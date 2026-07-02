@@ -1,0 +1,157 @@
+// dlectroflow data model — see docs/dlectroflow-plan.md for feature specs.
+// SQLite locally (→ Postgres for deploy). Note: SQLite doesn't support Prisma
+// enums or scalar-list fields, so status/role/outcome are String (allowed values
+// documented inline + mirrored in src/lib/constants.ts) and arrays are JSON/CSV strings.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ── Singleton config (id always "singleton") ──────────────────────────────
+model Settings {
+  id                    String   @id @default("singleton")
+  // Feature 1 — aging
+  agingThresholdMinutes Int      @default(240)
+  demoOverrideSeconds   Int? // aging demo override (~10s) to fire live on stage
+  // Feature 3 — timer + round-up
+  defaultFromEstimate   Boolean  @default(true)
+  addTimeIncrementMin   Int      @default(5)
+  workdayEndTime        String   @default("17:00") // HH:mm
+  roundupDemoOverride   Boolean  @default(false)
+  roundupEmailEnabled   Boolean  @default(false)
+  roundupEmail          String?
+  // Feature 4 — streaks
+  workingDays           String   @default("1,2,3,4,5") // ISO weekdays, Mon=1..Sun=7
+  updatedAt             DateTime @updatedAt
+}
+
+// ── Feature 1 — Brain Dump ────────────────────────────────────────────────
+model BrainDumpItem {
+  id           String    @id @default(cuid())
+  text         String
+  createdAt    DateTime  @default(now())
+  status       String    @default("inbox") // inbox | triaged | archived
+  triagedAt    DateTime?
+  remindedAt   DateTime?
+  snoozedUntil DateTime?
+  taskId       String?
+  task         Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+}
+
+// ── Feature 2 — Task Breakdown → Reclaim ──────────────────────────────────
+model Task {
+  id             String          @id @default(cuid())
+  title          String
+  source         String          @default("braindump") // braindump | manual
+  createdAt      DateTime        @default(now())
+  status         String          @default("active") // active | done | archived
+  parentEmoji    String?
+  steps          Step[]
+  turns          BreakdownTurn[]
+  brainDumpItems BrainDumpItem[]
+}
+
+model Step {
+  id              String         @id @default(cuid())
+  taskId          String
+  task            Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  text            String
+  order           Int
+  total           Int
+  estMinutes      Int
+  subtaskEmoji    String?
+  reclaimTaskId   String?
+  scheduledAt     DateTime?
+  done            Boolean        @default(false)
+  estimateHistory String? // JSON array of prior estMinutes values
+  createdAt       DateTime       @default(now())
+  focusSessions   FocusSession[]
+
+  @@index([taskId])
+}
+
+model BreakdownTurn {
+  id            String   @id @default(cuid())
+  taskId        String
+  task          Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  role          String // user | assistant
+  message       String
+  proposedSteps String? // JSON snapshot of proposed chunks
+  createdAt     DateTime @default(now())
+
+  @@index([taskId])
+}
+
+// ── Feature 3 — Focus Timer ───────────────────────────────────────────────
+model FocusSession {
+  id            String    @id @default(cuid())
+  stepId        String?
+  step          Step?     @relation(fields: [stepId], references: [id], onDelete: SetNull)
+  taskId        String?
+  plannedMin    Int
+  addedMin      Int       @default(0)
+  startedAt     DateTime  @default(now())
+  endedAt       DateTime?
+  durationMin   Int?
+  outcome       String? // completed | requeued | gaveup
+  reclaimSynced Boolean   @default(false)
+
+  @@index([stepId])
+}
+
+model DayRollup {
+  id           String    @id @default(cuid())
+  date         String    @unique // YYYY-MM-DD
+  focusMin     Int       @default(0)
+  sessions     Int       @default(0)
+  stepsDone    Int       @default(0)
+  pointsEarned Int       @default(0)
+  streakDay    Int       @default(0)
+  narrative    String?
+  emailedAt    DateTime?
+}
+
+// ── Feature 4 — Rewards & Streaks ─────────────────────────────────────────
+model RewardEvent {
+  id        String   @id @default(cuid())
+  type      String // step_done | session_finished | inbox_zero | breakdown_confirmed | scheduled
+  points    Int
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model Streak {
+  id                String  @id @default("singleton")
+  current           Int     @default(0)
+  lastActiveWorkday String? // YYYY-MM-DD
+}
+
+model StreakRecord {
+  id        String   @id @default(cuid())
+  length    Int
+  startedAt DateTime
+  endedAt   DateTime
+
+  @@index([length])
+}
+
+model Badge {
+  id       String   @id @default(cuid())
+  key      String   @unique // first_breakdown | first_schedule | streak_5 | ten_steps_day | beat_best_streak
+  earnedAt DateTime @default(now())
+}
+
+model DailySpark {
+  id     String @id @default(cuid())
+  date   String @unique // YYYY-MM-DD
+  quote  String
+  source String // ai | fallback
+}
