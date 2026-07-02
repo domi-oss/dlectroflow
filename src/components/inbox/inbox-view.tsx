@@ -13,6 +13,7 @@ import {
   keepAsTask,
   markReminded,
 } from "@/app/actions/braindump";
+import { startBreakdown } from "@/app/actions/breakdown";
 import { SettingsPanel } from "@/components/inbox/settings-panel";
 import {
   notificationPermission,
@@ -134,6 +135,12 @@ export function InboxView({
       router.refresh();
     });
 
+  const breakdown = (id: string) =>
+    startTransition(async () => {
+      const taskId = await startBreakdown(id);
+      if (taskId) router.push(`/tasks/${taskId}`);
+    });
+
   const submit = () => {
     const value = text.trim();
     if (!value) return;
@@ -204,7 +211,7 @@ export function InboxView({
                 key={item.id}
                 item={item}
                 settings={settings}
-                onBreakdown={() => run(() => keepAsTask(item.id))}
+                onBreakdown={() => breakdown(item.id)}
                 onKeep={() => run(() => keepAsTask(item.id))}
                 onSnooze={() => run(() => snoozeBrainDumpItem(item.id, 60))}
                 onDelete={() => run(() => deleteBrainDumpItem(item.id))}
