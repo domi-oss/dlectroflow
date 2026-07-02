@@ -11,7 +11,15 @@ import {
   snoozeBrainDumpItem,
   deleteBrainDumpItem,
   keepAsTask,
+  markReminded,
 } from "@/app/actions/braindump";
+import { SettingsPanel } from "@/components/inbox/settings-panel";
+import {
+  notificationPermission,
+  requestNotificationPermission,
+  registerServiceWorker,
+  showReminder,
+} from "@/lib/notifications";
 
 type Item = {
   id: string;
@@ -59,6 +67,19 @@ export function InboxView({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Notifications: register the service worker + track permission.
+  const [permission, setPermission] = useState<
+    NotificationPermission | "unsupported"
+  >("default");
+  const notifiedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    registerServiceWorker();
+    setPermission(notificationPermission());
+  }, []);
+
+  const enableReminders = () =>
+    requestNotificationPermission().then((p) => setPermission(p));
+
   const now = Date.now();
   const isInbox = (i: Item) => i.status === BrainDumpStatus.Inbox;
   const isSnoozed = (i: Item) =>
@@ -86,6 +107,27 @@ export function InboxView({
     isAging(i.createdAt, settings),
   ).length;
 
+  // Fire a desktop reminder once per aging, not-yet-reminded item, then persist
+  // remindedAt so it doesn't repeat (guarded client-side by notifiedRef too).
+  useEffect(() => {
+    if (permission !== "granted") return;
+    const due = needsTriage.filter(
+      (i) =>
+        isAging(i.createdAt, settings) &&
+        i.remindedAt == null &&
+        !notifiedRef.current.has(i.id),
+    );
+    if (due.length === 0) return;
+    due.forEach((i) => notifiedRef.current.add(i.id));
+    (async () => {
+      for (const i of due) {
+        await showReminder("🟡 Still needs triage", i.text);
+        await markReminded(i.id);
+      }
+      router.refresh();
+    })();
+  }, [needsTriage, permission, settings, router]);
+
   const run = (fn: () => Promise<unknown>) =>
     startTransition(async () => {
       await fn();
@@ -102,6 +144,21 @@ export function InboxView({
   return (
     <div className="space-y-6">
       <NavBadge untriagedCount={untriagedCount} agingCount={agingCount} />
+
+      {permission === "default" && (
+        <button
+          onClick={enableReminders}
+          className="hover:bg-accent w-full rounded-lg border border-dashed px-3 py-2 text-sm"
+        >
+          🔔 Enable desktop reminders for aging items
+        </button>
+      )}
+      {permission === "denied" && (
+        <p className="text-muted-foreground text-xs">
+          Desktop reminders are blocked in your browser settings; items still
+          age and re-sort in-app.
+        </p>
+      )}
 
       {/* Capture bar */}
       <div className="space-y-1">
@@ -123,6 +180,8 @@ export function InboxView({
           No fields required. Press Enter to capture instantly.
         </p>
       </div>
+
+      <SettingsPanel settings={settings} />
 
       {/* Needs triage */}
       <section>

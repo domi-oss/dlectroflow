@@ -41,6 +41,15 @@ export async function deleteBrainDumpItem(id: string) {
   revalidatePath(INBOX_PATH);
 }
 
+/** Mark an aging item as reminded so we don't re-notify (step 4). */
+export async function markReminded(id: string) {
+  await prisma.brainDumpItem.update({
+    where: { id },
+    data: { remindedAt: new Date() },
+  });
+  revalidatePath(INBOX_PATH);
+}
+
 /**
  * "Keep as task" — promote an inbox item into a Task without breaking it down.
  * (Step 5 will add the conversational-breakdown launch.)
