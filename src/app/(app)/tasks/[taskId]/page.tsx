@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { BreakdownChat } from "@/components/breakdown/breakdown-chat";
+import { getReclaimStatus } from "@/lib/reclaim";
 import type { Proposal } from "@/lib/breakdown";
 
 export const dynamic = "force-dynamic";
@@ -11,10 +12,13 @@ export default async function TaskPage({
   params: Promise<{ taskId: string }>;
 }) {
   const { taskId } = await params;
-  const task = await prisma.task.findUnique({
-    where: { id: taskId },
-    include: { steps: { orderBy: { order: "asc" } } },
-  });
+  const [task, reclaim] = await Promise.all([
+    prisma.task.findUnique({
+      where: { id: taskId },
+      include: { steps: { orderBy: { order: "asc" } } },
+    }),
+    getReclaimStatus(),
+  ]);
   if (!task) notFound();
 
   const initialProposal: Proposal | null = task.steps.length
@@ -33,6 +37,7 @@ export default async function TaskPage({
       taskId={task.id}
       title={task.title}
       initialProposal={initialProposal}
+      reclaimConnected={reclaim.connected}
     />
   );
 }

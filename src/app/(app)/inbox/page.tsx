@@ -5,22 +5,41 @@ import { InboxView } from "@/components/inbox/inbox-view";
 // DB-backed, always fresh.
 export const dynamic = "force-dynamic";
 
-export default async function InboxPage() {
-  const [items, settings] = await Promise.all([
+export default async function InboxPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ reclaim?: string; reason?: string }>;
+}) {
+  const [items, settings, sp] = await Promise.all([
     prisma.brainDumpItem.findMany({
       where: { status: { not: BrainDumpStatus.Archived } },
       orderBy: { createdAt: "desc" },
     }),
     getSettings(),
+    searchParams,
   ]);
 
   return (
-    <InboxView
-      initialItems={items}
-      settings={{
-        agingThresholdMinutes: settings.agingThresholdMinutes,
-        demoOverrideSeconds: settings.demoOverrideSeconds,
-      }}
-    />
+    <div className="space-y-4">
+      {sp.reclaim === "connected" && (
+        <div className="rounded-lg border border-green-600/30 bg-green-600/10 px-4 py-2 text-sm font-medium text-green-700">
+          ✅ Reclaim connected — you can now schedule task breakdowns onto your
+          calendar.
+        </div>
+      )}
+      {sp.reclaim === "error" && (
+        <div className="rounded-lg border border-red-600/30 bg-red-600/10 px-4 py-2 text-sm text-red-700">
+          Reclaim connection failed{sp.reason ? `: ${sp.reason}` : ""}. You can
+          try again from a task breakdown.
+        </div>
+      )}
+      <InboxView
+        initialItems={items}
+        settings={{
+          agingThresholdMinutes: settings.agingThresholdMinutes,
+          demoOverrideSeconds: settings.demoOverrideSeconds,
+        }}
+      />
+    </div>
   );
 }

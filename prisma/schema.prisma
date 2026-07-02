@@ -30,6 +30,20 @@ model Settings {
   updatedAt             DateTime @updatedAt
 }
 
+// ── Reclaim MCP OAuth (single-user demo; all values obtained at runtime) ──
+// Never committed — lives in the DB (gitignored SQLite locally / Postgres deploy).
+model ReclaimAuth {
+  id           String    @id @default("singleton")
+  clientId     String? // from dynamic client registration
+  clientSecret String?
+  redirectUri  String? // origin the client was registered for; re-register on change
+  accessToken  String?
+  refreshToken String?
+  expiresAt    DateTime?
+  scope        String?
+  updatedAt    DateTime  @updatedAt
+}
+
 // ── Feature 1 — Brain Dump ────────────────────────────────────────────────
 model BrainDumpItem {
   id           String    @id @default(cuid())

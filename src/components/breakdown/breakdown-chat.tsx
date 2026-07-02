@@ -2,21 +2,32 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { confirmBreakdown } from "@/app/actions/breakdown";
+import { scheduleTaskInReclaim } from "@/app/actions/reclaim";
 import type { Feedback, Proposal, StreamEvent } from "@/lib/breakdown";
 import { cn } from "@/lib/utils";
 
 type ChatMsg = { role: "assistant" | "user"; text: string };
+type ScheduleState = {
+  status: "idle" | "scheduling" | "done" | "error";
+  count?: number;
+  message?: string;
+};
 
 export function BreakdownChat({
   taskId,
   title,
   initialProposal,
+  reclaimConnected,
 }: {
   taskId: string;
   title: string;
   initialProposal: Proposal | null;
+  reclaimConnected: boolean;
 }) {
+  const router = useRouter();
+  const [schedule, setSchedule] = useState<ScheduleState>({ status: "idle" });
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [proposal, setProposal] = useState<Proposal | null>(initialProposal);
   const [streaming, setStreaming] = useState(false);
@@ -101,6 +112,23 @@ export function BreakdownChat({
     });
   }
 
+  async function scheduleNow() {
+    setSchedule({ status: "scheduling" });
+    const res = await scheduleTaskInReclaim(taskId);
+    if (res.ok) {
+      setSchedule({ status: "done", count: res.scheduled });
+      router.refresh();
+    } else {
+      setSchedule({
+        status: "error",
+        message:
+          res.reason === "not_connected"
+            ? "Reclaim isn't connected."
+            : (res.message ?? "Scheduling failed."),
+      });
+    }
+  }
+
   const totalMin = proposal?.steps.reduce((n, s) => n + (s.estMinutes || 0), 0) ?? 0;
   const busy = streaming || confirmPending;
 
@@ -114,14 +142,55 @@ export function BreakdownChat({
           <p className="font-medium text-green-700">
             🎉 Saved {proposal?.steps.length} steps ({totalMin} min total).
           </p>
-          <p className="text-muted-foreground mt-1 text-sm">
-            Reclaim scheduling gets wired up in step 6 — for now the steps are
-            saved locally on this task.
-          </p>
         </div>
+
+        {/* Reclaim scheduling */}
+        <div className="rounded-lg border p-4">
+          {!reclaimConnected ? (
+            <div className="space-y-2 text-sm">
+              <p className="font-medium">📅 Schedule onto your calendar</p>
+              <p className="text-muted-foreground">
+                Connect Reclaim and Claude will book each step on your calendar
+                automatically. Your steps are saved either way.
+              </p>
+              <a
+                href="/api/reclaim/oauth/start"
+                className="bg-primary text-primary-foreground inline-block rounded-md px-3 py-2 font-medium"
+              >
+                Connect Reclaim →
+              </a>
+            </div>
+          ) : schedule.status === "done" ? (
+            <p className="text-sm font-medium text-green-700">
+              ✅ Sent {schedule.count} task{schedule.count === 1 ? "" : "s"} to
+              Reclaim — check your calendar!
+            </p>
+          ) : (
+            <div className="space-y-2 text-sm">
+              <p className="font-medium">📅 Schedule onto your calendar</p>
+              <p className="text-muted-foreground">
+                Claude will create each step as a Reclaim task and let Reclaim
+                auto-schedule it.
+              </p>
+              <button
+                onClick={scheduleNow}
+                disabled={schedule.status === "scheduling"}
+                className="bg-primary text-primary-foreground rounded-md px-3 py-2 font-medium disabled:opacity-50"
+              >
+                {schedule.status === "scheduling"
+                  ? "Scheduling… (Claude is booking your tasks)"
+                  : "📅 Schedule in Reclaim"}
+              </button>
+              {schedule.status === "error" && (
+                <p className="text-red-700">{schedule.message}</p>
+              )}
+            </div>
+          )}
+        </div>
+
         <Link
           href="/inbox"
-          className="bg-primary text-primary-foreground inline-block rounded-md px-3 py-2 text-sm font-medium"
+          className="text-muted-foreground inline-block text-sm hover:underline"
         >
           ← Back to inbox
         </Link>
