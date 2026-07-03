@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: dlectroflow
+  labels:
+    {{- include "dlectroflow.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: dlectroflow
+  ports:
+    - port: 80
+      targetPort: 3000

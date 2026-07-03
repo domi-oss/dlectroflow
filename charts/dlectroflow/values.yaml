@@ -1,0 +1,40 @@
+image:
+  repository: registry.gitlab.com/gl-demo-ultimate-dtop/dlectroflow
+  tag: latest
+  pullPolicy: IfNotPresent
+
+env: production        # review | production
+host: dlectroflow.dlectronique.dev
+replicas: 1
+spot: false            # true for review apps
+
+resources:
+  app:
+    cpu: 500m
+    memory: 512Mi
+  postgres:
+    cpu: 250m
+    memory: 512Mi
+
+postgres:
+  persistent: true     # false for review (emptyDir)
+  storageSize: 8Gi
+  image: postgres:16
+
+tls:
+  clusterIssuer: letsencrypt-prod
+
+# Rendered into a dockerconfigjson pull secret (private GitLab registry).
+registry:
+  server: registry.gitlab.com
+  username: ""
+  password: ""
+
+# Injected by CI from GitLab Secrets Manager; never committed.
+secrets:
+  postgresPassword: ""
+  anthropicApiKey: ""
+  googleClientId: ""
+  googleClientSecret: ""
+  resendApiKey: ""
+  roundupFromEmail: ""

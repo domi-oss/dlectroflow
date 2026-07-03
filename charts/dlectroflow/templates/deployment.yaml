@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dlectroflow
+  labels:
+    {{- include "dlectroflow.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dlectroflow
+  template:
+    metadata:
+      labels:
+        {{- include "dlectroflow.labels" . | nindent 8 }}
+    spec:
+      {{- if .Values.spot }}
+      nodeSelector:
+        cloud.google.com/gke-spot: "true"
+      {{- end }}
+      imagePullSecrets:
+        - name: dlectroflow-registry
+      initContainers:
+        - name: wait-for-db
+          image: {{ .Values.postgres.image }}
+          command:
+            - sh
+            - -c
+            - until pg_isready -h dlectroflow-postgres -U dlectroflow; do echo waiting for db; sleep 2; done
+        - name: migrate
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ["npx", "prisma", "migrate", "deploy"]
+          envFrom:
+            - secretRef:
+                name: dlectroflow-secrets
+      containers:
+        - name: app
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 3000
+          env:
+            # Pins the external origin for OAuth redirect URIs (defense-in-depth
+            # vs. Host/X-Forwarded-* spoofing). requestOrigin() prefers this.
+            - name: PUBLIC_ORIGIN
+              value: "https://{{ .Values.host }}"
+          envFrom:
+            - secretRef:
+                name: dlectroflow-secrets
+          readinessProbe:
+            httpGet: { path: /api/health, port: 3000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /api/health, port: 3000 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: {{ .Values.resources.app.cpu }}
+              memory: {{ .Values.resources.app.memory }}
+            limits:
+              cpu: {{ .Values.resources.app.cpu }}
+              memory: {{ .Values.resources.app.memory }}
