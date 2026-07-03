@@ -25,13 +25,11 @@ metadata:
     nginx.ingress.kubernetes.io/limit-rps: "20"
     nginx.ingress.kubernetes.io/limit-connections: "20"
 
-    # ── Security response headers (ingress layer) ──────────────────────────
-    # Belt-and-suspenders: also set by next.config.ts, but enforced here even
-    # if the application fails to start or returns an error page.
-    nginx.ingress.kubernetes.io/configuration-snippet: |
-      more_set_headers "X-Content-Type-Options: nosniff";
-      more_set_headers "X-Frame-Options: SAMEORIGIN";
-      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+    # NOTE: security response headers are set by the app (next.config.ts).
+    # An ingress-layer `configuration-snippet` was intentionally NOT used —
+    # ingress-nginx v1.15 disables snippet annotations by default
+    # (allow-snippet-annotations=false, post CVE-2023-5043), so the admission
+    # webhook would reject this Ingress.
 spec:
   ingressClassName: nginx
   tls:

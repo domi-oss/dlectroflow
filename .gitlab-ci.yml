@@ -1,6 +1,6 @@
 stages:
   - build
-  - scan
+  - test   # GitLab security scanner templates (SAST/DS/Secret/Container) run here
   - deploy
 
 variables:

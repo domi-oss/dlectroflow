@@ -8,14 +8,15 @@ branch and the rationale behind each change. It serves as an audit trail for SOC
 
 ### 1. GitLab Security Scanners (`.gitlab-ci.yml`)
 
-**What changed:** Added a `scan` stage with four GitLab-managed scanner templates:
+**What changed:** Included four GitLab-managed scanner templates, which run in the `test`
+stage (the stage these templates target by default):
 - `Security/SAST.gitlab-ci.yml` — static analysis of TypeScript/JavaScript source
 - `Security/Dependency-Scanning.gitlab-ci.yml` — npm advisory database checks against `package-lock.json`
 - `Security/Secret-Detection.gitlab-ci.yml` — detects accidentally committed secrets
 - `Security/Container-Scanning.gitlab-ci.yml` — CVE scan of the built Docker image
 
-**Why:** The pipeline previously had zero security scanning. Vulnerabilities were accumulating
-in the container image (150+ detected) with no automated detection on MRs.
+**Why:** The pipeline previously had zero security scanning — no automated vulnerability
+detection on MRs.
 
 **Compliance:** SOC 2 CC7.1, CIS Control 16, OWASP ASVS V14
 
@@ -63,12 +64,15 @@ arbitrarily large payloads, triggering expensive Claude Opus calls.
 - Force HTTPS redirect (`ssl-redirect` + `force-ssl-redirect`)
 - Request body cap at 2 MB (`proxy-body-size`)
 - Per-IP rate limiting: 20 RPS, 20 concurrent connections
-- Belt-and-suspenders security headers at the ingress layer
 
 **Why:** The ingress previously had no rate limiting or body size enforcement. The
-application-layer guards (body size in route.ts, HSTS in next.config.ts) are the primary
-controls; the ingress provides a defence-in-depth backstop that applies even if the
-application fails to start.
+application-layer guards (body size in route.ts, HSTS + headers in next.config.ts) are the
+primary controls; these annotations add a defence-in-depth backstop.
+
+> Security response headers are **not** set at the ingress via a `configuration-snippet`:
+> ingress-nginx v1.15 disables snippet annotations by default (`allow-snippet-annotations=false`,
+> post CVE-2023-5043), so the admission webhook would reject the Ingress. The app sets those
+> headers in `next.config.ts` instead.
 
 **Compliance:** OWASP ASVS V13.2.6, CIS Kubernetes Benchmark 5.4
 
@@ -76,20 +80,20 @@ application fails to start.
 
 ### 5. Container Image Slimming (`Dockerfile`)
 
-**What changed:** Split the runtime stage to install **only** `openssl` (required by the
-Prisma query engine binary). The previous `node:22-slim` runtime stage was pulling in
-ImageMagick and a large media-processing dependency tree via transitive apt dependencies.
+**What changed:** The `openssl` install now uses `--no-install-recommends` (in both the
+build and runtime stages) so apt doesn't pull in recommended-but-unneeded packages. The
+runtime image still contains the Prisma CLI + schema, because the Kubernetes migrate
+initContainer reuses this same image to run `prisma migrate deploy`.
 
-A dedicated `migrate` stage retains the full toolchain for the Kubernetes init container
-that runs `prisma migrate deploy`.
-
-**Why:** The container vulnerability report showed 140+ CVEs, almost all in ImageMagick,
-binutils, HDF5, libraw, and related packages — none of which are used by a Next.js web app.
-This change eliminates those packages from the runtime image entirely.
+**Why:** Keep the runtime image as small as reasonable. `--no-install-recommends` trims the
+apt footprint on top of `node:22-slim`.
 
 **Compliance:** CIS Docker Benchmark 4.3 (minimal base image), SOC 2 CC7.1
 
-**Expected outcome:** Container CVE count drops from ~150 to <10 after this change.
+> Note: an earlier version of this doc claimed the base image shipped ImageMagick/HDF5/libraw
+> causing "140+ CVEs" and that this change would drop CVEs from ~150 to <10. That was not
+> substantiated — `node:22-slim` does not ship those packages. Any actual CVE reduction should
+> be read from the Container Scanning job's report, not asserted here.
 
 ---
 

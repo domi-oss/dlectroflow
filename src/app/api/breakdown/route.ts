@@ -14,7 +14,7 @@ export const runtime = "nodejs";
 // Prevents unbounded AI spend from unauthenticated review-app URLs.
 // The ingress also caps at 2 MB; this is the application-layer backstop.
 // OWASP ASVS V13.2.6 — API abuse prevention.
-const MAX_BODY_BYTES = 10_000;
+const MAX_BODY_CHARS = 10_000;
 
 const SYSTEM = `You are a warm, encouraging ADHD coach who helps break an overwhelming task into tiny, concrete, doable steps.
 
@@ -80,10 +80,10 @@ export async function POST(req: Request): Promise<Response> {
     });
   }
 
-  if (rawBody.length > MAX_BODY_BYTES) {
+  if (rawBody.length > MAX_BODY_CHARS) {
     return new Response(
       JSON.stringify({
-        error: `Request body too large (max ${MAX_BODY_BYTES} characters)`,
+        error: `Request body too large (max ${MAX_BODY_CHARS} characters)`,
       }),
       {
         status: 413,

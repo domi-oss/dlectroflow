@@ -12,8 +12,9 @@ const securityHeaders = [
   // Prevent browsers from MIME-sniffing the content-type (OWASP A05)
   { key: "X-Content-Type-Options", value: "nosniff" },
 
-  // Block the app from being embedded in iframes (clickjacking defence)
-  { key: "X-Frame-Options", value: "SAMEORIGIN" },
+  // Block the app from being embedded in iframes (clickjacking defence).
+  // DENY to match CSP `frame-ancestors 'none'` below — the app is never framed.
+  { key: "X-Frame-Options", value: "DENY" },
 
   // Enforce HTTPS for 2 years, include subdomains, allow preload submission
   {
