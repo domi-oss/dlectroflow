@@ -10,6 +10,14 @@ export function requestOrigin(req: Request): string {
   const configured = process.env.PUBLIC_ORIGIN?.trim();
   if (configured) return configured.replace(/\/+$/, "");
 
+  // In production PUBLIC_ORIGIN is required (the Helm chart always sets it). If it's
+  // somehow missing, refuse to derive the origin from spoofable headers.
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "PUBLIC_ORIGIN must be set in production (refusing to derive OAuth origin from request headers).",
+    );
+  }
+
   const h = req.headers;
   const url = new URL(req.url);
   const proto =
