@@ -204,3 +204,21 @@ export async function createGoogleTask(
   }
   return (await res.json()) as { id: string };
 }
+
+/** PATCH a Google Task (title/status/notes). Best-effort — returns ok. */
+export async function patchGoogleTask(
+  token: string,
+  listId: string,
+  taskId: string,
+  patch: { title?: string; status?: "needsAction" | "completed" },
+): Promise<boolean> {
+  const res = await fetch(`${TASKS_API}/lists/${listId}/tasks/${taskId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(patch),
+  });
+  return res.ok;
+}

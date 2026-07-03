@@ -252,12 +252,21 @@ export function BreakdownChat({
           )}
         </div>
 
-        <Link
-          href="/inbox"
-          className="text-muted-foreground inline-block text-sm hover:underline"
-        >
-          ← Back to inbox
-        </Link>
+        <div className="flex items-center gap-4">
+          {/* full navigation so the server renders the focusable steps view */}
+          <a
+            href={`/tasks/${taskId}`}
+            className="bg-primary text-primary-foreground inline-block rounded-md px-4 py-2 text-sm font-medium"
+          >
+            ▶ Start focusing
+          </a>
+          <Link
+            href="/inbox"
+            className="text-muted-foreground text-sm hover:underline"
+          >
+            ← Back to inbox
+          </Link>
+        </div>
       </div>
     );
   }
