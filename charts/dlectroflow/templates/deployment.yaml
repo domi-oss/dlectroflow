@@ -37,6 +37,16 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+          # initContainers need explicit limits: the review-only ResourceQuota
+          # sets limits.cpu/limits.memory, which makes them required on every
+          # container (initContainers included) or the pod is rejected.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 50m
+              memory: 64Mi
         - name: migrate
           image: "{{ .Values.image.repository }}:{{ required "image.tag must be set (CI passes $CI_COMMIT_SHA)" .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -51,6 +61,15 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+          # Reuses the app image; size it like the app so the review
+          # ResourceQuota (limits required) is satisfied and Prisma has headroom.
+          resources:
+            requests:
+              cpu: {{ .Values.resources.app.cpu }}
+              memory: {{ .Values.resources.app.memory }}
+            limits:
+              cpu: {{ .Values.resources.app.cpu }}
+              memory: {{ .Values.resources.app.memory }}
       containers:
         - name: app
           image: "{{ .Values.image.repository }}:{{ required "image.tag must be set (CI passes $CI_COMMIT_SHA)" .Values.image.tag }}"
