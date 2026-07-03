@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { exchangeCode } from "@/lib/google";
+import { requestOrigin } from "@/lib/origin";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
-  const origin = url.origin;
+  const origin = requestOrigin(req);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
   const oauthError = url.searchParams.get("error");
