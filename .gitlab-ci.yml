@@ -1,0 +1,116 @@
+stages:
+  - build
+  - deploy
+
+variables:
+  IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
+  AGENT_CONTEXT: "gl-demo-ultimate-dtop/dlectroflow:dlectroflow"
+
+build:
+  stage: build
+  image:
+    name: gcr.io/kaniko-project/executor:v1.23.2-debug
+    entrypoint: [""]
+  script:
+    - mkdir -p /kaniko/.docker
+    - echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" > /kaniko/.docker/config.json
+    - /kaniko/executor --context "$CI_PROJECT_DIR" --dockerfile "$CI_PROJECT_DIR/Dockerfile" --destination "$IMAGE"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+.deploy_base:
+  stage: deploy
+  image:
+    name: dtzar/helm-kubectl:3.16.1   # bundles helm + kubectl
+    entrypoint: [""]
+  before_script:
+    - kubectl config use-context "$AGENT_CONTEXT"
+
+deploy_review:
+  extends: .deploy_base
+  secrets:
+    ANTHROPIC_API_KEY:
+      gitlab_secrets_manager: { name: ANTHROPIC_API_KEY, source: group/gl-demo-ultimate-dtop }
+      file: false
+    POSTGRES_PASSWORD:
+      gitlab_secrets_manager: { name: POSTGRES_PASSWORD, source: group/gl-demo-ultimate-dtop }
+      file: false
+    GITLAB_DEPLOY_TOKEN:
+      gitlab_secrets_manager: { name: GITLAB_DEPLOY_TOKEN, source: group/gl-demo-ultimate-dtop }
+      file: false
+    GITLAB_DEPLOY_TOKEN_USER:
+      gitlab_secrets_manager: { name: GITLAB_DEPLOY_TOKEN_USER, source: group/gl-demo-ultimate-dtop }
+      file: false
+  script:
+    - helm upgrade --install "dlectroflow-mr-$CI_MERGE_REQUEST_IID" charts/dlectroflow
+        --namespace "dlectroflow-mr-$CI_MERGE_REQUEST_IID" --create-namespace
+        --set env=review --set spot=true --set postgres.persistent=false
+        --set-string image.tag="$CI_COMMIT_SHA"
+        --set-string host="mr-$CI_MERGE_REQUEST_IID.35-246-93-255.sslip.io"
+        --set-string secrets.postgresPassword="$POSTGRES_PASSWORD"
+        --set-string secrets.anthropicApiKey="$ANTHROPIC_API_KEY"
+        --set-string registry.username="$GITLAB_DEPLOY_TOKEN_USER"
+        --set-string registry.password="$GITLAB_DEPLOY_TOKEN"
+        --set resources.app.cpu=250m
+        --wait --timeout 5m
+  environment:
+    name: review/$CI_MERGE_REQUEST_IID
+    url: https://mr-$CI_MERGE_REQUEST_IID.35-246-93-255.sslip.io
+    on_stop: stop_review
+    auto_stop_in: 2 days
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+stop_review:
+  extends: .deploy_base
+  script:
+    - helm uninstall "dlectroflow-mr-$CI_MERGE_REQUEST_IID" --namespace "dlectroflow-mr-$CI_MERGE_REQUEST_IID" || true
+    - kubectl delete namespace "dlectroflow-mr-$CI_MERGE_REQUEST_IID" --ignore-not-found
+  environment:
+    name: review/$CI_MERGE_REQUEST_IID
+    action: stop
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: manual
+  allow_failure: true
+
+deploy_production:
+  extends: .deploy_base
+  secrets:
+    ANTHROPIC_API_KEY:
+      gitlab_secrets_manager: { name: ANTHROPIC_API_KEY, source: group/gl-demo-ultimate-dtop }
+      file: false
+    POSTGRES_PASSWORD:
+      gitlab_secrets_manager: { name: POSTGRES_PASSWORD, source: group/gl-demo-ultimate-dtop }
+      file: false
+    GOOGLE_CLIENT_ID:
+      gitlab_secrets_manager: { name: GOOGLE_CLIENT_ID, source: group/gl-demo-ultimate-dtop }
+      file: false
+    GOOGLE_CLIENT_SECRET:
+      gitlab_secrets_manager: { name: GOOGLE_CLIENT_SECRET, source: group/gl-demo-ultimate-dtop }
+      file: false
+    GITLAB_DEPLOY_TOKEN:
+      gitlab_secrets_manager: { name: GITLAB_DEPLOY_TOKEN, source: group/gl-demo-ultimate-dtop }
+      file: false
+    GITLAB_DEPLOY_TOKEN_USER:
+      gitlab_secrets_manager: { name: GITLAB_DEPLOY_TOKEN_USER, source: group/gl-demo-ultimate-dtop }
+      file: false
+  script:
+    - helm upgrade --install dlectroflow charts/dlectroflow
+        --namespace dlectroflow-prod --create-namespace
+        --set env=production --set postgres.persistent=true
+        --set-string image.tag="$CI_COMMIT_SHA"
+        --set-string host="dlectroflow.dlectronique.dev"
+        --set-string secrets.postgresPassword="$POSTGRES_PASSWORD"
+        --set-string secrets.anthropicApiKey="$ANTHROPIC_API_KEY"
+        --set-string secrets.googleClientId="$GOOGLE_CLIENT_ID"
+        --set-string secrets.googleClientSecret="$GOOGLE_CLIENT_SECRET"
+        --set-string registry.username="$GITLAB_DEPLOY_TOKEN_USER"
+        --set-string registry.password="$GITLAB_DEPLOY_TOKEN"
+        --wait --timeout 5m
+  environment:
+    name: production
+    url: https://dlectroflow.dlectronique.dev
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'

@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dlectroflow
+  labels:
+    {{- include "dlectroflow.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dlectroflow
+  template:
+    metadata:
+      labels:
+        {{- include "dlectroflow.labels" . | nindent 8 }}
+    spec:
+      {{- if .Values.spot }}
+      nodeSelector:
+        cloud.google.com/gke-spot: "true"
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      imagePullSecrets:
+        - name: dlectroflow-registry
+      initContainers:
+        - name: wait-for-db
+          image: "{{ .Values.postgres.image }}"
+          command:
+            - sh
+            - -c
+            - until pg_isready -h dlectroflow-postgres -U dlectroflow; do echo waiting for db; sleep 2; done
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          # initContainers need explicit limits: the review-only ResourceQuota
+          # sets limits.cpu/limits.memory, which makes them required on every
+          # container (initContainers included) or the pod is rejected.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 50m
+              memory: 64Mi
+        - name: migrate
+          image: "{{ .Values.image.repository }}:{{ required "image.tag must be set (CI passes $CI_COMMIT_SHA)" .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["npx", "prisma", "migrate", "deploy"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: dlectroflow-secrets
+                  key: DATABASE_URL
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          # Reuses the app image; size it like the app so the review
+          # ResourceQuota (limits required) is satisfied and Prisma has headroom.
+          resources:
+            requests:
+              cpu: {{ .Values.resources.app.cpu }}
+              memory: {{ .Values.resources.app.memory }}
+            limits:
+              cpu: {{ .Values.resources.app.cpu }}
+              memory: {{ .Values.resources.app.memory }}
+      containers:
+        - name: app
+          image: "{{ .Values.image.repository }}:{{ required "image.tag must be set (CI passes $CI_COMMIT_SHA)" .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - containerPort: 3000
+          env:
+            # Pins the external origin for OAuth redirect URIs (defense-in-depth
+            # vs. Host/X-Forwarded-* spoofing). requestOrigin() prefers this.
+            - name: PUBLIC_ORIGIN
+              value: "https://{{ .Values.host }}"
+          envFrom:
+            - secretRef:
+                name: dlectroflow-secrets
+          readinessProbe:
+            httpGet: { path: /api/health, port: 3000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /api/health, port: 3000 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: {{ .Values.resources.app.cpu }}
+              memory: {{ .Values.resources.app.memory }}
+            limits:
+              cpu: {{ .Values.resources.app.cpu }}
+              memory: {{ .Values.resources.app.memory }}

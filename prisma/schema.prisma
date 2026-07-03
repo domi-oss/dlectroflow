@@ -1,14 +1,14 @@
 // dlectroflow data model — see docs/dlectroflow-plan.md for feature specs.
-// SQLite locally (→ Postgres for deploy). Note: SQLite doesn't support Prisma
-// enums or scalar-list fields, so status/role/outcome are String (allowed values
-// documented inline + mirrored in src/lib/constants.ts) and arrays are JSON/CSV strings.
+// PostgreSQL everywhere (local dev via Docker Compose, production on GitLab).
+// Note: status/role/outcome are String (allowed values documented inline +
+// mirrored in src/lib/constants.ts) and arrays are JSON/CSV strings.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 

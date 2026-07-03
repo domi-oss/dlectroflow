@@ -1,0 +1,93 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: dlectroflow-postgres
+  labels:
+    {{- include "dlectroflow.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: dlectroflow-postgres
+  ports:
+    - port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: dlectroflow-postgres
+  labels:
+    {{- include "dlectroflow.labels" . | nindent 4 }}
+spec:
+  serviceName: dlectroflow-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dlectroflow-postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dlectroflow-postgres
+        dlectroflow/env: {{ .Values.env }}
+    spec:
+      {{- if .Values.spot }}
+      nodeSelector:
+        cloud.google.com/gke-spot: "true"
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: "{{ .Values.postgres.image }}"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: POSTGRES_USER
+              value: dlectroflow
+            - name: POSTGRES_DB
+              value: dlectroflow
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: dlectroflow-secrets
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "dlectroflow"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: {{ .Values.resources.postgres.cpu }}
+              memory: {{ .Values.resources.postgres.memory }}
+            limits:
+              cpu: {{ .Values.resources.postgres.cpu }}
+              memory: {{ .Values.resources.postgres.memory }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      {{- if not .Values.postgres.persistent }}
+      volumes:
+        - name: data
+          emptyDir: {}
+      {{- end }}
+  {{- if .Values.postgres.persistent }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.postgres.storageSize }}
+  {{- end }}

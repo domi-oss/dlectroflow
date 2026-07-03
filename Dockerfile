@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1
-# dlectroflow container. Single-user demo uses SQLite on a mounted volume;
-# for production scale, point DATABASE_URL at Postgres (see README → Deploy).
+# dlectroflow production image: standalone Next.js server + Prisma CLI/engines
+# so the same image runs the app (node server.js) and migrations
+# (npx prisma migrate deploy) from the Kubernetes migrate initContainer.
 
 # ---- build ----
 FROM node:22-slim AS build
 WORKDIR /app
-# Prisma engines need OpenSSL
 RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json prisma.config.ts ./
 COPY prisma ./prisma
@@ -18,10 +18,23 @@ FROM node:22-slim AS runner
 WORKDIR /app
 RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production
-# SQLite lives on a persistent volume; override for Postgres in production.
-ENV DATABASE_URL="file:/data/dlectroflow.db"
-COPY --from=build /app ./
-VOLUME ["/data"]
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+
+# Standalone server (server.js at /app, minimal traced node_modules)
+COPY --from=build /app/.next/standalone ./
+COPY --from=build /app/.next/static ./.next/static
+COPY --from=build /app/public ./public
+
+# Prisma CLI + engines + migrations for the migrate initContainer (same image).
+# --no-save installs alongside the traced node_modules without touching lockfiles.
+COPY --from=build /app/prisma ./prisma
+COPY --from=build /app/prisma.config.ts ./prisma.config.ts
+RUN npm install --no-save prisma@6.19.3 dotenv
+
+# Run as the non-root `node` user (uid 1000, present in node images).
+RUN chown -R node:node /app
+USER node
+
 EXPOSE 3000
-# Apply migrations, then start. ANTHROPIC_API_KEY must be passed at runtime.
-CMD ["sh", "-c", "npx prisma migrate deploy && npm run start -- -p 3000"]
+CMD ["node", "server.js"]

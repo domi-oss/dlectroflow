@@ -1,0 +1,15 @@
+{{- if eq .Values.env "review" }}
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: dlectroflow-quota
+  labels:
+    {{- include "dlectroflow.labels" . | nindent 4 }}
+spec:
+  hard:
+    requests.cpu: "2"
+    requests.memory: 3Gi
+    limits.cpu: "2"
+    limits.memory: 3Gi
+    pods: "10"
+{{- end }}

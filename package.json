@@ -11,7 +11,7 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
-    "setup": "npm install && prisma migrate dev"
+    "setup": "docker compose up -d db && npm install && prisma migrate dev"
   },
   "engines": {
     "node": ">=20.9.0"
