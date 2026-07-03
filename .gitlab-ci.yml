@@ -1,11 +1,29 @@
 stages:
   - build
+  - scan
   - deploy
 
 variables:
   IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
   AGENT_CONTEXT: "gl-demo-ultimate-dtop/dlectroflow:dlectroflow"
+  # ── Security Scanners ────────────────────────────────────────────────────
+  # Container Scanning: target the image built in the build stage
+  CS_IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
+  # SAST: skip generated/vendored paths
+  SAST_EXCLUDED_PATHS: "node_modules, .next, coverage, prisma/migrations"
+  # Dependency Scanning: lock-file only (no node_modules needed)
+  DS_EXCLUDED_PATHS: "node_modules"
 
+# ── GitLab Security Scanner Templates ───────────────────────────────────────
+# These populate the Vulnerability Report, MR Security Widget, and feed the
+# Compliance Dashboard automatically on every MR and main-branch push.
+include:
+  - template: Security/SAST.gitlab-ci.yml
+  - template: Security/Dependency-Scanning.gitlab-ci.yml
+  - template: Security/Secret-Detection.gitlab-ci.yml
+  - template: Security/Container-Scanning.gitlab-ci.yml
+
+# ── Build ────────────────────────────────────────────────────────────────────
 build:
   stage: build
   image:
@@ -27,6 +45,7 @@ build:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == "main"'
 
+# ── Deploy ───────────────────────────────────────────────────────────────────
 .deploy_base:
   stage: deploy
   image:
