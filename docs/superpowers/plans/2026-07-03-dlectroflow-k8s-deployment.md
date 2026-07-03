@@ -536,6 +536,11 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - containerPort: 3000
+          env:
+            # Pins the external origin for OAuth redirect URIs (defense-in-depth
+            # vs. Host/X-Forwarded-* spoofing). requestOrigin() prefers this.
+            - name: PUBLIC_ORIGIN
+              value: "https://{{ .Values.host }}"
           envFrom:
             - secretRef:
                 name: dlectroflow-secrets
@@ -693,9 +698,20 @@ spec:
       nodeSelector:
         cloud.google.com/gke-spot: "true"
       {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: postgres
-          image: {{ .Values.postgres.image }}
+          image: "{{ .Values.postgres.image }}"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           env:
             - name: POSTGRES_USER
               value: dlectroflow

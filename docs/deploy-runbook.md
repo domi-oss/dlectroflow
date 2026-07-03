@@ -62,6 +62,18 @@ spec:
 EOF
 ```
 
+> **GKE prod-TLS fix (required): cert-manager `hostAlias`.** cert-manager runs an HTTP-01 **self-check** by requesting the challenge at the public hostname, which resolves to the ingress **external LB IP**. On GKE a pod **can't reliably reach its own cluster's external LB IP** (no hairpin), so the self-check times out (`context deadline exceeded`) and the cert never issues — even though Let's Encrypt itself would validate fine from the internet. Fix: point cert-manager's in-cluster resolution of the prod host at the ingress **ClusterIP** via a `hostAlias`, applied durably through the Helm chart:
+> ```bash
+> INGRESS_CLUSTERIP=$(kubectl -n ingress-nginx get svc ingress-nginx-controller -o jsonpath='{.spec.clusterIP}')
+> helm upgrade cert-manager jetstack/cert-manager \
+>   --namespace cert-manager --version v1.16.2 \
+>   --set 'crds.enabled=true' \
+>   --set 'global.leaderElection.namespace=cert-manager' \
+>   --set "hostAliases[0].ip=$INGRESS_CLUSTERIP" \
+>   --set 'hostAliases[0].hostnames[0]=dlectroflow.dlectronique.dev'
+> ```
+> Public DNS is untouched, so Let's Encrypt still validates over the internet. (Review apps on dynamic `*.sslip.io` hosts are left on the ingress default self-signed cert — ephemeral previews, and the per-MR host would need its own alias.)
+
 ## 5. Install + register the GitLab agent
 
 > **Note — KUBE_CONTEXT collision:** the `gl-demo-ultimate-dtop` group defines a shared `KUBE_CONTEXT` CI/CD variable (pointing at `demo-foundation:gitops-agent`). Because group variables override `.gitlab-ci.yml`, this project's pipeline uses its own `AGENT_CONTEXT` variable (`gl-demo-ultimate-dtop/dlectroflow:dlectroflow`) instead. After you install the `dlectroflow` agent (below) and it connects, that context is injected into this project's CI jobs and the deploy jobs will find it. No group-variable change is required.

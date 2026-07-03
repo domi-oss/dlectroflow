@@ -19,12 +19,12 @@ This is **in active development**. Being honest so you don't hit surprises:
 | 🧠 Brain Dump — capture, triage, aging reminders | ✅ works |
 | 🔔 Desktop notifications + demo override | ✅ works |
 | ✂️ Claude task breakdown (streaming chat) | ✅ works (needs a Claude API key) |
-| 📅 Reclaim scheduling | ⚠️ connects & works **if your Reclaim account allows task creation** — otherwise steps save locally (see [Connecting Reclaim](#-connecting-reclaim)). A Google-Tasks route is in progress to remove that limit. |
+| 📅 Scheduling (Claude → Google Tasks → Reclaim sync) | ✅ works — connect Google and steps land in your Reclaim-synced Google Tasks list (durations parsed). Direct Reclaim-MCP task creation is gated on some accounts → steps then save locally as a fallback (see [Connecting Reclaim](#-connecting-reclaim)). |
 | ⏱️ Focus Timer | ✅ works |
 | 🎉 Rewards & streaks + dashboard | ✅ works |
 | 🌇 End-of-day round-up (in-app + desktop) | ✅ works |
 | ✉️ Round-up **email** (opt-in) | ✅ works when `RESEND_API_KEY` is set; cleanly disabled otherwise |
-| 🐳 Postgres + GitLab CI/CD | 🚧 in progress (Postgres local via Docker Compose done; CI/CD pipeline next) |
+| 🐳 Postgres + GitLab CI/CD | ✅ **live** — deployed to GKE Autopilot at **[dlectroflow.dlectronique.dev](https://dlectroflow.dlectronique.dev)** (valid TLS) via GitLab CI/CD; every MR gets a review app. Local Postgres via Docker Compose. |
 
 If all you want right now is **capture → Claude breakdown**, that's fully working
 and genuinely useful.
