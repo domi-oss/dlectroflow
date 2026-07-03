@@ -6,7 +6,15 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "postinstall": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:studio": "prisma studio",
+    "setup": "npm install && prisma migrate dev"
+  },
+  "engines": {
+    "node": ">=20.9.0"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.109.1",

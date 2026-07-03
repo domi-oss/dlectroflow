@@ -1,0 +1,12 @@
+node_modules
+.next
+.git
+.env
+.env*.local
+prisma/*.db
+prisma/*.db-journal
+*.sqlite
+*.sqlite3
+npm-debug.log*
+.DS_Store
+coverage
