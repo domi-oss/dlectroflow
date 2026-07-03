@@ -32,5 +32,9 @@ COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/prisma.config.ts ./prisma.config.ts
 RUN npm install --no-save prisma@6.19.3 dotenv
 
+# Run as the non-root `node` user (uid 1000, present in node images).
+RUN chown -R node:node /app
+USER node
+
 EXPOSE 3000
 CMD ["node", "server.js"]

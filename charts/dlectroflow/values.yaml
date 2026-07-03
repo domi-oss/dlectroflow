@@ -1,6 +1,6 @@
 image:
   repository: registry.gitlab.com/gl-demo-ultimate-dtop/dlectroflow
-  tag: latest
+  tag: ""
   pullPolicy: IfNotPresent
 
 env: production        # review | production
