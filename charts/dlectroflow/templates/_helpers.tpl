@@ -6,5 +6,5 @@ dlectroflow/env: {{ .Values.env }}
 {{- end -}}
 
 {{- define "dlectroflow.databaseUrl" -}}
-postgresql://dlectroflow:{{ .Values.secrets.postgresPassword }}@dlectroflow-postgres:5432/dlectroflow?schema=public
+postgresql://dlectroflow:{{ .Values.secrets.postgresPassword | urlquery }}@dlectroflow-postgres:5432/dlectroflow?schema=public
 {{- end -}}
