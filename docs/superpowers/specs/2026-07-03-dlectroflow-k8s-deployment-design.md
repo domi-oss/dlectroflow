@@ -156,9 +156,31 @@ resource requests, and `secrets.*`.
 | app (Next.js) | production | `500m` | `512Mi` | ephemeral 1Gi | on-demand |
 | postgres | production | `250m` | `512Mi` | PVC 8Gi | on-demand |
 | app | review | `250m` | `512Mi` | ephemeral 1Gi | Spot |
-| postgres | review | `250m` | `256Mi` | emptyDir | Spot |
+| postgres | review | `250m` | `512Mi` | emptyDir | Spot |
 
 (Autopilot minimums honored: ≥0.25 vCPU/pod, memory:CPU within 1:1–6.5:1.)
+
+### Stability & scaling headroom
+
+Sized for this app's real workload — a **single-user** demo where Claude inference
+runs on Anthropic's side, so our pods just proxy/stream (CPU stays low) and hold a tiny
+dataset. Expected steady state: Next.js standalone ~250–350MB under SSR + Prisma + the
+Anthropic SDK (well under `512Mi`); Postgres a few hundred rows (well under `512Mi`).
+
+Autopilot defaults **limits = requests**, so memory is a hard cap (over → OOMKill) and
+CPU is capped (over → throttle, not crash); the sizes above are set *with* headroom for
+that, not sized to the bone. Spot (review only) can be preempted → a few minutes of
+review-app restart, which is acceptable for ephemeral environments and deliberately not
+used for production.
+
+Every knob is a Helm value, so growth is low-effort and low-disruption:
+
+| Want to… | How | Disruption |
+|---|---|---|
+| Give a pod more CPU/RAM | change a `values.yaml` number → redeploy | rolling, none |
+| Handle concurrent users | raise `replicas` (+ HPA later); app is stateless, Prisma's migration lock covers it | none |
+| Grow the database | expand the PVC (GKE online resize), or move to Cloud SQL (§14) | minimal |
+| Exceed a node's size | nothing — Autopilot auto-provisions nodes to fit | none |
 
 ---
 
