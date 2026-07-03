@@ -1,0 +1,3 @@
+ci_access:
+  projects:
+    - id: gl-demo-ultimate-dtop/dlectroflow
