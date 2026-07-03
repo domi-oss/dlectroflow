@@ -4,7 +4,7 @@ stages:
 
 variables:
   IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
-  KUBE_CONTEXT: "gl-demo-ultimate-dtop/dlectroflow:dlectroflow"
+  AGENT_CONTEXT: "gl-demo-ultimate-dtop/dlectroflow:dlectroflow"
 
 build:
   stage: build
@@ -25,7 +25,7 @@ build:
     name: dtzar/helm-kubectl:3.16.1   # bundles helm + kubectl
     entrypoint: [""]
   before_script:
-    - kubectl config use-context "$KUBE_CONTEXT"
+    - kubectl config use-context "$AGENT_CONTEXT"
 
 deploy_review:
   extends: .deploy_base
