@@ -21,7 +21,7 @@
   ```
   Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
   ```
-- **Prereqs for executing this plan locally:** Docker Desktop running; `helm` (`brew install helm`); `kubeconform` (`brew install kubeconform`). Cluster provisioning (Task 7 runbook) is user-run and not required to complete Tasks 1–6.
+- **Prereqs for executing this plan locally:** Docker Desktop running; `helm` (`brew install helm`); `kubeconform` (`brew install kubeconform`). Cluster provisioning (Task 8 runbook) is user-run and not required to complete Tasks 1–7.
 
 ---
 
@@ -151,7 +151,7 @@ EOF
 - Create: `src/app/api/health/route.ts`
 
 **Interfaces:**
-- Produces: `GET /api/health` → `200 {"status":"ok"}` when the DB is reachable, `503 {"status":"error"}` otherwise. Consumed by the Helm Deployment's liveness/readiness probes (Task 4).
+- Produces: `GET /api/health` → `200 {"status":"ok"}` when the DB is reachable, `503 {"status":"error"}` otherwise. Consumed by the Helm Deployment's liveness/readiness probes (Task 5).
 
 - [ ] **Step 1: Create the health route**
 
@@ -204,14 +204,107 @@ EOF
 
 ---
 
-### Task 3: Standalone container image
+### Task 3: OAuth redirect URI honors ingress forwarded headers
+
+**Files:**
+- Create: `src/lib/origin.ts`
+- Modify: `src/app/api/google/oauth/start/route.ts` (origin derivation)
+- Modify: `src/app/api/google/oauth/callback/route.ts` (origin derivation)
+
+**Interfaces:**
+- Produces: `requestOrigin(req: Request): string` — the external origin honoring
+  `x-forwarded-proto` / `x-forwarded-host` (TLS terminates at ingress-nginx, so the pod
+  sees plain HTTP). Both Google OAuth routes use it, so redirect URIs are
+  `https://dlectroflow.dlectronique.dev/...` in production while still
+  `http://localhost:3000` locally. No signature changes.
+
+- [ ] **Step 1: Create `src/lib/origin.ts`**
+
+```ts
+/**
+ * External origin of the request, honoring reverse-proxy forwarded headers.
+ * Behind ingress-nginx, TLS terminates at the ingress and the pod receives plain
+ * HTTP, so `new URL(req.url).origin` would wrongly yield http://…. ingress-nginx
+ * sets x-forwarded-proto/host; fall back to the request URL for local dev.
+ */
+export function requestOrigin(req: Request): string {
+  const h = req.headers;
+  const url = new URL(req.url);
+  const proto = h.get("x-forwarded-proto") ?? url.protocol.replace(":", "");
+  const host = h.get("x-forwarded-host") ?? h.get("host") ?? url.host;
+  return `${proto}://${host}`;
+}
+```
+
+- [ ] **Step 2: Use it in the start route**
+
+In `src/app/api/google/oauth/start/route.ts`, add the import and replace the origin line:
+
+```ts
+import { requestOrigin } from "@/lib/origin";
+// …
+// replace: const origin = new URL(req.url).origin;
+const origin = requestOrigin(req);
+```
+
+- [ ] **Step 3: Use it in the callback route**
+
+In `src/app/api/google/oauth/callback/route.ts`, add the import and replace the origin
+line (keep `const url = new URL(req.url);` — it's still used for `url.searchParams`):
+
+```ts
+import { requestOrigin } from "@/lib/origin";
+// …
+// replace: const origin = url.origin;
+const origin = requestOrigin(req);
+```
+
+- [ ] **Step 4: Verify forwarded headers yield an https origin**
+
+With `docker compose up -d db` and `npm run dev` running (the error-redirect path also
+reflects `origin`, so this works whether or not `GOOGLE_CLIENT_ID` is set locally):
+
+```bash
+curl -s -o /dev/null -D - \
+  -H "x-forwarded-proto: https" -H "x-forwarded-host: dlectroflow.dlectronique.dev" \
+  "http://localhost:3000/api/google/oauth/start" | grep -i '^location:'
+```
+Expected: the `Location:` URL is on `https://dlectroflow.dlectronique.dev` (either the
+Google authorize URL with an `https%3A%2F%2Fdlectroflow.dlectronique.dev%2F...`
+`redirect_uri`, or the `/inbox?google=error` redirect on that https origin).
+
+- [ ] **Step 5: Verify local fallback (no forwarded headers)**
+
+```bash
+curl -s -o /dev/null -D - "http://localhost:3000/api/google/oauth/start" | grep -i '^location:'
+```
+Expected: the `Location:` URL is on `http://localhost:3000` — local dev still works.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/lib/origin.ts src/app/api/google/oauth/start/route.ts src/app/api/google/oauth/callback/route.ts
+git commit -m "$(cat <<'EOF'
+Step 10: derive OAuth origin from ingress forwarded headers
+
+TLS terminates at ingress-nginx, so build redirect URIs from x-forwarded-proto/
+host to get https://<prod-host> in production (unchanged locally).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+### Task 4: Standalone container image
 
 **Files:**
 - Modify: `next.config.ts`
 - Modify: `Dockerfile` (full rewrite)
 
 **Interfaces:**
-- Produces: a container image that (a) runs the app via `node server.js` on port 3000, and (b) can run `npx prisma migrate deploy` (Prisma CLI + engines + `prisma/migrations` present). Consumed by the Helm Deployment app container + `migrate` initContainer (Task 4), and built/pushed by CI (Task 6).
+- Produces: a container image that (a) runs the app via `node server.js` on port 3000, and (b) can run `npx prisma migrate deploy` (Prisma CLI + engines + `prisma/migrations` present). Consumed by the Helm Deployment app container + `migrate` initContainer (Task 5), and built/pushed by CI (Task 7).
 
 - [ ] **Step 1: Enable standalone output**
 
@@ -315,7 +408,7 @@ EOF
 
 ---
 
-### Task 4: Helm chart — app Deployment, Service, helpers, values
+### Task 5: Helm chart — app Deployment, Service, helpers, values
 
 **Files:**
 - Create: `charts/dlectroflow/Chart.yaml`
@@ -325,7 +418,7 @@ EOF
 - Create: `charts/dlectroflow/templates/service.yaml`
 
 **Interfaces:**
-- Consumes: the image from Task 3 (`node server.js`, `npx prisma migrate deploy`, `/api/health`).
+- Consumes: the image from Task 4 (`node server.js`, `npx prisma migrate deploy`, `/api/health`).
 - Produces: values keys used by all later chart templates + CI: `image.repository`, `image.tag`, `env` (`review|production`), `host`, `replicas`, `spot`, `resources.app.{cpu,memory}`, `resources.postgres.{cpu,memory}`, `postgres.{persistent,storageSize,image}`, `tls.clusterIssuer`, `registry.{server,username,password}`, `secrets.{postgresPassword,anthropicApiKey,googleClientId,googleClientSecret,resendApiKey,roundupFromEmail}`. Template helpers `dlectroflow.databaseUrl` and `dlectroflow.labels`. In-namespace service names: app `dlectroflow`, postgres `dlectroflow-postgres`. Secret name `dlectroflow-secrets`, pull secret `dlectroflow-registry`.
 
 - [ ] **Step 1: `Chart.yaml`**
@@ -513,7 +606,7 @@ EOF
 
 ---
 
-### Task 5: Helm chart — Secret, pull secret, Postgres, Ingress, ResourceQuota
+### Task 6: Helm chart — Secret, pull secret, Postgres, Ingress, ResourceQuota
 
 **Files:**
 - Create: `charts/dlectroflow/templates/secret.yaml`
@@ -523,7 +616,7 @@ EOF
 - Create: `charts/dlectroflow/templates/resourcequota.yaml`
 
 **Interfaces:**
-- Consumes: values + helpers from Task 4.
+- Consumes: values + helpers from Task 5.
 - Produces: `Secret/dlectroflow-secrets` (app env incl. `DATABASE_URL`, `POSTGRES_PASSWORD`), `Secret/dlectroflow-registry` (dockerconfigjson), `StatefulSet + Service dlectroflow-postgres`, an Ingress for `.Values.host` with cert-manager TLS, and (review only) a ResourceQuota.
 
 - [ ] **Step 1: `templates/secret.yaml`**
@@ -735,14 +828,14 @@ EOF
 
 ---
 
-### Task 6: GitLab agent config + CI pipeline
+### Task 7: GitLab agent config + CI pipeline
 
 **Files:**
 - Create: `.gitlab/agents/dlectroflow/config.yaml`
 - Create: `.gitlab-ci.yml`
 
 **Interfaces:**
-- Consumes: the Helm chart (Tasks 4–5), the image build, and Secrets Manager secrets (incl. new `GITLAB_DEPLOY_TOKEN` / `GITLAB_DEPLOY_TOKEN_USER`, see Task 7 runbook).
+- Consumes: the Helm chart (Tasks 5–6), the image build, and Secrets Manager secrets (incl. new `GITLAB_DEPLOY_TOKEN` / `GITLAB_DEPLOY_TOKEN_USER`, see Task 8 runbook).
 - Produces: pipeline jobs `build`, `deploy_review`, `stop_review`, `deploy_production`.
 
 - [ ] **Step 1: Agent config `.gitlab/agents/dlectroflow/config.yaml`**
@@ -916,7 +1009,7 @@ EOF
 
 ---
 
-### Task 7: Provisioning runbook + README deploy section
+### Task 8: Provisioning runbook + README deploy section
 
 **Files:**
 - Create: `docs/deploy-runbook.md`
@@ -997,13 +1090,32 @@ Confirm these secrets exist with the listed scopes (all created except Resend):
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — production
 - `RESEND_API_KEY` — production (optional)
 - **`GITLAB_DEPLOY_TOKEN` + `GITLAB_DEPLOY_TOKEN_USER` — All environments** (NEW):
-  create a project **deploy token** (Settings → Repository → Deploy tokens, scope `read_registry`), then add the username and token as these two secrets.
+  1. Project → **Settings → Repository → Deploy tokens → Add token**.
+  2. Name `k8s-registry-pull`; scope **`read_registry`** only; expiration optional.
+  3. **Create deploy token** — GitLab shows a **username** (`gitlab+deploy-token-…`) and
+     a **token** once. Copy both.
+  4. In Secrets Manager add two All-environments secrets:
+     - `GITLAB_DEPLOY_TOKEN_USER` = the username
+     - `GITLAB_DEPLOY_TOKEN` = the token
+  These become the cluster's dockerconfigjson pull secret so pods can pull the private
+  image across restarts (the CI job token would expire).
 
 ## 7. Production DNS (done)
 `dlectroflow` A record → `35.246.93.255` in dlectronique.dev DNS.
 
 ## 8. Google OAuth redirect
-Add `https://dlectroflow.dlectronique.dev/api/google/oauth/callback` to the OAuth client's authorized redirect URIs.
+Add to the OAuth client's authorized redirect URIs (keep the local one too):
+- `https://dlectroflow.dlectronique.dev/api/google/oauth/callback`
+- `http://localhost:3000/api/google/oauth/callback`
+
+After the production deploy, confirm the app builds an **https** redirect URI behind
+ingress (Task 3 handles the forwarded-proto derivation):
+```bash
+curl -s -o /dev/null -D - "https://dlectroflow.dlectronique.dev/api/google/oauth/start" | grep -i '^location:'
+```
+The `Location:` URL's `redirect_uri=` must be `https%3A%2F%2Fdlectroflow.dlectronique.dev%2F…`.
+If it shows `http%3A%2F%2F` or Google returns `redirect_uri_mismatch`, re-check the
+ingress `X-Forwarded-Proto` header and Task 3's `requestOrigin`.
 
 ## 9. Deploy
 - Open an MR → `deploy_review` publishes to `https://mr-<IID>.35.246.93.255.sslip.io` (see the MR "View app" button).
@@ -1039,7 +1151,9 @@ EOF
 ## Notes / risks surfaced during planning
 
 - **New secret required:** `GITLAB_DEPLOY_TOKEN` + `GITLAB_DEPLOY_TOKEN_USER` (private-registry pull). Not in the original spec's 5-secret list — flagged in the runbook (§6).
-- **OAuth base URL behind ingress:** the app derives redirect URIs from the request origin ([src/lib/google.ts](../../../src/lib/google.ts)). Verify it yields `https://dlectroflow.dlectronique.dev/...` behind ingress-nginx (which sets `X-Forwarded-Proto: https`); if it builds `http://`, fix origin derivation to honor forwarded headers. Verification step is in runbook §11.
+- **OAuth base URL behind ingress:** handled pre-emptively by **Task 3** (origin derived
+  from `x-forwarded-proto`/`x-forwarded-host`), so review/prod get correct `https://`
+  redirect URIs on the first deploy. Runbook §8 adds a post-deploy confirmation.
 - **kaniko/helm image tags** are pinned to concrete versions in `.gitlab-ci.yml`; bump as needed.
-- Tasks 1–6 are fully verifiable locally (Docker + helm + kubeconform). Task 7 is user-run infra.
+- Tasks 1–7 are fully verifiable locally (Docker + helm + kubeconform). Task 8 is user-run infra.
 ```
