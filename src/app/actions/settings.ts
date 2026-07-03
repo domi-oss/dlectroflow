@@ -24,3 +24,28 @@ export async function updateAgingSettings(input: {
   });
   revalidatePath("/inbox");
 }
+
+/** Feature 3/9 — end-of-day round-up delivery settings. */
+export async function updateRoundupSettings(input: {
+  workdayEndTime: string; // HH:mm
+  roundupDemoOverride: boolean;
+  roundupEmailEnabled: boolean;
+  roundupEmail: string | null;
+}) {
+  const workdayEndTime = /^\d{2}:\d{2}$/.test(input.workdayEndTime)
+    ? input.workdayEndTime
+    : "17:00";
+  const roundupEmail = input.roundupEmail?.trim() || null;
+  const data = {
+    workdayEndTime,
+    roundupDemoOverride: Boolean(input.roundupDemoOverride),
+    roundupEmailEnabled: Boolean(input.roundupEmailEnabled),
+    roundupEmail,
+  };
+  await prisma.settings.upsert({
+    where: { id: SINGLETON_ID },
+    create: { id: SINGLETON_ID, ...data },
+    update: data,
+  });
+  revalidatePath("/dashboard");
+}

@@ -1,7 +1,11 @@
 import Link from "next/link";
 import { getDashboardData } from "@/lib/rewards";
 import { getTodaySpark } from "@/lib/spark";
+import { getTodayRollup } from "@/lib/rollup";
+import { getSettings } from "@/lib/db";
+import { emailConfigured } from "@/lib/email";
 import { SparkCard } from "@/components/dashboard/spark-card";
+import { RoundupCard } from "@/components/dashboard/roundup-card";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +20,12 @@ const BADGE_LABELS: Record<string, string> = {
 const MEDALS = ["🥇", "🥈", "🥉"];
 
 export default async function DashboardPage() {
-  const [data, spark] = await Promise.all([getDashboardData(), getTodaySpark()]);
+  const [data, spark, rollup, settings] = await Promise.all([
+    getDashboardData(),
+    getTodaySpark(),
+    getTodayRollup(),
+    getSettings(),
+  ]);
 
   return (
     <div className="space-y-5">
@@ -34,6 +43,17 @@ export default async function DashboardPage() {
         <Stat label="Focus mins today" value={data.focusMinToday} />
         <Stat label="Steps done today" value={data.stepsDoneToday} />
       </div>
+
+      <RoundupCard
+        initialRollup={rollup}
+        settings={{
+          workdayEndTime: settings.workdayEndTime,
+          roundupDemoOverride: settings.roundupDemoOverride,
+          roundupEmailEnabled: settings.roundupEmailEnabled,
+          roundupEmail: settings.roundupEmail,
+        }}
+        emailConfigured={emailConfigured()}
+      />
 
       {/* Best streaks */}
       <section className="rounded-xl border p-4">

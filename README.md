@@ -20,9 +20,10 @@ This is **in active development**. Being honest so you don't hit surprises:
 | 🔔 Desktop notifications + demo override | ✅ works |
 | ✂️ Claude task breakdown (streaming chat) | ✅ works (needs a Claude API key) |
 | 📅 Reclaim scheduling | ⚠️ connects & works **if your Reclaim account allows task creation** — otherwise steps save locally (see [Connecting Reclaim](#-connecting-reclaim)). A Google-Tasks route is in progress to remove that limit. |
-| ⏱️ Focus Timer | 🚧 coming next |
-| 🎉 Rewards & streaks | 🚧 planned |
-| 🌇 End-of-day email round-up | 🚧 planned |
+| ⏱️ Focus Timer | ✅ works |
+| 🎉 Rewards & streaks + dashboard | ✅ works |
+| 🌇 End-of-day round-up (in-app + desktop) | ✅ works |
+| ✉️ Round-up **email** (opt-in) | ✅ works when `RESEND_API_KEY` is set; cleanly disabled otherwise |
 | 🐳 Postgres + GitLab CI/CD | 🚧 planned (SQLite + Docker work today) |
 
 If all you want right now is **capture → Claude breakdown**, that's fully working
@@ -50,7 +51,7 @@ That's it for running locally. No database server to install — it uses SQLite 
 |---|---|---|---|
 | **Anthropic (Claude API)** | The task breakdown chat | ✅ Required | Pay-as-you-go; a breakdown is a few cents. [console.anthropic.com](https://console.anthropic.com) → **API keys** |
 | **Reclaim.ai** | Scheduling steps onto your calendar | Optional | Free tier connects; **auto-scheduling tasks may need a paid plan / beta access** (see caveat below). [reclaim.ai](https://reclaim.ai) |
-| **Resend** | End-of-day email (planned) | Not yet | — |
+| **Resend** | Opt-in end-of-day round-up **email** | Optional | Free tier is plenty. Set `RESEND_API_KEY`, then opt in on the dashboard. In-app + desktop round-up work without it. [resend.com](https://resend.com) |
 
 You can run and demo the whole capture → breakdown flow with **just the Anthropic key**.
 
