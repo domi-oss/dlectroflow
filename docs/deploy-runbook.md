@@ -110,7 +110,8 @@ If it shows `http%3A%2F%2F` or Google returns `redirect_uri_mismatch`, re-check 
 ingress `X-Forwarded-Proto` header and Task 3's `requestOrigin`.
 
 ## 9. Deploy
-- Open an MR → `deploy_review` publishes to `https://mr-<IID>.35.246.93.255.sslip.io` (see the MR "View app" button).
+- Open an MR → `deploy_review` publishes to `https://mr-<IID>.35-246-93-255.sslip.io` (see the MR "View app" button).
+  > **sslip.io host format:** use the **dash-separated** IP (`35-246-93-255`), not dotted (`35.246.93.255`). A dotted quad *after* a hyphenated prefix like `mr-1.` makes sslip.io misparse the IP (e.g. `mr-1.35.246.93.255.sslip.io` resolves to a bogus `1.35.246.93`). The dash form resolves correctly.
 - Merge to `main` → `deploy_production` publishes to `https://dlectroflow.dlectronique.dev`.
 
 ## 10. Cost guardrails

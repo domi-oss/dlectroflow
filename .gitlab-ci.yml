@@ -47,7 +47,7 @@ deploy_review:
         --namespace "dlectroflow-mr-$CI_MERGE_REQUEST_IID" --create-namespace
         --set env=review --set spot=true --set postgres.persistent=false
         --set-string image.tag="$CI_COMMIT_SHA"
-        --set-string host="mr-$CI_MERGE_REQUEST_IID.35.246.93.255.sslip.io"
+        --set-string host="mr-$CI_MERGE_REQUEST_IID.35-246-93-255.sslip.io"
         --set-string secrets.postgresPassword="$POSTGRES_PASSWORD"
         --set-string secrets.anthropicApiKey="$ANTHROPIC_API_KEY"
         --set-string registry.username="$GITLAB_DEPLOY_TOKEN_USER"
@@ -56,7 +56,7 @@ deploy_review:
         --wait --timeout 5m
   environment:
     name: review/$CI_MERGE_REQUEST_IID
-    url: https://mr-$CI_MERGE_REQUEST_IID.35.246.93.255.sslip.io
+    url: https://mr-$CI_MERGE_REQUEST_IID.35-246-93-255.sslip.io
     on_stop: stop_review
     auto_stop_in: 2 days
   rules:

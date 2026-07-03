@@ -152,7 +152,7 @@ npm run db:studio         # open Prisma Studio to browse data
 
 The app deploys automatically via **GitLab CI/CD to GKE Autopilot** (europe-west2):
 
-- **Review apps** — every MR gets its own environment at `https://mr-<IID>.35.246.93.255.sslip.io` (the MR shows a "View app" button). The namespace is deleted when the MR closes.
+- **Review apps** — every MR gets its own environment at `https://mr-<IID>.35-246-93-255.sslip.io` (the MR shows a "View app" button). The namespace is deleted when the MR closes.
 - **Production** — merge to `main` deploys to **https://dlectroflow.dlectronique.dev**.
 
 For the full provisioning walkthrough (cluster, ingress-nginx, cert-manager, GitLab agent, secrets, DNS, OAuth), see **[docs/deploy-runbook.md](docs/deploy-runbook.md)**.
