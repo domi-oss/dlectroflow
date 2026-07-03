@@ -27,11 +27,18 @@ helm install ingress-nginx ingress-nginx/ingress-nginx \
   --set controller.service.loadBalancerIP=35.246.93.255
 ```
 
+> **Verify the IP bound:** `kubectl -n ingress-nginx get svc ingress-nginx-controller -w` until `EXTERNAL-IP` shows `35.246.93.255`. GKE honors `loadBalancerIP` only when the reserved address is a **regional external** address in the cluster's region (`europe-west2`) — confirm with `gcloud compute addresses describe dlectroflow-ingress --region=europe-west2`. If GKE provisions a different IP, delete the Service so Helm can recreate it, and re-check the address is regional (not global).
+
 ## 4. Install cert-manager + Let's Encrypt ClusterIssuer
 ```bash
 helm repo add jetstack https://charts.jetstack.io && helm repo update
 helm install cert-manager jetstack/cert-manager \
-  --namespace cert-manager --create-namespace --set crds.enabled=true
+  --namespace cert-manager --create-namespace --set crds.enabled=true --version v1.16.2
+```
+
+> `--set crds.enabled=true` is correct for cert-manager **v1.15+**; for older charts use `--set installCRDs=true` instead. If the ClusterIssuer apply fails with `no matches for kind "ClusterIssuer"`, the CRDs didn't install — apply them manually: `kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.crds.yaml`.
+
+```bash
 kubectl apply -f - <<'EOF'
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
@@ -40,7 +47,7 @@ metadata:
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
-    email: you@dlectronique.dev
+    email: you@dlectronique.dev # replace with your real email
     privateKeySecretRef:
       name: letsencrypt-prod
     solvers:
