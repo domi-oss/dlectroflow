@@ -150,47 +150,26 @@ npm run db:studio         # open Prisma Studio to browse data
 
 ## 🐳 Deploy
 
-### Option A — Docker (simplest, SQLite on a volume)
+The app deploys automatically via **GitLab CI/CD to GKE Autopilot** (europe-west2):
 
-Good for a single-user instance or a demo.
+- **Review apps** — every MR gets its own environment at `https://mr-<IID>.35.246.93.255.sslip.io` (the MR shows a "View app" button). The namespace is deleted when the MR closes.
+- **Production** — merge to `main` deploys to **https://dlectroflow.dlectronique.dev**.
+
+For the full provisioning walkthrough (cluster, ingress-nginx, cert-manager, GitLab agent, secrets, DNS, OAuth), see **[docs/deploy-runbook.md](docs/deploy-runbook.md)**.
+
+### Run the container directly
+
+If you want to run the image outside the cluster (e.g. a quick local prod-like test), supply a Postgres `DATABASE_URL`:
 
 ```bash
-# build
 docker build -t dlectroflow .
-
-# run (persist the SQLite db in a named volume; pass your key at runtime)
 docker run -p 3000:3000 \
+  -e DATABASE_URL="postgresql://user:pass@host:5432/dlectroflow" \
   -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
-  -v dlectroflow-data:/data \
   dlectroflow
 ```
 
 Migrations run automatically on start. Visit **http://localhost:3000**.
-
-### Option B — any Node host
-
-```bash
-npm ci
-npm run build
-npm run db:deploy      # apply migrations (prisma migrate deploy)
-ANTHROPIC_API_KEY=... npm run start
-```
-
-Set `ANTHROPIC_API_KEY` (and any other secrets) via your host's secret manager,
-not a file.
-
-### Scaling up to Postgres
-
-SQLite is perfect for one person. For multi-user / serverless:
-
-1. In [`prisma/schema.prisma`](prisma/schema.prisma), change the datasource
-   `provider` from `"sqlite"` to `"postgresql"`.
-2. Point `DATABASE_URL` at your Postgres instance.
-3. Regenerate migrations for Postgres: `npm run db:migrate` (SQLite migrations
-   don't transfer — the SQL differs).
-
-> Full production hardening (Postgres + `.gitlab-ci.yml` pipeline) is the planned
-> final build step.
 
 ---
 
@@ -214,7 +193,7 @@ SQLite is perfect for one person. For multi-user / serverless:
 - **Prisma 6** + **PostgreSQL** (local dev via Docker Compose; production on GitLab)
 - **Claude API** (`@anthropic-ai/sdk`, model `claude-opus-4-8`, adaptive thinking, streaming)
 - **Reclaim** via OAuth 2.1 + the Claude remote-MCP connector
-- Deploy: **Docker** (SQLite) / any Node host
+- Deploy: **Docker** → GKE Autopilot via GitLab CI/CD
 
 Full feature spec and the build order live in [`docs/dlectroflow-plan.md`](docs/dlectroflow-plan.md).
 
