@@ -24,7 +24,7 @@ This is **in active development**. Being honest so you don't hit surprises:
 | 🎉 Rewards & streaks + dashboard | ✅ works |
 | 🌇 End-of-day round-up (in-app + desktop) | ✅ works |
 | ✉️ Round-up **email** (opt-in) | ✅ works when `RESEND_API_KEY` is set; cleanly disabled otherwise |
-| 🐳 Postgres + GitLab CI/CD | 🚧 planned (SQLite + Docker work today) |
+| 🐳 Postgres + GitLab CI/CD | 🚧 in progress (Postgres local via Docker Compose done; CI/CD pipeline next) |
 
 If all you want right now is **capture → Claude breakdown**, that's fully working
 and genuinely useful.
@@ -39,9 +39,9 @@ You'll need these installed **before** you start. (One-time, ~5 min if you have 
   - Don't have it? [nodejs.org](https://nodejs.org) or `brew install node` (macOS) / your package manager. There's a `.nvmrc` if you use [nvm](https://github.com/nvm-sh/nvm) (`nvm use`).
 - [ ] **npm** (ships with Node). Check: `npm -v`
 - [ ] **Git**. Check: `git --version`
-- [ ] *(Deploy only)* **Docker** — [docker.com](https://www.docker.com/) — only if you want to containerize.
+- [ ] **Docker** — [docker.com](https://www.docker.com/) — used to run Postgres locally (and for production containers).
 
-That's it for running locally. No database server to install — it uses SQLite (a file).
+That's it for running locally. Postgres runs via Docker — no manual database server setup required.
 
 ---
 
@@ -64,8 +64,8 @@ You can run and demo the whole capture → breakdown flow with **just the Anthro
 git clone https://gitlab.com/gl-demo-ultimate-dtop/dlectroflow.git
 cd dlectroflow
 
-# 2. Install deps + create the database (one command)
-npm run setup        # = npm install && prisma migrate dev
+# 2. Start Postgres, install deps + create the database (one command)
+npm run setup        # = docker compose up -d db && npm install && prisma migrate dev
 
 # 3. Add your Claude API key (see options below), e.g. for this shell session:
 export ANTHROPIC_API_KEY='sk-ant-...'
@@ -135,11 +135,12 @@ Tokens are stored in your database (never the repo) and auto-refresh.
 
 ## 🗄️ Database & migrations
 
-SQLite by default — a file at `prisma/dev.db` (gitignored). Zero setup.
+Postgres — runs locally via Docker Compose. Start it with `docker compose up -d db`.
 
 ```bash
-npm run db:migrate    # create/apply migrations after schema changes
-npm run db:studio     # open Prisma Studio to browse data
+docker compose up -d db   # start local Postgres (idempotent — safe to re-run)
+npm run db:migrate        # create/apply migrations after schema changes
+npm run db:studio         # open Prisma Studio to browse data
 ```
 
 > **Gotcha:** after running a migration, **restart `npm run dev`** — a running dev
@@ -210,7 +211,7 @@ SQLite is perfect for one person. For multi-user / serverless:
 
 - **Next.js 16** (App Router) + **React 19** + **TypeScript**
 - **Tailwind CSS v4** + **shadcn/ui** + **Framer Motion**
-- **Prisma 6** + **SQLite** (→ Postgres for scale)
+- **Prisma 6** + **PostgreSQL** (local dev via Docker Compose; production on GitLab)
 - **Claude API** (`@anthropic-ai/sdk`, model `claude-opus-4-8`, adaptive thinking, streaming)
 - **Reclaim** via OAuth 2.1 + the Claude remote-MCP connector
 - Deploy: **Docker** (SQLite) / any Node host
