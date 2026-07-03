@@ -22,13 +22,14 @@ spec:
         - name: dlectroflow-registry
       initContainers:
         - name: wait-for-db
-          image: {{ .Values.postgres.image }}
+          image: "{{ .Values.postgres.image }}"
           command:
             - sh
             - -c
             - until pg_isready -h dlectroflow-postgres -U dlectroflow; do echo waiting for db; sleep 2; done
         - name: migrate
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["npx", "prisma", "migrate", "deploy"]
           envFrom:
             - secretRef:
