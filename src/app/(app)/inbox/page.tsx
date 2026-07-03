@@ -8,7 +8,11 @@ export const dynamic = "force-dynamic";
 export default async function InboxPage({
   searchParams,
 }: {
-  searchParams: Promise<{ reclaim?: string; reason?: string }>;
+  searchParams: Promise<{
+    reclaim?: string;
+    google?: string;
+    reason?: string;
+  }>;
 }) {
   const [items, settings, sp] = await Promise.all([
     prisma.brainDumpItem.findMany({
@@ -31,6 +35,18 @@ export default async function InboxPage({
         <div className="rounded-lg border border-red-600/30 bg-red-600/10 px-4 py-2 text-sm text-red-700">
           Reclaim connection failed{sp.reason ? `: ${sp.reason}` : ""}. You can
           try again from a task breakdown.
+        </div>
+      )}
+      {sp.google === "connected" && (
+        <div className="rounded-lg border border-green-600/30 bg-green-600/10 px-4 py-2 text-sm font-medium text-green-700">
+          ✅ Google Tasks connected — task breakdowns can now sync into Reclaim
+          via your Google Tasks list.
+        </div>
+      )}
+      {sp.google === "error" && (
+        <div className="rounded-lg border border-red-600/30 bg-red-600/10 px-4 py-2 text-sm text-red-700">
+          Google Tasks connection failed{sp.reason ? `: ${sp.reason}` : ""}. Try
+          again from a task breakdown.
         </div>
       )}
       <InboxView

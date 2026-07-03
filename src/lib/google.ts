@@ -1,0 +1,197 @@
+import { prisma } from "@/lib/db";
+import { SINGLETON_ID } from "@/lib/constants";
+import { createPkce, randomState } from "@/lib/reclaim";
+
+// Google OAuth 2.0 + Tasks API. Unlike Reclaim, Google has no dynamic client
+// registration — you create an OAuth client once in Google Cloud Console and
+// provide GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET via env.
+const AUTHORIZE_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
+const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
+const TASKS_API = "https://tasks.googleapis.com/tasks/v1";
+const SCOPE = "https://www.googleapis.com/auth/tasks";
+
+// The Google Tasks list Reclaim syncs from (default per Reclaim's docs: "🗓 Reclaim").
+// Match is case-insensitive "contains"; override the search term with env.
+const RECLAIM_LIST_MATCH = (
+  process.env.GOOGLE_TASKS_LIST_NAME ?? "reclaim"
+).toLowerCase();
+
+export { createPkce, randomState };
+
+export function googleClient() {
+  return {
+    clientId: process.env.GOOGLE_CLIENT_ID ?? "",
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+  };
+}
+
+export function googleConfigured(): boolean {
+  const { clientId, clientSecret } = googleClient();
+  return Boolean(clientId && clientSecret);
+}
+
+async function getAuth() {
+  return prisma.googleAuth.upsert({
+    where: { id: SINGLETON_ID },
+    create: { id: SINGLETON_ID },
+    update: {},
+  });
+}
+
+export function buildAuthorizeUrl(params: {
+  redirectUri: string;
+  state: string;
+  codeChallenge: string;
+}): string {
+  const { clientId } = googleClient();
+  const u = new URL(AUTHORIZE_ENDPOINT);
+  u.searchParams.set("client_id", clientId);
+  u.searchParams.set("redirect_uri", params.redirectUri);
+  u.searchParams.set("response_type", "code");
+  u.searchParams.set("scope", SCOPE);
+  u.searchParams.set("access_type", "offline"); // get a refresh token
+  u.searchParams.set("prompt", "consent"); // ensure refresh token is returned
+  u.searchParams.set("include_granted_scopes", "true");
+  u.searchParams.set("state", params.state);
+  u.searchParams.set("code_challenge", params.codeChallenge);
+  u.searchParams.set("code_challenge_method", "S256");
+  return u.toString();
+}
+
+type TokenResponse = {
+  access_token: string;
+  refresh_token?: string;
+  expires_in?: number;
+  scope?: string;
+};
+
+async function storeTokens(t: TokenResponse) {
+  const expiresAt = t.expires_in
+    ? new Date(Date.now() + t.expires_in * 1000)
+    : null;
+  await prisma.googleAuth.update({
+    where: { id: SINGLETON_ID },
+    data: {
+      accessToken: t.access_token,
+      ...(t.refresh_token ? { refreshToken: t.refresh_token } : {}),
+      expiresAt,
+      scope: t.scope ?? SCOPE,
+    },
+  });
+}
+
+export async function exchangeCode(
+  code: string,
+  codeVerifier: string,
+  redirectUri: string,
+): Promise<void> {
+  const { clientId, clientSecret } = googleClient();
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: redirectUri,
+    client_id: clientId,
+    client_secret: clientSecret,
+    code_verifier: codeVerifier,
+  });
+  const res = await fetch(TOKEN_ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  if (!res.ok) {
+    throw new Error(`Google token exchange failed (${res.status})`);
+  }
+  await storeTokens((await res.json()) as TokenResponse);
+}
+
+async function refreshAccessToken(): Promise<string | null> {
+  const auth = await getAuth();
+  if (!auth.refreshToken) return null;
+  const { clientId, clientSecret } = googleClient();
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: auth.refreshToken,
+    client_id: clientId,
+    client_secret: clientSecret,
+  });
+  const res = await fetch(TOKEN_ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  if (!res.ok) return null;
+  const data = (await res.json()) as TokenResponse;
+  await storeTokens(data);
+  return data.access_token;
+}
+
+export async function getValidAccessToken(): Promise<string | null> {
+  const auth = await getAuth();
+  if (!auth.accessToken) return null;
+  const soon = Date.now() + 60_000;
+  if (auth.expiresAt && auth.expiresAt.getTime() <= soon) {
+    return (await refreshAccessToken()) ?? null;
+  }
+  return auth.accessToken;
+}
+
+export async function getGoogleStatus(): Promise<{
+  configured: boolean;
+  connected: boolean;
+}> {
+  const auth = await getAuth();
+  return { configured: googleConfigured(), connected: Boolean(auth.accessToken) };
+}
+
+export async function disconnectGoogle(): Promise<void> {
+  await prisma.googleAuth.update({
+    where: { id: SINGLETON_ID },
+    data: { accessToken: null, refreshToken: null, expiresAt: null, scope: null },
+  });
+}
+
+// ── Google Tasks API ──────────────────────────────────────────────────────
+
+type TaskList = { id: string; title: string };
+
+export async function listTaskLists(token: string): Promise<TaskList[]> {
+  const res = await fetch(`${TASKS_API}/users/@me/lists?maxResults=100`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Google Tasks list fetch failed (${res.status})`);
+  const data = (await res.json()) as { items?: TaskList[] };
+  return data.items ?? [];
+}
+
+/** Find the Google Tasks list Reclaim syncs (title contains "reclaim"). */
+export async function findReclaimList(token: string): Promise<TaskList | null> {
+  const lists = await listTaskLists(token);
+  return (
+    lists.find((l) => l.title.toLowerCase().includes(RECLAIM_LIST_MATCH)) ?? null
+  );
+}
+
+export async function createGoogleTask(
+  token: string,
+  listId: string,
+  input: { title: string; notes?: string; due?: string },
+): Promise<{ id: string }> {
+  const res = await fetch(`${TASKS_API}/lists/${listId}/tasks`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      title: input.title,
+      notes: input.notes,
+      ...(input.due ? { due: input.due } : {}),
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`Google Tasks create failed (${res.status}) ${detail}`);
+  }
+  return (await res.json()) as { id: string };
+}

@@ -44,6 +44,17 @@ model ReclaimAuth {
   updatedAt    DateTime  @updatedAt
 }
 
+// ── Google Tasks OAuth (single-user demo; tokens obtained at runtime) ──────
+// client_id/secret come from env (GOOGLE_CLIENT_ID/SECRET); only tokens here.
+model GoogleAuth {
+  id           String    @id @default("singleton")
+  accessToken  String?
+  refreshToken String?
+  expiresAt    DateTime?
+  scope        String?
+  updatedAt    DateTime  @updatedAt
+}
+
 // ── Feature 1 — Brain Dump ────────────────────────────────────────────────
 model BrainDumpItem {
   id           String    @id @default(cuid())
@@ -82,6 +93,8 @@ model Step {
   estMinutes      Int
   subtaskEmoji    String?
   reclaimTaskId   String?
+  googleTaskId    String? // id of the synced Google Task (Reclaim ingests it)
+  googleTaskListId String?
   scheduledAt     DateTime?
   done            Boolean        @default(false)
   estimateHistory String? // JSON array of prior estMinutes values

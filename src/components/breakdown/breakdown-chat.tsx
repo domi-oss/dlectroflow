@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { confirmBreakdown } from "@/app/actions/breakdown";
 import { scheduleTaskInReclaim } from "@/app/actions/reclaim";
+import { pushStepsToGoogleTasks } from "@/app/actions/google-schedule";
 import type { Feedback, Proposal, StreamEvent } from "@/lib/breakdown";
 import { cn } from "@/lib/utils";
 
@@ -20,14 +21,17 @@ export function BreakdownChat({
   title,
   initialProposal,
   reclaimConnected,
+  google,
 }: {
   taskId: string;
   title: string;
   initialProposal: Proposal | null;
   reclaimConnected: boolean;
+  google: { configured: boolean; connected: boolean };
 }) {
   const router = useRouter();
   const [schedule, setSchedule] = useState<ScheduleState>({ status: "idle" });
+  const [gsched, setGsched] = useState<ScheduleState>({ status: "idle" });
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [proposal, setProposal] = useState<Proposal | null>(initialProposal);
   const [streaming, setStreaming] = useState(false);
@@ -129,6 +133,30 @@ export function BreakdownChat({
     }
   }
 
+  async function sendToGoogle() {
+    setGsched({ status: "scheduling" });
+    const res = await pushStepsToGoogleTasks(taskId);
+    if (res.ok) {
+      setGsched({
+        status: "done",
+        count: res.scheduled,
+        message: res.listTitle,
+      });
+      router.refresh();
+    } else {
+      const map: Record<string, string> = {
+        not_configured:
+          "Google isn't configured (set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).",
+        not_connected: "Google Tasks isn't connected.",
+        no_steps: "No steps to send.",
+      };
+      setGsched({
+        status: "error",
+        message: map[res.reason] ?? res.message ?? "Sending to Google Tasks failed.",
+      });
+    }
+  }
+
   const totalMin = proposal?.steps.reduce((n, s) => n + (s.estMinutes || 0), 0) ?? 0;
   const busy = streaming || confirmPending;
 
@@ -144,14 +172,55 @@ export function BreakdownChat({
           </p>
         </div>
 
-        {/* Reclaim scheduling */}
-        <div className="rounded-lg border p-4">
-          {!reclaimConnected ? (
-            <div className="space-y-2 text-sm">
-              <p className="font-medium">📅 Schedule onto your calendar</p>
+        {/* Scheduling — Google Tasks route (primary), Reclaim MCP (fallback) */}
+        <div className="space-y-2 rounded-lg border p-4 text-sm">
+          <p className="font-medium">📅 Schedule onto your calendar</p>
+
+          {google.configured ? (
+            !google.connected ? (
+              <div className="space-y-2">
+                <p className="text-muted-foreground">
+                  Connect Google Tasks — steps land in your Reclaim-synced list
+                  and Reclaim auto-schedules them. Steps are saved either way.
+                </p>
+                <a
+                  href="/api/google/oauth/start"
+                  className="bg-primary text-primary-foreground inline-block rounded-md px-3 py-2 font-medium"
+                >
+                  Connect Google Tasks →
+                </a>
+              </div>
+            ) : gsched.status === "done" ? (
+              <p className="font-medium text-green-700">
+                ✅ Sent {gsched.count} task{gsched.count === 1 ? "" : "s"} to your
+                “{gsched.message}” list — they’ll sync into Reclaim shortly.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-muted-foreground">
+                  Send these steps to your Reclaim-synced Google Tasks list;
+                  Reclaim picks them up and auto-schedules them.
+                </p>
+                <button
+                  onClick={sendToGoogle}
+                  disabled={gsched.status === "scheduling"}
+                  className="bg-primary text-primary-foreground rounded-md px-3 py-2 font-medium disabled:opacity-50"
+                >
+                  {gsched.status === "scheduling"
+                    ? "Sending…"
+                    : "📅 Send to Reclaim (via Google Tasks)"}
+                </button>
+                {gsched.status === "error" && (
+                  <p className="text-red-700">{gsched.message}</p>
+                )}
+              </div>
+            )
+          ) : !reclaimConnected ? (
+            <div className="space-y-2">
               <p className="text-muted-foreground">
-                Connect Reclaim and Claude will book each step on your calendar
-                automatically. Your steps are saved either way.
+                Connect Reclaim to schedule (or set <code>GOOGLE_CLIENT_ID</code>{" "}
+                to use the Google Tasks route — see the README). Steps are saved
+                either way.
               </p>
               <a
                 href="/api/reclaim/oauth/start"
@@ -161,25 +230,20 @@ export function BreakdownChat({
               </a>
             </div>
           ) : schedule.status === "done" ? (
-            <p className="text-sm font-medium text-green-700">
+            <p className="font-medium text-green-700">
               ✅ Sent {schedule.count} task{schedule.count === 1 ? "" : "s"} to
-              Reclaim — check your calendar!
+              Reclaim.
             </p>
           ) : (
-            <div className="space-y-2 text-sm">
-              <p className="font-medium">📅 Schedule onto your calendar</p>
-              <p className="text-muted-foreground">
-                Claude will create each step as a Reclaim task and let Reclaim
-                auto-schedule it.
-              </p>
+            <div className="space-y-2">
               <button
                 onClick={scheduleNow}
                 disabled={schedule.status === "scheduling"}
                 className="bg-primary text-primary-foreground rounded-md px-3 py-2 font-medium disabled:opacity-50"
               >
                 {schedule.status === "scheduling"
-                  ? "Scheduling… (Claude is booking your tasks)"
-                  : "📅 Schedule in Reclaim"}
+                  ? "Scheduling…"
+                  : "📅 Schedule in Reclaim (MCP)"}
               </button>
               {schedule.status === "error" && (
                 <p className="text-red-700">{schedule.message}</p>
