@@ -12,6 +12,8 @@ gcloud container clusters create-auto dlectroflow --region europe-west2
 gcloud container clusters get-credentials dlectroflow --region europe-west2
 ```
 
+> **kubectl needs `gke-gcloud-auth-plugin`.** If `kubectl` errors with "gke-gcloud-auth-plugin … not found", install it (`gcloud components install gke-gcloud-auth-plugin`) and ensure the SDK bin dir is on PATH (Homebrew: `/opt/homebrew/share/google-cloud-sdk/bin`), and `export USE_GKE_GCLOUD_AUTH_PLUGIN=True`.
+
 ## 2. Static IP (already reserved: 35.246.93.255)
 ```bash
 gcloud compute addresses describe dlectroflow-ingress --region europe-west2 --format='value(address)'
@@ -33,8 +35,11 @@ helm install ingress-nginx ingress-nginx/ingress-nginx \
 ```bash
 helm repo add jetstack https://charts.jetstack.io && helm repo update
 helm install cert-manager jetstack/cert-manager \
-  --namespace cert-manager --create-namespace --set crds.enabled=true --version v1.16.2
+  --namespace cert-manager --create-namespace --set crds.enabled=true --version v1.16.2 \
+  --set global.leaderElection.namespace=cert-manager
 ```
+
+> **GKE Autopilot fix (required):** `--set global.leaderElection.namespace=cert-manager`. By default cert-manager takes its leader-election lease in `kube-system`, which Autopilot **forbids writes to** ("managed-namespaces-limitation"). Without this flag, cainjector never becomes leader → never injects the webhook `caBundle` → every `ClusterIssuer`/`Certificate` apply fails with `failed calling webhook … x509: certificate signed by unknown authority`. If you already installed cert-manager without it, `helm upgrade` with the flag and wait for the webhook `caBundle` to populate (`kubectl get validatingwebhookconfiguration cert-manager-webhook -o jsonpath='{.webhooks[0].clientConfig.caBundle}' | wc -c` > 100).
 
 > `--set crds.enabled=true` is correct for cert-manager **v1.15+**; for older charts use `--set installCRDs=true` instead. If the ClusterIssuer apply fails with `no matches for kind "ClusterIssuer"`, the CRDs didn't install — apply them manually: `kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.crds.yaml`.
 
