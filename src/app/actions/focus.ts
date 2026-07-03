@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { getAnthropic, BREAKDOWN_MODEL } from "@/lib/anthropic";
 import { getValidAccessToken, patchGoogleTask } from "@/lib/google";
-import { FocusOutcome, RewardType, RewardPoints } from "@/lib/constants";
+import { FocusOutcome, RewardType, BadgeKey } from "@/lib/constants";
+import { logReward, touchStreakOnCompletion, awardBadge } from "@/lib/rewards";
 
 /** Start a focus session on a step. Returns the session id. */
 export async function beginFocus(
@@ -58,6 +59,8 @@ export type CompleteResult = {
   nextStepId: string | null;
   points: number;
   reclaimSynced: boolean;
+  streak: number | null;
+  freshStart: boolean;
 };
 
 /** Finish a session as completed: mark the step done, sync Reclaim, log rewards. */
@@ -72,25 +75,34 @@ export async function completeFocus(
     opts.addedMin,
   );
   const step = session.step;
-  if (!step) return { ok: false, nextStepId: null, points: 0, reclaimSynced: false };
+  if (!step)
+    return {
+      ok: false,
+      nextStepId: null,
+      points: 0,
+      reclaimSynced: false,
+      streak: null,
+      freshStart: false,
+    };
 
   const reclaimSynced = await completeGoogleTaskForStep(step);
-  await prisma.step.update({
-    where: { id: step.id },
-    data: { done: true },
-  });
+  await prisma.step.update({ where: { id: step.id }, data: { done: true } });
   await prisma.focusSession.update({
     where: { id: sessionId },
     data: { reclaimSynced },
   });
 
-  // Rewards (dashboard reads these in step 8).
-  await prisma.rewardEvent.createMany({
-    data: [
-      { type: RewardType.StepDone, points: RewardPoints.step_done },
-      { type: RewardType.SessionFinished, points: RewardPoints.session_finished },
-    ],
+  // Points + streak + badges (dashboard reads these in step 8).
+  await logReward(RewardType.StepDone);
+  await logReward(RewardType.SessionFinished);
+  const streak = await touchStreakOnCompletion();
+
+  const dayStart = new Date();
+  dayStart.setHours(0, 0, 0, 0);
+  const stepsToday = await prisma.rewardEvent.count({
+    where: { type: RewardType.StepDone, createdAt: { gte: dayStart } },
   });
+  if (stepsToday >= 10) await awardBadge(BadgeKey.TenStepsDay);
 
   const next = await prisma.step.findFirst({
     where: { taskId: step.taskId, done: false, order: { gt: step.order } },
@@ -98,11 +110,14 @@ export async function completeFocus(
   });
 
   revalidatePath(`/tasks/${step.taskId}`);
+  revalidatePath("/dashboard");
   return {
     ok: true,
     nextStepId: next?.id ?? null,
-    points: RewardPoints.step_done + RewardPoints.session_finished,
+    points: 15,
     reclaimSynced,
+    streak: streak?.current ?? null,
+    freshStart: streak?.freshStart ?? false,
   };
 }
 

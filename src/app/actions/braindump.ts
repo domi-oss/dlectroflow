@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
+import { maybeAwardInboxZero } from "@/lib/rewards";
 import {
   BrainDumpStatus,
   TaskSource,
@@ -22,6 +23,7 @@ export async function triageBrainDumpItem(id: string) {
     where: { id },
     data: { status: BrainDumpStatus.Triaged, triagedAt: new Date() },
   });
+  await maybeAwardInboxZero();
   revalidatePath(INBOX_PATH);
 }
 
@@ -33,11 +35,13 @@ export async function snoozeBrainDumpItem(id: string, minutes: number) {
       remindedAt: null,
     },
   });
+  await maybeAwardInboxZero();
   revalidatePath(INBOX_PATH);
 }
 
 export async function deleteBrainDumpItem(id: string) {
   await prisma.brainDumpItem.delete({ where: { id } });
+  await maybeAwardInboxZero();
   revalidatePath(INBOX_PATH);
 }
 
@@ -72,6 +76,7 @@ export async function keepAsTask(id: string) {
       taskId: task.id,
     },
   });
+  await maybeAwardInboxZero();
   revalidatePath(INBOX_PATH);
   return task.id;
 }

@@ -14,6 +14,9 @@ export default function AppLayout({
             <Link href="/inbox" className="hover:text-foreground transition-colors">
               🧠 Inbox
             </Link>
+            <Link href="/dashboard" className="hover:text-foreground transition-colors">
+              🎉 Dashboard
+            </Link>
           </nav>
         </div>
       </header>

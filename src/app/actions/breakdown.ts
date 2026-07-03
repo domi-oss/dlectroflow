@@ -2,7 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
-import { BrainDumpStatus, TaskSource, TaskStatus } from "@/lib/constants";
+import {
+  BrainDumpStatus,
+  TaskSource,
+  TaskStatus,
+  RewardType,
+  BadgeKey,
+} from "@/lib/constants";
+import { logReward, awardBadge } from "@/lib/rewards";
 import type { Proposal } from "@/lib/breakdown";
 
 /**
@@ -72,6 +79,9 @@ export async function confirmBreakdown(taskId: string, proposal: Proposal) {
       })),
     }),
   ]);
+
+  await logReward(RewardType.BreakdownConfirmed);
+  await awardBadge(BadgeKey.FirstBreakdown);
 
   revalidatePath(`/tasks/${taskId}`);
   revalidatePath("/inbox");

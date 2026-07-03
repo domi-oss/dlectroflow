@@ -11,6 +11,8 @@ import {
   getGoogleStatus,
   disconnectGoogle,
 } from "@/lib/google";
+import { RewardType, BadgeKey } from "@/lib/constants";
+import { logReward, awardBadge } from "@/lib/rewards";
 
 export type GoogleScheduleResult =
   | { ok: true; scheduled: number; listTitle: string }
@@ -88,6 +90,9 @@ export async function pushStepsToGoogleTasks(
       });
       scheduled++;
     }
+
+    await logReward(RewardType.Scheduled);
+    await awardBadge(BadgeKey.FirstSchedule);
 
     revalidatePath(`/tasks/${taskId}`);
     return { ok: true, scheduled, listTitle: list.title };

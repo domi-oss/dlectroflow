@@ -11,6 +11,15 @@ import {
   proposeNewEstimate,
   type CompleteResult,
 } from "@/app/actions/focus";
+import { Celebration } from "@/components/focus/celebration";
+
+const DONE_MESSAGES = [
+  "Nice — step done!",
+  "Boom. That's one off the list. 💪",
+  "Look at you, actually doing the thing.",
+  "One step closer. That felt good, right?",
+  "Done and dusted. Proud of you.",
+];
 
 type Phase = "setup" | "running" | "paused" | "timeup" | "reestimate" | "done" | "requeued" | "gaveup";
 
@@ -59,6 +68,9 @@ export function FocusTimer({
   const [pending, setPending] = useState(false);
   const [newEst, setNewEst] = useState(step.estMinutes);
   const [result, setResult] = useState<CompleteResult | null>(null);
+  const doneMsgRef = useRef(
+    DONE_MESSAGES[Math.floor(Math.random() * DONE_MESSAGES.length)],
+  );
 
   const inc = Math.max(1, addTimeIncrementMin || 5);
   const durationMin = () => Math.max(0, Math.round(elapsedRef.current / 60));
@@ -160,14 +172,24 @@ export function FocusTimer({
     return (
       <div className="space-y-5 text-center">
         {title}
+        <div className="flex justify-center pt-6">
+          <Celebration />
+        </div>
         <div className="text-6xl">🎉</div>
-        <p className="text-lg font-medium">Nice — step done!</p>
+        <p className="text-lg font-medium">{doneMsgRef.current}</p>
         {result && (
           <p className="text-muted-foreground text-sm">
             +{result.points} points
             {result.reclaimSynced ? " · marked complete in Reclaim ✅" : ""}
           </p>
         )}
+        {result?.streak ? (
+          <p className="text-sm font-medium text-amber-600">
+            {result.freshStart
+              ? "🌱 Fresh start — day 1 again, and that's completely okay."
+              : `🔥 ${result.streak}-day streak!`}
+          </p>
+        ) : null}
         <div className="flex flex-col items-center gap-2">
           {nextStepId ? (
             <Link
