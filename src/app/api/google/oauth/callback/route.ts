@@ -25,9 +25,10 @@ export async function GET(req: Request): Promise<Response> {
   };
 
   if (oauthError) return fail(oauthError);
-  if (!code || !state || !verifier || state !== expectedState) {
-    return fail("invalid_oauth_callback");
-  }
+  if (!code) return fail("missing_code");
+  if (!state) return fail("missing_state");
+  if (!verifier) return fail("missing_verifier_cookie");
+  if (state !== expectedState) return fail("state_mismatch");
 
   try {
     await exchangeCode(code, verifier, `${origin}/api/google/oauth/callback`);

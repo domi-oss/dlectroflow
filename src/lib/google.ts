@@ -69,13 +69,22 @@ async function storeTokens(t: TokenResponse) {
   const expiresAt = t.expires_in
     ? new Date(Date.now() + t.expires_in * 1000)
     : null;
-  await prisma.googleAuth.update({
+  const scope = t.scope ?? SCOPE;
+  // upsert (not update): the singleton row may not exist on the first connect.
+  await prisma.googleAuth.upsert({
     where: { id: SINGLETON_ID },
-    data: {
+    create: {
+      id: SINGLETON_ID,
+      accessToken: t.access_token,
+      refreshToken: t.refresh_token ?? null,
+      expiresAt,
+      scope,
+    },
+    update: {
       accessToken: t.access_token,
       ...(t.refresh_token ? { refreshToken: t.refresh_token } : {}),
       expiresAt,
-      scope: t.scope ?? SCOPE,
+      scope,
     },
   });
 }
