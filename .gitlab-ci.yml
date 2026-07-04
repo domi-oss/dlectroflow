@@ -129,10 +129,21 @@ build_image:
   script:
     - mkdir -p /kaniko/.docker
     - echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" > /kaniko/.docker/config.json
+    # On main, ALSO push a stable main-<short-sha> tag. deploy_production pulls
+    # this tag, and the container-registry cleanup policy's keep-regex (main-.*)
+    # protects it permanently — so cleanup can never delete the image prod runs.
+    # (Protecting main-* only helps because prod pulls it: deleting an untagged
+    # SHA would 404 even though the same digest survives under another tag.)
+    # Review/MR pipelines push only the ephemeral SHA tag, which cleanup reaps.
+    - |
+      DESTS="--destination $IMAGE"
+      if [ "$CI_COMMIT_BRANCH" = "main" ]; then
+        DESTS="$DESTS --destination $CI_REGISTRY_IMAGE:main-$CI_COMMIT_SHORT_SHA"
+      fi
     - /kaniko/executor
         --context "$CI_PROJECT_DIR"
         --dockerfile "$CI_PROJECT_DIR/Dockerfile.ci"
-        --destination "$IMAGE"
+        $DESTS
         --cache=true
         --cache-repo "$CI_REGISTRY_IMAGE/cache"
   rules:
@@ -223,10 +234,12 @@ deploy_production:
       gitlab_secrets_manager: { name: GITLAB_DEPLOY_TOKEN_USER, source: group/gl-demo-ultimate-dtop }
       file: false
   script:
+    # image.tag is the protected main-<short-sha> tag (kept forever by the
+    # registry cleanup policy), never the ephemeral bare SHA which cleanup reaps.
     - helm upgrade --install dlectroflow charts/dlectroflow
         --namespace dlectroflow-prod --create-namespace
         --set env=production --set postgres.persistent=true
-        --set-string image.tag="$CI_COMMIT_SHA"
+        --set-string image.tag="main-$CI_COMMIT_SHORT_SHA"
         --set-string host="dlectroflow.dlectronique.dev"
         --set-string secrets.postgresPassword="$POSTGRES_PASSWORD"
         --set-string secrets.anthropicApiKey="$ANTHROPIC_API_KEY"
