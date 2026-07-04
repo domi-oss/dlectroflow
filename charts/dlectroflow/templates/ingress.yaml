@@ -6,6 +6,30 @@ metadata:
     {{- include "dlectroflow.labels" . | nindent 4 }}
   annotations:
     cert-manager.io/cluster-issuer: {{ .Values.tls.clusterIssuer }}
+
+    # ── HTTPS enforcement ──────────────────────────────────────────────────
+    # Redirect all HTTP traffic to HTTPS at the ingress layer (belt-and-suspenders
+    # with the HSTS header set by the application).
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+
+    # ── Request size limit ─────────────────────────────────────────────────
+    # Cap incoming request bodies at 2 MB. The AI breakdown endpoint validates
+    # at 10 000 chars in application code; this is the infrastructure backstop.
+    nginx.ingress.kubernetes.io/proxy-body-size: "2m"
+
+    # ── Rate limiting ──────────────────────────────────────────────────────
+    # Limit each source IP to 20 requests/second and 20 concurrent connections.
+    # Protects the Claude Opus endpoint from abuse on unauthenticated review apps.
+    # Complies with OWASP ASVS V13.2.6 (API rate limiting).
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+    nginx.ingress.kubernetes.io/limit-connections: "20"
+
+    # NOTE: security response headers are set by the app (next.config.ts).
+    # An ingress-layer `configuration-snippet` was intentionally NOT used —
+    # ingress-nginx v1.15 disables snippet annotations by default
+    # (allow-snippet-annotations=false, post CVE-2023-5043), so the admission
+    # webhook would reject this Ingress.
 spec:
   ingressClassName: nginx
   tls:

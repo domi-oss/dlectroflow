@@ -9,6 +9,13 @@ import {
 
 export const runtime = "nodejs";
 
+// ── Request size guard ───────────────────────────────────────────────────────
+// Reject bodies larger than this before JSON parsing or calling Claude.
+// Prevents unbounded AI spend from unauthenticated review-app URLs.
+// The ingress also caps at 2 MB; this is the application-layer backstop.
+// OWASP ASVS V13.2.6 — API abuse prevention.
+const MAX_BODY_CHARS = 10_000;
+
 const SYSTEM = `You are a warm, encouraging ADHD coach who helps break an overwhelming task into tiny, concrete, doable steps.
 
 Voice:
@@ -59,9 +66,36 @@ const PROPOSE_TOOL: Anthropic.Tool = {
 };
 
 export async function POST(req: Request): Promise<Response> {
+  // ── Input size validation ────────────────────────────────────────────────
+  // Read the raw body first so we can enforce a size limit before parsing.
+  // This prevents maliciously large payloads from reaching the JSON parser or
+  // the Claude API. OWASP ASVS V13.2.6.
+  let rawBody: string;
+  try {
+    rawBody = await req.text();
+  } catch {
+    return new Response(JSON.stringify({ error: "Failed to read request body" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  if (rawBody.length > MAX_BODY_CHARS) {
+    return new Response(
+      JSON.stringify({
+        error: `Request body too large (max ${MAX_BODY_CHARS} characters)`,
+      }),
+      {
+        status: 413,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+  }
+
+  // ── JSON parsing ─────────────────────────────────────────────────────────
   let body: BreakdownRequest;
   try {
-    body = (await req.json()) as BreakdownRequest;
+    body = JSON.parse(rawBody) as BreakdownRequest;
   } catch {
     return new Response(JSON.stringify({ error: "Invalid JSON" }), {
       status: 400,
