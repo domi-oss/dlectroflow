@@ -8,15 +8,16 @@ workflow:
     - if: '$CI_COMMIT_BRANCH == "main"'
 
 stages:
-  - build
-  - test   # GitLab security scanner templates (SAST/DS/Secret/Container) run here
+  - build         # build_app: npm ci + next build (compile)
+  - build_image   # build_image: Kaniko assembles the image from build_app's artifacts
+  - test          # security scanners (container_scanning needs the built image → after build_image)
   - deploy
 
 variables:
   IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
   AGENT_CONTEXT: "gl-demo-ultimate-dtop/dlectroflow:dlectroflow"
   # ── Security Scanners ────────────────────────────────────────────────────
-  # Container Scanning: target the image built in the build stage
+  # Container Scanning: target the image assembled by build_image
   CS_IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
   # SAST: skip generated/vendored paths
   SAST_EXCLUDED_PATHS: "node_modules, .next, coverage, prisma/migrations"
@@ -49,26 +50,66 @@ secret_detection:
   rules: *scanner_rules
 
 container_scanning:
-  # Scan the image built in THIS pipeline (not a stale/absent one) — the branch
-  # pipeline had no build job, which is why it failed before. needs: build.
-  needs: ["build"]
+  # Scans the image assembled by build_image (the build job was split into
+  # build_app + build_image). needs it so the image exists before scanning.
+  needs: ["build_image"]
   rules: *scanner_rules
 
-# ── Build ────────────────────────────────────────────────────────────────────
-build:
+# ── Build: compile (build_app) then assemble image (build_image) ─────────────
+# Runs npm ci + next build in a standard Node runner with GitLab file cache.
+# .next/cache is preserved between runs for Next.js incremental compilation;
+# node_modules is cached keyed on package-lock.json so npm ci is near-instant.
+build_app:
   stage: build
+  image: node:22-slim
+  before_script:
+    - apt-get update -y && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+  script:
+    - npm ci
+    - npm run build
+    # Stage the build output under ci-dist/ (NOT .next/): .dockerignore excludes
+    # .next, and Kaniko honors it, so a .next/* artifact would be stripped from
+    # the image context. ci-dist/ is not ignored, so it survives into Kaniko.
+    - mkdir -p ci-dist
+    - cp -r .next/standalone ci-dist/standalone
+    - cp -r .next/static ci-dist/static
+  cache:
+    key:
+      files:
+        - package-lock.json
+    # npm ci deletes node_modules/ before installing, so caching it is pure
+    # up/download overhead — only .next/cache/ (Next incremental build) helps.
+    paths:
+      - .next/cache/
+  artifacts:
+    # Pass only the pre-built output to build_image (staged outside .next/).
+    paths:
+      - ci-dist/
+      - public/
+      - prisma/
+      - prisma.config.ts
+    expire_in: 1 hour
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+# Assembles the final image from build_app's artifacts using Dockerfile.ci.
+# Kaniko does no compilation here — COPY + npm install prisma only — so the
+# remaining layers are very stable and almost always cache hits.
+build_image:
+  stage: build_image
+  needs:
+    - job: build_app
+      artifacts: true
   image:
     name: gcr.io/kaniko-project/executor:v1.23.2-debug
     entrypoint: [""]
   script:
     - mkdir -p /kaniko/.docker
     - echo "{\"auths\":{\"$CI_REGISTRY\":{\"username\":\"$CI_REGISTRY_USER\",\"password\":\"$CI_REGISTRY_PASSWORD\"}}}" > /kaniko/.docker/config.json
-    # --cache and --cache-repo enable Kaniko layer caching in the registry.
-    # Layers (especially the npm ci layer) are reused when package-lock.json is unchanged,
-    # cutting build time significantly on dependency-heavy Next.js projects.
     - /kaniko/executor
         --context "$CI_PROJECT_DIR"
-        --dockerfile "$CI_PROJECT_DIR/Dockerfile"
+        --dockerfile "$CI_PROJECT_DIR/Dockerfile.ci"
         --destination "$IMAGE"
         --cache=true
         --cache-repo "$CI_REGISTRY_IMAGE/cache"

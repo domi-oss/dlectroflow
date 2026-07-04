@@ -1,0 +1,45 @@
+# syntax=docker/dockerfile:1
+# Dockerfile.ci — used only in CI pipelines.
+#
+# Expects the following to already exist as CI artifacts (built by the
+# build_app job using npm ci + next build):
+#   ci-dist/standalone/   (the .next/standalone output)
+#   ci-dist/static/       (the .next/static output)
+#   public/
+#   prisma/
+#   prisma.config.ts
+#
+# NOTE: build_app stages its output under ci-dist/ rather than .next/ because
+# .dockerignore excludes .next — Kaniko honors .dockerignore and would strip
+# the standalone artifact from its build context, producing an image with no
+# server.js (crash-loop: "Cannot find module '/app/server.js'"). ci-dist/ is
+# not ignored, so it survives into the Kaniko context.
+#
+# This file intentionally skips the build stage so Kaniko only assembles
+# the final image. All layers here are stable and will almost always be
+# Kaniko cache hits. For local development builds, use the regular Dockerfile.
+
+FROM node:22-slim AS runner
+WORKDIR /app
+RUN apt-get update -y && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+
+# Standalone server (server.js at /app, minimal traced node_modules)
+COPY ci-dist/standalone ./
+COPY ci-dist/static ./.next/static
+COPY public ./public
+
+# Prisma CLI + engines + migrations for the migrate initContainer (same image).
+# --no-save installs alongside the traced node_modules without touching lockfiles.
+COPY prisma ./prisma
+COPY prisma.config.ts ./prisma.config.ts
+RUN npm install --no-save prisma@6.19.3 dotenv@16.4.7
+
+# Run as the non-root `node` user (uid 1000, present in node images).
+RUN chown -R node:node /app
+USER node
+
+EXPOSE 3000
+CMD ["node", "server.js"]

@@ -37,7 +37,7 @@ COPY --from=build /app/public ./public
 # --no-save installs alongside the traced node_modules without touching lockfiles.
 COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/prisma.config.ts ./prisma.config.ts
-RUN npm install --no-save prisma@6.19.3 dotenv
+RUN npm install --no-save prisma@6.19.3 dotenv@16.4.7
 
 # Run as the non-root `node` user (uid 1000, present in node images).
 RUN chown -R node:node /app
