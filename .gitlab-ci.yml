@@ -1,3 +1,12 @@
+# Avoid duplicate pipelines: run a merge-request pipeline for MRs, suppress the
+# redundant branch pipeline while an MR is open, and run branch pipelines on main.
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
 stages:
   - build
   - test   # GitLab security scanner templates (SAST/DS/Secret/Container) run here
@@ -14,14 +23,36 @@ variables:
   # Dependency Scanning: lock-file only (no node_modules needed)
   DS_EXCLUDED_PATHS: "node_modules"
 
-# ── GitLab Security Scanner Templates ───────────────────────────────────────
-# These populate the Vulnerability Report, MR Security Widget, and feed the
-# Compliance Dashboard automatically on every MR and main-branch push.
+# ── GitLab security scanners ────────────────────────────────────────────────
+# Canonical Jobs/* templates (the Security/* paths are the older alias). These
+# default to *branch* pipelines; we override each job's rules below so they run
+# in merge-request + main pipelines — that's what populates the MR security
+# widget and the Vulnerability Report.
 include:
-  - template: Security/SAST.gitlab-ci.yml
-  - template: Security/Dependency-Scanning.gitlab-ci.yml
-  - template: Security/Secret-Detection.gitlab-ci.yml
-  - template: Security/Container-Scanning.gitlab-ci.yml
+  - template: Jobs/SAST.gitlab-ci.yml
+  - template: Jobs/Dependency-Scanning.gitlab-ci.yml
+  - template: Jobs/Secret-Detection.gitlab-ci.yml
+  - template: Jobs/Container-Scanning.gitlab-ci.yml
+
+# Move the scanners off their branch-only default and onto MR + main pipelines.
+.scanner_rules: &scanner_rules
+  - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  - if: '$CI_COMMIT_BRANCH == "main"'
+
+semgrep-sast:
+  rules: *scanner_rules
+
+gemnasium-dependency_scanning:
+  rules: *scanner_rules
+
+secret_detection:
+  rules: *scanner_rules
+
+container_scanning:
+  # Scan the image built in THIS pipeline (not a stale/absent one) — the branch
+  # pipeline had no build job, which is why it failed before. needs: build.
+  needs: ["build"]
+  rules: *scanner_rules
 
 # ── Build ────────────────────────────────────────────────────────────────────
 build:
