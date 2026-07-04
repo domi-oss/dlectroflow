@@ -26,7 +26,7 @@ variables:
   # Container Scanning: target the image assembled by build_image
   CS_IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
   # SAST: skip generated/vendored paths
-  SAST_EXCLUDED_PATHS: "node_modules, .next, coverage, prisma/migrations"
+  SAST_EXCLUDED_PATHS: "node_modules, .next, ci-dist, coverage, prisma/migrations"
   # Dependency Scanning: lock-file only (no node_modules needed)
   DS_EXCLUDED_PATHS: "node_modules"
 
