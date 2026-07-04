@@ -77,8 +77,9 @@ build_app:
     key:
       files:
         - package-lock.json
+    # npm ci deletes node_modules/ before installing, so caching it is pure
+    # up/download overhead — only .next/cache/ (Next incremental build) helps.
     paths:
-      - node_modules/
       - .next/cache/
   artifacts:
     # Pass only the pre-built output to build_image (staged outside .next/).
