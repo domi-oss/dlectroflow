@@ -16,6 +16,12 @@ stages:
 variables:
   IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
   AGENT_CONTEXT: "gl-demo-ultimate-dtop/dlectroflow:dlectroflow"
+  # ── Artifact/cache transfer speed ────────────────────────────────────────
+  # Fastzip + fast compression cuts upload/download time for the sizeable
+  # ci-dist/ artifact and the .next/.npm caches at a small size cost.
+  FF_USE_FASTZIP: "true"
+  ARTIFACT_COMPRESSION_LEVEL: "fast"
+  CACHE_COMPRESSION_LEVEL: "fast"
   # ── Security Scanners ────────────────────────────────────────────────────
   # Container Scanning: target the image assembled by build_image
   CS_IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
@@ -40,32 +46,45 @@ include:
   - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
   - if: '$CI_COMMIT_BRANCH == "main"'
 
+# Source-only scanners get needs: [] so they start at pipeline start, in
+# parallel with build_app, instead of waiting behind both build stages.
+# interruptible: true lets a newer pipeline on the same ref cancel them.
 semgrep-sast:
+  needs: []          # scans source only — no build output required
+  interruptible: true
   rules: *scanner_rules
 
 gemnasium-dependency_scanning:
+  needs: []          # scans package-lock.json only — no build output required
+  interruptible: true
   rules: *scanner_rules
 
 secret_detection:
+  needs: []          # scans git history only — no build output required
+  interruptible: true
   rules: *scanner_rules
 
 container_scanning:
   # Scans the image assembled by build_image (the build job was split into
   # build_app + build_image). needs it so the image exists before scanning.
   needs: ["build_image"]
+  interruptible: true
   rules: *scanner_rules
 
 # ── Build: compile (build_app) then assemble image (build_image) ─────────────
 # Runs npm ci + next build in a standard Node runner with GitLab file cache.
 # .next/cache is preserved between runs for Next.js incremental compilation;
-# node_modules is cached keyed on package-lock.json so npm ci is near-instant.
+# .npm/ keeps npm's tarball cache so npm ci reinstalls from disk, not network.
 build_app:
   stage: build
   image: node:22-slim
+  interruptible: true  # superseded pipelines on the same ref cancel this job
   before_script:
     - apt-get update -y && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
   script:
-    - npm ci
+    # --cache .npm keeps tarballs in the CI cache; --prefer-offline uses them
+    # without a registry round-trip; --no-audit/--no-fund skip extra requests.
+    - npm ci --cache .npm --prefer-offline --no-audit --no-fund
     - npm run build
     # Stage the build output under ci-dist/ (NOT .next/): .dockerignore excludes
     # .next, and Kaniko honors it, so a .next/* artifact would be stripped from
@@ -78,8 +97,10 @@ build_app:
       files:
         - package-lock.json
     # npm ci deletes node_modules/ before installing, so caching it is pure
-    # up/download overhead — only .next/cache/ (Next incremental build) helps.
+    # up/download overhead — cache npm's tarball store (.npm/) and Next's
+    # incremental build cache (.next/cache/) instead.
     paths:
+      - .npm/
       - .next/cache/
   artifacts:
     # Pass only the pre-built output to build_image (staged outside .next/).
@@ -98,6 +119,7 @@ build_app:
 # remaining layers are very stable and almost always cache hits.
 build_image:
   stage: build_image
+  interruptible: true  # superseded pipelines on the same ref cancel this job
   needs:
     - job: build_app
       artifacts: true
@@ -128,6 +150,11 @@ build_image:
 
 deploy_review:
   extends: .deploy_base
+  # Deploy as soon as the image is pushed — the scanners are allow_failure: true
+  # and never gate the review deploy, so waiting on the test stage is pure delay.
+  # (deploy_production intentionally stays stage-scheduled so scan results land
+  # before a prod rollout.)
+  needs: ["build_image"]
   secrets:
     ANTHROPIC_API_KEY:
       gitlab_secrets_manager: { name: ANTHROPIC_API_KEY, source: group/gl-demo-ultimate-dtop }
