@@ -12,6 +12,9 @@
 /out/
 next-env.d.ts
 
+# CI build staging (build_app stages standalone output here for Kaniko)
+/ci-dist/
+
 # Production
 /build
 

@@ -3,11 +3,17 @@
 #
 # Expects the following to already exist as CI artifacts (built by the
 # build_app job using npm ci + next build):
-#   .next/standalone/
-#   .next/static/
+#   ci-dist/standalone/   (the .next/standalone output)
+#   ci-dist/static/       (the .next/static output)
 #   public/
 #   prisma/
 #   prisma.config.ts
+#
+# NOTE: build_app stages its output under ci-dist/ rather than .next/ because
+# .dockerignore excludes .next — Kaniko honors .dockerignore and would strip
+# the standalone artifact from its build context, producing an image with no
+# server.js (crash-loop: "Cannot find module '/app/server.js'"). ci-dist/ is
+# not ignored, so it survives into the Kaniko context.
 #
 # This file intentionally skips the build stage so Kaniko only assembles
 # the final image. All layers here are stable and will almost always be
@@ -21,8 +27,8 @@ ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
 # Standalone server (server.js at /app, minimal traced node_modules)
-COPY .next/standalone ./
-COPY .next/static ./.next/static
+COPY ci-dist/standalone ./
+COPY ci-dist/static ./.next/static
 COPY public ./public
 
 # Prisma CLI + engines + migrations for the migrate initContainer (same image).

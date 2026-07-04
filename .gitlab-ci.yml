@@ -67,6 +67,12 @@ build_app:
   script:
     - npm ci
     - npm run build
+    # Stage the build output under ci-dist/ (NOT .next/): .dockerignore excludes
+    # .next, and Kaniko honors it, so a .next/* artifact would be stripped from
+    # the image context. ci-dist/ is not ignored, so it survives into Kaniko.
+    - mkdir -p ci-dist
+    - cp -r .next/standalone ci-dist/standalone
+    - cp -r .next/static ci-dist/static
   cache:
     key:
       files:
@@ -75,10 +81,9 @@ build_app:
       - node_modules/
       - .next/cache/
   artifacts:
-    # Pass only the pre-built output to build_image.
+    # Pass only the pre-built output to build_image (staged outside .next/).
     paths:
-      - .next/standalone/
-      - .next/static/
+      - ci-dist/
       - public/
       - prisma/
       - prisma.config.ts
