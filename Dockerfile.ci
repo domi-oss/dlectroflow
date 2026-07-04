@@ -21,7 +21,10 @@
 
 FROM node:22-slim AS runner
 WORKDIR /app
-RUN apt-get update -y && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+# apt-get upgrade pulls the latest Debian security patches into the base layer
+# (clears base-image CVEs flagged by Container Scanning — perl-base, ncurses,
+# libacl1, gzip, etc.); rebuilt every pipeline so it stays current.
+RUN apt-get update -y && apt-get upgrade -y && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
