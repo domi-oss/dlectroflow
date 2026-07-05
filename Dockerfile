@@ -11,11 +11,11 @@
 #     initContainer reuses this same image to run `prisma migrate deploy`.
 
 # ---- build ----
-FROM node:22-slim AS build
+# alpine (musl) to match the runtime + the CI Dockerfile.ci image, so native
+# binaries (Prisma engine) are built for the right libc.
+FROM node:22-alpine AS build
 WORKDIR /app
-# No apt-get upgrade here: multi-stage builds start each FROM from a fresh base,
-# so build-stage upgrades never reach the runner image (Duo review !7).
-RUN apt-get update -y && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache openssl
 COPY package.json package-lock.json prisma.config.ts ./
 COPY prisma ./prisma
 RUN npm ci
@@ -23,9 +23,9 @@ COPY . .
 RUN npm run build
 
 # ---- runtime ----
-FROM node:22-slim AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
-RUN apt-get update -y && apt-get upgrade -y --no-install-recommends && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+RUN apk upgrade --no-cache && apk add --no-cache openssl
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
