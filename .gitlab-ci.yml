@@ -306,8 +306,13 @@ deploy_production:
 # Self-hosted Renovate, run by the "Weekly Renovate" schedule (RENOVATE_RUN=true).
 # Behaviour is configured in renovate.json (npm deps + Docker base, pinned digests,
 # automerge for patch/minor/digest once the pipeline — incl. scanners — is green).
-# Requires a masked CI/CD variable RENOVATE_TOKEN: a Project/Group Access Token
-# (or PAT) with `api` scope and Maintainer role (needs merge rights for automerge).
+# Requires a masked CI/CD variable RENOVATE_TOKEN with `api` scope and Maintainer
+# role (merge rights for automerge). Use a Personal Access Token or a service-account
+# token — NOT a project access token (Renovate's GitLab platform init calls
+# GET /api/v4/user, which a project-access-token bot user cannot authenticate).
+# The project variable is auto-injected into this job's environment; do NOT re-map
+# it as `RENOVATE_TOKEN: "$RENOVATE_TOKEN"` — that self-reference resolves to empty
+# and shadows the real value (Renovate then sees no token → 401 unauthenticated).
 renovate:
   stage: maintenance
   # Digest-pinned (supply-chain): the `39` tag is a moving target. Renovate's own
@@ -318,7 +323,6 @@ renovate:
   variables:
     RENOVATE_PLATFORM: gitlab
     RENOVATE_ENDPOINT: "$CI_API_V4_URL"
-    RENOVATE_TOKEN: "$RENOVATE_TOKEN"
     RENOVATE_AUTODISCOVER: "false"
     RENOVATE_REPOSITORIES: "$CI_PROJECT_PATH"
     RENOVATE_ONBOARDING: "false"        # config lives in-repo (renovate.json)
