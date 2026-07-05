@@ -2,7 +2,9 @@
 
 > Perform a comprehensive application security assessment of the **dlectroflow** project (`gl-demo-ultimate-dtop/dlectroflow`). Cover the following areas:
 >
-> 1. **Vulnerability Report Analysis** — Retrieve all active vulnerabilities (DETECTED and CONFIRMED states only). Triage and prioritize by exploitability using EPSS scores, KEV status, and reachability data where applicable. Group by scanner type (SAST, Dependency Scanning, Container Scanning, Secret Detection, DAST).
+> 1. **Vulnerability Report Analysis** — Retrieve all active vulnerabilities (DETECTED and CONFIRMED states only) for this project. Triage and prioritize by exploitability using EPSS scores, KEV status, and reachability data where applicable. Group by scanner type (SAST, Dependency Scanning, Container Scanning, Secret Detection, DAST).
+>
+> > ℹ️ **Note:** The project path referenced in this prompt (`gl-demo-ultimate-dtop/dlectroflow`) is specific to this repository. If reusing this prompt in another project, update the path accordingly.
 >
 > 2. **Risk Prioritization** — Rank findings by real-world exploitability: CVSS severity, EPSS score, KEV status, and reachable code paths in production. Separate signal from noise.
 >
@@ -63,7 +65,9 @@ To invoke this assessment, say:
 Run the security assessment prompt from .gitlab/duo/prompts/security-assessment.md
 ```
 
-Or reference it directly in any Duo Agent session. The prompt is self-contained and can be run on demand or scheduled as part of the security program cadence defined within it.
+Agents are pointed to this prompt via the `## Security Assessment` section in `AGENTS.md`. The prompt is self-contained and can be run on demand or scheduled as part of the security program cadence defined within it.
+
+> ⚠️ **Portability note:** The project path `gl-demo-ultimate-dtop/dlectroflow` is hardcoded in area 1. Update it if reusing this prompt across repositories.
 
 ## Maintenance
 
