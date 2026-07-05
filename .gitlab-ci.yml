@@ -171,6 +171,7 @@ build_image:
     name: dtzar/helm-kubectl:3.16.1   # bundles helm + kubectl
     entrypoint: [""]
   before_script:
+    - chmod 600 "$KUBECONFIG"   # tighten perms on the runner-generated kubeconfig (silences Helm's group-readable warning)
     - kubectl config use-context "$AGENT_CONTEXT"
 
 deploy_review:
