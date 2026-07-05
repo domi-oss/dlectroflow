@@ -89,10 +89,12 @@ container_scanning:
 # .npm/ keeps npm's tarball cache so npm ci reinstalls from disk, not network.
 build_app:
   stage: build
-  image: node:22-slim
+  # alpine (musl) so npm ci + next build produce musl-matched native binaries
+  # (esp. the Prisma engine) that the alpine runtime image can execute.
+  image: node:22-alpine
   interruptible: true  # superseded pipelines on the same ref cancel this job
   before_script:
-    - apt-get update -y && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+    - apk add --no-cache openssl   # Prisma engine needs libssl; targets come from schema.prisma
   script:
     # --cache .npm keeps tarballs in the CI cache; --prefer-offline uses them
     # without a registry round-trip; --no-audit/--no-fund skip extra requests.
