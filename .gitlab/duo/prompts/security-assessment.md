@@ -48,7 +48,7 @@
 >   - 🔍 **Finding** — What was found and why it matters, with business impact context
 >   - 🛠️ **Action** — Specific, concrete steps to remediate or mitigate
 >   - 👤 **Owner** — Human, Agent, or Human-in-the-loop (agent executes, human approves)
->   - ⏱️ **Effort** — Low / Medium / High
+>   - ⏱️ **Effort** — 🟢 Low / 🟡 Medium / 🔴 High
 >   - 🔗 **References** — Relevant CVE, CWE, OWASP category, or GitLab documentation link
 >
 > - **Quick Wins** — Call out any findings that are 🔴 Immediate priority AND 🟢 Low effort — these should be done first.

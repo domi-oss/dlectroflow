@@ -12,4 +12,3 @@ When asked to perform a security review or security assessment, agents are point
 This prompt covers: vulnerability triage, secrets hygiene, least privilege, supply chain security, container security, frontend security, compliance posture, license review, GitLab platform configuration, incident response readiness, and security program cadence.
 
 The output should always be presented as an actionable work plan with prioritized work items, quick wins, agent automation opportunities, and a security debt register.
-<!-- END:nextjs-agent-rules -->
