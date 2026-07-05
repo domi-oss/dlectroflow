@@ -110,3 +110,52 @@ These require GitLab UI/admin actions and cannot be applied via code:
 | Enable Container Registry cleanup policy | Settings → Packages & Registries | 🟠 Medium |
 
 See the full review in the MR description for details on each.
+
+---
+
+## Base-Image Refresh Cadence & Automated Updates (issue #2, task 4.3)
+
+**What changed:** Two mechanisms keep the base image and dependencies current between code
+changes, closing the gap where prod's `node:22-alpine` base could drift and accumulate new
+CVEs undetected.
+
+**1. Weekly base-image rescan (scheduled pipeline).** A pipeline schedule with no extra
+variables rebuilds the image on the current `main` and re-runs the full scanner suite
+(SAST / dependency / secret / container). New base or dependency CVEs surface in the
+**Vulnerability Report** on a cadence, not only when code changes. (A scheduled pipeline has
+no merge request, so its results populate the Vulnerability Report only — not an MR security
+widget, which is driven exclusively by `merge_request_event` pipelines.)
+The `deploy_production` job is guarded (`$CI_PIPELINE_SOURCE == "schedule"` → `never`), so a
+rescan **never** rolls prod — it only detects.
+
+**2. Self-hosted Renovate (scheduled pipeline).** A second schedule sets `RENOVATE_RUN=true`,
+which runs only the `renovate` job (`renovate/renovate` image). Renovate opens update MRs for
+npm dependencies and the Docker/CI base image, using `config:best-practices` (pins Docker
+digests, enforces a minimum release age, weekly lockfile maintenance). Config lives in-repo at
+`renovate.json`. Patch / minor / digest / pin updates **automerge** once the MR pipeline
+passes (`platformAutomerge`); majors always require manual review. Security-advisory-driven
+bumps (`vulnerabilityAlerts`) are labelled but **not** automerged — a human reviews those.
+Base bumps reach prod the normal way: Renovate MR → merge to `main` → push pipeline →
+`deploy_production`.
+
+**Automerge safety — the real vuln gate is the Scan Result Policy (task 4.2).** On MR
+pipelines the scanners are *required* jobs (`allow_failure: false`), so a scanner that can't
+execute blocks the merge — but a scanner finding a new vulnerability still exits 0; it does
+not fail the job. Blocking a merge on *new Critical/High findings* is done by a Scan Result
+Policy, which is task 4.2. **Enable the Scan Result Policy before turning the "Weekly
+Renovate" schedule on**, otherwise automerge is gated only on scanner *execution*, not on
+findings.
+
+**Why:** A floating tag + `apk upgrade` only refreshes on rebuild; without a cadence, a
+long-lived `main` can run an increasingly stale base. Rescan gives detection; Renovate gives
+automated remediation, both gated by the existing scanners.
+
+**Compliance:** SLSA / supply-chain (pinned digests), CIS Docker Benchmark, SOC 2 CC7.1.
+
+### Setup required (GitLab UI/admin — cannot be applied via code)
+
+| Action | Where |
+|---|---|
+| Create `RENOVATE_TOKEN` CI/CD variable, **Protected + Masked**: Project/Group Access Token with `api` scope + **Maintainer** role (merge rights needed for automerge). Protected means only protected refs/schedules (main) can read it. | Settings → CI/CD → Variables |
+| Schedule **"Weekly base-image rescan"** (e.g. `0 6 * * 1`), target `main`, no variables | Settings → CI/CD → Pipeline schedules |
+| Schedule **"Weekly Renovate"** (e.g. `0 7 * * 1`), target `main`, variable `RENOVATE_RUN=true`. **Turn this on only after the Scan Result Policy (task 4.2) is live** — see automerge-safety note above. | Settings → CI/CD → Pipeline schedules |
