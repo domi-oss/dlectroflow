@@ -122,7 +122,9 @@ CVEs undetected.
 **1. Weekly base-image rescan (scheduled pipeline).** A pipeline schedule with no extra
 variables rebuilds the image on the current `main` and re-runs the full scanner suite
 (SAST / dependency / secret / container). New base or dependency CVEs surface in the
-Vulnerability Report and MR security widget on a cadence, not only when code changes.
+**Vulnerability Report** on a cadence, not only when code changes. (A scheduled pipeline has
+no merge request, so its results populate the Vulnerability Report only — not an MR security
+widget, which is driven exclusively by `merge_request_event` pipelines.)
 The `deploy_production` job is guarded (`$CI_PIPELINE_SOURCE == "schedule"` → `never`), so a
 rescan **never** rolls prod — it only detects.
 

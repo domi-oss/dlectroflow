@@ -313,7 +313,8 @@ renovate:
   # Digest-pinned (supply-chain): the `39` tag is a moving target. Renovate's own
   # gitlabci manager (docker:pinDigests in renovate.json) keeps this digest fresh.
   image: renovate/renovate:39@sha256:f2209c61a9c3c8c74ac58eecb5f15ec43651f1ba694aa33493ff2062b90ff4d3
-  interruptible: true
+  # NOT interruptible: a maintenance run should finish, not be cancelled by a
+  # newer main pipeline mid-run (which could leave update MRs half-created).
   variables:
     RENOVATE_PLATFORM: gitlab
     RENOVATE_ENDPOINT: "$CI_API_V4_URL"
