@@ -1,8 +1,10 @@
 # Avoid duplicate pipelines: run a merge-request pipeline for MRs, suppress the
 # redundant branch pipeline while an MR is open, and run branch pipelines on main.
+# Scheduled pipelines (weekly base-image rescan + Renovate) are allowed explicitly.
 workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
     - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
       when: never
     - if: '$CI_COMMIT_BRANCH == "main"'
@@ -12,6 +14,17 @@ stages:
   - build_image   # build_image: Kaniko assembles the image from build_app's artifacts
   - test          # security scanners (container_scanning needs the built image → after build_image)
   - deploy
+  - maintenance   # renovate: dependency/base-image update MRs (Renovate schedule only)
+
+# ── Scheduled pipelines (issue #2, task 4.3 — base-image refresh cadence) ─────
+# Two pipeline schedules drive maintenance (create in Settings → CI/CD → Schedules):
+#   1. "Weekly base-image rescan"  → no extra variables. Rebuilds the image on the
+#      current main and re-runs all scanners so new base/dependency CVEs surface in
+#      the Vulnerability Report even when no code changed. Does NOT deploy.
+#   2. "Weekly Renovate"           → variable RENOVATE_RUN=true. Runs ONLY the
+#      renovate job, which opens update MRs (npm deps + Docker base). Each MR then
+#      runs the full scanner suite and is gated by review (see renovate.json).
+# The RENOVATE_RUN flag keeps the two schedules from stepping on each other.
 
 variables:
   IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
@@ -46,8 +59,20 @@ include:
   - template: Jobs/Container-Scanning.gitlab-ci.yml
 
 # Move the scanners off their branch-only default and onto MR + main pipelines.
+# Also run them on the weekly rescan schedule (to re-detect drifting base CVEs),
+# but never on the Renovate schedule (RENOVATE_RUN=true) — that runs only renovate.
+#
+# allow_failure is set per-rule: on MR pipelines the scanners are REQUIRED
+# (allow_failure: false) so a scanner that can't run blocks the merge — closing
+# the automerge fail-open where a broken scanner would let a Renovate MR through.
+# On main we leave the template default (allow_failure: true) so a scanner flake
+# can't block a production deploy. (Blocking on *findings* — new Critical/High —
+# is the job of the Scan Result Policy, task 4.2, not job exit status.)
 .scanner_rules: &scanner_rules
+  - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'
+    when: never
   - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    allow_failure: false
   - if: '$CI_COMMIT_BRANCH == "main"'
 
 # Source-only scanners get needs: [] so they start at pipeline start, in
@@ -125,6 +150,8 @@ build_app:
       - prisma.config.ts
     expire_in: 1 hour
   rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'
+      when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == "main"'
 
@@ -161,6 +188,8 @@ build_image:
         --cache=true
         --cache-repo "$CI_REGISTRY_IMAGE/cache"
   rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'
+      when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == "main"'
 
@@ -267,4 +296,34 @@ deploy_production:
     name: production
     url: https://dlectroflow.dlectronique.dev
   rules:
+    # Never deploy from a scheduled pipeline (the weekly rescan rebuilds + scans
+    # only; base bumps reach prod via a Renovate MR merged to main → push pipeline).
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: never
     - if: '$CI_COMMIT_BRANCH == "main"'
+
+# ── Renovate: automated dependency + base-image update MRs ────────────────────
+# Self-hosted Renovate, run by the "Weekly Renovate" schedule (RENOVATE_RUN=true).
+# Behaviour is configured in renovate.json (npm deps + Docker base, pinned digests,
+# automerge for patch/minor/digest once the pipeline — incl. scanners — is green).
+# Requires a masked CI/CD variable RENOVATE_TOKEN: a Project/Group Access Token
+# (or PAT) with `api` scope and Maintainer role (needs merge rights for automerge).
+renovate:
+  stage: maintenance
+  # Digest-pinned (supply-chain): the `39` tag is a moving target. Renovate's own
+  # gitlabci manager (docker:pinDigests in renovate.json) keeps this digest fresh.
+  image: renovate/renovate:39@sha256:f2209c61a9c3c8c74ac58eecb5f15ec43651f1ba694aa33493ff2062b90ff4d3
+  interruptible: true
+  variables:
+    RENOVATE_PLATFORM: gitlab
+    RENOVATE_ENDPOINT: "$CI_API_V4_URL"
+    RENOVATE_TOKEN: "$RENOVATE_TOKEN"
+    RENOVATE_AUTODISCOVER: "false"
+    RENOVATE_REPOSITORIES: "$CI_PROJECT_PATH"
+    RENOVATE_ONBOARDING: "false"        # config lives in-repo (renovate.json)
+    RENOVATE_REQUIRE_CONFIG: "required"
+    LOG_LEVEL: info
+  script:
+    - renovate
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'
