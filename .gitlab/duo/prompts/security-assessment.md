@@ -56,6 +56,8 @@
 > - **Agent Automation Opportunities** — List all work items where an AI agent can own or accelerate the remediation, and suggest which to automate first.
 >
 > - **Security Debt Register** — A running log of accepted risks and deferred items with rationale, so nothing is silently forgotten.
+>
+> **📌 Work Item Requirement:** Whenever assessment findings are presented, **always create a GitLab work item (issue) in the assessed project (the project path referenced in area 1) containing the full findings** — including the executive summary, severity breakdown, active vulnerabilities, and recommendations. Use a title in the format `Security Assessment — YYYY-MM-DD`. This ensures every assessment leaves a durable, trackable record for follow-up and audit purposes. Label the work item with `security` and `security-assessment`, and add any directly related vulnerability reports or issues as [related issues](https://docs.gitlab.com/ee/user/project/issues/related_issues.html).
 
 ## Usage
 
@@ -76,4 +78,4 @@ Agents are pointed to this prompt via the `## Security Assessment` section in `A
 | **Owner** | Security / Engineering Lead |
 | **Review cadence** | Quarterly (or after significant architecture changes) |
 | **Last updated** | 2026-07-05 |
-| **Version** | 1.0.0 |
+| **Version** | 1.1.0 |
