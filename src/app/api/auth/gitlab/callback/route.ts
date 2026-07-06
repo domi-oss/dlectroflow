@@ -29,6 +29,7 @@ export async function GET(req: Request): Promise<Response> {
 
   if (oauthError) return fail(oauthError);
   if (!code || !state || !verifier) return fail("missing_oauth_params");
+  if (!expectedState) return fail("state_mismatch");
   if (state !== expectedState) return fail("state_mismatch");
 
   let identity: string;
