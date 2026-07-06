@@ -18,7 +18,7 @@ spec:
         # (e.g. rotated OAuth client id/secret never taking effect until a manual
         # `kubectl rollout restart`). Hashing secret.yaml changes the pod template
         # whenever the rendered Secret changes, forcing a rollout.
-        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum | quote }}
       labels:
         {{- include "dlectroflow.labels" . | nindent 8 }}
     spec:
