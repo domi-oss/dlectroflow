@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { SINGLETON_ID } from "@/lib/constants";
+import { SINGLETON_ID, OWNER_WORKSPACE_ID } from "@/lib/constants";
 
 // Reuse a single PrismaClient across dev HMR reloads to avoid exhausting
 // connections (Next.js re-imports modules on every change in development).
@@ -19,7 +19,7 @@ if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 export function getSettings() {
   return prisma.settings.upsert({
     where: { id: SINGLETON_ID },
-    create: { id: SINGLETON_ID },
+    create: { id: SINGLETON_ID, workspaceId: OWNER_WORKSPACE_ID },
     update: {},
   });
 }
@@ -28,7 +28,7 @@ export function getSettings() {
 export function getStreak() {
   return prisma.streak.upsert({
     where: { id: SINGLETON_ID },
-    create: { id: SINGLETON_ID },
+    create: { id: SINGLETON_ID, workspaceId: OWNER_WORKSPACE_ID },
     update: {},
   });
 }

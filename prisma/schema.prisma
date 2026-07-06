@@ -16,6 +16,16 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ── Workspaces (owner = private singleton "owner"; guests = ephemeral) ─────
+model Workspace {
+  id        String   @id @default(uuid())
+  kind      String   @default("guest") // owner | guest
+  createdAt DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  @@index([lastSeenAt])
+}
+
 // ── Singleton config (id always "singleton") ──────────────────────────────
 model Settings {
   id                    String   @id @default("singleton")
@@ -32,6 +42,7 @@ model Settings {
   // Feature 4 — streaks
   workingDays           String   @default("1,2,3,4,5") // ISO weekdays, Mon=1..Sun=7
   updatedAt             DateTime @updatedAt
+  workspaceId           String   @unique
 }
 
 // ── Reclaim MCP OAuth (single-user demo; all values obtained at runtime) ──
@@ -70,8 +81,10 @@ model BrainDumpItem {
   snoozedUntil DateTime?
   taskId       String?
   task         Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  workspaceId  String
 
   @@index([status])
+  @@index([workspaceId])
 }
 
 // ── Feature 2 — Task Breakdown → Reclaim ──────────────────────────────────
@@ -85,6 +98,9 @@ model Task {
   steps          Step[]
   turns          BreakdownTurn[]
   brainDumpItems BrainDumpItem[]
+  workspaceId    String
+
+  @@index([workspaceId])
 }
 
 model Step {
@@ -133,13 +149,15 @@ model FocusSession {
   durationMin   Int?
   outcome       String? // completed | requeued | gaveup
   reclaimSynced Boolean   @default(false)
+  workspaceId   String
 
   @@index([stepId])
+  @@index([workspaceId])
 }
 
 model DayRollup {
   id           String    @id @default(cuid())
-  date         String    @unique // YYYY-MM-DD
+  date         String    // YYYY-MM-DD
   focusMin     Int       @default(0)
   sessions     Int       @default(0)
   stepsDone    Int       @default(0)
@@ -147,42 +165,57 @@ model DayRollup {
   streakDay    Int       @default(0)
   narrative    String?
   emailedAt    DateTime?
+  workspaceId  String
+
+  @@unique([workspaceId, date])
 }
 
 // ── Feature 4 — Rewards & Streaks ─────────────────────────────────────────
 model RewardEvent {
-  id        String   @id @default(cuid())
-  type      String // step_done | session_finished | inbox_zero | breakdown_confirmed | scheduled
-  points    Int
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  type        String // step_done | session_finished | inbox_zero | breakdown_confirmed | scheduled
+  points      Int
+  createdAt   DateTime @default(now())
+  workspaceId String
 
   @@index([createdAt])
+  @@index([workspaceId])
 }
 
 model Streak {
   id                String  @id @default("singleton")
   current           Int     @default(0)
   lastActiveWorkday String? // YYYY-MM-DD
+  workspaceId       String  @unique
 }
 
 model StreakRecord {
-  id        String   @id @default(cuid())
-  length    Int
-  startedAt DateTime
-  endedAt   DateTime
+  id          String   @id @default(cuid())
+  length      Int
+  startedAt   DateTime
+  endedAt     DateTime
+  workspaceId String
 
   @@index([length])
+  @@index([workspaceId])
 }
 
 model Badge {
-  id       String   @id @default(cuid())
-  key      String   @unique // first_breakdown | first_schedule | streak_5 | ten_steps_day | beat_best_streak
-  earnedAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  key         String   // first_breakdown | first_schedule | streak_5 | ten_steps_day | beat_best_streak
+  earnedAt    DateTime @default(now())
+  workspaceId String
+
+  @@index([workspaceId])
+  @@unique([workspaceId, key])
 }
 
 model DailySpark {
-  id     String @id @default(cuid())
-  date   String @unique // YYYY-MM-DD
-  quote  String
-  source String // ai | fallback
+  id          String @id @default(cuid())
+  date        String // YYYY-MM-DD
+  quote       String
+  source      String // ai | fallback
+  workspaceId String
+
+  @@unique([workspaceId, date])
 }
