@@ -39,7 +39,7 @@ export async function touchWorkspace(id: string): Promise<void> {
   await prisma.workspace.upsert({
     where: { id },
     create: { id, kind, lastSeenAt: new Date() },
-    update: { lastSeenAt: new Date() },
+    update: { kind, lastSeenAt: new Date() },
   });
 }
 

@@ -38,4 +38,9 @@ describe("resolveWorkspaceId", () => {
       MissingWorkspaceError,
     );
   });
+
+  it("falls through to guest when the owner cookie is invalid/tampered", async () => {
+    const guest = await signSession({ kind: "guest", wsId: "g-2" }, SECRET);
+    expect(await resolveWorkspaceId({ owner: "bad.token.here", guest })).toBe("g-2");
+  });
 });
