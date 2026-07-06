@@ -46,6 +46,11 @@ variables:
   GITLAB_ADVANCED_SAST_ENABLED: "true"
   # Dependency Scanning: lock-file only (no node_modules needed)
   DS_EXCLUDED_PATHS: "node_modules"
+  # Secret Detection: exclude the generated Next.js build output staged for
+  # Kaniko. ci-dist/ is gitignored (never committed), but excluding it here
+  # keeps any future artifact-scanning from re-raising false positives such as
+  # the PKCS8 "key" that is really a bundled `jose` library dist chunk.
+  SECRET_DETECTION_EXCLUDED_PATHS: "ci-dist, .next, node_modules"
 
 # ── GitLab security scanners ────────────────────────────────────────────────
 # Canonical Jobs/* templates (the Security/* paths are the older alias). These
