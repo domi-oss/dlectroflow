@@ -224,6 +224,10 @@ deploy_review:
       gitlab_secrets_manager: { name: GITLAB_DEPLOY_TOKEN_USER, source: group/gl-demo-ultimate-dtop }
       file: false
   script:
+    # Per-deploy random session-signing key for the ephemeral review app — never
+    # committed. Rotating it each deploy only resets guest cookies (review holds
+    # no real data), and avoids shipping a known signing key in the repo.
+    - AUTH_SESSION_SECRET=$(cat /proc/sys/kernel/random/uuid /proc/sys/kernel/random/uuid | tr -cd 'a-fA-F0-9')
     - helm upgrade --install "dlectroflow-mr-$CI_MERGE_REQUEST_IID" charts/dlectroflow
         --namespace "dlectroflow-mr-$CI_MERGE_REQUEST_IID" --create-namespace
         --set env=review --set spot=true --set postgres.persistent=false
@@ -231,6 +235,10 @@ deploy_review:
         --set-string host="mr-$CI_MERGE_REQUEST_IID.35-246-93-255.sslip.io"
         --set-string secrets.postgresPassword="$POSTGRES_PASSWORD"
         --set-string secrets.anthropicApiKey="$ANTHROPIC_API_KEY"
+        --set-string auth.ownerAllowlist="13595692"
+        --set-string secrets.authSessionSecret="$AUTH_SESSION_SECRET"
+        --set-string secrets.gitlabOauthClientId="review-unused"
+        --set-string secrets.gitlabOauthClientSecret="review-unused"
         --set-string registry.username="$GITLAB_DEPLOY_TOKEN_USER"
         --set-string registry.password="$GITLAB_DEPLOY_TOKEN"
         --set resources.app.cpu=250m
@@ -289,6 +297,10 @@ deploy_production:
         --set-string secrets.anthropicApiKey="$ANTHROPIC_API_KEY"
         --set-string secrets.googleClientId="$GOOGLE_CLIENT_ID"
         --set-string secrets.googleClientSecret="$GOOGLE_CLIENT_SECRET"
+        --set-string auth.ownerAllowlist="13595692"
+        --set-string secrets.authSessionSecret="$AUTH_SESSION_SECRET"
+        --set-string secrets.gitlabOauthClientId="$GITLAB_OAUTH_CLIENT_ID"
+        --set-string secrets.gitlabOauthClientSecret="$GITLAB_OAUTH_CLIENT_SECRET"
         --set-string registry.username="$GITLAB_DEPLOY_TOKEN_USER"
         --set-string registry.password="$GITLAB_DEPLOY_TOKEN"
         --wait --timeout 5m

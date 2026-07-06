@@ -11,8 +11,9 @@ import {
   getGoogleStatus,
   disconnectGoogle,
 } from "@/lib/google";
-import { RewardType, BadgeKey } from "@/lib/constants";
+import { RewardType, BadgeKey, OWNER_WORKSPACE_ID } from "@/lib/constants";
 import { logReward, awardBadge } from "@/lib/rewards";
+import { currentWorkspaceId } from "@/lib/workspace";
 
 export type GoogleScheduleResult =
   | { ok: true; scheduled: number; listTitle: string }
@@ -49,12 +50,15 @@ function reclaimTitle(
 export async function pushStepsToGoogleTasks(
   taskId: string,
 ): Promise<GoogleScheduleResult> {
+  const workspaceId = await currentWorkspaceId();
+  if (workspaceId !== OWNER_WORKSPACE_ID) throw new Error("owner only");
+
   if (!googleConfigured()) return { ok: false, reason: "not_configured" };
   const token = await getValidAccessToken();
   if (!token) return { ok: false, reason: "not_connected" };
 
-  const task = await prisma.task.findUnique({
-    where: { id: taskId },
+  const task = await prisma.task.findFirst({
+    where: { id: taskId, workspaceId },
     include: { steps: { orderBy: { order: "asc" } } },
   });
   if (!task || task.steps.length === 0) return { ok: false, reason: "no_steps" };
@@ -84,15 +88,19 @@ export async function pushStepsToGoogleTasks(
         s.estMinutes,
       );
       const created = await createGoogleTask(token, list.id, { title });
-      await prisma.step.update({
-        where: { id: s.id },
-        data: { googleTaskId: created.id, googleTaskListId: list.id },
-      });
+      // Guard step ownership before update
+      const stepCheck = await prisma.step.findFirst({ where: { id: s.id, task: { workspaceId } } });
+      if (stepCheck) {
+        await prisma.step.update({
+          where: { id: s.id },
+          data: { googleTaskId: created.id, googleTaskListId: list.id },
+        });
+      }
       scheduled++;
     }
 
-    await logReward(RewardType.Scheduled);
-    await awardBadge(BadgeKey.FirstSchedule);
+    await logReward(workspaceId, RewardType.Scheduled);
+    await awardBadge(workspaceId, BadgeKey.FirstSchedule);
 
     revalidatePath(`/tasks/${taskId}`);
     return { ok: true, scheduled, listTitle: list.title };
@@ -106,10 +114,14 @@ export async function pushStepsToGoogleTasks(
 }
 
 export async function googleStatus() {
+  const workspaceId = await currentWorkspaceId();
+  if (workspaceId !== OWNER_WORKSPACE_ID) return { configured: false, connected: false };
   return getGoogleStatus();
 }
 
 export async function disconnectGoogleTasks() {
+  const workspaceId = await currentWorkspaceId();
+  if (workspaceId !== OWNER_WORKSPACE_ID) throw new Error("owner only");
   await disconnectGoogle();
   revalidatePath("/inbox");
 }

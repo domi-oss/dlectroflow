@@ -11,13 +11,15 @@ import {
 } from "@/lib/constants";
 import { logReward, awardBadge } from "@/lib/rewards";
 import type { Proposal } from "@/lib/breakdown";
+import { currentWorkspaceId } from "@/lib/workspace";
 
 /**
  * Launch a breakdown from a brain-dump item: create (or reuse) its Task and
  * triage the item. Returns the task id to navigate to.
  */
 export async function startBreakdown(itemId: string): Promise<string | null> {
-  const item = await prisma.brainDumpItem.findUnique({ where: { id: itemId } });
+  const workspaceId = await currentWorkspaceId();
+  const item = await prisma.brainDumpItem.findFirst({ where: { id: itemId, workspaceId } });
   if (!item) return null;
   if (item.taskId) return item.taskId;
 
@@ -26,6 +28,7 @@ export async function startBreakdown(itemId: string): Promise<string | null> {
       title: item.text,
       source: TaskSource.BrainDump,
       status: TaskStatus.Active,
+      workspaceId,
     },
   });
   await prisma.brainDumpItem.update({
@@ -42,10 +45,11 @@ export async function startBreakdown(itemId: string): Promise<string | null> {
 
 /** Create a standalone task (not from the inbox) and return its id. */
 export async function createTask(title: string): Promise<string | null> {
+  const workspaceId = await currentWorkspaceId();
   const trimmed = title.trim();
   if (!trimmed) return null;
   const task = await prisma.task.create({
-    data: { title: trimmed, source: TaskSource.Manual, status: TaskStatus.Active },
+    data: { title: trimmed, source: TaskSource.Manual, status: TaskStatus.Active, workspaceId },
   });
   return task.id;
 }
@@ -55,9 +59,13 @@ export async function createTask(title: string): Promise<string | null> {
  * steps with the proposal. (Reclaim scheduling is wired in step 6.)
  */
 export async function confirmBreakdown(taskId: string, proposal: Proposal) {
+  const workspaceId = await currentWorkspaceId();
   const steps = (proposal.steps ?? []).filter((s) => s.text?.trim());
   const total = steps.length;
   if (total === 0) return;
+
+  const existingTask = await prisma.task.findFirst({ where: { id: taskId, workspaceId } });
+  if (!existingTask) return;
 
   await prisma.$transaction([
     prisma.task.update({
@@ -80,8 +88,8 @@ export async function confirmBreakdown(taskId: string, proposal: Proposal) {
     }),
   ]);
 
-  await logReward(RewardType.BreakdownConfirmed);
-  await awardBadge(BadgeKey.FirstBreakdown);
+  await logReward(workspaceId, RewardType.BreakdownConfirmed);
+  await awardBadge(workspaceId, BadgeKey.FirstBreakdown);
 
   revalidatePath(`/tasks/${taskId}`);
   revalidatePath("/inbox");

@@ -1,4 +1,5 @@
 import { prisma, getSettings } from "@/lib/db";
+import { currentWorkspaceId } from "@/lib/workspace";
 import { BrainDumpStatus } from "@/lib/constants";
 import { InboxView } from "@/components/inbox/inbox-view";
 
@@ -14,12 +15,13 @@ export default async function InboxPage({
     reason?: string;
   }>;
 }) {
+  const workspaceId = await currentWorkspaceId();
   const [items, settings, sp] = await Promise.all([
     prisma.brainDumpItem.findMany({
-      where: { status: { not: BrainDumpStatus.Archived } },
+      where: { workspaceId, status: { not: BrainDumpStatus.Archived } },
       orderBy: { createdAt: "desc" },
     }),
-    getSettings(),
+    getSettings(workspaceId),
     searchParams,
   ]);
 

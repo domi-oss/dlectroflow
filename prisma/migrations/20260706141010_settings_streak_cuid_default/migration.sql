@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE "Settings" ALTER COLUMN "id" DROP DEFAULT;
+
+-- AlterTable
+ALTER TABLE "Streak" ALTER COLUMN "id" DROP DEFAULT;

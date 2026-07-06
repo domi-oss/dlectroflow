@@ -69,3 +69,11 @@ export const BadgeKey = {
 export type BadgeKey = (typeof BadgeKey)[keyof typeof BadgeKey];
 
 export const SINGLETON_ID = "singleton";
+
+export const OWNER_WORKSPACE_ID = "owner";
+
+export const WorkspaceKind = {
+  Owner: "owner",
+  Guest: "guest",
+} as const;
+export type WorkspaceKind = (typeof WorkspaceKind)[keyof typeof WorkspaceKind];

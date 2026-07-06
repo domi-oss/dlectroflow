@@ -4,7 +4,6 @@ import {
   RewardPoints,
   BadgeKey,
   BrainDumpStatus,
-  SINGLETON_ID,
   type RewardType as RewardTypeT,
   type BadgeKey as BadgeKeyT,
 } from "@/lib/constants";
@@ -33,35 +32,38 @@ function parseWorkingDays(csv: string): number[] {
 }
 
 // ── points ───────────────────────────────────────────────────────────────
-export async function logReward(type: RewardTypeT, points?: number) {
+export async function logReward(workspaceId: string, type: RewardTypeT, points?: number) {
   await prisma.rewardEvent.create({
-    data: { type, points: points ?? RewardPoints[type] },
+    data: { type, points: points ?? RewardPoints[type], workspaceId },
   });
 }
 
 /** Award inbox-zero once/day when the needs-triage queue just hit empty. */
-export async function maybeAwardInboxZero() {
+export async function maybeAwardInboxZero(workspaceId: string) {
   const now = new Date();
   const remaining = await prisma.brainDumpItem.count({
     where: {
+      workspaceId,
       status: BrainDumpStatus.Inbox,
       OR: [{ snoozedUntil: null }, { snoozedUntil: { lte: now } }],
     },
   });
   if (remaining > 0) return;
   const already = await prisma.rewardEvent.count({
-    where: { type: RewardType.InboxZero, createdAt: { gte: startOfToday() } },
+    where: { workspaceId, type: RewardType.InboxZero, createdAt: { gte: startOfToday() } },
   });
   if (already > 0) return;
-  await logReward(RewardType.InboxZero);
+  await logReward(workspaceId, RewardType.InboxZero);
 }
 
 // ── badges ─────────────────────────────────────────────────────────────────
 /** Award a badge once. Returns true if it was newly earned. */
-export async function awardBadge(key: BadgeKeyT): Promise<boolean> {
-  const existing = await prisma.badge.findUnique({ where: { key } });
+export async function awardBadge(workspaceId: string, key: BadgeKeyT): Promise<boolean> {
+  const existing = await prisma.badge.findUnique({
+    where: { workspaceId_key: { workspaceId, key } },
+  });
   if (existing) return false;
-  await prisma.badge.create({ data: { key } });
+  await prisma.badge.create({ data: { key, workspaceId } });
   return true;
 }
 
@@ -77,13 +79,13 @@ export type StreakUpdate = {
  * with ≥1 completion; non-working days are skipped (don't break it). Missing a
  * working day resets to 1 and files the ended streak into the Top-3 records.
  */
-export async function touchStreakOnCompletion(): Promise<StreakUpdate | null> {
-  const settings = await getSettings();
+export async function touchStreakOnCompletion(workspaceId: string): Promise<StreakUpdate | null> {
+  const settings = await getSettings(workspaceId);
   const workingDays = parseWorkingDays(settings.workingDays);
   const now = new Date();
   if (!workingDays.includes(isoWeekday(now))) return null; // non-working day: skip
 
-  const streak = await getStreak();
+  const streak = await getStreak(workspaceId);
   const today = ymd(now);
   if (streak.lastActiveWorkday === today) {
     return { current: streak.current, freshStart: false, continued: false };
@@ -115,6 +117,7 @@ export async function touchStreakOnCompletion(): Promise<StreakUpdate | null> {
           length: streak.current,
           startedAt: now,
           endedAt: now,
+          workspaceId,
         },
       });
     }
@@ -123,15 +126,18 @@ export async function touchStreakOnCompletion(): Promise<StreakUpdate | null> {
   }
 
   await prisma.streak.update({
-    where: { id: SINGLETON_ID },
+    where: { workspaceId },
     data: { current, lastActiveWorkday: today },
   });
 
   // streak badges
-  if (current >= 5) await awardBadge(BadgeKey.Streak5);
-  const best = await prisma.streakRecord.aggregate({ _max: { length: true } });
+  if (current >= 5) await awardBadge(workspaceId, BadgeKey.Streak5);
+  const best = await prisma.streakRecord.aggregate({
+    _max: { length: true },
+    where: { workspaceId },
+  });
   if ((best._max.length ?? 0) > 0 && current > (best._max.length ?? 0)) {
-    await awardBadge(BadgeKey.BeatBestStreak);
+    await awardBadge(workspaceId, BadgeKey.BeatBestStreak);
   }
 
   return { current, freshStart, continued: continues };
@@ -149,7 +155,7 @@ export type DashboardData = {
   badges: string[];
 };
 
-export async function getDashboardData(): Promise<DashboardData> {
+export async function getDashboardData(workspaceId: string): Promise<DashboardData> {
   const start = startOfToday();
   const [
     todayAgg,
@@ -162,19 +168,29 @@ export async function getDashboardData(): Promise<DashboardData> {
   ] = await Promise.all([
     prisma.rewardEvent.aggregate({
       _sum: { points: true },
-      where: { createdAt: { gte: start } },
+      where: { workspaceId, createdAt: { gte: start } },
     }),
-    prisma.rewardEvent.aggregate({ _sum: { points: true } }),
-    getStreak(),
-    prisma.streakRecord.findMany({ orderBy: { length: "desc" }, take: 3 }),
+    prisma.rewardEvent.aggregate({
+      _sum: { points: true },
+      where: { workspaceId },
+    }),
+    getStreak(workspaceId),
+    prisma.streakRecord.findMany({
+      where: { workspaceId },
+      orderBy: { length: "desc" },
+      take: 3,
+    }),
     prisma.focusSession.findMany({
-      where: { startedAt: { gte: start }, endedAt: { not: null } },
+      where: { workspaceId, startedAt: { gte: start }, endedAt: { not: null } },
       select: { durationMin: true },
     }),
     prisma.rewardEvent.count({
-      where: { type: RewardType.StepDone, createdAt: { gte: start } },
+      where: { workspaceId, type: RewardType.StepDone, createdAt: { gte: start } },
     }),
-    prisma.badge.findMany({ orderBy: { earnedAt: "asc" } }),
+    prisma.badge.findMany({
+      where: { workspaceId },
+      orderBy: { earnedAt: "asc" },
+    }),
   ]);
 
   return {

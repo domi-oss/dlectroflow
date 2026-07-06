@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
+import { currentWorkspaceId } from "@/lib/workspace";
 import { BreakdownChat } from "@/components/breakdown/breakdown-chat";
 import { getReclaimStatus } from "@/lib/reclaim";
 import { getGoogleStatus } from "@/lib/google";
@@ -15,11 +16,12 @@ export default async function TaskPage({
   params: Promise<{ taskId: string }>;
   searchParams: Promise<{ edit?: string }>;
 }) {
+  const workspaceId = await currentWorkspaceId();
   const { taskId } = await params;
   const { edit } = await searchParams;
   const [task, reclaim, google] = await Promise.all([
-    prisma.task.findUnique({
-      where: { id: taskId },
+    prisma.task.findFirst({
+      where: { id: taskId, workspaceId },
       include: { steps: { orderBy: { order: "asc" } } },
     }),
     getReclaimStatus(),

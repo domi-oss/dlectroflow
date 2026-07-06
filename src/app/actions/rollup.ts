@@ -12,6 +12,7 @@ import {
   roundupEmailHtml,
   sendRoundupEmail,
 } from "@/lib/email";
+import { currentWorkspaceId } from "@/lib/workspace";
 
 export type TriggerResult = {
   rollup: Rollup;
@@ -29,10 +30,11 @@ export async function triggerRollup(opts?: {
   force?: boolean;
   sendEmail?: boolean;
 }): Promise<TriggerResult> {
+  const workspaceId = await currentWorkspaceId();
   const force = opts?.force ?? true; // manual trigger regenerates by default
-  const rollup = await generateTodayRollup(force);
+  const rollup = await generateTodayRollup(workspaceId, force);
 
-  const settings = await getSettings();
+  const settings = await getSettings(workspaceId);
   const wantsEmail = settings.roundupEmailEnabled && (opts?.sendEmail ?? true);
 
   let email: TriggerResult["email"] = { attempted: false };
@@ -56,7 +58,7 @@ export async function triggerRollup(opts?: {
           spark: rollup.spark,
         }),
       );
-      if (result.ok) await markRollupEmailed(rollup.date);
+      if (result.ok) await markRollupEmailed(workspaceId, rollup.date);
       email = { attempted: true, ok: result.ok, reason: result.ok ? undefined : result.reason };
     }
   }
