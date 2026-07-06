@@ -3,6 +3,7 @@ import { getDashboardData } from "@/lib/rewards";
 import { getTodaySpark } from "@/lib/spark";
 import { getTodayRollup } from "@/lib/rollup";
 import { getSettings } from "@/lib/db";
+import { currentWorkspaceId } from "@/lib/workspace";
 import { emailConfigured } from "@/lib/email";
 import { SparkCard } from "@/components/dashboard/spark-card";
 import { RoundupCard } from "@/components/dashboard/roundup-card";
@@ -20,11 +21,12 @@ const BADGE_LABELS: Record<string, string> = {
 const MEDALS = ["🥇", "🥈", "🥉"];
 
 export default async function DashboardPage() {
+  const workspaceId = await currentWorkspaceId();
   const [data, spark, rollup, settings] = await Promise.all([
-    getDashboardData(),
-    getTodaySpark(),
-    getTodayRollup(),
-    getSettings(),
+    getDashboardData(workspaceId),
+    getTodaySpark(workspaceId),
+    getTodayRollup(workspaceId),
+    getSettings(workspaceId),
   ]);
 
   return (

@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { prisma, getSettings } from "@/lib/db";
+import { currentWorkspaceId } from "@/lib/workspace";
 import { focusStatsToday } from "@/app/actions/focus";
 import { FocusTimer } from "@/components/focus/focus-timer";
 
@@ -10,18 +11,19 @@ export default async function FocusPage({
 }: {
   params: Promise<{ stepId: string }>;
 }) {
+  const workspaceId = await currentWorkspaceId();
   const { stepId } = await params;
-  const step = await prisma.step.findUnique({
-    where: { id: stepId },
+  const step = await prisma.step.findFirst({
+    where: { id: stepId, task: { workspaceId } },
     include: { task: true },
   });
   if (!step) notFound();
 
   const [settings, stats, nextStep] = await Promise.all([
-    getSettings(),
+    getSettings(workspaceId),
     focusStatsToday(),
     prisma.step.findFirst({
-      where: { taskId: step.taskId, done: false, order: { gt: step.order } },
+      where: { taskId: step.taskId, done: false, order: { gt: step.order }, task: { workspaceId } },
       orderBy: { order: "asc" },
     }),
   ]);

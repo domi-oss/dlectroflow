@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { isOwnerRequest } from "@/lib/workspace";
 
-export default function AppLayout({
+export default async function AppLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const owner = await isOwnerRequest();
   return (
     <div className="flex min-h-full flex-col">
       <header className="border-b">
@@ -17,6 +19,11 @@ export default function AppLayout({
             <Link href="/dashboard" className="hover:text-foreground transition-colors">
               🎉 Dashboard
             </Link>
+            {owner ? (
+              <a href="/api/auth/logout" className="text-xs text-muted-foreground">Sign out</a>
+            ) : (
+              <a href="/login" className="text-xs text-muted-foreground">Owner sign in</a>
+            )}
           </nav>
         </div>
       </header>
