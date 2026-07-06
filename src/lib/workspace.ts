@@ -30,7 +30,10 @@ export async function resolveWorkspaceId(input: {
     const p = await verifySession(input.guest, sessionSecret);
     if (p?.kind === "guest") return p.wsId;
   }
-  if (input.header) return input.header;
+  if (input.header) {
+    const p = await verifySession(input.header, sessionSecret);
+    if (p?.kind === "guest") return p.wsId;
+  }
   throw new MissingWorkspaceError();
 }
 

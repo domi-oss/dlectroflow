@@ -29,8 +29,15 @@ describe("resolveWorkspaceId", () => {
     expect(await resolveWorkspaceId({ owner, guest })).toBe("owner");
   });
 
-  it("falls back to the forwarded header", async () => {
-    expect(await resolveWorkspaceId({ header: "g-hdr" })).toBe("g-hdr");
+  it("resolves a signed guest token forwarded via header", async () => {
+    const token = await signSession({ kind: "guest", wsId: "g-hdr" }, SECRET);
+    expect(await resolveWorkspaceId({ header: token })).toBe("g-hdr");
+  });
+
+  it("rejects a spoofed (unsigned) header value", async () => {
+    await expect(
+      resolveWorkspaceId({ header: "g-spoofed-raw-id" }),
+    ).rejects.toBeInstanceOf(MissingWorkspaceError);
   });
 
   it("throws when nothing resolves", async () => {
