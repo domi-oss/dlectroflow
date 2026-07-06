@@ -9,7 +9,7 @@ export const OWNER_ONLY_PREFIXES = [
 
 export function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some(
-    (p) => pathname === p || pathname.startsWith(p),
+    (p) => pathname === p || pathname.startsWith(p.endsWith("/") ? p : p + "/"),
   );
 }
 
