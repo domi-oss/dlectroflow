@@ -2,12 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
-import { SINGLETON_ID } from "@/lib/constants";
+import { currentWorkspaceId } from "@/lib/workspace";
 
 export async function updateAgingSettings(input: {
   agingThresholdMinutes: number;
   demoOverrideSeconds: number | null;
 }) {
+  const workspaceId = await currentWorkspaceId();
   const agingThresholdMinutes = Math.max(
     1,
     Math.round(input.agingThresholdMinutes || 1),
@@ -18,8 +19,8 @@ export async function updateAgingSettings(input: {
       : null;
 
   await prisma.settings.upsert({
-    where: { id: SINGLETON_ID },
-    create: { id: SINGLETON_ID, agingThresholdMinutes, demoOverrideSeconds },
+    where: { workspaceId },
+    create: { workspaceId, agingThresholdMinutes, demoOverrideSeconds },
     update: { agingThresholdMinutes, demoOverrideSeconds },
   });
   revalidatePath("/inbox");
@@ -32,6 +33,7 @@ export async function updateRoundupSettings(input: {
   roundupEmailEnabled: boolean;
   roundupEmail: string | null;
 }) {
+  const workspaceId = await currentWorkspaceId();
   const workdayEndTime = /^\d{2}:\d{2}$/.test(input.workdayEndTime)
     ? input.workdayEndTime
     : "17:00";
@@ -43,8 +45,8 @@ export async function updateRoundupSettings(input: {
     roundupEmail,
   };
   await prisma.settings.upsert({
-    where: { id: SINGLETON_ID },
-    create: { id: SINGLETON_ID, ...data },
+    where: { workspaceId },
+    create: { workspaceId, ...data },
     update: data,
   });
   revalidatePath("/dashboard");

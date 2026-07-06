@@ -9,6 +9,8 @@ import {
   getReclaimStatus,
   disconnectReclaim,
 } from "@/lib/reclaim";
+import { OWNER_WORKSPACE_ID } from "@/lib/constants";
+import { currentWorkspaceId } from "@/lib/workspace";
 
 export type ScheduleResult =
   | { ok: true; scheduled: number }
@@ -21,11 +23,14 @@ export type ScheduleResult =
 export async function scheduleTaskInReclaim(
   taskId: string,
 ): Promise<ScheduleResult> {
+  const workspaceId = await currentWorkspaceId();
+  if (workspaceId !== OWNER_WORKSPACE_ID) throw new Error("owner only");
+
   const token = await getValidAccessToken();
   if (!token) return { ok: false, reason: "not_connected" };
 
-  const task = await prisma.task.findUnique({
-    where: { id: taskId },
+  const task = await prisma.task.findFirst({
+    where: { id: taskId, workspaceId },
     include: { steps: { orderBy: { order: "asc" } } },
   });
   if (!task || task.steps.length === 0) return { ok: false, reason: "no_steps" };
@@ -90,6 +95,9 @@ After creating all of them, reply with ONLY a JSON array (no prose), one object 
       if (typeof r.order !== "number") continue;
       const step = task.steps.find((s) => s.order === r.order);
       if (!step) continue;
+      // Guard step ownership before update
+      const stepCheck = await prisma.step.findFirst({ where: { id: step.id, task: { workspaceId } } });
+      if (!stepCheck) continue;
       await prisma.step.update({
         where: { id: step.id },
         data: {

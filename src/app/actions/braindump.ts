@@ -8,26 +8,34 @@ import {
   TaskSource,
   TaskStatus,
 } from "@/lib/constants";
+import { currentWorkspaceId } from "@/lib/workspace";
 
 const INBOX_PATH = "/inbox";
 
 export async function createBrainDumpItem(text: string) {
+  const workspaceId = await currentWorkspaceId();
   const trimmed = text.trim();
   if (!trimmed) return;
-  await prisma.brainDumpItem.create({ data: { text: trimmed } });
+  await prisma.brainDumpItem.create({ data: { text: trimmed, workspaceId } });
   revalidatePath(INBOX_PATH);
 }
 
 export async function triageBrainDumpItem(id: string) {
+  const workspaceId = await currentWorkspaceId();
+  const existing = await prisma.brainDumpItem.findFirst({ where: { id, workspaceId } });
+  if (!existing) return;
   await prisma.brainDumpItem.update({
     where: { id },
     data: { status: BrainDumpStatus.Triaged, triagedAt: new Date() },
   });
-  await maybeAwardInboxZero();
+  await maybeAwardInboxZero(workspaceId);
   revalidatePath(INBOX_PATH);
 }
 
 export async function snoozeBrainDumpItem(id: string, minutes: number) {
+  const workspaceId = await currentWorkspaceId();
+  const existing = await prisma.brainDumpItem.findFirst({ where: { id, workspaceId } });
+  if (!existing) return;
   await prisma.brainDumpItem.update({
     where: { id },
     data: {
@@ -35,18 +43,24 @@ export async function snoozeBrainDumpItem(id: string, minutes: number) {
       remindedAt: null,
     },
   });
-  await maybeAwardInboxZero();
+  await maybeAwardInboxZero(workspaceId);
   revalidatePath(INBOX_PATH);
 }
 
 export async function deleteBrainDumpItem(id: string) {
+  const workspaceId = await currentWorkspaceId();
+  const existing = await prisma.brainDumpItem.findFirst({ where: { id, workspaceId } });
+  if (!existing) return;
   await prisma.brainDumpItem.delete({ where: { id } });
-  await maybeAwardInboxZero();
+  await maybeAwardInboxZero(workspaceId);
   revalidatePath(INBOX_PATH);
 }
 
 /** Mark an aging item as reminded so we don't re-notify (step 4). */
 export async function markReminded(id: string) {
+  const workspaceId = await currentWorkspaceId();
+  const existing = await prisma.brainDumpItem.findFirst({ where: { id, workspaceId } });
+  if (!existing) return;
   await prisma.brainDumpItem.update({
     where: { id },
     data: { remindedAt: new Date() },
@@ -59,13 +73,15 @@ export async function markReminded(id: string) {
  * (Step 5 will add the conversational-breakdown launch.)
  */
 export async function keepAsTask(id: string) {
-  const item = await prisma.brainDumpItem.findUnique({ where: { id } });
+  const workspaceId = await currentWorkspaceId();
+  const item = await prisma.brainDumpItem.findFirst({ where: { id, workspaceId } });
   if (!item) return;
   const task = await prisma.task.create({
     data: {
       title: item.text,
       source: TaskSource.BrainDump,
       status: TaskStatus.Active,
+      workspaceId,
     },
   });
   await prisma.brainDumpItem.update({
@@ -76,7 +92,7 @@ export async function keepAsTask(id: string) {
       taskId: task.id,
     },
   });
-  await maybeAwardInboxZero();
+  await maybeAwardInboxZero(workspaceId);
   revalidatePath(INBOX_PATH);
   return task.id;
 }
