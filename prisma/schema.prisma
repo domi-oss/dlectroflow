@@ -26,9 +26,9 @@ model Workspace {
   @@index([lastSeenAt])
 }
 
-// ── Singleton config (id always "singleton") ──────────────────────────────
+// ── Singleton config (one row per workspace, keyed by workspaceId) ───────
 model Settings {
-  id                    String   @id @default("singleton")
+  id                    String   @id @default(cuid())
   // Feature 1 — aging
   agingThresholdMinutes Int      @default(240)
   demoOverrideSeconds   Int? // aging demo override (~10s) to fire live on stage
@@ -183,7 +183,7 @@ model RewardEvent {
 }
 
 model Streak {
-  id                String  @id @default("singleton")
+  id                String  @id @default(cuid())
   current           Int     @default(0)
   lastActiveWorkday String? // YYYY-MM-DD
   workspaceId       String  @unique

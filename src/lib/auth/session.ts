@@ -2,8 +2,10 @@ import { SignJWT, jwtVerify } from "jose";
 
 export const OWNER_COOKIE = "df_owner";
 export const GUEST_COOKIE = "df_guest";
-// Middleware forwards the resolved guest workspace id on this request header so
-// the SAME request's server components can read it before the cookie round-trips.
+// Middleware forwards the signed guest session token (JWT) on this request header
+// so the SAME request's server components can read it before the cookie round-trips.
+// resolveWorkspaceId calls verifySession to verify the JWT before trusting it —
+// that verification is the IDOR defense; the header NEVER carries a raw workspace id.
 // Homed here (pure, Edge-safe) so both middleware and workspace.ts can import it.
 export const GUEST_WS_HEADER = "x-guest-ws";
 
