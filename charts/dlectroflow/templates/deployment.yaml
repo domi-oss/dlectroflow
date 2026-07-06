@@ -11,6 +11,14 @@ spec:
       app.kubernetes.io/name: dlectroflow
   template:
     metadata:
+      annotations:
+        # Roll pods when the Secret changes. Env is injected via envFrom:secretRef,
+        # which K8s reads only at container start — a Secret-only change on a
+        # same-image-tag deploy would otherwise leave running pods with stale env
+        # (e.g. rotated OAuth client id/secret never taking effect until a manual
+        # `kubectl rollout restart`). Hashing secret.yaml changes the pod template
+        # whenever the rendered Secret changes, forcing a rollout.
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum | quote }}
       labels:
         {{- include "dlectroflow.labels" . | nindent 8 }}
     spec:
