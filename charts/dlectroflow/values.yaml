@@ -30,7 +30,7 @@ registry:
   username: ""
   password: ""
 
-# Injected by CI from GitLab Secrets Manager; never committed.
+# Injected by CI from GitLab Secrets Manager / CI variables; never committed.
 secrets:
   postgresPassword: ""
   anthropicApiKey: ""
@@ -38,3 +38,14 @@ secrets:
   googleClientSecret: ""
   resendApiKey: ""
   roundupFromEmail: ""
+  # Owner auth — required in ALL envs (the prod boot guard refuses to start
+  # without these; review apps use dummy-but-valid values passed by CI).
+  authSessionSecret: ""
+  gitlabOauthClientId: ""
+  gitlabOauthClientSecret: ""
+
+# Owner auth config (non-secret). ownerAllowlist = comma-separated allowed
+# identities (GitLab numeric user id for the gitlab provider).
+auth:
+  provider: gitlab
+  ownerAllowlist: ""
