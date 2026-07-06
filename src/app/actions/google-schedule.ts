@@ -114,10 +114,14 @@ export async function pushStepsToGoogleTasks(
 }
 
 export async function googleStatus() {
+  const workspaceId = await currentWorkspaceId();
+  if (workspaceId !== OWNER_WORKSPACE_ID) return { configured: false, connected: false };
   return getGoogleStatus();
 }
 
 export async function disconnectGoogleTasks() {
+  const workspaceId = await currentWorkspaceId();
+  if (workspaceId !== OWNER_WORKSPACE_ID) throw new Error("owner only");
   await disconnectGoogle();
   revalidatePath("/inbox");
 }

@@ -20,7 +20,7 @@ export async function updateAgingSettings(input: {
 
   await prisma.settings.upsert({
     where: { workspaceId },
-    create: { workspaceId, agingThresholdMinutes, demoOverrideSeconds },
+    create: { id: workspaceId, workspaceId, agingThresholdMinutes, demoOverrideSeconds },
     update: { agingThresholdMinutes, demoOverrideSeconds },
   });
   revalidatePath("/inbox");
@@ -46,7 +46,7 @@ export async function updateRoundupSettings(input: {
   };
   await prisma.settings.upsert({
     where: { workspaceId },
-    create: { workspaceId, ...data },
+    create: { id: workspaceId, workspaceId, ...data },
     update: data,
   });
   revalidatePath("/dashboard");

@@ -139,10 +139,14 @@ function parseResults(text: string): ParsedResult[] {
 }
 
 export async function reclaimStatus() {
+  const workspaceId = await currentWorkspaceId();
+  if (workspaceId !== OWNER_WORKSPACE_ID) return { connected: false, expiresAt: null };
   return getReclaimStatus();
 }
 
 export async function disconnect() {
+  const workspaceId = await currentWorkspaceId();
+  if (workspaceId !== OWNER_WORKSPACE_ID) throw new Error("owner only");
   await disconnectReclaim();
   revalidatePath("/inbox");
 }
