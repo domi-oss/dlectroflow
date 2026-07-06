@@ -55,27 +55,29 @@ async function generateQuote(): Promise<{ quote: string; source: string }> {
 export type Spark = { quote: string; source: string };
 
 /** Get today's spark, generating + caching it on first request of the day. */
-export async function getTodaySpark(): Promise<Spark> {
+export async function getTodaySpark(workspaceId: string): Promise<Spark> {
   const date = today();
-  const existing = await prisma.dailySpark.findUnique({ where: { date } });
+  const existing = await prisma.dailySpark.findUnique({
+    where: { workspaceId_date: { workspaceId, date } },
+  });
   if (existing) return { quote: existing.quote, source: existing.source };
 
   const { quote, source } = await generateQuote();
   const saved = await prisma.dailySpark.upsert({
-    where: { date },
-    create: { date, quote, source },
+    where: { workspaceId_date: { workspaceId, date } },
+    create: { date, workspaceId, quote, source },
     update: {}, // if two requests race, keep the first
   });
   return { quote: saved.quote, source: saved.source };
 }
 
 /** Force a fresh spark for today ("New spark" button). */
-export async function refreshTodaySpark(): Promise<Spark> {
+export async function refreshTodaySpark(workspaceId: string): Promise<Spark> {
   const date = today();
   const { quote, source } = await generateQuote();
   const saved = await prisma.dailySpark.upsert({
-    where: { date },
-    create: { date, quote, source },
+    where: { workspaceId_date: { workspaceId, date } },
+    create: { date, workspaceId, quote, source },
     update: { quote, source },
   });
   return { quote: saved.quote, source: saved.source };

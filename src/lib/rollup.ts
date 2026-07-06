@@ -28,12 +28,13 @@ export type DayData = {
   carryOverTexts: string[]; // still-open steps to carry gently into tomorrow
 };
 
-export async function gatherDayData(): Promise<DayData> {
+export async function gatherDayData(workspaceId: string): Promise<DayData> {
   const start = startOfToday();
   const [doneSessions, allTodaySessions, pointsAgg, streak, carryOver] =
     await Promise.all([
       prisma.focusSession.findMany({
         where: {
+          workspaceId,
           outcome: FocusOutcome.Completed,
           endedAt: { gte: start },
         },
@@ -41,16 +42,16 @@ export async function gatherDayData(): Promise<DayData> {
         orderBy: { endedAt: "asc" },
       }),
       prisma.focusSession.findMany({
-        where: { startedAt: { gte: start }, endedAt: { not: null } },
+        where: { workspaceId, startedAt: { gte: start }, endedAt: { not: null } },
         select: { durationMin: true },
       }),
       prisma.rewardEvent.aggregate({
         _sum: { points: true },
-        where: { createdAt: { gte: start } },
+        where: { workspaceId, createdAt: { gte: start } },
       }),
-      getStreak(),
+      getStreak(workspaceId),
       prisma.step.findMany({
-        where: { done: false, task: { status: TaskStatus.Active } },
+        where: { done: false, task: { workspaceId, status: TaskStatus.Active } },
         include: { task: true },
         orderBy: [{ taskId: "asc" }, { order: "asc" }],
         take: 12,
@@ -160,11 +161,13 @@ export type Rollup = {
 };
 
 /** Read today's stored rollup, if one has been generated. */
-export async function getTodayRollup(): Promise<Rollup | null> {
+export async function getTodayRollup(workspaceId: string): Promise<Rollup | null> {
   const date = ymd(new Date());
-  const row = await prisma.dayRollup.findUnique({ where: { date } });
+  const row = await prisma.dayRollup.findUnique({
+    where: { workspaceId_date: { workspaceId, date } },
+  });
   if (!row || !row.narrative) return null;
-  const spark = await getTodaySpark();
+  const spark = await getTodaySpark(workspaceId);
   return {
     date: row.date,
     stepsDone: row.stepsDone,
@@ -183,10 +186,10 @@ export async function getTodayRollup(): Promise<Rollup | null> {
  * stats, ask Claude for a warm recap, and persist it to DayRollup. Returns the
  * full rollup for immediate display.
  */
-export async function generateTodayRollup(force = false): Promise<Rollup> {
-  const data = await gatherDayData();
+export async function generateTodayRollup(workspaceId: string, force = false): Promise<Rollup> {
+  const data = await gatherDayData(workspaceId);
   const existing = await prisma.dayRollup.findUnique({
-    where: { date: data.date },
+    where: { workspaceId_date: { workspaceId, date: data.date } },
   });
 
   const narrative =
@@ -195,9 +198,10 @@ export async function generateTodayRollup(force = false): Promise<Rollup> {
       : await generateNarrative(data);
 
   const row = await prisma.dayRollup.upsert({
-    where: { date: data.date },
+    where: { workspaceId_date: { workspaceId, date: data.date } },
     create: {
       date: data.date,
+      workspaceId,
       focusMin: data.focusMin,
       sessions: data.sessions,
       stepsDone: data.stepsDone,
@@ -215,7 +219,7 @@ export async function generateTodayRollup(force = false): Promise<Rollup> {
     },
   });
 
-  const spark = await getTodaySpark();
+  const spark = await getTodaySpark(workspaceId);
   return {
     date: row.date,
     stepsDone: row.stepsDone,
@@ -230,9 +234,9 @@ export async function generateTodayRollup(force = false): Promise<Rollup> {
 }
 
 /** Mark today's rollup as emailed (once-per-day guard for the delivery job). */
-export async function markRollupEmailed(date: string): Promise<void> {
+export async function markRollupEmailed(workspaceId: string, date: string): Promise<void> {
   await prisma.dayRollup.update({
-    where: { date },
+    where: { workspaceId_date: { workspaceId, date } },
     data: { emailedAt: new Date() },
   });
 }
