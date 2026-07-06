@@ -227,7 +227,7 @@ deploy_review:
     # Per-deploy random session-signing key for the ephemeral review app — never
     # committed. Rotating it each deploy only resets guest cookies (review holds
     # no real data), and avoids shipping a known signing key in the repo.
-    - AUTH_SESSION_SECRET=$(tr -dc 'a-f0-9' < /dev/urandom | head -c 64)
+    - AUTH_SESSION_SECRET=$(cat /proc/sys/kernel/random/uuid /proc/sys/kernel/random/uuid | tr -cd 'a-fA-F0-9')
     - helm upgrade --install "dlectroflow-mr-$CI_MERGE_REQUEST_IID" charts/dlectroflow
         --namespace "dlectroflow-mr-$CI_MERGE_REQUEST_IID" --create-namespace
         --set env=review --set spot=true --set postgres.persistent=false
