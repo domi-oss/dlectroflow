@@ -22,6 +22,7 @@ model Workspace {
   kind      String   @default("guest") // owner | guest
   createdAt DateTime @default(now())
   lastSeenAt DateTime @default(now())
+  expiresAt DateTime? // guest sandbox TTL (null = owner / no expiry)
 
   @@index([lastSeenAt])
 }
@@ -41,6 +42,8 @@ model Settings {
   roundupEmail          String?
   // Feature 4 — streaks
   workingDays           String   @default("1,2,3,4,5") // ISO weekdays, Mon=1..Sun=7
+  // Phase 2 — owner-selected breakdown model (null = env/default)
+  breakdownModel        String?
   updatedAt             DateTime @updatedAt
   workspaceId           String   @unique
 }
@@ -218,4 +221,26 @@ model DailySpark {
   workspaceId String
 
   @@unique([workspaceId, date])
+}
+
+// ── Phase 2 — guest AI allowance (IP-hash scoped, rolling window) ──────────
+// No PII: ipHash is a salted hash of the client IP. count/window enforce the
+// per-guest breakdown allowance; rows are self-expiring by window.
+model GuestAiUsage {
+  ipHash          String   @id
+  count           Int      @default(0)
+  windowStartedAt DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ── Phase 2 — global daily distinct-guest tally (circuit breaker) ──────────
+// One row per (UTC day, ipHash); count of rows for a day = distinct guests
+// that used AI that day. Presence = "this guest used AI today".
+model GuestDailyActivity {
+  day       String   // UTC date YYYY-MM-DD
+  ipHash    String
+  createdAt DateTime @default(now())
+
+  @@id([day, ipHash])
+  @@index([day])
 }
