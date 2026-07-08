@@ -165,7 +165,7 @@ export function FocusTimer({
       {parentEmoji ? `${parentEmoji} ` : ""}
       {taskTitle}
       <span className="text-muted-foreground font-normal">
-        {" "}· {t("step.counter", voice)} {step.order}/{step.total}
+        {" "}· {t("step.counter", voice)} {step.order} of {step.total}
       </span>
     </h1>
   );

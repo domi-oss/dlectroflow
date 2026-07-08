@@ -41,6 +41,9 @@ export function InboxView({
   settings,
   isOwner,
   breakdownModel,
+  // SSR seed value from the layout; the live source of truth is useVoice()
+  // (context), so at runtime we read `voice` below. voiceProp only forwards the
+  // initial value to SettingsPanel.
   voice: voiceProp,
 }: {
   initialItems: Item[];
