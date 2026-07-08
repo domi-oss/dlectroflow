@@ -46,7 +46,7 @@ export function buildTaskIcs(input: {
     lines.push(
       "BEGIN:VEVENT",
       `UID:${floating(cursor)}-${i}@dlectroflow`,
-      `DTSTAMP:${floating(new Date())}`,
+      `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").slice(0, 15)}Z`,
       `DTSTART:${floating(cursor)}`,
       `DTEND:${floating(end)}`,
       `SUMMARY:${esc(summary)}`,

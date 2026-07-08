@@ -18,6 +18,9 @@ describe("buildTaskIcs", () => {
     expect(ics).toContain("END:VCALENDAR");
     expect((ics.match(/BEGIN:VEVENT/g) ?? []).length).toBe(2);
   });
+  it("DTSTAMP is a UTC stamp (RFC 5545 §3.8.7.2)", () => {
+    expect(ics).toMatch(/DTSTAMP:\d{8}T\d{6}Z/);
+  });
   it("sequences events back-to-back using durations", () => {
     // first event 09:00–09:15, second 09:15–09:45 (floating local time, no Z)
     expect(ics).toContain("DTSTART:20260708T090000");

@@ -27,19 +27,17 @@ export async function purgeWorkspace(id: string): Promise<void> {
   });
 }
 
-/** Opportunistic purge of guest workspaces past their TTL. Returns count purged. */
+/** Opportunistic purge of guest workspaces past their TTL. Returns count successfully purged. */
 export async function purgeExpiredGuests(): Promise<number> {
   const expired = await prisma.workspace.findMany({
     where: { kind: "guest", expiresAt: { lt: new Date() } },
     select: { id: true },
     take: 25, // bound the work per call
   });
+  let purged = 0;
   for (const w of expired) {
-    try {
-      await purgeWorkspace(w.id);
-    } catch {
-      // best-effort; skip on error
-    }
+    try { await purgeWorkspace(w.id); purged++; }
+    catch { /* best-effort; skip on error */ }
   }
-  return expired.length;
+  return purged;
 }

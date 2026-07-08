@@ -15,6 +15,9 @@ export function clientIpHash(headers: Headers): string | null {
   const ip = (xff ? xff.split(",")[0] : headers.get("x-real-ip"))?.trim();
   if (!ip) return null;
   const salt = process.env.GUEST_IP_HASH_SALT ?? "";
+  if (!salt && process.env.NODE_ENV !== "test" && process.env.NODE_ENV !== "production") {
+    console.warn("[guest-quota] GUEST_IP_HASH_SALT is not set — IP hashing provides no privacy");
+  }
   return createHash("sha256").update(salt + ip).digest("hex");
 }
 
@@ -62,7 +65,11 @@ export async function consumeGuestBreakdown(ipHash: string): Promise<AllowanceRe
   if (!countedToday) {
     const distinct = await prisma.guestDailyActivity.count({ where: { day } });
     if (distinct >= globalCap) return { allowed: false, remaining: quota - used, reason: "global_cap" };
-    await prisma.guestDailyActivity.create({ data: { day, ipHash } });
+    try {
+      await prisma.guestDailyActivity.create({ data: { day, ipHash } });
+    } catch {
+      // Concurrent insert from same IP — already counted today; proceed.
+    }
   }
 
   const newCount = used + 1;

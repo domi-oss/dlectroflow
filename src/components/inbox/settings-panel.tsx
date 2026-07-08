@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { updateAgingSettings, updateBreakdownModel } from "@/app/actions/settings";
 import type { AgingSettings } from "@/lib/aging";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { OWNER_BREAKDOWN_ALLOWLIST } from "@/lib/constants";
+import { OWNER_BREAKDOWN_ALLOWLIST, OWNER_BREAKDOWN_MODEL_DEFAULT } from "@/lib/constants";
 
 const FABLE_LINES = [
   "Our most capable model. Also $50/M tokens. To split 'clean the kitchen' into 3 steps? We love you, but no.",
@@ -40,7 +40,7 @@ export function SettingsPanel({
       : "",
   );
 
-  const [model, setModel] = useState<string>(breakdownModel ?? "claude-sonnet-4-6");
+  const [model, setModel] = useState<string>(breakdownModel ?? OWNER_BREAKDOWN_MODEL_DEFAULT);
   const [fable] = useState(() => FABLE_LINES[Math.floor(Math.random() * FABLE_LINES.length)]);
 
   const save = () =>
