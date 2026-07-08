@@ -8,6 +8,8 @@ import { scheduleTaskInReclaim } from "@/app/actions/reclaim";
 import { pushStepsToGoogleTasks } from "@/app/actions/google-schedule";
 import type { Feedback, Proposal, StreamEvent } from "@/lib/breakdown";
 import { cn } from "@/lib/utils";
+import { t } from "@/lib/strings";
+import { useVoice } from "@/components/voice-provider";
 
 type ChatMsg = { role: "assistant" | "user"; text: string };
 type ScheduleState = {
@@ -32,6 +34,7 @@ export function BreakdownChat({
   isGuest?: boolean;
 }) {
   const router = useRouter();
+  const voice = useVoice();
   const [schedule, setSchedule] = useState<ScheduleState>({ status: "idle" });
   const [gsched, setGsched] = useState<ScheduleState>({ status: "idle" });
   const [messages, setMessages] = useState<ChatMsg[]>([]);
@@ -287,13 +290,13 @@ export function BreakdownChat({
             href={`/tasks/${taskId}`}
             className="bg-primary text-primary-foreground inline-block rounded-md px-4 py-2 text-sm font-medium"
           >
-            ▶ Start focusing
+            {t("action.startFocus", voice)}
           </a>
           <Link
             href="/inbox"
             className="text-muted-foreground text-sm hover:underline"
           >
-            ← Back to inbox
+            ← {t("action.backToInbox", voice)}
           </Link>
         </div>
       </div>
@@ -415,14 +418,14 @@ export function BreakdownChat({
           disabled={busy || !proposal || proposal.steps.length === 0}
           className="bg-primary text-primary-foreground rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50"
         >
-          {confirmPending ? "Saving…" : "👍 Looks right"}
+          {confirmPending ? "Saving…" : t("breakdown.looksRight", voice)}
         </button>
         <button
           onClick={() => request({ kind: "too_big" }, "These feel too big ⬇️")}
           disabled={busy || !proposal}
           className="hover:bg-accent rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
         >
-          ⬇️ Too big
+          {t("action.fewerSteps", voice)}
         </button>
         <button
           onClick={() =>
@@ -431,7 +434,7 @@ export function BreakdownChat({
           disabled={busy || !proposal}
           className="hover:bg-accent rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
         >
-          ⬆️ Too small
+          {t("action.moreSteps", voice)}
         </button>
       </div>
 

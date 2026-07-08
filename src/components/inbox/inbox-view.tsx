@@ -15,6 +15,8 @@ import {
 } from "@/app/actions/braindump";
 import { startBreakdown } from "@/app/actions/breakdown";
 import { SettingsPanel } from "@/components/inbox/settings-panel";
+import { t } from "@/lib/strings";
+import { useVoice } from "@/components/voice-provider";
 import type { Voice } from "@/lib/strings";
 import {
   notificationPermission,
@@ -39,7 +41,7 @@ export function InboxView({
   settings,
   isOwner,
   breakdownModel,
-  voice,
+  voice: voiceProp,
 }: {
   initialItems: Item[];
   settings: AgingSettings;
@@ -48,6 +50,7 @@ export function InboxView({
   voice: Voice;
 }) {
   const router = useRouter();
+  const voice = useVoice();
   const [pending, startTransition] = useTransition();
   const [text, setText] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -195,12 +198,12 @@ export function InboxView({
         </p>
       </div>
 
-      <SettingsPanel settings={settings} isOwner={isOwner} breakdownModel={breakdownModel} voice={voice} />
+      <SettingsPanel settings={settings} isOwner={isOwner} breakdownModel={breakdownModel} voice={voiceProp} />
 
-      {/* Needs triage */}
+      {/* Needs review */}
       <section>
         <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
-          Needs triage
+          {t("section.needsReview", voice)}
           {untriagedCount > 0 && (
             <span className="bg-secondary text-secondary-foreground rounded-full px-2 py-0.5 text-xs">
               {untriagedCount}
@@ -218,6 +221,7 @@ export function InboxView({
                 key={item.id}
                 item={item}
                 settings={settings}
+                voice={voice}
                 onBreakdown={() => breakdown(item.id)}
                 onKeep={() => run(() => keepAsTask(item.id))}
                 onSnooze={() => run(() => snoozeBrainDumpItem(item.id, 60))}
@@ -287,6 +291,7 @@ export function InboxView({
 function ItemRow({
   item,
   settings,
+  voice,
   onBreakdown,
   onKeep,
   onSnooze,
@@ -294,6 +299,7 @@ function ItemRow({
 }: {
   item: Item;
   settings: AgingSettings;
+  voice: Voice;
   onBreakdown: () => void;
   onKeep: () => void;
   onSnooze: () => void;
@@ -305,7 +311,7 @@ function ItemRow({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <div className="flex items-center gap-2">
-            <StatusPill kind={aging ? "aging" : "untriaged"} />
+            <StatusPill kind={aging ? "aging" : "untriaged"} voice={voice} />
             <span className="break-words">{item.text}</span>
           </div>
           <AgeLabel createdAt={item.createdAt} aging={aging} />
@@ -316,13 +322,13 @@ function ItemRow({
           onClick={onBreakdown}
           className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
         >
-          Break down →
+          {t("action.breakdown", voice)} →
         </button>
         <button
           onClick={onKeep}
           className="hover:bg-accent rounded-md border px-2.5 py-1"
         >
-          Keep as task
+          {t("action.addTodo", voice)}
         </button>
         <button
           onClick={onSnooze}
@@ -341,12 +347,12 @@ function ItemRow({
   );
 }
 
-function StatusPill({ kind }: { kind: "untriaged" | "aging" | "triaged" }) {
-  const map = {
+function StatusPill({ kind, voice = "plain" }: { kind: "untriaged" | "aging" | "triaged"; voice?: Voice }) {
+  const map: Record<"untriaged" | "aging" | "triaged", { dot: string; label: string; cls: string }> = {
     untriaged: { dot: "🔴", label: "Untriaged", cls: "text-red-600" },
-    aging: { dot: "🟡", label: "Aging", cls: "text-amber-600" },
+    aging: { dot: "🟡", label: t("freshness.aging", voice), cls: "text-amber-600" },
     triaged: { dot: "🟢", label: "Triaged", cls: "text-green-600" },
-  } as const;
+  };
   const { dot, label, cls } = map[kind];
   return (
     <span className={cn("shrink-0 text-xs font-medium", cls)}>
