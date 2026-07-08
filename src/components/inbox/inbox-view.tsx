@@ -3,8 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { BrainDumpStatus } from "@/lib/constants";
-import { isAging, effectiveAgingMs, type AgingSettings } from "@/lib/aging";
+import { isAging, effectiveAgingMs, freshnessTier, type AgingSettings } from "@/lib/aging";
 import {
   createBrainDumpItem,
   triageBrainDumpItem,
@@ -15,6 +14,8 @@ import {
 } from "@/app/actions/braindump";
 import { startBreakdown } from "@/app/actions/breakdown";
 import { SettingsPanel } from "@/components/inbox/settings-panel";
+import { StatusPill } from "@/components/inbox/status-pill";
+import { bucketItems, type Item } from "@/components/inbox/bucket";
 import { t } from "@/lib/strings";
 import { useVoice } from "@/components/voice-provider";
 import type { Voice } from "@/lib/strings";
@@ -25,21 +26,12 @@ import {
   showReminder,
 } from "@/lib/notifications";
 
-type Item = {
-  id: string;
-  text: string;
-  createdAt: Date;
-  status: string;
-  triagedAt: Date | null;
-  remindedAt: Date | null;
-  snoozedUntil: Date | null;
-  taskId: string | null;
-  freshenedAt: Date | null;
-  promptDismissedAt: Date | null;
-  stepsTotal: number;
-  stepsDone: number;
-  taskStatus: string | null;
-};
+// Deep-link targets for each section's "see all →" link (Library, Task 10+).
+const SEE_ALL = {
+  singleTask: "/library?tab=plated",
+  multiStep: "/library?tab=sorted",
+  savedLater: "/library?tab=pantry",
+} as const;
 
 export function InboxView({
   initialItems,
@@ -100,29 +92,13 @@ export function InboxView({
     requestNotificationPermission().then((p) => setPermission(p));
 
   const now = Date.now();
-  const isInbox = (i: Item) => i.status === BrainDumpStatus.Inbox;
-  const isSnoozed = (i: Item) =>
-    i.snoozedUntil != null && new Date(i.snoozedUntil).getTime() > now;
+  const { needsReview, singleTask, multiStep, savedLater } = bucketItems(
+    initialItems,
+    now,
+  );
 
-  const needsTriage = initialItems
-    .filter((i) => isInbox(i) && !isSnoozed(i))
-    .sort((a, b) => {
-      const aa = isAging(a.createdAt, settings) ? 1 : 0;
-      const ba = isAging(b.createdAt, settings) ? 1 : 0;
-      if (aa !== ba) return ba - aa; // aging first
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
-  const snoozed = initialItems.filter((i) => isInbox(i) && isSnoozed(i));
-  const triaged = initialItems
-    .filter((i) => i.status === BrainDumpStatus.Triaged)
-    .sort(
-      (a, b) =>
-        new Date(b.triagedAt ?? b.createdAt).getTime() -
-        new Date(a.triagedAt ?? a.createdAt).getTime(),
-    );
-
-  const untriagedCount = needsTriage.length;
-  const agingCount = needsTriage.filter((i) =>
+  const untriagedCount = needsReview.length;
+  const agingCount = needsReview.filter((i) =>
     isAging(i.createdAt, settings),
   ).length;
 
@@ -130,7 +106,7 @@ export function InboxView({
   // remindedAt so it doesn't repeat (guarded client-side by notifiedRef too).
   useEffect(() => {
     if (permission !== "granted") return;
-    const due = needsTriage.filter(
+    const due = needsReview.filter(
       (i) =>
         isAging(i.createdAt, settings) &&
         i.remindedAt == null &&
@@ -145,7 +121,7 @@ export function InboxView({
       }
       router.refresh();
     })();
-  }, [needsTriage, permission, settings, router]);
+  }, [needsReview, permission, settings, router]);
 
   const run = (fn: () => Promise<unknown>) =>
     startTransition(async () => {
@@ -218,13 +194,13 @@ export function InboxView({
             </span>
           )}
         </h2>
-        {needsTriage.length === 0 ? (
+        {needsReview.length === 0 ? (
           <p className="text-muted-foreground rounded-lg border border-dashed px-4 py-6 text-center text-sm">
             Inbox zero 🎉 Nothing to triage.
           </p>
         ) : (
           <ul className={cn("space-y-2", pending && "opacity-70")}>
-            {needsTriage.map((item) => (
+            {needsReview.map((item) => (
               <ItemRow
                 key={item.id}
                 item={item}
@@ -240,20 +216,98 @@ export function InboxView({
         )}
       </section>
 
-      {snoozed.length > 0 && (
+      {/* To do — triaged items split into single-task + multi-step sub-buckets */}
+      {(singleTask.length > 0 || multiStep.length > 0) && (
+        <section className="space-y-4">
+          <h2 className="text-sm font-semibold">{t("section.toDo", voice)}</h2>
+
+          {singleTask.length > 0 && (
+            <div>
+              <SubHeader
+                label={t("section.singleTask", voice)}
+                count={singleTask.length}
+                seeAllHref={SEE_ALL.singleTask}
+                voice={voice}
+              />
+              <ul className={cn("space-y-2", pending && "opacity-70")}>
+                {singleTask.map((item) => (
+                  <li
+                    key={item.id}
+                    className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="text-primary shrink-0 text-xs font-medium">
+                        {t("pill.toDo", voice)}
+                      </span>
+                      <span className="break-words">{item.text}</span>
+                    </span>
+                    <button
+                      className="text-muted-foreground hover:text-destructive shrink-0 text-xs"
+                      onClick={() => run(() => deleteBrainDumpItem(item.id))}
+                    >
+                      {t("action.delete", voice)}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {multiStep.length > 0 && (
+            <div>
+              <SubHeader
+                label={t("section.multiStep", voice)}
+                count={multiStep.length}
+                seeAllHref={SEE_ALL.multiStep}
+                voice={voice}
+              />
+              <ul className={cn("space-y-2", pending && "opacity-70")}>
+                {multiStep.map((item) => (
+                  <li
+                    key={item.id}
+                    className="flex items-center justify-between gap-3 rounded-lg border px-4 py-2 text-sm"
+                  >
+                    {item.taskId ? (
+                      <a
+                        href={`/tasks/${item.taskId}`}
+                        className="min-w-0 break-words hover:underline"
+                      >
+                        {item.text}
+                      </a>
+                    ) : (
+                      <span className="min-w-0 break-words">{item.text}</span>
+                    )}
+                    <span className="text-muted-foreground shrink-0 text-xs">
+                      {item.stepsDone > 0
+                        ? `${item.stepsDone}/${item.stepsTotal} ${t("progress.done", voice)}`
+                        : t("progress.notScheduled", voice)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Saved for later — snoozed inbox items; freshness is paused (no pill) */}
+      {savedLater.length > 0 && (
         <section>
-          <h2 className="text-muted-foreground mb-2 text-sm font-semibold">
-            💤 Snoozed ({snoozed.length})
-          </h2>
-          <ul className="space-y-2 opacity-60">
-            {snoozed.map((item) => (
+          <SubHeader
+            label={t("section.savedLater", voice)}
+            count={savedLater.length}
+            seeAllHref={SEE_ALL.savedLater}
+            voice={voice}
+          />
+          <ul className="space-y-2 opacity-70">
+            {savedLater.map((item) => (
               <li
                 key={item.id}
                 className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm"
               >
-                <span>{item.text}</span>
+                <span className="break-words">{item.text}</span>
                 <button
-                  className="text-muted-foreground hover:text-foreground text-xs underline"
+                  className="text-muted-foreground hover:text-foreground shrink-0 text-xs underline"
                   onClick={() => run(() => triageBrainDumpItem(item.id))}
                 >
                   wake now
@@ -263,35 +317,34 @@ export function InboxView({
           </ul>
         </section>
       )}
+    </div>
+  );
+}
 
-      {/* Triaged (collapsible) */}
-      {triaged.length > 0 && (
-        <details className="group">
-          <summary className="text-muted-foreground hover:text-foreground cursor-pointer list-none text-sm font-semibold">
-            <span className="group-open:hidden">▸</span>
-            <span className="hidden group-open:inline">▾</span> Triaged (
-            {triaged.length})
-          </summary>
-          <ul className="mt-2 space-y-2">
-            {triaged.map((item) => (
-              <li
-                key={item.id}
-                className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm"
-              >
-                <span className="flex items-center gap-2">
-                  <StatusPill kind="triaged" /> {item.text}
-                </span>
-                <button
-                  className="text-muted-foreground hover:text-destructive text-xs"
-                  onClick={() => run(() => deleteBrainDumpItem(item.id))}
-                >
-                  Delete
-                </button>
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
+/** Sub-bucket heading: label + count badge + a "see all →" deep-link. */
+function SubHeader({
+  label,
+  count,
+  seeAllHref,
+  voice,
+}: {
+  label: string;
+  count: number;
+  seeAllHref: string;
+  voice: Voice;
+}) {
+  return (
+    <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
+      <span>{label}</span>
+      <span className="bg-secondary text-secondary-foreground rounded-full px-2 py-0.5 text-xs">
+        {count}
+      </span>
+      <a
+        href={seeAllHref}
+        className="text-muted-foreground hover:text-foreground ml-auto text-xs font-normal"
+      >
+        {t("link.seeAll", voice)}
+      </a>
     </div>
   );
 }
@@ -314,12 +367,13 @@ function ItemRow({
   onDelete: () => void;
 }) {
   const aging = isAging(item.createdAt, settings);
+  const tier = freshnessTier(item.createdAt, item.freshenedAt, settings);
   return (
     <li className="rounded-lg border px-4 py-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <div className="flex items-center gap-2">
-            <StatusPill kind={aging ? "aging" : "untriaged"} voice={voice} />
+            <StatusPill tier={tier} voice={voice} />
             <span className="break-words">{item.text}</span>
           </div>
           <AgeLabel createdAt={item.createdAt} aging={aging} />
@@ -352,20 +406,6 @@ function ItemRow({
         </button>
       </div>
     </li>
-  );
-}
-
-function StatusPill({ kind, voice = "plain" }: { kind: "untriaged" | "aging" | "triaged"; voice?: Voice }) {
-  const map: Record<"untriaged" | "aging" | "triaged", { dot: string; label: string; cls: string }> = {
-    untriaged: { dot: "🔴", label: "Untriaged", cls: "text-red-600" },
-    aging: { dot: "🟡", label: t("freshness.aging", voice), cls: "text-amber-600" },
-    triaged: { dot: "🟢", label: "Triaged", cls: "text-green-600" },
-  };
-  const { dot, label, cls } = map[kind];
-  return (
-    <span className={cn("shrink-0 text-xs font-medium", cls)}>
-      {dot} {label}
-    </span>
   );
 }
 
