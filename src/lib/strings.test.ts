@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { STRINGS, t, type StringKey, type Voice } from "./strings";
+import { BadgeKey } from "./constants";
 
 describe("STRINGS map completeness", () => {
   it("every key has a non-empty plain string", () => {
@@ -15,6 +16,16 @@ describe("STRINGS map completeness", () => {
       expect(STRINGS[key].playful.length, `key "${key}" playful is empty string`).toBeGreaterThan(0);
     }
   });
+});
+
+describe("every awarded BadgeKey has a STRINGS label", () => {
+  // Guards the dashboard regression where awarded badges (e.g. beat_best_streak)
+  // rendered their raw DB key because BADGE_STRING_KEYS/STRINGS dropped them.
+  for (const key of Object.values(BadgeKey)) {
+    it(`badge.${key} exists`, () => {
+      expect(STRINGS[`badge.${key}` as StringKey]).toBeTruthy();
+    });
+  }
 });
 
 describe("t() function", () => {
@@ -45,6 +56,8 @@ describe("t() function", () => {
     ["badge.streak_5",       "playful", "🔥 Full Week"],
     ["badge.inbox_zero",     "plain",   "Inbox zero"],
     ["badge.comeback",       "plain",   "Comeback"],
+    ["badge.ten_steps_day",  "plain",   "10 steps in a day"],
+    ["badge.beat_best_streak","plain",  "Beat your best streak"],
   ];
 
   for (const [key, voice, expected] of cases) {
@@ -205,6 +218,8 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "badge.streak_5",
     "badge.inbox_zero",
     "badge.comeback",
+    "badge.ten_steps_day",
+    "badge.beat_best_streak",
     "section.needsReview",
     "action.addTodo",
     "focus.giveUp",

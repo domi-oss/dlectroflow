@@ -59,6 +59,8 @@ export const STRINGS = {
   "badge.streak_5":             { plain: "Full work week",    playful: "🔥 Full Week" },
   "badge.inbox_zero":           { plain: "Inbox zero",        playful: "🧺 Empty Tray" },
   "badge.comeback":             { plain: "Comeback",          playful: "📦 Back for Seconds" },
+  "badge.ten_steps_day":        { plain: "10 steps in a day", playful: "🔟 Ten-Bite Day" },
+  "badge.beat_best_streak":     { plain: "Beat your best streak", playful: "🏆 New Record" },
 
   // ── Focus timer labels ─────────────────────────────────────────────────────
   "focus.startTimer":   { plain: "▶ Start focusing",   playful: "▶ Start focusing" },

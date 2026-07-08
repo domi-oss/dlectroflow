@@ -13,13 +13,16 @@ export const dynamic = "force-dynamic";
 
 // Maps badge DB keys to STRINGS keys; unknown badges fall back to raw key.
 const BADGE_STRING_KEYS: Record<string, StringKey> = {
-  first_breakdown: "badge.first_breakdown",
-  first_schedule:  "badge.first_schedule",
-  first_focus:     "badge.first_focus",
-  task_complete:   "badge.task_complete",
-  streak_5:        "badge.streak_5",
-  inbox_zero:      "badge.inbox_zero",
-  comeback:        "badge.comeback",
+  first_breakdown:  "badge.first_breakdown",
+  first_schedule:   "badge.first_schedule",
+  first_focus:      "badge.first_focus",
+  task_complete:    "badge.task_complete",
+  streak_5:         "badge.streak_5",
+  inbox_zero:       "badge.inbox_zero",
+  comeback:         "badge.comeback",
+  // Actively awarded (rewards.ts) — must stay mapped so earned badges render a label.
+  ten_steps_day:    "badge.ten_steps_day",
+  beat_best_streak: "badge.beat_best_streak",
 };
 
 const MEDALS = ["🥇", "🥈", "🥉"];
