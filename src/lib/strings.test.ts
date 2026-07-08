@@ -165,6 +165,14 @@ describe("Task 4 — nav/menu/prompt/confirm keys (plain vs playful)", () => {
   it('t("progress.notScheduled", "playful") → "not scheduled"', () => {
     expect(t("progress.notScheduled", "playful")).toBe("not scheduled");
   });
+
+  // inbox.zero
+  it('t("inbox.zero", "plain") → "Inbox zero. Nothing to review."', () => {
+    expect(t("inbox.zero", "plain")).toBe("Inbox zero. Nothing to review.");
+  });
+  it('t("inbox.zero", "playful") → "🎉 Inbox zero! Nothing to review."', () => {
+    expect(t("inbox.zero", "playful")).toBe("🎉 Inbox zero! Nothing to review.");
+  });
 });
 
 describe("Task 2 — inbox/focus/breakdown keys (plain vs playful)", () => {
@@ -319,6 +327,7 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "action.cancel",
     "capture.confirm",
     "prompt.stillNeeded",
+    "inbox.zero",
     "focus.giveUp",
     "focus.nextStep",
     "breakdown.looksRight",

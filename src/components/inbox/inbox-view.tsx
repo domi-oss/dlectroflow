@@ -3,7 +3,13 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { isAging, effectiveAgingMs, freshnessTier, type AgingSettings } from "@/lib/aging";
+import {
+  isAging,
+  effectiveAgingMs,
+  freshnessTier,
+  shouldPrompt24h,
+  type AgingSettings,
+} from "@/lib/aging";
 import {
   createBrainDumpItem,
   triageBrainDumpItem,
@@ -11,6 +17,7 @@ import {
   deleteBrainDumpItem,
   keepAsTask,
   markReminded,
+  dismissPrompt,
 } from "@/app/actions/braindump";
 import { startBreakdown } from "@/app/actions/breakdown";
 import { SettingsPanel } from "@/components/inbox/settings-panel";
@@ -54,6 +61,18 @@ export function InboxView({
   const [pending, startTransition] = useTransition();
   const [text, setText] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Transient "captured ✓" indicator shown after a successful capture submit.
+  const [justCaptured, setJustCaptured] = useState(false);
+  const captureTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (captureTimeoutRef.current) clearTimeout(captureTimeoutRef.current);
+    };
+  }, []);
+
+  // Per-row inline delete confirm — only one row confirms at a time.
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   // Tick so relative ages + aging state recompute live.
   const [, setTick] = useState(0);
@@ -104,12 +123,16 @@ export function InboxView({
 
   // Fire a desktop reminder once per aging, not-yet-reminded item, then persist
   // remindedAt so it doesn't repeat (guarded client-side by notifiedRef too).
+  // The inline 24h "still needed?" prompt is the canonical review nudge, so an
+  // item whose prompt has been dismissed is excluded here too — dismissing it
+  // once means "stop bugging me about this," not just "don't show the banner."
   useEffect(() => {
     if (permission !== "granted") return;
     const due = needsReview.filter(
       (i) =>
         isAging(i.createdAt, settings) &&
         i.remindedAt == null &&
+        i.promptDismissedAt == null &&
         !notifiedRef.current.has(i.id),
     );
     if (due.length === 0) return;
@@ -140,6 +163,18 @@ export function InboxView({
     if (!value) return;
     setText("");
     run(() => createBrainDumpItem(value));
+    setJustCaptured(true);
+    if (captureTimeoutRef.current) clearTimeout(captureTimeoutRef.current);
+    captureTimeoutRef.current = setTimeout(() => setJustCaptured(false), 1500);
+  };
+
+  // Inline delete confirm: first click reveals Delete/Cancel; the action only
+  // fires on the confirming click.
+  const requestDelete = (id: string) => setConfirmDeleteId(id);
+  const cancelDelete = () => setConfirmDeleteId(null);
+  const confirmDelete = (id: string) => {
+    setConfirmDeleteId(null);
+    run(() => deleteBrainDumpItem(id));
   };
 
   return (
@@ -180,6 +215,11 @@ export function InboxView({
         <p className="text-muted-foreground px-1 text-xs">
           No fields required. Press Enter to capture instantly.
         </p>
+        {justCaptured && (
+          <p role="status" className="px-1 text-xs text-emerald-600">
+            {t("capture.confirm", voice)}
+          </p>
+        )}
       </div>
 
       <SettingsPanel settings={settings} isOwner={isOwner} breakdownModel={breakdownModel} voice={voiceProp} />
@@ -196,7 +236,7 @@ export function InboxView({
         </h2>
         {needsReview.length === 0 ? (
           <p className="text-muted-foreground rounded-lg border border-dashed px-4 py-6 text-center text-sm">
-            Inbox zero 🎉 Nothing to triage.
+            {t("inbox.zero", voice)}
           </p>
         ) : (
           <ul className={cn("space-y-2", pending && "opacity-70")}>
@@ -209,7 +249,11 @@ export function InboxView({
                 onBreakdown={() => breakdown(item.id)}
                 onKeep={() => run(() => keepAsTask(item.id))}
                 onSnooze={() => run(() => snoozeBrainDumpItem(item.id, 60))}
-                onDelete={() => run(() => deleteBrainDumpItem(item.id))}
+                confirmingDelete={confirmDeleteId === item.id}
+                onRequestDelete={() => requestDelete(item.id)}
+                onConfirmDelete={() => confirmDelete(item.id)}
+                onCancelDelete={cancelDelete}
+                onDismissPrompt={() => run(() => dismissPrompt(item.id))}
               />
             ))}
           </ul>
@@ -241,12 +285,30 @@ export function InboxView({
                       </span>
                       <span className="break-words">{item.text}</span>
                     </span>
-                    <button
-                      className="text-muted-foreground hover:text-destructive shrink-0 text-xs"
-                      onClick={() => run(() => deleteBrainDumpItem(item.id))}
-                    >
-                      {t("action.delete", voice)}
-                    </button>
+                    {confirmDeleteId === item.id ? (
+                      <span className="flex shrink-0 items-center gap-2 text-xs">
+                        <button
+                          className="text-destructive font-medium"
+                          onClick={() => confirmDelete(item.id)}
+                        >
+                          {t("action.delete", voice)}
+                        </button>
+                        <span className="text-muted-foreground">·</span>
+                        <button
+                          className="text-muted-foreground hover:text-foreground"
+                          onClick={cancelDelete}
+                        >
+                          {t("action.cancel", voice)}
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        className="text-muted-foreground hover:text-destructive shrink-0 text-xs"
+                        onClick={() => requestDelete(item.id)}
+                      >
+                        {t("action.delete", voice)}
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -356,7 +418,11 @@ function ItemRow({
   onBreakdown,
   onKeep,
   onSnooze,
-  onDelete,
+  confirmingDelete,
+  onRequestDelete,
+  onConfirmDelete,
+  onCancelDelete,
+  onDismissPrompt,
 }: {
   item: Item;
   settings: AgingSettings;
@@ -364,10 +430,20 @@ function ItemRow({
   onBreakdown: () => void;
   onKeep: () => void;
   onSnooze: () => void;
-  onDelete: () => void;
+  confirmingDelete: boolean;
+  onRequestDelete: () => void;
+  onConfirmDelete: () => void;
+  onCancelDelete: () => void;
+  onDismissPrompt: () => void;
 }) {
   const aging = isAging(item.createdAt, settings);
   const tier = freshnessTier(item.createdAt, item.freshenedAt, settings);
+  const showStillNeededPrompt = shouldPrompt24h(
+    item.createdAt,
+    item.freshenedAt,
+    item.promptDismissedAt,
+    settings,
+  );
   return (
     <li className="rounded-lg border px-4 py-3">
       <div className="flex items-start justify-between gap-3">
@@ -379,6 +455,21 @@ function ItemRow({
           <AgeLabel createdAt={item.createdAt} aging={aging} />
         </div>
       </div>
+      {showStillNeededPrompt && (
+        <div
+          className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-xs"
+          style={{ backgroundColor: "#fff5f5", borderColor: "#c0392b", color: "#c0392b" }}
+        >
+          <span>{t("prompt.stillNeeded", voice)}</span>
+          <button
+            onClick={onDismissPrompt}
+            className="rounded-md border px-2 py-1 font-medium"
+            style={{ borderColor: "#c0392b", color: "#c0392b" }}
+          >
+            {t("action.dismiss", voice)}
+          </button>
+        </div>
+      )}
       <div className="mt-2 flex flex-wrap gap-2 text-xs">
         <button
           onClick={onBreakdown}
@@ -398,12 +489,30 @@ function ItemRow({
         >
           {t("action.saveForLater", voice)}
         </button>
-        <button
-          onClick={onDelete}
-          className="text-muted-foreground hover:text-destructive ml-auto rounded-md px-2.5 py-1"
-        >
-          Delete
-        </button>
+        {confirmingDelete ? (
+          <span className="ml-auto flex items-center gap-2">
+            <button
+              onClick={onConfirmDelete}
+              className="text-destructive rounded-md px-2.5 py-1 font-medium"
+            >
+              {t("action.delete", voice)}
+            </button>
+            <span className="text-muted-foreground">·</span>
+            <button
+              onClick={onCancelDelete}
+              className="text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1"
+            >
+              {t("action.cancel", voice)}
+            </button>
+          </span>
+        ) : (
+          <button
+            onClick={onRequestDelete}
+            className="text-muted-foreground hover:text-destructive ml-auto rounded-md px-2.5 py-1"
+          >
+            {t("action.delete", voice)}
+          </button>
+        )}
       </div>
     </li>
   );

@@ -90,6 +90,9 @@ export const STRINGS = {
   // ── Prompts ────────────────────────────────────────────────────────────────
   "prompt.stillNeeded":  { plain: "This has been sitting a while — still needed?", playful: "🕐 This snack's been sitting a while — still want it?" },
 
+  // ── Inbox empty state ──────────────────────────────────────────────────────
+  "inbox.zero":          { plain: "Inbox zero. Nothing to review.", playful: "🎉 Inbox zero! Nothing to review." },
+
   // ── Links ──────────────────────────────────────────────────────────────────
   "link.seeAll":         { plain: "see all →",         playful: "see all →" },
 
