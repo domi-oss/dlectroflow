@@ -7,7 +7,7 @@ const db = vi.hoisted(() => ({
 
 vi.mock("@/lib/db", () => ({ prisma: db }));
 
-import { clientIpHash, consumeGuestBreakdown, peekGuestAllowance } from "./guest-quota";
+import { clientIpHash, consumeGuestBreakdown, peekGuestAllowance, refundGuestBreakdown } from "./guest-quota";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -77,6 +77,28 @@ describe("peekGuestAllowance", () => {
     const result = await peekGuestAllowance("iphash");
     expect(result.remaining).toBe(5);
     expect(db.guestAiUsage.upsert).not.toHaveBeenCalled();
+    expect(db.guestAiUsage.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("refundGuestBreakdown", () => {
+  it("decrements count when row exists with count > 0", async () => {
+    db.guestAiUsage.findUnique.mockResolvedValue({ ipHash: "iphash", count: 3, windowStartedAt: new Date() });
+    db.guestAiUsage.update.mockResolvedValue({});
+    await refundGuestBreakdown("iphash");
+    expect(db.guestAiUsage.update).toHaveBeenCalledWith({
+      where: { ipHash: "iphash" },
+      data: { count: { decrement: 1 } },
+    });
+  });
+  it("does NOT call update when no row exists", async () => {
+    db.guestAiUsage.findUnique.mockResolvedValue(null);
+    await refundGuestBreakdown("iphash");
+    expect(db.guestAiUsage.update).not.toHaveBeenCalled();
+  });
+  it("does NOT call update when count is 0", async () => {
+    db.guestAiUsage.findUnique.mockResolvedValue({ ipHash: "iphash", count: 0, windowStartedAt: new Date() });
+    await refundGuestBreakdown("iphash");
     expect(db.guestAiUsage.update).not.toHaveBeenCalled();
   });
 });

@@ -83,3 +83,11 @@ export async function consumeGuestBreakdown(ipHash: string): Promise<AllowanceRe
 
   return { allowed: true, remaining: Math.max(0, quota - newCount) };
 }
+
+/** Refund one consumed breakdown (e.g. the Claude call failed after metering). Never goes below 0. */
+export async function refundGuestBreakdown(ipHash: string): Promise<void> {
+  const row = await prisma.guestAiUsage.findUnique({ where: { ipHash } });
+  if (row && row.count > 0) {
+    await prisma.guestAiUsage.update({ where: { ipHash }, data: { count: { decrement: 1 } } });
+  }
+}

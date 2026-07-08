@@ -11,7 +11,7 @@ import {
 import { isOwnerRequest, currentWorkspaceId } from "@/lib/workspace";
 import { getSettings } from "@/lib/settings-read";
 import { resolveBreakdownModel, breakdownParamsFor } from "@/lib/models";
-import { clientIpHash, consumeGuestBreakdown } from "@/lib/guest-quota";
+import { clientIpHash, consumeGuestBreakdown, refundGuestBreakdown } from "@/lib/guest-quota";
 import { OWNER_WORKSPACE_ID } from "@/lib/constants";
 
 export const runtime = "nodejs";
@@ -116,14 +116,15 @@ export async function POST(req: Request): Promise<Response> {
   const isGuest = wsId !== OWNER_WORKSPACE_ID;
 
   let blockedReason: "quota" | "global_cap" | null = null;
+  let guestIpHash: string | null = null;
   if (isGuest) {
     const hdrs = await headers();
-    const ipHash = clientIpHash(hdrs);
+    guestIpHash = clientIpHash(hdrs);
     // No resolvable IP ⇒ treat as global-cap-style block (can't meter safely).
-    if (!ipHash) {
+    if (!guestIpHash) {
       blockedReason = "global_cap";
     } else {
-      const res = await consumeGuestBreakdown(ipHash);
+      const res = await consumeGuestBreakdown(guestIpHash);
       if (!res.allowed) blockedReason = res.reason ?? "quota";
     }
   }
@@ -165,7 +166,11 @@ export async function POST(req: Request): Promise<Response> {
         }
         send({ type: "done" });
       } catch {
-        // Claude failed → canned fallback rather than a dead end.
+        // Claude failed → refund the guest's quota so a transient error doesn't burn an allowance.
+        if (isGuest && guestIpHash && !blockedReason) {
+          await refundGuestBreakdown(guestIpHash);
+        }
+        // Canned fallback rather than a dead end.
         send({ type: "fallback", reason: "error", data: localBreakdown(body.title) });
         send({ type: "done" });
       } finally {
