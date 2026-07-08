@@ -36,9 +36,13 @@ type Item = {
 export function InboxView({
   initialItems,
   settings,
+  isOwner,
+  breakdownModel,
 }: {
   initialItems: Item[];
   settings: AgingSettings;
+  isOwner: boolean;
+  breakdownModel: string | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -188,7 +192,7 @@ export function InboxView({
         </p>
       </div>
 
-      <SettingsPanel settings={settings} />
+      <SettingsPanel settings={settings} isOwner={isOwner} breakdownModel={breakdownModel} />
 
       {/* Needs triage */}
       <section>

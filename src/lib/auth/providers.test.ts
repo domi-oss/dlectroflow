@@ -53,6 +53,7 @@ describe("assertAuthConfig", () => {
     vi.stubEnv("GITLAB_OAUTH_CLIENT_ID", "client-id");
     vi.stubEnv("GITLAB_OAUTH_CLIENT_SECRET", "client-secret");
     vi.stubEnv("OWNER_ALLOWLIST", "13595692");
+    vi.stubEnv("GUEST_IP_HASH_SALT", "a".repeat(16));
     expect(() => assertAuthConfig()).not.toThrow();
   });
 

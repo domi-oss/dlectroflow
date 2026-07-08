@@ -21,6 +21,8 @@ export function assertAuthConfig(): void {
   if (!c.clientId) missing.push("GITLAB_OAUTH_CLIENT_ID");
   if (!c.clientSecret) missing.push("GITLAB_OAUTH_CLIENT_SECRET");
   if (c.ownerAllowlist.length === 0) missing.push("OWNER_ALLOWLIST");
+  if (!process.env.GUEST_IP_HASH_SALT || process.env.GUEST_IP_HASH_SALT.length < 16)
+    missing.push("GUEST_IP_HASH_SALT (>=16 chars)");
   if (missing.length) {
     throw new Error(
       `Owner auth misconfigured — refusing to boot with data reachable. Missing: ${missing.join(", ")}`,

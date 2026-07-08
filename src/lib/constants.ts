@@ -72,8 +72,25 @@ export const SINGLETON_ID = "singleton";
 
 export const OWNER_WORKSPACE_ID = "owner";
 
+export function isGuestWorkspace(workspaceId: string): boolean {
+  return workspaceId !== OWNER_WORKSPACE_ID;
+}
+
 export const WorkspaceKind = {
   Owner: "owner",
   Guest: "guest",
 } as const;
 export type WorkspaceKind = (typeof WorkspaceKind)[keyof typeof WorkspaceKind];
+
+// ── Phase 2 — breakdown model selection ───────────────────────────────────
+// Owner-selectable models (validated server-side). claude-fable-5 is shown in
+// the UI but deliberately NOT allowlisted — it can never be selected/honored.
+export const OWNER_BREAKDOWN_ALLOWLIST = [
+  "claude-haiku-4-5",
+  "claude-sonnet-4-6",
+  "claude-opus-4-8",
+] as const;
+export type BreakdownModel = (typeof OWNER_BREAKDOWN_ALLOWLIST)[number];
+
+export const OWNER_BREAKDOWN_MODEL_DEFAULT = "claude-sonnet-4-6";
+export const GUEST_BREAKDOWN_MODEL_DEFAULT = "claude-haiku-4-5";

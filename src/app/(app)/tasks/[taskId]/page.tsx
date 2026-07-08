@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { currentWorkspaceId } from "@/lib/workspace";
+import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
 import { BreakdownChat } from "@/components/breakdown/breakdown-chat";
 import { getReclaimStatus } from "@/lib/reclaim";
 import { getGoogleStatus } from "@/lib/google";
@@ -19,13 +19,14 @@ export default async function TaskPage({
   const workspaceId = await currentWorkspaceId();
   const { taskId } = await params;
   const { edit } = await searchParams;
-  const [task, reclaim, google] = await Promise.all([
+  const [task, reclaim, google, owner] = await Promise.all([
     prisma.task.findFirst({
       where: { id: taskId, workspaceId },
       include: { steps: { orderBy: { order: "asc" } } },
     }),
     getReclaimStatus(),
     getGoogleStatus(),
+    isOwnerRequest(),
   ]);
   if (!task) notFound();
 
@@ -51,6 +52,7 @@ export default async function TaskPage({
         initialProposal={initialProposal}
         reclaimConnected={reclaim.connected}
         google={google}
+        isGuest={!owner}
       />
     );
   }

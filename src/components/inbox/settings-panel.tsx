@@ -2,10 +2,35 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { updateAgingSettings } from "@/app/actions/settings";
+import { updateAgingSettings, updateBreakdownModel } from "@/app/actions/settings";
 import type { AgingSettings } from "@/lib/aging";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { OWNER_BREAKDOWN_ALLOWLIST, OWNER_BREAKDOWN_MODEL_DEFAULT } from "@/lib/constants";
 
-export function SettingsPanel({ settings }: { settings: AgingSettings }) {
+const FABLE_LINES = [
+  "Our most capable model. Also $50/M tokens. To split 'clean the kitchen' into 3 steps? We love you, but no.",
+  "We tried it. It wrote a dissertation on the philosophy of procrastination instead of your task. Disabled for everyone's safety.",
+  "Reserved for problems harder than 'remember to buy milk.' 💸",
+  "Bringing a frontier reasoning model to a to-do list felt… irresponsible.",
+  "It kept trying to solve P vs NP instead of your laundry. Locked.",
+  "Overkill detector tripped. Fable stays in its cage for this one.",
+];
+
+const MODEL_LABELS: Record<string, string> = {
+  "claude-haiku-4-5": "Haiku 4.5 — fastest, cheapest",
+  "claude-sonnet-4-6": "Sonnet 4.6 — balanced (default)",
+  "claude-opus-4-8": "Opus 4.8 — deepest reasoning, slower",
+};
+
+export function SettingsPanel({
+  settings,
+  isOwner,
+  breakdownModel,
+}: {
+  settings: AgingSettings;
+  isOwner: boolean;
+  breakdownModel: string | null;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [minutes, setMinutes] = useState(settings.agingThresholdMinutes);
@@ -15,12 +40,22 @@ export function SettingsPanel({ settings }: { settings: AgingSettings }) {
       : "",
   );
 
+  const [model, setModel] = useState<string>(breakdownModel ?? OWNER_BREAKDOWN_MODEL_DEFAULT);
+  const [fable] = useState(() => FABLE_LINES[Math.floor(Math.random() * FABLE_LINES.length)]);
+
   const save = () =>
     startTransition(async () => {
       await updateAgingSettings({
         agingThresholdMinutes: minutes,
         demoOverrideSeconds: demo.trim() === "" ? null : Number(demo),
       });
+      router.refresh();
+    });
+
+  const saveModel = (m: string) =>
+    startTransition(async () => {
+      setModel(m);
+      await updateBreakdownModel(m);
       router.refresh();
     });
 
@@ -72,6 +107,35 @@ export function SettingsPanel({ settings }: { settings: AgingSettings }) {
         The demo override makes items age in seconds so reminders fire live on
         stage.
       </p>
+
+      <div className="mt-4 border-t pt-3">
+        <p className="text-muted-foreground mb-2 text-xs">🎨 Appearance</p>
+        <ThemeToggle />
+      </div>
+
+      {isOwner && (
+        <div className="mt-4 border-t pt-3">
+          <p className="text-muted-foreground mb-2 text-xs">🧠 Breakdown model</p>
+          <div className="flex flex-col gap-1">
+            {OWNER_BREAKDOWN_ALLOWLIST.map((m) => (
+              <label key={m} className="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="breakdown-model"
+                  checked={model === m}
+                  disabled={pending}
+                  onChange={() => saveModel(m)}
+                />
+                {MODEL_LABELS[m]}
+              </label>
+            ))}
+            <label className="flex items-center gap-2 text-sm opacity-50" title={fable}>
+              <input type="radio" name="breakdown-model" disabled />
+              🔒 Fable 5 — {fable}
+            </label>
+          </div>
+        </div>
+      )}
     </details>
   );
 }

@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { getStreak } from "@/lib/db";
 import { getAnthropic, BREAKDOWN_MODEL } from "@/lib/anthropic";
-import { FocusOutcome, TaskStatus } from "@/lib/constants";
+import { FocusOutcome, TaskStatus, isGuestWorkspace } from "@/lib/constants";
 import { getTodaySpark } from "@/lib/spark";
 
 // ── date helpers (server-local day, matching rewards.ts) ────────────────────
@@ -109,17 +109,19 @@ function fallbackNarrative(d: DayData): string {
   return `${winLine}${streakLine}${carryLine}`;
 }
 
-async function generateNarrative(d: DayData): Promise<string> {
-  try {
-    const anthropic = getAnthropic();
-    const resp = await anthropic.messages.create({
-      model: BREAKDOWN_MODEL,
-      max_tokens: 400,
-      output_config: { effort: "low" },
-      messages: [
-        {
-          role: "user",
-          content: `Write a warm, personal end-of-day recap for someone with ADHD. Rules:
+async function generateNarrative(d: DayData, workspaceId: string): Promise<string> {
+  // Guests never call Claude — use the local narrative builder.
+  if (!isGuestWorkspace(workspaceId)) {
+    try {
+      const anthropic = getAnthropic();
+      const resp = await anthropic.messages.create({
+        model: BREAKDOWN_MODEL,
+        max_tokens: 400,
+        output_config: { effort: "low" },
+        messages: [
+          {
+            role: "user",
+            content: `Write a warm, personal end-of-day recap for someone with ADHD. Rules:
 - Lead with the WINS first, always. Be genuinely encouraging, never cheesy or corny.
 - Guilt-free about anything unfinished — reframe carry-over as tomorrow's starting points, not failures.
 - 2 short paragraphs max, ~90 words total. Second person ("you"). No emoji, no headings, no bullet points, no quotation marks around the whole thing.
@@ -132,17 +134,18 @@ Today's data:
 - Still open (carry into tomorrow): ${d.carryOverTexts.length ? d.carryOverTexts.map((t) => `"${t}"`).join(", ") : "nothing pressing"}
 
 If the day was quiet (little done), be especially kind — no pressure, tomorrow is a clean slate.`,
-        },
-      ],
-    });
-    const text = resp.content
-      .filter((b) => b.type === "text")
-      .map((b) => (b.type === "text" ? b.text : ""))
-      .join("")
-      .trim();
-    if (text) return text;
-  } catch {
-    // fall through to the local fallback
+          },
+        ],
+      });
+      const text = resp.content
+        .filter((b) => b.type === "text")
+        .map((b) => (b.type === "text" ? b.text : ""))
+        .join("")
+        .trim();
+      if (text) return text;
+    } catch {
+      // fall through to the local fallback
+    }
   }
   return fallbackNarrative(d);
 }
@@ -195,7 +198,7 @@ export async function generateTodayRollup(workspaceId: string, force = false): P
   const narrative =
     !force && existing?.narrative
       ? existing.narrative
-      : await generateNarrative(data);
+      : await generateNarrative(data, workspaceId);
 
   const row = await prisma.dayRollup.upsert({
     where: { workspaceId_date: { workspaceId, date: data.date } },

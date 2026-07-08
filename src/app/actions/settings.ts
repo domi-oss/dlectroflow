@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
-import { currentWorkspaceId } from "@/lib/workspace";
+import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
+import { OWNER_BREAKDOWN_ALLOWLIST } from "@/lib/constants";
 
 export async function updateAgingSettings(input: {
   agingThresholdMinutes: number;
@@ -50,4 +51,17 @@ export async function updateRoundupSettings(input: {
     update: data,
   });
   revalidatePath("/dashboard");
+}
+
+/** Phase 2 — owner picks their breakdown model (allowlist-validated, owner-only). */
+export async function updateBreakdownModel(model: string) {
+  if (!(await isOwnerRequest())) return; // guests can't set a model
+  if (!(OWNER_BREAKDOWN_ALLOWLIST as readonly string[]).includes(model)) return;
+  const workspaceId = await currentWorkspaceId();
+  await prisma.settings.upsert({
+    where: { workspaceId },
+    create: { id: workspaceId, workspaceId, breakdownModel: model },
+    update: { breakdownModel: model },
+  });
+  revalidatePath("/inbox");
 }

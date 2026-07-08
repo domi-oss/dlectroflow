@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { getAnthropic, BREAKDOWN_MODEL } from "@/lib/anthropic";
 import { getValidAccessToken, patchGoogleTask } from "@/lib/google";
-import { FocusOutcome, RewardType, BadgeKey } from "@/lib/constants";
+import { FocusOutcome, RewardType, BadgeKey, isGuestWorkspace } from "@/lib/constants";
 import { logReward, touchStreakOnCompletion, awardBadge } from "@/lib/rewards";
 import { currentWorkspaceId } from "@/lib/workspace";
 
@@ -215,6 +215,7 @@ export async function proposeNewEstimate(stepId: string): Promise<number> {
   const workspaceId = await currentWorkspaceId();
   const step = await prisma.step.findFirst({ where: { id: stepId, task: { workspaceId } } });
   if (!step) return 15;
+  if (isGuestWorkspace(workspaceId)) return step.estMinutes + 10;
   try {
     const anthropic = getAnthropic();
     const resp = await anthropic.messages.create({

@@ -44,3 +44,6 @@ yarn-error.log*
 .idea
 .vscode
 *.tsbuildinfo
+
+# Superpowers SDD agent scratch (briefs, reports, review diffs, ledger)
+/.superpowers/
