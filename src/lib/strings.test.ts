@@ -77,6 +77,96 @@ describe("t() function", () => {
   });
 });
 
+describe("Task 4 — nav/menu/prompt/confirm keys (plain vs playful)", () => {
+  // nav.focusTimer
+  it('t("nav.focusTimer", "plain") → "Focus Timer"', () => {
+    expect(t("nav.focusTimer", "plain")).toBe("Focus Timer");
+  });
+  it('t("nav.focusTimer", "playful") → "⏱️ Focus Timer"', () => {
+    expect(t("nav.focusTimer", "playful")).toBe("⏱️ Focus Timer");
+  });
+
+  // nav.settings
+  it('t("nav.settings", "plain") → "Settings"', () => {
+    expect(t("nav.settings", "plain")).toBe("Settings");
+  });
+  it('t("nav.settings", "playful") → "⚙️ Settings"', () => {
+    expect(t("nav.settings", "playful")).toBe("⚙️ Settings");
+  });
+
+  // capture.confirm
+  it('t("capture.confirm", "plain") → "captured ✓"', () => {
+    expect(t("capture.confirm", "plain")).toBe("captured ✓");
+  });
+  it('t("capture.confirm", "playful") → "captured ✓"', () => {
+    expect(t("capture.confirm", "playful")).toBe("captured ✓");
+  });
+
+  // prompt.stillNeeded
+  it('t("prompt.stillNeeded", "plain") → "This has been sitting a while — still needed?"', () => {
+    expect(t("prompt.stillNeeded", "plain")).toBe("This has been sitting a while — still needed?");
+  });
+  it('t("prompt.stillNeeded", "playful") → "🕐 This snack\'s been sitting a while — still want it?"', () => {
+    expect(t("prompt.stillNeeded", "playful")).toBe("🕐 This snack's been sitting a while — still want it?");
+  });
+
+  // action.dismiss
+  it('t("action.dismiss", "plain") → "Dismiss"', () => {
+    expect(t("action.dismiss", "plain")).toBe("Dismiss");
+  });
+  it('t("action.dismiss", "playful") → "Not now"', () => {
+    expect(t("action.dismiss", "playful")).toBe("Not now");
+  });
+
+  // action.delete
+  it('t("action.delete", "plain") → "Delete"', () => {
+    expect(t("action.delete", "plain")).toBe("Delete");
+  });
+  it('t("action.delete", "playful") → "Delete"', () => {
+    expect(t("action.delete", "playful")).toBe("Delete");
+  });
+
+  // action.cancel
+  it('t("action.cancel", "plain") → "Cancel"', () => {
+    expect(t("action.cancel", "plain")).toBe("Cancel");
+  });
+  it('t("action.cancel", "playful") → "Cancel"', () => {
+    expect(t("action.cancel", "playful")).toBe("Cancel");
+  });
+
+  // link.seeAll
+  it('t("link.seeAll", "plain") → "see all →"', () => {
+    expect(t("link.seeAll", "plain")).toBe("see all →");
+  });
+  it('t("link.seeAll", "playful") → "see all →"', () => {
+    expect(t("link.seeAll", "playful")).toBe("see all →");
+  });
+
+  // pill.toDo
+  it('t("pill.toDo", "plain") → "▶ to-do"', () => {
+    expect(t("pill.toDo", "plain")).toBe("▶ to-do");
+  });
+  it('t("pill.toDo", "playful") → "▶ to-do"', () => {
+    expect(t("pill.toDo", "playful")).toBe("▶ to-do");
+  });
+
+  // progress.done
+  it('t("progress.done", "plain") → "done"', () => {
+    expect(t("progress.done", "plain")).toBe("done");
+  });
+  it('t("progress.done", "playful") → "done"', () => {
+    expect(t("progress.done", "playful")).toBe("done");
+  });
+
+  // progress.notScheduled
+  it('t("progress.notScheduled", "plain") → "not scheduled"', () => {
+    expect(t("progress.notScheduled", "plain")).toBe("not scheduled");
+  });
+  it('t("progress.notScheduled", "playful") → "not scheduled"', () => {
+    expect(t("progress.notScheduled", "playful")).toBe("not scheduled");
+  });
+});
+
 describe("Task 2 — inbox/focus/breakdown keys (plain vs playful)", () => {
   // freshness.aging
   it('t("freshness.aging", "plain") → "Aging"', () => {
@@ -210,6 +300,8 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "nav.dashboard",
     "nav.everything",
     "nav.done",
+    "nav.focusTimer",
+    "nav.settings",
     "heading.bestStreaks",
     "badge.first_breakdown",
     "badge.first_schedule",
@@ -222,6 +314,11 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "badge.beat_best_streak",
     "section.needsReview",
     "action.addTodo",
+    "action.dismiss",
+    "action.delete",
+    "action.cancel",
+    "capture.confirm",
+    "prompt.stillNeeded",
     "focus.giveUp",
     "focus.nextStep",
     "breakdown.looksRight",
@@ -231,6 +328,10 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "action.backToInbox",
     "focus.timesUp",
     "focus.yesDone",
+    "link.seeAll",
+    "pill.toDo",
+    "progress.done",
+    "progress.notScheduled",
   ];
 
   for (const key of plainOnlyKeys) {
