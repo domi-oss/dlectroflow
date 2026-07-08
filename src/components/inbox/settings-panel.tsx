@@ -6,7 +6,7 @@ import { updateAgingSettings, updateBreakdownModel, updateVoice } from "@/app/ac
 import type { AgingSettings } from "@/lib/aging";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { OWNER_BREAKDOWN_ALLOWLIST, OWNER_BREAKDOWN_MODEL_DEFAULT } from "@/lib/constants";
-import type { Voice } from "@/lib/strings";
+import { t, type Voice } from "@/lib/strings";
 
 const FABLE_LINES = [
   "Our most capable model. Also $50/M tokens. To split 'clean the kitchen' into 3 steps? We love you, but no.",
@@ -43,6 +43,11 @@ export function SettingsPanel({
       ? String(settings.demoOverrideSeconds)
       : "",
   );
+  const [agingHours, setAgingHours] = useState(settings.agingHours);
+  const [overdueHours, setOverdueHours] = useState(settings.overdueHours);
+  const [wayOverdueHours, setWayOverdueHours] = useState(
+    settings.wayOverdueHours,
+  );
 
   const [model, setModel] = useState<string>(breakdownModel ?? OWNER_BREAKDOWN_MODEL_DEFAULT);
   const [fable] = useState(() => FABLE_LINES[Math.floor(Math.random() * FABLE_LINES.length)]);
@@ -60,6 +65,9 @@ export function SettingsPanel({
       await updateAgingSettings({
         agingThresholdMinutes: minutes,
         demoOverrideSeconds: demo.trim() === "" ? null : Number(demo),
+        agingHours,
+        overdueHours,
+        wayOverdueHours,
       });
       router.refresh();
     });
@@ -105,6 +113,42 @@ export function SettingsPanel({
             placeholder="e.g. 10"
             onChange={(e) => setDemo(e.target.value)}
             className="border-input w-40 rounded-md border px-2 py-1"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-muted-foreground text-xs">
+            {t("freshness.aging", voice)} (hours)
+          </span>
+          <input
+            type="number"
+            min={1}
+            value={agingHours}
+            onChange={(e) => setAgingHours(Number(e.target.value))}
+            className="border-input w-32 rounded-md border px-2 py-1"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-muted-foreground text-xs">
+            {t("freshness.overdue", voice)} (hours)
+          </span>
+          <input
+            type="number"
+            min={1}
+            value={overdueHours}
+            onChange={(e) => setOverdueHours(Number(e.target.value))}
+            className="border-input w-32 rounded-md border px-2 py-1"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-muted-foreground text-xs">
+            {t("freshness.wayOverdue", voice)} (hours)
+          </span>
+          <input
+            type="number"
+            min={1}
+            value={wayOverdueHours}
+            onChange={(e) => setWayOverdueHours(Number(e.target.value))}
+            className="border-input w-32 rounded-md border px-2 py-1"
           />
         </label>
         <button
