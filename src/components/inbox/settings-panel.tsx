@@ -2,10 +2,11 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { updateAgingSettings, updateBreakdownModel } from "@/app/actions/settings";
+import { updateAgingSettings, updateBreakdownModel, updateVoice } from "@/app/actions/settings";
 import type { AgingSettings } from "@/lib/aging";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { OWNER_BREAKDOWN_ALLOWLIST, OWNER_BREAKDOWN_MODEL_DEFAULT } from "@/lib/constants";
+import type { Voice } from "@/lib/strings";
 
 const FABLE_LINES = [
   "Our most capable model. Also $50/M tokens. To split 'clean the kitchen' into 3 steps? We love you, but no.",
@@ -26,10 +27,12 @@ export function SettingsPanel({
   settings,
   isOwner,
   breakdownModel,
+  voice,
 }: {
   settings: AgingSettings;
   isOwner: boolean;
   breakdownModel: string | null;
+  voice: Voice;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -42,6 +45,14 @@ export function SettingsPanel({
 
   const [model, setModel] = useState<string>(breakdownModel ?? OWNER_BREAKDOWN_MODEL_DEFAULT);
   const [fable] = useState(() => FABLE_LINES[Math.floor(Math.random() * FABLE_LINES.length)]);
+  const [currentVoice, setCurrentVoice] = useState<Voice>(voice);
+
+  const saveVoice = (v: Voice) =>
+    startTransition(async () => {
+      setCurrentVoice(v);
+      await updateVoice(v);
+      router.refresh();
+    });
 
   const save = () =>
     startTransition(async () => {
@@ -107,6 +118,28 @@ export function SettingsPanel({
         The demo override makes items age in seconds so reminders fire live on
         stage.
       </p>
+
+      <div className="mt-4 border-t pt-3">
+        <p className="text-muted-foreground mb-2 text-xs">Voice</p>
+        <div className="inline-flex rounded-md border" role="group" aria-label="Voice preference">
+          {(["plain", "playful"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              disabled={pending}
+              onClick={() => saveVoice(v)}
+              className={
+                "px-3 py-1 text-sm first:rounded-l-md last:rounded-r-md transition-colors disabled:opacity-50 " +
+                (currentVoice === v
+                  ? "bg-primary text-primary-foreground font-medium"
+                  : "bg-background text-muted-foreground hover:text-foreground")
+              }
+            >
+              {v === "plain" ? "Plain" : "Playful"}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <div className="mt-4 border-t pt-3">
         <p className="text-muted-foreground mb-2 text-xs">🎨 Appearance</p>

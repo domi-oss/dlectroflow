@@ -15,6 +15,7 @@ import {
 } from "@/app/actions/braindump";
 import { startBreakdown } from "@/app/actions/breakdown";
 import { SettingsPanel } from "@/components/inbox/settings-panel";
+import type { Voice } from "@/lib/strings";
 import {
   notificationPermission,
   requestNotificationPermission,
@@ -38,11 +39,13 @@ export function InboxView({
   settings,
   isOwner,
   breakdownModel,
+  voice,
 }: {
   initialItems: Item[];
   settings: AgingSettings;
   isOwner: boolean;
   breakdownModel: string | null;
+  voice: Voice;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -192,7 +195,7 @@ export function InboxView({
         </p>
       </div>
 
-      <SettingsPanel settings={settings} isOwner={isOwner} breakdownModel={breakdownModel} />
+      <SettingsPanel settings={settings} isOwner={isOwner} breakdownModel={breakdownModel} voice={voice} />
 
       {/* Needs triage */}
       <section>

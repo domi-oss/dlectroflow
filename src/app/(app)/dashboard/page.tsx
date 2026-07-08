@@ -7,6 +7,7 @@ import { currentWorkspaceId } from "@/lib/workspace";
 import { emailConfigured } from "@/lib/email";
 import { SparkCard } from "@/components/dashboard/spark-card";
 import { RoundupCard } from "@/components/dashboard/roundup-card";
+import { t, type Voice } from "@/lib/strings";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,8 @@ export default async function DashboardPage() {
     getSettings(workspaceId),
   ]);
 
+  const voice: Voice = settings.voice === "playful" ? "playful" : "plain";
+
   return (
     <div className="space-y-5">
       <h1 className="text-2xl font-semibold">Dashboard</h1>
@@ -37,13 +40,13 @@ export default async function DashboardPage() {
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Today's points" value={data.todayPoints} accent="text-amber-600" />
+        <Stat label={t("stat.pointsToday", voice)} value={data.todayPoints} accent="text-amber-600" />
         <Stat
-          label="Current streak"
+          label={t("stat.currentStreak", voice)}
           value={`${data.currentStreak}${data.currentStreak > 0 ? " 🔥" : ""}`}
         />
-        <Stat label="Focus mins today" value={data.focusMinToday} />
-        <Stat label="Steps done today" value={data.stepsDoneToday} />
+        <Stat label={t("stat.focusMinsToday", voice)} value={data.focusMinToday} />
+        <Stat label={t("stat.stepsToday", voice)} value={data.stepsDoneToday} />
       </div>
 
       <RoundupCard
@@ -97,7 +100,7 @@ export default async function DashboardPage() {
       )}
 
       <p className="text-muted-foreground text-xs">
-        Total points earned: {data.totalPoints}
+        {t("stat.totalPoints", voice)}: {data.totalPoints}
       </p>
 
       <Link href="/inbox" className="text-muted-foreground inline-block text-sm hover:underline">

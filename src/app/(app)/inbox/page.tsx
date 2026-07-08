@@ -60,6 +60,7 @@ export default async function InboxPage({
         }}
         isOwner={owner}
         breakdownModel={settings.breakdownModel ?? null}
+        voice={settings.voice === "playful" ? "playful" : "plain"}
       />
     </div>
   );
