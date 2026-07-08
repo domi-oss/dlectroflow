@@ -5,7 +5,8 @@ import { isOwnerRequest, currentWorkspaceId } from "@/lib/workspace";
 import { clientIpHash, guestQuotaConfig, peekGuestAllowance } from "@/lib/guest-quota";
 import { GuestIndicator } from "@/components/guest/guest-indicator";
 import { VoiceProvider } from "@/components/voice-provider";
-import { t, type Voice } from "@/lib/strings";
+import { AppMenu } from "@/components/nav/app-menu";
+import { type Voice } from "@/lib/strings";
 
 export default async function AppLayout({
   children,
@@ -41,19 +42,14 @@ export default async function AppLayout({
           <Link href="/inbox" className="text-lg font-semibold tracking-tight">
             dlectroflow
           </Link>
-          <nav className="text-muted-foreground flex items-center gap-4 text-sm">
-            <Link href="/inbox" className="hover:text-foreground transition-colors">
-              {t("nav.inbox", voice)}
-            </Link>
-            <Link href="/dashboard" className="hover:text-foreground transition-colors">
-              {t("nav.dashboard", voice)}
-            </Link>
+          <div className="text-muted-foreground flex items-center gap-4 text-sm">
             {owner ? (
               <a href="/api/auth/logout" className="text-xs text-muted-foreground">Sign out</a>
             ) : (
               <a href="/login" className="text-xs text-muted-foreground">Owner sign in</a>
             )}
-          </nav>
+            <AppMenu voice={voice} />
+          </div>
         </div>
       </header>
       <div className="mx-auto w-full max-w-3xl flex-1 px-4 py-6">
