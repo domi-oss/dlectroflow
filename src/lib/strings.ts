@@ -21,6 +21,9 @@ export const STRINGS = {
   "action.moreSteps":    { plain: "More steps",        playful: "🍞 More steps" },
   "action.fewerSteps":   { plain: "Fewer steps",       playful: "🥖 Fewer steps" },
   "action.backToInbox":  { plain: "Back to inbox",     playful: "🍳 Back to inbox" },
+  "action.dismiss":      { plain: "Dismiss",           playful: "Not now" },
+  "action.delete":       { plain: "Delete",            playful: "Delete" },
+  "action.cancel":       { plain: "Cancel",            playful: "Cancel" },
 
   // ── Inbox section headers ──────────────────────────────────────────────────
   "section.needsReview": { plain: "Needs review",      playful: "Needs review" },
@@ -34,6 +37,8 @@ export const STRINGS = {
   "nav.dashboard":       { plain: "Dashboard",         playful: "🎉 Dashboard" },
   "nav.everything":      { plain: "Everything",        playful: "🍱 Larder" },
   "nav.done":            { plain: "Done",              playful: "🍽️ Devoured" },
+  "nav.focusTimer":      { plain: "Focus Timer",       playful: "⏱️ Focus Timer" },
+  "nav.settings":        { plain: "Settings",          playful: "⚙️ Settings" },
 
   // ── Freshness tiers ────────────────────────────────────────────────────────
   "freshness.recent":    { plain: "Recent",            playful: "Fresh" },
@@ -78,6 +83,25 @@ export const STRINGS = {
 
   // ── Breakdown step counter ─────────────────────────────────────────────────
   "step.counter":        { plain: "Step",              playful: "bite" },
+
+  // ── Capture confirm ────────────────────────────────────────────────────────
+  "capture.confirm":     { plain: "captured ✓",        playful: "captured ✓" },
+
+  // ── Prompts ────────────────────────────────────────────────────────────────
+  "prompt.stillNeeded":  { plain: "This has been sitting a while — still needed?", playful: "🕐 This snack's been sitting a while — still want it?" },
+
+  // ── Inbox empty state ──────────────────────────────────────────────────────
+  "inbox.zero":          { plain: "Inbox zero. Nothing to review.", playful: "🎉 Inbox zero! Nothing to review." },
+
+  // ── Links ──────────────────────────────────────────────────────────────────
+  "link.seeAll":         { plain: "see all →",         playful: "see all →" },
+
+  // ── Pills ──────────────────────────────────────────────────────────────────
+  "pill.toDo":           { plain: "▶ to-do",           playful: "▶ to-do" },
+
+  // ── Progress ───────────────────────────────────────────────────────────────
+  "progress.done":       { plain: "done",              playful: "done" },
+  "progress.notScheduled": { plain: "not scheduled",   playful: "not scheduled" },
 } as const;
 
 export type StringKey = keyof typeof STRINGS;
