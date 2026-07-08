@@ -72,6 +72,10 @@ export const SINGLETON_ID = "singleton";
 
 export const OWNER_WORKSPACE_ID = "owner";
 
+export function isGuestWorkspace(workspaceId: string): boolean {
+  return workspaceId !== OWNER_WORKSPACE_ID;
+}
+
 export const WorkspaceKind = {
   Owner: "owner",
   Guest: "guest",

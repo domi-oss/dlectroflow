@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { getAnthropic, BREAKDOWN_MODEL } from "@/lib/anthropic";
-import { SparkSource } from "@/lib/constants";
+import { SparkSource, isGuestWorkspace } from "@/lib/constants";
 
 const FALLBACK_SPARKS = [
   "You don't have to do it all — just the next tiny thing.",
@@ -52,6 +52,13 @@ async function generateQuote(): Promise<{ quote: string; source: string }> {
   return { quote: randomFallback(), source: SparkSource.Fallback };
 }
 
+async function quoteFor(workspaceId: string): Promise<{ quote: string; source: string }> {
+  if (isGuestWorkspace(workspaceId)) {
+    return { quote: randomFallback(), source: SparkSource.Fallback };
+  }
+  return generateQuote();
+}
+
 export type Spark = { quote: string; source: string };
 
 /** Get today's spark, generating + caching it on first request of the day. */
@@ -62,7 +69,7 @@ export async function getTodaySpark(workspaceId: string): Promise<Spark> {
   });
   if (existing) return { quote: existing.quote, source: existing.source };
 
-  const { quote, source } = await generateQuote();
+  const { quote, source } = await quoteFor(workspaceId);
   const saved = await prisma.dailySpark.upsert({
     where: { workspaceId_date: { workspaceId, date } },
     create: { date, workspaceId, quote, source },
@@ -74,7 +81,7 @@ export async function getTodaySpark(workspaceId: string): Promise<Spark> {
 /** Force a fresh spark for today ("New spark" button). */
 export async function refreshTodaySpark(workspaceId: string): Promise<Spark> {
   const date = today();
-  const { quote, source } = await generateQuote();
+  const { quote, source } = await quoteFor(workspaceId);
   const saved = await prisma.dailySpark.upsert({
     where: { workspaceId_date: { workspaceId, date } },
     create: { date, workspaceId, quote, source },

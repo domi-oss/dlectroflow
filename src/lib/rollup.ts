@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { getStreak } from "@/lib/db";
 import { getAnthropic, BREAKDOWN_MODEL } from "@/lib/anthropic";
-import { FocusOutcome, TaskStatus } from "@/lib/constants";
+import { FocusOutcome, TaskStatus, isGuestWorkspace } from "@/lib/constants";
 import { getTodaySpark } from "@/lib/spark";
 
 // ── date helpers (server-local day, matching rewards.ts) ────────────────────
@@ -109,8 +109,9 @@ function fallbackNarrative(d: DayData): string {
   return `${winLine}${streakLine}${carryLine}`;
 }
 
-async function generateNarrative(d: DayData): Promise<string> {
-  try {
+async function generateNarrative(d: DayData, workspaceId: string): Promise<string> {
+  // Guests never call Claude — use the local narrative builder.
+  if (!isGuestWorkspace(workspaceId)) try {
     const anthropic = getAnthropic();
     const resp = await anthropic.messages.create({
       model: BREAKDOWN_MODEL,
@@ -195,7 +196,7 @@ export async function generateTodayRollup(workspaceId: string, force = false): P
   const narrative =
     !force && existing?.narrative
       ? existing.narrative
-      : await generateNarrative(data);
+      : await generateNarrative(data, workspaceId);
 
   const row = await prisma.dayRollup.upsert({
     where: { workspaceId_date: { workspaceId, date: data.date } },
