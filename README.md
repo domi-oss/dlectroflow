@@ -110,6 +110,27 @@ or (simplest) a masked + protected CI/CD variable.
 
 See [`.env.example`](.env.example) for the full list of variables.
 
+### Phase 2: guest access & AI cost controls
+
+Guest users get a sandboxed AI breakdown experience with built-in guardrails:
+
+- **AI quota:** 5 breakdowns / IP / 24 h; 10 unique guest IPs / day globally (Haiku model — cheaper, still useful).
+- **Owner model:** selectable in Settings (defaults to `claude-sonnet-4-6`).
+- **`.ics` export:** no integration needed — pure client-side `.ics` file generation.
+- **Dark mode:** persists via `localStorage`; no backend required.
+
+New env vars for Phase 2:
+
+| Variable | Where to set | Purpose |
+|---|---|---|
+| `GUEST_IP_HASH_SALT` | **CI masked/protected var** (never `.env.example`) | Salts the guest IP hash — never stores the raw IP. **Required in production** (>=16 chars); app refuses to boot without it. |
+| `GUEST_AI_QUOTA_PER_WINDOW` | `.gitlab-ci.yml` prod job env | Max breakdowns per IP per window (default 5). |
+| `GUEST_AI_WINDOW_HOURS` | `.gitlab-ci.yml` prod job env | Sliding window length in hours (default 24). |
+| `GUEST_GLOBAL_DAILY_GUEST_CAP` | `.gitlab-ci.yml` prod job env | Max unique guest IPs per day globally (default 10). |
+| `GUEST_SANDBOX_TTL_HOURS` | `.gitlab-ci.yml` prod job env | How long a guest sandbox lives (default 24 h). |
+| `OWNER_BREAKDOWN_MODEL` | `.gitlab-ci.yml` prod job env | Claude model for owner breakdowns (default `claude-sonnet-4-6`). |
+| `GUEST_BREAKDOWN_MODEL` | `.gitlab-ci.yml` prod job env | Claude model for guest breakdowns (default `claude-haiku-4-5`). |
+
 ---
 
 ## 📅 Connecting Reclaim
