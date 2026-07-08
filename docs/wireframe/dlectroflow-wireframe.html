@@ -1,0 +1,1275 @@
+<!DOCTYPE html><script type="application/json" id="cowork-artifact-meta">
+{
+  "name": "Dlectroflow Wireframe",
+  "schemaVersion": 1,
+  "description": "Interactive low-fidelity wireframe of the dlectroflow app — Inbox, Breakdown chat, Focus Timer (setup/running/time's-up/done), Dashboard, Settings, and Library. Includes a live Plain/Playful voice toggle and a Desktop/Mobile preview toggle. Mirrors the capture→clarify→schedule→focus→reward loop."
+}
+</script>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>dlectroflow — Wireframe</title>
+<style>
+  :root{
+    --line:#8a8a8a; --line-strong:#333; --bg:#fff; --panel:#f4f4f4;
+    --muted:#777; --accent:#d9d9d9; --accent-strong:#bdbdbd;
+    color-scheme: light;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family: "Helvetica Neue", Arial, sans-serif; background:#eee; color:#222;
+  }
+  /* ---- Business / Snack voice toggle ---- */
+  body.mode-biz .only-snack{ display:none; }
+  body.mode-snack .only-biz{ display:none; }
+
+  .topbar{
+    background:#222; color:#fff; padding:10px 16px; display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+  }
+  .topbar h1{ font-size:15px; margin:0; font-weight:600; letter-spacing:.02em;}
+  .topbar .flowline{ font-size:11px; color:#bbb; }
+  .mode-switch{ display:flex; border:1px solid #666; border-radius:5px; overflow:hidden; }
+  .mode-switch .mode-opt, .mode-switch .view-opt, .mode-switch .fr-opt{ background:#333; color:#ccc; border:0; padding:5px 11px; font-size:11px; cursor:pointer; font-family:inherit; }
+  .mode-switch .mode-opt.active, .mode-switch .view-opt.active, .mode-switch .fr-opt.active{ background:#fff; color:#111; font-weight:600; }
+  .first-run-only{ display:none; }
+  body.first-run .demo-populated{ display:none; }
+  body.first-run .first-run-only{ display:block; }
+  .tabs{ display:flex; gap:6px; margin-left:auto; flex-wrap:wrap; }
+  .tab{
+    background:#333; color:#ddd; border:1px solid #555; padding:6px 10px; font-size:11px;
+    cursor:pointer; border-radius:3px; white-space:nowrap;
+  }
+  .tab.active{ background:#fff; color:#111; font-weight:600; border-color:#fff; }
+  .stage{ max-width:900px; margin:20px auto 60px; padding:0 16px; }
+  .screen{ display:none; }
+  .screen.active{ display:block; }
+  .device{
+    background:var(--bg); border:2px solid var(--line-strong); border-radius:6px; overflow:hidden;
+  }
+  .device-header{
+    display:flex; justify-content:space-between; align-items:center;
+    border-bottom:2px dashed var(--line); padding:10px 18px; font-size:13px;
+  }
+  .device-header .brand{ font-weight:700; }
+  .device-header nav{ display:flex; gap:14px; font-size:12px; color:var(--muted); }
+  .device-body{ padding:20px 22px; }
+
+  .nav-wrap{ position:relative; }
+  .hamburger-btn{
+    background:var(--panel); border:1.5px solid var(--line-strong); border-radius:4px;
+    width:30px; height:26px; font-size:14px; line-height:1; cursor:pointer;
+  }
+  .nav-menu{
+    display:none; position:absolute; top:34px; right:0; z-index:20;
+    background:#fff; border:1.5px dashed var(--line-strong); border-radius:6px;
+    min-width:180px; padding:6px; box-shadow:0 4px 10px rgba(0,0,0,.12);
+  }
+  .nav-menu.open{ display:block; }
+  .nav-menu-item{
+    padding:7px 10px; font-size:12px; border-radius:4px; cursor:pointer; white-space:nowrap;
+  }
+  .nav-menu-item:hover{ background:var(--panel); }
+  .nav-menu-item.active{ font-weight:700; background:var(--accent); }
+  .substate.hidden{ display:none; }
+  .substate-btn.active{ background:#333; color:#fff; border-color:#333; font-weight:600; }
+  .focus-state.hidden{ display:none; }
+  .focus-btn.active{ background:#333; color:#fff; border-color:#333; font-weight:600; }
+  .lib-tab.active{ background:#333; color:#fff; border-color:#333; font-weight:600; }
+  .lib-panel.hidden{ display:none; }
+  .sfl-expanded{ display:none; }
+  .sfl-item.reviewing .sfl-collapsed{ display:none !important; }
+  .sfl-item.reviewing .sfl-expanded{ display:block; }
+
+  .wf-box{ border:1.5px dashed var(--line); border-radius:6px; padding:10px 12px; }
+  .wf-solid{ border:1.5px solid var(--line-strong); border-radius:6px; padding:10px 12px; }
+  .label{ font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin-bottom:4px; display:block; }
+  .placeholder-text{ color:#aaa; font-size:12px; font-style:italic; }
+  .btn{
+    display:inline-block; border:1.5px solid var(--line-strong); border-radius:4px;
+    padding:6px 12px; font-size:12px; background:var(--panel); cursor:default;
+  }
+  .btn.primary{ background:#333; color:#fff; border-color:#333; font-weight:600; }
+  .btn.ghost{ background:transparent; }
+  .pill{
+    display:inline-block; border-radius:20px; padding:2px 9px; font-size:10px; border:1px solid var(--line);
+  }
+  .row{ display:flex; gap:10px; }
+  .col{ flex:1; min-width:0; }
+  .section-title{ font-size:12px; font-weight:700; margin:18px 0 8px; display:flex; align-items:center; gap:8px; }
+  .badge-count{ background:#ddd; border-radius:20px; padding:1px 7px; font-size:10px; }
+  .item-row{ border:1px solid var(--line); border-radius:6px; padding:8px 12px; margin-bottom:8px; }
+  .item-row .meta{ font-size:10px; color:var(--muted); margin-top:3px; }
+  .item-row.row-link{ cursor:pointer; }
+  .item-row.row-link:hover{ background:var(--panel); }
+  .row-link-stop{ position:relative; z-index:1; }
+  .item-actions{ display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
+  .item-actions .btn{ padding:4px 8px; font-size:10px; }
+  .annot{
+    position:relative; border-left:2px solid #999; padding-left:10px; margin:6px 0 16px;
+  }
+  .annot p{ margin:2px 0; font-size:11px; color:#555; }
+  .callout{
+    background:#fff9e0; border:1px dashed #d8c65a; border-radius:6px; padding:8px 10px; font-size:11px; color:#6a5b00; margin-top:10px;
+  }
+  .grid4{ display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+  .grid4 .stat{ border:1px solid var(--line-strong); border-radius:6px; padding:10px; text-align:center; }
+  .grid4 .stat .num{ font-size:20px; font-weight:700; }
+  .grid4 .stat .lbl{ font-size:9px; color:var(--muted); text-transform:uppercase; margin-top:2px; }
+  .chat-bubble{ border-radius:14px; padding:8px 12px; font-size:12px; max-width:75%; margin-bottom:8px; }
+  .chat-bubble.assistant{ background:#eee; border:1px solid var(--line); }
+  .chat-bubble.user{ background:#333; color:#fff; margin-left:auto; }
+  .stepper-row{ display:flex; align-items:center; gap:8px; border:1px solid var(--line); border-radius:6px; padding:6px 10px; margin-bottom:6px; font-size:11px;}
+  .stepper-row .num{ color:var(--muted); width:26px; }
+  .stepper-row .field{ border:1px dashed var(--line); border-radius:4px; padding:3px 6px; flex:1; }
+  .stepper-row .field.small{ flex:0 0 50px; text-align:right; }
+  /* in-progress step times read as editable estimates */
+  #substate-progress .stepper-row .field.small{
+    flex:0 0 82px; text-align:center; background:#fffbe6; border:1px solid #b8860b; color:#5a4500; cursor:text;
+  }
+  #substate-progress .stepper-row .field.small::after{ content:" ✏️"; font-size:9px; }
+  .ring{
+    width:190px; height:190px; border-radius:50%; border:14px solid #ddd; border-top-color:#333;
+    margin:20px auto; display:flex; align-items:center; justify-content:center; flex-direction:column;
+  }
+  .ring .time{ font-size:30px; font-weight:700; }
+  .ring .sub{ font-size:9px; color:var(--muted); }
+  .flow-map{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:11px; margin-top:6px;}
+  .flow-map .node{ border:1px solid var(--line-strong); border-radius:5px; padding:5px 9px; background:#fafafa; }
+  .flow-map .arrow{ color:var(--muted); }
+  /* settings */
+  .set-row{ display:flex; justify-content:space-between; align-items:center; gap:12px; padding:9px 0; border-bottom:1px dashed var(--line); }
+  .set-row:last-child{ border-bottom:0; }
+  .set-label{ font-size:12px; font-weight:600; }
+  .set-desc{ font-size:10px; color:var(--muted); margin-top:2px; }
+  .seg{ display:flex; border:1.5px solid var(--line-strong); border-radius:6px; overflow:hidden; flex-shrink:0; }
+  .seg .seg-opt{ padding:6px 14px; font-size:11px; cursor:pointer; background:var(--panel); }
+  .seg .seg-opt.active{ background:#333; color:#fff; font-weight:600; }
+  .toggle-pill{ display:inline-block; width:38px; height:20px; border-radius:20px; background:#ccc; position:relative; cursor:pointer; flex-shrink:0; }
+  .toggle-pill.on{ background:#2f7d32; }
+  .toggle-pill::after{ content:""; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:#fff; transition:left .15s; }
+  .toggle-pill.on::after{ left:20px; }
+  .mini-input{ border:1px solid var(--line-strong); border-radius:4px; padding:3px 6px; font-size:11px; width:52px; text-align:center; background:#fff; font-family:inherit; }
+  /* ---- Mobile preview toggle + real responsive ---- */
+  body.view-mobile .stage{ max-width:392px; }
+  body.view-mobile .notes{ max-width:392px; }
+  body.view-mobile .device{ border-radius:26px; box-shadow:0 0 0 7px #111, 0 10px 26px rgba(0,0,0,.28); }
+  body.view-mobile .device-body{ padding:14px 14px; }
+  body.view-mobile .grid4{ grid-template-columns:repeat(2,1fr); }
+  body.view-mobile .ring{ width:150px; height:150px; border-width:12px; }
+  body.view-mobile .chat-bubble{ max-width:88%; }
+  @media (max-width:600px){
+    .stage{ padding:0 10px; }
+    .device-body{ padding:14px; }
+    .grid4{ grid-template-columns:repeat(2,1fr); }
+    .ring{ width:150px; height:150px; }
+    .topbar{ gap:8px; }
+  }
+  .notes{
+    max-width:900px; margin:0 auto 40px; padding:0 16px; font-size:12px; color:#555;
+  }
+  .notes h2{ font-size:13px; color:#222; }
+  .notes ul{ padding-left:18px; }
+  .notes li{ margin-bottom:4px; }
+</style>
+</head>
+<body class="mode-biz">
+
+<div class="topbar">
+  <h1>dlectroflow — wireframe</h1>
+  <span class="flowline">capture → clarify → schedule → focus → reward</span>
+  <div style="margin-left:auto; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+    <span class="flowline">voice:</span>
+    <div class="mode-switch">
+      <button class="mode-opt active" data-mode="biz">Plain</button>
+      <button class="mode-opt" data-mode="snack">Playful</button>
+    </div>
+    <span class="flowline">view:</span>
+    <div class="mode-switch">
+      <button class="view-opt active" data-view="desktop">🖥 Desktop</button>
+      <button class="view-opt" data-view="mobile">📱 Mobile</button>
+    </div>
+    <span class="flowline">state:</span>
+    <div class="mode-switch">
+      <button class="fr-opt active" data-fr="normal">Populated</button>
+      <button class="fr-opt" data-fr="first">First run</button>
+    </div>
+  </div>
+</div>
+
+<div class="stage">
+
+  <!-- ============ SCREEN 1 : INBOX ============ -->
+  <div class="screen active" id="screen-inbox">
+    <div class="device">
+      <div class="device-header">
+        <span class="brand">dlectroflow</span>
+        <div class="nav-wrap">
+          <button class="hamburger-btn" data-menu="menu-inbox">☰</button>
+          <div class="nav-menu" id="menu-inbox">
+            <div class="nav-menu-item active" data-goto="inbox"><span class="only-biz">Inbox</span><span class="only-snack">🧠 Inbox</span></div>
+            <div class="nav-menu-item" data-goto="focus"><span class="only-biz">Focus Timer</span><span class="only-snack">⏱️ Focus Timer</span></div>
+            <div class="nav-menu-item" data-goto="dashboard"><span class="only-biz">Dashboard</span><span class="only-snack">🎉 Dashboard</span></div>
+            <div class="nav-menu-item" data-goto="library"><span class="only-biz">Everything</span><span class="only-snack">🍱 Larder</span></div>
+            <div class="nav-menu-item" data-goto="settings"><span class="only-biz">Settings</span><span class="only-snack">⚙️ Settings</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="device-body">
+
+        <!-- FIRST-RUN welcome card -->
+        <div class="first-run-only wf-box" style="margin-bottom:14px; background:#f4f9f4; border-color:#2f7d32;">
+          <div style="font-size:13px; font-weight:600; margin-bottom:4px;"><span class="only-snack">👋 </span>Welcome to dlectroflow</div>
+          <div style="font-size:11px; color:#555; margin-bottom:8px;">Capture anything on your mind and it'll help you break it into small, doable steps — one at a time. No setup, no fields.</div>
+          <div style="font-size:11px; color:#555; margin-bottom:4px;">Pick a voice to start with (you can switch any time in Settings):</div>
+          <div class="seg" style="display:inline-flex;">
+            <span class="seg-opt active" data-mode="biz">Plain</span>
+            <span class="seg-opt" data-mode="snack">Playful</span>
+          </div>
+        </div>
+
+        <div class="demo-populated">
+        <div class="wf-box" style="margin-bottom:12px; background:#eef4ff; border-color:#3b6fb0; display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+          <span style="font-size:12px; color:#1e3f66;">⏸ Focus <span class="only-biz">step</span><span class="only-snack">bite</span> <strong>"Pull receipts from email"</strong> paused</span>
+          <span class="btn goto-btn" data-goto="focus" data-focus="running" style="padding:3px 10px; font-size:10px;">resume →</span>
+        </div>
+
+        <div class="wf-box" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <span style="font-size:12px;">
+            <span class="only-biz"><strong>Review reminder</strong> — 4 to review <span style="color:#c0392b;">· 1 overdue</span></span>
+            <span class="only-snack">🍿 <strong>Snack check</strong> — 4 to review <span style="color:#c0392b;">· 1 stale 🔴</span></span>
+          </span>
+          <span class="placeholder-text"><span class="only-biz">✕ dismiss</span><span class="only-snack">✕ not now</span></span>
+        </div>
+
+        <div class="wf-box" style="margin-bottom:12px; background:#fafafa;">
+          <span style="font-size:11px; color:#555;">
+            <span class="only-biz">New here? Type whatever's on your mind below and press Enter — no fields, no sorting. It lands in your <strong>review list</strong>, where you can break it into steps, save it as a to-do, or snooze it for later — whenever you're ready.</span>
+            <span class="only-snack">💡 New here? Brain-dump whatever's rattling around below and press Enter — no fields, no sorting. It lands in your <strong>review list</strong>, where you can snack-size it into steps, plate it as a to-do, or pop it in the pantry — whenever you're ready.</span>
+          </span>
+        </div>
+        </div><!-- /demo-populated: banners -->
+
+        <span class="label">Capture bar</span>
+        <div class="wf-solid" style="margin-bottom:4px;">
+          <span class="placeholder-text"><span class="only-biz">Add anything to your inbox… (Enter to save, / to focus)</span><span class="only-snack">Brain dump anything… (Enter to save, / to focus)</span></span>
+        </div>
+        <p class="placeholder-text" style="font-size:10px;">No fields required. Press Enter — item saves with a quick "captured ✓" and drops into the list below.</p>
+
+        <div class="first-run-only wf-box" style="text-align:center; margin-top:16px; color:#888;">
+          <div style="font-size:12px;">Nothing here yet.</div>
+          <div style="font-size:11px; margin-top:4px;">Whatever you capture lands here, ready to review and break into steps. Try it — type something above and press Enter.</div>
+        </div>
+
+        <div class="demo-populated">
+        <div class="section-title">Needs review <span class="badge-count">4</span> <span class="placeholder-text" style="font-weight:400; text-transform:none; letter-spacing:0;">· <span class="only-biz">newest first</span><span class="only-snack">freshest first</span></span></div>
+
+        <div class="item-row row-link" data-goto="breakdown" data-substate="progress">
+          <div class="row" style="justify-content:space-between;">
+            <span><span class="pill" style="border-color:#2f7d32;color:#2f7d32;">🟢 <span class="only-biz">Recent</span><span class="only-snack">Fresh</span></span> &nbsp;Email the landlord about the lease renewal</span>
+          </div>
+          <div class="meta">captured 12m ago</div>
+          <div class="item-actions">
+            <span class="btn primary"><span class="only-biz">Break into steps →</span><span class="only-snack">🍿 Snack-size it →</span></span>
+            <span class="btn row-link-stop"><span class="only-biz">Add to-do</span><span class="only-snack">🍽️ Add to-do</span></span>
+            <span class="btn row-link-stop"><span class="only-biz">Save for later</span><span class="only-snack">🥫 Save for later</span></span>
+            <span class="btn ghost row-link-stop" style="margin-left:auto;color:#c0392b;border-color:#c0392b;" title="Delete">🗑️</span>
+          </div>
+        </div>
+
+        <div class="item-row row-link" data-goto="breakdown" data-substate="progress">
+          <div class="row" style="justify-content:space-between;">
+            <span><span class="pill" style="border-color:#b8860b;color:#b8860b;">🟡 <span class="only-biz">Aging</span><span class="only-snack">Softening</span></span> &nbsp;Fix the squeaky door hinge</span>
+          </div>
+          <div class="meta" style="color:#b8860b;">captured 5h ago</div>
+          <div class="item-actions">
+            <span class="btn primary"><span class="only-biz">Break into steps →</span><span class="only-snack">🍿 Snack-size it →</span></span>
+            <span class="btn row-link-stop"><span class="only-biz">Add to-do</span><span class="only-snack">🍽️ Add to-do</span></span>
+            <span class="btn row-link-stop"><span class="only-biz">Save for later</span><span class="only-snack">🥫 Save for later</span></span>
+            <span class="btn ghost row-link-stop" style="margin-left:auto;color:#c0392b;border-color:#c0392b;" title="Delete">🗑️</span>
+          </div>
+        </div>
+
+        <div class="item-row row-link" data-goto="breakdown" data-substate="progress">
+          <div class="row" style="justify-content:space-between;">
+            <span><span class="pill" style="border-color:#d35400;color:#d35400;">🟠 <span class="only-biz">Overdue</span><span class="only-snack">Soggy</span></span> &nbsp;Sort out the tax documents for last year</span>
+          </div>
+          <div class="meta" style="color:#d35400;">captured 9h ago</div>
+          <div class="item-actions">
+            <span class="btn primary"><span class="only-biz">Break into steps →</span><span class="only-snack">🍿 Snack-size it →</span></span>
+            <span class="btn row-link-stop"><span class="only-biz">Add to-do</span><span class="only-snack">🍽️ Add to-do</span></span>
+            <span class="btn row-link-stop"><span class="only-biz">Save for later</span><span class="only-snack">🥫 Save for later</span></span>
+            <span class="btn ghost row-link-stop" style="margin-left:auto;color:#c0392b;border-color:#c0392b;" title="Delete">🗑️</span>
+          </div>
+        </div>
+
+        <div class="item-row row-link" data-goto="breakdown" data-substate="progress">
+          <div class="row" style="justify-content:space-between;">
+            <span><span class="pill" style="border-color:#c0392b;color:#c0392b;">🔴 <span class="only-biz">Way overdue</span><span class="only-snack">Stale</span></span> &nbsp;Book the car in for its MOT</span>
+          </div>
+          <div class="meta" style="color:#c0392b;">captured 26h ago · untouched 24h</div>
+          <div class="wf-box row-link-stop" style="margin-top:8px; background:#fff5f5; border-color:#c0392b; display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+            <span style="font-size:11px; color:#c0392b;"><span class="only-biz">This has been sitting a while — still needed?</span><span class="only-snack">🕐 This snack's been sitting a while — still want it?</span></span>
+            <span>
+              <span class="btn ghost" style="padding:3px 8px;font-size:10px;"><span class="only-biz">Dismiss</span><span class="only-snack">Not now</span></span>
+            </span>
+          </div>
+          <div class="item-actions">
+            <span class="btn primary"><span class="only-biz">Break into steps →</span><span class="only-snack">🍿 Snack-size it →</span></span>
+            <span class="btn row-link-stop"><span class="only-biz">Add to-do</span><span class="only-snack">🍽️ Add to-do</span></span>
+            <span class="btn row-link-stop"><span class="only-biz">Save for later</span><span class="only-snack">🥫 Save for later</span></span>
+            <span class="btn ghost row-link-stop" style="margin-left:auto;color:#c0392b;border-color:#c0392b;" title="Delete">🗑️</span>
+          </div>
+        </div>
+
+        <div class="section-title">To do <span class="badge-count">3</span></div>
+
+        <div class="section-title" id="single-task-header" style="color:var(--muted); font-size:11px; margin:8px 0 6px;"><span class="only-biz">Single-task to-dos</span><span class="only-snack">😋 Quick bites</span> <span class="badge-count">1</span> <span class="placeholder-text" style="font-weight:400; text-transform:none; letter-spacing:0;">· single action, no steps</span> <span class="goto-btn" data-goto="library" data-lib-tab="plated" style="margin-left:auto; font-size:10px; font-weight:400; text-transform:none; letter-spacing:0; color:#333; text-decoration:underline; cursor:pointer;">see all →</span></div>
+        <div class="item-row" style="opacity:.7; display:flex; justify-content:space-between; align-items:center; gap:10px;">
+          <span style="min-width:0;">Reply to Sam's email</span>
+          <span class="pill" style="border-color:#8a8a8a;color:#777; flex-shrink:0;">▶ to-do</span>
+        </div>
+
+        <div class="section-title" style="color:var(--muted); font-size:11px; margin:12px 0 6px;"><span class="only-biz">Multi-step to-dos</span><span class="only-snack">✅ Sorted</span> <span class="badge-count">2</span> <span class="placeholder-text" style="font-weight:400; text-transform:none; letter-spacing:0;">· broken into steps · tap to open</span> <span class="goto-btn" data-goto="library" data-lib-tab="sorted" style="margin-left:auto; font-size:10px; font-weight:400; text-transform:none; letter-spacing:0; color:#333; text-decoration:underline; cursor:pointer;">see all →</span></div>
+        <div class="item-row row-link" data-goto="breakdown" data-substate="confirmed" style="display:flex; justify-content:space-between; align-items:center; gap:10px; opacity:.75;">
+          <span style="min-width:0;">Plan the team offsite agenda</span>
+          <span class="pill" style="border-color:#2f7d32;color:#2f7d32; flex-shrink:0;">2/5 done</span>
+        </div>
+        <div class="item-row row-link" data-goto="breakdown" data-substate="confirmed-unscheduled" style="display:flex; justify-content:space-between; align-items:center; gap:10px; opacity:.75;">
+          <span style="min-width:0;">Renew car insurance</span>
+          <span class="pill" style="border-color:#999;color:#777; flex-shrink:0;">0/4 done · not scheduled</span>
+        </div>
+
+        <div class="section-title" style="color:var(--muted);"><span class="only-biz">Saved for later</span><span class="only-snack">🥫 Pantry</span> <span class="badge-count">1</span> <span class="placeholder-text" style="font-weight:400; text-transform:none; letter-spacing:0;">· <span class="only-biz">waiting for your review</span><span class="only-snack">stored, waiting for review</span></span> <span class="goto-btn" data-goto="library" data-lib-tab="pantry" style="margin-left:auto; font-size:10px; font-weight:400; text-transform:none; letter-spacing:0; color:#333; text-decoration:underline; cursor:pointer;">see all →</span></div>
+        <div class="item-row sfl-item">
+          <div class="sfl-collapsed" style="display:flex; justify-content:space-between; align-items:center;">
+            <span>Book dentist appointment</span>
+            <span class="placeholder-text sfl-review" style="cursor:pointer; text-decoration:underline; color:#333;"><span class="only-biz">review now</span><span class="only-snack">🍽️ review now</span></span>
+          </div>
+          <div class="sfl-expanded">
+            <div class="row" style="justify-content:space-between;"><span>Book dentist appointment</span></div>
+            <div class="meta">captured 3 Jul 2026, 2:14pm</div>
+            <div class="item-actions">
+              <span class="btn primary goto-btn" data-goto="breakdown" data-substate="progress"><span class="only-biz">Break into steps →</span><span class="only-snack">🍿 Snack-size it →</span></span>
+              <span class="btn"><span class="only-biz">Add to-do</span><span class="only-snack">🍽️ Add to-do</span></span>
+              <span class="btn"><span class="only-biz">Save for later</span><span class="only-snack">🥫 Save for later</span></span>
+              <span class="btn ghost" style="margin-left:auto;color:#c0392b;border-color:#c0392b;" title="Delete">🗑️</span>
+            </div>
+          </div>
+        </div>
+        </div><!-- /demo-populated: sections -->
+
+      </div>
+    </div>
+    <div class="notes">
+      <h2>Screen notes — Inbox (source: <code>inbox-view.tsx</code>)</h2>
+      <ul>
+        <li><strong>Capture bar</strong> is the single required interaction — zero-friction capture, autofocus on load, "/" key refocuses it from anywhere. On Enter the item saves with a quick <em>"captured ✓"</em> inline confirmation (no modal, no blocking).</li>
+        <li><strong>Freshness scale (Task Snacking):</strong> every unsorted item ages through 🟢 Fresh → 🟡 Softening (4h) → 🟠 Soggy (8h) → 🔴 Stale (12h) — in Plain voice: Recent → Aging → Overdue → Way overdue. It's a no-guilt nudge, not a deadline. Rows sort freshest/newest first.</li>
+        <li>Freshness is a gentle nudge only — no penalty. Once an item's gone untouched 24h, the row surfaces a "still needed?" check with a <em>Dismiss</em> to clear the prompt.</li>
+        <li><strong>24h review prompt:</strong> once an item's gone untouched for 24h it surfaces an inline "still needed?" check — a light forced decision, never an auto-delete. A daily review nudge batches these up (candidate for a real scheduled reminder).</li>
+        <li>Each row's actions: <em>Snack-size it / Break into steps</em> (→ Breakdown), <em>Add to-do</em> (skip breakdown → the <em>To do</em> / Quick bites bucket), <em>Save for later</em> (→ the <em>Saved for later</em> / Pantry bucket, freshness paused), and a red 🗑️ Delete icon.</li>
+        <li><strong>Pantry / Saved for later</strong> holds "later" items with the freshness clock paused; <strong>Quick bites / To do</strong> holds single items committed without a breakdown.</li>
+        <li><strong>Sorted</strong> section: broken-down tasks in progress, grayed to recede, each showing <em>step progress</em> (e.g. "2/5 done"; gray "· not scheduled"). Fully finished tasks graduate to the Library's <strong>Done</strong> tab. Whole row reopens its confirmed breakdown.</li>
+        <li><strong>Voice toggle:</strong> all wording above flips between Plain and Playful via the top-bar switch or Settings. Same data, same features.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============ SCREEN 2 : BREAKDOWN ============ -->
+  <div class="screen" id="screen-breakdown">
+    <div class="device">
+      <div class="device-header">
+        <span class="brand">dlectroflow</span>
+        <div class="nav-wrap">
+          <button class="hamburger-btn" data-menu="menu-breakdown">☰</button>
+          <div class="nav-menu" id="menu-breakdown">
+            <div class="nav-menu-item" data-goto="inbox"><span class="only-biz">Inbox</span><span class="only-snack">🧠 Inbox</span></div>
+            <div class="nav-menu-item" data-goto="focus"><span class="only-biz">Focus Timer</span><span class="only-snack">⏱️ Focus Timer</span></div>
+            <div class="nav-menu-item" data-goto="dashboard"><span class="only-biz">Dashboard</span><span class="only-snack">🎉 Dashboard</span></div>
+            <div class="nav-menu-item" data-goto="library"><span class="only-biz">Everything</span><span class="only-snack">🍱 Larder</span></div>
+            <div class="nav-menu-item" data-goto="settings"><span class="only-biz">Settings</span><span class="only-snack">⚙️ Settings</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="device-body">
+
+        <strong id="breakdown-title" style="font-size:20px; display:block; margin-bottom:10px;"><span class="only-snack">✂️ </span>Sort out the tax documents</strong>
+
+        <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
+          <span class="btn goto-btn" data-goto="inbox">← Back</span>
+          <div class="item-actions" style="margin-top:0;">
+            <span class="btn substate-btn active" data-substate="progress"><span class="only-snack">🛠 </span>In progress</span>
+            <span class="btn substate-btn" data-substate="confirmed">✅ Confirmed &amp; scheduled</span>
+            <span class="btn substate-btn" data-substate="confirmed-unscheduled"><span class="only-snack">🔌 </span>Confirmed, not scheduled</span>
+          </div>
+        </div>
+
+        <div class="substate" id="substate-progress">
+
+        <div class="chat-bubble assistant"><span class="only-biz">Here's a first pass — 4 small steps to get this off your plate.</span><span class="only-snack">Here's a first pass — 4 snack-sized steps to get this off your plate.</span></div>
+        <div class="chat-bubble user"><span class="only-biz">These feel too big — can you split them?</span><span class="only-snack">These feel too big — more bites?</span></div>
+        <div class="chat-bubble assistant">Got it, splitting further…</div>
+
+        <span class="label" style="margin-top:10px;">Proposed steps · 4 <span class="only-biz">steps</span><span class="only-snack">snacks</span> · ~55 min total</span>
+        <p class="placeholder-text" style="font-size:10px; margin:2px 0 8px; font-style:normal;"><span class="only-snack">⏱️ </span>The minutes are the <strong>estimated time to spend</strong> on each — tap any <span style="background:#fffbe6; border:1px solid #b8860b; color:#5a4500; border-radius:3px; padding:0 4px;">✏️</span> to edit.</p>
+        <div class="stepper-row">
+          <span class="num">1/4</span>
+          <span class="field only-snack" style="flex:0 0 34px; text-align:center;">📂</span>
+          <span class="field">Find last year's tax folder</span>
+          <span class="field small">~10 min</span>
+          <span class="btn" style="padding:2px 7px;font-size:9px;" title="Send back to the Inbox as its own item to re-break-down"><span class="only-biz">↩ Back to inbox</span><span class="only-snack">🍳 Back to inbox</span></span>
+          <span class="btn ghost" style="padding:2px 7px;font-size:9px;color:#c0392b;border-color:#c0392b;" title="Remove step">🗑️</span>
+        </div>
+        <div class="stepper-row">
+          <span class="num">2/4</span>
+          <span class="field only-snack" style="flex:0 0 34px; text-align:center;">🧾</span>
+          <span class="field">Pull receipts from email</span>
+          <span class="field small">~15 min</span>
+          <span class="btn" style="padding:2px 7px;font-size:9px;" title="Send back to the Inbox as its own item to re-break-down"><span class="only-biz">↩ Back to inbox</span><span class="only-snack">🍳 Back to inbox</span></span>
+          <span class="btn ghost" style="padding:2px 7px;font-size:9px;color:#c0392b;border-color:#c0392b;" title="Remove step">🗑️</span>
+        </div>
+        <div class="stepper-row">
+          <span class="num">3/4</span>
+          <span class="field only-snack" style="flex:0 0 34px; text-align:center;">📊</span>
+          <span class="field">Enter totals into spreadsheet</span>
+          <span class="field small">~20 min</span>
+          <span class="btn" style="padding:2px 7px;font-size:9px;" title="Send back to the Inbox as its own item to re-break-down"><span class="only-biz">↩ Back to inbox</span><span class="only-snack">🍳 Back to inbox</span></span>
+          <span class="btn ghost" style="padding:2px 7px;font-size:9px;color:#c0392b;border-color:#c0392b;" title="Remove step">🗑️</span>
+        </div>
+        <div class="stepper-row">
+          <span class="num">4/4</span>
+          <span class="field only-snack" style="flex:0 0 34px; text-align:center;">📤</span>
+          <span class="field">Send to accountant</span>
+          <span class="field small">~10 min</span>
+          <span class="btn" style="padding:2px 7px;font-size:9px;" title="Send back to the Inbox as its own item to re-break-down"><span class="only-biz">↩ Back to inbox</span><span class="only-snack">🍳 Back to inbox</span></span>
+          <span class="btn ghost" style="padding:2px 7px;font-size:9px;color:#c0392b;border-color:#c0392b;" title="Remove step">🗑️</span>
+        </div>
+
+        <div class="item-actions" style="margin-top:12px;">
+          <span class="btn primary"><span class="only-biz">✅ Confirm steps</span><span class="only-snack">✅ Confirm steps</span></span>
+          <span class="btn"><span class="only-biz">More steps</span><span class="only-snack">🍞 More steps</span></span>
+          <span class="btn"><span class="only-biz">Fewer steps</span><span class="only-snack">🥖 Fewer steps</span></span>
+        </div>
+
+        <div class="wf-box" style="margin-top:12px; display:flex; gap:8px;">
+          <span class="placeholder-text" style="flex:1;">Or tell Claude how to adjust…</span>
+          <span class="btn" style="font-size:10px;">Send</span>
+        </div>
+
+        <div class="callout">
+          After confirming, this view switches to a confirmation state:
+          saved-steps summary → <strong>Schedule onto your calendar</strong> panel (Connect Google Tasks / Connect Reclaim,
+          or send directly if already connected) → <strong>Start focusing</strong> button.
+        </div>
+
+        </div>
+
+        <div class="substate hidden" id="substate-confirmed">
+
+          <div class="wf-solid" style="border-color:#2f7d32; background:#eafbea;">
+            <span style="font-size:12px; color:#1e5e22; font-weight:600;"><span class="only-biz">Saved 5 steps (70 min total).</span><span class="only-snack">🎉 You really locked in — 5 snacks packed. Time spent: only 70 mins.</span></span>
+          </div>
+
+          <span class="label" style="margin-top:12px;"><span class="only-snack">📅 </span>Schedule onto your calendar</span>
+          <div class="wf-solid">
+            <span style="font-size:12px; color:#1e5e22; font-weight:600;">✅ Sent 5 tasks to your "Reclaim Tasks" list — they'll sync into Reclaim shortly.</span>
+          </div>
+
+          <span class="label" style="margin-top:14px;">Steps (read-only once confirmed)</span>
+          <div class="stepper-row"><span class="num">1/5</span><span class="only-snack" style="flex:0 0 24px;">🗓️</span><span class="field" style="border-style:solid;">Pick a date &amp; venue</span><span class="field small" style="border-style:solid;">10 min</span></div>
+          <div class="stepper-row"><span class="num">2/5</span><span class="only-snack" style="flex:0 0 24px;">📋</span><span class="field" style="border-style:solid;">Draft the agenda outline</span><span class="field small" style="border-style:solid;">20 min</span></div>
+          <div class="stepper-row"><span class="num">3/5</span><span class="only-snack" style="flex:0 0 24px;">🍔</span><span class="field" style="border-style:solid;">Sort catering</span><span class="field small" style="border-style:solid;">15 min</span></div>
+          <div class="stepper-row"><span class="num">4/5</span><span class="only-snack" style="flex:0 0 24px;">✉️</span><span class="field" style="border-style:solid;">Send calendar invites</span><span class="field small" style="border-style:solid;">10 min</span></div>
+          <div class="stepper-row"><span class="num">5/5</span><span class="only-snack" style="flex:0 0 24px;">🎯</span><span class="field" style="border-style:solid;">Confirm activities lead</span><span class="field small" style="border-style:solid;">15 min</span></div>
+
+          <div class="item-actions" style="margin-top:14px;">
+            <span class="btn primary goto-btn" data-goto="focus" data-focus="setup"><span class="only-biz">▶ Start focusing</span><span class="only-snack">🍽️ Start focusing</span></span>
+          </div>
+
+          <div class="callout">
+            This is what reopening a <strong>sorted, already-broken-down, successfully scheduled</strong> task looks like —
+            landed on from Inbox → Sorted → the "✅ scheduled" row. Steps are read-only here (editing only
+            happens pre-confirmation). Use the toggle above to compare against the <strong>🔌 Confirmed, not scheduled</strong>
+            state — the banner always reflects ground truth, it doesn't just assume success.
+          </div>
+        </div>
+
+        <div class="substate hidden" id="substate-confirmed-unscheduled">
+
+          <div class="wf-solid">
+            <span style="font-size:12px; font-weight:600;"><span class="only-biz">Saved 4 steps (50 min total) — stored on this device.</span><span class="only-snack">💾 You really locked in — 4 snacks packed. Time spent: only 50 mins. <span style="font-weight:400; color:#777;">(stored on this device)</span></span></span>
+          </div>
+
+          <span class="label" style="margin-top:12px;"><span class="only-snack">📅 </span>Schedule onto your calendar</span>
+          <div class="wf-box">
+            <span style="font-size:12px; color:#6a5b00; font-weight:600;">⚠️ Not scheduled yet — connect a calendar to send these steps automatically.</span>
+            <div class="item-actions" style="margin-top:10px;">
+              <span class="btn primary"><span class="only-snack">🔌 </span>Connect Reclaim</span>
+              <span class="btn"><span class="only-snack">🔌 </span>Connect Google Tasks</span>
+            </div>
+            <p class="placeholder-text" style="margin:8px 0 0; font-size:10px;">Or skip scheduling — steps are saved regardless and you can start focusing on them manually any time.</p>
+          </div>
+
+          <span class="label" style="margin-top:14px;">Steps (read-only once confirmed)</span>
+          <div class="stepper-row"><span class="num">1/4</span><span class="only-snack" style="flex:0 0 24px;">🔍</span><span class="field" style="border-style:solid;">Compare quotes from 2–3 insurers</span><span class="field small" style="border-style:solid;">20 min</span></div>
+          <div class="stepper-row"><span class="num">2/4</span><span class="only-snack" style="flex:0 0 24px;">🪪</span><span class="field" style="border-style:solid;">Gather current policy info (VIN, dates)</span><span class="field small" style="border-style:solid;">10 min</span></div>
+          <div class="stepper-row"><span class="num">3/4</span><span class="only-snack" style="flex:0 0 24px;">📞</span><span class="field" style="border-style:solid;">Call or submit renewal application</span><span class="field small" style="border-style:solid;">15 min</span></div>
+          <div class="stepper-row"><span class="num">4/4</span><span class="only-snack" style="flex:0 0 24px;">📬</span><span class="field" style="border-style:solid;">Confirm new policy documents received</span><span class="field small" style="border-style:solid;">5 min</span></div>
+
+          <div class="item-actions" style="margin-top:14px;">
+            <span class="btn primary goto-btn" data-goto="focus" data-focus="setup"><span class="only-biz">▶ Start focusing</span><span class="only-snack">🍽️ Start focusing</span></span>
+          </div>
+
+          <div class="callout">
+            This is what reopening a <strong>sorted, already-broken-down, but never-scheduled</strong> task looks like —
+            landed on from Inbox → Sorted → the "· not scheduled" row. Same page as the confirmed
+            state, but no calendar integration ran, so it truthfully shows a connect prompt instead of a false "sent to
+            Reclaim" success banner. Start focusing still works — scheduling is optional, saving locally is not.
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="notes">
+      <h2>Screen notes — Breakdown / Task page (source: <code>breakdown-chat.tsx</code>)</h2>
+      <ul>
+        <li>Claude streams a proposal as chat text <em>and</em> a structured, directly-editable step list — emoji, text, and a per-step <strong>estimated time to spend</strong> (highlighted amber, tap ✏️ to edit) — simultaneously.</li>
+        <li>Quick-reply chips (<em>More bites/steps · Fewer bites/steps</em>) plus free-text let the user redirect Claude without leaving the flow.</li>
+        <li>Per-step controls: <em>Back to the kitchen / Back to inbox</em> ejects a too-big step out to the Inbox as its own item to re-break-down; 🗑️ removes it. Confirm the whole set, after which steps become read-only.</li>
+        <li>Confirmation state branches on integration status: Google Tasks configured → connect/send; else Reclaim MCP → connect/send. Both are optional — steps always save locally regardless.</li>
+        <li>This same route is what a Sorted item opens — not a different screen, just this page rendered in one of two confirmed states depending on whether scheduling actually succeeded. Use the toggle to preview all three.</li>
+        <li><strong>Start focusing / Dig in</strong> (both confirmed states) navigates into the Focus Timer's setup state, completing the schedule→focus handoff.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============ SCREEN 3 : FOCUS ============ -->
+  <div class="screen" id="screen-focus">
+    <div class="device">
+      <div class="device-header">
+        <span class="brand">dlectroflow</span>
+        <div class="nav-wrap">
+          <button class="hamburger-btn" data-menu="menu-focus">☰</button>
+          <div class="nav-menu" id="menu-focus">
+            <div class="nav-menu-item" data-goto="inbox"><span class="only-biz">Inbox</span><span class="only-snack">🧠 Inbox</span></div>
+            <div class="nav-menu-item active" data-goto="focus"><span class="only-biz">Focus Timer</span><span class="only-snack">⏱️ Focus Timer</span></div>
+            <div class="nav-menu-item" data-goto="dashboard"><span class="only-biz">Dashboard</span><span class="only-snack">🎉 Dashboard</span></div>
+            <div class="nav-menu-item" data-goto="library"><span class="only-biz">Everything</span><span class="only-snack">🍱 Larder</span></div>
+            <div class="nav-menu-item" data-goto="settings"><span class="only-biz">Settings</span><span class="only-snack">⚙️ Settings</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="device-body">
+
+        <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <strong id="focus-title" style="font-size:15px;"><span class="only-snack">🧾 </span>Sort out the tax documents<span class="placeholder-text">· <span class="only-biz">step 2 of 4</span><span class="only-snack">bite 2 of 4</span></span></strong>
+          <span class="placeholder-text" style="font-size:10px;">today: 25m · 2 <span class="only-biz">sessions</span><span class="only-snack">bites</span></span>
+        </div>
+
+        <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
+          <span class="btn goto-btn" data-goto="breakdown" data-substate="progress">← Back to steps</span>
+          <div class="item-actions" style="margin-top:0;">
+            <span class="btn focus-btn" data-focus="setup"><span class="only-snack">🎯 </span>Setup</span>
+            <span class="btn focus-btn active" data-focus="running">▶ Running</span>
+            <span class="btn focus-btn" data-focus="timeup"><span class="only-snack">⏰ </span>Time's up</span>
+            <span class="btn focus-btn" data-focus="done"><span class="only-snack">🎉 </span>Done</span>
+          </div>
+        </div>
+
+        <!-- ---- FOCUS: SETUP ---- -->
+        <div class="focus-state hidden" id="focus-setup" style="text-align:center;">
+          <p style="font-size:14px; margin-top:6px;"><span class="only-snack">📥 </span>Pull receipts from email</p>
+          <span class="label" style="margin-top:14px;">How long do you want to focus?</span>
+          <div class="item-actions" style="justify-content:center; margin-top:8px;">
+            <span class="btn">15 min</span>
+            <span class="btn primary">25 min <span style="font-weight:400; font-size:9px;">· est.</span></span>
+            <span class="btn">45 min</span>
+            <span class="btn">custom…</span>
+          </div>
+          <p class="placeholder-text" style="font-size:10px; margin-top:6px;">Pre-filled from the step's estimate — nudge it if today's brain disagrees.</p>
+          <div class="wf-box" style="margin-top:14px; text-align:left;">
+            <span class="label">Optional</span>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; font-size:11px;">
+              <span class="pill"><span class="only-snack">🔕 </span>Mute notifications</span>
+              <span class="pill"><span class="only-snack">🎵 </span>Focus sound: off</span>
+              <span class="pill"><span class="only-snack">👁️ </span>Hide other steps</span>
+            </div>
+          </div>
+          <div class="item-actions" style="justify-content:center; margin-top:16px;">
+            <span class="btn primary focus-btn" data-focus="running">▶ Start focus timer</span>
+          </div>
+          <div class="callout" style="text-align:left;">
+            Entry point when you tap <strong>Start focusing / Dig in</strong> from a confirmed breakdown. One decision only — duration —
+            then straight into the ring. Everything else is optional and pre-set.
+          </div>
+        </div>
+
+        <!-- ---- FOCUS: RUNNING / PAUSED ---- -->
+        <div class="focus-state" id="focus-running" style="text-align:center;">
+          <p style="font-size:14px; margin-top:6px;"><span class="only-snack">📥 </span>Pull receipts from email</p>
+
+          <div class="ring">
+            <div class="time">12:45</div>
+            <div class="sub">remaining · of 25 min</div>
+          </div>
+
+          <div class="item-actions" style="justify-content:center;">
+            <span class="btn focus-btn" data-focus="done" style="background:#2f7d32;color:#fff;border-color:#2f7d32;">✅ Complete</span>
+            <span class="btn">⏸️ Pause</span>
+            <span class="btn">➕ 5m</span>
+            <span class="btn">➖ 5m</span>
+            <span class="btn ghost goto-btn" data-goto="breakdown" data-substate="progress" style="color:#999;"><span class="only-biz">⏸ Pause for now</span><span class="only-snack">⏸️ Pause for now</span></span>
+          </div>
+          <p class="placeholder-text" style="font-size:10px; margin-top:10px;">Paused looks identical with a ▶ Resume in place of ⏸️ Pause and a dimmed ring — same screen, not a new state.</p>
+
+          <div class="callout" style="text-align:left;">
+            The focal screen. Minimal chrome around the ring on purpose. <strong>✅ Complete</strong> jumps to Done early;
+            letting the clock hit zero moves to <strong>Time's up</strong>; <strong>Pause for now</strong> ends the
+            session, keeps the step in its task, and drops a resume banner in the Inbox — low-shame, never a failure.
+          </div>
+        </div>
+
+        <!-- ---- FOCUS: TIME'S UP ---- -->
+        <div class="focus-state hidden" id="focus-timeup" style="text-align:center;">
+          <p style="font-size:14px; margin-top:6px;"><span class="only-snack">📥 </span>Pull receipts from email</p>
+
+          <div class="ring" style="border-color:#e6c200; border-top-color:#e6c200;">
+            <div class="time" style="font-size:22px;">⏰</div>
+            <div class="sub">time's up</div>
+          </div>
+
+          <strong style="font-size:15px;">Did you finish this <span class="only-biz">step</span><span class="only-snack">bite</span>?</strong>
+          <div class="item-actions" style="justify-content:center; margin-top:12px;">
+            <span class="btn primary focus-btn" data-focus="done">✅ Yes, done</span>
+            <span class="btn focus-btn" data-focus="running">➕ A bit more time</span>
+            <span class="btn"><span class="only-snack">🔁 </span>Re-estimate</span>
+          </div>
+          <div class="wf-box" style="margin-top:14px; text-align:left; background:#eee; border-style:solid;">
+            <span style="font-size:11px;"><span class="only-snack">💬 </span><em>Re-estimate</em> asks Claude for a kinder new number: "No worries — pulling
+            receipts often runs long. Want to add 15 min, or split it into 'search inbox' + 'save attachments'?"</span>
+          </div>
+          <p class="placeholder-text" style="font-size:10px; margin-top:10px;">Running past the estimate is never framed as failure — the timer just asks, it doesn't judge.</p>
+
+          <div class="callout" style="text-align:left;">
+            The anti-shame moment: hitting zero opens a gentle check-in, not an alarm. Every option is a valid next move —
+            done, keep going, or let Claude resize the step.
+          </div>
+        </div>
+
+        <!-- ---- FOCUS: DONE ---- -->
+        <div class="focus-state hidden" id="focus-done" style="text-align:center;">
+          <div class="only-snack" style="font-size:44px; margin:10px 0 4px;">🎉</div>
+          <strong style="font-size:16px;"><span class="only-biz">✅ Step complete — nice work!</span><span class="only-snack">🍽️ You bit off exactly what you could chew — great work</span></strong>
+          <p class="placeholder-text" style="font-size:11px; margin-top:2px;"><span class="only-snack">📥 </span>Pull receipts from email · 25 min focused</p>
+
+          <div class="grid4" style="margin-top:16px;">
+            <div class="stat"><div class="num" style="color:#a67c00;">+8</div><div class="lbl"><span class="only-biz">Points earned</span><span class="only-snack">Crumbs earned</span></div></div>
+            <div class="stat"><div class="num">3 <span class="only-snack">🔥</span></div><div class="lbl">Streak (kept!)</div></div>
+            <div class="stat"><div class="num">25</div><div class="lbl">Mins this session</div></div>
+            <div class="stat"><div class="num">3/4</div><div class="lbl"><span class="only-biz">Steps this task</span><span class="only-snack">Bites this snack</span></div></div>
+          </div>
+
+          <div class="wf-box" style="margin-top:14px; text-align:left; background:#fafafa;">
+            <span style="font-size:11px;"><span class="only-snack">🏅 </span>3 <span class="only-snack">🔥 </span>so far — 2 more days for the <span class="only-biz">Full work week</span><span class="only-snack">🔥 Full Week</span> badge.</span>
+          </div>
+
+          <div class="item-actions" style="justify-content:center; margin-top:16px;">
+            <span class="btn primary focus-btn" data-focus="setup">▶ Next <span class="only-biz">step</span><span class="only-snack">bite</span> (3/4)</span>
+            <span class="btn goto-btn" data-goto="inbox"><span class="only-snack">🧠 </span>Back to Inbox</span>
+            <span class="btn goto-btn" data-goto="dashboard"><span class="only-snack">🎉 </span>See Dashboard</span>
+          </div>
+
+          <div class="callout" style="text-align:left;">
+            The dopamine payoff — celebration + points + streak, explicitly ADHD-focused. Two off-ramps beside "next step"
+            so momentum is offered, never forced. <strong>Pause for now</strong> keeps the step in its task and surfaces a
+            resume banner; it lands on a quieter variant of this card — no confetti, streak preserved, framed as paused, not a loss.
+          </div>
+        </div>
+
+      </div>
+    </div>
+    <div class="notes">
+      <h2>Screen notes — Focus Timer (source: <code>focus-timer.tsx</code>)</h2>
+      <ul>
+        <li>Circular SVG progress ring is the focal element — countdown is the whole point of this screen, minimal chrome around it.</li>
+        <li><strong>Snack vocabulary (Playful voice):</strong> a task is the "snack", each step is a "bite" (header reads "bite 2 of 4"); Plain voice keeps "step 2 of 4".</li>
+        <li>"Time's up" doesn't auto-fail: offers <em>Yes done</em>, <em>add more time</em>, or <em>re-estimate</em> (Claude proposes a kinder new estimate).</li>
+        <li>Completion screen shows a celebration, points/crumbs, and streak status — explicitly designed for dopamine payoff (ADHD-focused UX).</li>
+        <li><strong>Pause for now</strong> is a first-class, low-shame exit — it ends the session, keeps the step in its task (not lost), and surfaces a "focus step paused — resume" banner in the Inbox. Lands on a quieter no-confetti card; never buried, never a failure.</li>
+        <li>Persistent top row (← Back to steps + four state buttons) mirrors the Breakdown pattern; four clickable sub-states (Setup / Running / Time's up / Done) are wired the way the real state machine flows.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============ SCREEN 4 : DASHBOARD ============ -->
+  <div class="screen" id="screen-dashboard">
+    <div class="device">
+      <div class="device-header">
+        <span class="brand">dlectroflow</span>
+        <div class="nav-wrap">
+          <button class="hamburger-btn" data-menu="menu-dashboard">☰</button>
+          <div class="nav-menu" id="menu-dashboard">
+            <div class="nav-menu-item" data-goto="inbox"><span class="only-biz">Inbox</span><span class="only-snack">🧠 Inbox</span></div>
+            <div class="nav-menu-item" data-goto="focus"><span class="only-biz">Focus Timer</span><span class="only-snack">⏱️ Focus Timer</span></div>
+            <div class="nav-menu-item active" data-goto="dashboard"><span class="only-biz">Dashboard</span><span class="only-snack">🎉 Dashboard</span></div>
+            <div class="nav-menu-item" data-goto="library"><span class="only-biz">Everything</span><span class="only-snack">🍱 Larder</span></div>
+            <div class="nav-menu-item" data-goto="settings"><span class="only-biz">Settings</span><span class="only-snack">⚙️ Settings</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="device-body">
+
+        <strong style="font-size:18px;">Dashboard</strong>
+
+        <div class="wf-box" style="margin:12px 0;">
+          <span class="label">Daily spark</span>
+          <span class="placeholder-text">"Small steps still move the needle." — regenerate ↻</span>
+        </div>
+
+        <div class="grid4">
+          <div class="stat"><div class="num" style="color:#a67c00;">40</div><div class="lbl"><span class="only-biz">Points today</span><span class="only-snack">Crumbs today</span></div></div>
+          <div class="stat"><div class="num">3 <span class="only-snack">🔥</span></div><div class="lbl"><span class="only-biz">Current streak</span><span class="only-snack">On a roll</span></div></div>
+          <div class="stat"><div class="num">55</div><div class="lbl"><span class="only-biz">Focus mins today</span><span class="only-snack">Time at the table</span></div></div>
+          <div class="stat"><div class="num">4</div><div class="lbl"><span class="only-biz">Steps today</span><span class="only-snack">Bites today</span></div></div>
+        </div>
+
+        <div class="wf-box" style="margin-top:14px;">
+          <span class="label"><span class="only-snack">🌇 </span>End-of-day round-up</span>
+          <span class="placeholder-text">Narrative summary + opt-in email toggle · demo override</span>
+        </div>
+
+        <div class="wf-solid" style="margin-top:14px;">
+          <span class="label" style="margin:0;"><span class="only-snack">🏆 </span>Best streaks</span>
+          <div style="font-size:12px; margin-top:6px;"><span class="only-snack">🥇 </span><strong>9 days</strong> <span class="placeholder-text">· ended 3 days ago</span></div>
+          <div style="font-size:12px;"><span class="only-snack">🥈 </span><strong>6 days</strong> <span class="placeholder-text">· ended 2 weeks ago</span></div>
+          <div style="font-size:12px;"><span class="only-snack">🥉 </span><strong>4 days</strong> <span class="placeholder-text">· ended last month</span></div>
+        </div>
+
+        <div class="wf-solid" style="margin-top:14px;">
+          <span class="label" style="margin:0;">Badges <span class="placeholder-text" style="text-transform:none; letter-spacing:0;">· faded = not earned yet</span></span>
+          <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">
+            <span class="pill"><span class="only-biz">First breakdown</span><span class="only-snack">🍰 First Slice</span></span>
+            <span class="pill"><span class="only-biz">First scheduled</span><span class="only-snack">🍽️ First Plate-up</span></span>
+            <span class="pill"><span class="only-biz">First focus</span><span class="only-snack">😋 First Bite</span></span>
+            <span class="pill"><span class="only-biz">Task complete</span><span class="only-snack">🧽 Clean Plate</span></span>
+            <span class="pill" style="opacity:.4;">🔒 <span class="only-biz">Full work week</span><span class="only-snack">🔥 Full Week</span></span>
+            <span class="pill" style="opacity:.4;">🔒 <span class="only-biz">Inbox zero</span><span class="only-snack">🧺 Empty Tray</span></span>
+            <span class="pill" style="opacity:.4;">🔒 <span class="only-biz">Comeback</span><span class="only-snack">📦 Back for Seconds</span></span>
+          </div>
+        </div>
+
+        <p class="placeholder-text" style="margin-top:12px;">Total <span class="only-biz">points</span><span class="only-snack">crumbs</span> earned: 1,240</p>
+      </div>
+    </div>
+    <div class="notes">
+      <h2>Screen notes — Dashboard (source: <code>dashboard/page.tsx</code>)</h2>
+      <ul>
+        <li>4-stat grid gives an at-a-glance daily reward snapshot; feeds the "reward" stage of the core loop.</li>
+        <li>Round-up card is the daily narrative close — reinforces habit-forming return-tomorrow behavior.</li>
+        <li>Streaks + badges are gamification layers pulled straight from <code>Streak</code>, <code>StreakRecord</code>, and <code>Badge</code> Prisma models.</li>
+        <li><strong>Badge set (7):</strong> First breakdown / 🍰 First Slice · First scheduled / 🍽️ First Plate-up · First focus / 😋 First Bite · Task complete / 🧽 Clean Plate · <strong>Full work week</strong> (5 working-day streak) / 🔥 Full Week · Inbox zero / 🧺 Empty Tray · Comeback / 📦 Back for Seconds (no-shame, for returning after a gap). Faded + 🔒 = not yet earned. "Full work week" aligns with the working-days streak rule.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============ SCREEN 5 : SETTINGS ============ -->
+  <div class="screen" id="screen-settings">
+    <div class="device">
+      <div class="device-header">
+        <span class="brand">dlectroflow</span>
+        <div class="nav-wrap">
+          <button class="hamburger-btn" data-menu="menu-settings">☰</button>
+          <div class="nav-menu" id="menu-settings">
+            <div class="nav-menu-item" data-goto="inbox"><span class="only-biz">Inbox</span><span class="only-snack">🧠 Inbox</span></div>
+            <div class="nav-menu-item" data-goto="focus"><span class="only-biz">Focus Timer</span><span class="only-snack">⏱️ Focus Timer</span></div>
+            <div class="nav-menu-item" data-goto="dashboard"><span class="only-biz">Dashboard</span><span class="only-snack">🎉 Dashboard</span></div>
+            <div class="nav-menu-item" data-goto="library"><span class="only-biz">Everything</span><span class="only-snack">🍱 Larder</span></div>
+            <div class="nav-menu-item active" data-goto="settings"><span class="only-biz">Settings</span><span class="only-snack">⚙️ Settings</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="device-body">
+
+        <strong style="font-size:18px;"><span class="only-snack">⚙️ </span>Settings</strong>
+
+        <span class="label" style="margin-top:14px;">Voice &amp; wording</span>
+        <div class="wf-box" style="margin-bottom:14px;">
+          <div class="set-row">
+            <div>
+              <div class="set-label">App voice</div>
+              <div class="set-desc">Switch the whole app between <strong>Plain</strong> language and <strong>Playful</strong> language. Same features, same data — just different words. (Also flippable from the top bar.)</div>
+            </div>
+            <div class="seg">
+              <span class="seg-opt active" data-mode="biz">Plain</span>
+              <span class="seg-opt" data-mode="snack">Playful</span>
+            </div>
+          </div>
+        </div>
+
+        <span class="label"><span class="only-biz">Aging &amp; review</span><span class="only-snack">Freshness &amp; review</span></span>
+        <div class="wf-box" style="margin-bottom:14px;">
+          <div class="set-row">
+            <div><div class="set-label"><span class="only-biz">Aging</span><span class="only-snack">Softening</span> after</div><div class="set-desc">First nudge tier (🟡)</div></div>
+            <span><input class="mini-input" value="4"> h</span>
+          </div>
+          <div class="set-row">
+            <div><div class="set-label"><span class="only-biz">Overdue</span><span class="only-snack">Soggy</span> after</div><div class="set-desc">Second tier (🟠)</div></div>
+            <span><input class="mini-input" value="8"> h</span>
+          </div>
+          <div class="set-row">
+            <div><div class="set-label"><span class="only-biz">Way overdue</span><span class="only-snack">Stale</span> after</div><div class="set-desc">Final tier (🔴)</div></div>
+            <span><input class="mini-input" value="12"> h</span>
+          </div>
+          <div class="set-row">
+            <div><div class="set-label">Daily review nudge</div><div class="set-desc">Once a day, prompt to review items untouched 24h+</div></div>
+            <span style="display:flex; align-items:center; gap:8px;"><input class="mini-input" value="09:00" style="width:60px;"><span class="toggle-pill on"></span></span>
+          </div>
+        </div>
+
+        <span class="label">Integrations</span>
+        <div class="wf-box" style="margin-bottom:14px;">
+          <div class="set-row">
+            <div><div class="set-label">Reclaim</div><div class="set-desc">Auto-schedules steps into your calendar</div></div>
+            <span class="btn primary">🔌 Connect</span>
+          </div>
+          <div class="set-row">
+            <div><div class="set-label">Google Tasks</div><div class="set-desc">Send steps to a task list</div></div>
+            <span class="btn">🔌 Connect</span>
+          </div>
+        </div>
+
+        <span class="label">Notifications</span>
+        <div class="wf-box">
+          <div class="set-row">
+            <div><div class="set-label">Desktop reminders</div><div class="set-desc">Aging nudges &amp; the daily review prompt</div></div>
+            <span class="toggle-pill on"></span>
+          </div>
+          <div class="set-row">
+            <div><div class="set-label">End-of-day round-up email</div><div class="set-desc">Narrative summary of your day</div></div>
+            <span class="toggle-pill"></span>
+          </div>
+        </div>
+
+        <span class="label">Demo</span>
+        <div class="wf-box">
+          <div class="set-row">
+            <div><div class="set-label">First-run preview</div><div class="set-desc">For demos — show the app as a brand-new user sees it (welcome card + empty Inbox).</div></div>
+            <div class="seg">
+              <span class="seg-opt fr-opt active" data-fr="normal">Populated</span>
+              <span class="seg-opt fr-opt" data-fr="first">First run</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    <div class="notes">
+      <h2>Screen notes — Settings (new)</h2>
+      <ul>
+        <li><strong>App voice</strong> is the headline setting: a live Plain/Playful toggle. Plain is the default so the app is safe to screen-share and lowers the barrier for users the playful voice might put off; Playful keeps the ADHD-friendly, low-shame identity. Flip it here or from the top bar — the whole app rewords instantly (and the choice persists).</li>
+        <li>Freshness thresholds make the 4h/8h/12h tiers configurable; the daily review nudge time + toggle is the home for the "items untouched 24h" prompt (candidate for a real scheduled reminder).</li>
+        <li>Integrations surface Reclaim + Google Tasks connection state — the same connect prompts shown in the Breakdown confirmation.</li>
+        <li>Wireframe-level only: inputs/toggles are illustrative. Freshness-tier labels themselves follow the active voice.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============ SCREEN 6 : LIBRARY ============ -->
+  <div class="screen" id="screen-library">
+    <div class="device">
+      <div class="device-header">
+        <span class="brand">dlectroflow</span>
+        <div class="nav-wrap">
+          <button class="hamburger-btn" data-menu="menu-library">☰</button>
+          <div class="nav-menu" id="menu-library">
+            <div class="nav-menu-item" data-goto="inbox"><span class="only-biz">Inbox</span><span class="only-snack">🧠 Inbox</span></div>
+            <div class="nav-menu-item" data-goto="focus"><span class="only-biz">Focus Timer</span><span class="only-snack">⏱️ Focus Timer</span></div>
+            <div class="nav-menu-item" data-goto="dashboard"><span class="only-biz">Dashboard</span><span class="only-snack">🎉 Dashboard</span></div>
+            <div class="nav-menu-item active" data-goto="library"><span class="only-biz">Everything</span><span class="only-snack">🍱 Larder</span></div>
+            <div class="nav-menu-item" data-goto="settings"><span class="only-biz">Settings</span><span class="only-snack">⚙️ Settings</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="device-body">
+
+        <span class="btn back-btn" style="display:inline-block; margin-bottom:12px;">← Back</span>
+        <strong style="font-size:18px; display:block;"><span class="only-biz">Everything</span><span class="only-snack">🍱 Larder</span></strong>
+        <p class="placeholder-text" style="font-size:11px; margin:4px 0 12px; font-style:normal;">Everything that's left your inbox — committed single tasks, stored items, and finished breakdowns.</p>
+
+        <div class="item-actions" style="margin-top:0; margin-bottom:14px;">
+          <span class="btn lib-tab active" data-lib-tab="plated"><span class="only-biz">Single-task</span><span class="only-snack">😋 Quick bites</span> <span class="badge-count">3</span></span>
+          <span class="btn lib-tab" data-lib-tab="pantry"><span class="only-biz">Saved for later</span><span class="only-snack">🥫 Pantry</span> <span class="badge-count">2</span></span>
+          <span class="btn lib-tab" data-lib-tab="sorted"><span class="only-biz">Multi-step</span><span class="only-snack">✅ Sorted</span> <span class="badge-count">2</span></span>
+          <span class="btn lib-tab" data-lib-tab="done"><span class="only-biz">Done</span><span class="only-snack">🍽️ Devoured</span> <span class="badge-count">2</span></span>
+        </div>
+
+        <!-- ---- LIBRARY: PLATED / TASKS ---- -->
+        <div class="lib-panel" id="lib-plated">
+          <p class="placeholder-text" style="font-size:10px; margin:0 0 8px;">Single action items you committed without breaking into steps. Do them whole, or snack-size one later.</p>
+
+          <div class="item-row">
+            <div class="row" style="justify-content:space-between;">
+              <span>Reply to Sam's email</span>
+              <span class="placeholder-text" style="font-size:10px;">added 2h ago</span>
+            </div>
+            <div class="item-actions">
+              <span class="btn primary goto-btn" data-goto="focus" data-focus="setup"><span class="only-biz">▶ Start focusing</span><span class="only-snack">🍽️ Start focusing</span></span>
+              <span class="btn">✅ <span class="only-biz">Done</span><span class="only-snack">Done</span></span>
+              <span class="btn goto-btn" data-goto="breakdown" data-substate="progress"><span class="only-biz">Break into steps →</span><span class="only-snack">🍿 Snack-size it →</span></span>
+              <span class="btn ghost" style="margin-left:auto;color:#c0392b;border-color:#c0392b;" title="Delete">🗑️</span>
+            </div>
+          </div>
+
+          <div class="item-row">
+            <div class="row" style="justify-content:space-between;">
+              <span>Book flights for the conference</span>
+              <span class="placeholder-text" style="font-size:10px;">added yesterday</span>
+            </div>
+            <div class="item-actions">
+              <span class="btn primary goto-btn" data-goto="focus" data-focus="setup"><span class="only-biz">▶ Start focusing</span><span class="only-snack">🍽️ Start focusing</span></span>
+              <span class="btn">✅ <span class="only-biz">Done</span><span class="only-snack">Done</span></span>
+              <span class="btn goto-btn" data-goto="breakdown" data-substate="progress"><span class="only-biz">Break into steps →</span><span class="only-snack">🍿 Snack-size it →</span></span>
+              <span class="btn ghost" style="margin-left:auto;color:#c0392b;border-color:#c0392b;" title="Delete">🗑️</span>
+            </div>
+          </div>
+
+          <div class="item-row">
+            <div class="row" style="justify-content:space-between;">
+              <span>Water the office plants</span>
+              <span class="placeholder-text" style="font-size:10px;">added 3 days ago</span>
+            </div>
+            <div class="item-actions">
+              <span class="btn primary goto-btn" data-goto="focus" data-focus="setup"><span class="only-biz">▶ Start focusing</span><span class="only-snack">🍽️ Start focusing</span></span>
+              <span class="btn">✅ <span class="only-biz">Done</span><span class="only-snack">Done</span></span>
+              <span class="btn goto-btn" data-goto="breakdown" data-substate="progress"><span class="only-biz">Break into steps →</span><span class="only-snack">🍿 Snack-size it →</span></span>
+              <span class="btn ghost" style="margin-left:auto;color:#c0392b;border-color:#c0392b;" title="Delete">🗑️</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---- LIBRARY: PANTRY / SNOOZED ---- -->
+        <div class="lib-panel hidden" id="lib-pantry">
+          <p class="placeholder-text" style="font-size:10px; margin:0 0 8px;">Stored for later — the freshness clock is paused until each one wakes.</p>
+
+          <div class="item-row sfl-item">
+            <div class="sfl-collapsed">
+              <div class="row" style="justify-content:space-between;">
+                <span>Book dentist appointment</span>
+                <span class="placeholder-text" style="font-size:10px;">wakes tomorrow 9:00</span>
+              </div>
+              <div class="item-actions">
+                <span class="btn sfl-review" style="cursor:pointer;"><span class="only-biz">review now</span><span class="only-snack">🍽️ review now</span></span>
+                <span class="btn ghost" style="margin-left:auto;color:#c0392b;border-color:#c0392b;" title="Delete">🗑️</span>
+              </div>
+            </div>
+            <div class="sfl-expanded">
+              <div class="row" style="justify-content:space-between;"><span>Book dentist appointment</span></div>
+              <div class="meta">captured 3 Jul 2026, 2:14pm</div>
+              <div class="item-actions">
+                <span class="btn primary goto-btn" data-goto="breakdown" data-substate="progress"><span class="only-biz">Break into steps →</span><span class="only-snack">🍿 Snack-size it →</span></span>
+                <span class="btn"><span class="only-biz">Add to-do</span><span class="only-snack">🍽️ Add to-do</span></span>
+                <span class="btn"><span class="only-biz">Save for later</span><span class="only-snack">🥫 Save for later</span></span>
+                <span class="btn ghost" style="margin-left:auto;color:#c0392b;border-color:#c0392b;" title="Delete">🗑️</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="item-row sfl-item">
+            <div class="sfl-collapsed">
+              <div class="row" style="justify-content:space-between;">
+                <span>Research standing desks</span>
+                <span class="placeholder-text" style="font-size:10px;">wakes Mon 8:00</span>
+              </div>
+              <div class="item-actions">
+                <span class="btn sfl-review" style="cursor:pointer;"><span class="only-biz">review now</span><span class="only-snack">🍽️ review now</span></span>
+                <span class="btn ghost" style="margin-left:auto;color:#c0392b;border-color:#c0392b;" title="Delete">🗑️</span>
+              </div>
+            </div>
+            <div class="sfl-expanded">
+              <div class="row" style="justify-content:space-between;"><span>Research standing desks</span></div>
+              <div class="meta">captured 1 Jul 2026, 10:30am</div>
+              <div class="item-actions">
+                <span class="btn primary goto-btn" data-goto="breakdown" data-substate="progress"><span class="only-biz">Break into steps →</span><span class="only-snack">🍿 Snack-size it →</span></span>
+                <span class="btn"><span class="only-biz">Add to-do</span><span class="only-snack">🍽️ Add to-do</span></span>
+                <span class="btn"><span class="only-biz">Save for later</span><span class="only-snack">🥫 Save for later</span></span>
+                <span class="btn ghost" style="margin-left:auto;color:#c0392b;border-color:#c0392b;" title="Delete">🗑️</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---- LIBRARY: SORTED (in progress) ---- -->
+        <div class="lib-panel hidden" id="lib-sorted">
+          <p class="placeholder-text" style="font-size:10px; margin:0 0 8px;">Broken-down tasks in progress — the count shows how many steps you've done. Finished ones move to Done. Tap to reopen.</p>
+
+          <div class="item-row row-link" data-goto="breakdown" data-substate="confirmed" style="display:flex; justify-content:space-between; align-items:center; gap:10px; opacity:.85;">
+            <span style="min-width:0;">Plan the team offsite agenda</span>
+            <span class="pill" style="border-color:#2f7d32;color:#2f7d32; flex-shrink:0;">2/5 done</span>
+          </div>
+
+          <div class="item-row row-link" data-goto="breakdown" data-substate="confirmed-unscheduled" style="display:flex; justify-content:space-between; align-items:center; gap:10px; opacity:.85;">
+            <span style="min-width:0;">Renew car insurance</span>
+            <span class="pill" style="border-color:#999;color:#777; flex-shrink:0;">0/4 done · not scheduled</span>
+          </div>
+        </div>
+
+        <!-- ---- LIBRARY: DONE ---- -->
+        <div class="lib-panel hidden" id="lib-done">
+          <p class="placeholder-text" style="font-size:10px; margin:0 0 8px;">Finished — every step done.<span class="only-snack"> 🎉</span></p>
+
+          <div class="item-row row-link" data-goto="breakdown" data-substate="confirmed" style="display:flex; justify-content:space-between; align-items:center; gap:10px; opacity:.7;">
+            <span style="min-width:0;">Sort out the tax documents</span>
+            <span class="pill" style="border-color:#2f7d32;color:#2f7d32; flex-shrink:0;">✅ 4/4 done</span>
+          </div>
+
+          <div class="item-row" style="display:flex; justify-content:space-between; align-items:center; gap:10px; opacity:.7;">
+            <span style="min-width:0;">Reply to the recruiter <span class="placeholder-text" style="font-size:10px;">· a to-do</span></span>
+            <span class="pill" style="border-color:#2f7d32;color:#2f7d32; flex-shrink:0;">✅ done · yesterday</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    <div class="notes">
+      <h2>Screen notes — Library (new)</h2>
+      <ul>
+        <li>One hub for everything that's left your inbox, with four tabs: <strong>To do / Quick bites</strong> (single action items, no breakdown), <strong>Saved for later / Pantry</strong> (stored, freshness paused, wake times), <strong>Sorted</strong> (broken-down tasks in progress, with step progress), and <strong>Done</strong> (fully finished tasks — a closure pile). Whole rows reopen the breakdown.</li>
+        <li>The Inbox keeps short previews of each bucket with a <em>see all →</em> link that deep-links to the matching tab here, so the Inbox stays focused on capture + review.</li>
+        <li>Plated rows offer <em>Start focusing/Dig in</em> (single-step focus), <em>Done</em>, <em>Break down/Snack-size it</em> (if it turns out to need steps after all), and delete.</li>
+        <li>Fully voice-aware like the rest of the app. Hub name: Library (business) / Larder (snack).</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+
+<div class="notes">
+  <h2>End-to-end flow</h2>
+  <div class="flow-map">
+    <span class="node">🧠 Capture (Inbox)</span><span class="arrow">→</span>
+    <span class="node">✂️ Clarify (Claude breakdown)</span><span class="arrow">→</span>
+    <span class="node">📅 Schedule (Reclaim / Google Tasks)</span><span class="arrow">→</span>
+    <span class="node">⏱️ Focus (Timer)</span><span class="arrow">→</span>
+    <span class="node">🎉 Reward (Dashboard, streaks)</span>
+  </div>
+  <p style="margin-top:10px;">This wireframe mirrors the actual route structure: <code>/inbox</code> → <code>/tasks/[taskId]</code> (breakdown) → <code>/focus/[stepId]</code> → <code>/dashboard</code> (+ <code>/settings</code>), built from the real components (<code>inbox-view.tsx</code>, <code>breakdown-chat.tsx</code>, <code>focus-timer.tsx</code>) and Prisma schema already in the repo. It's intentionally low-fidelity (dashed borders, gray placeholders) to keep focus on structure and flow. The <strong>Business / Snack voice toggle</strong> (top bar or Settings) rewords the entire UI live.</p>
+</div>
+
+<script>
+  let prevScreenName = 'inbox';
+  function goToScreen(name, substate, focusState, libTab) {
+    const _cur = document.querySelector('.screen.active');
+    if (_cur) { const c = _cur.id.replace('screen-', ''); if (c !== name) prevScreenName = c; }
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    const target = document.getElementById('screen-' + name);
+    if (target) target.classList.add('active');
+    document.querySelectorAll('.nav-menu').forEach(m => m.classList.remove('open'));
+    if (name === 'breakdown' && substate) setBreakdownSubstate(substate);
+    if (name === 'focus') setFocusSubstate(focusState || 'running');
+    if (name === 'library') setLibraryTab(libTab || 'plated');
+  }
+
+  function setLibraryTab(name) {
+    if (!name) name = 'plated';
+    document.querySelectorAll('.lib-tab').forEach(b => b.classList.toggle('active', b.dataset.libTab === name));
+    document.querySelectorAll('.lib-panel').forEach(p => p.classList.add('hidden'));
+    const el = document.getElementById('lib-' + name);
+    if (el) el.classList.remove('hidden');
+  }
+
+  const breakdownTitles = {
+    'progress': { emoji: '✂️', text: 'Sort out the tax documents' },
+    'confirmed': { emoji: '📅', text: 'Plan the team offsite agenda' },
+    'confirmed-unscheduled': { emoji: '🚗', text: 'Renew car insurance' }
+  };
+
+  function setBreakdownSubstate(name) {
+    document.querySelectorAll('.substate-btn').forEach(b => b.classList.toggle('active', b.dataset.substate === name));
+    document.querySelectorAll('.substate').forEach(s => s.classList.add('hidden'));
+    const el = document.getElementById('substate-' + name);
+    if (el) el.classList.remove('hidden');
+    const titleEl = document.getElementById('breakdown-title');
+    const t = breakdownTitles[name];
+    if (titleEl && t) titleEl.innerHTML = '<span class="only-snack">' + t.emoji + ' </span>' + t.text;
+  }
+
+  function setFocusSubstate(name) {
+    if (!name) name = 'running';
+    document.querySelectorAll('.focus-btn').forEach(b => b.classList.toggle('active', b.dataset.focus === name));
+    document.querySelectorAll('.focus-state').forEach(s => s.classList.add('hidden'));
+    const el = document.getElementById('focus-' + name);
+    if (el) el.classList.remove('hidden');
+  }
+
+  // ---- Business / Snack voice toggle ----
+  function setMode(mode) {
+    if (mode !== 'snack') mode = 'biz';
+    document.body.classList.toggle('mode-snack', mode === 'snack');
+    document.body.classList.toggle('mode-biz', mode !== 'snack');
+    document.querySelectorAll('.mode-opt, .seg-opt').forEach(b => {
+      if (b.dataset.mode) b.classList.toggle('active', b.dataset.mode === mode);
+    });
+    try { localStorage.setItem('dlectroflow-mode', mode); } catch (e) {}
+  }
+
+  document.querySelectorAll('.mode-opt, .seg-opt').forEach(b => {
+    if (b.dataset.mode) b.addEventListener('click', () => setMode(b.dataset.mode));
+  });
+
+  // ---- Desktop / Mobile preview toggle ----
+  function setView(view) {
+    if (view !== 'mobile') view = 'desktop';
+    document.body.classList.toggle('view-mobile', view === 'mobile');
+    document.querySelectorAll('.view-opt').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+    try { localStorage.setItem('dlectroflow-view', view); } catch (e) {}
+  }
+  document.querySelectorAll('.view-opt').forEach(b => {
+    b.addEventListener('click', () => setView(b.dataset.view));
+  });
+
+  // ---- First-run / empty-state preview toggle (Inbox) ----
+  function setFirstRun(fr) {
+    const on = fr === 'first';
+    document.body.classList.toggle('first-run', on);
+    document.querySelectorAll('.fr-opt').forEach(b => b.classList.toggle('active', b.dataset.fr === (on ? 'first' : 'normal')));
+    try { localStorage.setItem('dlectroflow-firstrun', on ? 'first' : 'normal'); } catch (e) {}
+    if (on) goToScreen('inbox');
+  }
+  document.querySelectorAll('.fr-opt').forEach(b => {
+    b.addEventListener('click', () => setFirstRun(b.dataset.fr));
+  });
+
+  document.querySelectorAll('.nav-menu-item').forEach(item => {
+    item.addEventListener('click', () => goToScreen(item.dataset.goto));
+  });
+
+  document.querySelectorAll('.goto-btn').forEach(btn => {
+    btn.addEventListener('click', () => goToScreen(btn.dataset.goto, btn.dataset.substate, btn.dataset.focus, btn.dataset.libTab));
+  });
+
+  // back button → previous screen (fallback to inbox)
+  document.querySelectorAll('.back-btn').forEach(b => {
+    b.style.cursor = 'pointer';
+    b.addEventListener('click', () => goToScreen((prevScreenName && prevScreenName !== 'library') ? prevScreenName : 'inbox'));
+  });
+
+  document.querySelectorAll('.lib-tab').forEach(btn => {
+    btn.addEventListener('click', () => setLibraryTab(btn.dataset.libTab));
+  });
+
+  // tapping a Saved-for-later row (anywhere except delete) expands it into the review actions — stays in the bucket, never jumps to breakdown
+  document.querySelectorAll('.sfl-collapsed').forEach(c => {
+    c.style.cursor = 'pointer';
+    c.addEventListener('click', (e) => {
+      if (e.target.closest('.btn.ghost')) return; // let the delete icon do its thing
+      const row = c.closest('.sfl-item');
+      if (row) row.classList.add('reviewing');
+    });
+  });
+
+  // Saved-for-later review actions: Add to-do → single-task bucket; Save for later → back to saved for later
+  document.querySelectorAll('.sfl-expanded .item-actions .btn').forEach(b => {
+    const label = b.textContent;
+    if (label.indexOf('Add to-do') !== -1) {
+      b.style.cursor = 'pointer';
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const row = b.closest('.sfl-item');
+        const header = document.getElementById('single-task-header');
+        if (row && header && row.closest('#screen-inbox')) {
+          // visibly move the item into the Inbox Single-task queue, at the top of the list
+          const titleEl = row.querySelector('.sfl-expanded .row span') || row.querySelector('.sfl-collapsed span');
+          const title = titleEl ? titleEl.textContent : 'New to-do';
+          const newRow = document.createElement('div');
+          newRow.className = 'item-row';
+          newRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center; gap:10px;';
+          newRow.innerHTML = '<span style="min-width:0;">' + title + '</span><span class="pill" style="border-color:#8a8a8a;color:#777; flex-shrink:0;">▶ to-do</span>';
+          header.insertAdjacentElement('afterend', newRow);
+          const badge = header.querySelector('.badge-count');
+          if (badge) badge.textContent = String((parseInt(badge.textContent, 10) || 0) + 1);
+          row.style.transition = 'opacity .18s'; row.style.opacity = '0';
+          setTimeout(() => { row.style.display = 'none'; }, 180);
+        } else {
+          goToScreen('library', null, null, 'plated');
+        }
+      });
+    } else if (label.indexOf('Save for later') !== -1) {
+      b.style.cursor = 'pointer';
+      b.addEventListener('click', (e) => { e.stopPropagation(); const r = b.closest('.sfl-item'); if (r) r.classList.remove('reviewing'); });
+    }
+  });
+
+  // confirm step for every task/item delete button (banner dismisses have no title="Delete", so they're excluded)
+  document.querySelectorAll('[title="Delete"]').forEach(btn => {
+    btn.style.cursor = 'pointer';
+    const original = btn.innerHTML;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (btn.classList.contains('confirming')) return;
+      btn.classList.add('confirming');
+      btn.innerHTML = '<span class="del-yes" style="color:#c0392b; font-weight:600;">Delete</span> <span style="color:#bbb;">·</span> <span class="del-no" style="color:#777;">cancel</span>';
+      const yes = btn.querySelector('.del-yes'), no = btn.querySelector('.del-no');
+      yes.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const row = btn.closest('.item-row') || btn.closest('.stepper-row');
+        if (row) { row.style.transition = 'opacity .18s'; row.style.opacity = '0'; setTimeout(() => { row.style.display = 'none'; }, 180); }
+      });
+      no.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        btn.classList.remove('confirming');
+        btn.innerHTML = original;
+      });
+    });
+  });
+
+  document.querySelectorAll('.row-link').forEach(row => {
+    row.addEventListener('click', () => goToScreen(row.dataset.goto, row.dataset.substate));
+  });
+
+  document.querySelectorAll('.row-link-stop').forEach(btn => {
+    btn.addEventListener('click', (e) => e.stopPropagation());
+  });
+
+  document.querySelectorAll('.substate-btn').forEach(btn => {
+    btn.addEventListener('click', () => setBreakdownSubstate(btn.dataset.substate));
+  });
+
+  document.querySelectorAll('.focus-btn').forEach(btn => {
+    btn.addEventListener('click', () => setFocusSubstate(btn.dataset.focus));
+  });
+
+  // settings toggle pills are illustrative — allow flipping for feel
+  document.querySelectorAll('.toggle-pill').forEach(t => {
+    t.addEventListener('click', () => t.classList.toggle('on'));
+  });
+
+  document.querySelectorAll('.hamburger-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const menu = document.getElementById(btn.dataset.menu);
+      const isOpen = menu.classList.contains('open');
+      document.querySelectorAll('.nav-menu').forEach(m => m.classList.remove('open'));
+      if (!isOpen) menu.classList.add('open');
+    });
+  });
+
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.nav-menu').forEach(m => m.classList.remove('open'));
+  });
+
+  // restore saved voice on load (default business)
+  (function () {
+    let savedMode = 'biz', savedView = 'desktop', savedFr = 'normal';
+    try {
+      savedMode = localStorage.getItem('dlectroflow-mode') || 'biz';
+      savedView = localStorage.getItem('dlectroflow-view') || 'desktop';
+      savedFr = localStorage.getItem('dlectroflow-firstrun') || 'normal';
+    } catch (e) {}
+    setMode(savedMode);
+    setView(savedView);
+    if (savedFr === 'first') document.body.classList.add('first-run');
+    document.querySelectorAll('.fr-opt').forEach(b => b.classList.toggle('active', b.dataset.fr === savedFr));
+  })();
+</script>
+
+</body>
+</html>

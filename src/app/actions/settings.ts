@@ -53,6 +53,18 @@ export async function updateRoundupSettings(input: {
   revalidatePath("/dashboard");
 }
 
+/** Voice preference — workspace-scoped; validates to {"plain","playful"} only. */
+export async function updateVoice(voice: string) {
+  if (voice !== "plain" && voice !== "playful") return; // no-op on invalid values
+  const workspaceId = await currentWorkspaceId();
+  await prisma.settings.upsert({
+    where: { workspaceId },
+    create: { id: workspaceId, workspaceId, voice },
+    update: { voice },
+  });
+  revalidatePath("/", "layout");
+}
+
 /** Phase 2 — owner picks their breakdown model (allowlist-validated, owner-only). */
 export async function updateBreakdownModel(model: string) {
   if (!(await isOwnerRequest())) return; // guests can't set a model

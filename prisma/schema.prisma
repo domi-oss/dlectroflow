@@ -44,6 +44,8 @@ model Settings {
   workingDays           String   @default("1,2,3,4,5") // ISO weekdays, Mon=1..Sun=7
   // Phase 2 — owner-selected breakdown model (null = env/default)
   breakdownModel        String?
+  // Voice preference: "plain" (default) or "playful"
+  voice                 String   @default("plain")
   updatedAt             DateTime @updatedAt
   workspaceId           String   @unique
 }

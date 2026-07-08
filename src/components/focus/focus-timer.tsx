@@ -12,6 +12,8 @@ import {
   type CompleteResult,
 } from "@/app/actions/focus";
 import { Celebration } from "@/components/focus/celebration";
+import { t } from "@/lib/strings";
+import { useVoice } from "@/components/voice-provider";
 
 const DONE_MESSAGES = [
   "Nice — step done!",
@@ -58,6 +60,7 @@ export function FocusTimer({
   nextStepId: string | null;
 }) {
   const router = useRouter();
+  const voice = useVoice();
   const [phase, setPhase] = useState<Phase>("setup");
   const [plannedMin, setPlannedMin] = useState(step.estMinutes);
   const [totalSec, setTotalSec] = useState(step.estMinutes * 60);
@@ -162,7 +165,7 @@ export function FocusTimer({
       {parentEmoji ? `${parentEmoji} ` : ""}
       {taskTitle}
       <span className="text-muted-foreground font-normal">
-        {" "}· {step.order}/{step.total}
+        {" "}· {t("step.counter", voice)} {step.order} of {step.total}
       </span>
     </h1>
   );
@@ -196,7 +199,7 @@ export function FocusTimer({
               href={`/focus/${nextStepId}`}
               className="bg-primary text-primary-foreground rounded-md px-4 py-2 font-medium"
             >
-              ▶ Focus the next step
+              ▶ {t("focus.nextStep", voice)}
             </Link>
           ) : (
             <p className="text-sm">That was the last step of this task. 🏁</p>
@@ -310,7 +313,7 @@ export function FocusTimer({
             disabled={pending}
             className="bg-primary text-primary-foreground rounded-full px-8 py-3 text-lg font-medium disabled:opacity-50"
           >
-            ▶ Start focusing
+            {t("focus.startTimer", voice)}
           </button>
         </div>
       )}
@@ -322,13 +325,13 @@ export function FocusTimer({
             disabled={pending}
             className="rounded-md bg-green-600 px-4 py-2 font-medium text-white disabled:opacity-50"
           >
-            ✅ Complete
+            {t("focus.complete", voice)}
           </button>
           <button
             onClick={() => setPhase((p) => (p === "running" ? "paused" : "running"))}
             className="hover:bg-accent rounded-md border px-4 py-2"
           >
-            {phase === "running" ? "⏸️ Pause" : "▶ Resume"}
+            {phase === "running" ? t("focus.pause", voice) : t("focus.resume", voice)}
           </button>
           <button onClick={() => addTime(inc)} className="hover:bg-accent rounded-md border px-3 py-2">
             ➕ {inc}m
@@ -341,21 +344,21 @@ export function FocusTimer({
             disabled={pending}
             className="text-muted-foreground hover:text-foreground rounded-md px-3 py-2 text-sm"
           >
-            give up (no guilt)
+            {t("focus.giveUp", voice)}
           </button>
         </div>
       )}
 
       {phase === "timeup" && (
         <div className="space-y-3 text-center">
-          <p className="text-lg font-medium">⏰ Time&apos;s up — did you finish?</p>
+          <p className="text-lg font-medium">{t("focus.timesUp", voice)}</p>
           <div className="flex flex-wrap justify-center gap-2">
             <button
               onClick={finishComplete}
               disabled={pending}
               className="rounded-md bg-green-600 px-4 py-2 font-medium text-white disabled:opacity-50"
             >
-              ✅ Yes, done!
+              {t("focus.yesDone", voice)}
             </button>
             <button
               onClick={() => addTime(inc)}
@@ -368,7 +371,7 @@ export function FocusTimer({
               disabled={pending}
               className="hover:bg-accent rounded-md border px-4 py-2 disabled:opacity-50"
             >
-              🔁 Not yet
+              {t("focus.notYet", voice)}
             </button>
           </div>
         </div>
