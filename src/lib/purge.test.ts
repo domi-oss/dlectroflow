@@ -36,7 +36,21 @@ describe("purgeWorkspace", () => {
   });
   it("deletes across scoped models then the workspace row", async () => {
     await purgeWorkspace("guest-123");
+    // Relation-filtered children (cascade via Task)
+    expect(tx.step.deleteMany).toHaveBeenCalledWith({ where: { task: { workspaceId: "guest-123" } } });
+    expect(tx.breakdownTurn.deleteMany).toHaveBeenCalledWith({ where: { task: { workspaceId: "guest-123" } } });
+    // Direct-workspaceId models
+    expect(tx.brainDumpItem.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
+    expect(tx.focusSession.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
+    expect(tx.dayRollup.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
+    expect(tx.rewardEvent.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
+    expect(tx.streak.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
+    expect(tx.streakRecord.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
+    expect(tx.badge.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
+    expect(tx.dailySpark.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
+    expect(tx.settings.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
     expect(tx.task.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
+    // Workspace row last
     expect(tx.workspace.delete).toHaveBeenCalledWith({ where: { id: "guest-123" } });
   });
 });
