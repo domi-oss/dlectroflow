@@ -83,9 +83,6 @@ describe("InboxView — capture confirm", () => {
       <InboxView
         initialItems={[]}
         settings={settings}
-        isOwner={false}
-        breakdownModel={null}
-        voice="plain"
       />,
     );
     const input = screen.getByPlaceholderText(/Brain dump/i);
@@ -101,9 +98,6 @@ describe("InboxView — capture confirm", () => {
       <InboxView
         initialItems={[]}
         settings={settings}
-        isOwner={false}
-        breakdownModel={null}
-        voice="plain"
       />,
     );
     const input = screen.getByPlaceholderText(/Brain dump/i);
@@ -135,9 +129,6 @@ describe("InboxView — inline delete confirm", () => {
       <InboxView
         initialItems={[item]}
         settings={settings}
-        isOwner={false}
-        breakdownModel={null}
-        voice="plain"
       />,
     );
 
@@ -170,9 +161,6 @@ describe("InboxView — 24h still-needed prompt", () => {
       <InboxView
         initialItems={[stale]}
         settings={settings}
-        isOwner={false}
-        breakdownModel={null}
-        voice="plain"
       />,
     );
 
@@ -196,9 +184,6 @@ describe("InboxView — 24h still-needed prompt", () => {
       <InboxView
         initialItems={[stale]}
         settings={settings}
-        isOwner={false}
-        breakdownModel={null}
-        voice="plain"
       />,
     );
 
@@ -214,11 +199,24 @@ describe("InboxView — inbox zero copy", () => {
       <InboxView
         initialItems={[]}
         settings={settings}
-        isOwner={false}
-        breakdownModel={null}
-        voice="plain"
       />,
     );
     expect(screen.getByText("Inbox zero. Nothing to review.")).toBeInTheDocument();
+  });
+});
+
+describe("InboxView — settings panel moved to /settings", () => {
+  it("no longer renders the aging & reminder settings panel on the inbox", () => {
+    render(
+      <InboxView
+        initialItems={[makeItem()]}
+        settings={settings}
+      />,
+    );
+    // The aging/reminder settings now live on the /settings page (☰ menu),
+    // not inline on the inbox.
+    expect(
+      screen.queryByText(/Aging & reminder settings/i),
+    ).not.toBeInTheDocument();
   });
 });

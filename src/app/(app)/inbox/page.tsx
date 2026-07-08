@@ -1,5 +1,5 @@
 import { prisma, getSettings } from "@/lib/db";
-import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
+import { currentWorkspaceId } from "@/lib/workspace";
 import { BrainDumpStatus } from "@/lib/constants";
 import { InboxView } from "@/components/inbox/inbox-view";
 
@@ -16,14 +16,13 @@ export default async function InboxPage({
   }>;
 }) {
   const workspaceId = await currentWorkspaceId();
-  const [rawItems, settings, owner, sp] = await Promise.all([
+  const [rawItems, settings, sp] = await Promise.all([
     prisma.brainDumpItem.findMany({
       where: { workspaceId, status: { not: BrainDumpStatus.Archived } },
       orderBy: { createdAt: "desc" },
       include: { task: { include: { steps: { select: { done: true } } } } },
     }),
     getSettings(workspaceId),
-    isOwnerRequest(),
     searchParams,
   ]);
 
@@ -69,9 +68,6 @@ export default async function InboxPage({
           overdueHours: settings.overdueHours,
           wayOverdueHours: settings.wayOverdueHours,
         }}
-        isOwner={owner}
-        breakdownModel={settings.breakdownModel ?? null}
-        voice={settings.voice === "playful" ? "playful" : "plain"}
       />
     </div>
   );

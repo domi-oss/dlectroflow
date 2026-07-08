@@ -20,7 +20,6 @@ import {
   dismissPrompt,
 } from "@/app/actions/braindump";
 import { startBreakdown } from "@/app/actions/breakdown";
-import { SettingsPanel } from "@/components/inbox/settings-panel";
 import { StatusPill } from "@/components/inbox/status-pill";
 import { bucketItems, type Item } from "@/components/inbox/bucket";
 import { t } from "@/lib/strings";
@@ -43,18 +42,9 @@ const SEE_ALL = {
 export function InboxView({
   initialItems,
   settings,
-  isOwner,
-  breakdownModel,
-  // SSR seed value from the layout; the live source of truth is useVoice()
-  // (context), so at runtime we read `voice` below. voiceProp only forwards the
-  // initial value to SettingsPanel.
-  voice: voiceProp,
 }: {
   initialItems: Item[];
   settings: AgingSettings;
-  isOwner: boolean;
-  breakdownModel: string | null;
-  voice: Voice;
 }) {
   const router = useRouter();
   const voice = useVoice();
@@ -221,8 +211,6 @@ export function InboxView({
           </p>
         )}
       </div>
-
-      <SettingsPanel settings={settings} isOwner={isOwner} breakdownModel={breakdownModel} voice={voiceProp} />
 
       {/* Needs review */}
       <section>
