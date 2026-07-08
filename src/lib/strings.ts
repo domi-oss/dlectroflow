@@ -66,7 +66,7 @@ export const STRINGS = {
   "focus.pause":        { plain: "⏸️ Pause",            playful: "⏸️ Pause" },
   "focus.resume":       { plain: "▶ Resume",            playful: "▶ Resume" },
   "focus.giveUp":       { plain: "Pause for now",       playful: "⏸️ Pause for now" },
-  "focus.timesUp":      { plain: "⏰ Time's up — did you finish?", playful: "⏰ Time's up — did you finish?" },
+  "focus.timesUp":      { plain: "Time's up — did you finish?",    playful: "⏰ Time's up — did you finish?" },
   "focus.yesDone":      { plain: "✅ Yes, done!",        playful: "✅ Yes, done!" },
   "focus.notYet":       { plain: "Not yet",             playful: "🔁 Not yet" },
   "focus.nextStep":     { plain: "Focus the next step", playful: "Focus the next bite" },

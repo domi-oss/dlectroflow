@@ -334,7 +334,7 @@ function ItemRow({
           onClick={onSnooze}
           className="hover:bg-accent rounded-md border px-2.5 py-1"
         >
-          Snooze
+          {t("action.saveForLater", voice)}
         </button>
         <button
           onClick={onDelete}

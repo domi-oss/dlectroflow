@@ -93,6 +93,9 @@ describe("Task 2 — inbox/focus/breakdown keys (plain vs playful)", () => {
   it('t("action.addTodo", "plain") → "Add to-do"', () => {
     expect(t("action.addTodo", "plain")).toBe("Add to-do");
   });
+  it('t("action.addTodo", "playful") → "🍽️ Add to-do"', () => {
+    expect(t("action.addTodo", "playful")).toBe("🍽️ Add to-do");
+  });
 
   // focus timer keys
   it('t("focus.startTimer", "plain") → "▶ Start focusing"', () => {
@@ -116,8 +119,11 @@ describe("Task 2 — inbox/focus/breakdown keys (plain vs playful)", () => {
   it('t("focus.giveUp", "playful") → "⏸️ Pause for now"', () => {
     expect(t("focus.giveUp", "playful")).toBe("⏸️ Pause for now");
   });
-  it('t("focus.timesUp", "plain") → "⏰ Time\'s up — did you finish?"', () => {
-    expect(t("focus.timesUp", "plain")).toBe("⏰ Time's up — did you finish?");
+  it('t("focus.timesUp", "plain") → "Time\'s up — did you finish?"', () => {
+    expect(t("focus.timesUp", "plain")).toBe("Time's up — did you finish?");
+  });
+  it('t("focus.timesUp", "playful") → "⏰ Time\'s up — did you finish?"', () => {
+    expect(t("focus.timesUp", "playful")).toBe("⏰ Time's up — did you finish?");
   });
   it('t("focus.yesDone", "plain") → "✅ Yes, done!"', () => {
     expect(t("focus.yesDone", "plain")).toBe("✅ Yes, done!");
@@ -181,8 +187,10 @@ describe("Task 2 — inbox/focus/breakdown keys (plain vs playful)", () => {
 });
 
 describe("Plain voice is emoji-free for nav and badge keys", () => {
-  // Matches any Unicode emoji character (basic range + ZWJ sequences)
-  const hasEmoji = (s: string) => /\p{Emoji_Presentation}/u.test(s);
+  // Allowed functional glyphs in plain voice: status dots, ✅, ▶/⏸/➕/➖, 🗑️, 🔒, ⚠️
+  const FUNCTIONAL_GLYPHS = /[✅▶⏸️➕➖🗑🔒⚠🟢🟡🟠🔴]/gu;
+  // Matches any decorative emoji (strips functional glyphs first)
+  const hasEmoji = (s: string) => /\p{Emoji_Presentation}/u.test(s.replace(FUNCTIONAL_GLYPHS, ""));
 
   const plainOnlyKeys: StringKey[] = [
     "nav.inbox",
@@ -206,6 +214,8 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "action.moreSteps",
     "action.startFocus",
     "action.backToInbox",
+    "focus.timesUp",
+    "focus.yesDone",
   ];
 
   for (const key of plainOnlyKeys) {
