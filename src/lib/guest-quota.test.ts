@@ -1,19 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("@/lib/db");
-
-import { clientIpHash, consumeGuestBreakdown } from "./guest-quota";
-import { prisma } from "@/lib/db";
-
-const db = {
+const db = vi.hoisted(() => ({
   guestAiUsage: { findUnique: vi.fn(), upsert: vi.fn(), update: vi.fn() },
   guestDailyActivity: { findUnique: vi.fn(), count: vi.fn(), create: vi.fn() },
-};
+}));
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(prisma as any).guestAiUsage = db.guestAiUsage;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(prisma as any).guestDailyActivity = db.guestDailyActivity;
+vi.mock("@/lib/db", () => ({ prisma: db }));
+
+import { clientIpHash, consumeGuestBreakdown, peekGuestAllowance } from "./guest-quota";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -33,6 +27,10 @@ describe("clientIpHash", () => {
   });
   it("returns null when no IP header present", () => {
     expect(clientIpHash(new Headers())).toBeNull();
+  });
+  it("x-real-ip fallback: returns a 64-hex string when only x-real-ip is present", () => {
+    const hash = clientIpHash(new Headers({ "x-real-ip": "9.9.9.9" }));
+    expect(hash).toMatch(/^[0-9a-f]{64}$/);
   });
 });
 
@@ -60,5 +58,25 @@ describe("consumeGuestBreakdown", () => {
     const r = await consumeGuestBreakdown("iphash");
     expect(r.allowed).toBe(false);
     expect(r.reason).toBe("global_cap");
+  });
+  it("window-expiry reset: allows when window is older than 24h and resets count", async () => {
+    const expiredStart = new Date(Date.now() - 25 * 3600_000);
+    db.guestAiUsage.findUnique.mockResolvedValue({ count: 5, windowStartedAt: expiredStart });
+    db.guestDailyActivity.findUnique.mockResolvedValue({ day: "x", ipHash: "iphash" }); // already counted today
+    db.guestAiUsage.upsert.mockResolvedValue({});
+    const r = await consumeGuestBreakdown("iphash");
+    expect(r.allowed).toBe(true);
+    expect(r.remaining).toBe(4); // fresh window: 5 - 1
+    expect(db.guestAiUsage.upsert).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("peekGuestAllowance", () => {
+  it("returns full quota when no row exists and never writes", async () => {
+    db.guestAiUsage.findUnique.mockResolvedValue(null);
+    const result = await peekGuestAllowance("iphash");
+    expect(result.remaining).toBe(5);
+    expect(db.guestAiUsage.upsert).not.toHaveBeenCalled();
+    expect(db.guestAiUsage.update).not.toHaveBeenCalled();
   });
 });

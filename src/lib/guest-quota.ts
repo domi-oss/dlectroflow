@@ -3,9 +3,9 @@ import { prisma } from "@/lib/db";
 
 export function guestQuotaConfig() {
   return {
-    quota: Number(process.env.GUEST_AI_QUOTA_PER_WINDOW ?? 5),
-    windowHours: Number(process.env.GUEST_AI_WINDOW_HOURS ?? 24),
-    globalCap: Number(process.env.GUEST_GLOBAL_DAILY_GUEST_CAP ?? 10),
+    quota: Number(process.env.GUEST_AI_QUOTA_PER_WINDOW || "5"),
+    windowHours: Number(process.env.GUEST_AI_WINDOW_HOURS || "24"),
+    globalCap: Number(process.env.GUEST_GLOBAL_DAILY_GUEST_CAP || "10"),
   };
 }
 
