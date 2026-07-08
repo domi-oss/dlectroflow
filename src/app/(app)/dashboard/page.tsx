@@ -7,16 +7,19 @@ import { currentWorkspaceId } from "@/lib/workspace";
 import { emailConfigured } from "@/lib/email";
 import { SparkCard } from "@/components/dashboard/spark-card";
 import { RoundupCard } from "@/components/dashboard/roundup-card";
-import { t, type Voice } from "@/lib/strings";
+import { t, type Voice, type StringKey } from "@/lib/strings";
 
 export const dynamic = "force-dynamic";
 
-const BADGE_LABELS: Record<string, string> = {
-  first_breakdown: "🧩 First breakdown",
-  first_schedule: "📅 First schedule",
-  streak_5: "🔥 5-day streak",
-  ten_steps_day: "🔟 10 steps in a day",
-  beat_best_streak: "🏆 Beat your best streak",
+// Maps badge DB keys to STRINGS keys; unknown badges fall back to raw key.
+const BADGE_STRING_KEYS: Record<string, StringKey> = {
+  first_breakdown: "badge.first_breakdown",
+  first_schedule:  "badge.first_schedule",
+  first_focus:     "badge.first_focus",
+  task_complete:   "badge.task_complete",
+  streak_5:        "badge.streak_5",
+  inbox_zero:      "badge.inbox_zero",
+  comeback:        "badge.comeback",
 };
 
 const MEDALS = ["🥇", "🥈", "🥉"];
@@ -43,7 +46,7 @@ export default async function DashboardPage() {
         <Stat label={t("stat.pointsToday", voice)} value={data.todayPoints} accent="text-amber-600" />
         <Stat
           label={t("stat.currentStreak", voice)}
-          value={`${data.currentStreak}${data.currentStreak > 0 ? " 🔥" : ""}`}
+          value={`${data.currentStreak}${data.currentStreak > 0 && voice === "playful" ? " 🔥" : ""}`}
         />
         <Stat label={t("stat.focusMinsToday", voice)} value={data.focusMinToday} />
         <Stat label={t("stat.stepsToday", voice)} value={data.stepsDoneToday} />
@@ -62,7 +65,7 @@ export default async function DashboardPage() {
 
       {/* Best streaks */}
       <section className="rounded-xl border p-4">
-        <h2 className="mb-2 text-sm font-semibold">🏆 Best streaks</h2>
+        <h2 className="mb-2 text-sm font-semibold">{t("heading.bestStreaks", voice)}</h2>
         {data.topStreaks.length === 0 ? (
           <p className="text-muted-foreground text-sm">
             No completed streaks yet — finish a step on a working day to start one.
@@ -92,7 +95,7 @@ export default async function DashboardPage() {
                 key={b}
                 className="bg-secondary text-secondary-foreground rounded-full px-3 py-1 text-xs font-medium"
               >
-                {BADGE_LABELS[b] ?? b}
+                {BADGE_STRING_KEYS[b] ? t(BADGE_STRING_KEYS[b], voice) : b}
               </span>
             ))}
           </div>

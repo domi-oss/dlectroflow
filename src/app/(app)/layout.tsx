@@ -5,7 +5,7 @@ import { isOwnerRequest, currentWorkspaceId } from "@/lib/workspace";
 import { clientIpHash, guestQuotaConfig, peekGuestAllowance } from "@/lib/guest-quota";
 import { GuestIndicator } from "@/components/guest/guest-indicator";
 import { VoiceProvider } from "@/components/voice-provider";
-import type { Voice } from "@/lib/strings";
+import { t, type Voice } from "@/lib/strings";
 
 export default async function AppLayout({
   children,
@@ -29,7 +29,7 @@ export default async function AppLayout({
 
   // Read voice server-side; fall back to "plain" if row doesn't exist yet.
   const settings = await getSettings(wsId);
-  const voice: Voice = (settings.voice === "playful" ? "playful" : "plain") as Voice;
+  const voice: Voice = settings.voice === "playful" ? "playful" : "plain";
 
   return (
     <div className="flex min-h-full flex-col">
@@ -43,10 +43,10 @@ export default async function AppLayout({
           </Link>
           <nav className="text-muted-foreground flex items-center gap-4 text-sm">
             <Link href="/inbox" className="hover:text-foreground transition-colors">
-              🧠 Inbox
+              {t("nav.inbox", voice)}
             </Link>
             <Link href="/dashboard" className="hover:text-foreground transition-colors">
-              🎉 Dashboard
+              {t("nav.dashboard", voice)}
             </Link>
             {owner ? (
               <a href="/api/auth/logout" className="text-xs text-muted-foreground">Sign out</a>

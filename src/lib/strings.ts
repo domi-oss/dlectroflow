@@ -30,6 +30,8 @@ export const STRINGS = {
   "section.savedLater":  { plain: "Saved for later",   playful: "🥫 Pantry" },
 
   // ── Nav / hub labels ───────────────────────────────────────────────────────
+  "nav.inbox":           { plain: "Inbox",             playful: "🧠 Inbox" },
+  "nav.dashboard":       { plain: "Dashboard",         playful: "🎉 Dashboard" },
   "nav.everything":      { plain: "Everything",        playful: "🍱 Larder" },
   "nav.done":            { plain: "Done",              playful: "🍽️ Devoured" },
 
@@ -45,6 +47,18 @@ export const STRINGS = {
   "stat.focusMinsToday": { plain: "Focus mins today",  playful: "Time at the table" },
   "stat.stepsToday":     { plain: "Steps today",       playful: "Bites today" },
   "stat.totalPoints":    { plain: "Total points earned", playful: "Total crumbs earned" },
+
+  // ── Dashboard section headings ─────────────────────────────────────────────
+  "heading.bestStreaks":        { plain: "Best streaks",       playful: "🏆 Best streaks" },
+
+  // ── Badge labels ───────────────────────────────────────────────────────────
+  "badge.first_breakdown":      { plain: "First breakdown",   playful: "🍰 First Slice" },
+  "badge.first_schedule":       { plain: "First scheduled",   playful: "🍽️ First Plate-up" },
+  "badge.first_focus":          { plain: "First focus",       playful: "😋 First Bite" },
+  "badge.task_complete":        { plain: "Task complete",     playful: "🧽 Clean Plate" },
+  "badge.streak_5":             { plain: "Full work week",    playful: "🔥 Full Week" },
+  "badge.inbox_zero":           { plain: "Inbox zero",        playful: "🧺 Empty Tray" },
+  "badge.comeback":             { plain: "Comeback",          playful: "📦 Back for Seconds" },
 
   // ── Breakdown step counter ─────────────────────────────────────────────────
   "step.counter":        { plain: "Step",              playful: "bite" },

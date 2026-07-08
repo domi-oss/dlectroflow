@@ -36,6 +36,7 @@ export function SettingsPanel({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [voicePending, startVoiceTransition] = useTransition();
   const [minutes, setMinutes] = useState(settings.agingThresholdMinutes);
   const [demo, setDemo] = useState<string>(
     settings.demoOverrideSeconds != null
@@ -48,7 +49,7 @@ export function SettingsPanel({
   const [currentVoice, setCurrentVoice] = useState<Voice>(voice);
 
   const saveVoice = (v: Voice) =>
-    startTransition(async () => {
+    startVoiceTransition(async () => {
       setCurrentVoice(v);
       await updateVoice(v);
       router.refresh();
@@ -126,7 +127,7 @@ export function SettingsPanel({
             <button
               key={v}
               type="button"
-              disabled={pending}
+              disabled={voicePending}
               onClick={() => saveVoice(v)}
               className={
                 "px-3 py-1 text-sm first:rounded-l-md last:rounded-r-md transition-colors disabled:opacity-50 " +
