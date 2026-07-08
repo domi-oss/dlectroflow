@@ -28,7 +28,7 @@ stages:
 
 variables:
   IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
-  AGENT_CONTEXT: "gl-demo-ultimate-dtop/dlectroflow:dlectroflow"
+  AGENT_CONTEXT: "gl-demo-ultimate-dtop/domi-oss/dlectroflow:dlectroflow"
   # ── Artifact/cache transfer speed ────────────────────────────────────────
   # Fastzip + fast compression cuts upload/download time for the sizeable
   # ci-dist/ artifact and the .next/.npm caches at a small size cost.

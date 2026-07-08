@@ -9,7 +9,7 @@ human-only remediation.
 
 **Do not open a public issue for a suspected vulnerability.**
 
-- Preferred: open a [confidential issue](https://gitlab.com/gl-demo-ultimate-dtop/dlectroflow/-/issues/new)
+- Preferred: open a [confidential issue](https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/issues/new)
   (check **This issue is confidential**) with steps to reproduce and impact.
 - Alternatively, email the maintainer at the address on the GitLab profile.
 

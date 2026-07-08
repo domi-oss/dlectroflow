@@ -4,7 +4,7 @@ All infra lives in GCP region **europe-west2**. Prod host **dlectroflow.dlectron
 
 ## 0. Prerequisites
 - `gcloud` authed to the target project; `kubectl`, `helm` installed.
-- GitLab project `gl-demo-ultimate-dtop/dlectroflow`, Ultimate, SaaS runners.
+- GitLab project `gl-demo-ultimate-dtop/domi-oss/dlectroflow`, Ultimate, SaaS runners.
 
 ## 1. Create the Autopilot cluster
 ```bash
@@ -76,7 +76,7 @@ EOF
 
 ## 5. Install + register the GitLab agent
 
-> **Note — KUBE_CONTEXT collision:** the `gl-demo-ultimate-dtop` group defines a shared `KUBE_CONTEXT` CI/CD variable (pointing at `demo-foundation:gitops-agent`). Because group variables override `.gitlab-ci.yml`, this project's pipeline uses its own `AGENT_CONTEXT` variable (`gl-demo-ultimate-dtop/dlectroflow:dlectroflow`) instead. After you install the `dlectroflow` agent (below) and it connects, that context is injected into this project's CI jobs and the deploy jobs will find it. No group-variable change is required.
+> **Note — KUBE_CONTEXT collision:** the `gl-demo-ultimate-dtop` group defines a shared `KUBE_CONTEXT` CI/CD variable (pointing at `demo-foundation:gitops-agent`). Because group variables override `.gitlab-ci.yml`, this project's pipeline uses its own `AGENT_CONTEXT` variable (`gl-demo-ultimate-dtop/domi-oss/dlectroflow:dlectroflow`) instead. After you install the `dlectroflow` agent (below) and it connects, that context is injected into this project's CI jobs and the deploy jobs will find it. No group-variable change is required.
 
 - In GitLab: Operate → Kubernetes clusters → Connect a cluster → agent name `dlectroflow` (config is committed at `.gitlab/agents/dlectroflow/config.yaml`). Copy the registration token, then:
 ```bash
