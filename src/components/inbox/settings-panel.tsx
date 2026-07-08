@@ -80,16 +80,17 @@ export function SettingsPanel({
     });
 
   return (
-    <details className="rounded-lg border px-4 py-2 text-sm">
-      <summary className="text-muted-foreground hover:text-foreground cursor-pointer list-none">
-        ⚙️ Aging &amp; reminder settings
-        {settings.demoOverrideSeconds != null && (
-          <span className="ml-2 text-amber-600">
-            demo override: {settings.demoOverrideSeconds}s
-          </span>
-        )}
-      </summary>
-      <div className="mt-3 flex flex-wrap items-end gap-4">
+    <div className="space-y-6 text-sm">
+      <section className="space-y-3">
+        <h2 className="font-semibold">
+          Aging &amp; reminder
+          {settings.demoOverrideSeconds != null && (
+            <span className="ml-2 text-xs font-normal text-amber-600">
+              demo override: {settings.demoOverrideSeconds}s
+            </span>
+          )}
+        </h2>
+        <div className="flex flex-wrap items-end gap-4">
         <label className="flex flex-col gap-1">
           <span className="text-muted-foreground text-xs">
             Aging threshold (minutes)
@@ -158,14 +159,15 @@ export function SettingsPanel({
         >
           {pending ? "Saving…" : "Save"}
         </button>
-      </div>
-      <p className="text-muted-foreground mt-2 text-xs">
-        The demo override makes items age in seconds so reminders fire live on
-        stage.
-      </p>
+        </div>
+        <p className="text-muted-foreground text-xs">
+          The demo override makes items age in seconds so reminders fire live on
+          stage.
+        </p>
+      </section>
 
-      <div className="mt-4 border-t pt-3">
-        <p className="text-muted-foreground mb-2 text-xs">Voice</p>
+      <section className="space-y-2 border-t pt-4">
+        <h2 className="font-semibold">Voice</h2>
         <div className="inline-flex rounded-md border" role="group" aria-label="Voice preference">
           {(["plain", "playful"] as const).map((v) => (
             <button
@@ -184,16 +186,16 @@ export function SettingsPanel({
             </button>
           ))}
         </div>
-      </div>
+      </section>
 
-      <div className="mt-4 border-t pt-3">
-        <p className="text-muted-foreground mb-2 text-xs">🎨 Appearance</p>
+      <section className="space-y-2 border-t pt-4">
+        <h2 className="font-semibold">Appearance</h2>
         <ThemeToggle />
-      </div>
+      </section>
 
       {isOwner && (
-        <div className="mt-4 border-t pt-3">
-          <p className="text-muted-foreground mb-2 text-xs">🧠 Breakdown model</p>
+        <section className="space-y-2 border-t pt-4">
+          <h2 className="font-semibold">Breakdown model</h2>
           <div className="flex flex-col gap-1">
             {OWNER_BREAKDOWN_ALLOWLIST.map((m) => (
               <label key={m} className="flex items-center gap-2 text-sm">
@@ -212,8 +214,8 @@ export function SettingsPanel({
               🔒 Fable 5 — {fable}
             </label>
           </div>
-        </div>
+        </section>
       )}
-    </details>
+    </div>
   );
 }
