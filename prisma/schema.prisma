@@ -46,6 +46,10 @@ model Settings {
   breakdownModel        String?
   // Voice preference: "plain" (default) or "playful"
   voice                 String   @default("plain")
+  // Phase 2 — per-tier freshness thresholds (hours)
+  agingHours            Int      @default(4)
+  overdueHours          Int      @default(8)
+  wayOverdueHours       Int      @default(12)
   updatedAt             DateTime @updatedAt
   workspaceId           String   @unique
 }
@@ -77,16 +81,18 @@ model GoogleAuth {
 
 // ── Feature 1 — Brain Dump ────────────────────────────────────────────────
 model BrainDumpItem {
-  id           String    @id @default(cuid())
-  text         String
-  createdAt    DateTime  @default(now())
-  status       String    @default("inbox") // inbox | triaged | archived
-  triagedAt    DateTime?
-  remindedAt   DateTime?
-  snoozedUntil DateTime?
-  taskId       String?
-  task         Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  workspaceId  String
+  id               String    @id @default(cuid())
+  text             String
+  createdAt        DateTime  @default(now())
+  status           String    @default("inbox") // inbox | triaged | archived
+  triagedAt        DateTime?
+  remindedAt       DateTime?
+  snoozedUntil     DateTime?
+  freshenedAt      DateTime?
+  promptDismissedAt DateTime?
+  taskId           String?
+  task             Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  workspaceId      String
 
   @@index([status])
   @@index([workspaceId])
