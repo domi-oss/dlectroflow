@@ -34,6 +34,11 @@ type Item = {
   remindedAt: Date | null;
   snoozedUntil: Date | null;
   taskId: string | null;
+  freshenedAt: Date | null;
+  promptDismissedAt: Date | null;
+  stepsTotal: number;
+  stepsDone: number;
+  taskStatus: string | null;
 };
 
 export function InboxView({

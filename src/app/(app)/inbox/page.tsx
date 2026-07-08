@@ -16,15 +16,23 @@ export default async function InboxPage({
   }>;
 }) {
   const workspaceId = await currentWorkspaceId();
-  const [items, settings, owner, sp] = await Promise.all([
+  const [rawItems, settings, owner, sp] = await Promise.all([
     prisma.brainDumpItem.findMany({
       where: { workspaceId, status: { not: BrainDumpStatus.Archived } },
       orderBy: { createdAt: "desc" },
+      include: { task: { include: { steps: { select: { done: true } } } } },
     }),
     getSettings(workspaceId),
     isOwnerRequest(),
     searchParams,
   ]);
+
+  const items = rawItems.map(({ task, ...item }) => ({
+    ...item,
+    stepsTotal: task?.steps.length ?? 0,
+    stepsDone: task?.steps.filter((s) => s.done).length ?? 0,
+    taskStatus: task?.status ?? null,
+  }));
 
   return (
     <div className="space-y-4">
@@ -57,6 +65,9 @@ export default async function InboxPage({
         settings={{
           agingThresholdMinutes: settings.agingThresholdMinutes,
           demoOverrideSeconds: settings.demoOverrideSeconds,
+          agingHours: settings.agingHours,
+          overdueHours: settings.overdueHours,
+          wayOverdueHours: settings.wayOverdueHours,
         }}
         isOwner={owner}
         breakdownModel={settings.breakdownModel ?? null}
