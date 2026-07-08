@@ -39,6 +39,7 @@ export function BreakdownChat({
   const [error, setError] = useState<string | null>(null);
   const [freeText, setFreeText] = useState("");
   const [confirmed, setConfirmed] = useState(false);
+  const [fallbackNote, setFallbackNote] = useState<string | null>(null);
   const [confirmPending, startConfirm] = useTransition();
   const startedRef = useRef(false);
 
@@ -52,6 +53,7 @@ export function BreakdownChat({
   async function request(feedback: Feedback, userLabel?: string) {
     if (streaming) return;
     setError(null);
+    setFallbackNote(null);
     if (userLabel) setMessages((m) => [...m, { role: "user", text: userLabel }]);
     setStreaming(true);
     setStreamText("");
@@ -80,6 +82,15 @@ export function BreakdownChat({
             setStreamText(assistantText);
           } else if (ev.type === "steps") {
             setProposal(ev.data);
+          } else if (ev.type === "fallback") {
+            setProposal(ev.data);
+            setFallbackNote(
+              ev.reason === "quota"
+                ? "⚡ You're out of AI breakdowns for now — but here's a solid starter plan you can tweak, and the focus list still works."
+                : ev.reason === "global_cap"
+                  ? "🚦 The demo's shared AI is maxed out for today — here's a hand-built plan to get you moving. Still fully usable."
+                  : "🔌 The AI hiccuped, so here's a reliable starter plan. Edit away and add it to your focus list.",
+            );
           } else if (ev.type === "error") {
             setError(ev.message);
           }
@@ -290,6 +301,12 @@ export function BreakdownChat({
         ))}
         {streaming && <ChatBubble role="assistant" text={streamText} typing />}
       </div>
+
+      {fallbackNote && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700">
+          {fallbackNote}
+        </div>
+      )}
 
       {error && (
         <div className="rounded-lg border border-red-600/30 bg-red-600/10 p-3 text-sm text-red-700">

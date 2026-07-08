@@ -30,6 +30,7 @@ export type BreakdownRequest = {
 export type StreamEvent =
   | { type: "text"; delta: string }
   | { type: "steps"; data: Proposal }
+  | { type: "fallback"; reason: "quota" | "global_cap" | "error"; data: Proposal }
   | { type: "done" }
   | { type: "error"; message: string };
 
@@ -51,6 +52,25 @@ export function feedbackInstruction(fb: Feedback, proposal: Proposal | null): st
     case "free":
       return fb.text;
   }
+}
+
+/**
+ * Deterministic local breakdown used when Claude is unavailable or a guest is
+ * over their allowance. Generic scaffolding steps derived from the task title —
+ * intentionally simple; the point is that the app still works without AI.
+ */
+export function localBreakdown(title: string): Proposal {
+  const t = title.trim() || "this task";
+  return {
+    parentEmoji: "🗂️",
+    steps: [
+      { text: `Write down exactly what "done" looks like for: ${t}`, estMinutes: 5, subtaskEmoji: "🎯" },
+      { text: "Gather anything you need to start (files, links, tools)", estMinutes: 10, subtaskEmoji: "🧰" },
+      { text: "Do the smallest first piece for 10 minutes", estMinutes: 10, subtaskEmoji: "🌱" },
+      { text: "Continue the main work in one focused block", estMinutes: 25, subtaskEmoji: "🚀" },
+      { text: "Review, tidy up, and mark it complete", estMinutes: 10, subtaskEmoji: "✅" },
+    ],
+  };
 }
 
 /** Build the user-turn prompt carrying task + current proposal + feedback. */

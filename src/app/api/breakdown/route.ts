@@ -1,11 +1,18 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { getAnthropic, BREAKDOWN_MODEL } from "@/lib/anthropic";
+import { headers } from "next/headers";
+import { getAnthropic } from "@/lib/anthropic";
 import {
   buildUserPrompt,
+  localBreakdown,
   type BreakdownRequest,
   type Proposal,
   type StreamEvent,
 } from "@/lib/breakdown";
+import { isOwnerRequest, currentWorkspaceId } from "@/lib/workspace";
+import { getSettings } from "@/lib/settings-read";
+import { resolveBreakdownModel, breakdownParamsFor } from "@/lib/models";
+import { clientIpHash, consumeGuestBreakdown } from "@/lib/guest-quota";
+import { OWNER_WORKSPACE_ID } from "@/lib/constants";
 
 export const runtime = "nodejs";
 
@@ -103,26 +110,52 @@ export async function POST(req: Request): Promise<Response> {
     });
   }
 
+  // ── Role + allowance resolution ────────────────────────────────────────────
+  const owner = await isOwnerRequest();
+  const wsId = await currentWorkspaceId();
+  const isGuest = wsId !== OWNER_WORKSPACE_ID;
+
+  let blockedReason: "quota" | "global_cap" | null = null;
+  if (isGuest) {
+    const hdrs = await headers();
+    const ipHash = clientIpHash(hdrs);
+    // No resolvable IP ⇒ treat as global-cap-style block (can't meter safely).
+    if (!ipHash) {
+      blockedReason = "global_cap";
+    } else {
+      const res = await consumeGuestBreakdown(ipHash);
+      if (!res.allowed) blockedReason = res.reason ?? "quota";
+    }
+  }
+
+  // Resolve model (owner setting → env → default; guest → haiku).
+  const settings = owner ? await getSettings(OWNER_WORKSPACE_ID) : null;
+  const model = resolveBreakdownModel({ isOwner: owner, ownerSetting: settings?.breakdownModel ?? null });
+
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const send = (e: StreamEvent) =>
         controller.enqueue(encoder.encode(JSON.stringify(e) + "\n"));
+
+      // Blocked guest → non-silent canned fallback, NO Claude call.
+      if (blockedReason) {
+        send({ type: "fallback", reason: blockedReason, data: localBreakdown(body.title) });
+        send({ type: "done" });
+        controller.close();
+        return;
+      }
+
       try {
         const anthropic = getAnthropic();
         const ms = anthropic.messages.stream({
-          model: BREAKDOWN_MODEL,
+          ...breakdownParamsFor(model),
           max_tokens: 6000,
-          thinking: { type: "adaptive" },
-          // low effort keeps the interactive chat snappy; the task is simple
-          output_config: { effort: "low" },
           system: SYSTEM,
           tools: [PROPOSE_TOOL],
           messages: [{ role: "user", content: buildUserPrompt(body) }],
         });
-
         ms.on("text", (delta) => send({ type: "text", delta }));
-
         const final = await ms.finalMessage();
         const tool = final.content.find(
           (b) => b.type === "tool_use" && b.name === "propose_steps",
@@ -131,12 +164,10 @@ export async function POST(req: Request): Promise<Response> {
           send({ type: "steps", data: tool.input as unknown as Proposal });
         }
         send({ type: "done" });
-      } catch (err) {
-        send({
-          type: "error",
-          message:
-            err instanceof Error ? err.message : "Breakdown request failed.",
-        });
+      } catch {
+        // Claude failed → canned fallback rather than a dead end.
+        send({ type: "fallback", reason: "error", data: localBreakdown(body.title) });
+        send({ type: "done" });
       } finally {
         controller.close();
       }
