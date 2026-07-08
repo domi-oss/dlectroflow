@@ -8,6 +8,9 @@ import { OWNER_BREAKDOWN_ALLOWLIST } from "@/lib/constants";
 export async function updateAgingSettings(input: {
   agingThresholdMinutes: number;
   demoOverrideSeconds: number | null;
+  agingHours: number;
+  overdueHours: number;
+  wayOverdueHours: number;
 }) {
   const workspaceId = await currentWorkspaceId();
   const agingThresholdMinutes = Math.max(
@@ -18,11 +21,30 @@ export async function updateAgingSettings(input: {
     input.demoOverrideSeconds != null && input.demoOverrideSeconds > 0
       ? Math.round(input.demoOverrideSeconds)
       : null;
+  const clampHours = (value: number) =>
+    Number.isFinite(value) ? Math.max(1, Math.round(value)) : 1;
+  const agingHours = clampHours(input.agingHours);
+  const overdueHours = clampHours(input.overdueHours);
+  const wayOverdueHours = clampHours(input.wayOverdueHours);
 
   await prisma.settings.upsert({
     where: { workspaceId },
-    create: { id: workspaceId, workspaceId, agingThresholdMinutes, demoOverrideSeconds },
-    update: { agingThresholdMinutes, demoOverrideSeconds },
+    create: {
+      id: workspaceId,
+      workspaceId,
+      agingThresholdMinutes,
+      demoOverrideSeconds,
+      agingHours,
+      overdueHours,
+      wayOverdueHours,
+    },
+    update: {
+      agingThresholdMinutes,
+      demoOverrideSeconds,
+      agingHours,
+      overdueHours,
+      wayOverdueHours,
+    },
   });
   revalidatePath("/inbox");
 }

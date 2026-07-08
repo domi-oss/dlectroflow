@@ -68,6 +68,26 @@ export async function markReminded(id: string) {
   revalidatePath(INBOX_PATH);
 }
 
+/** Freshen an aging item — resets the freshness clock without triaging it. */
+export async function freshenItem(id: string) {
+  const workspaceId = await currentWorkspaceId();
+  await prisma.brainDumpItem.updateMany({
+    where: { id, workspaceId },
+    data: { freshenedAt: new Date() },
+  });
+  revalidatePath(INBOX_PATH);
+}
+
+/** Dismiss the freshness prompt for an item without freshening or triaging it. */
+export async function dismissPrompt(id: string) {
+  const workspaceId = await currentWorkspaceId();
+  await prisma.brainDumpItem.updateMany({
+    where: { id, workspaceId },
+    data: { promptDismissedAt: new Date() },
+  });
+  revalidatePath(INBOX_PATH);
+}
+
 /**
  * "Keep as task" — promote an inbox item into a Task without breaking it down.
  * (Step 5 will add the conversational-breakdown launch.)
