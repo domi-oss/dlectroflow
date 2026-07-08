@@ -4,14 +4,13 @@ function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 /** Floating local time stamp: YYYYMMDDTHHMMSS (no trailing Z).
- *  Uses UTC accessors so the value is timezone-independent — callers pass a
- *  "wall-clock" Date (e.g. new Date("2026-07-08T09:00:00Z")) and the stamp
- *  reflects that wall time regardless of the server's local timezone.
+ *  Emits the LOCAL wall-clock time of the given Date as a floating (no-Z) stamp,
+ *  per RFC 5545 §3.3.5 — the calendar client interprets it in the viewer's local tz.
  */
 function floating(d: Date): string {
   return (
-    `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}` +
-    `T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}`
+    `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` +
+    `T${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
   );
 }
 function esc(s: string): string {
@@ -19,8 +18,8 @@ function esc(s: string): string {
 }
 function nextTopOfHour(from = new Date()): Date {
   const d = new Date(from);
-  d.setUTCMinutes(0, 0, 0);
-  d.setUTCHours(d.getUTCHours() + 1);
+  d.setMinutes(0, 0, 0);
+  d.setHours(d.getHours() + 1);
   return d;
 }
 
