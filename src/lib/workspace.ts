@@ -8,6 +8,7 @@ import {
 } from "@/lib/auth/session";
 import { authConfig } from "@/lib/auth/config";
 import { OWNER_WORKSPACE_ID } from "@/lib/constants";
+import { guestSandboxTtlHours, purgeExpiredGuests } from "@/lib/purge";
 
 export class MissingWorkspaceError extends Error {
   constructor() {
@@ -39,10 +40,14 @@ export async function resolveWorkspaceId(input: {
 
 export async function touchWorkspace(id: string): Promise<void> {
   const kind = id === OWNER_WORKSPACE_ID ? "owner" : "guest";
+  const expiresAt =
+    kind === "guest"
+      ? new Date(Date.now() + guestSandboxTtlHours() * 3600_000)
+      : null;
   await prisma.workspace.upsert({
     where: { id },
-    create: { id, kind, lastSeenAt: new Date() },
-    update: { kind, lastSeenAt: new Date() },
+    create: { id, kind, lastSeenAt: new Date(), expiresAt },
+    update: { kind, lastSeenAt: new Date() }, // don't extend TTL on touch
   });
 }
 
@@ -55,6 +60,7 @@ export async function currentWorkspaceId(): Promise<string> {
     header: hdrs.get(GUEST_WS_HEADER) ?? undefined,
   });
   await touchWorkspace(id);
+  void purgeExpiredGuests().catch(() => {});
   return id;
 }
 

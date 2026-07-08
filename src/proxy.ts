@@ -16,6 +16,7 @@ export const config = {
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const { sessionSecret } = authConfig();
+  const guestTtlHours = Number(process.env.GUEST_SANDBOX_TTL_HOURS ?? 24);
 
   // Security: strip any inbound GUEST_WS_HEADER so a malicious client cannot
   // inject a workspace id. This stripped copy is used for all pass-throughs.
@@ -58,7 +59,7 @@ export async function proxy(req: NextRequest) {
     guestToken = await new SignJWT({ kind: "guest", wsId })
       .setProtectedHeader({ alg: "HS256" })
       .setIssuedAt()
-      .setExpirationTime("30d")
+      .setExpirationTime(`${guestTtlHours}h`)
       .sign(new TextEncoder().encode(sessionSecret));
   }
 
@@ -71,7 +72,7 @@ export async function proxy(req: NextRequest) {
     secure: req.nextUrl.protocol === "https:",
     sameSite: "lax",
     path: "/",
-    maxAge: 60 * 60 * 24 * 30,
+    maxAge: 60 * 60 * guestTtlHours,
   });
   return res;
 }
