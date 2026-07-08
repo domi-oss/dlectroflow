@@ -61,7 +61,7 @@ You can run and demo the whole capture → breakdown flow with **just the Anthro
 
 ```bash
 # 1. Clone
-git clone https://gitlab.com/gl-demo-ultimate-dtop/dlectroflow.git
+git clone https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow.git
 cd dlectroflow
 
 # 2. Start Postgres, install deps + create the database (one command)

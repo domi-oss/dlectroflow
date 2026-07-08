@@ -1,5 +1,5 @@
 image:
-  repository: registry.gitlab.com/gl-demo-ultimate-dtop/dlectroflow
+  repository: registry.gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow
   tag: ""
   pullPolicy: IfNotPresent
 
