@@ -11,6 +11,7 @@ const DESTINATIONS = [
   { key: "nav.dashboard", href: "/dashboard" },
   { key: "nav.everything", href: "/library" },
   { key: "nav.settings", href: "/settings" },
+  { key: "nav.help", href: "/help" },
 ] as const;
 
 export function AppMenu({ voice }: { voice: Voice }) {
