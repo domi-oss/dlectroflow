@@ -390,7 +390,7 @@ describe("InboxView — Move to… menu dispatch", () => {
   });
 
   it("choosing 'Save for later' in the prompt snoozes the item", async () => {
-    const { snoozeBrainDumpItem } = await import("@/app/actions/braindump");
+    const { snoozeBrainDumpItem, reopenItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
     render(<InboxView initialItems={[makeItem({ id: "n1", text: "big thing" })]} settings={settings} />);
     const row = screen.getByText("big thing").closest("li")!;
@@ -402,5 +402,40 @@ describe("InboxView — Move to… menu dispatch", () => {
     const dialog = screen.getByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "Save for later" }));
     expect(snoozeBrainDumpItem).toHaveBeenCalledWith("n1", 60);
+    // Non-completed source → reopenFirst is false, so reopen must not fire.
+    expect(reopenItem).not.toHaveBeenCalled();
+  });
+
+  it("moving a Completed item to Multi-step then Cancel is a true no-op (does not reopen)", async () => {
+    const { reopenItem } = await import("@/app/actions/braindump");
+    const { startBreakdown } = await import("@/app/actions/breakdown");
+    const user = userEvent.setup();
+    const done = makeItem({ id: "d1", text: "finished big thing", status: "triaged", completedAt: new Date() });
+    render(<InboxView initialItems={[done]} settings={settings} />);
+    const row = screen.getByText("finished big thing").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Move to…" }));
+    await user.click(within(row).getByRole("menuitem", { name: /Multi-step/ }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(reopenItem).not.toHaveBeenCalled();
+    expect(startBreakdown).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("moving a Completed item to Multi-step then 'Break into steps now' reopens it first", async () => {
+    const { reopenItem } = await import("@/app/actions/braindump");
+    const { startBreakdown } = await import("@/app/actions/breakdown");
+    const user = userEvent.setup();
+    const done = makeItem({ id: "d1", text: "finished big thing", status: "triaged", completedAt: new Date() });
+    render(<InboxView initialItems={[done]} settings={settings} />);
+    const row = screen.getByText("finished big thing").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Move to…" }));
+    await user.click(within(row).getByRole("menuitem", { name: /Multi-step/ }));
+    await user.click(screen.getByRole("button", { name: "Break into steps now" }));
+
+    expect(reopenItem).toHaveBeenCalledWith("d1", undefined);
+    expect(startBreakdown).toHaveBeenCalledWith("d1");
   });
 });

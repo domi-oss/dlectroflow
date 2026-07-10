@@ -40,6 +40,14 @@ export async function triageBrainDumpItem(id: string) {
   revalidatePath(INBOX_PATH);
 }
 
+/**
+ * "Save for later" — a saved-for-later item is a paused inbox item regardless
+ * of where it came from, so snoozing also un-triages it (status → inbox,
+ * triagedAt → null). Otherwise a triaged single-task/multi-step to-do stays
+ * in its original bucket (bucket.ts's savedLater rule requires status ===
+ * "inbox"), making the move a silent no-op. Waking via triageBrainDumpItem
+ * re-triages symmetrically.
+ */
 export async function snoozeBrainDumpItem(id: string, minutes: number) {
   const workspaceId = await currentWorkspaceId();
   const existing = await prisma.brainDumpItem.findFirst({ where: { id, workspaceId } });
@@ -47,6 +55,8 @@ export async function snoozeBrainDumpItem(id: string, minutes: number) {
   await prisma.brainDumpItem.update({
     where: { id },
     data: {
+      status: BrainDumpStatus.Inbox,
+      triagedAt: null,
       snoozedUntil: new Date(Date.now() + minutes * 60_000),
       remindedAt: null,
     },

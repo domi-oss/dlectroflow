@@ -178,7 +178,9 @@ export function InboxView({
 
   // Drag (dnd-kit) + the "Move to…" menu share this single dispatcher so the
   // two paths can never diverge (Task 10).
-  const [pendingBreakdown, setPendingBreakdown] = useState<Item | null>(null);
+  const [pendingBreakdown, setPendingBreakdown] = useState<
+    { item: Item; reopenFirst: boolean } | null
+  >(null);
   const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor));
   const itemsById = new Map(initialItems.map((i) => [i.id, i]));
 
@@ -189,10 +191,11 @@ export function InboxView({
     if (plan.kind === "noop") return;
 
     if (plan.prompt) {
-      // Multi-step target: reopen a completed item first (so it leaves Completed),
-      // then ask break-now vs save.
-      if (plan.reopenFirst) run(() => reopenItem(itemId, undefined));
-      setPendingBreakdown(item);
+      // Multi-step target: ask break-now vs save first. The reopen (needed
+      // when the source is Completed, so it leaves Completed) is deferred
+      // into the prompt's own confirm handlers so Cancel/Escape is a true
+      // no-op instead of reopening the item before the user decides.
+      setPendingBreakdown({ item, reopenFirst: plan.reopenFirst });
       return;
     }
 
@@ -506,20 +509,24 @@ export function InboxView({
 
       {pendingBreakdown && (
         <MultiStepDropPrompt
-          itemText={pendingBreakdown.text}
+          itemText={pendingBreakdown.item.text}
           voice={voice}
           onBreakNow={() => {
-            const id = pendingBreakdown.id;
+            const { item, reopenFirst } = pendingBreakdown;
             setPendingBreakdown(null);
             startTransition(async () => {
-              const taskId = await startBreakdown(id);
+              if (reopenFirst) await reopenItem(item.id, undefined);
+              const taskId = await startBreakdown(item.id);
               if (taskId) router.push(`/tasks/${taskId}`);
             });
           }}
           onSaveLater={() => {
-            const id = pendingBreakdown.id;
+            const { item, reopenFirst } = pendingBreakdown;
             setPendingBreakdown(null);
-            run(() => snoozeBrainDumpItem(id, 60));
+            run(async () => {
+              if (reopenFirst) await reopenItem(item.id, undefined);
+              await snoozeBrainDumpItem(item.id, 60);
+            });
           }}
           onCancel={() => setPendingBreakdown(null)}
         />
