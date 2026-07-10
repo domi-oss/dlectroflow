@@ -318,6 +318,7 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "nav.done",
     "nav.focusTimer",
     "nav.settings",
+    "nav.help",
     "heading.bestStreaks",
     "badge.first_breakdown",
     "badge.first_schedule",

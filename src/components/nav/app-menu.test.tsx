@@ -11,7 +11,7 @@ vi.mock("next/navigation", () => ({
 afterEach(cleanup);
 
 describe("AppMenu", () => {
-  it("lists the five destinations and excludes Task Breakdown", async () => {
+  it("lists the destinations (incl. Help) and excludes Task Breakdown", async () => {
     render(<AppMenu voice="plain" />);
     await userEvent.click(screen.getByRole("button", { name: /menu/i }));
     expect(screen.getByRole("link", { name: /Inbox/ })).toHaveAttribute("href", "/inbox");
@@ -19,6 +19,7 @@ describe("AppMenu", () => {
     expect(screen.getByRole("link", { name: /Dashboard/ })).toHaveAttribute("href", "/dashboard");
     expect(screen.getByRole("link", { name: /Everything/ })).toHaveAttribute("href", "/library");
     expect(screen.getByRole("link", { name: /Settings/ })).toHaveAttribute("href", "/settings");
+    expect(screen.getByRole("link", { name: /Help/ })).toHaveAttribute("href", "/help");
     expect(screen.queryByText(/Task Breakdown|Break into steps/)).not.toBeInTheDocument();
   });
 

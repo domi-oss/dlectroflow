@@ -40,6 +40,7 @@ export const STRINGS = {
   "nav.done":            { plain: "Done",              playful: "🍽️ Devoured" },
   "nav.focusTimer":      { plain: "Focus Timer",       playful: "⏱️ Focus Timer" },
   "nav.settings":        { plain: "Settings",          playful: "⚙️ Settings" },
+  "nav.help":            { plain: "Help",              playful: "🆘 Help" },
 
   // ── Freshness tiers ────────────────────────────────────────────────────────
   "freshness.recent":    { plain: "Recent",            playful: "Fresh" },

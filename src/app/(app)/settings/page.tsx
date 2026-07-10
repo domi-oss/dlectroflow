@@ -30,9 +30,14 @@ export default async function SettingsPage() {
         breakdownModel={settings.breakdownModel ?? null}
         voice={voice}
       />
-      <Link href="/inbox" className="text-sm underline">
-        {t("action.backToInbox", voice)}
-      </Link>
+      <div className="flex gap-4 text-sm">
+        <Link href="/help" className="underline">
+          {t("nav.help", voice)} &amp; docs
+        </Link>
+        <Link href="/inbox" className="underline">
+          {t("action.backToInbox", voice)}
+        </Link>
+      </div>
     </div>
   );
 }
