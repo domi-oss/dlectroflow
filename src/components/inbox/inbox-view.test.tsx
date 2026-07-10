@@ -21,6 +21,8 @@ vi.mock("@/app/actions/braindump", () => ({
   markReminded: vi.fn().mockResolvedValue(undefined),
   freshenItem: vi.fn().mockResolvedValue(undefined),
   dismissPrompt: vi.fn().mockResolvedValue(undefined),
+  completeItem: vi.fn().mockResolvedValue(undefined),
+  reopenItem: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/app/actions/breakdown", () => ({
@@ -236,5 +238,27 @@ describe("InboxView — settings panel moved to /settings", () => {
     expect(
       screen.queryByText(/Aging & reminder settings/i),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("InboxView — complete + completed bucket", () => {
+  it("a needs-review row has a Complete button that calls completeItem", async () => {
+    const { completeItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeItem({ id: "n1", text: "do it" })]} settings={settings} />);
+    const row = screen.getByText("do it").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Complete" }));
+    expect(completeItem).toHaveBeenCalledWith("n1");
+  });
+
+  it("renders the Completed section with a today count and Undo", async () => {
+    const { reopenItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    const done = makeItem({ id: "d1", text: "finished", status: "triaged", completedAt: new Date() });
+    render(<InboxView initialItems={[done]} settings={settings} />);
+    expect(screen.getByText(/Completed today/i)).toBeInTheDocument();
+    const row = screen.getByText("finished").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: /Reopen|Undo/ }));
+    expect(reopenItem).toHaveBeenCalledWith("d1", undefined);
   });
 });
