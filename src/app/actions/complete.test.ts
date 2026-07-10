@@ -85,3 +85,42 @@ describe("completeItem", () => {
     expect(prismaMock.brainDumpItem.findFirst.mock.calls[0][0].where).toEqual({ id: "i1", workspaceId: "owner" });
   });
 });
+
+describe("reopenItem", () => {
+  it("clears completedAt for a single-task item", async () => {
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({ id: "i1", task: null });
+    const { reopenItem } = await import("./braindump");
+    await reopenItem("i1");
+    expect(prismaMock.brainDumpItem.update).toHaveBeenCalledWith({ where: { id: "i1" }, data: { completedAt: null } });
+  });
+
+  it("reopens a multi-step task: reactivates + resets selected steps", async () => {
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i2", task: { id: "t1", steps: [{ id: "s1", done: true }, { id: "s2", done: true }] },
+    });
+    const { reopenItem } = await import("./braindump");
+    await reopenItem("i2", ["s2"]);
+    expect(prismaMock.task.update).toHaveBeenCalledWith({ where: { id: "t1" }, data: { status: "active" } });
+    expect(prismaMock.step.updateMany).toHaveBeenCalledWith({ where: { id: { in: ["s2"] } }, data: { done: false } });
+  });
+
+  it("empty stepIds resets ALL steps (whole-task reopen)", async () => {
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i3", task: { id: "t2", steps: [{ id: "a", done: true }, { id: "b", done: true }] },
+    });
+    const { reopenItem } = await import("./braindump");
+    await reopenItem("i3", []);
+    expect(prismaMock.step.updateMany).toHaveBeenCalledWith({ where: { id: { in: ["a", "b"] } }, data: { done: false } });
+  });
+
+  it("guards ≥1 not-done: a subset covering nothing also resets the last step", async () => {
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i4", task: { id: "t3", steps: [{ id: "a", done: true }, { id: "b", done: true }] },
+    });
+    const { reopenItem } = await import("./braindump");
+    await reopenItem("i4", ["missing"]); // covers no real steps → all still done → add last
+    const call = prismaMock.step.updateMany.mock.calls[0][0];
+    expect(call.data).toEqual({ done: false });
+    expect(call.where.id.in).toContain("b"); // last step forced not-done
+  });
+});
