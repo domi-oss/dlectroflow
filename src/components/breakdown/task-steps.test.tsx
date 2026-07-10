@@ -15,8 +15,12 @@ vi.mock("next/link", () => ({
 vi.mock("@/app/actions/breakdown", () => ({
   extractStepToInbox: vi.fn(),
 }));
+vi.mock("@/app/actions/focus", () => ({
+  completeStep: vi.fn().mockResolvedValue(undefined),
+}));
 
 import { extractStepToInbox } from "@/app/actions/breakdown";
+import { completeStep } from "@/app/actions/focus";
 
 function steps() {
   return [
@@ -64,5 +68,14 @@ describe("TaskSteps — send to review", () => {
 
     await user.click(screen.getByRole("button", { name: /single to-do/i }));
     expect(push).toHaveBeenCalledWith("/inbox");
+  });
+});
+
+describe("TaskSteps — complete step", () => {
+  it("a step's ✓ Complete calls completeStep", async () => {
+    const user = userEvent.setup();
+    render(<TaskSteps taskId="t1" steps={steps()} />);
+    await user.click(screen.getAllByRole("button", { name: /Complete/i })[0]);
+    expect(completeStep).toHaveBeenCalledWith("s1");
   });
 });

@@ -42,6 +42,7 @@ export const RewardType = {
   InboxZero: "inbox_zero",
   BreakdownConfirmed: "breakdown_confirmed",
   Scheduled: "scheduled",
+  TaskComplete: "task_complete",
 } as const;
 export type RewardType = (typeof RewardType)[keyof typeof RewardType];
 
@@ -51,6 +52,7 @@ export const RewardPoints: Record<RewardType, number> = {
   inbox_zero: 15,
   breakdown_confirmed: 10,
   scheduled: 10,
+  task_complete: 25,
 };
 
 export const SparkSource = {
@@ -65,6 +67,7 @@ export const BadgeKey = {
   Streak5: "streak_5",
   TenStepsDay: "ten_steps_day",
   BeatBestStreak: "beat_best_streak",
+  TaskComplete: "task_complete",
 } as const;
 export type BadgeKey = (typeof BadgeKey)[keyof typeof BadgeKey];
 

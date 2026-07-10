@@ -90,6 +90,7 @@ model BrainDumpItem {
   snoozedUntil     DateTime?
   freshenedAt      DateTime?
   promptDismissedAt DateTime?
+  completedAt      DateTime?
   taskId           String?
   task             Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
   workspaceId      String

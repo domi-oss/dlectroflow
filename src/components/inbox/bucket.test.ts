@@ -18,6 +18,8 @@ function item(overrides: Partial<Item> & { id: string }): Item {
     stepsTotal: 0,
     stepsDone: 0,
     taskStatus: null,
+    completedAt: null,
+    steps: [],
     ...overrides,
   };
 }
@@ -115,5 +117,37 @@ describe("bucketItems", () => {
     const { singleTask, multiStep } = bucketItems(items, NOW);
     expect(multiStep).toEqual([]);
     expect(singleTask).toEqual([]);
+  });
+});
+
+describe("completed bucket", () => {
+  it("collects completed items, newest first, capped at 10, excluded elsewhere", () => {
+    const items = [
+      item({ id: "a", status: BrainDumpStatus.Triaged, completedAt: new Date(NOW - 5_000) }),
+      item({ id: "b", status: BrainDumpStatus.Triaged, completedAt: new Date(NOW - 1_000) }),
+      item({ id: "todo", status: BrainDumpStatus.Triaged }),
+    ];
+    const { completed, singleTask } = bucketItems(items, NOW);
+    expect(completed.map((i) => i.id)).toEqual(["b", "a"]);
+    expect(singleTask.map((i) => i.id)).toEqual(["todo"]); // completed excluded
+  });
+
+  it("caps completed at 10 most recent", () => {
+    const items = Array.from({ length: 14 }, (_, n) =>
+      item({ id: `c${n}`, status: BrainDumpStatus.Triaged, completedAt: new Date(NOW - n * 1000) }),
+    );
+    const { completed } = bucketItems(items, NOW);
+    expect(completed).toHaveLength(10);
+    expect(completed[0].id).toBe("c0"); // newest
+  });
+
+  it("completedTodayCount counts only items completed since local midnight", () => {
+    const midnight = new Date(NOW); midnight.setHours(0, 0, 0, 0);
+    const items = [
+      item({ id: "today", status: BrainDumpStatus.Triaged, completedAt: new Date(midnight.getTime() + 1000) }),
+      item({ id: "yesterday", status: BrainDumpStatus.Triaged, completedAt: new Date(midnight.getTime() - 1000) }),
+    ];
+    const { completedTodayCount } = bucketItems(items, NOW);
+    expect(completedTodayCount).toBe(1);
   });
 });

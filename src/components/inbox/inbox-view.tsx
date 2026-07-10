@@ -19,6 +19,8 @@ import {
   markReminded,
   freshenItem,
   dismissPrompt,
+  completeItem,
+  reopenItem,
 } from "@/app/actions/braindump";
 import { startBreakdown } from "@/app/actions/breakdown";
 import { StatusPill } from "@/components/inbox/status-pill";
@@ -102,10 +104,8 @@ export function InboxView({
     requestNotificationPermission().then((p) => setPermission(p));
 
   const now = Date.now();
-  const { needsReview, singleTask, multiStep, savedLater } = bucketItems(
-    initialItems,
-    now,
-  );
+  const { needsReview, singleTask, multiStep, savedLater, completed, completedTodayCount } =
+    bucketItems(initialItems, now);
 
   const untriagedCount = needsReview.length;
   const agingCount = needsReview.filter((i) =>
@@ -238,6 +238,7 @@ export function InboxView({
                 onBreakdown={() => breakdown(item.id)}
                 onKeep={() => run(() => keepAsTask(item.id))}
                 onSnooze={() => run(() => snoozeBrainDumpItem(item.id, 60))}
+                onComplete={() => run(() => completeItem(item.id))}
                 confirmingDelete={confirmDeleteId === item.id}
                 onRequestDelete={() => requestDelete(item.id)}
                 onConfirmDelete={() => confirmDelete(item.id)}
@@ -275,30 +276,38 @@ export function InboxView({
                       </span>
                       <span className="break-words">{item.text}</span>
                     </span>
-                    {confirmDeleteId === item.id ? (
-                      <span className="flex shrink-0 items-center gap-2 text-xs">
+                    <span className="flex shrink-0 items-center gap-2 text-xs">
+                      <button
+                        className="hover:bg-accent rounded-md border px-2.5 py-1"
+                        onClick={() => run(() => completeItem(item.id))}
+                      >
+                        {t("action.complete", voice)}
+                      </button>
+                      {confirmDeleteId === item.id ? (
+                        <span className="flex items-center gap-2">
+                          <button
+                            className="text-destructive font-medium"
+                            onClick={() => confirmDelete(item.id)}
+                          >
+                            {t("action.delete", voice)}
+                          </button>
+                          <span className="text-muted-foreground">·</span>
+                          <button
+                            className="text-muted-foreground hover:text-foreground"
+                            onClick={cancelDelete}
+                          >
+                            {t("action.cancel", voice)}
+                          </button>
+                        </span>
+                      ) : (
                         <button
-                          className="text-destructive font-medium"
-                          onClick={() => confirmDelete(item.id)}
+                          className="text-muted-foreground hover:text-destructive"
+                          onClick={() => requestDelete(item.id)}
                         >
                           {t("action.delete", voice)}
                         </button>
-                        <span className="text-muted-foreground">·</span>
-                        <button
-                          className="text-muted-foreground hover:text-foreground"
-                          onClick={cancelDelete}
-                        >
-                          {t("action.cancel", voice)}
-                        </button>
-                      </span>
-                    ) : (
-                      <button
-                        className="text-muted-foreground hover:text-destructive shrink-0 text-xs"
-                        onClick={() => requestDelete(item.id)}
-                      >
-                        {t("action.delete", voice)}
-                      </button>
-                    )}
+                      )}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -329,10 +338,18 @@ export function InboxView({
                     ) : (
                       <span className="min-w-0 break-words">{item.text}</span>
                     )}
-                    <span className="text-muted-foreground shrink-0 text-xs">
-                      {item.stepsDone > 0
-                        ? `${item.stepsDone}/${item.stepsTotal} ${t("progress.done", voice)}`
-                        : t("progress.notScheduled", voice)}
+                    <span className="flex shrink-0 items-center gap-2 text-xs">
+                      <span className="text-muted-foreground">
+                        {item.stepsDone > 0
+                          ? `${item.stepsDone}/${item.stepsTotal} ${t("progress.done", voice)}`
+                          : t("progress.notScheduled", voice)}
+                      </span>
+                      <button
+                        className="hover:bg-accent rounded-md border px-2.5 py-1"
+                        onClick={() => run(() => completeItem(item.id))}
+                      >
+                        {t("action.complete", voice)}
+                      </button>
                     </span>
                   </li>
                 ))}
@@ -363,6 +380,40 @@ export function InboxView({
                   onClick={() => run(() => triageBrainDumpItem(item.id))}
                 >
                   wake now
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* Completed — most-recently completed first, capped at 10 (Task 6) */}
+      {completed.length > 0 && (
+        <section>
+          <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
+            {t("section.completed", voice)}
+            <span className="bg-secondary text-secondary-foreground rounded-full px-2 py-0.5 text-xs">
+              {t("section.completedToday", voice)}: {completedTodayCount}
+            </span>
+            <a
+              href="/library?tab=done"
+              className="text-muted-foreground hover:text-foreground ml-auto text-xs font-normal"
+            >
+              {t("link.seeAll", voice)}
+            </a>
+          </h2>
+          <ul className="space-y-2 opacity-80">
+            {completed.map((item) => (
+              <li
+                key={item.id}
+                className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm"
+              >
+                <span className="break-words line-through">{item.text}</span>
+                <button
+                  className="text-muted-foreground hover:text-foreground shrink-0 text-xs underline"
+                  onClick={() => run(() => reopenItem(item.id, undefined))}
+                >
+                  {t("action.reopen", voice)}
                 </button>
               </li>
             ))}
@@ -408,6 +459,7 @@ function ItemRow({
   onBreakdown,
   onKeep,
   onSnooze,
+  onComplete,
   confirmingDelete,
   onRequestDelete,
   onConfirmDelete,
@@ -421,6 +473,7 @@ function ItemRow({
   onBreakdown: () => void;
   onKeep: () => void;
   onSnooze: () => void;
+  onComplete: () => void;
   confirmingDelete: boolean;
   onRequestDelete: () => void;
   onConfirmDelete: () => void;
@@ -489,6 +542,12 @@ function ItemRow({
           className="hover:bg-accent rounded-md border px-2.5 py-1"
         >
           {t("action.saveForLater", voice)}
+        </button>
+        <button
+          onClick={onComplete}
+          className="hover:bg-accent rounded-md border px-2.5 py-1"
+        >
+          {t("action.complete", voice)}
         </button>
         {confirmingDelete ? (
           <span className="ml-auto flex items-center gap-2">

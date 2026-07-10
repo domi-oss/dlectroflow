@@ -2,11 +2,19 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
-import { maybeAwardInboxZero } from "@/lib/rewards";
+import {
+  maybeAwardInboxZero,
+  maybeAwardTenStepsDay,
+  logReward,
+  awardBadge,
+  touchStreakOnCompletion,
+} from "@/lib/rewards";
 import {
   BrainDumpStatus,
   TaskSource,
   TaskStatus,
+  RewardType,
+  BadgeKey,
 } from "@/lib/constants";
 import { currentWorkspaceId } from "@/lib/workspace";
 
@@ -115,4 +123,63 @@ export async function keepAsTask(id: string) {
   await maybeAwardInboxZero(workspaceId);
   revalidatePath(INBOX_PATH);
   return task.id;
+}
+
+export async function completeItem(id: string) {
+  const workspaceId = await currentWorkspaceId();
+  const item = await prisma.brainDumpItem.findFirst({
+    where: { id, workspaceId },
+    include: { task: { include: { steps: true } } },
+  });
+  if (!item || item.completedAt) return;
+
+  if (item.task) {
+    const notDone = item.task.steps.filter((s) => !s.done);
+    await prisma.step.updateMany({ where: { taskId: item.task.id }, data: { done: true } });
+    await prisma.task.update({ where: { id: item.task.id }, data: { status: TaskStatus.Done } });
+    for (const _step of notDone) await logReward(workspaceId, RewardType.StepDone);
+    await maybeAwardTenStepsDay(workspaceId);
+  }
+
+  await prisma.brainDumpItem.update({ where: { id }, data: { completedAt: new Date() } });
+  await logReward(workspaceId, RewardType.TaskComplete);
+  await touchStreakOnCompletion(workspaceId);
+  await awardBadge(workspaceId, BadgeKey.TaskComplete);
+  await maybeAwardInboxZero(workspaceId);
+
+  revalidatePath(INBOX_PATH);
+  revalidatePath("/dashboard");
+  if (item.task) revalidatePath(`/tasks/${item.task.id}`);
+}
+
+export async function reopenItem(id: string, stepIds?: string[]) {
+  const workspaceId = await currentWorkspaceId();
+  const item = await prisma.brainDumpItem.findFirst({
+    where: { id, workspaceId },
+    include: { task: { include: { steps: true } } },
+  });
+  if (!item) return;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.brainDumpItem.update({ where: { id }, data: { completedAt: null } });
+    if (item.task) {
+      const steps = item.task.steps;
+      await tx.task.update({ where: { id: item.task.id }, data: { status: TaskStatus.Active } });
+      const resetIds = new Set(
+        stepIds && stepIds.length
+          ? steps.filter((s) => stepIds.includes(s.id)).map((s) => s.id)
+          : steps.map((s) => s.id),
+      );
+      // Guarantee ≥1 not-done step so the task re-enters To-do.
+      const anyNotDone = steps.some((s) => resetIds.has(s.id) || !s.done);
+      if (!anyNotDone && steps.length) resetIds.add(steps[steps.length - 1].id);
+      if (resetIds.size) {
+        await tx.step.updateMany({ where: { id: { in: [...resetIds] } }, data: { done: false } });
+      }
+    }
+  });
+
+  revalidatePath(INBOX_PATH);
+  revalidatePath("/dashboard");
+  if (item.task) revalidatePath(`/tasks/${item.task.id}`);
 }

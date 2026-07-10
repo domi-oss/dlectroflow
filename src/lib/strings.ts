@@ -27,13 +27,17 @@ export const STRINGS = {
   "action.stillNeeded":  { plain: "Still need it",     playful: "Still want it" },
   "action.delete":       { plain: "Delete",            playful: "Delete" },
   "action.cancel":       { plain: "Cancel",            playful: "Cancel" },
+  "action.complete":     { plain: "Complete",          playful: "✅ Complete" },
+  "action.reopen":       { plain: "Reopen",            playful: "Reopen" },
 
   // ── Inbox section headers ──────────────────────────────────────────────────
-  "section.needsReview": { plain: "Needs review",      playful: "Needs review" },
-  "section.toDo":        { plain: "To do",             playful: "To do" },
-  "section.singleTask":  { plain: "Single-task to-dos",playful: "😋 Quick bites" },
-  "section.multiStep":   { plain: "Multi-step to-dos", playful: "✅ Sorted" },
-  "section.savedLater":  { plain: "Saved for later",   playful: "🥫 Pantry" },
+  "section.needsReview":    { plain: "Needs review",      playful: "Needs review" },
+  "section.toDo":           { plain: "To do",             playful: "To do" },
+  "section.singleTask":     { plain: "Single-task to-dos",playful: "😋 Quick bites" },
+  "section.multiStep":      { plain: "Multi-step to-dos", playful: "✅ Sorted" },
+  "section.savedLater":     { plain: "Saved for later",   playful: "🥫 Pantry" },
+  "section.completed":      { plain: "Completed",         playful: "🍽️ Cleared plate" },
+  "section.completedToday": { plain: "Completed today",   playful: "Cleared today" },
 
   // ── Nav / hub labels ───────────────────────────────────────────────────────
   "nav.inbox":           { plain: "Inbox",             playful: "🧠 Inbox" },
