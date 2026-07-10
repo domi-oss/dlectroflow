@@ -100,13 +100,28 @@ describe("BreakdownChat — manual step editing", () => {
 
   it("step rows expose Remove but NOT 'break down further'", () => {
     renderChat();
-    expect(screen.getAllByTitle("Remove step")).toHaveLength(2);
+    expect(screen.getAllByTitle("Remove this step")).toHaveLength(2);
     expect(screen.queryByTitle(/break this step down further/i)).toBeNull();
   });
 
   it("step rows expose a drag-to-reorder handle", () => {
     renderChat();
     expect(screen.getAllByTitle("Drag to reorder")).toHaveLength(2);
+  });
+
+  it("each step row has an emoji picker trigger", () => {
+    renderChat();
+    expect(screen.getAllByRole("button", { name: /choose emoji/i })).toHaveLength(2);
+  });
+
+  it("'Remove step' removes the last step", async () => {
+    const user = userEvent.setup();
+    renderChat();
+    expect(screen.getAllByLabelText("Step text")).toHaveLength(2);
+    await user.click(screen.getByRole("button", { name: "Remove step" }));
+    const remaining = screen.getAllByLabelText("Step text");
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]).toHaveValue("First step");
   });
 
   it("'Send to review' removes the row and creates a needs-review inbox item", async () => {

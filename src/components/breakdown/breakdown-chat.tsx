@@ -9,6 +9,7 @@ import { scheduleTaskInReclaim } from "@/app/actions/reclaim";
 import { pushStepsToGoogleTasks } from "@/app/actions/google-schedule";
 import type { Feedback, Proposal, StreamEvent } from "@/lib/breakdown";
 import { reorder, blankStep } from "@/lib/breakdown";
+import { EmojiPicker } from "@/components/breakdown/emoji-picker";
 import { cn } from "@/lib/utils";
 import { t } from "@/lib/strings";
 import { useVoice } from "@/components/voice-provider";
@@ -129,6 +130,13 @@ export function BreakdownChat({
   function removeStep(i: number) {
     setProposal((p) =>
       p ? { ...p, steps: p.steps.filter((_, j) => j !== i) } : p,
+    );
+  }
+
+  // Manual "Remove step" — drops the last step in the list.
+  function removeLastStep() {
+    setProposal((p) =>
+      p && p.steps.length > 0 ? { ...p, steps: p.steps.slice(0, -1) } : p,
     );
   }
 
@@ -437,11 +445,9 @@ export function BreakdownChat({
                 <span className="text-muted-foreground pt-1.5 text-xs tabular-nums">
                   {i + 1}/{proposal.steps.length}
                 </span>
-                <input
+                <EmojiPicker
                   value={s.subtaskEmoji}
-                  onChange={(e) => updateStep(i, { subtaskEmoji: e.target.value })}
-                  className="w-9 rounded-md border px-1 py-1 text-center"
-                  aria-label="Step emoji"
+                  onSelect={(emoji) => updateStep(i, { subtaskEmoji: emoji })}
                 />
                 <input
                   value={s.text}
@@ -472,7 +478,8 @@ export function BreakdownChat({
                     ↗
                   </button>
                   <button
-                    title="Remove step"
+                    title="Remove this step"
+                    aria-label="Remove this step"
                     onClick={() => removeStep(i)}
                     className="text-muted-foreground hover:text-destructive rounded px-1 text-xs"
                   >
@@ -518,6 +525,13 @@ export function BreakdownChat({
           className="hover:bg-accent rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
         >
           {t("action.addStep", voice)}
+        </button>
+        <button
+          onClick={removeLastStep}
+          disabled={busy || !proposal || proposal.steps.length === 0}
+          className="hover:bg-accent rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
+        >
+          {t("action.removeStep", voice)}
         </button>
       </div>
 
