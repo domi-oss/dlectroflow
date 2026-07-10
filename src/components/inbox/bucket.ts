@@ -19,7 +19,7 @@ export type Item = {
   stepsDone: number;
   taskStatus: string | null;
   completedAt: Date | null;
-  steps: { id: string; order: number; text: string; done: boolean }[];
+  steps: { id: string; order: number; text: string; done: boolean; estMinutes: number; subtaskEmoji: string | null }[];
 };
 
 export type Buckets = {
@@ -36,6 +36,8 @@ export type Buckets = {
   /** Count of items completed since local midnight. */
   completedTodayCount: number;
 };
+
+export type BucketId = "needsReview" | "singleTask" | "multiStep" | "savedLater" | "completed";
 
 const toMs = (d: Date | string): number =>
   (typeof d === "string" ? new Date(d) : d).getTime();
@@ -91,4 +93,21 @@ export function bucketItems(items: Item[], now: number = Date.now()): Buckets {
   const completedTodayCount = completedAll.filter((i) => toMs(i.completedAt!) >= dayStart).length;
 
   return { needsReview, singleTask, multiStep, savedLater, completed, completedTodayCount };
+}
+
+/**
+ * Which bucket a single item currently lives in — mirrors bucketItems'
+ * membership rules. Used by the drag/menu dispatcher to detect same-bucket
+ * no-ops and completed-source reopen-first.
+ */
+export function bucketOfItem(i: Item, now: number = Date.now()): BucketId {
+  if (isCompleted(i)) return "completed";
+  if (i.status === BrainDumpStatus.Inbox) {
+    return i.snoozedUntil != null && toMs(i.snoozedUntil) > now ? "savedLater" : "needsReview";
+  }
+  if (i.status === BrainDumpStatus.Triaged && !isFullyDone(i)) {
+    return i.stepsTotal > 0 ? "multiStep" : "singleTask";
+  }
+  // Fully-done-but-not-stamped or any other state: treat as review (safe default).
+  return "needsReview";
 }

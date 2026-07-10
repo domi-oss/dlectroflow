@@ -32,7 +32,14 @@ export default async function InboxPage({
     stepsDone: task?.steps.filter((s) => s.done).length ?? 0,
     taskStatus: task?.status ?? null,
     completedAt: item.completedAt,
-    steps: task?.steps.map((s) => ({ id: s.id, order: s.order, text: s.text, done: s.done })) ?? [],
+    steps: task?.steps.map((s) => ({
+      id: s.id,
+      order: s.order,
+      text: s.text,
+      done: s.done,
+      estMinutes: s.estMinutes,
+      subtaskEmoji: s.subtaskEmoji,
+    })) ?? [],
   }));
 
   return (

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bucketItems, type Item } from "@/components/inbox/bucket";
+import { bucketItems, bucketOfItem, type Item } from "@/components/inbox/bucket";
 import { BrainDumpStatus, TaskStatus } from "@/lib/constants";
 
 const NOW = new Date("2026-07-08T12:00:00Z").getTime();
@@ -149,5 +149,16 @@ describe("completed bucket", () => {
     ];
     const { completedTodayCount } = bucketItems(items, NOW);
     expect(completedTodayCount).toBe(1);
+  });
+});
+
+describe("bucketOfItem", () => {
+  it("classifies completed, saved, review, single-task and multi-step", () => {
+    const now = NOW;
+    expect(bucketOfItem(item({ id: "completed", status: "triaged", completedAt: new Date(now) }), now)).toBe("completed");
+    expect(bucketOfItem(item({ id: "saved", status: "inbox", snoozedUntil: new Date(now + 60_000) }), now)).toBe("savedLater");
+    expect(bucketOfItem(item({ id: "review", status: "inbox" }), now)).toBe("needsReview");
+    expect(bucketOfItem(item({ id: "single", status: "triaged", stepsTotal: 0 }), now)).toBe("singleTask");
+    expect(bucketOfItem(item({ id: "multi", status: "triaged", stepsTotal: 3, stepsDone: 1 }), now)).toBe("multiStep");
   });
 });
