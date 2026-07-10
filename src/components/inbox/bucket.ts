@@ -34,6 +34,14 @@ export type Buckets = {
 const toMs = (d: Date | string): number =>
   (typeof d === "string" ? new Date(d) : d).getTime();
 
+/**
+ * Freshness clock for Needs-review sorting: newest of createdAt / freshenedAt.
+ * Mirrors `freshnessAgeMs` in aging.ts (age = now − max(createdAt, freshenedAt))
+ * so a freshened item both shows a "recent" pill AND sorts to the top.
+ */
+const freshnessKey = (i: Item): number =>
+  i.freshenedAt ? Math.max(toMs(i.createdAt), toMs(i.freshenedAt)) : toMs(i.createdAt);
+
 /** Design decision 3: a to-do is fully done when the task is done OR every step is done. */
 function isFullyDone(i: Item): boolean {
   return (
@@ -49,8 +57,9 @@ export function bucketItems(items: Item[], now: number = Date.now()): Buckets {
 
   const needsReview = items
     .filter((i) => isInbox(i) && !isSavedForLater(i))
-    // Freshest / newest first.
-    .sort((a, b) => toMs(b.createdAt) - toMs(a.createdAt));
+    // Freshest first — freshenedAt resets the clock, so a freshened item
+    // outranks an item captured more recently.
+    .sort((a, b) => freshnessKey(b) - freshnessKey(a));
 
   const savedLater = items.filter((i) => isInbox(i) && isSavedForLater(i));
 

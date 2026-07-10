@@ -43,6 +43,22 @@ describe("bucketItems", () => {
     expect(needsReview.map((i) => i.id)).toEqual(["new", "mid", "old"]);
   });
 
+  it("needsReview sort is freshness-aware: freshenedAt outranks a newer createdAt", () => {
+    const items = [
+      // Captured most recently but never freshened.
+      item({ id: "newest", createdAt: new Date(NOW - 1_000) }),
+      // Captured long ago but freshened just now → should sort to the top.
+      item({
+        id: "freshened",
+        createdAt: new Date(NOW - 10_000),
+        freshenedAt: new Date(NOW - 500),
+      }),
+      item({ id: "oldest", createdAt: new Date(NOW - 5_000) }),
+    ];
+    const { needsReview } = bucketItems(items, NOW);
+    expect(needsReview.map((i) => i.id)).toEqual(["freshened", "newest", "oldest"]);
+  });
+
   it("savedLater = inbox items snoozed into the future only", () => {
     const items = [
       item({ id: "future", snoozedUntil: new Date(NOW + 60_000) }),
