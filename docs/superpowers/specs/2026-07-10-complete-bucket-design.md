@@ -1,6 +1,6 @@
 # Complete + Completed bucket + inbox bucket board (drag-to-move) — Design
 
-> Status: **in review (updated 2026-07-10)** — expanded from the approved complete-bucket design to absorb the always-visible bucket board + drag-to-move requests. Feature branch `feat/complete-bucket` (off `fast-follows-phase2` = MR !27, now merged to main). Milestone v0.0.2, relates to work item #8.
+> Status: **APPROVED (2026-07-10).** Decisions locked: drag=@dnd-kit/core; two MRs (A completion core, then B bucket board); multi-step→review keeps the task (un-triage only); completed-drag auto-reopens then applies; TaskComplete=25 pts; Completed bucket = 10 most-recent + see-all→Done stub. Feature branch `feat/complete-bucket`; rebase onto current main (!27/!28/!29 merged) before building. Milestone v0.0.2, relates to work item #8. Next: writing-plans (Phase A).
 
 ## Goal
 
@@ -16,7 +16,7 @@ Turn the inbox into a **bucket board** the user can move items around directly:
 - **Phase A — Completion core:** schema `completedAt`, rewards/badge, `completeItem`/`completeStep`/`reopenItem`, the Completed bucket + "Completed today", Complete buttons, task-page ✓ Complete. (Everything in the original spec below.)
 - **Phase B — Bucket board:** always-visible buckets + empty states, drag-to-move with action-on-drop, the multi-step drop prompt, multi-step inline expand + focus, `moveToReview`.
 
-Phase A is independently shippable; Phase B builds on it. Split into two MRs unless we decide otherwise.
+Phase A is independently shippable; Phase B builds on it. **Decided: two MRs (A then B).**
 
 ## Non-goals / scope boundary
 
@@ -39,7 +39,7 @@ ALTER TABLE "BrainDumpItem" ADD COLUMN "completedAt" TIMESTAMP;
 
 ## Rewards / constants
 
-- **`RewardType.TaskComplete = "task_complete"`**, `RewardPoints.task_complete = 15`.
+- **`RewardType.TaskComplete = "task_complete"`**, `RewardPoints.task_complete = 25`.
 - **`BadgeKey.TaskComplete = "task_complete"`** — the `badge.task_complete` string already exists in `strings.ts` but the badge was never in the `BadgeKey` enum and is never awarded today. This wires it up (awarded once, on first-ever completion).
 - `strings.test.ts` iterates `Object.values(BadgeKey)` asserting each has a string — adding `TaskComplete` is satisfied by the existing `badge.task_complete` entry.
 
@@ -56,7 +56,7 @@ Used by the **Complete** button on needs-review, single-task, and multi-step row
   - set `task.status = "done"`;
   - mark **all** its steps `done = true`;
   - for each step that was **not** already done, award `RewardType.StepDone` (credits the steps, so the row-level Complete earns the same as finishing them one-by-one — the focus-timer's `SessionFinished` +5 remains the only extra).
-- Award `RewardType.TaskComplete` (15) once.
+- Award `RewardType.TaskComplete` (25) once.
 - `touchStreakOnCompletion(workspaceId)`.
 - Award `BadgeKey.TaskComplete` (first-ever) and re-check `TenStepsDay` (step-done count today may have crossed 10).
 
@@ -66,7 +66,7 @@ Used by the new **✓ Complete** button beside **▶ Focus** on the task page �
 - Guard step ownership (`step.task.workspaceId === workspaceId`). If already `done` → no-op.
 - `step.done = true`; sync Reclaim/Google via the existing `completeGoogleTaskForStep(step)`.
 - Award `RewardType.StepDone` (10) + `touchStreakOnCompletion` + re-check `TenStepsDay`. **Not** `SessionFinished` — that stays the focus session's bonus.
-- If this was the **last** incomplete step → set `task.status = "done"`, stamp `completedAt` on the linked item(s), award `RewardType.TaskComplete` (15) once + `BadgeKey.TaskComplete`.
+- If this was the **last** incomplete step → set `task.status = "done"`, stamp `completedAt` on the linked item(s), award `RewardType.TaskComplete` (25) once + `BadgeKey.TaskComplete`.
 
 > `completeStep` shares reward logic with `completeFocus`; extract a small helper (e.g. `rewardStepDone(workspaceId)`) so the two stay in sync without duplicating the streak/badge/day-count code.
 
@@ -131,7 +131,9 @@ Each bucket (including **Needs review**) is a **drop zone**. Dropping item *X* o
 - Dropping a **Completed** item elsewhere first **reopens** it (`reopenItem`) then applies the target action; dragging a completed multi-step is allowed but uses the whole-task reopen (no per-step picker mid-drag).
 
 ### `moveToReview(id)` (new action, workspace-scoped)
-Sets `status = "inbox"`, clears `triagedAt`, `snoozedUntil`, `completedAt`. If the item has a linked task, **detach** it (`taskId = null`) and archive the now-orphaned task (`status = "archived"`) — the item goes back to review as a fresh idea, and we don't leave a dangling active task. (Steps stay on the archived task; a future breakdown creates a new one via `startBreakdown`.) Revalidate `/inbox`.
+**Decision: keep the task, just un-triage.** Sets `status = "inbox"`, clears `triagedAt`, `snoozedUntil`, `completedAt`. **Leaves `taskId` and the task's steps intact** — the item returns to the review queue but stays linked to its existing breakdown, so re-triaging later reuses the same task/steps (`startBreakdown` returns the existing `taskId`). Revalidate `/inbox`.
+
+- Edge case to handle in the view: a step-bearing item that's back in review and then dropped onto **Single-task** is still `triageBrainDumpItem`'d, but because it has steps it renders in the **Multi-step** bucket (bucket placement follows `stepsTotal`, not the drop target). That's acceptable — the drop triages it; the board reflects reality. (We don't strip steps on a single-task drop.)
 
 ## Multi-step drop prompt
 
@@ -148,14 +150,11 @@ Rendered as a small inline prompt / popover anchored to the drop (reusing the co
 - **Tapping the row toggles an inline step list** (reusing/adapting the `TaskSteps` client component from MR !28): each step shows **▶ Focus** (→ `/focus/[stepId]`), the direct **✓ Complete** (Phase A `completeStep`), and **↗ Send to review** (!28). This means the inbox page query must `include` each multi-step item's `steps { id, order, text, done, estMinutes }` (extends the Phase-A include already needed for the reopen picker).
 - The row is both a **drag source** and a **tap-to-expand** target; the drag handle (grip) initiates drag so a tap on the row body expands without triggering a drag.
 
-## Drag mechanism — DECISION NEEDED
+## Drag mechanism — DECIDED: `@dnd-kit/core`
 
-Native HTML5 drag-and-drop (used for step reorder in !28) does **not** work on touch devices and has poor keyboard a11y — but the inbox is a primary mobile surface and ADHD users need low-friction touch.
+Add **`@dnd-kit/core`** (MIT, maintained) for pointer + touch + keyboard drag sensors — the inbox is a primary mobile surface and ADHD users need low-friction touch, which native HTML5 DnD can't do. Buckets are `useDroppable` zones; item cards are `useDraggable`. On the multi-step row, the drag activator is the grip handle only (so a tap on the row body expands the step list instead of starting a drag).
 
-- **Option 1 (recommended): add `@dnd-kit/core`** — pointer + touch + keyboard sensors, accessible, ~modest bundle. One new dependency (weigh against the repo's minimal-dep posture; it is actively maintained, MIT).
-- **Option 2: native HTML5 DnD + a keyboard/menu fallback** — zero deps, but clunky on touch; we'd add a per-item "Move to…" menu as the real accessible path and treat drag as desktop sugar.
-
-Either way, **a non-drag "Move to…" menu per item is required for accessibility** (keyboard + screen-reader + touch fallback). Recommendation: **Option 1** for a coherent touch/keyboard drag, plus the "Move to…" menu.
+**Still required for a11y:** a per-item **"Move to…" menu** (keyboard + screen-reader + non-pointer fallback) that invokes the exact same drop-action dispatch. Drag and the menu share one `moveItemToBucket(itemId, targetBucket)` dispatcher so they can't diverge.
 
 ## Guest / permission notes
 
@@ -216,6 +215,5 @@ All drop actions map to existing workspace-scoped mutations, so guests are alrea
 
 ## Open dependency & sequencing
 
-- Built on `fast-follows-phase2` (MR !27) — **now merged to main**. Rebase this branch onto `main` before its MR.
-- **Overlaps MR !28** (breakdown): Phase A's task-page ✓ Complete should slot into !28's new `TaskSteps` client component (add Complete beside the existing Focus / Send-to-review), and Phase B reuses `TaskSteps` for the inline multi-step list. **Sequence: land !28 first, then rebase this branch onto main** so both build on the shared `TaskSteps`.
-- **Decision pending (Phase B):** drag mechanism — `@dnd-kit/core` (recommended) vs native DnD + "Move to…" menu.
+- **!27, !28, !29 are all merged to main + live in prod.** This branch (`feat/complete-bucket`, based on the pre-!28 state) must be **rebased onto current `main`** before Phase A work — it will pick up !28's `TaskSteps` client component, which Phase A's task-page ✓ Complete slots into (Complete beside the existing Focus / Send-to-review) and Phase B reuses for the inline multi-step list.
+- **All prior decisions resolved:** drag = `@dnd-kit/core`; phasing = two MRs (A then B); multi-step→review keeps the task (un-triage only); completed-drag auto-reopens then applies.
