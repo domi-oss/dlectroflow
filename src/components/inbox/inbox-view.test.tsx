@@ -36,6 +36,12 @@ vi.mock("@/lib/notifications", () => ({
   showReminder: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@/components/breakdown/task-steps", () => ({
+  TaskSteps: ({ steps }: { steps: { id: string; text: string }[] }) => (
+    <ol data-testid="inline-steps">{steps.map((s) => <li key={s.id}>{s.text}</li>)}</ol>
+  ),
+}));
+
 import {
   createBrainDumpItem,
   deleteBrainDumpItem,
@@ -70,6 +76,22 @@ function makeItem(overrides: Partial<Item> = {}): Item {
     steps: [],
     ...overrides,
   };
+}
+
+function makeMultiStep() {
+  return makeItem({
+    id: "m1",
+    text: "plan trip",
+    status: "triaged",
+    taskId: "t1",
+    stepsTotal: 3,
+    stepsDone: 1,
+    steps: [
+      { id: "s1", order: 1, text: "book", done: true, estMinutes: 10, subtaskEmoji: null },
+      { id: "s2", order: 2, text: "pack", done: false, estMinutes: 20, subtaskEmoji: null },
+      { id: "s3", order: 3, text: "go", done: false, estMinutes: 5, subtaskEmoji: null },
+    ],
+  });
 }
 
 beforeEach(() => {
@@ -280,5 +302,20 @@ describe("InboxView — always-visible bucket board", () => {
     render(<InboxView initialItems={[todo]} settings={settings} />);
     const single = screen.getByText("a todo").closest<HTMLElement>("section, div")!;
     expect(within(single).queryByText("Nothing here yet")).not.toBeInTheDocument();
+  });
+});
+
+describe("InboxView — multi-step step count + expand", () => {
+  it("shows a step-count indicator", () => {
+    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} />);
+    expect(screen.getByText(/3 steps · 1 done/)).toBeInTheDocument();
+  });
+
+  it("expands the inline step list when the row body is tapped", async () => {
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} />);
+    expect(screen.queryByTestId("inline-steps")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /plan trip/ }));
+    expect(screen.getByTestId("inline-steps")).toBeInTheDocument();
   });
 });

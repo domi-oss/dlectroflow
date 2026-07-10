@@ -24,6 +24,7 @@ import {
 } from "@/app/actions/braindump";
 import { startBreakdown } from "@/app/actions/breakdown";
 import { StatusPill } from "@/components/inbox/status-pill";
+import { TaskSteps } from "@/components/breakdown/task-steps";
 import { bucketItems, type Item } from "@/components/inbox/bucket";
 import { t } from "@/lib/strings";
 import { useVoice } from "@/components/voice-provider";
@@ -66,6 +67,9 @@ export function InboxView({
 
   // Per-row inline delete confirm — only one row confirms at a time.
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  // Which multi-step row (if any) has its inline TaskSteps list expanded.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Tick so relative ages + aging state recompute live.
   const [, setTick] = useState(0);
@@ -262,24 +266,48 @@ export function InboxView({
             <EmptyBucket voice={voice} />
           ) : (
             <ul className={cn("space-y-2", pending && "opacity-70")}>
-              {multiStep.map((item) => (
+              {multiStep.map((item) => {
                 /* multi-step row — extended in Task 9 (step count + expand) and Task 10 (drag/menu) */
-                <li key={item.id} className="flex items-center justify-between gap-3 rounded-lg border px-4 py-2 text-sm">
-                  {item.taskId ? (
-                    <a href={`/tasks/${item.taskId}`} className="min-w-0 break-words hover:underline">{item.text}</a>
-                  ) : (
-                    <span className="min-w-0 break-words">{item.text}</span>
-                  )}
-                  <span className="flex shrink-0 items-center gap-2 text-xs">
-                    <span className="text-muted-foreground">
-                      {item.stepsDone > 0 ? `${item.stepsDone}/${item.stepsTotal} ${t("progress.done", voice)}` : t("progress.notScheduled", voice)}
-                    </span>
-                    <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => completeItem(item.id))}>
-                      {t("action.complete", voice)}
-                    </button>
-                  </span>
-                </li>
-              ))}
+                const expanded = expandedId === item.id;
+                return (
+                  <li key={item.id} className="rounded-lg border px-4 py-2 text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <button
+                        type="button"
+                        aria-expanded={expanded}
+                        onClick={() => setExpandedId(expanded ? null : item.id)}
+                        className="min-w-0 flex-1 break-words text-left hover:underline"
+                      >
+                        {item.text}
+                      </button>
+                      <span className="flex shrink-0 items-center gap-2 text-xs">
+                        <span className="text-muted-foreground">
+                          {item.stepsTotal} steps · {item.stepsDone} {t("progress.done", voice)}
+                        </span>
+                        <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => completeItem(item.id))}>
+                          {t("action.complete", voice)}
+                        </button>
+                      </span>
+                    </div>
+                    {expanded && item.taskId && (
+                      <div className="mt-2">
+                        <TaskSteps
+                          taskId={item.taskId}
+                          steps={item.steps.map((s) => ({
+                            id: s.id,
+                            order: s.order,
+                            total: item.stepsTotal,
+                            text: s.text,
+                            subtaskEmoji: s.subtaskEmoji,
+                            estMinutes: s.estMinutes,
+                            done: s.done,
+                          }))}
+                        />
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
