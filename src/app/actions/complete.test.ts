@@ -13,7 +13,11 @@ const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(()
     badge: { findUnique: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({}) },
     focusSession: { findFirst: vi.fn(), update: vi.fn() },
     streak: {}, settings: {}, streakRecord: {},
+    $transaction: vi.fn(),
   };
+  prismaMock.$transaction.mockImplementation((arg: unknown) =>
+    typeof arg === "function" ? (arg as (tx: unknown) => unknown)(prismaMock) : Promise.all(arg as Promise<unknown>[]),
+  );
   return { prismaMock, revalidatePathMock: vi.fn(), currentWorkspaceIdMock: vi.fn().mockResolvedValue("owner") };
 });
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
@@ -36,7 +40,7 @@ vi.mock("@/lib/google", () => ({
   getValidAccessToken: vi.fn().mockResolvedValue(null),
   patchGoogleTask: vi.fn().mockResolvedValue(undefined),
 }));
-import { logReward, awardBadge, maybeAwardTenStepsDay } from "@/lib/rewards";
+import { logReward, awardBadge, maybeAwardTenStepsDay, maybeAwardInboxZero } from "@/lib/rewards";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -64,6 +68,7 @@ describe("completeItem", () => {
     expect(upd.data.completedAt).toBeInstanceOf(Date);
     expect(logReward).toHaveBeenCalledWith("owner", "task_complete");
     expect(awardBadge).toHaveBeenCalledWith("owner", "task_complete");
+    expect(maybeAwardInboxZero).toHaveBeenCalledWith("owner");
   });
 
   it("completes a multi-step task: all steps + task done, credits StepDone per not-done step", async () => {

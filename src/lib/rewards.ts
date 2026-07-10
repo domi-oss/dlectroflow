@@ -45,6 +45,7 @@ export async function maybeAwardInboxZero(workspaceId: string) {
     where: {
       workspaceId,
       status: BrainDumpStatus.Inbox,
+      completedAt: null,
       OR: [{ snoozedUntil: null }, { snoozedUntil: { lte: now } }],
     },
   });
