@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getSettings } from "@/lib/db";
 import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
-import { SettingsPanel } from "@/components/inbox/settings-panel";
+import { SettingsPanel } from "@/components/settings/settings-panel";
 import { t, type Voice } from "@/lib/strings";
 
 // DB-backed, always fresh.

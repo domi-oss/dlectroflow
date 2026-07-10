@@ -38,6 +38,7 @@ import {
   createBrainDumpItem,
   deleteBrainDumpItem,
   dismissPrompt,
+  freshenItem,
 } from "@/app/actions/braindump";
 
 const settings: AgingSettings = {
@@ -171,6 +172,21 @@ describe("InboxView — 24h still-needed prompt", () => {
     const row = screen.getByText("old thing").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Dismiss" }));
     expect(dismissPrompt).toHaveBeenCalledWith("stale-1");
+  });
+
+  it("wires 'Still need it' to freshenItem, resetting the freshness clock", async () => {
+    const user = userEvent.setup();
+    const stale = makeItem({
+      id: "stale-3",
+      text: "keep this",
+      createdAt: new Date(Date.now() - 25 * 3600_000),
+    });
+    render(<InboxView initialItems={[stale]} settings={settings} />);
+
+    const row = screen.getByText("keep this").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Still need it" }));
+    expect(freshenItem).toHaveBeenCalledWith("stale-3");
+    expect(dismissPrompt).not.toHaveBeenCalled();
   });
 
   it("does not render the prompt when promptDismissedAt is already set", () => {

@@ -118,6 +118,14 @@ describe("Task 4 — nav/menu/prompt/confirm keys (plain vs playful)", () => {
     expect(t("action.dismiss", "playful")).toBe("Not now");
   });
 
+  // action.stillNeeded
+  it('t("action.stillNeeded", "plain") → "Still need it"', () => {
+    expect(t("action.stillNeeded", "plain")).toBe("Still need it");
+  });
+  it('t("action.stillNeeded", "playful") → "Still want it"', () => {
+    expect(t("action.stillNeeded", "playful")).toBe("Still want it");
+  });
+
   // action.delete
   it('t("action.delete", "plain") → "Delete"', () => {
     expect(t("action.delete", "plain")).toBe("Delete");
@@ -323,6 +331,7 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "section.needsReview",
     "action.addTodo",
     "action.dismiss",
+    "action.stillNeeded",
     "action.delete",
     "action.cancel",
     "capture.confirm",
