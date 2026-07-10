@@ -62,6 +62,10 @@ describe("t() function", () => {
     ["badge.comeback",       "plain",   "Comeback"],
     ["badge.ten_steps_day",  "plain",   "10 steps in a day"],
     ["badge.beat_best_streak","plain",  "Beat your best streak"],
+    ["bucket.empty",      "plain",   "Nothing here yet"],
+    ["action.moveTo",     "plain",   "Move to…"],
+    ["prompt.breakNow",   "plain",   "Break into steps now"],
+    ["prompt.saveInstead","plain",   "Save for later"],
   ];
 
   for (const [key, voice, expected] of cases) {
@@ -343,8 +347,12 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "action.stillNeeded",
     "action.delete",
     "action.cancel",
+    "action.moveTo",
     "capture.confirm",
     "prompt.stillNeeded",
+    "prompt.breakNow",
+    "prompt.saveInstead",
+    "bucket.empty",
     "inbox.zero",
     "focus.giveUp",
     "focus.nextStep",
