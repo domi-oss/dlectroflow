@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { confirmBreakdown } from "@/app/actions/breakdown";
+import { createBrainDumpItem } from "@/app/actions/braindump";
 import { scheduleTaskInReclaim } from "@/app/actions/reclaim";
 import { pushStepsToGoogleTasks } from "@/app/actions/google-schedule";
 import type { Feedback, Proposal, StreamEvent } from "@/lib/breakdown";
@@ -23,6 +24,7 @@ export function BreakdownChat({
   taskId,
   title,
   initialProposal,
+  startManual = false,
   reclaimConnected,
   google,
   isGuest = false,
@@ -30,6 +32,8 @@ export function BreakdownChat({
   taskId: string;
   title: string;
   initialProposal: Proposal | null;
+  /** Start with one blank step and skip the automatic AI proposal (manual re-plan). */
+  startManual?: boolean;
   reclaimConnected: boolean;
   google: { configured: boolean; connected: boolean };
   isGuest?: boolean;
@@ -39,7 +43,10 @@ export function BreakdownChat({
   const [schedule, setSchedule] = useState<ScheduleState>({ status: "idle" });
   const [gsched, setGsched] = useState<ScheduleState>({ status: "idle" });
   const [messages, setMessages] = useState<ChatMsg[]>([]);
-  const [proposal, setProposal] = useState<Proposal | null>(initialProposal);
+  const [proposal, setProposal] = useState<Proposal | null>(
+    initialProposal ??
+      (startManual ? { parentEmoji: "🗂️", steps: [blankStep()] } : null),
+  );
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -52,7 +59,7 @@ export function BreakdownChat({
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
-    if (!initialProposal) void request({ kind: "propose" });
+    if (!initialProposal && !startManual) void request({ kind: "propose" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -123,6 +130,15 @@ export function BreakdownChat({
     setProposal((p) =>
       p ? { ...p, steps: p.steps.filter((_, j) => j !== i) } : p,
     );
+  }
+
+  // Send a step back to the inbox "needs review" bucket as its own bigger task.
+  // In the editor the steps aren't persisted yet, so this just drops the row
+  // locally and captures its text as a fresh inbox item.
+  function sendStepToReview(i: number) {
+    const text = proposal?.steps[i]?.text.trim();
+    removeStep(i);
+    if (text) void createBrainDumpItem(text);
   }
 
   // Manual "Add a step" — appends a blank, editable row. No Claude call; the
@@ -447,6 +463,14 @@ export function BreakdownChat({
                   <span className="text-muted-foreground text-xs">min</span>
                 </div>
                 <div className="flex flex-col gap-1">
+                  <button
+                    title="Send to review"
+                    aria-label="Send to review"
+                    onClick={() => sendStepToReview(i)}
+                    className="text-muted-foreground hover:text-foreground rounded px-1 text-xs"
+                  >
+                    ↗
+                  </button>
                   <button
                     title="Remove step"
                     onClick={() => removeStep(i)}

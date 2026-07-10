@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
 import { BreakdownChat } from "@/components/breakdown/breakdown-chat";
+import { TaskSteps } from "@/components/breakdown/task-steps";
 import { getReclaimStatus } from "@/lib/reclaim";
 import { getGoogleStatus } from "@/lib/google";
 import type { Proposal } from "@/lib/breakdown";
@@ -14,11 +15,11 @@ export default async function TaskPage({
   searchParams,
 }: {
   params: Promise<{ taskId: string }>;
-  searchParams: Promise<{ edit?: string }>;
+  searchParams: Promise<{ edit?: string; manual?: string }>;
 }) {
   const workspaceId = await currentWorkspaceId();
   const { taskId } = await params;
-  const { edit } = await searchParams;
+  const { edit, manual } = await searchParams;
   const [task, reclaim, google, owner] = await Promise.all([
     prisma.task.findFirst({
       where: { id: taskId, workspaceId },
@@ -50,6 +51,7 @@ export default async function TaskPage({
         taskId={task.id}
         title={task.title}
         initialProposal={initialProposal}
+        startManual={manual === "1"}
         reclaimConnected={reclaim.connected}
         google={google}
         isGuest={!owner}
@@ -83,33 +85,18 @@ export default async function TaskPage({
         )}
       </p>
 
-      <ol className="space-y-2">
-        {task.steps.map((s) => (
-          <li
-            key={s.id}
-            className="flex items-center gap-3 rounded-lg border px-3 py-2"
-          >
-            <span className="text-muted-foreground w-8 text-xs tabular-nums">
-              {s.order}/{s.total}
-            </span>
-            <span className={s.done ? "flex-1 text-muted-foreground line-through" : "flex-1"}>
-              {s.subtaskEmoji ? `${s.subtaskEmoji} ` : ""}
-              {s.text}
-            </span>
-            <span className="text-muted-foreground text-xs">{s.estMinutes}m</span>
-            {s.done ? (
-              <span className="text-green-600" title="done">✓</span>
-            ) : (
-              <Link
-                href={`/focus/${s.id}`}
-                className="bg-primary text-primary-foreground rounded-md px-3 py-1 text-sm font-medium"
-              >
-                ▶ Focus
-              </Link>
-            )}
-          </li>
-        ))}
-      </ol>
+      <TaskSteps
+        taskId={task.id}
+        steps={task.steps.map((s) => ({
+          id: s.id,
+          order: s.order,
+          total: s.total,
+          text: s.text,
+          subtaskEmoji: s.subtaskEmoji,
+          estMinutes: s.estMinutes,
+          done: s.done,
+        }))}
+      />
 
       <div className="flex gap-4 text-sm">
         <Link href={`/tasks/${task.id}?edit=1`} className="text-muted-foreground hover:underline">

@@ -20,6 +20,9 @@ vi.mock("@/components/voice-provider", () => ({ useVoice: () => "plain" }));
 vi.mock("@/app/actions/breakdown", () => ({
   confirmBreakdown: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("@/app/actions/braindump", () => ({
+  createBrainDumpItem: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@/app/actions/reclaim", () => ({
   scheduleTaskInReclaim: vi.fn().mockResolvedValue({ ok: true, scheduled: 0 }),
 }));
@@ -104,5 +107,15 @@ describe("BreakdownChat — manual step editing", () => {
   it("step rows expose a drag-to-reorder handle", () => {
     renderChat();
     expect(screen.getAllByTitle("Drag to reorder")).toHaveLength(2);
+  });
+
+  it("'Send to review' removes the row and creates a needs-review inbox item", async () => {
+    const { createBrainDumpItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    renderChat();
+    await user.click(screen.getAllByTitle("Send to review")[0]);
+    expect(createBrainDumpItem).toHaveBeenCalledWith("First step");
+    expect(screen.getAllByLabelText("Step text")).toHaveLength(1);
+    expect(screen.getByLabelText("Step text")).toHaveValue("Second step");
   });
 });
