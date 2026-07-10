@@ -64,6 +64,7 @@ function makeItem(overrides: Partial<Item> = {}): Item {
     stepsTotal: 0,
     stepsDone: 0,
     taskStatus: null,
+    completedAt: null,
     ...overrides,
   };
 }

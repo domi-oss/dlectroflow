@@ -18,6 +18,7 @@ export type Item = {
   stepsTotal: number;
   stepsDone: number;
   taskStatus: string | null;
+  completedAt: Date | null;
 };
 
 export type Buckets = {
@@ -29,6 +30,10 @@ export type Buckets = {
   multiStep: Item[];
   /** Inbox items snoozed into the future. Freshness is PAUSED here. */
   savedLater: Item[];
+  /** Completed items sorted by completedAt DESC, capped at 10. */
+  completed: Item[];
+  /** Count of items completed since local midnight. */
+  completedTodayCount: number;
 };
 
 const toMs = (d: Date | string): number =>
@@ -50,24 +55,39 @@ function isFullyDone(i: Item): boolean {
   );
 }
 
+const isCompleted = (i: Item) => i.completedAt != null;
+
+function startOfDayMs(now: number): number {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
 export function bucketItems(items: Item[], now: number = Date.now()): Buckets {
   const isInbox = (i: Item) => i.status === BrainDumpStatus.Inbox;
   const isSavedForLater = (i: Item) =>
     i.snoozedUntil != null && toMs(i.snoozedUntil) > now;
 
   const needsReview = items
-    .filter((i) => isInbox(i) && !isSavedForLater(i))
+    .filter((i) => isInbox(i) && !isSavedForLater(i) && !isCompleted(i))
     // Freshest first — freshenedAt resets the clock, so a freshened item
     // outranks an item captured more recently.
     .sort((a, b) => freshnessKey(b) - freshnessKey(a));
 
-  const savedLater = items.filter((i) => isInbox(i) && isSavedForLater(i));
+  const savedLater = items.filter((i) => isInbox(i) && isSavedForLater(i) && !isCompleted(i));
 
   const triaged = items.filter(
-    (i) => i.status === BrainDumpStatus.Triaged && !isFullyDone(i),
+    (i) => i.status === BrainDumpStatus.Triaged && !isFullyDone(i) && !isCompleted(i),
   );
   const singleTask = triaged.filter((i) => i.stepsTotal === 0);
   const multiStep = triaged.filter((i) => i.stepsTotal > 0);
 
-  return { needsReview, singleTask, multiStep, savedLater };
+  const completedAll = items
+    .filter(isCompleted)
+    .sort((a, b) => toMs(b.completedAt!) - toMs(a.completedAt!));
+  const completed = completedAll.slice(0, 10);
+  const dayStart = startOfDayMs(now);
+  const completedTodayCount = completedAll.filter((i) => toMs(i.completedAt!) >= dayStart).length;
+
+  return { needsReview, singleTask, multiStep, savedLater, completed, completedTodayCount };
 }
