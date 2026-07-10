@@ -1,10 +1,22 @@
-# Complete button + unified Completed bucket — Design
+# Complete + Completed bucket + inbox bucket board (drag-to-move) — Design
 
-> Status: approved (2026-07-10). Feature branch `feat/complete-bucket` (off `fast-follows-phase2`, which carries MR !27). Milestone v0.0.2, relates to work item #8.
+> Status: **in review (updated 2026-07-10)** — expanded from the approved complete-bucket design to absorb the always-visible bucket board + drag-to-move requests. Feature branch `feat/complete-bucket` (off `fast-follows-phase2` = MR !27, now merged to main). Milestone v0.0.2, relates to work item #8.
 
 ## Goal
 
-Let the user mark work as **done** directly from the inbox and the task page, and surface finished work in a **Completed** bucket. Every finished thing — a needs-review item, a single-task to-do, or a whole multi-step task — flows into one Completed list on the inbox (with a "Completed today" counter) and, later (Phase 3), into the Everything **Done** view. Completion feeds the existing gamification (points + badge + streak). Steps can be finished without the focus timer.
+Turn the inbox into a **bucket board** the user can move items around directly:
+
+1. Mark work as **done** from the inbox and the task page; finished things collect in a **Completed** bucket (with a "Completed today" counter) and, later (Phase 3), the Everything **Done** view. Completion feeds gamification (points + badge + streak); steps can be finished without the focus timer.
+2. The **To-Do area shows four buckets at all times** — Multi-step to-dos, Single-task to-dos, Saved for later, Completed — each with a "nothing here yet" empty state, so the structure is always legible.
+3. Items can be **dragged between buckets** (including back to **Needs review**); **the drop performs that bucket's action** (triage, save-for-later, complete, send-to-review…), not just a visual move.
+4. **Multi-step rows** show a step-count indicator ("10 steps · 0 done"); tapping a row expands its step list inline, from which the focus timer can be started.
+
+### Suggested build sequence (phased MRs under this one spec)
+
+- **Phase A — Completion core:** schema `completedAt`, rewards/badge, `completeItem`/`completeStep`/`reopenItem`, the Completed bucket + "Completed today", Complete buttons, task-page ✓ Complete. (Everything in the original spec below.)
+- **Phase B — Bucket board:** always-visible buckets + empty states, drag-to-move with action-on-drop, the multi-step drop prompt, multi-step inline expand + focus, `moveToReview`.
+
+Phase A is independently shippable; Phase B builds on it. Split into two MRs unless we decide otherwise.
 
 ## Non-goals / scope boundary
 
@@ -95,6 +107,60 @@ Used by the **Undo** control on a Completed row.
 - Each **incomplete** step row currently shows **▶ Focus** (link) / **✓** (when done). Add a **✓ Complete** button beside **▶ Focus** for incomplete steps → `completeStep(step.id)`.
 - The page is a server component; add a small **client** component (e.g. `CompleteStepButton`) that calls the server action, so the rest of the page stays server-rendered.
 
+---
+
+# Phase B — Inbox bucket board (drag-to-move)
+
+## Always-visible buckets + empty states
+
+The inbox renders, in order: **Needs review** (unchanged), then a **To-Do board** with four always-present buckets — **Multi-step to-dos**, **Single-task to-dos**, **Saved for later**, **Completed** — each rendering a muted "nothing here yet" helper (`bucket.empty`) when its list is empty (instead of the current "hide when empty" behavior). Completed still caps at 10 with `see all →`. `bucketItems` already returns all four arrays + `completedTodayCount`; only the rendering changes (always show, empty state).
+
+## Drag-to-move with action-on-drop
+
+Each bucket (including **Needs review**) is a **drop zone**. Dropping item *X* onto bucket *B* runs *B*'s action on *X*, regardless of where *X* came from — the destination defines the outcome:
+
+| Drop target | Action on the item | Server action |
+|---|---|---|
+| **Needs review** | Un-triage back to the inbox review queue | `moveToReview(id)` (new) |
+| **Single-task to-dos** | Triage as a plain to-do (no steps) | `triageBrainDumpItem(id)` (exists) |
+| **Multi-step to-dos** | **Prompt** (see below) — needs a breakdown first | `startBreakdown(id)` or `snoozeBrainDumpItem` |
+| **Saved for later** | Snooze into the future | `snoozeBrainDumpItem(id, mins)` (exists) |
+| **Completed** | Complete it | `completeItem(id)` (Phase A) |
+
+- If dropping where the item already lives (same bucket), it's a no-op (Phase B does not reorder within a bucket).
+- Dropping a **Completed** item elsewhere first **reopens** it (`reopenItem`) then applies the target action; dragging a completed multi-step is allowed but uses the whole-task reopen (no per-step picker mid-drag).
+
+### `moveToReview(id)` (new action, workspace-scoped)
+Sets `status = "inbox"`, clears `triagedAt`, `snoozedUntil`, `completedAt`. If the item has a linked task, **detach** it (`taskId = null`) and archive the now-orphaned task (`status = "archived"`) — the item goes back to review as a fresh idea, and we don't leave a dangling active task. (Steps stay on the archived task; a future breakdown creates a new one via `startBreakdown`.) Revalidate `/inbox`.
+
+## Multi-step drop prompt
+
+Dropping onto **Multi-step to-dos** can't silently create steps, so it asks:
+
+- **Break into steps now** → `startBreakdown(id)` then navigate to `/tasks/[taskId]` (the editor).
+- **Save for later** → `snoozeBrainDumpItem(id, …)` (lands in Saved for later instead).
+
+Rendered as a small inline prompt / popover anchored to the drop (reusing the confirm-style pattern), dismissible with Escape (no-op on cancel).
+
+## Multi-step rows: step count + inline expand + focus
+
+- Each multi-step row shows **`N steps · M done`** (`progress.stepCount`) from `stepsTotal`/`stepsDone` (already on `Item`).
+- **Tapping the row toggles an inline step list** (reusing/adapting the `TaskSteps` client component from MR !28): each step shows **▶ Focus** (→ `/focus/[stepId]`), the direct **✓ Complete** (Phase A `completeStep`), and **↗ Send to review** (!28). This means the inbox page query must `include` each multi-step item's `steps { id, order, text, done, estMinutes }` (extends the Phase-A include already needed for the reopen picker).
+- The row is both a **drag source** and a **tap-to-expand** target; the drag handle (grip) initiates drag so a tap on the row body expands without triggering a drag.
+
+## Drag mechanism — DECISION NEEDED
+
+Native HTML5 drag-and-drop (used for step reorder in !28) does **not** work on touch devices and has poor keyboard a11y — but the inbox is a primary mobile surface and ADHD users need low-friction touch.
+
+- **Option 1 (recommended): add `@dnd-kit/core`** — pointer + touch + keyboard sensors, accessible, ~modest bundle. One new dependency (weigh against the repo's minimal-dep posture; it is actively maintained, MIT).
+- **Option 2: native HTML5 DnD + a keyboard/menu fallback** — zero deps, but clunky on touch; we'd add a per-item "Move to…" menu as the real accessible path and treat drag as desktop sugar.
+
+Either way, **a non-drag "Move to…" menu per item is required for accessibility** (keyboard + screen-reader + touch fallback). Recommendation: **Option 1** for a coherent touch/keyboard drag, plus the "Move to…" menu.
+
+## Guest / permission notes
+
+All drop actions map to existing workspace-scoped mutations, so guests are already constrained the same way as the buttons. `completeItem`/`moveToReview` reuse the same scoping.
+
 ## Voice strings (`src/lib/strings.ts`, Plain 100% emoji-free)
 
 | key | plain | playful (illustrative) |
@@ -103,6 +169,11 @@ Used by the **Undo** control on a Completed row.
 | `action.reopen` | Reopen | Reopen |
 | `section.completed` | Completed | 🍽️ Cleared plate |
 | `section.completedToday` | Completed today | Cleared today |
+| `bucket.empty` (Phase B) | Nothing here yet | Nothing here yet |
+| `progress.stepCount` (Phase B) | *(templated, e.g. "3 of 10 done" — built from numbers, not a fixed string)* | — |
+| `action.moveTo` (Phase B) | Move to… | Move to… |
+| `prompt.breakNow` (Phase B) | Break into steps now | 🍿 Snack-size it now |
+| `prompt.saveInstead` (Phase B) | Save for later | 🥫 Save for later |
 
 (Final playful wording confirmed against `docs/wireframe` vocabulary during implementation; Plain values are fixed above.)
 
@@ -114,6 +185,13 @@ Used by the **Undo** control on a Completed row.
 - **strings.test.ts** — new keys render (plain + playful) and Plain is emoji-free.
 - **inbox-view.test.tsx** — Complete button on active rows calls `completeItem`; Completed section renders with today chip; Undo on a single-task reopens; Undo on a multi-step shows the step picker and `reopenItem` is called with the selected `stepIds`.
 - **task page** — `CompleteStepButton` calls `completeStep`.
+
+### Phase B tests
+- **`moveToReview`** — un-triages (status inbox, clears triagedAt/snoozedUntil/completedAt), detaches + archives a linked task, workspace-scoped, revalidates.
+- **drop-action dispatch** (pure mapping unit) — bucket id → action name, so the wiring can't silently invert (mirrors the !28 More/Fewer regression lesson).
+- **bucket board render** — all four buckets show even when empty (`bucket.empty` visible); multi-step row shows `progress.stepCount`; tapping expands the step list.
+- **multi-step drop prompt** — choosing "Break into steps now" calls `startBreakdown`; "Save for later" calls `snoozeBrainDumpItem`.
+- **"Move to…" menu** (a11y fallback) — selecting a target invokes the same action as dropping there.
 
 ## Files touched
 
@@ -130,7 +208,14 @@ Used by the **Undo** control on a Completed row.
 | `src/components/inbox/complete-step-button.tsx` (client) or under `tasks/` | new (+ test) |
 | `src/app/(app)/tasks/[taskId]/page.tsx` | wire ✓ Complete per step |
 | `src/lib/strings.ts` (+ test) | new keys |
+| **Phase B** — `src/app/actions/braindump.ts` | `moveToReview` |
+| **Phase B** — `src/components/inbox/inbox-view.tsx` (+ test) | always-visible buckets + empty states, drag sources/drop zones, "Move to…" menu, multi-step drop prompt, inline multi-step expand |
+| **Phase B** — `src/components/inbox/task-steps.tsx` (from !28) | reuse for inline step list on multi-step rows |
+| **Phase B** — `src/app/(app)/inbox/page.tsx` | `include` steps for multi-step rows (inline list) |
+| **Phase B** — drag lib (if Option 1) | add `@dnd-kit/core` |
 
-## Open dependency
+## Open dependency & sequencing
 
-Built on `fast-follows-phase2` (MR !27). Should merge **after** !27 lands on main; if !27 changes during review, rebase this branch onto the updated base.
+- Built on `fast-follows-phase2` (MR !27) — **now merged to main**. Rebase this branch onto `main` before its MR.
+- **Overlaps MR !28** (breakdown): Phase A's task-page ✓ Complete should slot into !28's new `TaskSteps` client component (add Complete beside the existing Focus / Send-to-review), and Phase B reuses `TaskSteps` for the inline multi-step list. **Sequence: land !28 first, then rebase this branch onto main** so both build on the shared `TaskSteps`.
+- **Decision pending (Phase B):** drag mechanism — `@dnd-kit/core` (recommended) vs native DnD + "Move to…" menu.
