@@ -29,8 +29,9 @@ vi.mock("@/lib/rewards", () => ({
   rewardStepDone: vi.fn().mockResolvedValue(null),
   touchStreakOnCompletion: vi.fn().mockResolvedValue(null),
   maybeAwardInboxZero: vi.fn().mockResolvedValue(undefined),
+  maybeAwardTenStepsDay: vi.fn().mockResolvedValue(undefined),
 }));
-import { logReward, awardBadge } from "@/lib/rewards";
+import { logReward, awardBadge, maybeAwardTenStepsDay } from "@/lib/rewards";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -73,6 +74,8 @@ describe("completeItem", () => {
     const stepDoneCalls = (logReward as unknown as ReturnType<typeof vi.fn>).mock.calls.filter((c) => c[1] === "step_done");
     expect(stepDoneCalls).toHaveLength(2);
     expect(logReward).toHaveBeenCalledWith("owner", "task_complete");
+    expect(maybeAwardTenStepsDay).toHaveBeenCalledWith("owner");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
   });
 
   it("is workspace-scoped (findFirst gated on workspaceId)", async () => {

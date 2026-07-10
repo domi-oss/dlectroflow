@@ -2,7 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
-import { maybeAwardInboxZero, logReward, awardBadge, touchStreakOnCompletion } from "@/lib/rewards";
+import {
+  maybeAwardInboxZero,
+  maybeAwardTenStepsDay,
+  logReward,
+  awardBadge,
+  touchStreakOnCompletion,
+} from "@/lib/rewards";
 import {
   BrainDumpStatus,
   TaskSource,
@@ -131,7 +137,8 @@ export async function completeItem(id: string) {
     const notDone = item.task.steps.filter((s) => !s.done);
     await prisma.step.updateMany({ where: { taskId: item.task.id }, data: { done: true } });
     await prisma.task.update({ where: { id: item.task.id }, data: { status: TaskStatus.Done } });
-    for (let n = 0; n < notDone.length; n++) await logReward(workspaceId, RewardType.StepDone);
+    for (const _step of notDone) await logReward(workspaceId, RewardType.StepDone);
+    await maybeAwardTenStepsDay(workspaceId);
   }
 
   await prisma.brainDumpItem.update({ where: { id }, data: { completedAt: new Date() } });

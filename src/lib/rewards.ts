@@ -67,6 +67,14 @@ export async function awardBadge(workspaceId: string, key: BadgeKeyT): Promise<b
   return true;
 }
 
+/** Award ten-steps-in-a-day once StepDone count for today reaches 10. */
+export async function maybeAwardTenStepsDay(workspaceId: string): Promise<void> {
+  const stepsToday = await prisma.rewardEvent.count({
+    where: { workspaceId, type: RewardType.StepDone, createdAt: { gte: startOfToday() } },
+  });
+  if (stepsToday >= 10) await awardBadge(workspaceId, BadgeKey.TenStepsDay);
+}
+
 /**
  * Shared "a step got done" reward path — used by finishing a focus session AND
  * by completing a step directly. Logs StepDone, extends the streak, and awards
@@ -76,10 +84,7 @@ export async function awardBadge(workspaceId: string, key: BadgeKeyT): Promise<b
 export async function rewardStepDone(workspaceId: string): Promise<StreakUpdate | null> {
   await logReward(workspaceId, RewardType.StepDone);
   const streak = await touchStreakOnCompletion(workspaceId);
-  const stepsToday = await prisma.rewardEvent.count({
-    where: { workspaceId, type: RewardType.StepDone, createdAt: { gte: startOfToday() } },
-  });
-  if (stepsToday >= 10) await awardBadge(workspaceId, BadgeKey.TenStepsDay);
+  await maybeAwardTenStepsDay(workspaceId);
   return streak;
 }
 
