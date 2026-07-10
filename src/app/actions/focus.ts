@@ -4,8 +4,8 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { getAnthropic, BREAKDOWN_MODEL } from "@/lib/anthropic";
 import { getValidAccessToken, patchGoogleTask } from "@/lib/google";
-import { FocusOutcome, RewardType, BadgeKey, isGuestWorkspace } from "@/lib/constants";
-import { logReward, touchStreakOnCompletion, awardBadge } from "@/lib/rewards";
+import { FocusOutcome, RewardType, isGuestWorkspace } from "@/lib/constants";
+import { logReward, rewardStepDone } from "@/lib/rewards";
 import { currentWorkspaceId } from "@/lib/workspace";
 
 /** Start a focus session on a step. Returns the session id. */
@@ -117,17 +117,9 @@ export async function completeFocus(
     data: { reclaimSynced },
   });
 
-  // Points + streak + badges (dashboard reads these in step 8).
-  await logReward(workspaceId, RewardType.StepDone);
+  // Points + streak + badges (dashboard reads these).
+  const streak = await rewardStepDone(workspaceId);
   await logReward(workspaceId, RewardType.SessionFinished);
-  const streak = await touchStreakOnCompletion(workspaceId);
-
-  const dayStart = new Date();
-  dayStart.setHours(0, 0, 0, 0);
-  const stepsToday = await prisma.rewardEvent.count({
-    where: { workspaceId, type: RewardType.StepDone, createdAt: { gte: dayStart } },
-  });
-  if (stepsToday >= 10) await awardBadge(workspaceId, BadgeKey.TenStepsDay);
 
   const next = await prisma.step.findFirst({
     where: { taskId: step.taskId, done: false, order: { gt: step.order }, task: { workspaceId } },
