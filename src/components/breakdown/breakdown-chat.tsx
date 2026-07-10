@@ -7,6 +7,7 @@ import { confirmBreakdown } from "@/app/actions/breakdown";
 import { scheduleTaskInReclaim } from "@/app/actions/reclaim";
 import { pushStepsToGoogleTasks } from "@/app/actions/google-schedule";
 import type { Feedback, Proposal, StreamEvent } from "@/lib/breakdown";
+import { reorder, blankStep } from "@/lib/breakdown";
 import { cn } from "@/lib/utils";
 import { t } from "@/lib/strings";
 import { useVoice } from "@/components/voice-provider";
@@ -122,6 +123,23 @@ export function BreakdownChat({
     setProposal((p) =>
       p ? { ...p, steps: p.steps.filter((_, j) => j !== i) } : p,
     );
+  }
+
+  // Manual "Add a step" — appends a blank, editable row. No Claude call; the
+  // list is rebuilt from the controlled state, so numbering stays 0-based.
+  function addStep() {
+    setProposal((p) =>
+      p
+        ? { ...p, steps: [...p.steps, blankStep()] }
+        : { parentEmoji: "🗂️", steps: [blankStep()] },
+    );
+  }
+
+  // Drag-to-reorder: the grip handle is the drag source, each row is a drop
+  // target. `reorder` returns a fresh array so state updates cleanly.
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  function moveStep(from: number, to: number) {
+    setProposal((p) => (p ? { ...p, steps: reorder(p.steps, from, to) } : p));
   }
 
   function confirm() {
@@ -323,6 +341,33 @@ export function BreakdownChat({
         {streaming && <ChatBubble role="assistant" text={streamText} typing />}
       </div>
 
+      {/* Tell Claude how to adjust — sits right under the latest reply */}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          const v = freeText.trim();
+          if (!v) return;
+          setFreeText("");
+          request({ kind: "free", text: v }, `✍️ ${v}`);
+        }}
+        className="flex gap-2"
+      >
+        <input
+          value={freeText}
+          onChange={(e) => setFreeText(e.target.value)}
+          placeholder="Tell Claude how to adjust…"
+          disabled={busy}
+          className="border-input flex-1 rounded-md border px-3 py-2 text-sm disabled:opacity-50"
+        />
+        <button
+          type="submit"
+          disabled={busy || !freeText.trim()}
+          className="hover:bg-accent rounded-md border px-3 py-2 text-sm disabled:opacity-50"
+        >
+          Send
+        </button>
+      </form>
+
       {fallbackNote && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700">
           {fallbackNote}
@@ -353,8 +398,26 @@ export function BreakdownChat({
             {proposal.steps.map((s, i) => (
               <li
                 key={i}
-                className="flex items-start gap-2 rounded-lg border px-3 py-2"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => {
+                  if (dragIndex !== null && dragIndex !== i) moveStep(dragIndex, i);
+                  setDragIndex(null);
+                }}
+                className={cn(
+                  "flex items-start gap-2 rounded-lg border px-3 py-2",
+                  dragIndex === i && "opacity-50",
+                )}
               >
+                <span
+                  draggable
+                  onDragStart={() => setDragIndex(i)}
+                  onDragEnd={() => setDragIndex(null)}
+                  title="Drag to reorder"
+                  aria-label="Drag to reorder"
+                  className="text-muted-foreground hover:text-foreground cursor-grab pt-1.5 text-xs select-none active:cursor-grabbing"
+                >
+                  ⠿
+                </span>
                 <span className="text-muted-foreground pt-1.5 text-xs tabular-nums">
                   {i + 1}/{proposal.steps.length}
                 </span>
@@ -385,19 +448,6 @@ export function BreakdownChat({
                 </div>
                 <div className="flex flex-col gap-1">
                   <button
-                    title="Break this step down further"
-                    disabled={busy}
-                    onClick={() =>
-                      request(
-                        { kind: "split_step", index: i },
-                        `Break down step ${i + 1}: "${s.text}"`,
-                      )
-                    }
-                    className="hover:bg-accent rounded px-1 text-xs disabled:opacity-40"
-                  >
-                    ↳
-                  </button>
-                  <button
                     title="Remove step"
                     onClick={() => removeStep(i)}
                     className="text-muted-foreground hover:text-destructive rounded px-1 text-xs"
@@ -421,7 +471,9 @@ export function BreakdownChat({
           {confirmPending ? "Saving…" : t("breakdown.looksRight", voice)}
         </button>
         <button
-          onClick={() => request({ kind: "too_big" }, "These feel too big ⬇️")}
+          onClick={() =>
+            request({ kind: "too_small" }, "Fewer, bigger steps ⬇️")
+          }
           disabled={busy || !proposal}
           className="hover:bg-accent rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
         >
@@ -429,41 +481,22 @@ export function BreakdownChat({
         </button>
         <button
           onClick={() =>
-            request({ kind: "too_small" }, "Too small / too many ⬆️")
+            request({ kind: "too_big" }, "More, smaller steps ⬆️")
           }
           disabled={busy || !proposal}
           className="hover:bg-accent rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
         >
           {t("action.moreSteps", voice)}
         </button>
+        <button
+          onClick={addStep}
+          disabled={busy}
+          className="hover:bg-accent rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
+        >
+          {t("action.addStep", voice)}
+        </button>
       </div>
 
-      {/* Free text */}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          const t = freeText.trim();
-          if (!t) return;
-          setFreeText("");
-          request({ kind: "free", text: t }, `✍️ ${t}`);
-        }}
-        className="flex gap-2"
-      >
-        <input
-          value={freeText}
-          onChange={(e) => setFreeText(e.target.value)}
-          placeholder="Or tell Claude how to adjust…"
-          disabled={busy}
-          className="border-input flex-1 rounded-md border px-3 py-2 text-sm disabled:opacity-50"
-        />
-        <button
-          type="submit"
-          disabled={busy || !freeText.trim()}
-          className="hover:bg-accent rounded-md border px-3 py-2 text-sm disabled:opacity-50"
-        >
-          Send
-        </button>
-      </form>
     </div>
   );
 }
