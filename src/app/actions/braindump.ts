@@ -183,3 +183,25 @@ export async function reopenItem(id: string, stepIds?: string[]) {
   revalidatePath("/dashboard");
   if (item.task) revalidatePath(`/tasks/${item.task.id}`);
 }
+
+/**
+ * Un-triage an item back to the "needs review" queue (Phase B drag/menu target).
+ * Keeps the linked task + its steps intact so re-triaging reuses the same
+ * breakdown (startBreakdown returns the existing taskId). Only the item's
+ * placement changes: status → inbox, and triaged/snoozed/completed cleared.
+ */
+export async function moveToReview(id: string) {
+  const workspaceId = await currentWorkspaceId();
+  const existing = await prisma.brainDumpItem.findFirst({ where: { id, workspaceId } });
+  if (!existing) return;
+  await prisma.brainDumpItem.updateMany({
+    where: { id, workspaceId },
+    data: {
+      status: BrainDumpStatus.Inbox,
+      triagedAt: null,
+      snoozedUntil: null,
+      completedAt: null,
+    },
+  });
+  revalidatePath(INBOX_PATH);
+}
