@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { extractStepToInbox } from "@/app/actions/breakdown";
+import { completeStep } from "@/app/actions/focus";
 import { cn } from "@/lib/utils";
 
 export type TaskStepRow = {
@@ -101,12 +102,28 @@ export function TaskSteps({
               ✓
             </span>
           ) : (
-            <Link
-              href={`/focus/${s.id}`}
-              className="bg-primary text-primary-foreground rounded-md px-3 py-1 text-sm font-medium"
-            >
-              ▶ Focus
-            </Link>
+            <>
+              <button
+                title="Complete"
+                aria-label="Complete"
+                disabled={pending}
+                onClick={() =>
+                  start(async () => {
+                    await completeStep(s.id);
+                    router.refresh();
+                  })
+                }
+                className="text-muted-foreground hover:text-green-600 rounded px-1 text-sm disabled:opacity-40"
+              >
+                ✓ Complete
+              </button>
+              <Link
+                href={`/focus/${s.id}`}
+                className="bg-primary text-primary-foreground rounded-md px-3 py-1 text-sm font-medium"
+              >
+                ▶ Focus
+              </Link>
+            </>
           )}
         </li>
       ))}
