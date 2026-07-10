@@ -4,8 +4,8 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { getAnthropic, BREAKDOWN_MODEL } from "@/lib/anthropic";
 import { getValidAccessToken, patchGoogleTask } from "@/lib/google";
-import { FocusOutcome, RewardType, isGuestWorkspace } from "@/lib/constants";
-import { logReward, rewardStepDone } from "@/lib/rewards";
+import { BadgeKey, FocusOutcome, RewardType, TaskStatus, isGuestWorkspace } from "@/lib/constants";
+import { awardBadge, logReward, rewardStepDone } from "@/lib/rewards";
 import { currentWorkspaceId } from "@/lib/workspace";
 
 /** Start a focus session on a step. Returns the session id. */
@@ -56,6 +56,35 @@ async function completeGoogleTaskForStep(step: {
   return patchGoogleTask(token, step.googleTaskListId, step.googleTaskId, {
     status: "completed",
   });
+}
+
+/** Complete a step directly (no focus session). Awards StepDone; finishes the task on the last step. */
+export async function completeStep(stepId: string) {
+  const workspaceId = await currentWorkspaceId();
+  const step = await prisma.step.findFirst({
+    where: { id: stepId, task: { workspaceId } },
+    include: { task: { include: { steps: true } } },
+  });
+  if (!step || step.done) return;
+
+  await completeGoogleTaskForStep(step);
+  await prisma.step.update({ where: { id: stepId }, data: { done: true } });
+  await rewardStepDone(workspaceId);
+
+  const stillOpen = step.task.steps.filter((s) => s.id !== stepId && !s.done);
+  if (stillOpen.length === 0) {
+    await prisma.task.update({ where: { id: step.taskId }, data: { status: TaskStatus.Done } });
+    await prisma.brainDumpItem.updateMany({
+      where: { taskId: step.taskId, workspaceId },
+      data: { completedAt: new Date() },
+    });
+    await logReward(workspaceId, RewardType.TaskComplete);
+    await awardBadge(workspaceId, BadgeKey.TaskComplete);
+  }
+
+  revalidatePath(`/tasks/${step.taskId}`);
+  revalidatePath("/inbox");
+  revalidatePath("/dashboard");
 }
 
 export type CompleteResult = {

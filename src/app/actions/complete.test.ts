@@ -31,6 +31,10 @@ vi.mock("@/lib/rewards", () => ({
   maybeAwardInboxZero: vi.fn().mockResolvedValue(undefined),
   maybeAwardTenStepsDay: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("@/lib/google", () => ({
+  getValidAccessToken: vi.fn().mockResolvedValue(null),
+  patchGoogleTask: vi.fn().mockResolvedValue(undefined),
+}));
 import { logReward, awardBadge, maybeAwardTenStepsDay } from "@/lib/rewards";
 
 beforeEach(() => {
@@ -122,5 +126,43 @@ describe("reopenItem", () => {
     const call = prismaMock.step.updateMany.mock.calls[0][0];
     expect(call.data).toEqual({ done: false });
     expect(call.where.id.in).toContain("b"); // last step forced not-done
+  });
+});
+
+describe("completeStep", () => {
+  it("marks the step done + awards StepDone (not SessionFinished), scoped", async () => {
+    const rewards = await import("@/lib/rewards");
+    prismaMock.step.findFirst.mockResolvedValueOnce({
+      id: "s1", taskId: "t1", done: false,
+      task: { id: "t1", steps: [{ id: "s1", done: false }, { id: "s2", done: false }] },
+    });
+    const { completeStep } = await import("./focus");
+    await completeStep("s1");
+    expect(prismaMock.step.findFirst.mock.calls[0][0].where).toEqual({ id: "s1", task: { workspaceId: "owner" } });
+    expect(prismaMock.step.update).toHaveBeenCalledWith({ where: { id: "s1" }, data: { done: true } });
+    expect(rewards.rewardStepDone).toHaveBeenCalledWith("owner");
+    expect(rewards.logReward).not.toHaveBeenCalledWith("owner", "session_finished");
+  });
+
+  it("last step → task done + item stamped + TaskComplete", async () => {
+    const rewards = await import("@/lib/rewards");
+    prismaMock.step.findFirst.mockResolvedValueOnce({
+      id: "s2", taskId: "t1", done: false,
+      task: { id: "t1", steps: [{ id: "s1", done: true }, { id: "s2", done: false }] },
+    });
+    const { completeStep } = await import("./focus");
+    await completeStep("s2");
+    expect(prismaMock.task.update).toHaveBeenCalledWith({ where: { id: "t1" }, data: { status: "done" } });
+    expect(prismaMock.brainDumpItem.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { taskId: "t1", workspaceId: "owner" } }),
+    );
+    expect(rewards.logReward).toHaveBeenCalledWith("owner", "task_complete");
+  });
+
+  it("no-ops when already done", async () => {
+    prismaMock.step.findFirst.mockResolvedValueOnce({ id: "s1", done: true, task: { steps: [] } });
+    const { completeStep } = await import("./focus");
+    await completeStep("s1");
+    expect(prismaMock.step.update).not.toHaveBeenCalled();
   });
 });
