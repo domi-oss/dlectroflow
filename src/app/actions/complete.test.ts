@@ -7,10 +7,11 @@ const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(()
       update: vi.fn().mockResolvedValue({}),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
-    step: { updateMany: vi.fn().mockResolvedValue({ count: 0 }), update: vi.fn(), findFirst: vi.fn() },
+    step: { updateMany: vi.fn().mockResolvedValue({ count: 0 }), update: vi.fn(), findFirst: vi.fn(), count: vi.fn() },
     task: { update: vi.fn().mockResolvedValue({}) },
     rewardEvent: { create: vi.fn().mockResolvedValue({}), count: vi.fn().mockResolvedValue(0) },
     badge: { findUnique: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({}) },
+    focusSession: { findFirst: vi.fn(), update: vi.fn() },
     streak: {}, settings: {}, streakRecord: {},
   };
   return { prismaMock, revalidatePathMock: vi.fn(), currentWorkspaceIdMock: vi.fn().mockResolvedValue("owner") };
@@ -164,5 +165,42 @@ describe("completeStep", () => {
     const { completeStep } = await import("./focus");
     await completeStep("s1");
     expect(prismaMock.step.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("completeFocus — task completion", () => {
+  it("last step completes the task", async () => {
+    const rewards = await import("@/lib/rewards");
+    prismaMock.focusSession.findFirst.mockResolvedValueOnce({ id: "sess" });
+    prismaMock.focusSession.update.mockResolvedValueOnce({
+      step: { id: "s2", taskId: "t1", order: 2 },
+    });
+    prismaMock.step.findFirst.mockResolvedValueOnce({
+      id: "s2", taskId: "t1", task: { workspaceId: "owner" },
+    });
+    prismaMock.step.count.mockResolvedValueOnce(0);
+    const { completeFocus } = await import("./focus");
+    await completeFocus("sess", { durationMin: 25, addedMin: 0 });
+    expect(prismaMock.task.update).toHaveBeenCalledWith({ where: { id: "t1" }, data: { status: "done" } });
+    expect(prismaMock.brainDumpItem.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { taskId: "t1", workspaceId: "owner" } }),
+    );
+    expect(rewards.logReward).toHaveBeenCalledWith("owner", "task_complete");
+  });
+
+  it("non-last step does NOT complete the task", async () => {
+    const rewards = await import("@/lib/rewards");
+    prismaMock.focusSession.findFirst.mockResolvedValueOnce({ id: "sess" });
+    prismaMock.focusSession.update.mockResolvedValueOnce({
+      step: { id: "s2", taskId: "t1", order: 2 },
+    });
+    prismaMock.step.findFirst.mockResolvedValueOnce({
+      id: "s2", taskId: "t1", task: { workspaceId: "owner" },
+    });
+    prismaMock.step.count.mockResolvedValueOnce(2);
+    const { completeFocus } = await import("./focus");
+    await completeFocus("sess", { durationMin: 25, addedMin: 0 });
+    expect(rewards.logReward).not.toHaveBeenCalledWith("owner", "task_complete");
+    expect(prismaMock.task.update).not.toHaveBeenCalledWith({ where: { id: "t1" }, data: { status: "done" } });
   });
 });

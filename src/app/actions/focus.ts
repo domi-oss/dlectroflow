@@ -46,6 +46,17 @@ async function closeSession(
   });
 }
 
+/** Mark a task and its linked inbox item(s) completed, and award the task-complete reward+badge. */
+async function markTaskCompleted(workspaceId: string, taskId: string) {
+  await prisma.task.update({ where: { id: taskId }, data: { status: TaskStatus.Done } });
+  await prisma.brainDumpItem.updateMany({
+    where: { taskId, workspaceId },
+    data: { completedAt: new Date() },
+  });
+  await logReward(workspaceId, RewardType.TaskComplete);
+  await awardBadge(workspaceId, BadgeKey.TaskComplete);
+}
+
 async function completeGoogleTaskForStep(step: {
   googleTaskId: string | null;
   googleTaskListId: string | null;
@@ -72,15 +83,7 @@ export async function completeStep(stepId: string) {
   await rewardStepDone(workspaceId);
 
   const stillOpen = step.task.steps.filter((s) => s.id !== stepId && !s.done);
-  if (stillOpen.length === 0) {
-    await prisma.task.update({ where: { id: step.taskId }, data: { status: TaskStatus.Done } });
-    await prisma.brainDumpItem.updateMany({
-      where: { taskId: step.taskId, workspaceId },
-      data: { completedAt: new Date() },
-    });
-    await logReward(workspaceId, RewardType.TaskComplete);
-    await awardBadge(workspaceId, BadgeKey.TaskComplete);
-  }
+  if (stillOpen.length === 0) await markTaskCompleted(workspaceId, step.taskId);
 
   revalidatePath(`/tasks/${step.taskId}`);
   revalidatePath("/inbox");
@@ -154,6 +157,14 @@ export async function completeFocus(
     where: { taskId: step.taskId, done: false, order: { gt: step.order }, task: { workspaceId } },
     orderBy: { order: "asc" },
   });
+
+  const openCount = await prisma.step.count({
+    where: { taskId: step.taskId, done: false, task: { workspaceId } },
+  });
+  if (openCount === 0) {
+    await markTaskCompleted(workspaceId, step.taskId);
+    revalidatePath("/inbox");
+  }
 
   revalidatePath(`/tasks/${step.taskId}`);
   revalidatePath("/dashboard");
