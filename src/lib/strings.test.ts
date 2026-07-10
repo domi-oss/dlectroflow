@@ -342,6 +342,8 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "breakdown.looksRight",
     "action.fewerSteps",
     "action.moreSteps",
+    "action.addStep",
+    "action.removeStep",
     "action.startFocus",
     "action.backToInbox",
     "focus.timesUp",

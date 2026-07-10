@@ -55,6 +55,49 @@ export async function createTask(title: string): Promise<string | null> {
 }
 
 /**
+ * Move a persisted step back into the inbox as its own "needs review" item
+ * (a bigger task to re-triage), remove it from its task, and renumber the
+ * remaining steps so order/total stay contiguous. Workspace-scoped.
+ * Returns the task id and how many steps remain (0 ⇒ the task is now empty,
+ * which the caller resolves via the re-plan / keep-as-todo chooser).
+ */
+export async function extractStepToInbox(
+  stepId: string,
+): Promise<{ taskId: string; remaining: number } | null> {
+  const workspaceId = await currentWorkspaceId();
+  const step = await prisma.step.findFirst({
+    where: { id: stepId, task: { workspaceId } },
+  });
+  if (!step) return null;
+  const { taskId } = step;
+
+  await prisma.brainDumpItem.create({
+    data: { text: step.text, workspaceId, status: BrainDumpStatus.Inbox },
+  });
+  await prisma.step.delete({ where: { id: stepId } });
+
+  const remaining = await prisma.step.findMany({
+    where: { taskId },
+    orderBy: { order: "asc" },
+  });
+  const total = remaining.length;
+  if (total > 0) {
+    await prisma.$transaction(
+      remaining.map((s, i) =>
+        prisma.step.update({
+          where: { id: s.id },
+          data: { order: i + 1, total },
+        }),
+      ),
+    );
+  }
+
+  revalidatePath(`/tasks/${taskId}`);
+  revalidatePath("/inbox");
+  return { taskId, remaining: total };
+}
+
+/**
  * Persist a confirmed breakdown: set the parent emoji and replace the task's
  * steps with the proposal. (Reclaim scheduling is wired in step 6.)
  */

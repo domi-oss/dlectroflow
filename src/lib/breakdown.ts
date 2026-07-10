@@ -12,6 +12,26 @@ export type Proposal = {
   steps: ProposedStep[];
 };
 
+/** A fresh, empty step the user can fill in — used by the editor's "Add a step". */
+export function blankStep(): ProposedStep {
+  return { text: "", estMinutes: 10, subtaskEmoji: "•" };
+}
+
+/**
+ * Move an array item from index `from` to index `to`, returning a NEW array.
+ * Indices are clamped into range so a drag past either end lands at the edge
+ * rather than dropping the item. Used by the editor's drag-to-reorder.
+ */
+export function reorder<T>(arr: T[], from: number, to: number): T[] {
+  const next = [...arr];
+  const lastFrom = Math.max(0, Math.min(from, next.length - 1));
+  const lastTo = Math.max(0, Math.min(to, next.length - 1));
+  if (lastFrom === lastTo) return next;
+  const [moved] = next.splice(lastFrom, 1);
+  next.splice(lastTo, 0, moved);
+  return next;
+}
+
 /** Quick-reply intents + free text. */
 export type Feedback =
   | { kind: "propose" }
