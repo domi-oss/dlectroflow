@@ -251,176 +251,128 @@ export function InboxView({
         )}
       </section>
 
-      {/* To do — triaged items split into single-task + multi-step sub-buckets */}
-      {(singleTask.length > 0 || multiStep.length > 0) && (
-        <section className="space-y-4">
-          <h2 className="text-sm font-semibold">{t("section.toDo", voice)}</h2>
+      {/* To-Do board — four always-visible buckets (Phase B) */}
+      <section className="space-y-4">
+        <h2 className="text-sm font-semibold">{t("section.toDo", voice)}</h2>
 
-          {singleTask.length > 0 && (
-            <div>
-              <SubHeader
-                label={t("section.singleTask", voice)}
-                count={singleTask.length}
-                seeAllHref={SEE_ALL.singleTask}
-                voice={voice}
-              />
-              <ul className={cn("space-y-2", pending && "opacity-70")}>
-                {singleTask.map((item) => (
-                  <li
-                    key={item.id}
-                    className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm"
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span className="text-primary shrink-0 text-xs font-medium">
-                        {t("pill.toDo", voice)}
-                      </span>
-                      <span className="break-words">{item.text}</span>
+        {/* Multi-step */}
+        <div>
+          <SubHeader label={t("section.multiStep", voice)} count={multiStep.length} seeAllHref={SEE_ALL.multiStep} voice={voice} />
+          {multiStep.length === 0 ? (
+            <EmptyBucket voice={voice} />
+          ) : (
+            <ul className={cn("space-y-2", pending && "opacity-70")}>
+              {multiStep.map((item) => (
+                /* multi-step row — extended in Task 9 (step count + expand) and Task 10 (drag/menu) */
+                <li key={item.id} className="flex items-center justify-between gap-3 rounded-lg border px-4 py-2 text-sm">
+                  {item.taskId ? (
+                    <a href={`/tasks/${item.taskId}`} className="min-w-0 break-words hover:underline">{item.text}</a>
+                  ) : (
+                    <span className="min-w-0 break-words">{item.text}</span>
+                  )}
+                  <span className="flex shrink-0 items-center gap-2 text-xs">
+                    <span className="text-muted-foreground">
+                      {item.stepsDone > 0 ? `${item.stepsDone}/${item.stepsTotal} ${t("progress.done", voice)}` : t("progress.notScheduled", voice)}
                     </span>
-                    <span className="flex shrink-0 items-center gap-2 text-xs">
-                      <button
-                        className="hover:bg-accent rounded-md border px-2.5 py-1"
-                        onClick={() => run(() => completeItem(item.id))}
-                      >
-                        {t("action.complete", voice)}
-                      </button>
-                      {confirmDeleteId === item.id ? (
-                        <span className="flex items-center gap-2">
-                          <button
-                            className="text-destructive font-medium"
-                            onClick={() => confirmDelete(item.id)}
-                          >
-                            {t("action.delete", voice)}
-                          </button>
-                          <span className="text-muted-foreground">·</span>
-                          <button
-                            className="text-muted-foreground hover:text-foreground"
-                            onClick={cancelDelete}
-                          >
-                            {t("action.cancel", voice)}
-                          </button>
-                        </span>
-                      ) : (
-                        <button
-                          className="text-muted-foreground hover:text-destructive"
-                          onClick={() => requestDelete(item.id)}
-                        >
-                          {t("action.delete", voice)}
-                        </button>
-                      )}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+                    <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => completeItem(item.id))}>
+                      {t("action.complete", voice)}
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
           )}
+        </div>
 
-          {multiStep.length > 0 && (
-            <div>
-              <SubHeader
-                label={t("section.multiStep", voice)}
-                count={multiStep.length}
-                seeAllHref={SEE_ALL.multiStep}
-                voice={voice}
-              />
-              <ul className={cn("space-y-2", pending && "opacity-70")}>
-                {multiStep.map((item) => (
-                  <li
-                    key={item.id}
-                    className="flex items-center justify-between gap-3 rounded-lg border px-4 py-2 text-sm"
-                  >
-                    {item.taskId ? (
-                      <a
-                        href={`/tasks/${item.taskId}`}
-                        className="min-w-0 break-words hover:underline"
-                      >
-                        {item.text}
-                      </a>
+        {/* Single-task */}
+        <div>
+          <SubHeader label={t("section.singleTask", voice)} count={singleTask.length} seeAllHref={SEE_ALL.singleTask} voice={voice} />
+          {singleTask.length === 0 ? (
+            <EmptyBucket voice={voice} />
+          ) : (
+            <ul className={cn("space-y-2", pending && "opacity-70")}>
+              {singleTask.map((item) => (
+                <li key={item.id} className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="text-primary shrink-0 text-xs font-medium">{t("pill.toDo", voice)}</span>
+                    <span className="break-words">{item.text}</span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-2 text-xs">
+                    <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => completeItem(item.id))}>
+                      {t("action.complete", voice)}
+                    </button>
+                    {confirmDeleteId === item.id ? (
+                      <span className="flex items-center gap-2">
+                        <button className="text-destructive font-medium" onClick={() => confirmDelete(item.id)}>{t("action.delete", voice)}</button>
+                        <span className="text-muted-foreground">·</span>
+                        <button className="text-muted-foreground hover:text-foreground" onClick={cancelDelete}>{t("action.cancel", voice)}</button>
+                      </span>
                     ) : (
-                      <span className="min-w-0 break-words">{item.text}</span>
+                      <button className="text-muted-foreground hover:text-destructive" onClick={() => requestDelete(item.id)}>{t("action.delete", voice)}</button>
                     )}
-                    <span className="flex shrink-0 items-center gap-2 text-xs">
-                      <span className="text-muted-foreground">
-                        {item.stepsDone > 0
-                          ? `${item.stepsDone}/${item.stepsTotal} ${t("progress.done", voice)}`
-                          : t("progress.notScheduled", voice)}
-                      </span>
-                      <button
-                        className="hover:bg-accent rounded-md border px-2.5 py-1"
-                        onClick={() => run(() => completeItem(item.id))}
-                      >
-                        {t("action.complete", voice)}
-                      </button>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+                  </span>
+                </li>
+              ))}
+            </ul>
           )}
-        </section>
-      )}
+        </div>
 
-      {/* Saved for later — snoozed inbox items; freshness is paused (no pill) */}
-      {savedLater.length > 0 && (
-        <section>
-          <SubHeader
-            label={t("section.savedLater", voice)}
-            count={savedLater.length}
-            seeAllHref={SEE_ALL.savedLater}
-            voice={voice}
-          />
-          <ul className="space-y-2 opacity-70">
-            {savedLater.map((item) => (
-              <li
-                key={item.id}
-                className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm"
-              >
-                <span className="break-words">{item.text}</span>
-                <button
-                  className="text-muted-foreground hover:text-foreground shrink-0 text-xs underline"
-                  onClick={() => run(() => triageBrainDumpItem(item.id))}
-                >
-                  wake now
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+        {/* Saved for later */}
+        <div>
+          <SubHeader label={t("section.savedLater", voice)} count={savedLater.length} seeAllHref={SEE_ALL.savedLater} voice={voice} />
+          {savedLater.length === 0 ? (
+            <EmptyBucket voice={voice} />
+          ) : (
+            <ul className="space-y-2 opacity-70">
+              {savedLater.map((item) => (
+                <li key={item.id} className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm">
+                  <span className="break-words">{item.text}</span>
+                  <button className="text-muted-foreground hover:text-foreground shrink-0 text-xs underline" onClick={() => run(() => triageBrainDumpItem(item.id))}>
+                    wake now
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
 
-      {/* Completed — most-recently completed first, capped at 10 (Task 6) */}
-      {completed.length > 0 && (
-        <section>
+        {/* Completed */}
+        <div>
           <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
             {t("section.completed", voice)}
             <span className="bg-secondary text-secondary-foreground rounded-full px-2 py-0.5 text-xs">
               {t("section.completedToday", voice)}: {completedTodayCount}
             </span>
-            <a
-              href="/library?tab=done"
-              className="text-muted-foreground hover:text-foreground ml-auto text-xs font-normal"
-            >
+            <a href="/library?tab=done" className="text-muted-foreground hover:text-foreground ml-auto text-xs font-normal">
               {t("link.seeAll", voice)}
             </a>
           </h2>
-          <ul className="space-y-2 opacity-80">
-            {completed.map((item) => (
-              <li
-                key={item.id}
-                className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm"
-              >
-                <span className="break-words line-through">{item.text}</span>
-                <button
-                  className="text-muted-foreground hover:text-foreground shrink-0 text-xs underline"
-                  onClick={() => run(() => reopenItem(item.id, undefined))}
-                >
-                  {t("action.reopen", voice)}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+          {completed.length === 0 ? (
+            <EmptyBucket voice={voice} />
+          ) : (
+            <ul className="space-y-2 opacity-80">
+              {completed.map((item) => (
+                <li key={item.id} className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm">
+                  <span className="break-words line-through">{item.text}</span>
+                  <button className="text-muted-foreground hover:text-foreground shrink-0 text-xs underline" onClick={() => run(() => reopenItem(item.id, undefined))}>
+                    {t("action.reopen", voice)}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
     </div>
+  );
+}
+
+/** Empty-state placeholder shown inside a bucket that has no items. */
+function EmptyBucket({ voice }: { voice: Voice }) {
+  return (
+    <p className="text-muted-foreground rounded-lg border border-dashed px-4 py-4 text-center text-xs">
+      {t("bucket.empty", voice)}
+    </p>
   );
 }
 

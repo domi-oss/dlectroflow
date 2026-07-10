@@ -262,3 +262,23 @@ describe("InboxView — complete + completed bucket", () => {
     expect(reopenItem).toHaveBeenCalledWith("d1", undefined);
   });
 });
+
+describe("InboxView — always-visible bucket board", () => {
+  it("shows all four To-Do buckets with empty states when there are no to-dos", () => {
+    render(<InboxView initialItems={[]} settings={settings} />);
+    // Section headers present even when empty
+    expect(screen.getByText("Multi-step to-dos")).toBeInTheDocument();
+    expect(screen.getByText("Single-task to-dos")).toBeInTheDocument();
+    expect(screen.getByText("Saved for later")).toBeInTheDocument();
+    expect(screen.getByText("Completed")).toBeInTheDocument();
+    // "Nothing here yet" appears for the empty buckets (at least the 3 non-completed)
+    expect(screen.getAllByText("Nothing here yet").length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("does not show the empty helper for a bucket that has items", () => {
+    const todo = makeItem({ id: "t1", text: "a todo", status: "triaged" });
+    render(<InboxView initialItems={[todo]} settings={settings} />);
+    const single = screen.getByText("a todo").closest<HTMLElement>("section, div")!;
+    expect(within(single).queryByText("Nothing here yet")).not.toBeInTheDocument();
+  });
+});
