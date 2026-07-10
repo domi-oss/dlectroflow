@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act, fireEvent, cleanup, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { InboxView } from "@/components/inbox/inbox-view";
+import { InboxView, dragEndToMove } from "@/components/inbox/inbox-view";
 import type { Item } from "@/components/inbox/bucket";
 import type { AgingSettings } from "@/lib/aging";
 
@@ -23,6 +23,7 @@ vi.mock("@/app/actions/braindump", () => ({
   dismissPrompt: vi.fn().mockResolvedValue(undefined),
   completeItem: vi.fn().mockResolvedValue(undefined),
   reopenItem: vi.fn().mockResolvedValue(undefined),
+  moveToReview: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/app/actions/breakdown", () => ({
@@ -315,7 +316,91 @@ describe("InboxView — multi-step step count + expand", () => {
     const user = userEvent.setup();
     render(<InboxView initialItems={[makeMultiStep()]} settings={settings} />);
     expect(screen.queryByTestId("inline-steps")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /plan trip/ }));
+    // Exact match (not a substring regex): Task 10 adds a "Drag plan trip" grip
+    // button alongside this title button, so a loose /plan trip/ match would be
+    // ambiguous between the two.
+    await user.click(screen.getByRole("button", { name: "plan trip" }));
     expect(screen.getByTestId("inline-steps")).toBeInTheDocument();
+  });
+});
+
+describe("dragEndToMove (pure)", () => {
+  it("maps an over-a-bucket drop to { itemId, target }", () => {
+    expect(dragEndToMove("item-1", "completed")).toEqual({ itemId: "item-1", target: "completed" });
+  });
+  it("returns null when dropped outside any bucket", () => {
+    expect(dragEndToMove("item-1", null)).toBeNull();
+  });
+});
+
+describe("InboxView — Move to… menu dispatch", () => {
+  it("a single-task 'Move to Completed' completes the item", async () => {
+    const { completeItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeItem({ id: "s1", text: "todo", status: "triaged" })]} settings={settings} />);
+    const row = screen.getByText("todo").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Move to…" }));
+    await user.click(within(row).getByRole("menuitem", { name: /Completed/ }));
+    expect(completeItem).toHaveBeenCalledWith("s1");
+  });
+
+  it("a single-task 'Move to Needs review' un-triages via moveToReview", async () => {
+    const { moveToReview } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeItem({ id: "s1", text: "todo", status: "triaged" })]} settings={settings} />);
+    const row = screen.getByText("todo").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Move to…" }));
+    await user.click(within(row).getByRole("menuitem", { name: /Needs review/ }));
+    expect(moveToReview).toHaveBeenCalledWith("s1");
+  });
+
+  it("moving a Completed item to Single-task reopens it first", async () => {
+    const { reopenItem, triageBrainDumpItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    const done = makeItem({ id: "d1", text: "done item", status: "triaged", completedAt: new Date() });
+    render(<InboxView initialItems={[done]} settings={settings} />);
+    const row = screen.getByText("done item").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Move to…" }));
+    await user.click(within(row).getByRole("menuitem", { name: /Single-task/ }));
+    expect(reopenItem).toHaveBeenCalledWith("d1", undefined);
+    expect(triageBrainDumpItem).toHaveBeenCalledWith("d1");
+  });
+
+  it("moving an item to Multi-step opens the prompt (no action yet)", async () => {
+    const { startBreakdown } = await import("@/app/actions/breakdown");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeItem({ id: "n1", text: "big thing" })]} settings={settings} />);
+    const row = screen.getByText("big thing").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Move to…" }));
+    await user.click(within(row).getByRole("menuitem", { name: /Multi-step/ }));
+    expect(screen.getByRole("button", { name: "Break into steps now" })).toBeInTheDocument();
+    expect(startBreakdown).not.toHaveBeenCalled();
+  });
+
+  it("choosing 'Break into steps now' in the prompt calls startBreakdown", async () => {
+    const { startBreakdown } = await import("@/app/actions/breakdown");
+    (startBreakdown as ReturnType<typeof vi.fn>).mockResolvedValue("t9");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeItem({ id: "n1", text: "big thing" })]} settings={settings} />);
+    const row = screen.getByText("big thing").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Move to…" }));
+    await user.click(within(row).getByRole("menuitem", { name: /Multi-step/ }));
+    await user.click(screen.getByRole("button", { name: "Break into steps now" }));
+    expect(startBreakdown).toHaveBeenCalledWith("n1");
+  });
+
+  it("choosing 'Save for later' in the prompt snoozes the item", async () => {
+    const { snoozeBrainDumpItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeItem({ id: "n1", text: "big thing" })]} settings={settings} />);
+    const row = screen.getByText("big thing").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Move to…" }));
+    await user.click(within(row).getByRole("menuitem", { name: /Multi-step/ }));
+    // Scoped to the prompt dialog: the needs-review row keeps its own
+    // (identically-labeled) "Save for later" snooze button while the prompt
+    // is open, since the item hasn't moved yet.
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Save for later" }));
+    expect(snoozeBrainDumpItem).toHaveBeenCalledWith("n1", 60);
   });
 });

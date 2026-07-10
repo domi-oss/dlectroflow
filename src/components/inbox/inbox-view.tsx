@@ -4,6 +4,16 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
+  DndContext,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  useDraggable,
+  useDroppable,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
   isAging,
   effectiveAgingMs,
   freshnessTier,
@@ -21,11 +31,15 @@ import {
   dismissPrompt,
   completeItem,
   reopenItem,
+  moveToReview,
 } from "@/app/actions/braindump";
 import { startBreakdown } from "@/app/actions/breakdown";
 import { StatusPill } from "@/components/inbox/status-pill";
 import { TaskSteps } from "@/components/breakdown/task-steps";
-import { bucketItems, type Item } from "@/components/inbox/bucket";
+import { bucketItems, bucketOfItem, type Item, type BucketId } from "@/components/inbox/bucket";
+import { dropPlan } from "@/components/inbox/move-dispatch";
+import { MoveToMenu } from "@/components/inbox/move-to-menu";
+import { MultiStepDropPrompt } from "@/components/inbox/multi-step-drop-prompt";
 import { t } from "@/lib/strings";
 import { useVoice } from "@/components/voice-provider";
 import type { Voice } from "@/lib/strings";
@@ -35,6 +49,15 @@ import {
   registerServiceWorker,
   showReminder,
 } from "@/lib/notifications";
+
+/** Map a dnd-kit drop onto a bucket to a move intent (null when dropped nowhere). */
+export function dragEndToMove(
+  activeId: string,
+  overId: string | null,
+): { itemId: string; target: BucketId } | null {
+  if (!overId) return null;
+  return { itemId: activeId, target: overId as BucketId };
+}
 
 // Deep-link targets for each section's "see all →" link (Library, Task 10+).
 const SEE_ALL = {
@@ -153,6 +176,43 @@ export function InboxView({
       if (taskId) router.push(`/tasks/${taskId}`);
     });
 
+  // Drag (dnd-kit) + the "Move to…" menu share this single dispatcher so the
+  // two paths can never diverge (Task 10).
+  const [pendingBreakdown, setPendingBreakdown] = useState<Item | null>(null);
+  const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor));
+  const itemsById = new Map(initialItems.map((i) => [i.id, i]));
+
+  const moveItemToBucket = (itemId: string, target: BucketId) => {
+    const item = itemsById.get(itemId);
+    if (!item) return;
+    const plan = dropPlan(bucketOfItem(item, now), target);
+    if (plan.kind === "noop") return;
+
+    if (plan.prompt) {
+      // Multi-step target: reopen a completed item first (so it leaves Completed),
+      // then ask break-now vs save.
+      if (plan.reopenFirst) run(() => reopenItem(itemId, undefined));
+      setPendingBreakdown(item);
+      return;
+    }
+
+    run(async () => {
+      if (plan.reopenFirst) await reopenItem(itemId, undefined);
+      switch (plan.action) {
+        case "moveToReview": await moveToReview(itemId); break;
+        case "triage":       await triageBrainDumpItem(itemId); break;
+        case "snooze":       await snoozeBrainDumpItem(itemId, 60); break;
+        case "complete":     await completeItem(itemId); break;
+        // "breakdown" is handled by the prompt branch above.
+      }
+    });
+  };
+
+  const handleDragEnd = (e: DragEndEvent) => {
+    const move = dragEndToMove(String(e.active.id), e.over ? String(e.over.id) : null);
+    if (move) moveItemToBucket(move.itemId, move.target);
+  };
+
   const submit = () => {
     const value = text.trim();
     if (!value) return;
@@ -217,181 +277,282 @@ export function InboxView({
         )}
       </div>
 
-      {/* Needs review */}
-      <section>
-        <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
-          {t("section.needsReview", voice)}
-          {untriagedCount > 0 && (
-            <span className="bg-secondary text-secondary-foreground rounded-full px-2 py-0.5 text-xs">
-              {untriagedCount}
-            </span>
-          )}
-        </h2>
-        {needsReview.length === 0 ? (
-          <p className="text-muted-foreground rounded-lg border border-dashed px-4 py-6 text-center text-sm">
-            {t("inbox.zero", voice)}
-          </p>
-        ) : (
-          <ul className={cn("space-y-2", pending && "opacity-70")}>
-            {needsReview.map((item) => (
-              <ItemRow
-                key={item.id}
-                item={item}
-                settings={settings}
-                voice={voice}
-                onBreakdown={() => breakdown(item.id)}
-                onKeep={() => run(() => keepAsTask(item.id))}
-                onSnooze={() => run(() => snoozeBrainDumpItem(item.id, 60))}
-                onComplete={() => run(() => completeItem(item.id))}
-                confirmingDelete={confirmDeleteId === item.id}
-                onRequestDelete={() => requestDelete(item.id)}
-                onConfirmDelete={() => confirmDelete(item.id)}
-                onCancelDelete={cancelDelete}
-                onFreshen={() => run(() => freshenItem(item.id))}
-                onDismissPrompt={() => run(() => dismissPrompt(item.id))}
-              />
-            ))}
-          </ul>
-        )}
-      </section>
+      <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+        {/* Needs review */}
+        <section>
+          <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
+            {t("section.needsReview", voice)}
+            {untriagedCount > 0 && (
+              <span className="bg-secondary text-secondary-foreground rounded-full px-2 py-0.5 text-xs">
+                {untriagedCount}
+              </span>
+            )}
+          </h2>
+          <DroppableBucket id="needsReview">
+            {needsReview.length === 0 ? (
+              <p className="text-muted-foreground rounded-lg border border-dashed px-4 py-6 text-center text-sm">
+                {t("inbox.zero", voice)}
+              </p>
+            ) : (
+              <ul className={cn("space-y-2", pending && "opacity-70")}>
+                {needsReview.map((item) => (
+                  <ItemRow
+                    key={item.id}
+                    item={item}
+                    settings={settings}
+                    voice={voice}
+                    onBreakdown={() => breakdown(item.id)}
+                    onKeep={() => run(() => keepAsTask(item.id))}
+                    onSnooze={() => run(() => snoozeBrainDumpItem(item.id, 60))}
+                    onComplete={() => run(() => completeItem(item.id))}
+                    confirmingDelete={confirmDeleteId === item.id}
+                    onRequestDelete={() => requestDelete(item.id)}
+                    onConfirmDelete={() => confirmDelete(item.id)}
+                    onCancelDelete={cancelDelete}
+                    onFreshen={() => run(() => freshenItem(item.id))}
+                    onDismissPrompt={() => run(() => dismissPrompt(item.id))}
+                    moveMenu={
+                      <MoveToMenu
+                        currentBucket={bucketOfItem(item, now)}
+                        voice={voice}
+                        onMove={(target) => moveItemToBucket(item.id, target)}
+                      />
+                    }
+                    dragGrip={<DragGrip id={item.id} label={item.text} />}
+                  />
+                ))}
+              </ul>
+            )}
+          </DroppableBucket>
+        </section>
 
-      {/* To-Do board — four always-visible buckets (Phase B) */}
-      <section className="space-y-4">
-        <h2 className="text-sm font-semibold">{t("section.toDo", voice)}</h2>
+        {/* To-Do board — four always-visible buckets (Phase B) */}
+        <section className="space-y-4">
+          <h2 className="text-sm font-semibold">{t("section.toDo", voice)}</h2>
 
-        {/* Multi-step */}
-        <div>
-          <SubHeader label={t("section.multiStep", voice)} count={multiStep.length} seeAllHref={SEE_ALL.multiStep} voice={voice} />
-          {multiStep.length === 0 ? (
-            <EmptyBucket voice={voice} />
-          ) : (
-            <ul className={cn("space-y-2", pending && "opacity-70")}>
-              {multiStep.map((item) => {
-                /* multi-step row — extended in Task 9 (step count + expand) and Task 10 (drag/menu) */
-                const expanded = expandedId === item.id;
-                return (
-                  <li key={item.id} className="rounded-lg border px-4 py-2 text-sm">
-                    <div className="flex items-center justify-between gap-3">
-                      <button
-                        type="button"
-                        aria-expanded={expanded}
-                        onClick={() => setExpandedId(expanded ? null : item.id)}
-                        className="min-w-0 flex-1 break-words text-left hover:underline"
-                      >
-                        {item.text}
-                      </button>
+          {/* Multi-step */}
+          <div>
+            <SubHeader label={t("section.multiStep", voice)} count={multiStep.length} seeAllHref={SEE_ALL.multiStep} voice={voice} />
+            <DroppableBucket id="multiStep">
+              {multiStep.length === 0 ? (
+                <EmptyBucket voice={voice} />
+              ) : (
+                <ul className={cn("space-y-2", pending && "opacity-70")}>
+                  {multiStep.map((item) => {
+                    /* multi-step row — extended in Task 9 (step count + expand) and Task 10 (drag/menu) */
+                    const expanded = expandedId === item.id;
+                    return (
+                      <li key={item.id} className="rounded-lg border px-4 py-2 text-sm">
+                        <div className="flex items-center justify-between gap-3">
+                          <DragGrip id={item.id} label={item.text} />
+                          <button
+                            type="button"
+                            aria-expanded={expanded}
+                            onClick={() => setExpandedId(expanded ? null : item.id)}
+                            className="min-w-0 flex-1 break-words text-left hover:underline"
+                          >
+                            {item.text}
+                          </button>
+                          <span className="flex shrink-0 items-center gap-2 text-xs">
+                            <span className="text-muted-foreground">
+                              {item.stepsTotal} steps · {item.stepsDone} {t("progress.done", voice)}
+                            </span>
+                            <MoveToMenu
+                              currentBucket={bucketOfItem(item, now)}
+                              voice={voice}
+                              onMove={(target) => moveItemToBucket(item.id, target)}
+                            />
+                            <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => completeItem(item.id))}>
+                              {t("action.complete", voice)}
+                            </button>
+                          </span>
+                        </div>
+                        {expanded && item.taskId && (
+                          <div className="mt-2">
+                            <TaskSteps
+                              taskId={item.taskId}
+                              steps={item.steps.map((s) => ({
+                                id: s.id,
+                                order: s.order,
+                                total: item.stepsTotal,
+                                text: s.text,
+                                subtaskEmoji: s.subtaskEmoji,
+                                estMinutes: s.estMinutes,
+                                done: s.done,
+                              }))}
+                            />
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </DroppableBucket>
+          </div>
+
+          {/* Single-task */}
+          <div>
+            <SubHeader label={t("section.singleTask", voice)} count={singleTask.length} seeAllHref={SEE_ALL.singleTask} voice={voice} />
+            <DroppableBucket id="singleTask">
+              {singleTask.length === 0 ? (
+                <EmptyBucket voice={voice} />
+              ) : (
+                <ul className={cn("space-y-2", pending && "opacity-70")}>
+                  {singleTask.map((item) => (
+                    <li key={item.id} className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <DragGrip id={item.id} label={item.text} />
+                        <span className="text-primary shrink-0 text-xs font-medium">{t("pill.toDo", voice)}</span>
+                        <span className="break-words">{item.text}</span>
+                      </span>
                       <span className="flex shrink-0 items-center gap-2 text-xs">
-                        <span className="text-muted-foreground">
-                          {item.stepsTotal} steps · {item.stepsDone} {t("progress.done", voice)}
-                        </span>
+                        <MoveToMenu
+                          currentBucket={bucketOfItem(item, now)}
+                          voice={voice}
+                          onMove={(target) => moveItemToBucket(item.id, target)}
+                        />
                         <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => completeItem(item.id))}>
                           {t("action.complete", voice)}
                         </button>
+                        {confirmDeleteId === item.id ? (
+                          <span className="flex items-center gap-2">
+                            <button className="text-destructive font-medium" onClick={() => confirmDelete(item.id)}>{t("action.delete", voice)}</button>
+                            <span className="text-muted-foreground">·</span>
+                            <button className="text-muted-foreground hover:text-foreground" onClick={cancelDelete}>{t("action.cancel", voice)}</button>
+                          </span>
+                        ) : (
+                          <button className="text-muted-foreground hover:text-destructive" onClick={() => requestDelete(item.id)}>{t("action.delete", voice)}</button>
+                        )}
                       </span>
-                    </div>
-                    {expanded && item.taskId && (
-                      <div className="mt-2">
-                        <TaskSteps
-                          taskId={item.taskId}
-                          steps={item.steps.map((s) => ({
-                            id: s.id,
-                            order: s.order,
-                            total: item.stepsTotal,
-                            text: s.text,
-                            subtaskEmoji: s.subtaskEmoji,
-                            estMinutes: s.estMinutes,
-                            done: s.done,
-                          }))}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </DroppableBucket>
+          </div>
+
+          {/* Saved for later */}
+          <div>
+            <SubHeader label={t("section.savedLater", voice)} count={savedLater.length} seeAllHref={SEE_ALL.savedLater} voice={voice} />
+            <DroppableBucket id="savedLater">
+              {savedLater.length === 0 ? (
+                <EmptyBucket voice={voice} />
+              ) : (
+                <ul className="space-y-2 opacity-70">
+                  {savedLater.map((item) => (
+                    <li key={item.id} className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <DragGrip id={item.id} label={item.text} />
+                        <span className="break-words">{item.text}</span>
+                      </span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        <MoveToMenu
+                          currentBucket={bucketOfItem(item, now)}
+                          voice={voice}
+                          onMove={(target) => moveItemToBucket(item.id, target)}
                         />
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-
-        {/* Single-task */}
-        <div>
-          <SubHeader label={t("section.singleTask", voice)} count={singleTask.length} seeAllHref={SEE_ALL.singleTask} voice={voice} />
-          {singleTask.length === 0 ? (
-            <EmptyBucket voice={voice} />
-          ) : (
-            <ul className={cn("space-y-2", pending && "opacity-70")}>
-              {singleTask.map((item) => (
-                <li key={item.id} className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="text-primary shrink-0 text-xs font-medium">{t("pill.toDo", voice)}</span>
-                    <span className="break-words">{item.text}</span>
-                  </span>
-                  <span className="flex shrink-0 items-center gap-2 text-xs">
-                    <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => completeItem(item.id))}>
-                      {t("action.complete", voice)}
-                    </button>
-                    {confirmDeleteId === item.id ? (
-                      <span className="flex items-center gap-2">
-                        <button className="text-destructive font-medium" onClick={() => confirmDelete(item.id)}>{t("action.delete", voice)}</button>
-                        <span className="text-muted-foreground">·</span>
-                        <button className="text-muted-foreground hover:text-foreground" onClick={cancelDelete}>{t("action.cancel", voice)}</button>
+                        <button className="text-muted-foreground hover:text-foreground shrink-0 text-xs underline" onClick={() => run(() => triageBrainDumpItem(item.id))}>
+                          wake now
+                        </button>
                       </span>
-                    ) : (
-                      <button className="text-muted-foreground hover:text-destructive" onClick={() => requestDelete(item.id)}>{t("action.delete", voice)}</button>
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </DroppableBucket>
+          </div>
 
-        {/* Saved for later */}
-        <div>
-          <SubHeader label={t("section.savedLater", voice)} count={savedLater.length} seeAllHref={SEE_ALL.savedLater} voice={voice} />
-          {savedLater.length === 0 ? (
-            <EmptyBucket voice={voice} />
-          ) : (
-            <ul className="space-y-2 opacity-70">
-              {savedLater.map((item) => (
-                <li key={item.id} className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm">
-                  <span className="break-words">{item.text}</span>
-                  <button className="text-muted-foreground hover:text-foreground shrink-0 text-xs underline" onClick={() => run(() => triageBrainDumpItem(item.id))}>
-                    wake now
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+          {/* Completed */}
+          <div>
+            <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
+              {t("section.completed", voice)}
+              <span className="bg-secondary text-secondary-foreground rounded-full px-2 py-0.5 text-xs">
+                {t("section.completedToday", voice)}: {completedTodayCount}
+              </span>
+              <a href="/library?tab=done" className="text-muted-foreground hover:text-foreground ml-auto text-xs font-normal">
+                {t("link.seeAll", voice)}
+              </a>
+            </h2>
+            <DroppableBucket id="completed">
+              {completed.length === 0 ? (
+                <EmptyBucket voice={voice} />
+              ) : (
+                <ul className="space-y-2 opacity-80">
+                  {completed.map((item) => (
+                    <li key={item.id} className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <DragGrip id={item.id} label={item.text} />
+                        <span className="break-words line-through">{item.text}</span>
+                      </span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        <MoveToMenu
+                          currentBucket={bucketOfItem(item, now)}
+                          voice={voice}
+                          onMove={(target) => moveItemToBucket(item.id, target)}
+                        />
+                        <button className="text-muted-foreground hover:text-foreground shrink-0 text-xs underline" onClick={() => run(() => reopenItem(item.id, undefined))}>
+                          {t("action.reopen", voice)}
+                        </button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </DroppableBucket>
+          </div>
+        </section>
+      </DndContext>
 
-        {/* Completed */}
-        <div>
-          <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
-            {t("section.completed", voice)}
-            <span className="bg-secondary text-secondary-foreground rounded-full px-2 py-0.5 text-xs">
-              {t("section.completedToday", voice)}: {completedTodayCount}
-            </span>
-            <a href="/library?tab=done" className="text-muted-foreground hover:text-foreground ml-auto text-xs font-normal">
-              {t("link.seeAll", voice)}
-            </a>
-          </h2>
-          {completed.length === 0 ? (
-            <EmptyBucket voice={voice} />
-          ) : (
-            <ul className="space-y-2 opacity-80">
-              {completed.map((item) => (
-                <li key={item.id} className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm">
-                  <span className="break-words line-through">{item.text}</span>
-                  <button className="text-muted-foreground hover:text-foreground shrink-0 text-xs underline" onClick={() => run(() => reopenItem(item.id, undefined))}>
-                    {t("action.reopen", voice)}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </section>
+      {pendingBreakdown && (
+        <MultiStepDropPrompt
+          itemText={pendingBreakdown.text}
+          voice={voice}
+          onBreakNow={() => {
+            const id = pendingBreakdown.id;
+            setPendingBreakdown(null);
+            startTransition(async () => {
+              const taskId = await startBreakdown(id);
+              if (taskId) router.push(`/tasks/${taskId}`);
+            });
+          }}
+          onSaveLater={() => {
+            const id = pendingBreakdown.id;
+            setPendingBreakdown(null);
+            run(() => snoozeBrainDumpItem(id, 60));
+          }}
+          onCancel={() => setPendingBreakdown(null)}
+        />
+      )}
     </div>
+  );
+}
+
+/** Drop zone wrapper around a bucket's body — used by both the To-Do buckets
+ * and the Needs-review region so drag has a target everywhere the menu does. */
+function DroppableBucket({ id, children }: { id: BucketId; children: React.ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id });
+  return (
+    <div ref={setNodeRef} data-bucket={id} className={cn("rounded-lg", isOver && "ring-primary ring-2")}>
+      {children}
+    </div>
+  );
+}
+
+/** Drag handle for a single item card — the pointer/keyboard-accessible grip
+ * dnd-kit binds `useDraggable` listeners to. */
+function DragGrip({ id, label }: { id: string; label: string }) {
+  const { attributes, listeners, setNodeRef } = useDraggable({ id });
+  return (
+    <button
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      aria-label={`Drag ${label}`}
+      className="text-muted-foreground hover:text-foreground shrink-0 cursor-grab px-1 text-xs"
+    >
+      ⠿
+    </button>
   );
 }
 
@@ -446,6 +607,8 @@ function ItemRow({
   onCancelDelete,
   onFreshen,
   onDismissPrompt,
+  moveMenu,
+  dragGrip,
 }: {
   item: Item;
   settings: AgingSettings;
@@ -460,6 +623,8 @@ function ItemRow({
   onCancelDelete: () => void;
   onFreshen: () => void;
   onDismissPrompt: () => void;
+  moveMenu?: React.ReactNode;
+  dragGrip?: React.ReactNode;
 }) {
   const aging = isAging(item.createdAt, settings);
   const tier = freshnessTier(item.createdAt, item.freshenedAt, settings);
@@ -472,6 +637,7 @@ function ItemRow({
   return (
     <li className="rounded-lg border px-4 py-3">
       <div className="flex items-start justify-between gap-3">
+        {dragGrip}
         <div className="min-w-0 space-y-1">
           <div className="flex items-center gap-2">
             <StatusPill tier={tier} voice={voice} />
@@ -529,6 +695,7 @@ function ItemRow({
         >
           {t("action.complete", voice)}
         </button>
+        {moveMenu}
         {confirmingDelete ? (
           <span className="ml-auto flex items-center gap-2">
             <button
