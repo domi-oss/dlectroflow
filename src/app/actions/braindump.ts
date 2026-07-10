@@ -2,11 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
-import { maybeAwardInboxZero } from "@/lib/rewards";
+import { maybeAwardInboxZero, logReward, awardBadge, touchStreakOnCompletion } from "@/lib/rewards";
 import {
   BrainDumpStatus,
   TaskSource,
   TaskStatus,
+  RewardType,
+  BadgeKey,
 } from "@/lib/constants";
 import { currentWorkspaceId } from "@/lib/workspace";
 
@@ -115,4 +117,29 @@ export async function keepAsTask(id: string) {
   await maybeAwardInboxZero(workspaceId);
   revalidatePath(INBOX_PATH);
   return task.id;
+}
+
+export async function completeItem(id: string) {
+  const workspaceId = await currentWorkspaceId();
+  const item = await prisma.brainDumpItem.findFirst({
+    where: { id, workspaceId },
+    include: { task: { include: { steps: true } } },
+  });
+  if (!item || item.completedAt) return;
+
+  if (item.task) {
+    const notDone = item.task.steps.filter((s) => !s.done);
+    await prisma.step.updateMany({ where: { taskId: item.task.id }, data: { done: true } });
+    await prisma.task.update({ where: { id: item.task.id }, data: { status: TaskStatus.Done } });
+    for (let n = 0; n < notDone.length; n++) await logReward(workspaceId, RewardType.StepDone);
+  }
+
+  await prisma.brainDumpItem.update({ where: { id }, data: { completedAt: new Date() } });
+  await logReward(workspaceId, RewardType.TaskComplete);
+  await touchStreakOnCompletion(workspaceId);
+  await awardBadge(workspaceId, BadgeKey.TaskComplete);
+
+  revalidatePath(INBOX_PATH);
+  revalidatePath("/dashboard");
+  if (item.task) revalidatePath(`/tasks/${item.task.id}`);
 }
