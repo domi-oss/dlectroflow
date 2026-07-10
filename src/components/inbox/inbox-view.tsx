@@ -17,6 +17,7 @@ import {
   deleteBrainDumpItem,
   keepAsTask,
   markReminded,
+  freshenItem,
   dismissPrompt,
 } from "@/app/actions/braindump";
 import { startBreakdown } from "@/app/actions/breakdown";
@@ -241,6 +242,7 @@ export function InboxView({
                 onRequestDelete={() => requestDelete(item.id)}
                 onConfirmDelete={() => confirmDelete(item.id)}
                 onCancelDelete={cancelDelete}
+                onFreshen={() => run(() => freshenItem(item.id))}
                 onDismissPrompt={() => run(() => dismissPrompt(item.id))}
               />
             ))}
@@ -410,6 +412,7 @@ function ItemRow({
   onRequestDelete,
   onConfirmDelete,
   onCancelDelete,
+  onFreshen,
   onDismissPrompt,
 }: {
   item: Item;
@@ -422,6 +425,7 @@ function ItemRow({
   onRequestDelete: () => void;
   onConfirmDelete: () => void;
   onCancelDelete: () => void;
+  onFreshen: () => void;
   onDismissPrompt: () => void;
 }) {
   const aging = isAging(item.createdAt, settings);
@@ -449,13 +453,22 @@ function ItemRow({
           style={{ backgroundColor: "#fff5f5", borderColor: "#c0392b", color: "#c0392b" }}
         >
           <span>{t("prompt.stillNeeded", voice)}</span>
-          <button
-            onClick={onDismissPrompt}
-            className="rounded-md border px-2 py-1 font-medium"
-            style={{ borderColor: "#c0392b", color: "#c0392b" }}
-          >
-            {t("action.dismiss", voice)}
-          </button>
+          <span className="flex shrink-0 items-center gap-2">
+            <button
+              onClick={onFreshen}
+              className="rounded-md border px-2 py-1 font-medium"
+              style={{ borderColor: "#c0392b", color: "#c0392b" }}
+            >
+              {t("action.stillNeeded", voice)}
+            </button>
+            <button
+              onClick={onDismissPrompt}
+              className="rounded-md border px-2 py-1 font-medium"
+              style={{ borderColor: "#c0392b", color: "#c0392b" }}
+            >
+              {t("action.dismiss", voice)}
+            </button>
+          </span>
         </div>
       )}
       <div className="mt-2 flex flex-wrap gap-2 text-xs">
