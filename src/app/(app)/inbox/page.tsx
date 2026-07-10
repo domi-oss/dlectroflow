@@ -20,7 +20,7 @@ export default async function InboxPage({
     prisma.brainDumpItem.findMany({
       where: { workspaceId, status: { not: BrainDumpStatus.Archived } },
       orderBy: { createdAt: "desc" },
-      include: { task: { include: { steps: { select: { done: true } } } } },
+      include: { task: { include: { steps: { orderBy: { order: "asc" } } } } },
     }),
     getSettings(workspaceId),
     searchParams,
@@ -31,6 +31,8 @@ export default async function InboxPage({
     stepsTotal: task?.steps.length ?? 0,
     stepsDone: task?.steps.filter((s) => s.done).length ?? 0,
     taskStatus: task?.status ?? null,
+    completedAt: item.completedAt,
+    steps: task?.steps.map((s) => ({ id: s.id, order: s.order, text: s.text, done: s.done })) ?? [],
   }));
 
   return (

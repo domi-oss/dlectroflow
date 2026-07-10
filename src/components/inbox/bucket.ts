@@ -19,6 +19,7 @@ export type Item = {
   stepsDone: number;
   taskStatus: string | null;
   completedAt: Date | null;
+  steps: { id: string; order: number; text: string; done: boolean }[];
 };
 
 export type Buckets = {
