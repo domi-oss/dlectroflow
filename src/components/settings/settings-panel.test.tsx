@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { SettingsPanel } from "@/components/inbox/settings-panel";
+import { SettingsPanel } from "@/components/settings/settings-panel";
 import type { AgingSettings } from "@/lib/aging";
 
 const push = vi.fn();
