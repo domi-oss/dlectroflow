@@ -341,8 +341,9 @@ export function InboxView({
                     const expanded = expandedId === item.id;
                     const awaitingBreakdown = item.stepsTotal === 0;
                     return (
-                      <li key={item.id} className="rounded-lg border px-4 py-2 text-sm">
-                        <div className="flex items-center justify-between gap-3">
+                      <li key={item.id} className="rounded-lg border px-4 py-3 text-sm">
+                        {/* Title line + action row below — mirrors the Needs-review row layout. */}
+                        <div className="flex items-start gap-3">
                           <DragGrip id={item.id} label={item.text} />
                           {awaitingBreakdown ? (
                             <span className="min-w-0 flex-1 break-words">{item.text}</span>
@@ -356,29 +357,30 @@ export function InboxView({
                               {item.text}
                             </button>
                           )}
-                          <span className="flex shrink-0 items-center gap-2 text-xs">
-                            {awaitingBreakdown ? (
-                              <button
-                                type="button"
-                                onClick={() => breakdown(item.id)}
-                                className="bg-destructive rounded-md px-2.5 py-1 font-medium text-white hover:opacity-90"
-                              >
-                                {t("prompt.breakNow", voice)}
-                              </button>
-                            ) : (
-                              <span className="text-muted-foreground">
-                                {item.stepsTotal} steps · {item.stepsDone} {t("progress.done", voice)}
-                              </span>
-                            )}
-                            <MoveToMenu
-                              currentBucket={bucketOfItem(item, now)}
-                              voice={voice}
-                              onMove={(target) => moveItemToBucket(item.id, target)}
-                            />
-                            <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => completeItem(item.id))}>
-                              {t("action.complete", voice)}
+                          {!awaitingBreakdown && (
+                            <span className="text-muted-foreground shrink-0 text-xs">
+                              {item.stepsTotal} steps · {item.stepsDone} {t("progress.done", voice)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                          {awaitingBreakdown && (
+                            <button
+                              type="button"
+                              onClick={() => breakdown(item.id)}
+                              className="bg-destructive rounded-md px-2.5 py-1 font-medium text-white hover:opacity-90"
+                            >
+                              {t("prompt.breakNow", voice)}
                             </button>
-                          </span>
+                          )}
+                          <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => completeItem(item.id))}>
+                            {t("action.complete", voice)}
+                          </button>
+                          <MoveToMenu
+                            currentBucket={bucketOfItem(item, now)}
+                            voice={voice}
+                            onMove={(target) => moveItemToBucket(item.id, target)}
+                          />
                         </div>
                         {expanded && item.taskId && (
                           <div className="mt-2">
@@ -413,31 +415,34 @@ export function InboxView({
               ) : (
                 <ul className={cn("space-y-2", pending && "opacity-70")}>
                   {singleTask.map((item) => (
-                    <li key={item.id} className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm">
-                      <span className="flex min-w-0 items-center gap-2">
+                    <li key={item.id} className="rounded-lg border px-4 py-3 text-sm">
+                      {/* Title line + action row below — mirrors the Needs-review row layout. */}
+                      <div className="flex items-start gap-3">
                         <DragGrip id={item.id} label={item.text} />
-                        <span className="text-primary shrink-0 text-xs font-medium">{t("pill.toDo", voice)}</span>
-                        <span className="break-words">{item.text}</span>
-                      </span>
-                      <span className="flex shrink-0 items-center gap-2 text-xs">
+                        <span className="min-w-0 flex-1 break-words">
+                          <span className="text-primary mr-2 text-xs font-medium">{t("pill.toDo", voice)}</span>
+                          {item.text}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                        <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => completeItem(item.id))}>
+                          {t("action.complete", voice)}
+                        </button>
                         <MoveToMenu
                           currentBucket={bucketOfItem(item, now)}
                           voice={voice}
                           onMove={(target) => moveItemToBucket(item.id, target)}
                         />
-                        <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => completeItem(item.id))}>
-                          {t("action.complete", voice)}
-                        </button>
                         {confirmDeleteId === item.id ? (
-                          <span className="flex items-center gap-2">
-                            <button className="text-destructive font-medium" onClick={() => confirmDelete(item.id)}>{t("action.delete", voice)}</button>
+                          <span className="ml-auto flex items-center gap-2">
+                            <button className="text-destructive rounded-md px-2.5 py-1 font-medium" onClick={() => confirmDelete(item.id)}>{t("action.delete", voice)}</button>
                             <span className="text-muted-foreground">·</span>
-                            <button className="text-muted-foreground hover:text-foreground" onClick={cancelDelete}>{t("action.cancel", voice)}</button>
+                            <button className="text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1" onClick={cancelDelete}>{t("action.cancel", voice)}</button>
                           </span>
                         ) : (
-                          <button className="text-muted-foreground hover:text-destructive" onClick={() => requestDelete(item.id)}>{t("action.delete", voice)}</button>
+                          <button className="text-muted-foreground hover:text-destructive ml-auto rounded-md px-2.5 py-1" onClick={() => requestDelete(item.id)}>{t("action.delete", voice)}</button>
                         )}
-                      </span>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -458,45 +463,46 @@ export function InboxView({
                        review row has — the pantry is "waiting for your review". */
                     const optionsOpen = savedOptionsId === item.id;
                     return (
-                      <li key={item.id} className="rounded-lg border px-4 py-2 text-sm">
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="flex min-w-0 flex-1 items-center gap-2">
-                            <DragGrip id={item.id} label={item.text} />
-                            <button
-                              type="button"
-                              aria-expanded={optionsOpen}
-                              onClick={() => setSavedOptionsId(optionsOpen ? null : item.id)}
-                              className="min-w-0 flex-1 break-words text-left hover:underline"
-                            >
-                              {item.text}
-                            </button>
-                          </span>
-                          <span className="flex shrink-0 items-center gap-2">
-                            <MoveToMenu
-                              currentBucket={bucketOfItem(item, now)}
-                              voice={voice}
-                              onMove={(target) => moveItemToBucket(item.id, target)}
-                            />
-                            <button className="text-muted-foreground hover:text-foreground shrink-0 text-xs underline" onClick={() => run(() => triageBrainDumpItem(item.id))}>
-                              wake now
-                            </button>
-                          </span>
+                      <li key={item.id} className="rounded-lg border px-4 py-3 text-sm">
+                        {/* Title line + action row below — mirrors the Needs-review row layout. */}
+                        <div className="flex items-start gap-3">
+                          <DragGrip id={item.id} label={item.text} />
+                          <button
+                            type="button"
+                            aria-expanded={optionsOpen}
+                            onClick={() => setSavedOptionsId(optionsOpen ? null : item.id)}
+                            className="min-w-0 flex-1 break-words text-left hover:underline"
+                          >
+                            {item.text}
+                          </button>
                         </div>
-                        {optionsOpen && (
-                          <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                            <button
-                              onClick={() => breakdown(item.id)}
-                              className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
-                            >
-                              {t("action.breakdown", voice)} →
-                            </button>
-                            <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => keepAsTask(item.id))}>
-                              {t("action.addTodo", voice)}
-                            </button>
-                            <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => completeItem(item.id))}>
-                              {t("action.complete", voice)}
-                            </button>
-                            {confirmDeleteId === item.id ? (
+                        <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                          {optionsOpen && (
+                            <>
+                              <button
+                                onClick={() => breakdown(item.id)}
+                                className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
+                              >
+                                {t("action.breakdown", voice)} →
+                              </button>
+                              <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => keepAsTask(item.id))}>
+                                {t("action.addTodo", voice)}
+                              </button>
+                              <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => completeItem(item.id))}>
+                                {t("action.complete", voice)}
+                              </button>
+                            </>
+                          )}
+                          <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => triageBrainDumpItem(item.id))}>
+                            wake now
+                          </button>
+                          <MoveToMenu
+                            currentBucket={bucketOfItem(item, now)}
+                            voice={voice}
+                            onMove={(target) => moveItemToBucket(item.id, target)}
+                          />
+                          {optionsOpen &&
+                            (confirmDeleteId === item.id ? (
                               <span className="ml-auto flex items-center gap-2">
                                 <button className="text-destructive rounded-md px-2.5 py-1 font-medium" onClick={() => confirmDelete(item.id)}>
                                   {t("action.delete", voice)}
@@ -510,9 +516,8 @@ export function InboxView({
                               <button className="text-muted-foreground hover:text-destructive ml-auto rounded-md px-2.5 py-1" onClick={() => requestDelete(item.id)}>
                                 {t("action.delete", voice)}
                               </button>
-                            )}
-                          </div>
-                        )}
+                            ))}
+                        </div>
                       </li>
                     );
                   })}
@@ -538,21 +543,22 @@ export function InboxView({
               ) : (
                 <ul className="space-y-2 opacity-80">
                   {completed.map((item) => (
-                    <li key={item.id} className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm">
-                      <span className="flex min-w-0 items-center gap-2">
+                    <li key={item.id} className="rounded-lg border px-4 py-3 text-sm">
+                      {/* Title line + action row below — mirrors the Needs-review row layout. */}
+                      <div className="flex items-start gap-3">
                         <DragGrip id={item.id} label={item.text} />
-                        <span className="break-words line-through">{item.text}</span>
-                      </span>
-                      <span className="flex shrink-0 items-center gap-2">
+                        <span className="min-w-0 flex-1 break-words line-through">{item.text}</span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                        <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => reopenItem(item.id, undefined))}>
+                          {t("action.reopen", voice)}
+                        </button>
                         <MoveToMenu
                           currentBucket={bucketOfItem(item, now)}
                           voice={voice}
                           onMove={(target) => moveItemToBucket(item.id, target)}
                         />
-                        <button className="text-muted-foreground hover:text-foreground shrink-0 text-xs underline" onClick={() => run(() => reopenItem(item.id, undefined))}>
-                          {t("action.reopen", voice)}
-                        </button>
-                      </span>
+                      </div>
                     </li>
                   ))}
                 </ul>
