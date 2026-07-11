@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
@@ -50,6 +50,7 @@ import {
   requestNotificationPermission,
   registerServiceWorker,
   showReminder,
+  subscribeNotificationPermission,
 } from "@/lib/notifications";
 
 /** Map a dnd-kit drop onto a bucket to a move intent (null when dropped nowhere). */
@@ -102,11 +103,15 @@ export function InboxView({
   // Which row (any bucket) is editing its title via the ✎ pencil.
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // Tick so relative ages + aging state recompute live.
-  const [, setTick] = useState(0);
+  // Which completed multi-step row (if any) has its per-step Reopen picker open.
+  const [reopenPickerId, setReopenPickerId] = useState<string | null>(null);
+
+  // Live clock for bucketing + relative ages — interval-driven state (rather
+  // than Date.now() during render) so ages recompute live AND render stays pure.
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const ms = Math.min(effectiveAgingMs(settings), 15_000);
-    const id = setInterval(() => setTick((t) => t + 1), Math.max(1000, ms / 4));
+    const id = setInterval(() => setNow(Date.now()), Math.max(1000, ms / 4));
     return () => clearInterval(id);
   }, [settings]);
 
@@ -125,20 +130,23 @@ export function InboxView({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Notifications: register the service worker + track permission.
-  const [permission, setPermission] = useState<
-    NotificationPermission | "unsupported"
-  >("default");
+  // Notifications: register the service worker + read permission through a
+  // subscription — the store notifies after our own permission requests, so
+  // no setState-in-effect is needed to keep the banner in sync.
+  const permission = useSyncExternalStore(
+    subscribeNotificationPermission,
+    notificationPermission,
+    () => "default" as const,
+  );
   const notifiedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     registerServiceWorker();
-    setPermission(notificationPermission());
   }, []);
 
-  const enableReminders = () =>
-    requestNotificationPermission().then((p) => setPermission(p));
+  const enableReminders = () => {
+    void requestNotificationPermission();
+  };
 
-  const now = Date.now();
   const { needsReview, singleTask, multiStep, savedLater, completed, completedTodayCount } =
     bucketItems(initialItems, now);
 
@@ -332,6 +340,7 @@ export function InboxView({
                     item={item}
                     settings={settings}
                     voice={voice}
+                    now={now}
                     onBreakdown={() => breakdown(item.id)}
                     onKeep={() => run(() => keepAsTask(item.id))}
                     onSnooze={() => run(() => snoozeBrainDumpItem(item.id, 60))}
@@ -417,9 +426,7 @@ export function InboxView({
                               {t("prompt.breakNow", voice)}
                             </button>
                           )}
-                          <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => completeItem(item.id))}>
-                            {t("action.complete", voice)}
-                          </button>
+                          <CompleteButton voice={voice} onClick={() => run(() => completeItem(item.id))} />
                           <MoveToMenu
                             currentBucket={bucketOfItem(item, now)}
                             voice={voice}
@@ -479,9 +486,7 @@ export function InboxView({
                         >
                           ▶ Focus
                         </button>
-                        <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => completeItem(item.id))}>
-                          {t("action.complete", voice)}
-                        </button>
+                        <CompleteButton voice={voice} onClick={() => run(() => completeItem(item.id))} />
                         <MoveToMenu
                           currentBucket={bucketOfItem(item, now)}
                           voice={voice}
@@ -562,9 +567,7 @@ export function InboxView({
                               >
                                 {t("action.saveForLater", voice)}
                               </button>
-                              <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => completeItem(item.id))}>
-                                {t("action.complete", voice)}
-                              </button>
+                              <CompleteButton voice={voice} onClick={() => run(() => completeItem(item.id))} />
                               <MoveToMenu
                                 currentBucket={bucketOfItem(item, now)}
                                 voice={voice}
@@ -630,31 +633,56 @@ export function InboxView({
                 <EmptyBucket voice={voice} />
               ) : (
                 <ul className="space-y-2 opacity-80">
-                  {completed.map((item) => (
-                    <li key={item.id} className="rounded-lg border px-4 py-3 text-sm">
-                      {/* Title line + action row below — mirrors the Needs-review row layout. */}
-                      <div className="flex items-start gap-3">
-                        <DragGrip id={item.id} label={item.text} />
-                        {editingId === item.id ? (
-                          titleEditor(item)
-                        ) : (
-                          <span className="min-w-0 flex-1 break-words">
-                            <span className="line-through">{item.text}</span> {pencil(item)}
-                          </span>
+                  {completed.map((item) => {
+                    /* Multi-step (2+ steps): Reopen opens a per-step picker so
+                       only the steps that still need doing come back. Anything
+                       simpler reopens whole, as before. */
+                    const pickingSteps = reopenPickerId === item.id;
+                    return (
+                      <li key={item.id} className="rounded-lg border px-4 py-3 text-sm">
+                        {/* Title line + action row below — mirrors the Needs-review row layout. */}
+                        <div className="flex items-start gap-3">
+                          <DragGrip id={item.id} label={item.text} />
+                          {editingId === item.id ? (
+                            titleEditor(item)
+                          ) : (
+                            <span className="min-w-0 flex-1 break-words">
+                              <span className="line-through">{item.text}</span> {pencil(item)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                          <button
+                            type="button"
+                            className="hover:bg-accent rounded-md border px-2.5 py-1"
+                            onClick={() =>
+                              item.stepsTotal > 1
+                                ? setReopenPickerId(pickingSteps ? null : item.id)
+                                : run(() => reopenItem(item.id, undefined))
+                            }
+                          >
+                            {t("action.reopen", voice)}
+                          </button>
+                          <MoveToMenu
+                            currentBucket={bucketOfItem(item, now)}
+                            voice={voice}
+                            onMove={(target) => moveItemToBucket(item.id, target)}
+                          />
+                        </div>
+                        {pickingSteps && (
+                          <ReopenStepPicker
+                            steps={item.steps}
+                            voice={voice}
+                            onConfirm={(stepIds) => {
+                              setReopenPickerId(null);
+                              run(() => reopenItem(item.id, stepIds));
+                            }}
+                            onCancel={() => setReopenPickerId(null)}
+                          />
                         )}
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                        <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => reopenItem(item.id, undefined))}>
-                          {t("action.reopen", voice)}
-                        </button>
-                        <MoveToMenu
-                          currentBucket={bucketOfItem(item, now)}
-                          voice={voice}
-                          onMove={(target) => moveItemToBucket(item.id, target)}
-                        />
-                      </div>
-                    </li>
-                  ))}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </DroppableBucket>
@@ -692,6 +720,93 @@ function EditTitleInput({
       }}
       className="border-input bg-background focus-visible:ring-ring min-w-0 flex-1 rounded-md border px-2 py-1 text-sm outline-none focus-visible:ring-2"
     />
+  );
+}
+
+/** The secondary "Complete" button every bucket row shows — one source for its
+ * styling instead of four copies. */
+function CompleteButton({ voice, onClick }: { voice: Voice; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="hover:bg-accent rounded-md border px-2.5 py-1"
+    >
+      {t("action.complete", voice)}
+    </button>
+  );
+}
+
+/** Inline picker for undoing a completed multi-step item: tick the steps that
+ * still need doing. Confirm needs ≥1 ticked; "Reopen all" resets every step
+ * (same as the whole-item Undo, stepIds = undefined). */
+function ReopenStepPicker({
+  steps,
+  voice,
+  onConfirm,
+  onCancel,
+}: {
+  steps: Item["steps"];
+  voice: Voice;
+  onConfirm: (stepIds: string[] | undefined) => void;
+  onCancel: () => void;
+}) {
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const toggle = (id: string) =>
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const ordered = [...steps].sort((a, b) => a.order - b.order);
+  return (
+    <div className="mt-2 space-y-2 rounded-md border px-3 py-2 text-xs">
+      <p className="font-medium">{t("prompt.reopenWhich", voice)}</p>
+      <ul className="space-y-1">
+        {ordered.map((s) => (
+          <li key={s.id}>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={checked.has(s.id)}
+                onChange={() => toggle(s.id)}
+                aria-label={s.text}
+              />
+              {/* Unticked = stays done, so it keeps the completed strikethrough. */}
+              <span className={cn(!checked.has(s.id) && "line-through opacity-70")}>
+                {s.subtaskEmoji ? `${s.subtaskEmoji} ` : ""}
+                {s.text}
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={checked.size === 0}
+          onClick={() => onConfirm([...checked])}
+          className="bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90 disabled:opacity-50"
+        >
+          {t("action.reopenSelected", voice)}
+        </button>
+        <button
+          type="button"
+          onClick={() => onConfirm(undefined)}
+          className="hover:bg-accent rounded-md border px-2.5 py-1"
+        >
+          {t("action.reopenAll", voice)}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1"
+        >
+          {t("action.cancel", voice)}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -764,6 +879,7 @@ function ItemRow({
   item,
   settings,
   voice,
+  now,
   onBreakdown,
   onKeep,
   onSnooze,
@@ -782,6 +898,7 @@ function ItemRow({
   item: Item;
   settings: AgingSettings;
   voice: Voice;
+  now: number;
   onBreakdown: () => void;
   onKeep: () => void;
   onSnooze: () => void;
@@ -819,7 +936,7 @@ function ItemRow({
               </>
             )}
           </div>
-          <AgeLabel createdAt={item.createdAt} aging={aging} />
+          <AgeLabel createdAt={item.createdAt} aging={aging} now={now} />
         </div>
       </div>
       {showStillNeededPrompt && (
@@ -865,12 +982,7 @@ function ItemRow({
         >
           {t("action.saveForLater", voice)}
         </button>
-        <button
-          onClick={onComplete}
-          className="hover:bg-accent rounded-md border px-2.5 py-1"
-        >
-          {t("action.complete", voice)}
-        </button>
+        <CompleteButton voice={voice} onClick={onComplete} />
         {moveMenu}
         {confirmingDelete ? (
           <span className="ml-auto flex items-center gap-2">
@@ -901,8 +1013,8 @@ function ItemRow({
   );
 }
 
-function AgeLabel({ createdAt, aging }: { createdAt: Date; aging: boolean }) {
-  const ms = Date.now() - new Date(createdAt).getTime();
+function AgeLabel({ createdAt, aging, now }: { createdAt: Date; aging: boolean; now: number }) {
+  const ms = now - new Date(createdAt).getTime();
   const label = formatAgo(ms);
   return (
     <p className={cn("text-xs", aging ? "text-amber-600" : "text-muted-foreground")}>

@@ -163,6 +163,7 @@ describe("completeStep", () => {
       expect.objectContaining({ where: { taskId: "t1", workspaceId: "owner" } }),
     );
     expect(rewards.logReward).toHaveBeenCalledWith("owner", "task_complete");
+    expect(rewards.awardBadge).toHaveBeenCalledWith("owner", "task_complete");
   });
 
   it("no-ops when already done", async () => {
