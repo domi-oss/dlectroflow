@@ -26,6 +26,7 @@ vi.mock("@/app/actions/braindump", () => ({
   moveToReview: vi.fn().mockResolvedValue(undefined),
   requestBreakdown: vi.fn().mockResolvedValue(undefined),
   ensureFocusStep: vi.fn().mockResolvedValue(null),
+  renameItem: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/app/actions/breakdown", () => ({
@@ -436,6 +437,53 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
     await user.click(within(row).getByRole("button", { name: "Move to…" }));
     await user.click(within(row).getByRole("menuitem", { name: /Single-task/ }));
     expect(triageBrainDumpItem).toHaveBeenCalledWith("aw1");
+  });
+});
+
+describe("InboxView — ✎ edit title", () => {
+  it("pencil → input → Enter renames the item (review row)", async () => {
+    const { renameItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeItem({ id: "r1", text: "old name" })]} settings={settings} />);
+    await user.click(screen.getByRole("button", { name: "Edit old name" }));
+    const input = screen.getByRole("textbox", { name: "Edit title" });
+    await user.clear(input);
+    await user.type(input, "new name{Enter}");
+    expect(renameItem).toHaveBeenCalledWith("r1", "new name");
+  });
+
+  it("Escape cancels without renaming", async () => {
+    const { renameItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeItem({ id: "r1", text: "old name" })]} settings={settings} />);
+    await user.click(screen.getByRole("button", { name: "Edit old name" }));
+    await user.keyboard("{Escape}");
+    expect(renameItem).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox", { name: "Edit title" })).not.toBeInTheDocument();
+    expect(screen.getByText("old name")).toBeInTheDocument();
+  });
+
+  it("every bucket row has a pencil", () => {
+    const items = [
+      makeItem({ id: "r1", text: "review item" }),
+      makeItem({ id: "s1", text: "single item", status: "triaged" }),
+      makeMultiStep(),
+      makeItem({ id: "v1", text: "saved item", snoozedUntil: new Date(Date.now() + 3_600_000) }),
+      makeItem({ id: "d1", text: "done item", status: "triaged", completedAt: new Date() }),
+    ];
+    render(<InboxView initialItems={items} settings={settings} />);
+    for (const text of ["review item", "single item", "plan trip", "saved item", "done item"]) {
+      expect(screen.getByRole("button", { name: `Edit ${text}` })).toBeInTheDocument();
+    }
+  });
+
+  it("unchanged text does not fire the action", async () => {
+    const { renameItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeItem({ id: "r1", text: "same" })]} settings={settings} />);
+    await user.click(screen.getByRole("button", { name: "Edit same" }));
+    await user.keyboard("{Enter}");
+    expect(renameItem).not.toHaveBeenCalled();
   });
 });
 

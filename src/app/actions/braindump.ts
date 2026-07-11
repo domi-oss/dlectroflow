@@ -90,6 +90,25 @@ export async function snoozeBrainDumpItem(id: string, minutes: number) {
   revalidatePath(INBOX_PATH);
 }
 
+/**
+ * Rename an item from its row (✎). Keeps a linked task's title in sync so
+ * the breakdown editor / focus timer never show a stale name (steps keep
+ * their own texts). Empty input is a no-op.
+ */
+export async function renameItem(id: string, text: string) {
+  const workspaceId = await currentWorkspaceId();
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  const existing = await prisma.brainDumpItem.findFirst({ where: { id, workspaceId } });
+  if (!existing) return;
+  await prisma.brainDumpItem.update({ where: { id }, data: { text: trimmed } });
+  if (existing.taskId) {
+    await prisma.task.update({ where: { id: existing.taskId }, data: { title: trimmed } });
+    revalidatePath(`/tasks/${existing.taskId}`);
+  }
+  revalidatePath(INBOX_PATH);
+}
+
 export async function deleteBrainDumpItem(id: string) {
   const workspaceId = await currentWorkspaceId();
   const existing = await prisma.brainDumpItem.findFirst({ where: { id, workspaceId } });

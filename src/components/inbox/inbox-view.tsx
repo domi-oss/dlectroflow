@@ -34,6 +34,7 @@ import {
   moveToReview,
   requestBreakdown,
   ensureFocusStep,
+  renameItem,
 } from "@/app/actions/braindump";
 import { startBreakdown } from "@/app/actions/breakdown";
 import { StatusPill } from "@/components/inbox/status-pill";
@@ -97,6 +98,9 @@ export function InboxView({
 
   // Which saved-for-later row (if any) has its inline sorting options open.
   const [savedOptionsId, setSavedOptionsId] = useState<string | null>(null);
+
+  // Which row (any bucket) is editing its title via the ✎ pencil.
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   // Tick so relative ages + aging state recompute live.
   const [, setTick] = useState(0);
@@ -187,6 +191,28 @@ export function InboxView({
       const stepId = await ensureFocusStep(id);
       if (stepId) router.push(`/focus/${stepId}`);
     });
+
+  // ✎ inline title editing — shared by every bucket's rows.
+  const pencil = (item: Item) => (
+    <button
+      type="button"
+      aria-label={`Edit ${item.text}`}
+      onClick={() => setEditingId(item.id)}
+      className="text-muted-foreground hover:text-foreground shrink-0 px-1 text-xs"
+    >
+      ✎
+    </button>
+  );
+  const titleEditor = (item: Item) => (
+    <EditTitleInput
+      initial={item.text}
+      onSave={(value) => {
+        setEditingId(null);
+        if (value && value !== item.text) run(() => renameItem(item.id, value));
+      }}
+      onCancel={() => setEditingId(null)}
+    />
+  );
 
   // Drag (dnd-kit) + the "Move to…" menu share this single dispatcher so the
   // two paths can never diverge (Task 10). Every drop moves immediately —
@@ -324,6 +350,8 @@ export function InboxView({
                       />
                     }
                     dragGrip={<DragGrip id={item.id} label={item.text} />}
+                    editButton={pencil(item)}
+                    titleEditor={editingId === item.id ? titleEditor(item) : undefined}
                   />
                 ))}
               </ul>
@@ -354,19 +382,26 @@ export function InboxView({
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
                         <div className="flex items-start gap-3">
                           <DragGrip id={item.id} label={item.text} />
-                          {awaitingBreakdown ? (
-                            <span className="min-w-0 flex-1 break-words">{item.text}</span>
+                          {editingId === item.id ? (
+                            titleEditor(item)
+                          ) : awaitingBreakdown ? (
+                            <span className="min-w-0 flex-1 break-words">
+                              {item.text} {pencil(item)}
+                            </span>
                           ) : (
-                            <button
-                              type="button"
-                              aria-expanded={expanded}
-                              onClick={() => setExpandedId(expanded ? null : item.id)}
-                              className="min-w-0 flex-1 break-words text-left hover:underline"
-                            >
-                              {item.text}
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                aria-expanded={expanded}
+                                onClick={() => setExpandedId(expanded ? null : item.id)}
+                                className="min-w-0 flex-1 break-words text-left hover:underline"
+                              >
+                                {item.text}
+                              </button>
+                              {pencil(item)}
+                            </>
                           )}
-                          {!awaitingBreakdown && (
+                          {editingId !== item.id && !awaitingBreakdown && (
                             <span className="text-muted-foreground shrink-0 text-xs">
                               {item.stepsTotal} steps · {item.stepsDone} {t("progress.done", voice)}
                             </span>
@@ -428,7 +463,13 @@ export function InboxView({
                       {/* Title line + action row below — mirrors the Needs-review row layout. */}
                       <div className="flex items-start gap-3">
                         <DragGrip id={item.id} label={item.text} />
-                        <span className="min-w-0 flex-1 break-words">{item.text}</span>
+                        {editingId === item.id ? (
+                          titleEditor(item)
+                        ) : (
+                          <span className="min-w-0 flex-1 break-words">
+                            {item.text} {pencil(item)}
+                          </span>
+                        )}
                       </div>
                       <div className="mt-2 flex flex-wrap gap-2 text-xs">
                         <button
@@ -480,14 +521,21 @@ export function InboxView({
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
                         <div className="flex items-start gap-3">
                           <DragGrip id={item.id} label={item.text} />
-                          <button
-                            type="button"
-                            aria-expanded={optionsOpen}
-                            onClick={() => setSavedOptionsId(optionsOpen ? null : item.id)}
-                            className="min-w-0 flex-1 break-words text-left hover:underline"
-                          >
-                            {item.text}
-                          </button>
+                          {editingId === item.id ? (
+                            titleEditor(item)
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                aria-expanded={optionsOpen}
+                                onClick={() => setSavedOptionsId(optionsOpen ? null : item.id)}
+                                className="min-w-0 flex-1 break-words text-left hover:underline"
+                              >
+                                {item.text}
+                              </button>
+                              {pencil(item)}
+                            </>
+                          )}
                         </div>
                         <div className="mt-2 flex flex-wrap gap-2 text-xs">
                           {optionsOpen && (
@@ -567,7 +615,13 @@ export function InboxView({
                       {/* Title line + action row below — mirrors the Needs-review row layout. */}
                       <div className="flex items-start gap-3">
                         <DragGrip id={item.id} label={item.text} />
-                        <span className="min-w-0 flex-1 break-words line-through">{item.text}</span>
+                        {editingId === item.id ? (
+                          titleEditor(item)
+                        ) : (
+                          <span className="min-w-0 flex-1 break-words">
+                            <span className="line-through">{item.text}</span> {pencil(item)}
+                          </span>
+                        )}
                       </div>
                       <div className="mt-2 flex flex-wrap gap-2 text-xs">
                         <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => reopenItem(item.id, undefined))}>
@@ -588,6 +642,36 @@ export function InboxView({
         </section>
       </DndContext>
     </div>
+  );
+}
+
+/** Inline title editor swapped in for a row's title while its ✎ is active.
+ * Enter saves, Escape cancels. */
+function EditTitleInput({
+  initial,
+  onSave,
+  onCancel,
+}: {
+  initial: string;
+  onSave: (value: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  return (
+    <input
+      autoFocus
+      value={value}
+      aria-label="Edit title"
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          onSave(value.trim());
+        }
+        if (e.key === "Escape") onCancel();
+      }}
+      className="border-input bg-background focus-visible:ring-ring min-w-0 flex-1 rounded-md border px-2 py-1 text-sm outline-none focus-visible:ring-2"
+    />
   );
 }
 
@@ -672,6 +756,8 @@ function ItemRow({
   onDismissPrompt,
   moveMenu,
   dragGrip,
+  editButton,
+  titleEditor,
 }: {
   item: Item;
   settings: AgingSettings;
@@ -688,6 +774,8 @@ function ItemRow({
   onDismissPrompt: () => void;
   moveMenu?: React.ReactNode;
   dragGrip?: React.ReactNode;
+  editButton?: React.ReactNode;
+  titleEditor?: React.ReactNode;
 }) {
   const aging = isAging(item.createdAt, settings);
   const tier = freshnessTier(item.createdAt, item.freshenedAt, settings);
@@ -704,7 +792,12 @@ function ItemRow({
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex items-center gap-2">
             <StatusPill tier={tier} voice={voice} />
-            <span className="break-words">{item.text}</span>
+            {titleEditor ?? (
+              <>
+                <span className="break-words">{item.text}</span>
+                {editButton}
+              </>
+            )}
           </div>
           <AgeLabel createdAt={item.createdAt} aging={aging} />
         </div>
