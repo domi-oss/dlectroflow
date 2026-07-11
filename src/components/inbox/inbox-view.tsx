@@ -36,7 +36,7 @@ import {
 import { startBreakdown } from "@/app/actions/breakdown";
 import { StatusPill } from "@/components/inbox/status-pill";
 import { TaskSteps } from "@/components/breakdown/task-steps";
-import { bucketItems, bucketOfItem, type Item, type BucketId } from "@/components/inbox/bucket";
+import { bucketItems, bucketOfItem, isBucketId, type Item, type BucketId } from "@/components/inbox/bucket";
 import { dropPlan } from "@/components/inbox/move-dispatch";
 import { MoveToMenu } from "@/components/inbox/move-to-menu";
 import { MultiStepDropPrompt } from "@/components/inbox/multi-step-drop-prompt";
@@ -55,8 +55,8 @@ export function dragEndToMove(
   activeId: string,
   overId: string | null,
 ): { itemId: string; target: BucketId } | null {
-  if (!overId) return null;
-  return { itemId: activeId, target: overId as BucketId };
+  if (!overId || !isBucketId(overId)) return null;
+  return { itemId: activeId, target: overId };
 }
 
 // Deep-link targets for each section's "see all →" link (Library, Task 10+).

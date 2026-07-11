@@ -1,19 +1,16 @@
 # Handoff
 
 ## State
-- Phase 1 (voice foundation) SHIPPED — MR !24 merged to main (30e037b); Duo-approved.
-- Phase 2 plan written + committed on branch `feat/inbox-ia-freshness` (docs/superpowers/plans/2026-07-08-inbox-ia-freshness.md, 11 TDD tasks: Inbox IA + 4-tier freshness + 24h prompt + capture/delete UX + ☰ menu). NOT executed yet.
-- Subgroup move DONE: both projects now under `gl-demo-ultimate-dtop/domi-oss` (public); policy project linked. dlectroflow id 84020916, policy id 84119955 (IDs stable).
-- MR !25 (dlectroflow, DRAFT): move-prep path fixes (values.yaml image.repo, .gitlab-ci.yml AGENT_CONTEXT, agent config, docs) → now safe to un-draft + merge post-transfer.
-- MR !2 (policy project): fixed invalid policy YAML — `newly_detected` (removed GL 17.0) → `new_needs_triage`+`new_dismissed`. NOT merged.
-- Secrets-in-history scan: CLEAN (gitleaks: 4 hits, all the test fixture "test-secret-…-xxxxx"; no rotation needed).
+- Phase B of #10 (inbox bucket board) BUILT + pushed: branch `feat/complete-bucket-phase-b` @ 3df1e3c, **MR !31** → main (reviewer Duo, milestone v0.0.2), pipeline #163 running. NOT merged.
+- 11-task TDD plan (`docs/superpowers/plans/2026-07-10-complete-bucket-phase-b.md`), subagent-driven, whole-branch opus review found+fixed 2 real bugs (snooze didn't un-triage → Save-for-later silent no-op; completed→Multi-step reopened before confirm). vitest 342/342, tsc0, build OK, /inbox boot smoke clean.
+- Delivered: `@dnd-kit/core`, always-visible 4-bucket board + empty states, drag+action-on-drop (`dropPlan`/`bucketOfItem`/`moveItemToBucket`), "Move to…" a11y menu, multi-step drop prompt, tap-to-expand inline TaskSteps, `moveToReview` (keeps task).
 
 ## Next
-1. Merge MR !2 (policy fix) — blocks security-policy enforcement while invalid. Duo review was BROKEN today.
-2. Un-draft + merge MR !25 (path fixes) → CI rebuilds/redeploys on new registry path.
-3. Repoint local git remote to …/domi-oss/dlectroflow; then execute Phase 2 plan (subagent-driven, TDD).
+1. Watch !31 pipeline + Duo review → get owner merge OK → merge → prod-deploy verify → tick #10 Phase B checkboxes (JSON PUT).
+2. Manual drag UX verify in a browser (checklist in the !31 description — can't unit-test drag).
+3. Optional fast-follows in !31 "Known Minors" (orphaned `progress.notScheduled`, "wake now" not via t(), MoveToMenu Escape/outside-close).
 
 ## Context
-- Duo review is currently broken (user's words) — don't block merges waiting on it today.
-- Before making the APP project public: turn OFF "Public pipelines" + verify all CI secrets Masked+Protected. History is clean so no secret rotation required.
-- Merges need explicit owner OK. Update work-item DESCRIPTIONS via JSON PUT + Content-Type header (glab api --input, not -f). .superpowers/ is gitignored; docs/superpowers/ is tracked.
+- Merges need owner OK + Duo; if Duo errors, owner pre-authorized self-review+document+merge on green pipeline. Push freely.
+- SDD ledger `.superpowers/sdd/progress.md` has full task-by-task recovery map.
+- `git -C ~/workdev/dlectroflow` (CWD drifts to parent). Component tests need `// @vitest-environment jsdom` + `afterEach(cleanup)`. Local DB: rancher docker + `docker compose up -d db`.

@@ -37,7 +37,19 @@ export type Buckets = {
   completedTodayCount: number;
 };
 
-export type BucketId = "needsReview" | "singleTask" | "multiStep" | "savedLater" | "completed";
+export const BUCKET_IDS = [
+  "needsReview",
+  "singleTask",
+  "multiStep",
+  "savedLater",
+  "completed",
+] as const;
+
+export type BucketId = (typeof BUCKET_IDS)[number];
+
+export function isBucketId(id: string): id is BucketId {
+  return (BUCKET_IDS as readonly string[]).includes(id);
+}
 
 const toMs = (d: Date | string): number =>
   (typeof d === "string" ? new Date(d) : d).getTime();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { t, type Voice } from "@/lib/strings";
 
 /**
@@ -21,6 +21,14 @@ export function MultiStepDropPrompt({
   onSaveLater: () => void;
   onCancel: () => void;
 }) {
+  const firstButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    // Focus the primary action on mount so keyboard/SR users land in the
+    // dialog instead of staying on whatever triggered it.
+    firstButtonRef.current?.focus();
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCancel();
@@ -32,21 +40,24 @@ export function MultiStepDropPrompt({
   return (
     <div
       role="dialog"
-      aria-label={t("action.moveTo", voice)}
+      aria-modal="true"
+      aria-label={t("prompt.breakNow", voice)}
       className="mt-2 space-y-2 rounded-md border bg-background px-3 py-2 text-xs shadow-sm"
     >
       <p className="text-muted-foreground break-words">{itemText}</p>
       <div className="flex flex-wrap gap-2">
         <button
+          ref={firstButtonRef}
+          type="button"
           onClick={onBreakNow}
           className="bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium"
         >
           {t("prompt.breakNow", voice)}
         </button>
-        <button onClick={onSaveLater} className="hover:bg-accent rounded-md border px-2.5 py-1">
+        <button type="button" onClick={onSaveLater} className="hover:bg-accent rounded-md border px-2.5 py-1">
           {t("prompt.saveInstead", voice)}
         </button>
-        <button onClick={onCancel} className="text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1">
+        <button type="button" onClick={onCancel} className="text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1">
           {t("action.cancel", voice)}
         </button>
       </div>

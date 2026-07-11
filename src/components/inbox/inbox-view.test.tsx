@@ -331,6 +331,9 @@ describe("dragEndToMove (pure)", () => {
   it("returns null when dropped outside any bucket", () => {
     expect(dragEndToMove("item-1", null)).toBeNull();
   });
+  it("returns null when the drop target is not a bucket id", () => {
+    expect(dragEndToMove("item-1", "some-other-droppable")).toBeNull();
+  });
 });
 
 describe("InboxView — Move to… menu dispatch", () => {

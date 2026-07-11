@@ -40,4 +40,18 @@ describe("MultiStepDropPrompt", () => {
     await userEvent.keyboard("{Escape}");
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
+
+  it("is an aria-modal dialog that focuses the primary action on mount", () => {
+    setup();
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(screen.getByRole("button", { name: "Break into steps now" })).toHaveFocus();
+  });
+
+  it("renders all actions as type=button so it can't submit an enclosing form", () => {
+    setup();
+    for (const button of screen.getAllByRole("button")) {
+      expect(button).toHaveAttribute("type", "button");
+    }
+  });
 });
