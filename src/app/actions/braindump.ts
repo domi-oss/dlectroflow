@@ -34,12 +34,44 @@ export async function triageBrainDumpItem(id: string) {
   if (!existing) return;
   await prisma.brainDumpItem.update({
     where: { id },
-    data: { status: BrainDumpStatus.Triaged, triagedAt: new Date() },
+    data: { status: BrainDumpStatus.Triaged, triagedAt: new Date(), breakdownRequestedAt: null },
   });
   await maybeAwardInboxZero(workspaceId);
   revalidatePath(INBOX_PATH);
 }
 
+/**
+ * Move an item into Multi-step before it has any steps (Phase B drop/menu
+ * target): triages it and stamps breakdownRequestedAt so it sits in the
+ * Multi-step bucket showing a "Break into steps now?" call-to-action instead
+ * of silently landing in Single-task. Any move to another bucket clears the
+ * stamp (you changed your mind).
+ */
+export async function requestBreakdown(id: string) {
+  const workspaceId = await currentWorkspaceId();
+  const existing = await prisma.brainDumpItem.findFirst({ where: { id, workspaceId } });
+  if (!existing) return;
+  await prisma.brainDumpItem.update({
+    where: { id },
+    data: {
+      status: BrainDumpStatus.Triaged,
+      triagedAt: new Date(),
+      breakdownRequestedAt: new Date(),
+      snoozedUntil: null,
+    },
+  });
+  await maybeAwardInboxZero(workspaceId);
+  revalidatePath(INBOX_PATH);
+}
+
+/**
+ * "Save for later" — a saved-for-later item is a paused inbox item regardless
+ * of where it came from, so snoozing also un-triages it (status → inbox,
+ * triagedAt → null). Otherwise a triaged single-task/multi-step to-do stays
+ * in its original bucket (bucket.ts's savedLater rule requires status ===
+ * "inbox"), making the move a silent no-op. Waking via triageBrainDumpItem
+ * re-triages symmetrically.
+ */
 export async function snoozeBrainDumpItem(id: string, minutes: number) {
   const workspaceId = await currentWorkspaceId();
   const existing = await prisma.brainDumpItem.findFirst({ where: { id, workspaceId } });
@@ -47,11 +79,33 @@ export async function snoozeBrainDumpItem(id: string, minutes: number) {
   await prisma.brainDumpItem.update({
     where: { id },
     data: {
+      status: BrainDumpStatus.Inbox,
+      triagedAt: null,
       snoozedUntil: new Date(Date.now() + minutes * 60_000),
       remindedAt: null,
+      breakdownRequestedAt: null,
     },
   });
   await maybeAwardInboxZero(workspaceId);
+  revalidatePath(INBOX_PATH);
+}
+
+/**
+ * Rename an item from its row (✎). Keeps a linked task's title in sync so
+ * the breakdown editor / focus timer never show a stale name (steps keep
+ * their own texts). Empty input is a no-op.
+ */
+export async function renameItem(id: string, text: string) {
+  const workspaceId = await currentWorkspaceId();
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  const existing = await prisma.brainDumpItem.findFirst({ where: { id, workspaceId } });
+  if (!existing) return;
+  await prisma.brainDumpItem.update({ where: { id }, data: { text: trimmed } });
+  if (existing.taskId) {
+    await prisma.task.update({ where: { id: existing.taskId }, data: { title: trimmed } });
+    revalidatePath(`/tasks/${existing.taskId}`);
+  }
   revalidatePath(INBOX_PATH);
 }
 
@@ -118,11 +172,56 @@ export async function keepAsTask(id: string) {
       status: BrainDumpStatus.Triaged,
       triagedAt: new Date(),
       taskId: task.id,
+      breakdownRequestedAt: null,
     },
   });
   await maybeAwardInboxZero(workspaceId);
   revalidatePath(INBOX_PATH);
   return task.id;
+}
+
+/**
+ * ▶ Focus on a single to-do: the focus timer is step-based, so ensure the
+ * item has a task with one step mirroring its text (created on first use,
+ * idempotent) and return the id of the first not-done step to focus on.
+ * A one-step task still counts as a single to-do (bucket.ts: multi-step
+ * needs 2+ steps), so the item stays in its bucket.
+ */
+export async function ensureFocusStep(id: string): Promise<string | null> {
+  const workspaceId = await currentWorkspaceId();
+  const item = await prisma.brainDumpItem.findFirst({
+    where: { id, workspaceId },
+    include: { task: { include: { steps: { orderBy: { order: "asc" } } } } },
+  });
+  if (!item) return null;
+
+  let taskId = item.taskId;
+  let steps = item.task?.steps ?? [];
+
+  if (!taskId) {
+    const task = await prisma.task.create({
+      data: {
+        title: item.text,
+        source: TaskSource.BrainDump,
+        status: TaskStatus.Active,
+        workspaceId,
+      },
+    });
+    taskId = task.id;
+    await prisma.brainDumpItem.update({ where: { id }, data: { taskId } });
+    steps = [];
+  }
+
+  if (steps.length === 0) {
+    const step = await prisma.step.create({
+      data: { taskId, text: item.text, order: 1, total: 1, estMinutes: 10 },
+    });
+    revalidatePath(INBOX_PATH);
+    return step.id;
+  }
+
+  const next = steps.find((s) => !s.done) ?? steps[0];
+  return next.id;
 }
 
 export async function completeItem(id: string) {
@@ -141,7 +240,10 @@ export async function completeItem(id: string) {
     await maybeAwardTenStepsDay(workspaceId);
   }
 
-  await prisma.brainDumpItem.update({ where: { id }, data: { completedAt: new Date() } });
+  await prisma.brainDumpItem.update({
+    where: { id },
+    data: { completedAt: new Date(), breakdownRequestedAt: null },
+  });
   await logReward(workspaceId, RewardType.TaskComplete);
   await touchStreakOnCompletion(workspaceId);
   await awardBadge(workspaceId, BadgeKey.TaskComplete);
@@ -182,4 +284,27 @@ export async function reopenItem(id: string, stepIds?: string[]) {
   revalidatePath(INBOX_PATH);
   revalidatePath("/dashboard");
   if (item.task) revalidatePath(`/tasks/${item.task.id}`);
+}
+
+/**
+ * Un-triage an item back to the "needs review" queue (Phase B drag/menu target).
+ * Keeps the linked task + its steps intact so re-triaging reuses the same
+ * breakdown (startBreakdown returns the existing taskId). Only the item's
+ * placement changes: status → inbox, and triaged/snoozed/completed cleared.
+ */
+export async function moveToReview(id: string) {
+  const workspaceId = await currentWorkspaceId();
+  const existing = await prisma.brainDumpItem.findFirst({ where: { id, workspaceId } });
+  if (!existing) return;
+  await prisma.brainDumpItem.updateMany({
+    where: { id, workspaceId },
+    data: {
+      status: BrainDumpStatus.Inbox,
+      triagedAt: null,
+      snoozedUntil: null,
+      completedAt: null,
+      breakdownRequestedAt: null,
+    },
+  });
+  revalidatePath(INBOX_PATH);
 }

@@ -91,6 +91,10 @@ model BrainDumpItem {
   freshenedAt      DateTime?
   promptDismissedAt DateTime?
   completedAt      DateTime?
+  // Set when the item is moved into Multi-step without steps yet — it sits in
+  // the Multi-step bucket with a "Break into steps now?" call-to-action.
+  // Cleared by any move to another bucket.
+  breakdownRequestedAt DateTime?
   taskId           String?
   task             Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
   workspaceId      String

@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act, fireEvent, cleanup, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { InboxView } from "@/components/inbox/inbox-view";
+import { InboxView, dragEndToMove } from "@/components/inbox/inbox-view";
 import type { Item } from "@/components/inbox/bucket";
 import type { AgingSettings } from "@/lib/aging";
 
@@ -23,6 +23,10 @@ vi.mock("@/app/actions/braindump", () => ({
   dismissPrompt: vi.fn().mockResolvedValue(undefined),
   completeItem: vi.fn().mockResolvedValue(undefined),
   reopenItem: vi.fn().mockResolvedValue(undefined),
+  moveToReview: vi.fn().mockResolvedValue(undefined),
+  requestBreakdown: vi.fn().mockResolvedValue(undefined),
+  ensureFocusStep: vi.fn().mockResolvedValue(null),
+  renameItem: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/app/actions/breakdown", () => ({
@@ -34,6 +38,12 @@ vi.mock("@/lib/notifications", () => ({
   requestNotificationPermission: vi.fn().mockResolvedValue("default"),
   registerServiceWorker: vi.fn().mockResolvedValue(null),
   showReminder: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@/components/breakdown/task-steps", () => ({
+  TaskSteps: ({ steps }: { steps: { id: string; text: string }[] }) => (
+    <ol data-testid="inline-steps">{steps.map((s) => <li key={s.id}>{s.text}</li>)}</ol>
+  ),
 }));
 
 import {
@@ -63,6 +73,7 @@ function makeItem(overrides: Partial<Item> = {}): Item {
     taskId: null,
     freshenedAt: null,
     promptDismissedAt: null,
+    breakdownRequestedAt: null,
     stepsTotal: 0,
     stepsDone: 0,
     taskStatus: null,
@@ -70,6 +81,22 @@ function makeItem(overrides: Partial<Item> = {}): Item {
     steps: [],
     ...overrides,
   };
+}
+
+function makeMultiStep() {
+  return makeItem({
+    id: "m1",
+    text: "plan trip",
+    status: "triaged",
+    taskId: "t1",
+    stepsTotal: 3,
+    stepsDone: 1,
+    steps: [
+      { id: "s1", order: 1, text: "book", done: true, estMinutes: 10, subtaskEmoji: null },
+      { id: "s2", order: 2, text: "pack", done: false, estMinutes: 20, subtaskEmoji: null },
+      { id: "s3", order: 3, text: "go", done: false, estMinutes: 5, subtaskEmoji: null },
+    ],
+  });
 }
 
 beforeEach(() => {
@@ -260,5 +287,313 @@ describe("InboxView — complete + completed bucket", () => {
     const row = screen.getByText("finished").closest("li")!;
     await user.click(within(row).getByRole("button", { name: /Reopen|Undo/ }));
     expect(reopenItem).toHaveBeenCalledWith("d1", undefined);
+  });
+});
+
+describe("InboxView — always-visible bucket board", () => {
+  it("shows all four To-Do buckets with empty states when there are no to-dos", () => {
+    render(<InboxView initialItems={[]} settings={settings} />);
+    // Section headers present even when empty
+    expect(screen.getByText("Multi-step to-dos")).toBeInTheDocument();
+    expect(screen.getByText("Single-task to-dos")).toBeInTheDocument();
+    expect(screen.getByText("Saved for later")).toBeInTheDocument();
+    expect(screen.getByText("Completed")).toBeInTheDocument();
+    // "Nothing here yet" appears for the empty buckets (at least the 3 non-completed)
+    expect(screen.getAllByText("Nothing here yet").length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("does not show the empty helper for a bucket that has items", () => {
+    const todo = makeItem({ id: "t1", text: "a todo", status: "triaged" });
+    render(<InboxView initialItems={[todo]} settings={settings} />);
+    const single = screen.getByText("a todo").closest<HTMLElement>("section, div")!;
+    expect(within(single).queryByText("Nothing here yet")).not.toBeInTheDocument();
+  });
+});
+
+describe("InboxView — multi-step step count + expand", () => {
+  it("shows a step-count indicator", () => {
+    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} />);
+    expect(screen.getByText(/3 steps · 1 done/)).toBeInTheDocument();
+  });
+
+  it("expands the inline step list when the row body is tapped", async () => {
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} />);
+    expect(screen.queryByTestId("inline-steps")).not.toBeInTheDocument();
+    // Exact match (not a substring regex): Task 10 adds a "Drag plan trip" grip
+    // button alongside this title button, so a loose /plan trip/ match would be
+    // ambiguous between the two.
+    await user.click(screen.getByRole("button", { name: "plan trip" }));
+    expect(screen.getByTestId("inline-steps")).toBeInTheDocument();
+  });
+});
+
+describe("dragEndToMove (pure)", () => {
+  it("maps an over-a-bucket drop to { itemId, target }", () => {
+    expect(dragEndToMove("item-1", "completed")).toEqual({ itemId: "item-1", target: "completed" });
+  });
+  it("returns null when dropped outside any bucket", () => {
+    expect(dragEndToMove("item-1", null)).toBeNull();
+  });
+  it("returns null when the drop target is not a bucket id", () => {
+    expect(dragEndToMove("item-1", "some-other-droppable")).toBeNull();
+  });
+});
+
+describe("InboxView — Move to… menu dispatch", () => {
+  it("a single-task 'Move to Completed' completes the item", async () => {
+    const { completeItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeItem({ id: "s1", text: "todo", status: "triaged" })]} settings={settings} />);
+    const row = screen.getByText("todo").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Move to…" }));
+    await user.click(within(row).getByRole("menuitem", { name: /Completed/ }));
+    expect(completeItem).toHaveBeenCalledWith("s1");
+  });
+
+  it("a single-task 'Move to Needs review' un-triages via moveToReview", async () => {
+    const { moveToReview } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeItem({ id: "s1", text: "todo", status: "triaged" })]} settings={settings} />);
+    const row = screen.getByText("todo").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Move to…" }));
+    await user.click(within(row).getByRole("menuitem", { name: /Needs review/ }));
+    expect(moveToReview).toHaveBeenCalledWith("s1");
+  });
+
+  it("moving a Completed item to Single-task reopens it first", async () => {
+    const { reopenItem, triageBrainDumpItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    const done = makeItem({ id: "d1", text: "done item", status: "triaged", completedAt: new Date() });
+    render(<InboxView initialItems={[done]} settings={settings} />);
+    const row = screen.getByText("done item").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Move to…" }));
+    await user.click(within(row).getByRole("menuitem", { name: /Single-task/ }));
+    expect(reopenItem).toHaveBeenCalledWith("d1", undefined);
+    expect(triageBrainDumpItem).toHaveBeenCalledWith("d1");
+  });
+
+  it("moving an item to Multi-step moves immediately via requestBreakdown (no prompt)", async () => {
+    const { requestBreakdown } = await import("@/app/actions/braindump");
+    const { startBreakdown } = await import("@/app/actions/breakdown");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeItem({ id: "n1", text: "big thing" })]} settings={settings} />);
+    const row = screen.getByText("big thing").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Move to…" }));
+    await user.click(within(row).getByRole("menuitem", { name: /Multi-step/ }));
+    expect(requestBreakdown).toHaveBeenCalledWith("n1");
+    // The editor only opens from the row's "Break into steps now?" CTA.
+    expect(startBreakdown).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("moving a Completed item to Multi-step reopens it first, then requests the breakdown", async () => {
+    const { reopenItem, requestBreakdown } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    const done = makeItem({ id: "d1", text: "finished big thing", status: "triaged", completedAt: new Date() });
+    render(<InboxView initialItems={[done]} settings={settings} />);
+    const row = screen.getByText("finished big thing").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Move to…" }));
+    await user.click(within(row).getByRole("menuitem", { name: /Multi-step/ }));
+    expect(reopenItem).toHaveBeenCalledWith("d1", undefined);
+    expect(requestBreakdown).toHaveBeenCalledWith("d1");
+  });
+});
+
+describe("InboxView — awaiting-breakdown row (red CTA)", () => {
+  const awaiting = () =>
+    makeItem({
+      id: "aw1",
+      text: "needs a plan",
+      status: "triaged",
+      breakdownRequestedAt: new Date(),
+      stepsTotal: 0,
+    });
+
+  it("renders an awaiting-breakdown item in the Multi-step bucket with a 'Break into steps now?' CTA", () => {
+    render(<InboxView initialItems={[awaiting()]} settings={settings} />);
+    const row = screen.getByText("needs a plan").closest("li")!;
+    expect(row.closest('[data-bucket="multiStep"]')).not.toBeNull();
+    expect(within(row).getByRole("button", { name: "Break into steps now?" })).toBeInTheDocument();
+    // No step count on an awaiting row.
+    expect(within(row).queryByText(/steps ·/)).not.toBeInTheDocument();
+  });
+
+  it("clicking the CTA starts the breakdown and navigates to the editor", async () => {
+    const { startBreakdown } = await import("@/app/actions/breakdown");
+    (startBreakdown as ReturnType<typeof vi.fn>).mockResolvedValue("t9");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[awaiting()]} settings={settings} />);
+    await user.click(screen.getByRole("button", { name: "Break into steps now?" }));
+    expect(startBreakdown).toHaveBeenCalledWith("aw1");
+    expect(push).toHaveBeenCalledWith("/tasks/t9");
+  });
+
+  it("not clicking the CTA blocks nothing: the row still moves elsewhere via Move to…", async () => {
+    const { triageBrainDumpItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[awaiting()]} settings={settings} />);
+    const row = screen.getByText("needs a plan").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Move to…" }));
+    await user.click(within(row).getByRole("menuitem", { name: /Single-task/ }));
+    expect(triageBrainDumpItem).toHaveBeenCalledWith("aw1");
+  });
+});
+
+describe("InboxView — ✎ edit title", () => {
+  it("pencil → input → Enter renames the item (review row)", async () => {
+    const { renameItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeItem({ id: "r1", text: "old name" })]} settings={settings} />);
+    await user.click(screen.getByRole("button", { name: "Edit old name" }));
+    const input = screen.getByRole("textbox", { name: "Edit title" });
+    await user.clear(input);
+    await user.type(input, "new name{Enter}");
+    expect(renameItem).toHaveBeenCalledWith("r1", "new name");
+  });
+
+  it("Escape cancels without renaming", async () => {
+    const { renameItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeItem({ id: "r1", text: "old name" })]} settings={settings} />);
+    await user.click(screen.getByRole("button", { name: "Edit old name" }));
+    await user.keyboard("{Escape}");
+    expect(renameItem).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox", { name: "Edit title" })).not.toBeInTheDocument();
+    expect(screen.getByText("old name")).toBeInTheDocument();
+  });
+
+  it("every bucket row has a pencil", () => {
+    const items = [
+      makeItem({ id: "r1", text: "review item" }),
+      makeItem({ id: "s1", text: "single item", status: "triaged" }),
+      makeMultiStep(),
+      makeItem({ id: "v1", text: "saved item", snoozedUntil: new Date(Date.now() + 3_600_000) }),
+      makeItem({ id: "d1", text: "done item", status: "triaged", completedAt: new Date() }),
+    ];
+    render(<InboxView initialItems={items} settings={settings} />);
+    for (const text of ["review item", "single item", "plan trip", "saved item", "done item"]) {
+      expect(screen.getByRole("button", { name: `Edit ${text}` })).toBeInTheDocument();
+    }
+  });
+
+  it("unchanged text does not fire the action", async () => {
+    const { renameItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeItem({ id: "r1", text: "same" })]} settings={settings} />);
+    await user.click(screen.getByRole("button", { name: "Edit same" }));
+    await user.keyboard("{Enter}");
+    expect(renameItem).not.toHaveBeenCalled();
+  });
+});
+
+describe("InboxView — single to-do ▶ Focus", () => {
+  it("clicking ▶ Focus ensures the focus step and navigates to the timer", async () => {
+    const { ensureFocusStep } = await import("@/app/actions/braindump");
+    (ensureFocusStep as ReturnType<typeof vi.fn>).mockResolvedValue("step-7");
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        initialItems={[makeItem({ id: "s1", text: "focusable todo", status: "triaged" })]}
+        settings={settings}
+      />,
+    );
+    const row = screen.getByText("focusable todo").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "▶ Focus" }));
+    expect(ensureFocusStep).toHaveBeenCalledWith("s1");
+    expect(push).toHaveBeenCalledWith("/focus/step-7");
+  });
+
+  it("does not navigate when no step id comes back", async () => {
+    const { ensureFocusStep } = await import("@/app/actions/braindump");
+    (ensureFocusStep as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        initialItems={[makeItem({ id: "s1", text: "focusable todo", status: "triaged" })]}
+        settings={settings}
+      />,
+    );
+    const row = screen.getByText("focusable todo").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "▶ Focus" }));
+    expect(push).not.toHaveBeenCalled();
+  });
+});
+
+describe("InboxView — saved-for-later inline sorting options", () => {
+  const saved = () =>
+    makeItem({
+      id: "sv1",
+      text: "stored thing",
+      snoozedUntil: new Date(Date.now() + 60 * 60_000),
+    });
+
+  it("clicking a saved row reveals the sorting options; clicking again hides them", async () => {
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[saved()]} settings={settings} />);
+    const row = screen.getByText("stored thing").closest("li")!;
+    expect(within(row).queryByRole("button", { name: /Break into steps/ })).not.toBeInTheDocument();
+
+    await user.click(within(row).getByRole("button", { name: "stored thing" }));
+    expect(within(row).getByRole("button", { name: /Break into steps/ })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Add to-do" })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Complete" })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Delete" })).toBeInTheDocument();
+
+    await user.click(within(row).getByRole("button", { name: "stored thing" }));
+    expect(within(row).queryByRole("button", { name: /Break into steps/ })).not.toBeInTheDocument();
+  });
+
+  it("'Review now' swaps to the full review-row button set (Review now disappears) — no triage", async () => {
+    const { triageBrainDumpItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[saved()]} settings={settings} />);
+    const row = screen.getByText("stored thing").closest("li")!;
+    expect(row.className).toContain("opacity-70"); // idle = dimmed
+
+    await user.click(within(row).getByRole("button", { name: "Review now" }));
+    for (const name of [/Break into steps/, "Add to-do", "Save for later", "Complete", "Move to…", "Delete"]) {
+      expect(within(row).getByRole("button", { name })).toBeInTheDocument();
+    }
+    expect(within(row).queryByRole("button", { name: "Review now" })).not.toBeInTheDocument();
+    expect(row.className).not.toContain("opacity-70"); // reviewing = looks active
+    expect(triageBrainDumpItem).not.toHaveBeenCalled();
+
+    // Collapse via the row title — back to idle.
+    await user.click(within(row).getByRole("button", { name: "stored thing" }));
+    expect(within(row).getByRole("button", { name: "Review now" })).toBeInTheDocument();
+  });
+
+  it("'Save for later' in the open options re-snoozes and puts the row back to sleep", async () => {
+    const { snoozeBrainDumpItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[saved()]} settings={settings} />);
+    const row = screen.getByText("stored thing").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Review now" }));
+    await user.click(within(row).getByRole("button", { name: "Save for later" }));
+    expect(snoozeBrainDumpItem).toHaveBeenCalledWith("sv1", 60);
+    expect(within(row).getByRole("button", { name: "Review now" })).toBeInTheDocument();
+  });
+
+  it("the revealed options dispatch the same actions as a review row", async () => {
+    const { keepAsTask } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[saved()]} settings={settings} />);
+    const row = screen.getByText("stored thing").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "stored thing" }));
+    await user.click(within(row).getByRole("button", { name: "Add to-do" }));
+    expect(keepAsTask).toHaveBeenCalledWith("sv1");
+  });
+
+  it("Delete in the options uses the two-step confirm", async () => {
+    const { deleteBrainDumpItem: del } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[saved()]} settings={settings} />);
+    const row = screen.getByText("stored thing").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "stored thing" }));
+    await user.click(within(row).getByRole("button", { name: "Delete" }));
+    expect(del).not.toHaveBeenCalled(); // first click only reveals confirm
+    await user.click(within(row).getByRole("button", { name: "Delete" }));
+    expect(del).toHaveBeenCalledWith("sv1");
   });
 });

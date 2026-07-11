@@ -29,6 +29,7 @@ export const STRINGS = {
   "action.cancel":       { plain: "Cancel",            playful: "Cancel" },
   "action.complete":     { plain: "Complete",          playful: "✅ Complete" },
   "action.reopen":       { plain: "Reopen",            playful: "Reopen" },
+  "action.moveTo":       { plain: "Move to…",          playful: "Move to…" },
 
   // ── Inbox section headers ──────────────────────────────────────────────────
   "section.needsReview":    { plain: "Needs review",      playful: "Needs review" },
@@ -38,6 +39,9 @@ export const STRINGS = {
   "section.savedLater":     { plain: "Saved for later",   playful: "🥫 Pantry" },
   "section.completed":      { plain: "Completed",         playful: "🍽️ Cleared plate" },
   "section.completedToday": { plain: "Completed today",   playful: "Cleared today" },
+
+  // ── Bucket board (Phase B) ─────────────────────────────────────────────────
+  "bucket.empty":        { plain: "Nothing here yet",  playful: "Nothing here yet" },
 
   // ── Nav / hub labels ───────────────────────────────────────────────────────
   "nav.inbox":           { plain: "Inbox",             playful: "🧠 Inbox" },
@@ -97,6 +101,7 @@ export const STRINGS = {
 
   // ── Prompts ────────────────────────────────────────────────────────────────
   "prompt.stillNeeded":  { plain: "This has been sitting a while — still needed?", playful: "🕐 This snack's been sitting a while — still want it?" },
+  "prompt.breakNow":     { plain: "Break into steps now?", playful: "🍿 Snack-size it now?" },
 
   // ── Inbox empty state ──────────────────────────────────────────────────────
   "inbox.zero":          { plain: "Inbox zero. Nothing to review.", playful: "🎉 Inbox zero! Nothing to review." },
@@ -106,6 +111,7 @@ export const STRINGS = {
 
   // ── Pills ──────────────────────────────────────────────────────────────────
   "pill.toDo":           { plain: "▶ to-do",           playful: "▶ to-do" },
+  "action.reviewNow":    { plain: "Review now",        playful: "🥫 Review now" },
 
   // ── Progress ───────────────────────────────────────────────────────────────
   "progress.done":       { plain: "done",              playful: "done" },
