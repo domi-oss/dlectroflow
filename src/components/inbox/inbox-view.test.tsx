@@ -544,18 +544,35 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     expect(within(row).queryByRole("button", { name: /Break into steps/ })).not.toBeInTheDocument();
   });
 
-  it("'Review now' toggles the in-bucket options exactly like pressing the row — no triage", async () => {
+  it("'Review now' swaps to the full review-row button set (Review now disappears) — no triage", async () => {
     const { triageBrainDumpItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
     render(<InboxView initialItems={[saved()]} settings={settings} />);
     const row = screen.getByText("stored thing").closest("li")!;
+    expect(row.className).toContain("opacity-70"); // idle = dimmed
 
     await user.click(within(row).getByRole("button", { name: "Review now" }));
-    expect(within(row).getByRole("button", { name: /Break into steps/ })).toBeInTheDocument();
+    for (const name of [/Break into steps/, "Add to-do", "Save for later", "Complete", "Move to…", "Delete"]) {
+      expect(within(row).getByRole("button", { name })).toBeInTheDocument();
+    }
+    expect(within(row).queryByRole("button", { name: "Review now" })).not.toBeInTheDocument();
+    expect(row.className).not.toContain("opacity-70"); // reviewing = looks active
     expect(triageBrainDumpItem).not.toHaveBeenCalled();
 
+    // Collapse via the row title — back to idle.
+    await user.click(within(row).getByRole("button", { name: "stored thing" }));
+    expect(within(row).getByRole("button", { name: "Review now" })).toBeInTheDocument();
+  });
+
+  it("'Save for later' in the open options re-snoozes and puts the row back to sleep", async () => {
+    const { snoozeBrainDumpItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[saved()]} settings={settings} />);
+    const row = screen.getByText("stored thing").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Review now" }));
-    expect(within(row).queryByRole("button", { name: /Break into steps/ })).not.toBeInTheDocument();
+    await user.click(within(row).getByRole("button", { name: "Save for later" }));
+    expect(snoozeBrainDumpItem).toHaveBeenCalledWith("sv1", 60);
+    expect(within(row).getByRole("button", { name: "Review now" })).toBeInTheDocument();
   });
 
   it("the revealed options dispatch the same actions as a review row", async () => {

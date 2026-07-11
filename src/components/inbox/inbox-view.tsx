@@ -511,13 +511,14 @@ export function InboxView({
               {savedLater.length === 0 ? (
                 <EmptyBucket voice={voice} />
               ) : (
-                <ul className="space-y-2 opacity-70">
+                <ul className="space-y-2">
                   {savedLater.map((item) => {
                     /* Tapping a saved row reveals the same sorting options a
-                       review row has — the pantry is "waiting for your review". */
+                       review row has — the pantry is "waiting for your review".
+                       Idle rows are dimmed; a row under review looks active. */
                     const optionsOpen = savedOptionsId === item.id;
                     return (
-                      <li key={item.id} className="rounded-lg border px-4 py-3 text-sm">
+                      <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", !optionsOpen && "opacity-70")}>
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
                         <div className="flex items-start gap-3">
                           <DragGrip id={item.id} label={item.text} />
@@ -537,8 +538,11 @@ export function InboxView({
                             </>
                           )}
                         </div>
+                        {/* Idle: Review now + Move to…. Reviewing: the full
+                            review-row button set replaces it ("Save for
+                            later" re-snoozes and puts the row back to sleep). */}
                         <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                          {optionsOpen && (
+                          {optionsOpen ? (
                             <>
                               <button
                                 onClick={() => breakdown(item.id)}
@@ -549,42 +553,58 @@ export function InboxView({
                               <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => keepAsTask(item.id))}>
                                 {t("action.addTodo", voice)}
                               </button>
+                              <button
+                                className="hover:bg-accent rounded-md border px-2.5 py-1"
+                                onClick={() => {
+                                  setSavedOptionsId(null);
+                                  run(() => snoozeBrainDumpItem(item.id, 60));
+                                }}
+                              >
+                                {t("action.saveForLater", voice)}
+                              </button>
                               <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => completeItem(item.id))}>
                                 {t("action.complete", voice)}
                               </button>
-                            </>
-                          )}
-                          {/* Wakes the item for review IN the bucket — same
-                              toggle as pressing the row title. */}
-                          <button
-                            type="button"
-                            aria-expanded={optionsOpen}
-                            onClick={() => setSavedOptionsId(optionsOpen ? null : item.id)}
-                            className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
-                          >
-                            {t("action.reviewNow", voice)}
-                          </button>
-                          <MoveToMenu
-                            currentBucket={bucketOfItem(item, now)}
-                            voice={voice}
-                            onMove={(target) => moveItemToBucket(item.id, target)}
-                          />
-                          {optionsOpen &&
-                            (confirmDeleteId === item.id ? (
-                              <span className="ml-auto flex items-center gap-2">
-                                <button className="text-destructive rounded-md px-2.5 py-1 font-medium" onClick={() => confirmDelete(item.id)}>
+                              <MoveToMenu
+                                currentBucket={bucketOfItem(item, now)}
+                                voice={voice}
+                                onMove={(target) => moveItemToBucket(item.id, target)}
+                              />
+                              {confirmDeleteId === item.id ? (
+                                <span className="ml-auto flex items-center gap-2">
+                                  <button className="text-destructive rounded-md px-2.5 py-1 font-medium" onClick={() => confirmDelete(item.id)}>
+                                    {t("action.delete", voice)}
+                                  </button>
+                                  <span className="text-muted-foreground">·</span>
+                                  <button className="text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1" onClick={cancelDelete}>
+                                    {t("action.cancel", voice)}
+                                  </button>
+                                </span>
+                              ) : (
+                                <button className="text-muted-foreground hover:text-destructive ml-auto rounded-md px-2.5 py-1" onClick={() => requestDelete(item.id)}>
                                   {t("action.delete", voice)}
                                 </button>
-                                <span className="text-muted-foreground">·</span>
-                                <button className="text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1" onClick={cancelDelete}>
-                                  {t("action.cancel", voice)}
-                                </button>
-                              </span>
-                            ) : (
-                              <button className="text-muted-foreground hover:text-destructive ml-auto rounded-md px-2.5 py-1" onClick={() => requestDelete(item.id)}>
-                                {t("action.delete", voice)}
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              {/* Wakes the item for review IN the bucket — same
+                                  toggle as pressing the row title. */}
+                              <button
+                                type="button"
+                                aria-expanded={optionsOpen}
+                                onClick={() => setSavedOptionsId(item.id)}
+                                className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
+                              >
+                                {t("action.reviewNow", voice)}
                               </button>
-                            ))}
+                              <MoveToMenu
+                                currentBucket={bucketOfItem(item, now)}
+                                voice={voice}
+                                onMove={(target) => moveItemToBucket(item.id, target)}
+                              />
+                            </>
+                          )}
                         </div>
                       </li>
                     );
