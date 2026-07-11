@@ -193,4 +193,17 @@ describe("bucketOfItem", () => {
     expect(bucketOfItem(item({ id: "single", status: "triaged", stepsTotal: 0 }), now)).toBe("singleTask");
     expect(bucketOfItem(item({ id: "multi", status: "triaged", stepsTotal: 3, stepsDone: 1 }), now)).toBe("multiStep");
   });
+
+  it("falls back to needsReview for states outside every bucket rule", () => {
+    // Fully done but not stamped completedAt — e.g. a task finished before the
+    // completedAt migration, or a race between task.status and the stamp.
+    expect(
+      bucketOfItem(item({ id: "doneNoStamp", status: "triaged", taskStatus: TaskStatus.Done }), NOW),
+    ).toBe("needsReview");
+    expect(
+      bucketOfItem(item({ id: "allStepsDone", status: "triaged", stepsTotal: 2, stepsDone: 2 }), NOW),
+    ).toBe("needsReview");
+    // An unknown status string shouldn't crash the board either.
+    expect(bucketOfItem(item({ id: "weird", status: "archived" }), NOW)).toBe("needsReview");
+  });
 });

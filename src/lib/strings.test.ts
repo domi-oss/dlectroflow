@@ -175,14 +175,6 @@ describe("Task 4 — nav/menu/prompt/confirm keys (plain vs playful)", () => {
     expect(t("progress.done", "playful")).toBe("done");
   });
 
-  // progress.notScheduled
-  it('t("progress.notScheduled", "plain") → "not scheduled"', () => {
-    expect(t("progress.notScheduled", "plain")).toBe("not scheduled");
-  });
-  it('t("progress.notScheduled", "playful") → "not scheduled"', () => {
-    expect(t("progress.notScheduled", "playful")).toBe("not scheduled");
-  });
-
   // inbox.zero
   it('t("inbox.zero", "plain") → "Inbox zero. Nothing to review."', () => {
     expect(t("inbox.zero", "plain")).toBe("Inbox zero. Nothing to review.");
@@ -369,7 +361,9 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "link.seeAll",
     "pill.toDo",
     "progress.done",
-    "progress.notScheduled",
+    "action.reopenSelected",
+    "action.reopenAll",
+    "prompt.reopenWhich",
   ];
 
   for (const key of plainOnlyKeys) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { BucketId } from "./bucket";
 import { t, type Voice, type StringKey } from "@/lib/strings";
 
@@ -29,10 +29,28 @@ export function MoveToMenu({
   onMove: (target: BucketId) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLSpanElement>(null);
   const targets = BUCKET_ORDER.filter((b) => b !== currentBucket);
 
+  // Escape or a press anywhere outside dismisses the open menu.
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    const onPointerDown = (e: Event) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [open]);
+
   return (
-    <span className="relative">
+    <span ref={rootRef} className="relative">
       <button
         type="button"
         aria-haspopup="menu"

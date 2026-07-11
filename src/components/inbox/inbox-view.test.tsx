@@ -35,6 +35,7 @@ vi.mock("@/app/actions/breakdown", () => ({
 
 vi.mock("@/lib/notifications", () => ({
   notificationPermission: () => "default",
+  subscribeNotificationPermission: () => () => {},
   requestNotificationPermission: vi.fn().mockResolvedValue("default"),
   registerServiceWorker: vi.fn().mockResolvedValue(null),
   showReminder: vi.fn().mockResolvedValue(undefined),
@@ -278,6 +279,29 @@ describe("InboxView — complete + completed bucket", () => {
     expect(completeItem).toHaveBeenCalledWith("n1");
   });
 
+  it("a single-task row's Complete button calls completeItem", async () => {
+    const { completeItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        initialItems={[makeItem({ id: "st1", text: "single todo", status: "triaged" })]}
+        settings={settings}
+      />,
+    );
+    const row = screen.getByText("single todo").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Complete" }));
+    expect(completeItem).toHaveBeenCalledWith("st1");
+  });
+
+  it("a multi-step row's Complete button calls completeItem", async () => {
+    const { completeItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} />);
+    const row = screen.getByText("plan trip").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Complete" }));
+    expect(completeItem).toHaveBeenCalledWith("m1");
+  });
+
   it("renders the Completed section with a today count and Undo", async () => {
     const { reopenItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
@@ -287,6 +311,82 @@ describe("InboxView — complete + completed bucket", () => {
     const row = screen.getByText("finished").closest("li")!;
     await user.click(within(row).getByRole("button", { name: /Reopen|Undo/ }));
     expect(reopenItem).toHaveBeenCalledWith("d1", undefined);
+  });
+});
+
+describe("InboxView — per-step Undo picker (completed multi-step)", () => {
+  const doneMulti = () =>
+    makeItem({
+      id: "dm1",
+      text: "finished trip",
+      status: "triaged",
+      taskId: "t1",
+      completedAt: new Date(),
+      stepsTotal: 3,
+      stepsDone: 3,
+      taskStatus: "done",
+      steps: [
+        { id: "s1", order: 1, text: "book", done: true, estMinutes: 10, subtaskEmoji: null },
+        // Emoji on purpose: it must stay decorative (aria-hidden), so the
+        // checkbox's accessible name is still exactly "pack".
+        { id: "s2", order: 2, text: "pack", done: true, estMinutes: 20, subtaskEmoji: "🧳" },
+        { id: "s3", order: 3, text: "go", done: true, estMinutes: 5, subtaskEmoji: null },
+      ],
+    });
+
+  it("Reopen on a completed multi-step opens the step picker instead of reopening", async () => {
+    const { reopenItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[doneMulti()]} settings={settings} />);
+    const row = screen.getByText("finished trip").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Reopen" }));
+    expect(reopenItem).not.toHaveBeenCalled();
+    expect(within(row).getByText("Which steps still need doing?")).toBeInTheDocument();
+    expect(within(row).getByRole("checkbox", { name: "pack" })).toBeInTheDocument();
+  });
+
+  it("reopens only the checked steps", async () => {
+    const { reopenItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[doneMulti()]} settings={settings} />);
+    const row = screen.getByText("finished trip").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Reopen" }));
+    await user.click(within(row).getByRole("checkbox", { name: "pack" }));
+    await user.click(within(row).getByRole("button", { name: "Reopen selected" }));
+    expect(reopenItem).toHaveBeenCalledWith("dm1", ["s2"]);
+  });
+
+  it("confirm is disabled with nothing checked; Reopen all resets every step", async () => {
+    const { reopenItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[doneMulti()]} settings={settings} />);
+    const row = screen.getByText("finished trip").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Reopen" }));
+    expect(within(row).getByRole("button", { name: "Reopen selected" })).toBeDisabled();
+    await user.click(within(row).getByRole("button", { name: "Reopen all" }));
+    expect(reopenItem).toHaveBeenCalledWith("dm1", undefined);
+  });
+
+  it("Cancel closes the picker without reopening", async () => {
+    const { reopenItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[doneMulti()]} settings={settings} />);
+    const row = screen.getByText("finished trip").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Reopen" }));
+    await user.click(within(row).getByRole("button", { name: "Cancel" }));
+    expect(reopenItem).not.toHaveBeenCalled();
+    expect(within(row).queryByText("Which steps still need doing?")).not.toBeInTheDocument();
+  });
+
+  it("Escape closes the picker without reopening (matches MoveToMenu)", async () => {
+    const { reopenItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[doneMulti()]} settings={settings} />);
+    const row = screen.getByText("finished trip").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Reopen" }));
+    await user.keyboard("{Escape}");
+    expect(reopenItem).not.toHaveBeenCalled();
+    expect(within(row).queryByText("Which steps still need doing?")).not.toBeInTheDocument();
   });
 });
 

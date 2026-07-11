@@ -29,6 +29,8 @@ export const STRINGS = {
   "action.cancel":       { plain: "Cancel",            playful: "Cancel" },
   "action.complete":     { plain: "Complete",          playful: "✅ Complete" },
   "action.reopen":       { plain: "Reopen",            playful: "Reopen" },
+  "action.reopenSelected": { plain: "Reopen selected", playful: "Reopen selected" },
+  "action.reopenAll":    { plain: "Reopen all",        playful: "Reopen all" },
   "action.moveTo":       { plain: "Move to…",          playful: "Move to…" },
 
   // ── Inbox section headers ──────────────────────────────────────────────────
@@ -102,6 +104,7 @@ export const STRINGS = {
   // ── Prompts ────────────────────────────────────────────────────────────────
   "prompt.stillNeeded":  { plain: "This has been sitting a while — still needed?", playful: "🕐 This snack's been sitting a while — still want it?" },
   "prompt.breakNow":     { plain: "Break into steps now?", playful: "🍿 Snack-size it now?" },
+  "prompt.reopenWhich":  { plain: "Which steps still need doing?", playful: "Which steps go back on the plate?" },
 
   // ── Inbox empty state ──────────────────────────────────────────────────────
   "inbox.zero":          { plain: "Inbox zero. Nothing to review.", playful: "🎉 Inbox zero! Nothing to review." },
@@ -115,7 +118,6 @@ export const STRINGS = {
 
   // ── Progress ───────────────────────────────────────────────────────────────
   "progress.done":       { plain: "done",              playful: "done" },
-  "progress.notScheduled": { plain: "not scheduled",   playful: "not scheduled" },
 } as const;
 
 export type StringKey = keyof typeof STRINGS;

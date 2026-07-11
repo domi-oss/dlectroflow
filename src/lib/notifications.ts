@@ -9,9 +9,23 @@ export function notificationPermission(): NotificationPermission | "unsupported"
   return Notification.permission;
 }
 
+// Listeners notified when Notification.permission may have changed. The
+// platform has no reliable cross-browser change event, so we emit after our
+// own permission requests; React reads the value via useSyncExternalStore.
+const permissionListeners = new Set<() => void>();
+
+export function subscribeNotificationPermission(listener: () => void): () => void {
+  permissionListeners.add(listener);
+  return () => {
+    permissionListeners.delete(listener);
+  };
+}
+
 export async function requestNotificationPermission(): Promise<NotificationPermission> {
   if (!notificationsSupported()) return "denied";
-  return Notification.requestPermission();
+  const result = await Notification.requestPermission();
+  permissionListeners.forEach((listener) => listener());
+  return result;
 }
 
 /** Register the service worker (idempotent). Returns the registration or null. */

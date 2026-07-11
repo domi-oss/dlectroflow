@@ -25,4 +25,27 @@ describe("MoveToMenu", () => {
     await userEvent.click(screen.getByRole("menuitem", { name: /Completed/ }));
     expect(onMove).toHaveBeenCalledWith("completed");
   });
+
+  it("Escape closes the open menu", async () => {
+    render(<MoveToMenu currentBucket="singleTask" voice="plain" onMove={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: "Move to…" }));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("clicking outside closes the menu without moving", async () => {
+    const onMove = vi.fn();
+    render(
+      <div>
+        <button type="button">outside</button>
+        <MoveToMenu currentBucket="singleTask" voice="plain" onMove={onMove} />
+      </div>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Move to…" }));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "outside" }));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(onMove).not.toHaveBeenCalled();
+  });
 });
