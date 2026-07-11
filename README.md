@@ -1,12 +1,33 @@
 # dlectroflow 🧠⚡
 
+[![pipeline status](https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/badges/main/pipeline.svg)](https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/pipelines)
+
 An ADHD helper web app — **capture → clarify → schedule → focus → reward**.
+
+**🌐 Live demo:** [dlectroflow.dlectronique.dev](https://dlectroflow.dlectronique.dev)
 
 You brain-dump anything, Claude breaks the scary stuff into tiny do-able steps,
 those steps get scheduled onto your real calendar (via Reclaim), you focus on one
 at a time, and you get a hit of dopamine for finishing. Come back tomorrow, repeat.
 
 Built as both a learning project and a polished live-demo app.
+
+---
+
+## 📖 Table of contents
+
+- [🚦 Status — what works today](#-status--what-works-today)
+- [🧰 Prerequisites](#-prerequisites)
+- [🔑 Third-party services](#-third-party-services)
+- [🚀 Quick start (local, ~5 minutes)](#-quick-start-local-5-minutes)
+- [🔐 Secrets & environment](#-secrets--environment)
+- [📅 Connecting Reclaim](#-connecting-reclaim)
+- [🗄️ Database & migrations](#️-database--migrations)
+- [🐳 Deploy](#-deploy)
+- [🧯 Troubleshooting](#-troubleshooting)
+- [🗺️ Tech stack](#️-tech-stack)
+- [🤝 Contributing](#-contributing)
+- [🧠 A note for fellow neurodivergent nerds](#-a-note-for-fellow-neurodivergent-nerds)
 
 ---
 
@@ -149,8 +170,9 @@ Tokens are stored in your database (never the repo) and auto-refresh.
 > ⚠️ **Known limitation (honest heads-up):** Reclaim gates task-*creation* via MCP
 > per account. If yours only has read access, you'll see *"create_reclaim_task is
 > not available for your account"* — your steps still save locally, nothing breaks.
-> A **Claude → Google Tasks → Reclaim** route (Reclaim syncs your Google Tasks) is
-> in progress to sidestep this.
+> The **Claude → Google Tasks → Reclaim** route (Reclaim syncs your Google Tasks)
+> works today and sidesteps this — connect Google and steps land in your
+> Reclaim-synced Google Tasks list, durations included.
 
 ---
 
@@ -211,12 +233,23 @@ Migrations run automatically on start. Visit **http://localhost:3000**.
 
 - **Next.js 16** (App Router) + **React 19** + **TypeScript**
 - **Tailwind CSS v4** + **shadcn/ui** + **Framer Motion**
-- **Prisma 6** + **PostgreSQL** (local dev via Docker Compose; production on GitLab)
-- **Claude API** (`@anthropic-ai/sdk`, model `claude-opus-4-8`, adaptive thinking, streaming)
+- **Prisma 6** + **PostgreSQL** (local dev via Docker Compose; production on GKE, deployed via GitLab CI/CD)
+- **Claude API** (`@anthropic-ai/sdk`, streaming with adaptive thinking; model is configurable — defaults to `claude-sonnet-4-6` for owners and `claude-haiku-4-5` for guests, see [Phase 2](#phase-2-guest-access--ai-cost-controls))
 - **Reclaim** via OAuth 2.1 + the Claude remote-MCP connector
 - Deploy: **Docker** → GKE Autopilot via GitLab CI/CD
 
 Full feature spec and the build order live in [`docs/dlectroflow-plan.md`](docs/dlectroflow-plan.md).
+
+---
+
+## 🤝 Contributing
+
+Spotted a bug, a confusing doc step, or an idea? **Open an issue** — small reports
+are very welcome. For code changes, open a merge request against `main`; every MR
+gets its own review app so you (and reviewers) can click around the change live.
+
+> 🤖 This app is built with the support of **[Claude](https://claude.com/claude-code)** and **GitLab Duo** —
+> from pair-building features and reviewing every merge request to drafting these very docs.
 
 ---
 
