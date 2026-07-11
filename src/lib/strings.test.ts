@@ -64,8 +64,7 @@ describe("t() function", () => {
     ["badge.beat_best_streak","plain",  "Beat your best streak"],
     ["bucket.empty",      "plain",   "Nothing here yet"],
     ["action.moveTo",     "plain",   "Move to…"],
-    ["prompt.breakNow",   "plain",   "Break into steps now"],
-    ["prompt.saveInstead","plain",   "Save for later"],
+    ["prompt.breakNow",   "plain",   "Break into steps now?"],
   ];
 
   for (const [key, voice, expected] of cases) {
@@ -351,7 +350,6 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "capture.confirm",
     "prompt.stillNeeded",
     "prompt.breakNow",
-    "prompt.saveInstead",
     "bucket.empty",
     "inbox.zero",
     "focus.giveUp",

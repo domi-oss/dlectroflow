@@ -32,6 +32,7 @@ import {
   completeItem,
   reopenItem,
   moveToReview,
+  requestBreakdown,
 } from "@/app/actions/braindump";
 import { startBreakdown } from "@/app/actions/breakdown";
 import { StatusPill } from "@/components/inbox/status-pill";
@@ -39,7 +40,6 @@ import { TaskSteps } from "@/components/breakdown/task-steps";
 import { bucketItems, bucketOfItem, isBucketId, type Item, type BucketId } from "@/components/inbox/bucket";
 import { dropPlan } from "@/components/inbox/move-dispatch";
 import { MoveToMenu } from "@/components/inbox/move-to-menu";
-import { MultiStepDropPrompt } from "@/components/inbox/multi-step-drop-prompt";
 import { t } from "@/lib/strings";
 import { useVoice } from "@/components/voice-provider";
 import type { Voice } from "@/lib/strings";
@@ -93,6 +93,9 @@ export function InboxView({
 
   // Which multi-step row (if any) has its inline TaskSteps list expanded.
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // Which saved-for-later row (if any) has its inline sorting options open.
+  const [savedOptionsId, setSavedOptionsId] = useState<string | null>(null);
 
   // Tick so relative ages + aging state recompute live.
   const [, setTick] = useState(0);
@@ -177,10 +180,9 @@ export function InboxView({
     });
 
   // Drag (dnd-kit) + the "Move to…" menu share this single dispatcher so the
-  // two paths can never diverge (Task 10).
-  const [pendingBreakdown, setPendingBreakdown] = useState<
-    { item: Item; reopenFirst: boolean } | null
-  >(null);
+  // two paths can never diverge (Task 10). Every drop moves immediately —
+  // a Multi-step drop parks the item there with a "Break into steps now?"
+  // call-to-action (requestBreakdown) instead of a blocking prompt.
   const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor));
   const itemsById = new Map(initialItems.map((i) => [i.id, i]));
 
@@ -190,23 +192,14 @@ export function InboxView({
     const plan = dropPlan(bucketOfItem(item, now), target);
     if (plan.kind === "noop") return;
 
-    if (plan.prompt) {
-      // Multi-step target: ask break-now vs save first. The reopen (needed
-      // when the source is Completed, so it leaves Completed) is deferred
-      // into the prompt's own confirm handlers so Cancel/Escape is a true
-      // no-op instead of reopening the item before the user decides.
-      setPendingBreakdown({ item, reopenFirst: plan.reopenFirst });
-      return;
-    }
-
     run(async () => {
       if (plan.reopenFirst) await reopenItem(itemId, undefined);
       switch (plan.action) {
-        case "moveToReview": await moveToReview(itemId); break;
-        case "triage":       await triageBrainDumpItem(itemId); break;
-        case "snooze":       await snoozeBrainDumpItem(itemId, 60); break;
-        case "complete":     await completeItem(itemId); break;
-        // "breakdown" is handled by the prompt branch above.
+        case "moveToReview":      await moveToReview(itemId); break;
+        case "triage":            await triageBrainDumpItem(itemId); break;
+        case "requestBreakdown":  await requestBreakdown(itemId); break;
+        case "snooze":            await snoozeBrainDumpItem(itemId, 60); break;
+        case "complete":          await completeItem(itemId); break;
       }
     });
   };
@@ -337,57 +330,46 @@ export function InboxView({
           <div>
             <SubHeader label={t("section.multiStep", voice)} count={multiStep.length} seeAllHref={SEE_ALL.multiStep} voice={voice} />
             <DroppableBucket id="multiStep">
-              {/* Spec: the drop prompt is anchored to the drop — it renders inside
-                  this bucket so it appears where the user just dropped. */}
-              {pendingBreakdown && (
-                <div className="mb-2">
-                  <MultiStepDropPrompt
-                    itemText={pendingBreakdown.item.text}
-                    voice={voice}
-                    onBreakNow={() => {
-                      const { item, reopenFirst } = pendingBreakdown;
-                      setPendingBreakdown(null);
-                      startTransition(async () => {
-                        if (reopenFirst) await reopenItem(item.id, undefined);
-                        const taskId = await startBreakdown(item.id);
-                        if (taskId) router.push(`/tasks/${taskId}`);
-                      });
-                    }}
-                    onSaveLater={() => {
-                      const { item, reopenFirst } = pendingBreakdown;
-                      setPendingBreakdown(null);
-                      run(async () => {
-                        if (reopenFirst) await reopenItem(item.id, undefined);
-                        await snoozeBrainDumpItem(item.id, 60);
-                      });
-                    }}
-                    onCancel={() => setPendingBreakdown(null)}
-                  />
-                </div>
-              )}
               {multiStep.length === 0 ? (
                 <EmptyBucket voice={voice} />
               ) : (
                 <ul className={cn("space-y-2", pending && "opacity-70")}>
                   {multiStep.map((item) => {
-                    /* multi-step row — extended in Task 9 (step count + expand) and Task 10 (drag/menu) */
+                    /* multi-step row — extended in Task 9 (step count + expand) and Task 10 (drag/menu).
+                       A 0-step row is awaiting its breakdown (breakdownRequestedAt): instead of a
+                       step count it shows a red "Break into steps now?" CTA into the editor. */
                     const expanded = expandedId === item.id;
+                    const awaitingBreakdown = item.stepsTotal === 0;
                     return (
                       <li key={item.id} className="rounded-lg border px-4 py-2 text-sm">
                         <div className="flex items-center justify-between gap-3">
                           <DragGrip id={item.id} label={item.text} />
-                          <button
-                            type="button"
-                            aria-expanded={expanded}
-                            onClick={() => setExpandedId(expanded ? null : item.id)}
-                            className="min-w-0 flex-1 break-words text-left hover:underline"
-                          >
-                            {item.text}
-                          </button>
+                          {awaitingBreakdown ? (
+                            <span className="min-w-0 flex-1 break-words">{item.text}</span>
+                          ) : (
+                            <button
+                              type="button"
+                              aria-expanded={expanded}
+                              onClick={() => setExpandedId(expanded ? null : item.id)}
+                              className="min-w-0 flex-1 break-words text-left hover:underline"
+                            >
+                              {item.text}
+                            </button>
+                          )}
                           <span className="flex shrink-0 items-center gap-2 text-xs">
-                            <span className="text-muted-foreground">
-                              {item.stepsTotal} steps · {item.stepsDone} {t("progress.done", voice)}
-                            </span>
+                            {awaitingBreakdown ? (
+                              <button
+                                type="button"
+                                onClick={() => breakdown(item.id)}
+                                className="bg-destructive rounded-md px-2.5 py-1 font-medium text-white hover:opacity-90"
+                              >
+                                {t("prompt.breakNow", voice)}
+                              </button>
+                            ) : (
+                              <span className="text-muted-foreground">
+                                {item.stepsTotal} steps · {item.stepsDone} {t("progress.done", voice)}
+                              </span>
+                            )}
                             <MoveToMenu
                               currentBucket={bucketOfItem(item, now)}
                               voice={voice}
@@ -471,24 +453,69 @@ export function InboxView({
                 <EmptyBucket voice={voice} />
               ) : (
                 <ul className="space-y-2 opacity-70">
-                  {savedLater.map((item) => (
-                    <li key={item.id} className="flex items-center justify-between rounded-lg border px-4 py-2 text-sm">
-                      <span className="flex min-w-0 items-center gap-2">
-                        <DragGrip id={item.id} label={item.text} />
-                        <span className="break-words">{item.text}</span>
-                      </span>
-                      <span className="flex shrink-0 items-center gap-2">
-                        <MoveToMenu
-                          currentBucket={bucketOfItem(item, now)}
-                          voice={voice}
-                          onMove={(target) => moveItemToBucket(item.id, target)}
-                        />
-                        <button className="text-muted-foreground hover:text-foreground shrink-0 text-xs underline" onClick={() => run(() => triageBrainDumpItem(item.id))}>
-                          wake now
-                        </button>
-                      </span>
-                    </li>
-                  ))}
+                  {savedLater.map((item) => {
+                    /* Tapping a saved row reveals the same sorting options a
+                       review row has — the pantry is "waiting for your review". */
+                    const optionsOpen = savedOptionsId === item.id;
+                    return (
+                      <li key={item.id} className="rounded-lg border px-4 py-2 text-sm">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="flex min-w-0 flex-1 items-center gap-2">
+                            <DragGrip id={item.id} label={item.text} />
+                            <button
+                              type="button"
+                              aria-expanded={optionsOpen}
+                              onClick={() => setSavedOptionsId(optionsOpen ? null : item.id)}
+                              className="min-w-0 flex-1 break-words text-left hover:underline"
+                            >
+                              {item.text}
+                            </button>
+                          </span>
+                          <span className="flex shrink-0 items-center gap-2">
+                            <MoveToMenu
+                              currentBucket={bucketOfItem(item, now)}
+                              voice={voice}
+                              onMove={(target) => moveItemToBucket(item.id, target)}
+                            />
+                            <button className="text-muted-foreground hover:text-foreground shrink-0 text-xs underline" onClick={() => run(() => triageBrainDumpItem(item.id))}>
+                              wake now
+                            </button>
+                          </span>
+                        </div>
+                        {optionsOpen && (
+                          <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                            <button
+                              onClick={() => breakdown(item.id)}
+                              className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
+                            >
+                              {t("action.breakdown", voice)} →
+                            </button>
+                            <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => keepAsTask(item.id))}>
+                              {t("action.addTodo", voice)}
+                            </button>
+                            <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => completeItem(item.id))}>
+                              {t("action.complete", voice)}
+                            </button>
+                            {confirmDeleteId === item.id ? (
+                              <span className="ml-auto flex items-center gap-2">
+                                <button className="text-destructive rounded-md px-2.5 py-1 font-medium" onClick={() => confirmDelete(item.id)}>
+                                  {t("action.delete", voice)}
+                                </button>
+                                <span className="text-muted-foreground">·</span>
+                                <button className="text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1" onClick={cancelDelete}>
+                                  {t("action.cancel", voice)}
+                                </button>
+                              </span>
+                            ) : (
+                              <button className="text-muted-foreground hover:text-destructive ml-auto rounded-md px-2.5 py-1" onClick={() => requestDelete(item.id)}>
+                                {t("action.delete", voice)}
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </DroppableBucket>

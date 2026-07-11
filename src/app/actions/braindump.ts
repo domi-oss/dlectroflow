@@ -34,7 +34,31 @@ export async function triageBrainDumpItem(id: string) {
   if (!existing) return;
   await prisma.brainDumpItem.update({
     where: { id },
-    data: { status: BrainDumpStatus.Triaged, triagedAt: new Date() },
+    data: { status: BrainDumpStatus.Triaged, triagedAt: new Date(), breakdownRequestedAt: null },
+  });
+  await maybeAwardInboxZero(workspaceId);
+  revalidatePath(INBOX_PATH);
+}
+
+/**
+ * Move an item into Multi-step before it has any steps (Phase B drop/menu
+ * target): triages it and stamps breakdownRequestedAt so it sits in the
+ * Multi-step bucket showing a "Break into steps now?" call-to-action instead
+ * of silently landing in Single-task. Any move to another bucket clears the
+ * stamp (you changed your mind).
+ */
+export async function requestBreakdown(id: string) {
+  const workspaceId = await currentWorkspaceId();
+  const existing = await prisma.brainDumpItem.findFirst({ where: { id, workspaceId } });
+  if (!existing) return;
+  await prisma.brainDumpItem.update({
+    where: { id },
+    data: {
+      status: BrainDumpStatus.Triaged,
+      triagedAt: new Date(),
+      breakdownRequestedAt: new Date(),
+      snoozedUntil: null,
+    },
   });
   await maybeAwardInboxZero(workspaceId);
   revalidatePath(INBOX_PATH);
@@ -59,6 +83,7 @@ export async function snoozeBrainDumpItem(id: string, minutes: number) {
       triagedAt: null,
       snoozedUntil: new Date(Date.now() + minutes * 60_000),
       remindedAt: null,
+      breakdownRequestedAt: null,
     },
   });
   await maybeAwardInboxZero(workspaceId);
@@ -128,6 +153,7 @@ export async function keepAsTask(id: string) {
       status: BrainDumpStatus.Triaged,
       triagedAt: new Date(),
       taskId: task.id,
+      breakdownRequestedAt: null,
     },
   });
   await maybeAwardInboxZero(workspaceId);
@@ -151,7 +177,10 @@ export async function completeItem(id: string) {
     await maybeAwardTenStepsDay(workspaceId);
   }
 
-  await prisma.brainDumpItem.update({ where: { id }, data: { completedAt: new Date() } });
+  await prisma.brainDumpItem.update({
+    where: { id },
+    data: { completedAt: new Date(), breakdownRequestedAt: null },
+  });
   await logReward(workspaceId, RewardType.TaskComplete);
   await touchStreakOnCompletion(workspaceId);
   await awardBadge(workspaceId, BadgeKey.TaskComplete);
@@ -211,6 +240,7 @@ export async function moveToReview(id: string) {
       triagedAt: null,
       snoozedUntil: null,
       completedAt: null,
+      breakdownRequestedAt: null,
     },
   });
   revalidatePath(INBOX_PATH);

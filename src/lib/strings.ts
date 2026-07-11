@@ -101,8 +101,7 @@ export const STRINGS = {
 
   // ── Prompts ────────────────────────────────────────────────────────────────
   "prompt.stillNeeded":  { plain: "This has been sitting a while — still needed?", playful: "🕐 This snack's been sitting a while — still want it?" },
-  "prompt.breakNow":     { plain: "Break into steps now", playful: "🍿 Snack-size it now" },
-  "prompt.saveInstead":  { plain: "Save for later",       playful: "🥫 Save for later" },
+  "prompt.breakNow":     { plain: "Break into steps now?", playful: "🍿 Snack-size it now?" },
 
   // ── Inbox empty state ──────────────────────────────────────────────────────
   "inbox.zero":          { plain: "Inbox zero. Nothing to review.", playful: "🎉 Inbox zero! Nothing to review." },

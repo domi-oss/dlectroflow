@@ -15,6 +15,7 @@ function item(overrides: Partial<Item> & { id: string }): Item {
     taskId: null,
     freshenedAt: null,
     promptDismissedAt: null,
+    breakdownRequestedAt: null,
     stepsTotal: 0,
     stepsDone: 0,
     taskStatus: null,
@@ -97,6 +98,21 @@ describe("bucketItems", () => {
     ];
     const { multiStep } = bucketItems(items, NOW);
     expect(multiStep.map((i) => i.id)).toEqual(["partial"]);
+  });
+
+  it("a triaged 0-step item with breakdownRequestedAt sits in multiStep (awaiting breakdown), not singleTask", () => {
+    const items = [
+      item({
+        id: "awaiting",
+        status: BrainDumpStatus.Triaged,
+        stepsTotal: 0,
+        breakdownRequestedAt: new Date(NOW),
+      }),
+    ];
+    const { multiStep, singleTask } = bucketItems(items, NOW);
+    expect(multiStep.map((i) => i.id)).toEqual(["awaiting"]);
+    expect(singleTask).toEqual([]);
+    expect(bucketOfItem(items[0], NOW)).toBe("multiStep");
   });
 
   it("excludes fully-done tasks (all steps done OR taskStatus done)", () => {

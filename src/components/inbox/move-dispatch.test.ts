@@ -5,7 +5,7 @@ describe("ACTION_FOR_BUCKET (anti-inversion map)", () => {
   it("maps each bucket to its destination action", () => {
     expect(ACTION_FOR_BUCKET.needsReview).toBe("moveToReview");
     expect(ACTION_FOR_BUCKET.singleTask).toBe("triage");
-    expect(ACTION_FOR_BUCKET.multiStep).toBe("breakdown");
+    expect(ACTION_FOR_BUCKET.multiStep).toBe("requestBreakdown");
     expect(ACTION_FOR_BUCKET.savedLater).toBe("snooze");
     expect(ACTION_FOR_BUCKET.completed).toBe("complete");
   });
@@ -18,10 +18,10 @@ describe("dropPlan", () => {
 
   it("applies the target action for a cross-bucket move", () => {
     expect(dropPlan("needsReview", "singleTask")).toEqual({
-      kind: "apply", target: "singleTask", action: "triage", reopenFirst: false, prompt: false,
+      kind: "apply", target: "singleTask", action: "triage", reopenFirst: false,
     });
     expect(dropPlan("singleTask", "completed")).toEqual({
-      kind: "apply", target: "completed", action: "complete", reopenFirst: false, prompt: false,
+      kind: "apply", target: "completed", action: "complete", reopenFirst: false,
     });
   });
 
@@ -29,8 +29,10 @@ describe("dropPlan", () => {
     expect(dropPlan("completed", "singleTask")).toMatchObject({ kind: "apply", reopenFirst: true, action: "triage" });
   });
 
-  it("flags a prompt when the target is multi-step", () => {
-    expect(dropPlan("needsReview", "multiStep")).toMatchObject({ kind: "apply", prompt: true, action: "breakdown" });
-    expect(dropPlan("completed", "multiStep")).toMatchObject({ reopenFirst: true, prompt: true });
+  it("multi-step target moves immediately via requestBreakdown (no blocking prompt)", () => {
+    expect(dropPlan("needsReview", "multiStep")).toEqual({
+      kind: "apply", target: "multiStep", action: "requestBreakdown", reopenFirst: false,
+    });
+    expect(dropPlan("completed", "multiStep")).toMatchObject({ reopenFirst: true, action: "requestBreakdown" });
   });
 });

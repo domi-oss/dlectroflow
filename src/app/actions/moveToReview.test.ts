@@ -44,7 +44,7 @@ describe("moveToReview", () => {
     await moveToReview("i1");
     expect(prismaMock.brainDumpItem.updateMany).toHaveBeenCalledWith({
       where: { id: "i1", workspaceId: "owner" },
-      data: { status: "inbox", triagedAt: null, snoozedUntil: null, completedAt: null },
+      data: { status: "inbox", triagedAt: null, snoozedUntil: null, completedAt: null, breakdownRequestedAt: null },
     });
     // taskId is NOT in the data payload → left intact
     const data = prismaMock.brainDumpItem.updateMany.mock.calls[0][0].data;
