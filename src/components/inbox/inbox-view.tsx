@@ -389,17 +389,17 @@ export function InboxView({
                               {item.text} {pencil(item)}
                             </span>
                           ) : (
-                            <>
+                            <span className="min-w-0 flex-1 break-words">
                               <button
                                 type="button"
                                 aria-expanded={expanded}
                                 onClick={() => setExpandedId(expanded ? null : item.id)}
-                                className="min-w-0 flex-1 break-words text-left hover:underline"
+                                className="break-words text-left hover:underline"
                               >
                                 {item.text}
-                              </button>
+                              </button>{" "}
                               {pencil(item)}
-                            </>
+                            </span>
                           )}
                           {editingId !== item.id && !awaitingBreakdown && (
                             <span className="text-muted-foreground shrink-0 text-xs">
@@ -525,17 +525,17 @@ export function InboxView({
                           {editingId === item.id ? (
                             titleEditor(item)
                           ) : (
-                            <>
+                            <span className="min-w-0 flex-1 break-words">
                               <button
                                 type="button"
                                 aria-expanded={optionsOpen}
                                 onClick={() => setSavedOptionsId(optionsOpen ? null : item.id)}
-                                className="min-w-0 flex-1 break-words text-left hover:underline"
+                                className="break-words text-left hover:underline"
                               >
                                 {item.text}
-                              </button>
+                              </button>{" "}
                               {pencil(item)}
-                            </>
+                            </span>
                           )}
                         </div>
                         {/* Idle: Review now + Move to…. Reviewing: the full
