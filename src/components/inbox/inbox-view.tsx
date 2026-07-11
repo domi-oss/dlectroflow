@@ -337,6 +337,34 @@ export function InboxView({
           <div>
             <SubHeader label={t("section.multiStep", voice)} count={multiStep.length} seeAllHref={SEE_ALL.multiStep} voice={voice} />
             <DroppableBucket id="multiStep">
+              {/* Spec: the drop prompt is anchored to the drop — it renders inside
+                  this bucket so it appears where the user just dropped. */}
+              {pendingBreakdown && (
+                <div className="mb-2">
+                  <MultiStepDropPrompt
+                    itemText={pendingBreakdown.item.text}
+                    voice={voice}
+                    onBreakNow={() => {
+                      const { item, reopenFirst } = pendingBreakdown;
+                      setPendingBreakdown(null);
+                      startTransition(async () => {
+                        if (reopenFirst) await reopenItem(item.id, undefined);
+                        const taskId = await startBreakdown(item.id);
+                        if (taskId) router.push(`/tasks/${taskId}`);
+                      });
+                    }}
+                    onSaveLater={() => {
+                      const { item, reopenFirst } = pendingBreakdown;
+                      setPendingBreakdown(null);
+                      run(async () => {
+                        if (reopenFirst) await reopenItem(item.id, undefined);
+                        await snoozeBrainDumpItem(item.id, 60);
+                      });
+                    }}
+                    onCancel={() => setPendingBreakdown(null)}
+                  />
+                </div>
+              )}
               {multiStep.length === 0 ? (
                 <EmptyBucket voice={voice} />
               ) : (
@@ -506,31 +534,6 @@ export function InboxView({
           </div>
         </section>
       </DndContext>
-
-      {pendingBreakdown && (
-        <MultiStepDropPrompt
-          itemText={pendingBreakdown.item.text}
-          voice={voice}
-          onBreakNow={() => {
-            const { item, reopenFirst } = pendingBreakdown;
-            setPendingBreakdown(null);
-            startTransition(async () => {
-              if (reopenFirst) await reopenItem(item.id, undefined);
-              const taskId = await startBreakdown(item.id);
-              if (taskId) router.push(`/tasks/${taskId}`);
-            });
-          }}
-          onSaveLater={() => {
-            const { item, reopenFirst } = pendingBreakdown;
-            setPendingBreakdown(null);
-            run(async () => {
-              if (reopenFirst) await reopenItem(item.id, undefined);
-              await snoozeBrainDumpItem(item.id, 60);
-            });
-          }}
-          onCancel={() => setPendingBreakdown(null)}
-        />
-      )}
     </div>
   );
 }
@@ -643,9 +646,9 @@ function ItemRow({
   );
   return (
     <li className="rounded-lg border px-4 py-3">
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start gap-3">
         {dragGrip}
-        <div className="min-w-0 space-y-1">
+        <div className="min-w-0 flex-1 space-y-1">
           <div className="flex items-center gap-2">
             <StatusPill tier={tier} voice={voice} />
             <span className="break-words">{item.text}</span>

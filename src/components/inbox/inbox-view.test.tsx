@@ -380,6 +380,16 @@ describe("InboxView — Move to… menu dispatch", () => {
     expect(startBreakdown).not.toHaveBeenCalled();
   });
 
+  it("renders the prompt anchored inside the Multi-step bucket (spec: anchored to the drop)", async () => {
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeItem({ id: "n1", text: "big thing" })]} settings={settings} />);
+    const row = screen.getByText("big thing").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Move to…" }));
+    await user.click(within(row).getByRole("menuitem", { name: /Multi-step/ }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.closest('[data-bucket="multiStep"]')).not.toBeNull();
+  });
+
   it("choosing 'Break into steps now' in the prompt calls startBreakdown", async () => {
     const { startBreakdown } = await import("@/app/actions/breakdown");
     (startBreakdown as ReturnType<typeof vi.fn>).mockResolvedValue("t9");
