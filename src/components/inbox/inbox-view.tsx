@@ -506,8 +506,15 @@ export function InboxView({
                               </button>
                             </>
                           )}
-                          <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => triageBrainDumpItem(item.id))}>
-                            wake now
+                          {/* Wakes the item for review IN the bucket — same
+                              toggle as pressing the row title. */}
+                          <button
+                            type="button"
+                            aria-expanded={optionsOpen}
+                            onClick={() => setSavedOptionsId(optionsOpen ? null : item.id)}
+                            className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
+                          >
+                            {t("action.reviewNow", voice)}
                           </button>
                           <MoveToMenu
                             currentBucket={bucketOfItem(item, now)}

@@ -496,6 +496,20 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     expect(within(row).queryByRole("button", { name: /Break into steps/ })).not.toBeInTheDocument();
   });
 
+  it("'Review now' toggles the in-bucket options exactly like pressing the row — no triage", async () => {
+    const { triageBrainDumpItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[saved()]} settings={settings} />);
+    const row = screen.getByText("stored thing").closest("li")!;
+
+    await user.click(within(row).getByRole("button", { name: "Review now" }));
+    expect(within(row).getByRole("button", { name: /Break into steps/ })).toBeInTheDocument();
+    expect(triageBrainDumpItem).not.toHaveBeenCalled();
+
+    await user.click(within(row).getByRole("button", { name: "Review now" }));
+    expect(within(row).queryByRole("button", { name: /Break into steps/ })).not.toBeInTheDocument();
+  });
+
   it("the revealed options dispatch the same actions as a review row", async () => {
     const { keepAsTask } = await import("@/app/actions/braindump");
     const user = userEvent.setup();

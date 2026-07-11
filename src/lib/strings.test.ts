@@ -65,6 +65,8 @@ describe("t() function", () => {
     ["bucket.empty",      "plain",   "Nothing here yet"],
     ["action.moveTo",     "plain",   "Move to…"],
     ["prompt.breakNow",   "plain",   "Break into steps now?"],
+    ["action.reviewNow",  "plain",   "Review now"],
+    ["action.reviewNow",  "playful", "🥫 Review now"],
   ];
 
   for (const [key, voice, expected] of cases) {
@@ -350,6 +352,7 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "capture.confirm",
     "prompt.stillNeeded",
     "prompt.breakNow",
+    "action.reviewNow",
     "bucket.empty",
     "inbox.zero",
     "focus.giveUp",

@@ -111,6 +111,7 @@ export const STRINGS = {
 
   // ── Pills ──────────────────────────────────────────────────────────────────
   "pill.toDo":           { plain: "▶ to-do",           playful: "▶ to-do" },
+  "action.reviewNow":    { plain: "Review now",        playful: "🥫 Review now" },
 
   // ── Progress ───────────────────────────────────────────────────────────────
   "progress.done":       { plain: "done",              playful: "done" },
