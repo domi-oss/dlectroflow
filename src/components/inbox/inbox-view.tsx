@@ -760,6 +760,15 @@ function ReopenStepPicker({
       return next;
     });
   const ordered = [...steps].sort((a, b) => a.order - b.order);
+
+  // Escape dismisses the picker — same keyboard behaviour as MoveToMenu.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onCancel]);
   return (
     <div className="mt-2 space-y-2 rounded-md border px-3 py-2 text-xs">
       <p className="font-medium">{t("prompt.reopenWhich", voice)}</p>
@@ -771,11 +780,11 @@ function ReopenStepPicker({
                 type="checkbox"
                 checked={checked.has(s.id)}
                 onChange={() => toggle(s.id)}
-                aria-label={s.text}
               />
               {/* Unticked = stays done, so it keeps the completed strikethrough. */}
               <span className={cn(!checked.has(s.id) && "line-through opacity-70")}>
-                {s.subtaskEmoji ? `${s.subtaskEmoji} ` : ""}
+                {/* Emoji is decoration; keep it out of the accessible name. */}
+                {s.subtaskEmoji && <span aria-hidden="true">{s.subtaskEmoji} </span>}
                 {s.text}
               </span>
             </label>

@@ -327,7 +327,9 @@ describe("InboxView — per-step Undo picker (completed multi-step)", () => {
       taskStatus: "done",
       steps: [
         { id: "s1", order: 1, text: "book", done: true, estMinutes: 10, subtaskEmoji: null },
-        { id: "s2", order: 2, text: "pack", done: true, estMinutes: 20, subtaskEmoji: null },
+        // Emoji on purpose: it must stay decorative (aria-hidden), so the
+        // checkbox's accessible name is still exactly "pack".
+        { id: "s2", order: 2, text: "pack", done: true, estMinutes: 20, subtaskEmoji: "🧳" },
         { id: "s3", order: 3, text: "go", done: true, estMinutes: 5, subtaskEmoji: null },
       ],
     });
@@ -372,6 +374,17 @@ describe("InboxView — per-step Undo picker (completed multi-step)", () => {
     const row = screen.getByText("finished trip").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Reopen" }));
     await user.click(within(row).getByRole("button", { name: "Cancel" }));
+    expect(reopenItem).not.toHaveBeenCalled();
+    expect(within(row).queryByText("Which steps still need doing?")).not.toBeInTheDocument();
+  });
+
+  it("Escape closes the picker without reopening (matches MoveToMenu)", async () => {
+    const { reopenItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[doneMulti()]} settings={settings} />);
+    const row = screen.getByText("finished trip").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Reopen" }));
+    await user.keyboard("{Escape}");
     expect(reopenItem).not.toHaveBeenCalled();
     expect(within(row).queryByText("Which steps still need doing?")).not.toBeInTheDocument();
   });
