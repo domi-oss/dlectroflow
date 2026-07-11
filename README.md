@@ -22,10 +22,10 @@ Built as both a learning project and a polished live-demo app.
 - [🚀 Quick start (local, ~5 minutes)](#-quick-start-local-5-minutes)
 - [🔐 Secrets & environment](#-secrets--environment)
 - [📅 Connecting Reclaim](#-connecting-reclaim)
-- [🗄️ Database & migrations](#-database--migrations)
+- [🗄️ Database & migrations](#️-database--migrations)
 - [🐳 Deploy](#-deploy)
 - [🧯 Troubleshooting](#-troubleshooting)
-- [🗺️ Tech stack](#-tech-stack)
+- [🗺️ Tech stack](#️-tech-stack)
 - [🤝 Contributing](#-contributing)
 - [🧠 A note for fellow neurodivergent nerds](#-a-note-for-fellow-neurodivergent-nerds)
 
@@ -247,6 +247,9 @@ Full feature spec and the build order live in [`docs/dlectroflow-plan.md`](docs/
 Spotted a bug, a confusing doc step, or an idea? **Open an issue** — small reports
 are very welcome. For code changes, open a merge request against `main`; every MR
 gets its own review app so you (and reviewers) can click around the change live.
+
+> 🤖 This app is built with the support of **[Claude](https://claude.com/claude-code)** and **GitLab Duo** —
+> from pair-building features and reviewing every merge request to drafting these very docs.
 
 ---
 
