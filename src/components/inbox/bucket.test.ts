@@ -100,6 +100,22 @@ describe("bucketItems", () => {
     expect(multiStep.map((i) => i.id)).toEqual(["partial"]);
   });
 
+  it("a one-step task is a single to-do (its step is the ▶ Focus target), not multi-step", () => {
+    const items = [
+      item({
+        id: "one-step",
+        status: BrainDumpStatus.Triaged,
+        taskId: "t1",
+        stepsTotal: 1,
+        stepsDone: 0,
+      }),
+    ];
+    const { singleTask, multiStep } = bucketItems(items, NOW);
+    expect(singleTask.map((i) => i.id)).toEqual(["one-step"]);
+    expect(multiStep).toEqual([]);
+    expect(bucketOfItem(items[0], NOW)).toBe("singleTask");
+  });
+
   it("a triaged 0-step item with breakdownRequestedAt sits in multiStep (awaiting breakdown), not singleTask", () => {
     const items = [
       item({

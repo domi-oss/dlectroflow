@@ -33,6 +33,7 @@ import {
   reopenItem,
   moveToReview,
   requestBreakdown,
+  ensureFocusStep,
 } from "@/app/actions/braindump";
 import { startBreakdown } from "@/app/actions/breakdown";
 import { StatusPill } from "@/components/inbox/status-pill";
@@ -177,6 +178,14 @@ export function InboxView({
     startTransition(async () => {
       const taskId = await startBreakdown(id);
       if (taskId) router.push(`/tasks/${taskId}`);
+    });
+
+  // ▶ Focus on a single to-do — ensures its one-step task exists, then opens
+  // the step-based focus timer.
+  const focusOnItem = (id: string) =>
+    startTransition(async () => {
+      const stepId = await ensureFocusStep(id);
+      if (stepId) router.push(`/focus/${stepId}`);
     });
 
   // Drag (dnd-kit) + the "Move to…" menu share this single dispatcher so the
@@ -419,12 +428,16 @@ export function InboxView({
                       {/* Title line + action row below — mirrors the Needs-review row layout. */}
                       <div className="flex items-start gap-3">
                         <DragGrip id={item.id} label={item.text} />
-                        <span className="min-w-0 flex-1 break-words">
-                          <span className="text-primary mr-2 text-xs font-medium">{t("pill.toDo", voice)}</span>
-                          {item.text}
-                        </span>
+                        <span className="min-w-0 flex-1 break-words">{item.text}</span>
                       </div>
                       <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => focusOnItem(item.id)}
+                          className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
+                        >
+                          ▶ Focus
+                        </button>
                         <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => completeItem(item.id))}>
                           {t("action.complete", voice)}
                         </button>

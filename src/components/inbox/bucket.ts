@@ -97,9 +97,11 @@ export function bucketItems(items: Item[], now: number = Date.now()): Buckets {
   const triaged = items.filter(
     (i) => i.status === BrainDumpStatus.Triaged && !isFullyDone(i) && !isCompleted(i),
   );
+  // A one-step task IS a single to-do (its step exists so ▶ Focus has a
+  // target); only 2+ steps make it multi-step.
   const awaitsBreakdown = (i: Item) => i.stepsTotal === 0 && i.breakdownRequestedAt != null;
-  const singleTask = triaged.filter((i) => i.stepsTotal === 0 && !awaitsBreakdown(i));
-  const multiStep = triaged.filter((i) => i.stepsTotal > 0 || awaitsBreakdown(i));
+  const singleTask = triaged.filter((i) => i.stepsTotal <= 1 && !awaitsBreakdown(i));
+  const multiStep = triaged.filter((i) => i.stepsTotal > 1 || awaitsBreakdown(i));
 
   const completedAll = items
     .filter(isCompleted)
@@ -122,7 +124,8 @@ export function bucketOfItem(i: Item, now: number = Date.now()): BucketId {
     return i.snoozedUntil != null && toMs(i.snoozedUntil) > now ? "savedLater" : "needsReview";
   }
   if (i.status === BrainDumpStatus.Triaged && !isFullyDone(i)) {
-    return i.stepsTotal > 0 || i.breakdownRequestedAt != null ? "multiStep" : "singleTask";
+    const awaitsBreakdown = i.stepsTotal === 0 && i.breakdownRequestedAt != null;
+    return i.stepsTotal > 1 || awaitsBreakdown ? "multiStep" : "singleTask";
   }
   // Fully-done-but-not-stamped or any other state: treat as review (safe default).
   return "needsReview";

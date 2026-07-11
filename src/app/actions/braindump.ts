@@ -161,6 +161,50 @@ export async function keepAsTask(id: string) {
   return task.id;
 }
 
+/**
+ * ▶ Focus on a single to-do: the focus timer is step-based, so ensure the
+ * item has a task with one step mirroring its text (created on first use,
+ * idempotent) and return the id of the first not-done step to focus on.
+ * A one-step task still counts as a single to-do (bucket.ts: multi-step
+ * needs 2+ steps), so the item stays in its bucket.
+ */
+export async function ensureFocusStep(id: string): Promise<string | null> {
+  const workspaceId = await currentWorkspaceId();
+  const item = await prisma.brainDumpItem.findFirst({
+    where: { id, workspaceId },
+    include: { task: { include: { steps: { orderBy: { order: "asc" } } } } },
+  });
+  if (!item) return null;
+
+  let taskId = item.taskId;
+  let steps = item.task?.steps ?? [];
+
+  if (!taskId) {
+    const task = await prisma.task.create({
+      data: {
+        title: item.text,
+        source: TaskSource.BrainDump,
+        status: TaskStatus.Active,
+        workspaceId,
+      },
+    });
+    taskId = task.id;
+    await prisma.brainDumpItem.update({ where: { id }, data: { taskId } });
+    steps = [];
+  }
+
+  if (steps.length === 0) {
+    const step = await prisma.step.create({
+      data: { taskId, text: item.text, order: 1, total: 1, estMinutes: 10 },
+    });
+    revalidatePath(INBOX_PATH);
+    return step.id;
+  }
+
+  const next = steps.find((s) => !s.done) ?? steps[0];
+  return next.id;
+}
+
 export async function completeItem(id: string) {
   const workspaceId = await currentWorkspaceId();
   const item = await prisma.brainDumpItem.findFirst({

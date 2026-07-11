@@ -25,6 +25,7 @@ vi.mock("@/app/actions/braindump", () => ({
   reopenItem: vi.fn().mockResolvedValue(undefined),
   moveToReview: vi.fn().mockResolvedValue(undefined),
   requestBreakdown: vi.fn().mockResolvedValue(undefined),
+  ensureFocusStep: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/app/actions/breakdown", () => ({
@@ -435,6 +436,39 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
     await user.click(within(row).getByRole("button", { name: "Move to…" }));
     await user.click(within(row).getByRole("menuitem", { name: /Single-task/ }));
     expect(triageBrainDumpItem).toHaveBeenCalledWith("aw1");
+  });
+});
+
+describe("InboxView — single to-do ▶ Focus", () => {
+  it("clicking ▶ Focus ensures the focus step and navigates to the timer", async () => {
+    const { ensureFocusStep } = await import("@/app/actions/braindump");
+    (ensureFocusStep as ReturnType<typeof vi.fn>).mockResolvedValue("step-7");
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        initialItems={[makeItem({ id: "s1", text: "focusable todo", status: "triaged" })]}
+        settings={settings}
+      />,
+    );
+    const row = screen.getByText("focusable todo").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "▶ Focus" }));
+    expect(ensureFocusStep).toHaveBeenCalledWith("s1");
+    expect(push).toHaveBeenCalledWith("/focus/step-7");
+  });
+
+  it("does not navigate when no step id comes back", async () => {
+    const { ensureFocusStep } = await import("@/app/actions/braindump");
+    (ensureFocusStep as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        initialItems={[makeItem({ id: "s1", text: "focusable todo", status: "triaged" })]}
+        settings={settings}
+      />,
+    );
+    const row = screen.getByText("focusable todo").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "▶ Focus" }));
+    expect(push).not.toHaveBeenCalled();
   });
 });
 
