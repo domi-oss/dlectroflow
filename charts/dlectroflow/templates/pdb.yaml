@@ -1,0 +1,17 @@
+# Keep at least one app pod serving during voluntary disruptions (GKE
+# Autopilot node upgrades/bin-packing drains). With replicas < 2 a single
+# drain left zero Ready endpoints behind the Service and ingress-nginx
+# returned a bare 503. Postgres is deliberately not covered: it is a
+# single-replica StatefulSet (accepted risk), and a minAvailable PDB on it
+# would only block drains, not add availability.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: dlectroflow
+  labels:
+    {{- include "dlectroflow.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dlectroflow
