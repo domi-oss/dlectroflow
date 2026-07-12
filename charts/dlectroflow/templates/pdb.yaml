@@ -1,9 +1,15 @@
 # Keep at least one app pod serving during voluntary disruptions (GKE
-# Autopilot node upgrades/bin-packing drains). With replicas < 2 a single
+# Autopilot node-upgrade and bin-packing drains). With replicas < 2 a single
 # drain left zero Ready endpoints behind the Service and ingress-nginx
-# returned a bare 503. Postgres is deliberately not covered: it is a
-# single-replica StatefulSet (accepted risk), and a minAvailable PDB on it
-# would only block drains, not add availability.
+# returned a bare 503. Scope: PDBs only govern the eviction API — they do NOT
+# protect against involuntary loss (node crash, OOM, spot preemption; review
+# apps run on spot nodes). maxUnavailable rather than minAvailable so a
+# replicas=1 deploy degrades to "drain allowed" instead of wedging every node
+# drain; AlwaysAllow lets already-NotReady pods (e.g. both pods failing the
+# DB-backed readiness probe while postgres restarts) be evicted instead of
+# blocking maintenance to protect pods that serve nothing. Postgres is
+# deliberately not covered: it is a single-replica StatefulSet (accepted
+# risk), and a PDB on it would only block drains, not add availability.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -11,7 +17,8 @@ metadata:
   labels:
     {{- include "dlectroflow.labels" . | nindent 4 }}
 spec:
-  minAvailable: 1
+  maxUnavailable: 1
+  unhealthyPodEvictionPolicy: AlwaysAllow
   selector:
     matchLabels:
-      app.kubernetes.io/name: dlectroflow
+      {{- include "dlectroflow.selectorLabels" . | nindent 6 }}

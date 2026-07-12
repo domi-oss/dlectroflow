@@ -313,7 +313,7 @@ deploy_production:
         --set-string secrets.guestIpHashSalt="$GUEST_IP_HASH_SALT"
         --set-string registry.username="$GITLAB_DEPLOY_TOKEN_USER"
         --set-string registry.password="$GITLAB_DEPLOY_TOKEN"
-        --wait --timeout 5m
+        --wait --timeout 10m
   environment:
     name: production
     url: https://dlectroflow.dlectronique.dev
