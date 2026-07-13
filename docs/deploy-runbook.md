@@ -135,3 +135,76 @@ ingress `X-Forwarded-Proto` header and Task 3's `requestOrigin`.
 - `curl -I https://dlectroflow.dlectronique.dev` → 200 + valid TLS.
 - Google "Connect" completes on the prod host.
 - Close the MR → review namespace is deleted.
+
+## 12. Database backups (GCS, prod only)
+
+The in-cluster Postgres is a single-replica StatefulSet on one PVC, so a logical
+backup is the recovery path (see #21). A daily CronJob dumps the DB to GCS.
+
+**Infra (one-time, already provisioned):**
+- Bucket `gs://dlectroflow-db-backups-dtop-1bf3a85b` (europe-west2, uniform access,
+  public-access-prevention, **30-day lifecycle auto-delete**).
+- GCP service account `dlectroflow-backup@dtop-1bf3a85b.iam.gserviceaccount.com`
+  with `roles/storage.objectAdmin` **scoped to that bucket only**.
+- Workload Identity binding: KSA `dlectroflow-prod/dlectroflow-backup` → that GSA
+  (keyless; no JSON key exists or is mounted).
+
+**How it runs:** `charts/dlectroflow/templates/backup.yaml` renders a `ServiceAccount`
+(WI-annotated) + `CronJob dlectroflow-db-backup` when `backup.enabled` and
+`env=production` (CI sets both). Schedule **02:00 UTC daily**. Two stages: an
+initContainer (`postgres:16`, version-matched) runs `pg_dump | gzip` to a shared
+volume, then the `google/cloud-sdk` container `gcloud storage cp`s it to
+`gs://…/pg/dlectroflow-<UTC-timestamp>.sql.gz`.
+
+**Check it's healthy:**
+```
+kubectl -n dlectroflow-prod get cronjob dlectroflow-db-backup
+kubectl -n dlectroflow-prod get jobs -l app.kubernetes.io/name=dlectroflow --sort-by=.metadata.creationTimestamp | tail
+gcloud storage ls -l gs://dlectroflow-db-backups-dtop-1bf3a85b/pg/ | tail
+```
+
+**Run one on demand** (e.g. before a risky migration):
+```
+kubectl -n dlectroflow-prod create job --from=cronjob/dlectroflow-db-backup manual-backup-$(date +%s)
+```
+
+### Restore (into a scratch DB first — never straight over prod)
+1. Pull the dump you want:
+   ```
+   gcloud storage cp gs://dlectroflow-db-backups-dtop-1bf3a85b/pg/dlectroflow-<STAMP>.sql.gz /tmp/
+   gunzip /tmp/dlectroflow-<STAMP>.sql.gz
+   ```
+2. Port-forward prod Postgres and restore into a **scratch** database to inspect:
+   ```
+   kubectl -n dlectroflow-prod port-forward svc/dlectroflow-postgres 5432:5432 &
+   PGPASSWORD=<POSTGRES_PASSWORD> createdb   -h localhost -U dlectroflow restore_check
+   PGPASSWORD=<POSTGRES_PASSWORD> psql -h localhost -U dlectroflow -d restore_check -f /tmp/dlectroflow-<STAMP>.sql
+   ```
+   (`POSTGRES_PASSWORD` is the Secrets Manager value; `kubectl -n dlectroflow-prod get secret dlectroflow-secrets -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d`.)
+   > `dlectroflow` is the only DB role and is a **superuser** here — the postgres image makes `POSTGRES_USER` one — so it can `createdb`. There is no separate `postgres` role in this deployment.
+3. Only once verified, restore over the live DB during a maintenance window:
+   scale the app to 0 (`kubectl -n dlectroflow-prod scale deploy/dlectroflow --replicas=0`),
+   `dropdb`/`createdb dlectroflow`, `psql -d dlectroflow -f dump.sql`, scale back up.
+
+- **RPO ≈ 24h** (daily dump). **RTO** = time to pull + restore (minutes at this size).
+  Tighten either by raising the schedule frequency.
+
+## 13. Rollback
+
+**App-only (no schema change in the bad deploy):** deploys use `helm upgrade --atomic`,
+so a rollout that fails to become Ready **auto-rolls back** to the last good release.
+To revert a deploy that *succeeded* but is bad:
+```
+helm -n dlectroflow-prod history dlectroflow
+helm -n dlectroflow-prod rollback dlectroflow <PREVIOUS_REVISION> --wait --timeout 10m
+```
+
+**⚠️ If the bad deploy ran a migration:** migrations are **forward-only**
+(`prisma migrate deploy` in the app initContainer). `helm rollback` reverts the
+*image* but **not** the schema, so an older image can hit a newer schema and crash.
+Options, in order of preference:
+1. **Roll forward** — fix in a new commit and deploy (preferred; avoids schema divergence).
+2. If you must go back, restore the DB from the pre-deploy backup (§12) to match the
+   old image, then `helm rollback`. Take a fresh on-demand backup first.
+- **Discipline going forward:** keep migrations backward-compatible (expand/contract)
+  so an app rollback is always safe without a DB restore.

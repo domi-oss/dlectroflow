@@ -1,0 +1,141 @@
+{{- /*
+Daily logical backup of the in-cluster Postgres to GCS.
+
+Rendered only in production and only when backup.enabled — review apps use an
+ephemeral emptyDir DB and must never back up. Two stages so each image does one
+job and pg_dump matches the server major version exactly:
+  1. initContainer `dump`  — postgres:16, pg_dump | gzip → shared emptyDir file
+  2. container    `upload` — cloud-sdk, gcloud storage cp → gs://<bucket>/pg/
+Upload auth is keyless via Workload Identity (the KSA below is bound to a GCP
+service account); no key file is ever mounted. Retention is enforced by the
+bucket's lifecycle policy, not here.
+*/ -}}
+{{- if and .Values.backup.enabled (eq .Values.env "production") }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.backup.serviceAccountName }}
+  labels:
+    {{- include "dlectroflow.labels" . | nindent 4 }}
+  annotations:
+    iam.gke.io/gcp-service-account: {{ .Values.backup.gcpServiceAccount | quote }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dlectroflow-db-backup
+  labels:
+    {{- include "dlectroflow.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            {{- include "dlectroflow.labels" . | nindent 12 }}
+        spec:
+          serviceAccountName: {{ .Values.backup.serviceAccountName }}
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+            - name: dump
+              emptyDir: {}
+            # Writable scratch for pg_dump/gcloud under readOnlyRootFilesystem —
+            # gcloud caches its config + token to disk even with Workload Identity,
+            # so it needs a writable HOME/CLOUDSDK_CONFIG (pointed at /tmp below).
+            - name: tmp
+              emptyDir: {}
+          initContainers:
+            - name: dump
+              # Defaults to the server image so pg_dump can never drift to a
+              # different major version than Postgres (a mismatch fails every run).
+              image: {{ .Values.backup.dumpImage | default .Values.postgres.image | quote }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: dlectroflow-secrets
+                      key: POSTGRES_PASSWORD
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  # Connection literals mirror postgres.yaml (the headless Service
+                  # name + POSTGRES_USER/POSTGRES_DB, all hardcoded there too) —
+                  # keep in sync if that Service is ever renamed.
+                  pg_dump -h dlectroflow-postgres -U dlectroflow -d dlectroflow \
+                    --no-owner --no-privileges \
+                    | gzip -c > /backup/dump.sql.gz
+                  SIZE=$(wc -c < /backup/dump.sql.gz)
+                  echo "dump bytes: ${SIZE}"
+                  # Guard against a degenerate/empty dump silently becoming "the backup".
+                  [ "${SIZE}" -gt 1024 ] || { echo "ERROR: dump suspiciously small (${SIZE} bytes)" >&2; exit 1; }
+              volumeMounts:
+                - name: dump
+                  mountPath: /backup
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 250m
+                  memory: 256Mi
+          containers:
+            - name: upload
+              image: {{ .Values.backup.uploadImage | quote }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                # gcloud needs a writable HOME + config dir even under Workload
+                # Identity; point both at the writable /tmp emptyDir so the root
+                # filesystem stays read-only.
+                - name: HOME
+                  value: /tmp
+                - name: CLOUDSDK_CONFIG
+                  value: /tmp/gcloud
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+                  DEST="gs://{{ .Values.backup.gcsBucket }}/pg/dlectroflow-${STAMP}.sql.gz"
+                  gcloud storage cp /backup/dump.sql.gz "$DEST"
+                  echo "uploaded ${DEST}"
+              volumeMounts:
+                - name: dump
+                  mountPath: /backup
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 256Mi
+                limits:
+                  cpu: 250m
+                  memory: 512Mi
+{{- end }}

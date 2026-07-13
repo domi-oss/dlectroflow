@@ -52,3 +52,15 @@ secrets:
 auth:
   provider: gitlab
   ownerAllowlist: ""
+
+# Daily logical Postgres backup → GCS (prod only; see templates/backup.yaml).
+# Disabled by default so review apps and `helm template` stay clean; CI turns it
+# on for prod with the bucket + GSA below. Retention is the bucket lifecycle.
+backup:
+  enabled: false
+  schedule: "0 2 * * *"          # 02:00 UTC daily
+  gcsBucket: ""                  # bucket name, no gs:// prefix
+  gcpServiceAccount: ""          # GSA email bound via Workload Identity
+  serviceAccountName: dlectroflow-backup
+  dumpImage: ""                        # defaults to postgres.image (keeps pg_dump matched to the server major); override only for a different version
+  uploadImage: google/cloud-sdk:slim
