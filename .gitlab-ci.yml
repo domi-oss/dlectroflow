@@ -239,6 +239,7 @@ deploy_review:
     - helm upgrade --install "dlectroflow-mr-$CI_MERGE_REQUEST_IID" charts/dlectroflow
         --namespace "dlectroflow-mr-$CI_MERGE_REQUEST_IID" --create-namespace
         --set env=review --set spot=true --set postgres.persistent=false
+        --set replicas=1
         --set-string image.tag="$CI_COMMIT_SHA"
         --set-string host="mr-$CI_MERGE_REQUEST_IID.35-246-93-255.sslip.io"
         --set-string secrets.postgresPassword="$POSTGRES_PASSWORD"
