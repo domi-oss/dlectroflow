@@ -64,7 +64,11 @@ describe("google token encryption", () => {
     const { create, update } = prismaMock.googleAuth.upsert.mock.calls[0][0];
     expect(create.accessToken).toMatch(/^v1:/);
     expect(decryptToken(create.accessToken)).toBe("g-at");
+    expect(create.refreshToken).toMatch(/^v1:/);
+    expect(decryptToken(create.refreshToken)).toBe("g-rt");
     expect(update.accessToken).toMatch(/^v1:/);
     expect(decryptToken(update.accessToken)).toBe("g-at");
+    expect(update.refreshToken).toMatch(/^v1:/);
+    expect(decryptToken(update.refreshToken)).toBe("g-rt");
   });
 });
