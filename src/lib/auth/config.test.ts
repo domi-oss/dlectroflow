@@ -32,4 +32,9 @@ describe("assertAuthConfig — TOKEN_ENC_KEY", () => {
     process.env.TOKEN_ENC_KEY = "abc";
     expect(() => assertAuthConfig()).toThrow(/TOKEN_ENC_KEY/);
   });
+
+  it("throws when TOKEN_ENC_KEY is 64 chars but not hex", () => {
+    process.env.TOKEN_ENC_KEY = "g".repeat(64);
+    expect(() => assertAuthConfig()).toThrow(/TOKEN_ENC_KEY/);
+  });
 });
