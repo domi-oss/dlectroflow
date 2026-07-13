@@ -31,7 +31,7 @@ Pure, dependency-light, unit-testable. No Prisma/SDK imports.
   → `"v1:" + base64( iv(12 bytes) ‖ authTag(16 bytes) ‖ ciphertext )`, AES-256-GCM, a fresh random IV per call.
 - `decryptToken(stored: string): string`
   → parses the `v1:` envelope, verifies the GCM auth tag, returns plaintext. **Throws** on a missing/unknown version prefix, malformed payload, or auth-tag failure (tamper). No plaintext passthrough.
-- Key loading: read `TOKEN_ENC_KEY`, base64-decode, assert exactly 32 bytes; throw a clear error otherwise. Lazy (loaded on first use), mirroring `getAnthropic()` so `next build` doesn't require the key.
+- Key loading: read `TOKEN_ENC_KEY` (a 64-char **hex** string), hex-decode, assert exactly 32 bytes; throw a clear error otherwise. Lazy (loaded on first use), mirroring `getAnthropic()` so `next build` doesn't require the key. (Hex, not base64, so the value is cleanly maskable as a GitLab CI variable.)
 - The `v1:` prefix is a forward hook for future key rotation (a later `v2:` with a new key). Rotation itself is **not** built now (YAGNI).
 
 ### Wiring — `src/lib/reclaim.ts`, `src/lib/google.ts`
@@ -56,11 +56,11 @@ Forward-only; rollback path is the pre-deploy backup (per runbook §13). Backups
 
 - **`values.yaml`:** add `secrets.tokenEncKey: ""`.
 - **`secret.yaml`:** add `TOKEN_ENC_KEY: {{ .Values.secrets.tokenEncKey | quote }}` in the **all-envs** block (the image always runs `NODE_ENV=production`, so review apps enforce it too — same reasoning as `GUEST_IP_HASH_SALT`).
-- **`.gitlab-ci.yml`:**
-  - `deploy_production`: add `TOKEN_ENC_KEY` to the `secrets:` block (GitLab Secrets Manager, group source) and pass `--set-string secrets.tokenEncKey="$TOKEN_ENC_KEY"`.
-  - `deploy_review`: generate a per-deploy dummy key `TOKEN_ENC_KEY=$(head -c 32 /dev/urandom | base64)` (mirrors the per-deploy `AUTH_SESSION_SECRET`; review apps hold no real tokens).
-- **Boot guard (`src/lib/auth/config.ts`):** in `assertAuthConfig()`, require `TOKEN_ENC_KEY` present and base64-decoding to 32 bytes; add to the `missing[]` list so prod refuses to boot without it (fail-closed, consistent with the existing checks).
-- **`.env.example`:** document `TOKEN_ENC_KEY` with a generate hint (`openssl rand -base64 32`).
+- **`.gitlab-ci.yml`:** `TOKEN_ENC_KEY` is a **masked + hidden + protected** project CI variable (already provisioned; same delivery pattern as `AUTH_SESSION_SECRET`, not the Secrets Manager `secrets:` block).
+  - `deploy_production`: pass `--set-string secrets.tokenEncKey="$TOKEN_ENC_KEY"` (the protected var resolves on `main`).
+  - `deploy_review`: generate a per-deploy dummy key `TOKEN_ENC_KEY=$(openssl rand -hex 32)` (mirrors the per-deploy `AUTH_SESSION_SECRET`; review apps hold no real tokens, and the protected var isn't exposed to unprotected MR branches anyway).
+- **Boot guard (`src/lib/auth/config.ts`):** in `assertAuthConfig()`, require `TOKEN_ENC_KEY` present and hex-decoding to 32 bytes (64 hex chars); add to the `missing[]` list so prod refuses to boot without it (fail-closed, consistent with the existing checks).
+- **`.env.example`:** document `TOKEN_ENC_KEY` with a generate hint (`openssl rand -hex 32`).
 
 ## Testing (TDD)
 
@@ -70,7 +70,7 @@ Forward-only; rollback path is the pre-deploy backup (per runbook §13). Backups
 
 ## Deploy sequencing (important)
 
-1. **Provision `TOKEN_ENC_KEY` first** — generate a 32-byte key, store it in GitLab Secrets Manager (group `gl-demo-ultimate-dtop`) and wire the CI reference. If this is absent when the change deploys, the boot guard stops prod from starting. (Flag owner before creating the secret.)
+1. **Provision `TOKEN_ENC_KEY` first** — ✅ **DONE 2026-07-13**: generated a 32-byte hex key and stored it as a **masked + hidden + protected** project CI variable on dlectroflow (value unrecoverable by design; the pipeline still injects it into the prod deploy). If this were absent when the change deploys, the boot guard would stop prod from starting.
 2. Merge → migrate initContainer clears the token rows → app boots (guard satisfied) → owner reconnects Google + Reclaim → all writes encrypted.
 3. Verify: reconnect both, confirm a subsequent backup dump shows the token columns as `v1:` ciphertext (not plaintext).
 
