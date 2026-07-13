@@ -61,7 +61,9 @@ spec:
               emptyDir: {}
           initContainers:
             - name: dump
-              image: {{ .Values.backup.dumpImage | quote }}
+              # Defaults to the server image so pg_dump can never drift to a
+              # different major version than Postgres (a mismatch fails every run).
+              image: {{ .Values.backup.dumpImage | default .Values.postgres.image | quote }}
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
