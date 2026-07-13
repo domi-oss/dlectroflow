@@ -181,6 +181,7 @@ kubectl -n dlectroflow-prod create job --from=cronjob/dlectroflow-db-backup manu
    PGPASSWORD=<POSTGRES_PASSWORD> psql -h localhost -U dlectroflow -d restore_check -f /tmp/dlectroflow-<STAMP>.sql
    ```
    (`POSTGRES_PASSWORD` is the Secrets Manager value; `kubectl -n dlectroflow-prod get secret dlectroflow-secrets -o jsonpath='{.data.POSTGRES_PASSWORD}' | base64 -d`.)
+   > `dlectroflow` is the only DB role and is a **superuser** here — the postgres image makes `POSTGRES_USER` one — so it can `createdb`. There is no separate `postgres` role in this deployment.
 3. Only once verified, restore over the live DB during a maintenance window:
    scale the app to 0 (`kubectl -n dlectroflow-prod scale deploy/dlectroflow --replicas=0`),
    `dropdb`/`createdb dlectroflow`, `psql -d dlectroflow -f dump.sql`, scale back up.

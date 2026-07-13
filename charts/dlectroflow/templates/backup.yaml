@@ -77,10 +77,16 @@ spec:
               args:
                 - |
                   set -euo pipefail
+                  # Connection literals mirror postgres.yaml (the headless Service
+                  # name + POSTGRES_USER/POSTGRES_DB, all hardcoded there too) —
+                  # keep in sync if that Service is ever renamed.
                   pg_dump -h dlectroflow-postgres -U dlectroflow -d dlectroflow \
                     --no-owner --no-privileges \
                     | gzip -c > /backup/dump.sql.gz
-                  echo "dump bytes: $(wc -c < /backup/dump.sql.gz)"
+                  SIZE=$(wc -c < /backup/dump.sql.gz)
+                  echo "dump bytes: ${SIZE}"
+                  # Guard against a degenerate/empty dump silently becoming "the backup".
+                  [ "${SIZE}" -gt 1024 ] || { echo "ERROR: dump suspiciously small (${SIZE} bytes)" >&2; exit 1; }
               volumeMounts:
                 - name: dump
                   mountPath: /backup
