@@ -236,6 +236,10 @@ deploy_review:
     # Phase 2 — dummy per-deploy guest IP-hash salt so the prod-mode boot guard
     # starts in the ephemeral review app (holds no real guest data).
     - GUEST_IP_HASH_SALT_REVIEW=$(cat /proc/sys/kernel/random/uuid /proc/sys/kernel/random/uuid | tr -cd 'a-fA-F0-9')
+    # #21 P2 — dummy per-deploy AES-256-GCM key so the boot guard starts in the
+    # ephemeral review app (holds no real OAuth tokens). od/tr are busybox
+    # built-ins; avoid openssl (not in this Alpine deploy image).
+    - TOKEN_ENC_KEY=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
     - helm upgrade --install "dlectroflow-mr-$CI_MERGE_REQUEST_IID" charts/dlectroflow
         --namespace "dlectroflow-mr-$CI_MERGE_REQUEST_IID" --create-namespace
         --set env=review --set spot=true --set postgres.persistent=false
@@ -249,6 +253,7 @@ deploy_review:
         --set-string secrets.gitlabOauthClientId="review-unused"
         --set-string secrets.gitlabOauthClientSecret="review-unused"
         --set-string secrets.guestIpHashSalt="$GUEST_IP_HASH_SALT_REVIEW"
+        --set-string secrets.tokenEncKey="$TOKEN_ENC_KEY"
         --set-string registry.username="$GITLAB_DEPLOY_TOKEN_USER"
         --set-string registry.password="$GITLAB_DEPLOY_TOKEN"
         --set resources.app.cpu=250m
@@ -312,6 +317,7 @@ deploy_production:
         --set-string secrets.gitlabOauthClientId="$GITLAB_OAUTH_CLIENT_ID"
         --set-string secrets.gitlabOauthClientSecret="$GITLAB_OAUTH_CLIENT_SECRET"
         --set-string secrets.guestIpHashSalt="$GUEST_IP_HASH_SALT"
+        --set-string secrets.tokenEncKey="$TOKEN_ENC_KEY"
         --set-string registry.username="$GITLAB_DEPLOY_TOKEN_USER"
         --set-string registry.password="$GITLAB_DEPLOY_TOKEN"
         --set backup.enabled=true
