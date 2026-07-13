@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
-import { OWNER_BREAKDOWN_ALLOWLIST } from "@/lib/constants";
+import { OWNER_BREAKDOWN_ALLOWLIST, isGuestWorkspace } from "@/lib/constants";
 
 export async function updateAgingSettings(input: {
   agingThresholdMinutes: number;
@@ -60,11 +60,14 @@ export async function updateRoundupSettings(input: {
   const workdayEndTime = /^\d{2}:\d{2}$/.test(input.workdayEndTime)
     ? input.workdayEndTime
     : "17:00";
-  const roundupEmail = input.roundupEmail?.trim() || null;
+  // Outbound email is owner-only: a guest sandbox may tune the demo knobs but
+  // must never aim Resend at an arbitrary address (#20).
+  const isGuest = isGuestWorkspace(workspaceId);
+  const roundupEmail = isGuest ? null : input.roundupEmail?.trim() || null;
   const data = {
     workdayEndTime,
     roundupDemoOverride: Boolean(input.roundupDemoOverride),
-    roundupEmailEnabled: Boolean(input.roundupEmailEnabled),
+    roundupEmailEnabled: isGuest ? false : Boolean(input.roundupEmailEnabled),
     roundupEmail,
   };
   await prisma.settings.upsert({
