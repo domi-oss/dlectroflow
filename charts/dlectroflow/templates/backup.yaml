@@ -54,6 +54,11 @@ spec:
           volumes:
             - name: dump
               emptyDir: {}
+            # Writable scratch for pg_dump/gcloud under readOnlyRootFilesystem —
+            # gcloud caches its config + token to disk even with Workload Identity,
+            # so it needs a writable HOME/CLOUDSDK_CONFIG (pointed at /tmp below).
+            - name: tmp
+              emptyDir: {}
           initContainers:
             - name: dump
               image: {{ .Values.backup.dumpImage | quote }}
@@ -79,6 +84,8 @@ spec:
               volumeMounts:
                 - name: dump
                   mountPath: /backup
+                - name: tmp
+                  mountPath: /tmp
               resources:
                 requests:
                   cpu: 100m
@@ -94,6 +101,14 @@ spec:
                 readOnlyRootFilesystem: true
                 capabilities:
                   drop: ["ALL"]
+              env:
+                # gcloud needs a writable HOME + config dir even under Workload
+                # Identity; point both at the writable /tmp emptyDir so the root
+                # filesystem stays read-only.
+                - name: HOME
+                  value: /tmp
+                - name: CLOUDSDK_CONFIG
+                  value: /tmp/gcloud
               command: ["/bin/sh", "-c"]
               args:
                 - |
@@ -106,6 +121,8 @@ spec:
                 - name: dump
                   mountPath: /backup
                   readOnly: true
+                - name: tmp
+                  mountPath: /tmp
               resources:
                 requests:
                   cpu: 100m
