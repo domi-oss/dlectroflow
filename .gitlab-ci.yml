@@ -250,7 +250,7 @@ build_image:
 .deploy_base:
   stage: deploy
   image:
-    name: dtzar/helm-kubectl:3.16.1   # bundles helm + kubectl
+    name: dtzar/helm-kubectl:3.19.1@sha256:d02d8d02a24d67e4851503cc443e7eb2358383c9c052f699c262409cd05dae55   # bundles helm + kubectl
     entrypoint: [""]
   before_script:
     - chmod 600 "$KUBECONFIG"   # tighten perms on the runner-generated kubeconfig (silences Helm's group-readable warning)
