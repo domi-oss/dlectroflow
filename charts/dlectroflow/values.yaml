@@ -5,7 +5,7 @@ image:
 
 env: production        # review | production
 host: dlectroflow.dlectronique.dev
-replicas: 1
+replicas: 2            # review apps pinned to 1 via CI (no HA need on spot)
 spot: false            # true for review apps
 
 resources:
