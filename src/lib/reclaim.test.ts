@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { decryptToken } from "@/lib/crypto/token-cipher";
 
 const { prismaMock } = vi.hoisted(() => ({
   prismaMock: {
