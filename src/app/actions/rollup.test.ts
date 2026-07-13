@@ -80,6 +80,8 @@ describe("triggerRollup email gating", () => {
     const res = await triggerRollup({ force: true, sendEmail: true });
 
     expect(sendRoundupEmailMock).toHaveBeenCalledTimes(1);
+    // The once-per-day guard depends on the emailed marker being written.
+    expect(markRollupEmailedMock).toHaveBeenCalledWith("owner", rollupFixture.date);
     expect(res.email).toEqual({ attempted: true, ok: true, reason: undefined });
   });
 });
