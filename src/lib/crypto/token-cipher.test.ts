@@ -57,4 +57,19 @@ describe("token-cipher", () => {
     expect(enc).not.toBeNull();
     expect(decryptNullable(enc)).toBe("v");
   });
+
+  it("encryptNullable handles empty string (not null)", () => {
+    const encrypted = encryptNullable("");
+    expect(encrypted).not.toBeNull();
+    expect(encrypted).toMatch(/^v1:/);
+    expect(decryptNullable(encrypted)).toBe("");
+  });
+
+  it("decryptNullable throws on empty non-null string", () => {
+    expect(() => decryptNullable("")).toThrow();
+  });
+
+  it("decryptToken throws on v1-prefixed but too-short payload", () => {
+    expect(() => decryptToken("v1:AAAA")).toThrow(/Malformed token envelope/);
+  });
 });

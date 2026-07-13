@@ -51,9 +51,9 @@ export function decryptToken(stored: string): string {
 }
 
 export function encryptNullable(v: string | null | undefined): string | null {
-  return v ? encryptToken(v) : null;
+  return v == null ? null : encryptToken(v);
 }
 
 export function decryptNullable(v: string | null | undefined): string | null {
-  return v ? decryptToken(v) : null;
+  return v == null ? null : decryptToken(v);
 }
