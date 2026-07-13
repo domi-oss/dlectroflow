@@ -23,6 +23,9 @@ export function assertAuthConfig(): void {
   if (c.ownerAllowlist.length === 0) missing.push("OWNER_ALLOWLIST");
   if (!process.env.GUEST_IP_HASH_SALT || process.env.GUEST_IP_HASH_SALT.length < 16)
     missing.push("GUEST_IP_HASH_SALT (>=16 chars)");
+  const encKey = process.env.TOKEN_ENC_KEY ?? "";
+  if (!/^[0-9a-fA-F]{64}$/.test(encKey))
+    missing.push("TOKEN_ENC_KEY (64 hex chars)");
   if (missing.length) {
     throw new Error(
       `Owner auth misconfigured — refusing to boot with data reachable. Missing: ${missing.join(", ")}`,
