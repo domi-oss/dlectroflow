@@ -239,7 +239,7 @@ deploy_review:
     # #21 P2 — dummy per-deploy AES-256-GCM key so the boot guard starts in the
     # ephemeral review app (holds no real OAuth tokens). od/tr are busybox
     # built-ins; avoid openssl (not in this Alpine deploy image).
-    - TOKEN_ENC_KEY=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    - TOKEN_ENC_KEY=$(tr -dc '0-9a-f' < /dev/urandom | head -c 64)
     - helm upgrade --install "dlectroflow-mr-$CI_MERGE_REQUEST_IID" charts/dlectroflow
         --namespace "dlectroflow-mr-$CI_MERGE_REQUEST_IID" --create-namespace
         --set env=review --set spot=true --set postgres.persistent=false

@@ -65,11 +65,16 @@ describe("token-cipher", () => {
     expect(decryptNullable(encrypted)).toBe("");
   });
 
-  it("decryptNullable throws on empty non-null string", () => {
-    expect(() => decryptNullable("")).toThrow();
+  it("decryptNullable degrades to null on an undecryptable value (empty / tampered / non-v1)", () => {
+    // Graceful degradation: a stored value that can't be decrypted is treated
+    // as "absent" so token reads return null (→ reconnect) instead of throwing.
+    expect(decryptNullable("")).toBeNull();
+    expect(decryptNullable("plaintext-not-encrypted")).toBeNull();
+    const tampered = encryptToken("x").slice(0, -2) + "AA";
+    expect(decryptNullable(tampered)).toBeNull();
   });
 
-  it("decryptToken throws on v1-prefixed but too-short payload", () => {
+  it("decryptToken (strict) still throws on a v1-prefixed but too-short payload", () => {
     expect(() => decryptToken("v1:AAAA")).toThrow(/Malformed token envelope/);
   });
 });

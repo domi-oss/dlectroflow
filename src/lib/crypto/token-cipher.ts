@@ -54,6 +54,19 @@ export function encryptNullable(v: string | null | undefined): string | null {
   return v == null ? null : encryptToken(v);
 }
 
+/**
+ * Decrypt a stored token, treating any undecryptable value as "absent" (null).
+ * A null/undefined column is null; a value that fails to decrypt (wrong key
+ * after rotation, corruption, a stray non-`v1:` value) also yields null rather
+ * than throwing — so token reads degrade to "not connected" (prompting a
+ * reconnect) instead of surfacing a 500 on every focus/schedule action. Use
+ * `decryptToken` directly when a decryption failure should be fatal.
+ */
 export function decryptNullable(v: string | null | undefined): string | null {
-  return v == null ? null : decryptToken(v);
+  if (v == null) return null;
+  try {
+    return decryptToken(v);
+  } catch {
+    return null;
+  }
 }
