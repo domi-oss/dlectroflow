@@ -5,11 +5,12 @@ import {
   randomState,
   buildAuthorizeUrl,
 } from "@/lib/reclaim";
+import { requestOrigin } from "@/lib/origin";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request): Promise<Response> {
-  const origin = new URL(req.url).origin;
+  const origin = requestOrigin(req);
   const redirectUri = `${origin}/api/reclaim/oauth/callback`;
 
   try {
