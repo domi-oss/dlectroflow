@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Liveness must be process-only: importing/serving it may not touch the DB.
 // Poison the prisma module so any accidental DB dependency fails loudly.
@@ -11,6 +11,7 @@ import { _resetAnthropicFailuresForTest, recordAnthropicFailure } from "@/lib/ob
 
 describe("GET /api/livez", () => {
   beforeEach(() => _resetAnthropicFailuresForTest());
+  afterEach(() => vi.restoreAllMocks());
 
   it("returns 200 alive without any DB access", async () => {
     const res = await GET();
@@ -24,6 +25,5 @@ describe("GET /api/livez", () => {
     recordAnthropicFailure("breakdown", new Error("x"));
     const body = await (await GET()).json();
     expect(body.anthropicFailures).toBe(1);
-    vi.restoreAllMocks();
   });
 });
