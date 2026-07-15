@@ -170,6 +170,16 @@ test_app:
   image: node:22-alpine
   interruptible: true
   needs: []          # starts at pipeline start, in parallel with build_app
+  # Real Postgres for the *.integration.test.ts files (they exercise actual
+  # queries — e.g. workspace scoping — and skipping them in CI would gate on
+  # less than the local suite runs).
+  services:
+    - postgres:16
+  variables:
+    POSTGRES_USER: dlectroflow
+    POSTGRES_PASSWORD: ci-test-only
+    POSTGRES_DB: dlectroflow_test
+    DATABASE_URL: "postgresql://dlectroflow:ci-test-only@postgres:5432/dlectroflow_test?schema=public"
   before_script:
     - apk add --no-cache openssl   # Prisma engine libssl (postinstall runs prisma generate)
   script:
@@ -178,6 +188,7 @@ test_app:
     # Errors fail the gate; the react-hooks compiler-era rules are warn-level
     # pending the #23 burn-down, so their findings stay visible but don't block.
     - npm run lint
+    - npx prisma migrate deploy   # schema for the integration tests' service DB
     - npm run test
   cache:
     key:
@@ -252,6 +263,11 @@ deploy_review:
   # (deploy_production intentionally stays stage-scheduled so scan results land
   # before a prod rollout.)
   needs: ["build_image"]
+  # Serialize helm per review env: deploy jobs aren't interruptible, so a
+  # quick follow-up push otherwise races the previous pipeline's still-running
+  # helm op on the same release → "another operation is in progress" (hit on
+  # !46). Same group as stop_review so a deploy can't race the teardown either.
+  resource_group: review/$CI_MERGE_REQUEST_IID
   secrets:
     ANTHROPIC_API_KEY:
       gitlab_secrets_manager: { name: ANTHROPIC_API_KEY, source: group/gl-demo-ultimate-dtop }
@@ -305,6 +321,7 @@ deploy_review:
 
 stop_review:
   extends: .deploy_base
+  resource_group: review/$CI_MERGE_REQUEST_IID
   script:
     - helm uninstall "dlectroflow-mr-$CI_MERGE_REQUEST_IID" --namespace "dlectroflow-mr-$CI_MERGE_REQUEST_IID" || true
     - kubectl delete namespace "dlectroflow-mr-$CI_MERGE_REQUEST_IID" --ignore-not-found
@@ -318,6 +335,9 @@ stop_review:
 
 deploy_production:
   extends: .deploy_base
+  # Serialize prod helm ops (rapid successive merges to main would otherwise
+  # race each other the same way review deploys can).
+  resource_group: production
   secrets:
     ANTHROPIC_API_KEY:
       gitlab_secrets_manager: { name: ANTHROPIC_API_KEY, source: group/gl-demo-ultimate-dtop }
