@@ -406,10 +406,13 @@ renovate:
   stage: maintenance
   # Digest-pinned (supply-chain): the major tag is a moving target. Renovate's own
   # gitlabci manager (docker:pinDigests in renovate.json) keeps this digest fresh.
-  # Bumped 39→43 manually (#24): v39's npm updateArtifacts crashed with
-  # `undefined` on every lockfile regen, breaking its own update MRs — Renovate
-  # can't self-update its image when its MRs are the broken ones.
-  image: renovate/renovate:43@sha256:062bec49857f0b23232e09fc9a557b3abf71dd499dbf54c2137a83d9c6320795
+  # -full flavor (#24): the slim image installs tools at runtime, resolving the
+  # node toolchain via the github-releases datasource — unauthenticated from
+  # shared CI runners that gets rate-limited → "No tool releases found." →
+  # every npm lockfile regen died (surfaced as `undefined` artifact errors).
+  # -full ships node/npm preinstalled (binarySource=global), no GitHub lookup.
+  # Alternative documented fix if we ever go back to slim: GITHUB_COM_TOKEN.
+  image: renovate/renovate:43-full@sha256:b8efce2f968c25f5a7597d3bb3dfe193fd4217061aa75717251eba08a17abfb7
   # NOT interruptible: a maintenance run should finish, not be cancelled by a
   # newer main pipeline mid-run (which could leave update MRs half-created).
   variables:
@@ -418,6 +421,9 @@ renovate:
     RENOVATE_AUTODISCOVER: "false"
     RENOVATE_REPOSITORIES: "$CI_PROJECT_PATH"
     RENOVATE_ONBOARDING: "false"        # config lives in-repo (renovate.json)
+    # Belt-and-braces with the -full image (which defaults to this): never
+    # try runtime tool installs — they need github-releases API access.
+    RENOVATE_BINARY_SOURCE: "global"
     RENOVATE_REQUIRE_CONFIG: "required"
     LOG_LEVEL: info
   script:
