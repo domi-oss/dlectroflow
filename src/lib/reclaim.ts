@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { prisma } from "@/lib/db";
 import { SINGLETON_ID } from "@/lib/constants";
+import { encryptToken, decryptNullable } from "@/lib/crypto/token-cipher";
 
 // Reclaim MCP OAuth 2.1 endpoints (discovered from
 // https://mcp.reclaim.ai/.well-known/oauth-authorization-server).
@@ -44,7 +45,7 @@ export async function ensureClient(redirectUri: string): Promise<{
 }> {
   const auth = await getAuth();
   if (auth.clientId && auth.redirectUri === redirectUri) {
-    return { clientId: auth.clientId, clientSecret: auth.clientSecret };
+    return { clientId: auth.clientId, clientSecret: decryptNullable(auth.clientSecret) };
   }
   const res = await fetch(REGISTRATION_ENDPOINT, {
     method: "POST",
@@ -69,7 +70,7 @@ export async function ensureClient(redirectUri: string): Promise<{
     where: { id: SINGLETON_ID },
     data: {
       clientId: data.client_id,
-      clientSecret: data.client_secret ?? null,
+      clientSecret: data.client_secret ? encryptToken(data.client_secret) : null,
       redirectUri,
       // new client ⇒ any previous tokens are invalid
       accessToken: null,
@@ -111,9 +112,9 @@ async function storeTokens(t: TokenResponse) {
   await prisma.reclaimAuth.update({
     where: { id: SINGLETON_ID },
     data: {
-      accessToken: t.access_token,
+      accessToken: encryptToken(t.access_token),
       // Reclaim may omit a new refresh_token on refresh — keep the old one.
-      ...(t.refresh_token ? { refreshToken: t.refresh_token } : {}),
+      ...(t.refresh_token ? { refreshToken: encryptToken(t.refresh_token) } : {}),
       expiresAt,
       scope: t.scope ?? SCOPES,
     },
@@ -135,7 +136,8 @@ export async function exchangeCode(
     client_id: auth.clientId,
     code_verifier: codeVerifier,
   });
-  if (auth.clientSecret) body.set("client_secret", auth.clientSecret);
+  const clientSecret = decryptNullable(auth.clientSecret);
+  if (clientSecret) body.set("client_secret", clientSecret);
 
   const res = await fetch(TOKEN_ENDPOINT, {
     method: "POST",
@@ -150,13 +152,15 @@ export async function exchangeCode(
 
 async function refreshAccessToken(): Promise<string | null> {
   const auth = await getAuth();
-  if (!auth.clientId || !auth.refreshToken) return null;
+  const refreshToken = decryptNullable(auth.refreshToken);
+  if (!auth.clientId || !refreshToken) return null;
   const body = new URLSearchParams({
     grant_type: "refresh_token",
-    refresh_token: auth.refreshToken,
+    refresh_token: refreshToken,
     client_id: auth.clientId,
   });
-  if (auth.clientSecret) body.set("client_secret", auth.clientSecret);
+  const clientSecret = decryptNullable(auth.clientSecret);
+  if (clientSecret) body.set("client_secret", clientSecret);
 
   const res = await fetch(TOKEN_ENDPOINT, {
     method: "POST",
@@ -172,12 +176,13 @@ async function refreshAccessToken(): Promise<string | null> {
 /** Return a valid access token, refreshing if needed; null if not connected. */
 export async function getValidAccessToken(): Promise<string | null> {
   const auth = await getAuth();
-  if (!auth.accessToken) return null;
+  const accessToken = decryptNullable(auth.accessToken);
+  if (!accessToken) return null;
   const soon = Date.now() + 60_000;
   if (auth.expiresAt && auth.expiresAt.getTime() <= soon) {
     return (await refreshAccessToken()) ?? null;
   }
-  return auth.accessToken;
+  return accessToken;
 }
 
 export async function getReclaimStatus(): Promise<{

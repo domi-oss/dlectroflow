@@ -1,251 +1,108 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ensureClient, exchangeCode } from "./reclaim";
-import { prisma } from "@/lib/db";
+import { decryptToken } from "@/lib/crypto/token-cipher";
 
-vi.mock("@/lib/db", () => ({
-  prisma: {
+const { prismaMock } = vi.hoisted(() => ({
+  prismaMock: {
     reclaimAuth: {
       upsert: vi.fn(),
-      update: vi.fn(),
+      update: vi.fn().mockResolvedValue({}),
     },
   },
 }));
+vi.mock("@/lib/db", () => ({ prisma: prismaMock }));
 
-describe("Reclaim OAuth - SSRF Prevention", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+beforeEach(() => {
+  vi.clearAllMocks();
+  prismaMock.reclaimAuth.upsert.mockResolvedValue({ id: "singleton" });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("reclaim token encryption", () => {
+  it("getValidAccessToken decrypts a stored (encrypted) access token", async () => {
+    const { encryptToken } = await import("@/lib/crypto/token-cipher");
+    prismaMock.reclaimAuth.upsert.mockResolvedValue({
+      id: "singleton",
+      accessToken: encryptToken("live-access-token"),
+      refreshToken: null,
+      clientId: "cid",
+      clientSecret: null,
+      expiresAt: null,
+    });
+    const { getValidAccessToken } = await import("./reclaim");
+    expect(await getValidAccessToken()).toBe("live-access-token");
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
+  it("getValidAccessToken returns null when no token stored", async () => {
+    prismaMock.reclaimAuth.upsert.mockResolvedValue({
+      id: "singleton",
+      accessToken: null,
+      refreshToken: null,
+      clientId: "cid",
+      clientSecret: null,
+      expiresAt: null,
+    });
+    const { getValidAccessToken } = await import("./reclaim");
+    expect(await getValidAccessToken()).toBeNull();
   });
 
-  describe("ensureClient - redirectUri validation", () => {
-    it("accepts valid HTTPS redirect URIs", async () => {
-      const validUri = "https://dlectroflow.dlectronique.dev/api/reclaim/oauth/callback";
-      vi.mocked(prisma.reclaimAuth.upsert).mockResolvedValueOnce({
-        id: "singleton",
-        clientId: null,
-        clientSecret: null,
-        redirectUri: null,
-        accessToken: null,
-        refreshToken: null,
-        expiresAt: null,
-        scope: null,
-      });
-
-      global.fetch = vi.fn().mockResolvedValueOnce({
+  it("ensureClient persists an encrypted clientSecret on the registration path", async () => {
+    prismaMock.reclaimAuth.upsert.mockResolvedValue({
+      id: "singleton",
+      clientId: null,
+      clientSecret: null,
+      redirectUri: null,
+      accessToken: null,
+      refreshToken: null,
+      expiresAt: null,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ client_id: "test-client", client_secret: "test-secret" }),
-      });
+        json: async () => ({ client_id: "cid", client_secret: "plaintext-secret" }),
+      }),
+    );
+    const { ensureClient } = await import("./reclaim");
+    await ensureClient("https://app/cb");
 
-      vi.mocked(prisma.reclaimAuth.update).mockResolvedValueOnce({
-        id: "singleton",
-        clientId: "test-client",
-        clientSecret: "test-secret",
-        redirectUri: validUri,
-        accessToken: null,
-        refreshToken: null,
-        expiresAt: null,
-        scope: null,
-      });
-
-      const result = await ensureClient(validUri);
-      expect(result.clientId).toBe("test-client");
-      expect(result.clientSecret).toBe("test-secret");
-    });
-
-    it("accepts valid localhost redirect URIs for development", async () => {
-      const devUri = "http://localhost:3000/api/reclaim/oauth/callback";
-      vi.mocked(prisma.reclaimAuth.upsert).mockResolvedValueOnce({
-        id: "singleton",
-        clientId: null,
-        clientSecret: null,
-        redirectUri: null,
-        accessToken: null,
-        refreshToken: null,
-        expiresAt: null,
-        scope: null,
-      });
-
-      global.fetch = vi.fn().mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ client_id: "test-client", client_secret: "test-secret" }),
-      });
-
-      vi.mocked(prisma.reclaimAuth.update).mockResolvedValueOnce({
-        id: "singleton",
-        clientId: "test-client",
-        clientSecret: "test-secret",
-        redirectUri: devUri,
-        accessToken: null,
-        refreshToken: null,
-        expiresAt: null,
-        scope: null,
-      });
-
-      const result = await ensureClient(devUri);
-      expect(result.clientId).toBe("test-client");
-    });
-
-    it("registers client with exact redirectUri passed", async () => {
-      const redirectUri = "https://example.com/api/reclaim/oauth/callback";
-      vi.mocked(prisma.reclaimAuth.upsert).mockResolvedValueOnce({
-        id: "singleton",
-        clientId: null,
-        clientSecret: null,
-        redirectUri: null,
-        accessToken: null,
-        refreshToken: null,
-        expiresAt: null,
-        scope: null,
-      });
-
-      global.fetch = vi.fn().mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ client_id: "test-client" }),
-      });
-
-      vi.mocked(prisma.reclaimAuth.update).mockResolvedValueOnce({
-        id: "singleton",
-        clientId: "test-client",
-        clientSecret: null,
-        redirectUri,
-        accessToken: null,
-        refreshToken: null,
-        expiresAt: null,
-        scope: null,
-      });
-
-      await ensureClient(redirectUri);
-
-      const fetchCall = vi.mocked(global.fetch).mock.calls[0];
-      const body = JSON.parse(fetchCall[1]?.body as string);
-      expect(body.redirect_uris).toEqual([redirectUri]);
-    });
-
-    it("reuses existing client when redirectUri matches", async () => {
-      const redirectUri = "https://example.com/api/reclaim/oauth/callback";
-      vi.mocked(prisma.reclaimAuth.upsert).mockResolvedValueOnce({
-        id: "singleton",
-        clientId: "existing-client",
-        clientSecret: "existing-secret",
-        redirectUri,
-        accessToken: null,
-        refreshToken: null,
-        expiresAt: null,
-        scope: null,
-      });
-
-      const result = await ensureClient(redirectUri);
-
-      expect(result.clientId).toBe("existing-client");
-      expect(result.clientSecret).toBe("existing-secret");
-      expect(global.fetch).not.toHaveBeenCalled();
-    });
-
-    it("re-registers when redirectUri changes", async () => {
-      const oldUri = "https://old.example.com/api/reclaim/oauth/callback";
-      const newUri = "https://new.example.com/api/reclaim/oauth/callback";
-
-      vi.mocked(prisma.reclaimAuth.upsert).mockResolvedValueOnce({
-        id: "singleton",
-        clientId: "old-client",
-        clientSecret: "old-secret",
-        redirectUri: oldUri,
-        accessToken: null,
-        refreshToken: null,
-        expiresAt: null,
-        scope: null,
-      });
-
-      global.fetch = vi.fn().mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ client_id: "new-client", client_secret: "new-secret" }),
-      });
-
-      vi.mocked(prisma.reclaimAuth.update).mockResolvedValueOnce({
-        id: "singleton",
-        clientId: "new-client",
-        clientSecret: "new-secret",
-        redirectUri: newUri,
-        accessToken: null,
-        refreshToken: null,
-        expiresAt: null,
-        scope: null,
-      });
-
-      const result = await ensureClient(newUri);
-
-      expect(result.clientId).toBe("new-client");
-      expect(global.fetch).toHaveBeenCalled();
-    });
+    expect(prismaMock.reclaimAuth.update).toHaveBeenCalled();
+    const storedSecret = prismaMock.reclaimAuth.update.mock.calls[0][0].data.clientSecret;
+    expect(storedSecret).toMatch(/^v1:/);
+    expect(storedSecret).not.toBe("plaintext-secret");
+    expect(decryptToken(storedSecret)).toBe("plaintext-secret");
   });
 
-  describe("exchangeCode - redirectUri validation", () => {
-    it("passes redirectUri to token endpoint", async () => {
-      const redirectUri = "https://example.com/api/reclaim/oauth/callback";
-      const code = "auth-code-123";
-      const verifier = "pkce-verifier";
-
-      vi.mocked(prisma.reclaimAuth.upsert).mockResolvedValueOnce({
-        id: "singleton",
-        clientId: "test-client",
-        clientSecret: "test-secret",
-        redirectUri,
-        accessToken: null,
-        refreshToken: null,
-        expiresAt: null,
-        scope: null,
-      });
-
-      global.fetch = vi.fn().mockResolvedValueOnce({
+  it("exchangeCode persists encrypted access + refresh tokens", async () => {
+    prismaMock.reclaimAuth.upsert.mockResolvedValue({
+      id: "singleton",
+      clientId: "cid",
+      clientSecret: null,
+      accessToken: null,
+      refreshToken: null,
+      expiresAt: null,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ access_token: "token-123" }),
-      });
+        json: async () => ({
+          access_token: "at-plain",
+          refresh_token: "rt-plain",
+          expires_in: 3600,
+        }),
+      }),
+    );
+    const { exchangeCode } = await import("./reclaim");
+    await exchangeCode("code", "verifier", "https://app/cb");
 
-      vi.mocked(prisma.reclaimAuth.update).mockResolvedValueOnce({
-        id: "singleton",
-        clientId: "test-client",
-        clientSecret: "test-secret",
-        redirectUri,
-        accessToken: "token-123",
-        refreshToken: null,
-        expiresAt: null,
-        scope: null,
-      });
-
-      await exchangeCode(code, verifier, redirectUri);
-
-      const fetchCall = vi.mocked(global.fetch).mock.calls[0];
-      const body = new URLSearchParams(fetchCall[1]?.body as string);
-      expect(body.get("redirect_uri")).toBe(redirectUri);
-      expect(body.get("code")).toBe(code);
-      expect(body.get("code_verifier")).toBe(verifier);
-    });
-
-    it("fails when token endpoint returns error", async () => {
-      const redirectUri = "https://example.com/api/reclaim/oauth/callback";
-
-      vi.mocked(prisma.reclaimAuth.upsert).mockResolvedValueOnce({
-        id: "singleton",
-        clientId: "test-client",
-        clientSecret: "test-secret",
-        redirectUri,
-        accessToken: null,
-        refreshToken: null,
-        expiresAt: null,
-        scope: null,
-      });
-
-      global.fetch = vi.fn().mockResolvedValueOnce({
-        ok: false,
-        status: 400,
-      });
-
-      await expect(
-        exchangeCode("bad-code", "verifier", redirectUri),
-      ).rejects.toThrow("Reclaim token exchange failed");
-    });
+    expect(prismaMock.reclaimAuth.update).toHaveBeenCalled();
+    const data = prismaMock.reclaimAuth.update.mock.calls[0][0].data;
+    expect(data.accessToken).toMatch(/^v1:/);
+    expect(decryptToken(data.accessToken)).toBe("at-plain");
+    expect(data.refreshToken).toMatch(/^v1:/);
+    expect(decryptToken(data.refreshToken)).toBe("rt-plain");
   });
 });

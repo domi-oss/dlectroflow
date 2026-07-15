@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { SINGLETON_ID } from "@/lib/constants";
 import { createPkce, randomState } from "@/lib/reclaim";
+import { encryptToken, decryptNullable } from "@/lib/crypto/token-cipher";
 
 // Google OAuth 2.0 + Tasks API. Unlike Reclaim, Google has no dynamic client
 // registration — you create an OAuth client once in Google Cloud Console and
@@ -75,14 +76,14 @@ async function storeTokens(t: TokenResponse) {
     where: { id: SINGLETON_ID },
     create: {
       id: SINGLETON_ID,
-      accessToken: t.access_token,
-      refreshToken: t.refresh_token ?? null,
+      accessToken: encryptToken(t.access_token),
+      refreshToken: t.refresh_token ? encryptToken(t.refresh_token) : null,
       expiresAt,
       scope,
     },
     update: {
-      accessToken: t.access_token,
-      ...(t.refresh_token ? { refreshToken: t.refresh_token } : {}),
+      accessToken: encryptToken(t.access_token),
+      ...(t.refresh_token ? { refreshToken: encryptToken(t.refresh_token) } : {}),
       expiresAt,
       scope,
     },
@@ -116,11 +117,12 @@ export async function exchangeCode(
 
 async function refreshAccessToken(): Promise<string | null> {
   const auth = await getAuth();
-  if (!auth.refreshToken) return null;
+  const refreshToken = decryptNullable(auth.refreshToken);
+  if (!refreshToken) return null;
   const { clientId, clientSecret } = googleClient();
   const body = new URLSearchParams({
     grant_type: "refresh_token",
-    refresh_token: auth.refreshToken,
+    refresh_token: refreshToken,
     client_id: clientId,
     client_secret: clientSecret,
   });
@@ -137,12 +139,13 @@ async function refreshAccessToken(): Promise<string | null> {
 
 export async function getValidAccessToken(): Promise<string | null> {
   const auth = await getAuth();
-  if (!auth.accessToken) return null;
+  const accessToken = decryptNullable(auth.accessToken);
+  if (!accessToken) return null;
   const soon = Date.now() + 60_000;
   if (auth.expiresAt && auth.expiresAt.getTime() <= soon) {
     return (await refreshAccessToken()) ?? null;
   }
-  return auth.accessToken;
+  return accessToken;
 }
 
 export async function getGoogleStatus(): Promise<{
