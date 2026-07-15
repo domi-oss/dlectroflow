@@ -12,6 +12,7 @@ import { isOwnerRequest, currentWorkspaceId } from "@/lib/workspace";
 import { getSettings } from "@/lib/settings-read";
 import { resolveBreakdownModel, breakdownParamsFor } from "@/lib/models";
 import { clientIpHash, consumeGuestBreakdown, refundGuestBreakdown } from "@/lib/guest-quota";
+import { recordAnthropicFailure } from "@/lib/observability";
 import { OWNER_WORKSPACE_ID } from "@/lib/constants";
 
 export const runtime = "nodejs";
@@ -165,7 +166,10 @@ export async function POST(req: Request): Promise<Response> {
           send({ type: "steps", data: tool.input as unknown as Proposal });
         }
         send({ type: "done" });
-      } catch {
+      } catch (err) {
+        // #21 P4: fallback mode must be visible — one structured log line +
+        // the per-pod counter on /api/livez (was a silent bare catch).
+        recordAnthropicFailure("breakdown", err);
         // Claude failed → refund the guest's quota so a transient error doesn't burn an allowance.
         if (isGuest && guestIpHash && !blockedReason) {
           await refundGuestBreakdown(guestIpHash);

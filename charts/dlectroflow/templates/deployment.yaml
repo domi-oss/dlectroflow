@@ -111,8 +111,13 @@ spec:
             httpGet: { path: /api/health, port: 3000 }
             initialDelaySeconds: 5
             periodSeconds: 10
+          # Process-only liveness (#21 P4): /api/health runs SELECT 1, so
+          # pointing liveness at it meant a Postgres blip restarted every app
+          # pod (initContainer storm). Liveness now only proves the process
+          # serves; the DB check stays on readiness, which just pulls the pod
+          # from rotation until Postgres is back.
           livenessProbe:
-            httpGet: { path: /api/health, port: 3000 }
+            httpGet: { path: /api/livez, port: 3000 }
             initialDelaySeconds: 15
             periodSeconds: 20
           resources:
