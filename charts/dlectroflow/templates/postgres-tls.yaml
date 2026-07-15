@@ -1,11 +1,23 @@
 {{- /*
 Self-signed server cert so app↔Postgres traffic is encrypted in transit
 (DATABASE_URL carries sslmode=require; pg_dump uses PGSSLMODE=require).
-Regenerated on every helm render — harmless because clients require
-encryption, not certificate verity (a self-signed cert can't be verified
-anyway, and the running server keeps the cert it loaded at startup).
+Clients require encryption, not certificate verity (a self-signed cert
+can't be verified anyway), so cert identity/age doesn't matter — but the
+lookup guard reuses the existing Secret so upgrades don't churn it (diff
+noise, and a restart-per-deploy footgun if a checksum annotation is ever
+added to the Postgres pod). lookup returns empty under `helm template`/
+lint (no cluster) — that path just generates fresh, which renders fine.
+10-year validity; if it ever expires or the Secret is deleted, the next
+deploy regenerates it and Postgres picks it up on its next restart.
 */ -}}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace "dlectroflow-postgres-tls" }}
+{{- $data := dict }}
+{{- if and $existing $existing.data (index $existing.data "tls.crt") (index $existing.data "tls.key") }}
+{{- $data = $existing.data }}
+{{- else }}
 {{- $cert := genSelfSignedCert "dlectroflow-postgres" nil (list "dlectroflow-postgres") 3650 }}
+{{- $data = dict "tls.crt" ($cert.Cert | b64enc) "tls.key" ($cert.Key | b64enc) }}
+{{- end }}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -14,5 +26,5 @@ metadata:
     {{- include "dlectroflow.labels" . | nindent 4 }}
 type: kubernetes.io/tls
 data:
-  tls.crt: {{ $cert.Cert | b64enc }}
-  tls.key: {{ $cert.Key | b64enc }}
+  tls.crt: {{ index $data "tls.crt" }}
+  tls.key: {{ index $data "tls.key" }}
