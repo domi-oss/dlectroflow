@@ -17,7 +17,7 @@ const { tx, db } = vi.hoisted(() => {
     workspace: { delete: vi.fn() },
   };
   const db = {
-    $transaction: vi.fn(async (fn: any) => fn(tx)),
+    $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
     workspace: { findMany: vi.fn() },
   };
   return { tx, db };
