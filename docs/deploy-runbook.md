@@ -189,6 +189,25 @@ kubectl -n dlectroflow-prod create job --from=cronjob/dlectroflow-db-backup manu
 - **RPO ≈ 24h** (daily dump). **RTO** = time to pull + restore (minutes at this size).
   Tighten either by raising the schedule frequency.
 
+**Belt-and-braces PD snapshots (set up 2026-07-15, manual GCP config):** the Postgres
+PVC's disk also gets a daily GCE snapshot at 03:00 UTC (offset from the 02:00 dump),
+14-day retention, snapshots survive disk deletion:
+```
+gcloud compute resource-policies create snapshot-schedule dlectroflow-pg-daily \
+  --project dtop-1bf3a85b --region europe-west2 --max-retention-days 14 \
+  --on-source-disk-delete keep-auto-snapshots --daily-schedule --start-time 03:00 \
+  --storage-location europe-west2
+gcloud compute disks add-resource-policies <PVC_DISK> \
+  --project dtop-1bf3a85b --zone europe-west2-a --resource-policies dlectroflow-pg-daily
+```
+(`<PVC_DISK>` = `kubectl get pv $(kubectl -n dlectroflow-prod get pvc
+data-dlectroflow-postgres-0 -o jsonpath='{.spec.volumeName}') -o
+jsonpath='{.spec.csi.volumeHandle}'`, last path segment.)
+> ⚠️ The policy attaches to the **disk**, not the PVC — if the PVC/PV is ever
+> recreated, re-run the `add-resource-policies` step on the new disk. Snapshots are
+> crash-consistent (not application-consistent); the pg_dump in this section stays
+> the primary restore path, snapshots are the disaster fallback.
+
 ## 13. Rollback
 
 **App-only (no schema change in the bad deploy):** deploys use `helm upgrade --atomic`,
