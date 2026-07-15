@@ -404,9 +404,12 @@ deploy_production:
 # and shadows the real value (Renovate then sees no token → 401 unauthenticated).
 renovate:
   stage: maintenance
-  # Digest-pinned (supply-chain): the `39` tag is a moving target. Renovate's own
+  # Digest-pinned (supply-chain): the major tag is a moving target. Renovate's own
   # gitlabci manager (docker:pinDigests in renovate.json) keeps this digest fresh.
-  image: renovate/renovate:39@sha256:f2209c61a9c3c8c74ac58eecb5f15ec43651f1ba694aa33493ff2062b90ff4d3
+  # Bumped 39→43 manually (#24): v39's npm updateArtifacts crashed with
+  # `undefined` on every lockfile regen, breaking its own update MRs — Renovate
+  # can't self-update its image when its MRs are the broken ones.
+  image: renovate/renovate:43@sha256:062bec49857f0b23232e09fc9a557b3abf71dd499dbf54c2137a83d9c6320795
   # NOT interruptible: a maintenance run should finish, not be cancelled by a
   # newer main pipeline mid-run (which could leave update MRs half-created).
   variables:
