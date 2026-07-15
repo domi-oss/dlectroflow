@@ -43,6 +43,16 @@ spec:
       containers:
         - name: postgres
           image: "{{ .Values.postgres.image }}"
+          # TLS on the wire (clients set sslmode/PGSSLMODE=require). Key is
+          # root-owned 0440 with group 999 via fsGroup — postgres accepts
+          # root-owned keys up to 0640.
+          args:
+            - -c
+            - ssl=on
+            - -c
+            - ssl_cert_file=/etc/postgres-tls/tls.crt
+            - -c
+            - ssl_key_file=/etc/postgres-tls/tls.key
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -76,8 +86,15 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
-      {{- if not .Values.postgres.persistent }}
+            - name: tls
+              mountPath: /etc/postgres-tls
+              readOnly: true
       volumes:
+        - name: tls
+          secret:
+            secretName: dlectroflow-postgres-tls
+            defaultMode: 0440
+      {{- if not .Values.postgres.persistent }}
         - name: data
           emptyDir: {}
       {{- end }}

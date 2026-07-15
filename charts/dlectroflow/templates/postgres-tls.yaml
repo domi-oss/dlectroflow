@@ -1,0 +1,18 @@
+{{- /*
+Self-signed server cert so app↔Postgres traffic is encrypted in transit
+(DATABASE_URL carries sslmode=require; pg_dump uses PGSSLMODE=require).
+Regenerated on every helm render — harmless because clients require
+encryption, not certificate verity (a self-signed cert can't be verified
+anyway, and the running server keeps the cert it loaded at startup).
+*/ -}}
+{{- $cert := genSelfSignedCert "dlectroflow-postgres" nil (list "dlectroflow-postgres") 3650 }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dlectroflow-postgres-tls
+  labels:
+    {{- include "dlectroflow.labels" . | nindent 4 }}
+type: kubernetes.io/tls
+data:
+  tls.crt: {{ $cert.Cert | b64enc }}
+  tls.key: {{ $cert.Key | b64enc }}

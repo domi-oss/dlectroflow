@@ -208,3 +208,40 @@ Options, in order of preference:
    old image, then `helm rollback`. Take a fresh on-demand backup first.
 - **Discipline going forward:** keep migrations backward-compatible (expand/contract)
   so an app rollback is always safe without a DB restore.
+
+## 14. DB leaked — what to rotate, in what order
+
+If a database copy may have left your control (stolen backup dump, exposed
+`POSTGRES_PASSWORD`, compromised pod, suspicious GCS access), work this list
+**top to bottom**. Token columns are AES-256-GCM ciphertext (`v1:`, key
+`TOKEN_ENC_KEY` lives outside the DB), so a DB copy alone exposes no usable
+credentials — the order below assumes the worst anyway.
+
+1. **Cut off the entry point.** Rotate `POSTGRES_PASSWORD` in Secrets Manager,
+   redeploy (the secret-checksum annotation rolls the pods), and restart the
+   Postgres pod so old credentials die: `kubectl -n dlectroflow-prod rollout
+   restart statefulset/dlectroflow-postgres`. If a pod was compromised, also
+   rotate everything in `dlectroflow-secrets` — a pod reads env, not just the DB.
+2. **Decide whether `TOKEN_ENC_KEY` is also suspect.** DB-only leak → it is not
+   (it never touches the DB); ciphertext stays unusable, and steps 3–4 become
+   optional hygiene. Pod/cluster/CI leak → treat it as burned: generate a new
+   key (`head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'`), update the CI
+   variable, then clean-slate the token rows (step 3) — old ciphertext is
+   undecryptable under the new key by design (no re-encrypt path).
+3. **Google tokens.** In [Google Account → Security → Third-party access],
+   remove dlectroflow's grant (kills the refresh token server-side), then
+   `DELETE FROM "GoogleAuth";` and reconnect via
+   `https://dlectroflow.dlectronique.dev/api/google/oauth/start`.
+4. **Reclaim tokens** (only if a `ReclaimAuth` row exists — the write path is
+   unused): revoke dlectroflow in Reclaim's connected-apps settings, then
+   `DELETE FROM "ReclaimAuth";` — a fresh client re-registers on next connect.
+5. **Owner/guest sessions.** DB leak alone does NOT expose `AUTH_SESSION_SECRET`
+   or `GUEST_IP_HASH_SALT` (env-only) — rotate them only on pod/CI compromise.
+   Rotating logs everyone out (sessions are stateless JWTs).
+6. **What's NOT in the DB:** `ANTHROPIC_API_KEY`, `RESEND_API_KEY`,
+   `GITLAB_OAUTH_CLIENT_SECRET`, GCS credentials (keyless Workload Identity).
+   Rotate at their providers only on pod/CI compromise.
+7. **Afterwards:** take a fresh on-demand backup (§12), verify token columns
+   show `v1:` ciphertext, and audit GCS bucket access
+   (`gcloud logging read 'resource.type="gcs_bucket"' ...`) for reads you
+   don't recognise.
