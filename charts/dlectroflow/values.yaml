@@ -19,7 +19,7 @@ resources:
 postgres:
   persistent: true     # false for review (emptyDir)
   storageSize: 8Gi
-  image: postgres:16
+  image: postgres:16@sha256:17e67d7b9890c99b055ba1e0d5c5be4ec27c9d3a72bda32db24a5e5d8a85af0c
 
 tls:
   clusterIssuer: letsencrypt-prod
@@ -67,4 +67,4 @@ backup:
   gcpServiceAccount: ""          # GSA email bound via Workload Identity
   serviceAccountName: dlectroflow-backup
   dumpImage: ""                        # defaults to postgres.image (keeps pg_dump matched to the server major); override only for a different version
-  uploadImage: google/cloud-sdk:slim
+  uploadImage: google/cloud-sdk:slim@sha256:85419a311666821eb3a195d86753cb9bf253c0b869492fdaf632bd2f983d0d83
