@@ -160,6 +160,51 @@ build_app:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == "main"'
 
+# ── Test gate (#21 P3): tsc + eslint + vitest ahead of image/deploy ──────────
+# Next 16's `next build` neither runs tests nor lints, so before this job a red
+# suite (or lint) could ride any compiling main commit straight into
+# deploy_production. Gating is double: build_image `needs` this job, and
+# deploy_production is stage-scheduled behind the build stage on main.
+test_app:
+  stage: build
+  image: node:22-alpine
+  interruptible: true
+  needs: []          # starts at pipeline start, in parallel with build_app
+  # Real Postgres for the *.integration.test.ts files (they exercise actual
+  # queries — e.g. workspace scoping — and skipping them in CI would gate on
+  # less than the local suite runs).
+  services:
+    - postgres:16
+  variables:
+    POSTGRES_USER: dlectroflow
+    POSTGRES_PASSWORD: ci-test-only
+    POSTGRES_DB: dlectroflow_test
+    DATABASE_URL: "postgresql://dlectroflow:ci-test-only@postgres:5432/dlectroflow_test?schema=public"
+  before_script:
+    - apk add --no-cache openssl   # Prisma engine libssl (postinstall runs prisma generate)
+  script:
+    - npm ci --cache .npm --prefer-offline --no-audit --no-fund
+    - npx tsc --noEmit
+    # Errors fail the gate; the react-hooks compiler-era rules are warn-level
+    # pending the #23 burn-down, so their findings stay visible but don't block.
+    - npm run lint
+    - npx prisma migrate deploy   # schema for the integration tests' service DB
+    - npm run test
+  cache:
+    key:
+      files:
+        - package-lock.json
+    paths:
+      - .npm/
+    # pull-only: build_app owns the cache upload (incl. .next/cache/); a push
+    # from here would overwrite that zip with one missing the Next build cache.
+    policy: pull
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
 # Assembles the final image from build_app's artifacts using Dockerfile.ci.
 # Kaniko does no compilation here — COPY + npm install prisma only — so the
 # remaining layers are very stable and almost always cache hits.
@@ -169,6 +214,9 @@ build_image:
   needs:
     - job: build_app
       artifacts: true
+    # Test gate: no image (and thus no review/prod deploy) from a red suite.
+    - job: test_app
+      artifacts: false
   image:
     name: gcr.io/kaniko-project/executor:v1.23.2-debug
     entrypoint: [""]
@@ -215,6 +263,11 @@ deploy_review:
   # (deploy_production intentionally stays stage-scheduled so scan results land
   # before a prod rollout.)
   needs: ["build_image"]
+  # Serialize helm per review env: deploy jobs aren't interruptible, so a
+  # quick follow-up push otherwise races the previous pipeline's still-running
+  # helm op on the same release → "another operation is in progress" (hit on
+  # !46). Same group as stop_review so a deploy can't race the teardown either.
+  resource_group: review/$CI_MERGE_REQUEST_IID
   secrets:
     ANTHROPIC_API_KEY:
       gitlab_secrets_manager: { name: ANTHROPIC_API_KEY, source: group/gl-demo-ultimate-dtop }
@@ -268,6 +321,7 @@ deploy_review:
 
 stop_review:
   extends: .deploy_base
+  resource_group: review/$CI_MERGE_REQUEST_IID
   script:
     - helm uninstall "dlectroflow-mr-$CI_MERGE_REQUEST_IID" --namespace "dlectroflow-mr-$CI_MERGE_REQUEST_IID" || true
     - kubectl delete namespace "dlectroflow-mr-$CI_MERGE_REQUEST_IID" --ignore-not-found
@@ -281,6 +335,9 @@ stop_review:
 
 deploy_production:
   extends: .deploy_base
+  # Serialize prod helm ops (rapid successive merges to main would otherwise
+  # race each other the same way review deploys can).
+  resource_group: production
   secrets:
     ANTHROPIC_API_KEY:
       gitlab_secrets_manager: { name: ANTHROPIC_API_KEY, source: group/gl-demo-ultimate-dtop }

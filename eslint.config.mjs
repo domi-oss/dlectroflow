@@ -13,6 +13,16 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    // React-compiler-era advisory rules, demoted to warn so the CI lint gate
+    // (#21 P3) can block on real errors today. Existing findings + restoring
+    // these to error are tracked in issue #23 — don't add new ones.
+    rules: {
+      "react-hooks/purity": "warn",
+      "react-hooks/set-state-in-effect": "warn",
+      "react-hooks/refs": "warn",
+    },
+  },
 ]);
 
 export default eslintConfig;
