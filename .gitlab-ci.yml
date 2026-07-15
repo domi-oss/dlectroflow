@@ -174,7 +174,7 @@ test_app:
   # queries — e.g. workspace scoping — and skipping them in CI would gate on
   # less than the local suite runs).
   services:
-    - postgres:16
+    - postgres:16@sha256:17e67d7b9890c99b055ba1e0d5c5be4ec27c9d3a72bda32db24a5e5d8a85af0c
   variables:
     POSTGRES_USER: dlectroflow
     POSTGRES_PASSWORD: ci-test-only
@@ -218,7 +218,7 @@ build_image:
     - job: test_app
       artifacts: false
   image:
-    name: gcr.io/kaniko-project/executor:v1.23.2-debug
+    name: gcr.io/kaniko-project/executor:v1.23.2-debug@sha256:c3109d5926a997b100c4343944e06c6b30a6804b2f9abe0994d3de6ef92b028e
     entrypoint: [""]
   script:
     - mkdir -p /kaniko/.docker
