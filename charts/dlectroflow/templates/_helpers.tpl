@@ -14,5 +14,8 @@ dlectroflow/env: {{ .Values.env }}
 {{- end -}}
 
 {{- define "dlectroflow.databaseUrl" -}}
-postgresql://dlectroflow:{{ .Values.secrets.postgresPassword | urlquery }}@dlectroflow-postgres:5432/dlectroflow?schema=public
+{{- /* sslmode=require: Prisma's engine fails closed (P1011) if the server
+can't do TLS, and accepts the self-signed cert (encryption, not verity —
+verified empirically against postgres:16 + prisma 6.19). */ -}}
+postgresql://dlectroflow:{{ .Values.secrets.postgresPassword | urlquery }}@dlectroflow-postgres:5432/dlectroflow?schema=public&sslmode=require
 {{- end -}}

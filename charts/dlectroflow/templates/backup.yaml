@@ -75,6 +75,10 @@ spec:
                     secretKeyRef:
                       name: dlectroflow-secrets
                       key: POSTGRES_PASSWORD
+                # Fail rather than dump over cleartext if the server ever
+                # loses TLS (mirrors the app's sslmode=require).
+                - name: PGSSLMODE
+                  value: require
               command: ["/bin/sh", "-c"]
               args:
                 - |
