@@ -5,13 +5,16 @@ import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
   DndContext,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   KeyboardSensor,
   useSensor,
   useSensors,
   useDraggable,
   useDroppable,
+  DragOverlay,
   type DragEndEvent,
+  type DragStartEvent,
 } from "@dnd-kit/core";
 import {
   isAging,
@@ -226,7 +229,15 @@ export function InboxView({
   // two paths can never diverge (Task 10). Every drop moves immediately —
   // a Multi-step drop parks the item there with a "Break into steps now?"
   // call-to-action (requestBreakdown) instead of a blocking prompt.
-  const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor));
+  // Mouse/touch split (#26): a bare PointerSensor loses the gesture race to
+  // page scrolling on touch screens, so drags never started on mobile.
+  // Touch = long-press to lift (the standard mobile list pattern); mouse keeps
+  // a 5px threshold (imperceptible, and stops stray clicks becoming drags).
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
+    useSensor(KeyboardSensor),
+  );
   const itemsById = new Map(initialItems.map((i) => [i.id, i]));
 
   const moveItemToBucket = (itemId: string, target: BucketId) => {
@@ -247,10 +258,17 @@ export function InboxView({
     });
   };
 
+  // Row-follows-finger feedback (#26): DragOverlay floats a copy of the row;
+  // rows compare their id against activeDragId to dim themselves (dnd-kit does
+  // NOT hide the source automatically). Cleared on drop/cancel.
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const handleDragStart = (e: DragStartEvent) => setActiveDragId(String(e.active.id));
   const handleDragEnd = (e: DragEndEvent) => {
+    setActiveDragId(null);
     const move = dragEndToMove(String(e.active.id), e.over ? String(e.over.id) : null);
     if (move) moveItemToBucket(move.itemId, move.target);
   };
+  const activeDragItem = activeDragId ? (itemsById.get(activeDragId) ?? null) : null;
 
   const submit = () => {
     const value = text.trim();
@@ -316,7 +334,7 @@ export function InboxView({
         )}
       </div>
 
-      <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragCancel={() => setActiveDragId(null)} onDragEnd={handleDragEnd}>
         {/* Needs review */}
         <section>
           <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
@@ -336,6 +354,7 @@ export function InboxView({
               <ul className={cn("space-y-2", pending && "opacity-70")}>
                 {needsReview.map((item) => (
                   <ItemRow
+                    isDragging={activeDragId === item.id}
                     key={item.id}
                     item={item}
                     settings={settings}
@@ -387,7 +406,7 @@ export function InboxView({
                     const expanded = expandedId === item.id;
                     const awaitingBreakdown = item.stepsTotal === 0;
                     return (
-                      <li key={item.id} className="rounded-lg border px-4 py-3 text-sm">
+                      <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", item.id === activeDragId && "opacity-40")}>
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
                         <div className="flex items-start gap-3">
                           <DragGrip id={item.id} label={item.text} />
@@ -466,7 +485,7 @@ export function InboxView({
               ) : (
                 <ul className={cn("space-y-2", pending && "opacity-70")}>
                   {singleTask.map((item) => (
-                    <li key={item.id} className="rounded-lg border px-4 py-3 text-sm">
+                    <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", item.id === activeDragId && "opacity-40")}>
                       {/* Title line + action row below — mirrors the Needs-review row layout. */}
                       <div className="flex items-start gap-3">
                         <DragGrip id={item.id} label={item.text} />
@@ -523,7 +542,7 @@ export function InboxView({
                        Idle rows are dimmed; a row under review looks active. */
                     const optionsOpen = savedOptionsId === item.id;
                     return (
-                      <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", !optionsOpen && "opacity-70")}>
+                      <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", item.id === activeDragId ? "opacity-40" : !optionsOpen && "opacity-70")}>
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
                         <div className="flex items-start gap-3">
                           <DragGrip id={item.id} label={item.text} />
@@ -639,7 +658,7 @@ export function InboxView({
                        simpler reopens whole, as before. */
                     const pickingSteps = reopenPickerId === item.id;
                     return (
-                      <li key={item.id} className="rounded-lg border px-4 py-3 text-sm">
+                      <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", item.id === activeDragId && "opacity-40")}>
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
                         <div className="flex items-start gap-3">
                           <DragGrip id={item.id} label={item.text} />
@@ -688,6 +707,16 @@ export function InboxView({
             </DroppableBucket>
           </div>
         </section>
+        {/* #26: floating copy of the dragged row — the whole card visibly follows
+            the finger/pointer during a drag, with a short settle animation on drop. */}
+        <DragOverlay dropAnimation={{ duration: 180, easing: "ease-out" }}>
+          {activeDragItem ? (
+            <div className="bg-background ring-primary/40 pointer-events-none scale-[1.02] rounded-lg border px-4 py-3 text-sm shadow-lg ring-2">
+              <span className="text-muted-foreground pr-2 text-xs">⠿</span>
+              {activeDragItem.text}
+            </div>
+          ) : null}
+        </DragOverlay>
       </DndContext>
     </div>
   );
@@ -840,7 +869,7 @@ function DragGrip({ id, label }: { id: string; label: string }) {
       {...attributes}
       {...listeners}
       aria-label={`Drag ${label}`}
-      className="text-muted-foreground hover:text-foreground shrink-0 cursor-grab px-1 text-xs"
+      className="text-muted-foreground hover:text-foreground touch-none shrink-0 cursor-grab px-1 text-xs"
     >
       ⠿
     </button>
@@ -889,6 +918,7 @@ function ItemRow({
   settings,
   voice,
   now,
+  isDragging,
   onBreakdown,
   onKeep,
   onSnooze,
@@ -908,6 +938,7 @@ function ItemRow({
   settings: AgingSettings;
   voice: Voice;
   now: number;
+  isDragging?: boolean;
   onBreakdown: () => void;
   onKeep: () => void;
   onSnooze: () => void;
@@ -932,7 +963,7 @@ function ItemRow({
     settings,
   );
   return (
-    <li className="rounded-lg border px-4 py-3">
+    <li className={cn("rounded-lg border px-4 py-3", isDragging && "opacity-40")}>
       <div className="flex items-start gap-3">
         {dragGrip}
         <div className="min-w-0 flex-1 space-y-1">
