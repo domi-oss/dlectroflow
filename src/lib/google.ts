@@ -80,12 +80,14 @@ async function storeTokens(t: TokenResponse) {
       refreshToken: t.refresh_token ? encryptToken(t.refresh_token) : null,
       expiresAt,
       scope,
+      needsReconnect: false,
     },
     update: {
       accessToken: encryptToken(t.access_token),
       ...(t.refresh_token ? { refreshToken: encryptToken(t.refresh_token) } : {}),
       expiresAt,
       scope,
+      needsReconnect: false,
     },
   });
 }
@@ -131,7 +133,23 @@ async function refreshAccessToken(): Promise<string | null> {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    let errCode: string | undefined;
+    try {
+      errCode = ((await res.json()) as { error?: string }).error;
+    } catch {
+      /* non-JSON error body — treat as transient */
+    }
+    if (errCode === "invalid_grant") {
+      // The refresh token is dead (revoked/expired). Presence of stale tokens
+      // is what makes `connected` lie — clear them and flag for reconnect.
+      await prisma.googleAuth.update({
+        where: { id: SINGLETON_ID },
+        data: { accessToken: null, refreshToken: null, expiresAt: null, needsReconnect: true },
+      });
+    }
+    return null;
+  }
   const data = (await res.json()) as TokenResponse;
   await storeTokens(data);
   return data.access_token;
@@ -151,16 +169,38 @@ export async function getValidAccessToken(): Promise<string | null> {
 export async function getGoogleStatus(): Promise<{
   configured: boolean;
   connected: boolean;
+  needsReconnect: boolean;
 }> {
   const auth = await getAuth();
-  return { configured: googleConfigured(), connected: Boolean(auth.accessToken) };
+  return {
+    configured: googleConfigured(),
+    connected: Boolean(auth.accessToken),
+    needsReconnect: Boolean(auth.needsReconnect),
+  };
 }
 
+const REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke";
+
+/**
+ * Disconnect Google: best-effort server-side revoke (refresh token preferred —
+ * revoking it kills the whole grant), then delete the stored row regardless.
+ * Idempotent; revoke failures must never keep dead tokens around.
+ */
 export async function disconnectGoogle(): Promise<void> {
-  await prisma.googleAuth.update({
-    where: { id: SINGLETON_ID },
-    data: { accessToken: null, refreshToken: null, expiresAt: null, scope: null },
-  });
+  const auth = await getAuth();
+  const token = decryptNullable(auth.refreshToken) ?? decryptNullable(auth.accessToken);
+  if (token) {
+    try {
+      await fetch(REVOKE_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ token }),
+      });
+    } catch {
+      // Best-effort: the row still gets deleted below.
+    }
+  }
+  await prisma.googleAuth.deleteMany({ where: { id: SINGLETON_ID } });
 }
 
 // ── Google Tasks API ──────────────────────────────────────────────────────

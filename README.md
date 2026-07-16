@@ -7,8 +7,9 @@ An ADHD helper web app — **capture → clarify → schedule → focus → rewa
 **🌐 Live demo:** [dlectroflow.dlectronique.dev](https://dlectroflow.dlectronique.dev)
 
 You brain-dump anything, Claude breaks the scary stuff into tiny do-able steps,
-those steps get scheduled onto your real calendar (via Reclaim), you focus on one
-at a time, and you get a hit of dopamine for finishing. Come back tomorrow, repeat.
+those steps land in Google Tasks and get scheduled onto your real calendar (a
+Reclaim-synced list is scheduled automatically), you focus on one at a time, and
+you get a hit of dopamine for finishing. Come back tomorrow, repeat.
 
 Built as both a learning project and a polished live-demo app.
 
@@ -21,7 +22,7 @@ Built as both a learning project and a polished live-demo app.
 - [🔑 Third-party services](#-third-party-services)
 - [🚀 Quick start (local, ~5 minutes)](#-quick-start-local-5-minutes)
 - [🔐 Secrets & environment](#-secrets--environment)
-- [📅 Connecting Reclaim](#-connecting-reclaim)
+- [📅 Connecting Google Tasks](#-connecting-google-tasks)
 - [🗄️ Database & migrations](#️-database--migrations)
 - [🐳 Deploy](#-deploy)
 - [🧯 Troubleshooting](#-troubleshooting)
@@ -40,7 +41,7 @@ This is **in active development**. Being honest so you don't hit surprises:
 | 🧠 Brain Dump — capture, triage, aging reminders | ✅ works |
 | 🔔 Desktop notifications + demo override | ✅ works |
 | ✂️ Claude task breakdown (streaming chat) | ✅ works (needs a Claude API key) |
-| 📅 Scheduling (Claude → Google Tasks → Reclaim sync) | ✅ works — connect Google and steps land in your Reclaim-synced Google Tasks list (durations parsed). Direct Reclaim-MCP task creation is gated on some accounts → steps then save locally as a fallback (see [Connecting Reclaim](#-connecting-reclaim)). |
+| 📅 Scheduling (Claude → Google Tasks) | ✅ works — connect Google from **Settings → Integrations** (or right from a breakdown) and steps land in your Google Tasks list, durations parsed; a Reclaim-synced list is scheduled automatically. Direct Reclaim-MCP task creation is also available as a fallback but is gated on some accounts → steps then save locally in that case (see [Connecting Google Tasks](#-connecting-google-tasks)). |
 | ⏱️ Focus Timer | ✅ works |
 | 🎉 Rewards & streaks + dashboard | ✅ works |
 | 🌇 End-of-day round-up (in-app + desktop) | ✅ works |
@@ -71,7 +72,8 @@ That's it for running locally. Postgres runs via Docker — no manual database s
 | Service | Needed for | Required? | Cost |
 |---|---|---|---|
 | **Anthropic (Claude API)** | The task breakdown chat | ✅ Required | Pay-as-you-go; a breakdown is a few cents. [console.anthropic.com](https://console.anthropic.com) → **API keys** |
-| **Reclaim.ai** | Scheduling steps onto your calendar | Optional | Free tier connects; **auto-scheduling tasks may need a paid plan / beta access** (see caveat below). [reclaim.ai](https://reclaim.ai) |
+| **Google Tasks** | Scheduling steps — connect from **Settings → Integrations** | Optional | Free. Create an OAuth client in [Google Cloud Console](https://console.cloud.google.com/) (see [Connecting Google Tasks](#-connecting-google-tasks)). |
+| **Reclaim.ai** | Auto-scheduling your Google Tasks list onto your calendar | Optional | Free tier connects; **auto-scheduling tasks may need a paid plan / beta access** (see caveat below). [reclaim.ai](https://reclaim.ai) |
 | **Resend** | Opt-in end-of-day round-up **email** | Optional | Free tier is plenty. Set `RESEND_API_KEY`, then opt in on the dashboard. In-app + desktop round-up work without it. [resend.com](https://resend.com) |
 
 You can run and demo the whole capture → breakdown flow with **just the Anthropic key**.
@@ -154,25 +156,36 @@ New env vars for Phase 2:
 
 ---
 
-## 📅 Connecting Reclaim
+## 📅 Connecting Google Tasks
 
-Reclaim scheduling uses a **browser OAuth flow** — no API key to paste, and the app
-**self-registers** with Reclaim (dynamic client registration), so there's no manual
-"create an OAuth app" step.
+Google Tasks is the recommended way to schedule steps — connect once and a
+Reclaim-synced list is scheduled automatically from there.
 
-1. Run the app (`npm run dev`).
-2. Break down a task and hit **👍 Looks right**.
-3. Click **Connect Reclaim →**, log in, and approve.
-4. Back on the task, hit **📅 Schedule in Reclaim**.
+1. Run the app (`npm run dev`) with `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` set
+   (see [Third-party services](#-third-party-services)).
+2. Go to **Settings → Integrations** and click **Connect Google →** (or connect
+   inline: break down a task, hit **👍 Looks right**, then **Connect Google Tasks →**
+   right there).
+3. Log in and approve. Back on a task, hit **📅 Send to Google Tasks**.
 
-Tokens are stored in your database (never the repo) and auto-refresh.
+Tokens are stored in your database (never the repo) and auto-refresh. If Google
+revokes access, **Settings → Integrations** shows **Reconnect needed** and a task's
+schedule button degrades to a reconnect link instead — click it, nothing is lost.
+Settings → Integrations is also where you disconnect.
+
+### Optional: direct Reclaim MCP scheduling
+
+As a fallback (e.g. no Google OAuth client configured), the app can ask Claude to
+create Reclaim tasks directly via the Reclaim remote-MCP connector. This flow uses
+a **browser OAuth flow** — no API key to paste, and the app **self-registers** with
+Reclaim (dynamic client registration), so there's no manual "create an OAuth app"
+step. From a broken-down task, click **Connect Reclaim →**, log in, and approve;
+then hit **📅 Schedule in Reclaim (MCP)**.
 
 > ⚠️ **Known limitation (honest heads-up):** Reclaim gates task-*creation* via MCP
 > per account. If yours only has read access, you'll see *"create_reclaim_task is
 > not available for your account"* — your steps still save locally, nothing breaks.
-> The **Claude → Google Tasks → Reclaim** route (Reclaim syncs your Google Tasks)
-> works today and sidesteps this — connect Google and steps land in your
-> Reclaim-synced Google Tasks list, durations included.
+> The Google Tasks route above sidesteps this entirely.
 
 ---
 
@@ -224,7 +237,7 @@ Migrations run automatically on start. Visit **http://localhost:3000**.
 | Breakdown returns *"ANTHROPIC_API_KEY is not set"* | Export the key (or put it in `.env.local`) **and restart** `npm run dev`. Env is read at server start. |
 | DB error mentioning a table/model that should exist | You ran a migration while `npm run dev` was running. **Restart the dev server.** |
 | `Port 3000 is already in use` | Another server is running: `npm run dev -- -p 3001`, or stop the other one. |
-| Reclaim: *"create_reclaim_task is not available for your account"* | Account-level Reclaim limit, not a bug — steps save locally. See [Connecting Reclaim](#-connecting-reclaim). |
+| Reclaim: *"create_reclaim_task is not available for your account"* | Account-level Reclaim MCP limit, not a bug — steps save locally, or use the recommended Google Tasks route instead. See [Connecting Google Tasks](#-connecting-google-tasks). |
 | Prisma client seems out of date after `git pull` | `npm install` (runs `prisma generate`) or `npm run db:migrate`. |
 
 ---
@@ -235,7 +248,7 @@ Migrations run automatically on start. Visit **http://localhost:3000**.
 - **Tailwind CSS v4** + **shadcn/ui** + **Motion** (née Framer Motion)
 - **Prisma 6** + **PostgreSQL** (local dev via Docker Compose; production on GKE, deployed via GitLab CI/CD)
 - **Claude API** (`@anthropic-ai/sdk`, streaming with adaptive thinking; model is configurable — defaults to `claude-sonnet-4-6` for owners and `claude-haiku-4-5` for guests, see [Phase 2](#phase-2-guest-access--ai-cost-controls))
-- **Reclaim** via OAuth 2.1 + the Claude remote-MCP connector
+- **Google Tasks API** via OAuth 2.0 (primary scheduling integration) + **Reclaim** via OAuth 2.1 + the Claude remote-MCP connector (optional fallback)
 - Deploy: **Docker** → GKE Autopilot via GitLab CI/CD
 
 Full feature spec and the build order live in [`docs/dlectroflow-plan.md`](docs/dlectroflow-plan.md).
@@ -260,8 +273,9 @@ This app is built the way it helps *me* think, and the setup is meant to respect
 - **One command to start** (`npm run setup`) — fewer decisions, less friction.
 - **Copy-pasteable steps** — no "figure out the obvious bit" gaps.
 - **Honest status** above — so you're never chasing a feature that isn't wired yet.
-- **Nothing hard-fails** — no Claude key? App still runs. No Reclaim? Steps save
-  locally. The goal is to never punish you for a missing piece.
+- **Nothing hard-fails** — no Claude key? App still runs. Haven't connected Google
+  Tasks yet (Settings → Integrations)? Steps save locally. The goal is to never
+  punish you for a missing piece.
 
 If a step here tripped you up, that's a bug in *the docs*, not in you — open an
 issue and I'll fix the instructions.

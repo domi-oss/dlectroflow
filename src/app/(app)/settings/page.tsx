@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { getSettings } from "@/lib/db";
 import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
+import { getGoogleStatus } from "@/lib/google";
 import { SettingsPanel } from "@/components/settings/settings-panel";
+import { IntegrationsPanel } from "@/components/settings/integrations-panel";
 import { t, type Voice } from "@/lib/strings";
 
 // DB-backed, always fresh.
@@ -13,6 +15,7 @@ export default async function SettingsPage() {
     getSettings(workspaceId),
     isOwnerRequest(),
   ]);
+  const google = owner ? await getGoogleStatus() : null;
   const voice: Voice = settings.voice === "playful" ? "playful" : "plain";
 
   return (
@@ -30,6 +33,7 @@ export default async function SettingsPage() {
         breakdownModel={settings.breakdownModel ?? null}
         voice={voice}
       />
+      {owner && google && <IntegrationsPanel google={google} />}
       <div className="flex gap-4 text-sm">
         <Link href="/help" className="underline">
           {t("nav.help", voice)} &amp; docs

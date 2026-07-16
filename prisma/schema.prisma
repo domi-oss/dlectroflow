@@ -71,12 +71,13 @@ model ReclaimAuth {
 // ── Google Tasks OAuth (single-user demo; tokens obtained at runtime) ──────
 // client_id/secret come from env (GOOGLE_CLIENT_ID/SECRET); only tokens here.
 model GoogleAuth {
-  id           String    @id @default("singleton")
-  accessToken  String?
-  refreshToken String?
-  expiresAt    DateTime?
-  scope        String?
-  updatedAt    DateTime  @updatedAt
+  id             String    @id @default("singleton")
+  accessToken    String?
+  refreshToken   String?
+  expiresAt      DateTime?
+  scope          String?
+  needsReconnect Boolean   @default(false)
+  updatedAt      DateTime  @updatedAt
 }
 
 // ── Feature 1 — Brain Dump ────────────────────────────────────────────────

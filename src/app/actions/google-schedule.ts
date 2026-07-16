@@ -19,7 +19,13 @@ export type GoogleScheduleResult =
   | { ok: true; scheduled: number; listTitle: string }
   | {
       ok: false;
-      reason: "not_configured" | "not_connected" | "no_reclaim_list" | "no_steps" | "error";
+      reason:
+        | "not_configured"
+        | "not_connected"
+        | "reconnect_required"
+        | "no_reclaim_list"
+        | "no_steps"
+        | "error";
       message?: string;
     };
 
@@ -55,7 +61,10 @@ export async function pushStepsToGoogleTasks(
 
   if (!googleConfigured()) return { ok: false, reason: "not_configured" };
   const token = await getValidAccessToken();
-  if (!token) return { ok: false, reason: "not_connected" };
+  if (!token) {
+    const status = await getGoogleStatus();
+    return { ok: false, reason: status.needsReconnect ? "reconnect_required" : "not_connected" };
+  }
 
   const task = await prisma.task.findFirst({
     where: { id: taskId, workspaceId },
@@ -115,13 +124,15 @@ export async function pushStepsToGoogleTasks(
 
 export async function googleStatus() {
   const workspaceId = await currentWorkspaceId();
-  if (workspaceId !== OWNER_WORKSPACE_ID) return { configured: false, connected: false };
+  if (workspaceId !== OWNER_WORKSPACE_ID)
+    return { configured: false, connected: false, needsReconnect: false };
   return getGoogleStatus();
 }
 
-export async function disconnectGoogleTasks() {
+export async function disconnectGoogleTasks(): Promise<{ ok: true }> {
   const workspaceId = await currentWorkspaceId();
   if (workspaceId !== OWNER_WORKSPACE_ID) throw new Error("owner only");
   await disconnectGoogle();
-  revalidatePath("/inbox");
+  revalidatePath("/settings");
+  return { ok: true };
 }
