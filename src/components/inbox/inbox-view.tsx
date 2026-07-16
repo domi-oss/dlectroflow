@@ -440,6 +440,7 @@ export function InboxView({
                     onDismissPrompt={() => run(() => dismissPrompt(item.id))}
                     moveMenu={
                       <MoveToMenu
+                        key="move"
                         currentBucket={bucketOfItem(item, now)}
                         voice={voice}
                         onMove={(target) => moveItemToBucket(item.id, target)}
