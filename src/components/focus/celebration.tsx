@@ -1,10 +1,10 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { motion } from "motion/react";
 
 const EMOJIS = ["🎉", "✨", "⭐", "🎊", "💫", "🌟", "🥳"];
 
-/** A one-shot confetti-ish burst of emoji particles (Framer Motion). */
+/** A one-shot confetti-ish burst of emoji particles (Motion, née Framer Motion). */
 export function Celebration() {
   const particles = Array.from({ length: 16 });
   return (

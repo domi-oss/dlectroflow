@@ -232,7 +232,7 @@ Migrations run automatically on start. Visit **http://localhost:3000**.
 ## 🗺️ Tech stack
 
 - **Next.js 16** (App Router) + **React 19** + **TypeScript**
-- **Tailwind CSS v4** + **shadcn/ui** + **Framer Motion**
+- **Tailwind CSS v4** + **shadcn/ui** + **Motion** (née Framer Motion)
 - **Prisma 6** + **PostgreSQL** (local dev via Docker Compose; production on GKE, deployed via GitLab CI/CD)
 - **Claude API** (`@anthropic-ai/sdk`, streaming with adaptive thinking; model is configurable — defaults to `claude-sonnet-4-6` for owners and `claude-haiku-4-5` for guests, see [Phase 2](#phase-2-guest-access--ai-cost-controls))
 - **Reclaim** via OAuth 2.1 + the Claude remote-MCP connector
