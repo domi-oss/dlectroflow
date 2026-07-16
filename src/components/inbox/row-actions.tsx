@@ -4,10 +4,15 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 const DURATION_PRESETS = [15, 30, 60] as const;
 
+const MAX_CUSTOM_MINUTES = 480;
+
 export type ScheduleControlProps = {
   state: "ready_steps" | "needs_duration" | "connect" | "reconnect";
   onScheduleSteps?: () => void;
   onScheduleSingle?: (minutes: number) => void;
+  /** True while a schedule call for this row is in flight — disables the 📅
+   * button/popover Go so a slow request can't be double-submitted. */
+  pending?: boolean;
 };
 
 /**
@@ -16,7 +21,7 @@ export type ScheduleControlProps = {
  * `onScheduleSingle` once a duration is chosen; `connect`/`reconnect` render an
  * OAuth link instead of a button (nothing to click-handle client-side).
  */
-function ScheduleControl({ state, onScheduleSteps, onScheduleSingle }: ScheduleControlProps) {
+function ScheduleControl({ state, onScheduleSteps, onScheduleSingle, pending }: ScheduleControlProps) {
   const [open, setOpen] = useState(false);
   const [custom, setCustom] = useState("");
   const rootRef = useRef<HTMLSpanElement>(null);
@@ -47,7 +52,7 @@ function ScheduleControl({ state, onScheduleSteps, onScheduleSingle }: ScheduleC
 
   const fireCustom = () => {
     const minutes = Number(custom);
-    if (!Number.isFinite(minutes) || minutes <= 0) return;
+    if (!Number.isFinite(minutes) || minutes <= 0 || minutes > MAX_CUSTOM_MINUTES) return;
     setOpen(false);
     setCustom("");
     onScheduleSingle?.(minutes);
@@ -61,6 +66,7 @@ function ScheduleControl({ state, onScheduleSteps, onScheduleSingle }: ScheduleC
         title="Schedule"
         aria-haspopup={state === "needs_duration" ? "menu" : undefined}
         aria-expanded={state === "needs_duration" ? open : undefined}
+        disabled={pending}
         onClick={() => {
           if (state === "ready_steps") {
             onScheduleSteps?.();
@@ -68,7 +74,7 @@ function ScheduleControl({ state, onScheduleSteps, onScheduleSingle }: ScheduleC
             setOpen((o) => !o);
           }
         }}
-        className="rounded-md px-2.5 py-1 font-medium"
+        className="rounded-md px-2.5 py-1 font-medium disabled:opacity-50"
       >
         📅
       </button>
@@ -79,7 +85,8 @@ function ScheduleControl({ state, onScheduleSteps, onScheduleSingle }: ScheduleC
               <button
                 key={minutes}
                 type="button"
-                className="rounded-md px-2.5 py-1 font-medium"
+                disabled={pending}
+                className="rounded-md px-2.5 py-1 font-medium disabled:opacity-50"
                 onClick={() => {
                   setOpen(false);
                   onScheduleSingle?.(minutes);
@@ -92,12 +99,19 @@ function ScheduleControl({ state, onScheduleSteps, onScheduleSingle }: ScheduleC
           <span className="flex items-center gap-1">
             <input
               type="number"
+              min={1}
+              step={1}
               value={custom}
               onChange={(e) => setCustom(e.target.value)}
               className="w-16 rounded-md border px-2 py-1"
               placeholder="min"
             />
-            <button type="button" className="rounded-md px-2.5 py-1 font-medium" onClick={fireCustom}>
+            <button
+              type="button"
+              disabled={pending}
+              className="rounded-md px-2.5 py-1 font-medium disabled:opacity-50"
+              onClick={fireCustom}
+            >
               Go
             </button>
           </span>

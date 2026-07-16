@@ -1,5 +1,6 @@
 import { prisma, getSettings } from "@/lib/db";
-import { currentWorkspaceId } from "@/lib/workspace";
+import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
+import { getGoogleStatus } from "@/lib/google";
 import { BrainDumpStatus } from "@/lib/constants";
 import { InboxView } from "@/components/inbox/inbox-view";
 
@@ -16,7 +17,7 @@ export default async function InboxPage({
   }>;
 }) {
   const workspaceId = await currentWorkspaceId();
-  const [rawItems, settings, sp] = await Promise.all([
+  const [rawItems, settings, sp, owner] = await Promise.all([
     prisma.brainDumpItem.findMany({
       where: { workspaceId, status: { not: BrainDumpStatus.Archived } },
       orderBy: { createdAt: "desc" },
@@ -24,7 +25,11 @@ export default async function InboxPage({
     }),
     getSettings(workspaceId),
     searchParams,
+    isOwnerRequest(),
   ]);
+  // Owner-gated, same as the settings page's Integrations panel — guests get
+  // null and every row's 📅 control is omitted.
+  const google = owner ? await getGoogleStatus() : null;
 
   const items = rawItems.map(({ task, ...item }) => ({
     ...item,
@@ -77,6 +82,7 @@ export default async function InboxPage({
           overdueHours: settings.overdueHours,
           wayOverdueHours: settings.wayOverdueHours,
         }}
+        google={google}
       />
     </div>
   );

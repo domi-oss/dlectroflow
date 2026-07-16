@@ -33,6 +33,11 @@ vi.mock("@/app/actions/breakdown", () => ({
   startBreakdown: vi.fn().mockResolvedValue(null),
 }));
 
+vi.mock("@/app/actions/google-schedule", () => ({
+  pushStepsToGoogleTasks: vi.fn().mockResolvedValue({ ok: true, scheduled: 1, listTitle: "Reclaim" }),
+  scheduleSingleTask: vi.fn().mockResolvedValue({ ok: true }),
+}));
+
 vi.mock("@/lib/notifications", () => ({
   notificationPermission: () => "default",
   subscribeNotificationPermission: () => () => {},
@@ -279,7 +284,7 @@ describe("InboxView — complete + completed bucket", () => {
     expect(completeItem).toHaveBeenCalledWith("n1");
   });
 
-  it("a single-task row's Complete button calls completeItem", async () => {
+  it("a single-task row's Complete button (now in the ⋯ overflow) calls completeItem", async () => {
     const { completeItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
     render(
@@ -289,6 +294,7 @@ describe("InboxView — complete + completed bucket", () => {
       />,
     );
     const row = screen.getByText("single todo").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "More actions" }));
     await user.click(within(row).getByRole("button", { name: "Complete" }));
     expect(completeItem).toHaveBeenCalledWith("st1");
   });
@@ -446,6 +452,8 @@ describe("InboxView — Move to… menu dispatch", () => {
     const user = userEvent.setup();
     render(<InboxView initialItems={[makeItem({ id: "s1", text: "todo", status: "triaged" })]} settings={settings} />);
     const row = screen.getByText("todo").closest("li")!;
+    // Move to… now lives inside the row's ⋯ overflow menu.
+    await user.click(within(row).getByRole("button", { name: "More actions" }));
     await user.click(within(row).getByRole("button", { name: "Move to…" }));
     await user.click(within(row).getByRole("menuitem", { name: /Completed/ }));
     expect(completeItem).toHaveBeenCalledWith("s1");
@@ -456,6 +464,7 @@ describe("InboxView — Move to… menu dispatch", () => {
     const user = userEvent.setup();
     render(<InboxView initialItems={[makeItem({ id: "s1", text: "todo", status: "triaged" })]} settings={settings} />);
     const row = screen.getByText("todo").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "More actions" }));
     await user.click(within(row).getByRole("button", { name: "Move to…" }));
     await user.click(within(row).getByRole("menuitem", { name: /Needs review/ }));
     expect(moveToReview).toHaveBeenCalledWith("s1");
@@ -534,6 +543,7 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
     const user = userEvent.setup();
     render(<InboxView initialItems={[awaiting()]} settings={settings} />);
     const row = screen.getByText("needs a plan").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "More actions" }));
     await user.click(within(row).getByRole("button", { name: "Move to…" }));
     await user.click(within(row).getByRole("menuitem", { name: /Single-task/ }));
     expect(triageBrainDumpItem).toHaveBeenCalledWith("aw1");
@@ -572,8 +582,14 @@ describe("InboxView — ✎ edit title", () => {
       makeItem({ id: "d1", text: "done item", status: "triaged", completedAt: new Date() }),
     ];
     render(<InboxView initialItems={items} settings={settings} />);
-    for (const text of ["review item", "single item", "plan trip", "saved item", "done item"]) {
+    for (const text of ["review item", "saved item", "done item"]) {
       expect(screen.getByRole("button", { name: `Edit ${text}` })).toBeInTheDocument();
+    }
+    // Multi-step and single-task rows tuck Edit into the ⋯ overflow menu now.
+    for (const text of ["single item", "plan trip"]) {
+      const row = screen.getByText(text).closest("li")!;
+      fireEvent.click(within(row).getByRole("button", { name: "More actions" }));
+      expect(within(row).getByRole("button", { name: `Edit ${text}` })).toBeInTheDocument();
     }
   });
 
@@ -695,5 +711,122 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     expect(del).not.toHaveBeenCalled(); // first click only reveals confirm
     await user.click(within(row).getByRole("button", { name: "Delete" }));
     expect(del).toHaveBeenCalledWith("sv1");
+  });
+});
+
+describe("InboxView — 📅 row scheduling (Task 5)", () => {
+  const connected = { configured: true, connected: true, needsReconnect: false };
+
+  it("multi-step row with steps: 📅 pushes steps via pushStepsToGoogleTasks(taskId)", async () => {
+    const { pushStepsToGoogleTasks } = await import("@/app/actions/google-schedule");
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} google={connected} />);
+    const row = screen.getByText("plan trip").closest("li")!;
+    expect(within(row).getByRole("button", { name: /schedule/i })).toBeInTheDocument();
+    await user.click(within(row).getByRole("button", { name: /schedule/i }));
+    expect(pushStepsToGoogleTasks).toHaveBeenCalledWith("t1");
+  });
+
+  it("single-task row: 📅 opens the popover; picking 30 min calls scheduleSingleTask(itemId, 30)", async () => {
+    const { scheduleSingleTask } = await import("@/app/actions/google-schedule");
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        initialItems={[makeItem({ id: "st1", text: "single todo", status: "triaged" })]}
+        settings={settings}
+        google={connected}
+      />,
+    );
+    const row = screen.getByText("single todo").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: /schedule/i }));
+    await user.click(within(row).getByRole("button", { name: /^30 min$/i }));
+    expect(scheduleSingleTask).toHaveBeenCalledWith("st1", 30);
+  });
+
+  it("an awaiting-breakdown (0-step) multi-step row uses the duration popover, not pushSteps", async () => {
+    const { scheduleSingleTask, pushStepsToGoogleTasks } = await import("@/app/actions/google-schedule");
+    const user = userEvent.setup();
+    const awaiting = makeItem({
+      id: "aw1",
+      text: "needs a plan",
+      status: "triaged",
+      breakdownRequestedAt: new Date(),
+      stepsTotal: 0,
+    });
+    render(<InboxView initialItems={[awaiting]} settings={settings} google={connected} />);
+    const row = screen.getByText("needs a plan").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: /schedule/i }));
+    await user.click(within(row).getByRole("button", { name: /^15 min$/i }));
+    expect(scheduleSingleTask).toHaveBeenCalledWith("aw1", 15);
+    expect(pushStepsToGoogleTasks).not.toHaveBeenCalled();
+  });
+
+  it("google={null} (guest): no Schedule control on any row", () => {
+    render(
+      <InboxView
+        initialItems={[makeMultiStep(), makeItem({ id: "st1", text: "single todo", status: "triaged" })]}
+        settings={settings}
+        google={null}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /schedule/i })).toBeNull();
+  });
+
+  it("needsReconnect: rows show the Reconnect link instead of the 📅 button", () => {
+    const needsReconnect = { configured: true, connected: false, needsReconnect: true };
+    render(
+      <InboxView
+        initialItems={[makeMultiStep(), makeItem({ id: "st1", text: "single todo", status: "triaged" })]}
+        settings={settings}
+        google={needsReconnect}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /schedule/i })).toBeNull();
+    expect(screen.getAllByRole("link", { name: /reconnect google/i })).toHaveLength(2);
+  });
+
+  it("not configured: rows show the Connect link instead of the 📅 button", () => {
+    const notConfigured = { configured: false, connected: false, needsReconnect: false };
+    render(
+      <InboxView
+        initialItems={[makeItem({ id: "st1", text: "single todo", status: "triaged" })]}
+        settings={settings}
+        google={notConfigured}
+      />,
+    );
+    expect(screen.getByRole("link", { name: /connect google/i })).toBeInTheDocument();
+  });
+
+  it("a reconnect_required push failure swaps the row's control to the Reconnect link", async () => {
+    const { pushStepsToGoogleTasks } = await import("@/app/actions/google-schedule");
+    (pushStepsToGoogleTasks as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: false,
+      reason: "reconnect_required",
+    });
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} google={connected} />);
+    const row = screen.getByText("plan trip").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: /schedule/i }));
+    expect(await within(row).findByRole("link", { name: /reconnect google/i })).toBeInTheDocument();
+  });
+
+  it("a scheduleSingleTask failure shows an inline error message under the row", async () => {
+    const { scheduleSingleTask } = await import("@/app/actions/google-schedule");
+    (scheduleSingleTask as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: false,
+      reason: "no_reclaim_list",
+    });
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        initialItems={[makeItem({ id: "st1", text: "single todo", status: "triaged" })]}
+        settings={settings}
+        google={connected}
+      />,
+    );
+    const row = screen.getByText("single todo").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: /schedule/i }));
+    await user.click(within(row).getByRole("button", { name: /^30 min$/i }));
+    expect(await within(row).findByText(/Reclaim-synced Google Tasks list/i)).toBeInTheDocument();
   });
 });

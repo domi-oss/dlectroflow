@@ -30,6 +30,29 @@ describe("RowActions", () => {
     expect(fn).toHaveBeenCalledWith(25);
   });
 
+  it("pending disables the 📅 control, closing the double-submit race", () => {
+    const fn = vi.fn();
+    render(
+      <RowActions overflow={[]} schedule={{ state: "ready_steps", onScheduleSteps: fn, pending: true }} />,
+    );
+    const scheduleButton = screen.getByRole("button", { name: /schedule/i });
+    expect(scheduleButton).toBeDisabled();
+    fireEvent.click(scheduleButton);
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it("has min/step bounds on the custom duration input and refuses minutes over 480", () => {
+    const fn = vi.fn();
+    render(<RowActions overflow={[]} schedule={{ state: "needs_duration", onScheduleSingle: fn }} />);
+    fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
+    const input = screen.getByRole("spinbutton");
+    expect(input).toHaveAttribute("min", "1");
+    expect(input).toHaveAttribute("step", "1");
+    fireEvent.change(input, { target: { value: "9999" } });
+    fireEvent.click(screen.getByRole("button", { name: /go/i }));
+    expect(fn).not.toHaveBeenCalled();
+  });
+
   it("reconnect state renders the OAuth link, not a button", () => {
     render(<RowActions overflow={[]} schedule={{ state: "reconnect" }} />);
     expect(screen.getByRole("link", { name: /reconnect google/i })).toHaveAttribute(

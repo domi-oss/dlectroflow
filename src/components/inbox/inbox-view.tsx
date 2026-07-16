@@ -40,11 +40,13 @@ import {
   renameItem,
 } from "@/app/actions/braindump";
 import { startBreakdown } from "@/app/actions/breakdown";
+import { pushStepsToGoogleTasks, scheduleSingleTask } from "@/app/actions/google-schedule";
 import { StatusPill } from "@/components/inbox/status-pill";
 import { TaskSteps } from "@/components/breakdown/task-steps";
 import { bucketItems, bucketOfItem, isBucketId, type Item, type BucketId } from "@/components/inbox/bucket";
 import { dropPlan } from "@/components/inbox/move-dispatch";
 import { MoveToMenu } from "@/components/inbox/move-to-menu";
+import { RowActions, type ScheduleControlProps } from "@/components/inbox/row-actions";
 import { t } from "@/lib/strings";
 import { useVoice } from "@/components/voice-provider";
 import type { Voice } from "@/lib/strings";
@@ -72,12 +74,38 @@ const SEE_ALL = {
   savedLater: "/library?tab=pantry",
 } as const;
 
+type GoogleStatus = { configured: boolean; connected: boolean; needsReconnect: boolean };
+
+/** Maps a row's connection status + its own "ready" state (what it'd show if
+ * Google were connected) onto the 📅 control's actual state — not-configured
+ * and needs-reconnect override every row the same way. */
+function scheduleState(
+  google: GoogleStatus,
+  ready: ScheduleControlProps["state"],
+): ScheduleControlProps["state"] {
+  if (!google.configured) return "connect";
+  if (google.needsReconnect) return "reconnect";
+  return ready;
+}
+
+// Mirrors the failure-reason copy `breakdown-chat.tsx` already uses for the
+// same Google Tasks actions — `reconnect_required` is handled separately
+// (swaps the row's control to the Reconnect link instead of showing text).
+const SCHEDULE_ERROR_MESSAGES: Record<string, string> = {
+  not_configured: "Google isn't configured (set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).",
+  not_connected: "Google Tasks isn't connected.",
+  no_reclaim_list: "Couldn't find your Reclaim-synced Google Tasks list.",
+  no_steps: "No steps to send.",
+};
+
 export function InboxView({
   initialItems,
   settings,
+  google = null,
 }: {
   initialItems: Item[];
   settings: AgingSettings;
+  google?: GoogleStatus | null;
 }) {
   const router = useRouter();
   const voice = useVoice();
@@ -189,6 +217,41 @@ export function InboxView({
       router.refresh();
     });
 
+  // Per-row 📅 error text (cleared on the row's next attempt); reconnect_required
+  // is a workspace-wide condition, so it swaps every row's control to the
+  // Reconnect link rather than just showing an error message on one row.
+  const [scheduleErrors, setScheduleErrors] = useState<Record<string, string>>({});
+  const [reconnectRequired, setReconnectRequired] = useState(false);
+  const effectiveGoogle: GoogleStatus | null = google
+    ? { ...google, needsReconnect: google.needsReconnect || reconnectRequired }
+    : null;
+
+  const runSchedule = (
+    itemId: string,
+    fn: () => Promise<{ ok: true } | { ok: false; reason: string; message?: string }>,
+  ) =>
+    startTransition(async () => {
+      setScheduleErrors((prev) => {
+        if (!(itemId in prev)) return prev;
+        const next = { ...prev };
+        delete next[itemId];
+        return next;
+      });
+      const res = await fn();
+      if (res.ok) {
+        router.refresh();
+        return;
+      }
+      if (res.reason === "reconnect_required") {
+        setReconnectRequired(true);
+        return;
+      }
+      setScheduleErrors((prev) => ({
+        ...prev,
+        [itemId]: SCHEDULE_ERROR_MESSAGES[res.reason] ?? res.message ?? "Scheduling failed.",
+      }));
+    });
+
   const breakdown = (id: string) =>
     startTransition(async () => {
       const taskId = await startBreakdown(id);
@@ -203,9 +266,11 @@ export function InboxView({
       if (stepId) router.push(`/focus/${stepId}`);
     });
 
-  // ✎ inline title editing — shared by every bucket's rows.
+  // ✎ inline title editing — shared by every bucket's rows. Keyed so it's
+  // safe to drop directly into a RowActions `overflow` array too.
   const pencil = (item: Item) => (
     <button
+      key={`edit-${item.id}`}
       type="button"
       aria-label={`Edit ${item.text}`}
       onClick={() => setEditingId(item.id)}
@@ -405,6 +470,24 @@ export function InboxView({
                        step count it shows a red "Break into steps now?" CTA into the editor. */
                     const expanded = expandedId === item.id;
                     const awaitingBreakdown = item.stepsTotal === 0;
+                    // No steps yet → nothing to push, so 📅 offers the same
+                    // duration popover a single-task row uses. Rows with
+                    // steps push them straight to Google Tasks on tap.
+                    const schedule: ScheduleControlProps | null = !effectiveGoogle
+                      ? null
+                      : awaitingBreakdown
+                        ? {
+                            state: scheduleState(effectiveGoogle, "needs_duration"),
+                            onScheduleSingle: (minutes: number) =>
+                              runSchedule(item.id, () => scheduleSingleTask(item.id, minutes)),
+                            pending,
+                          }
+                        : {
+                            state: scheduleState(effectiveGoogle, "ready_steps"),
+                            onScheduleSteps: () =>
+                              runSchedule(item.id, () => pushStepsToGoogleTasks(item.taskId!)),
+                            pending,
+                          };
                     return (
                       <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", item.id === activeDragId && "opacity-40")}>
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
@@ -413,9 +496,7 @@ export function InboxView({
                           {editingId === item.id ? (
                             titleEditor(item)
                           ) : awaitingBreakdown ? (
-                            <span className="min-w-0 flex-1 break-words">
-                              {item.text} {pencil(item)}
-                            </span>
+                            <span className="min-w-0 flex-1 break-words">{item.text}</span>
                           ) : (
                             <span className="min-w-0 flex-1 break-words">
                               <button
@@ -425,8 +506,7 @@ export function InboxView({
                                 className="break-words text-left hover:underline"
                               >
                                 {item.text}
-                              </button>{" "}
-                              {pencil(item)}
+                              </button>
                             </span>
                           )}
                           {editingId !== item.id && !awaitingBreakdown && (
@@ -435,23 +515,34 @@ export function InboxView({
                             </span>
                           )}
                         </div>
-                        <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                          {awaitingBreakdown && (
-                            <button
-                              type="button"
-                              onClick={() => breakdown(item.id)}
-                              className="bg-destructive rounded-md px-2.5 py-1 font-medium text-white hover:opacity-90"
-                            >
-                              {t("prompt.breakNow", voice)}
-                            </button>
-                          )}
-                          <CompleteButton voice={voice} onClick={() => run(() => completeItem(item.id))} />
-                          <MoveToMenu
-                            currentBucket={bucketOfItem(item, now)}
-                            voice={voice}
-                            onMove={(target) => moveItemToBucket(item.id, target)}
-                          />
-                        </div>
+                        <RowActions
+                          primary={
+                            awaitingBreakdown ? (
+                              <button
+                                type="button"
+                                onClick={() => breakdown(item.id)}
+                                className="bg-destructive rounded-md px-2.5 py-1 font-medium text-white hover:opacity-90"
+                              >
+                                {t("prompt.breakNow", voice)}
+                              </button>
+                            ) : (
+                              <CompleteButton voice={voice} onClick={() => run(() => completeItem(item.id))} />
+                            )
+                          }
+                          schedule={schedule}
+                          overflow={[
+                            <MoveToMenu
+                              key="move"
+                              currentBucket={bucketOfItem(item, now)}
+                              voice={voice}
+                              onMove={(target) => moveItemToBucket(item.id, target)}
+                            />,
+                            pencil(item),
+                          ]}
+                        />
+                        {scheduleErrors[item.id] && (
+                          <p className="text-destructive mt-1 text-xs">{scheduleErrors[item.id]}</p>
+                        )}
                         {expanded && item.taskId && (
                           <div className="mt-2">
                             <TaskSteps
@@ -484,45 +575,68 @@ export function InboxView({
                 <EmptyBucket voice={voice} />
               ) : (
                 <ul className={cn("space-y-2", pending && "opacity-70")}>
-                  {singleTask.map((item) => (
-                    <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", item.id === activeDragId && "opacity-40")}>
-                      {/* Title line + action row below — mirrors the Needs-review row layout. */}
-                      <div className="flex items-start gap-3">
-                        <DragGrip id={item.id} label={item.text} />
-                        {editingId === item.id ? (
-                          titleEditor(item)
-                        ) : (
-                          <span className="min-w-0 flex-1 break-words">
-                            {item.text} {pencil(item)}
-                          </span>
-                        )}
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                        <button
-                          type="button"
-                          onClick={() => focusOnItem(item.id)}
-                          className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
-                        >
-                          ▶ Focus
-                        </button>
-                        <CompleteButton voice={voice} onClick={() => run(() => completeItem(item.id))} />
-                        <MoveToMenu
-                          currentBucket={bucketOfItem(item, now)}
-                          voice={voice}
-                          onMove={(target) => moveItemToBucket(item.id, target)}
+                  {singleTask.map((item) => {
+                    const schedule: ScheduleControlProps | null = effectiveGoogle
+                      ? {
+                          state: scheduleState(effectiveGoogle, "needs_duration"),
+                          onScheduleSingle: (minutes: number) =>
+                            runSchedule(item.id, () => scheduleSingleTask(item.id, minutes)),
+                          pending,
+                        }
+                      : null;
+                    return (
+                      <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", item.id === activeDragId && "opacity-40")}>
+                        {/* Title line + action row below — mirrors the Needs-review row layout. */}
+                        <div className="flex items-start gap-3">
+                          <DragGrip id={item.id} label={item.text} />
+                          {editingId === item.id ? (
+                            titleEditor(item)
+                          ) : (
+                            <span className="min-w-0 flex-1 break-words">{item.text}</span>
+                          )}
+                          {editingId !== item.id && (
+                            <span className="text-muted-foreground shrink-0 text-xs">
+                              captured {formatAgo(now - new Date(item.createdAt).getTime())}
+                            </span>
+                          )}
+                        </div>
+                        <RowActions
+                          primary={
+                            <button
+                              type="button"
+                              onClick={() => focusOnItem(item.id)}
+                              className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
+                            >
+                              ▶ Focus
+                            </button>
+                          }
+                          schedule={schedule}
+                          overflow={[
+                            <CompleteButton key="complete" voice={voice} onClick={() => run(() => completeItem(item.id))} />,
+                            <MoveToMenu
+                              key="move"
+                              currentBucket={bucketOfItem(item, now)}
+                              voice={voice}
+                              onMove={(target) => moveItemToBucket(item.id, target)}
+                            />,
+                            pencil(item),
+                            confirmDeleteId === item.id ? (
+                              <span key="delete" className="flex items-center gap-2">
+                                <button className="text-destructive rounded-md px-2.5 py-1 font-medium" onClick={() => confirmDelete(item.id)}>{t("action.delete", voice)}</button>
+                                <span className="text-muted-foreground">·</span>
+                                <button className="text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1" onClick={cancelDelete}>{t("action.cancel", voice)}</button>
+                              </span>
+                            ) : (
+                              <button key="delete" className="text-muted-foreground hover:text-destructive w-full rounded-md px-2.5 py-1 text-left" onClick={() => requestDelete(item.id)}>{t("action.delete", voice)}</button>
+                            ),
+                          ]}
                         />
-                        {confirmDeleteId === item.id ? (
-                          <span className="ml-auto flex items-center gap-2">
-                            <button className="text-destructive rounded-md px-2.5 py-1 font-medium" onClick={() => confirmDelete(item.id)}>{t("action.delete", voice)}</button>
-                            <span className="text-muted-foreground">·</span>
-                            <button className="text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1" onClick={cancelDelete}>{t("action.cancel", voice)}</button>
-                          </span>
-                        ) : (
-                          <button className="text-muted-foreground hover:text-destructive ml-auto rounded-md px-2.5 py-1" onClick={() => requestDelete(item.id)}>{t("action.delete", voice)}</button>
+                        {scheduleErrors[item.id] && (
+                          <p className="text-destructive mt-1 text-xs">{scheduleErrors[item.id]}</p>
                         )}
-                      </div>
-                    </li>
-                  ))}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </DroppableBucket>
