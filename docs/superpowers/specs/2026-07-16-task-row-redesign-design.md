@@ -69,3 +69,25 @@ have them) — additive schema change, mirrors the step columns.
 
 Board drag-drop changes · breakdown-view schedule panel (stays, wording updated by the
 integrations MR) · recurring/scheduled-time pickers (Reclaim owns actual calendaring).
+
+## Revision v5 (2026-07-16 evening — owner feedback on the built rows)
+
+Owner reviewed the built ⋯-overflow rows and revised: **visible inline actions beat a
+hidden menu.** Approved via mockup (`assets/2026-07-16-row-v5-inline-actions.png`):
+
+![v5 rows](assets/2026-07-16-row-v5-inline-actions.png)
+
+- **Pencil returns beside the title** on every row kind (never in a menu — but it MAY
+  also appear in ▾'s duplicate list).
+- **Action line** = visible buttons … spacer … **end cluster `[📅] [🗑] [▾]`**.
+  - Review row visible buttons, in order: `✂️ Break into steps` (red CTA) ·
+    `Add as single to-do` (= Keep as task) · `Save for later` (= move to Saved bucket,
+    direct action) · `Complete`.
+  - Multi-step visible: `Break into steps now?` (awaiting) else `Complete`.
+  - Single-task visible: `▶ Focus` · `Complete`.
+- **📅 on review rows too** (duration popover — unclarified items schedule as single
+  tasks). All rows keep the connect/reconnect/pending states.
+- **🗑 delete inline** at the end cluster (existing two-step confirm inline).
+- **▾ (triangle) replaces ⋯**: lists **ALL the row's options including duplicates**,
+  with `Move to…` pinned first. Snooze lives only here (review rows).
+- Supersedes the "single contextual primary" rule from the original approach-A design.
