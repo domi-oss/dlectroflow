@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
-import { RowActions } from "./row-actions";
+import { RowActions, ScheduleControl } from "./row-actions";
 
 afterEach(cleanup);
 
@@ -160,5 +160,50 @@ describe("RowActions", () => {
   it("no schedule prop → no 📅 control (guest rows)", () => {
     render(<RowActions inline={[]} schedule={null} menu={[<span key="a">Edit</span>]} />);
     expect(screen.queryByRole("button", { name: /schedule/i })).toBeNull();
+  });
+
+  it("v6: end cluster with a move slot renders in order: move, schedule, delete, then 🔽 (All options)", () => {
+    render(
+      <RowActions
+        inline={[<button key="a">First</button>]}
+        move={
+          <button key="mv" aria-label="Move to">
+            📥
+          </button>
+        }
+        schedule={{ state: "ready_steps", onScheduleSteps: vi.fn() }}
+        del={<button key="d">Delete</button>}
+        menu={[]}
+      />,
+    );
+    const names = screen
+      .getAllByRole("button")
+      .map((b) => b.getAttribute("aria-label") ?? b.textContent);
+    expect(names).toEqual(["First", "Move to", "Schedule", "Delete", "All options"]);
+  });
+});
+
+describe("ScheduleControl — menu variant (▾ dropdown 'Schedule' entry)", () => {
+  it("ready_steps: renders a 'Schedule' text button that fires onScheduleSteps", () => {
+    const fn = vi.fn();
+    render(<ScheduleControl variant="menu" state="ready_steps" onScheduleSteps={fn} />);
+    fireEvent.click(screen.getByRole("button", { name: "Schedule" }));
+    expect(fn).toHaveBeenCalledOnce();
+  });
+
+  it("needs_duration: 'Schedule' expands presets inline; picking 30 fires onScheduleSingle(30)", () => {
+    const fn = vi.fn();
+    render(<ScheduleControl variant="menu" state="needs_duration" onScheduleSingle={fn} />);
+    fireEvent.click(screen.getByRole("button", { name: "Schedule" }));
+    fireEvent.click(screen.getByRole("button", { name: /^30 min$/i }));
+    expect(fn).toHaveBeenCalledWith(30);
+  });
+
+  it("reconnect: renders the OAuth link even in menu variant", () => {
+    render(<ScheduleControl variant="menu" state="reconnect" />);
+    expect(screen.getByRole("link", { name: /reconnect google/i })).toHaveAttribute(
+      "href",
+      "/api/google/oauth/start",
+    );
   });
 });

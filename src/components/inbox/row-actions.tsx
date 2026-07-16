@@ -13,6 +13,13 @@ export type ScheduleControlProps = {
   /** True while a schedule call for this row is in flight — disables the 📅
    * button/popover Go so a slow request can't be double-submitted. */
   pending?: boolean;
+  /** v6: "icon" (default) = the 📅 end-cluster button with an absolute popover.
+   * "menu" = a full-width text entry for the ▾ dropdown's full mirror — the
+   * duration presets expand inline (in normal flow) instead of in an absolute
+   * popover, so it nests cleanly inside the dropdown column. */
+  variant?: "icon" | "menu";
+  /** Menu-variant trigger text (voice-resolved by the caller). Defaults to "Schedule". */
+  label?: string;
 };
 
 /**
@@ -23,10 +30,18 @@ export type ScheduleControlProps = {
  * of silently doing nothing. `connect`/`reconnect` render an OAuth link instead
  * of a button (nothing to click-handle client-side).
  */
-function ScheduleControl({ state, onScheduleSteps, onScheduleSingle, pending }: ScheduleControlProps) {
+export function ScheduleControl({
+  state,
+  onScheduleSteps,
+  onScheduleSingle,
+  pending,
+  variant = "icon",
+  label = "Schedule",
+}: ScheduleControlProps) {
   const [open, setOpen] = useState(false);
   const [custom, setCustom] = useState("");
   const rootRef = useRef<HTMLSpanElement>(null);
+  const isMenu = variant === "menu";
 
   useEffect(() => {
     if (!open) return;
@@ -46,7 +61,14 @@ function ScheduleControl({ state, onScheduleSteps, onScheduleSingle, pending }: 
 
   if (state === "connect" || state === "reconnect") {
     return (
-      <a href="/api/google/oauth/start" className="rounded-md px-2.5 py-1 font-medium">
+      <a
+        href="/api/google/oauth/start"
+        className={
+          isMenu
+            ? "hover:bg-accent w-full rounded-md px-2.5 py-1 text-left font-medium"
+            : "rounded-md px-2.5 py-1 font-medium"
+        }
+      >
         {state === "reconnect" ? "Reconnect Google →" : "Connect Google →"}
       </a>
     );
@@ -65,11 +87,11 @@ function ScheduleControl({ state, onScheduleSteps, onScheduleSingle, pending }: 
   };
 
   return (
-    <span ref={rootRef} className="relative">
+    <span ref={rootRef} className={isMenu ? "flex flex-col" : "relative"}>
       <button
         type="button"
-        aria-label="Schedule"
-        title="Schedule"
+        aria-label={isMenu ? undefined : "Schedule"}
+        title={isMenu ? undefined : "Schedule"}
         aria-haspopup={state === "needs_duration" ? "menu" : undefined}
         aria-expanded={state === "needs_duration" ? open : undefined}
         disabled={pending}
@@ -80,12 +102,22 @@ function ScheduleControl({ state, onScheduleSteps, onScheduleSingle, pending }: 
             setOpen((o) => !o);
           }
         }}
-        className="rounded-md px-2.5 py-1 font-medium disabled:opacity-50"
+        className={
+          isMenu
+            ? "hover:bg-accent w-full rounded-md px-2.5 py-1 text-left font-medium disabled:opacity-50"
+            : "rounded-md px-2.5 py-1 font-medium disabled:opacity-50"
+        }
       >
-        📅
+        {isMenu ? label : "📅"}
       </button>
       {state === "needs_duration" && open && (
-        <span className="bg-background absolute right-0 z-10 mt-1 flex min-w-48 flex-col gap-2 rounded-md border p-2 text-xs shadow-md">
+        <span
+          className={
+            isMenu
+              ? "mt-1 flex flex-col gap-2 px-2.5 pb-1 text-xs"
+              : "bg-background absolute right-0 z-10 mt-1 flex min-w-48 flex-col gap-2 rounded-md border p-2 text-xs shadow-md"
+          }
+        >
           <span className="flex gap-1">
             {DURATION_PRESETS.map((minutes) => (
               <button
@@ -143,11 +175,14 @@ function ScheduleControl({ state, onScheduleSteps, onScheduleSingle, pending }: 
  */
 export function RowActions({
   inline,
+  move,
   schedule,
   del,
   menu,
 }: {
   inline: ReactNode[];
+  /** v6: 📥 Move-to icon, first in the end cluster (omitted when not provided). */
+  move?: ReactNode;
   schedule?: ScheduleControlProps | null;
   del?: ReactNode;
   menu: ReactNode[];
@@ -175,7 +210,10 @@ export function RowActions({
     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
       {inline}
       <span className="flex-1" />
+      {move}
       {schedule && <ScheduleControl {...schedule} />}
+      {/* Visible gap so 📅 Schedule and 🗑 Delete don't sit flush — avoids misclicks. */}
+      {del && <span aria-hidden="true" className="w-3" />}
       {del}
       <span ref={menuRef} className="relative">
         <button
@@ -186,7 +224,7 @@ export function RowActions({
           onClick={() => setMenuOpen((o) => !o)}
           className="rounded-md px-2.5 py-1 font-medium"
         >
-          ▾
+          🔽
         </button>
         {menuOpen && (
           <span className="bg-background absolute right-0 z-10 mt-1 flex min-w-40 flex-col gap-1 rounded-md border p-1 shadow-md">

@@ -67,6 +67,13 @@ describe("t() function", () => {
     ["prompt.breakNow",   "plain",   "Break into steps now?"],
     ["action.reviewNow",  "plain",   "Review now"],
     ["action.reviewNow",  "playful", "🥫 Review now"],
+    // v6 dropdown full-labels + short button
+    ["action.breakdownFull", "plain", "Break into smaller steps"],
+    ["action.addTodoFull",   "plain", "Add as single task to do"],
+    ["action.saveShort",     "plain", "Save"],
+    ["action.completeFull",  "plain", "Mark as completed"],
+    ["action.editTitle",     "plain", "Edit task title"],
+    ["action.schedule",      "plain", "Schedule"],
   ];
 
   for (const [key, voice, expected] of cases) {
@@ -341,6 +348,12 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "action.delete",
     "action.cancel",
     "action.moveTo",
+    "action.breakdownFull",
+    "action.addTodoFull",
+    "action.saveShort",
+    "action.completeFull",
+    "action.editTitle",
+    "action.schedule",
     "capture.confirm",
     "prompt.stillNeeded",
     "prompt.breakNow",

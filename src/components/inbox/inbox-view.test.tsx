@@ -487,7 +487,8 @@ describe("InboxView — Move to… menu dispatch", () => {
     const done = makeItem({ id: "d1", text: "done item", status: "triaged", completedAt: new Date() });
     render(<InboxView initialItems={[done]} settings={settings} />);
     const row = screen.getByText("done item").closest("li")!;
-    await user.click(within(row).getByRole("button", { name: "Move to…" }));
+    // v6: completed rows' Move-to is the 📥 icon (aria "Move to").
+    await user.click(within(row).getByRole("button", { name: "Move to" }));
     await user.click(within(row).getByRole("menuitem", { name: /Single-task/ }));
     expect(reopenItem).toHaveBeenCalledWith("d1", undefined);
     expect(triageBrainDumpItem).toHaveBeenCalledWith("d1");
@@ -515,7 +516,7 @@ describe("InboxView — Move to… menu dispatch", () => {
     const done = makeItem({ id: "d1", text: "finished big thing", status: "triaged", completedAt: new Date() });
     render(<InboxView initialItems={[done]} settings={settings} />);
     const row = screen.getByText("finished big thing").closest("li")!;
-    await user.click(within(row).getByRole("button", { name: "Move to…" }));
+    await user.click(within(row).getByRole("button", { name: "Move to" }));
     await user.click(within(row).getByRole("menuitem", { name: /Multi-step/ }));
     expect(reopenItem).toHaveBeenCalledWith("d1", undefined);
     expect(requestBreakdown).toHaveBeenCalledWith("d1");
@@ -603,13 +604,15 @@ describe("InboxView — ✎ edit title", () => {
     }
   });
 
-  it("the pencil also appears as a duplicate entry inside the ▾ menu", async () => {
+  it("v6: the ▾ menu carries an 'Edit task title' entry; the title keeps its single ✏️ pencil", async () => {
     const user = userEvent.setup();
     render(<InboxView initialItems={[makeItem({ id: "r1", text: "review item" })]} settings={settings} />);
     const row = screen.getByText("review item").closest("li")!;
     expect(within(row).getAllByRole("button", { name: "Edit review item" })).toHaveLength(1);
     await user.click(within(row).getByRole("button", { name: "All options" }));
-    expect(within(row).getAllByRole("button", { name: "Edit review item" })).toHaveLength(2);
+    // Still one ✏️ pencil (the title-line affordance); the menu adds a text entry.
+    expect(within(row).getAllByRole("button", { name: "Edit review item" })).toHaveLength(1);
+    expect(within(row).getByRole("button", { name: "Edit task title" })).toBeInTheDocument();
   });
 
   it("unchanged text does not fire the action", async () => {
@@ -688,7 +691,8 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     expect(row.className).toContain("opacity-70"); // idle = dimmed
 
     await user.click(within(row).getByRole("button", { name: "Review now" }));
-    for (const name of [/Break into steps/, "Add to-do", "Save for later", "Complete", "Move to…", "Delete"]) {
+    // v6: short inline buttons + icon end-cluster (📥 "Move to", 🗑 "Delete").
+    for (const name of [/Break into steps/, "Add to-do", "Save", "Complete", "Move to", "Delete"]) {
       expect(within(row).getByRole("button", { name })).toBeInTheDocument();
     }
     expect(within(row).queryByRole("button", { name: "Review now" })).not.toBeInTheDocument();
@@ -700,13 +704,13 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     expect(within(row).getByRole("button", { name: "Review now" })).toBeInTheDocument();
   });
 
-  it("'Save for later' in the open options re-snoozes and puts the row back to sleep", async () => {
+  it("the inline 'Save' in the open options re-snoozes and puts the row back to sleep", async () => {
     const { snoozeBrainDumpItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
     render(<InboxView initialItems={[saved()]} settings={settings} />);
     const row = screen.getByText("stored thing").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Review now" }));
-    await user.click(within(row).getByRole("button", { name: "Save for later" }));
+    await user.click(within(row).getByRole("button", { name: "Save" }));
     expect(snoozeBrainDumpItem).toHaveBeenCalledWith("sv1", 60);
     expect(within(row).getByRole("button", { name: "Review now" })).toBeInTheDocument();
   });
@@ -905,14 +909,36 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
   });
 });
 
-describe("InboxView — needs-review rows adopt the v5 inline-actions frame", () => {
-  it("renders Break into steps, Add as single to-do, Save for later, and Complete inline (no ▾ needed)", () => {
+describe("InboxView — needs-review rows adopt the v6 inline-actions frame", () => {
+  it("renders SHORT inline buttons: Break into steps, Add to-do, Save, Complete (full labels live in ▾)", () => {
     render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} />);
     const row = screen.getByText("capture me").closest("li")!;
     expect(within(row).getByRole("button", { name: /Break into steps/ })).toBeInTheDocument();
     expect(within(row).getByRole("button", { name: "Add to-do" })).toBeInTheDocument();
-    expect(within(row).getByRole("button", { name: "Save for later" })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Save" })).toBeInTheDocument();
     expect(within(row).getByRole("button", { name: "Complete" })).toBeInTheDocument();
+    // The full "Save for later" is the dropdown mirror, not an inline button.
+    expect(within(row).queryByRole("button", { name: "Save for later" })).not.toBeInTheDocument();
+  });
+
+  it("v6: shows a 📥 Move-to icon (aria 'Move to') in the end cluster, distinct from the ▾ 'Move to…' entry", async () => {
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} />);
+    const row = screen.getByText("capture me").closest("li")!;
+    expect(within(row).getByRole("button", { name: "Move to" })).toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: "Move to…" })).not.toBeInTheDocument();
+    await user.click(within(row).getByRole("button", { name: "All options" }));
+    expect(within(row).getByRole("button", { name: "Move to…" })).toBeInTheDocument();
+  });
+
+  it("v6: with Google connected, the ▾ menu adds a full-text 'Schedule' entry alongside the 📅 icon", async () => {
+    const user = userEvent.setup();
+    const connected = { configured: true, connected: true, needsReconnect: false };
+    render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} google={connected} />);
+    const row = screen.getByText("capture me").closest("li")!;
+    expect(within(row).getAllByRole("button", { name: "Schedule" })).toHaveLength(1); // 📅 icon only
+    await user.click(within(row).getByRole("button", { name: "All options" }));
+    expect(within(row).getAllByRole("button", { name: "Schedule" })).toHaveLength(2); // + full-text menu entry
   });
 
   it("clicking Add as single to-do (Keep-as-task) fires directly, no menu involved", async () => {
@@ -924,12 +950,12 @@ describe("InboxView — needs-review rows adopt the v5 inline-actions frame", ()
     expect(keepAsTask).toHaveBeenCalledWith("n1");
   });
 
-  it("clicking Save for later is a direct MOVE to the Saved bucket via the shared dispatcher", async () => {
+  it("clicking the inline 'Save' is a direct MOVE to the Saved bucket via the shared dispatcher", async () => {
     const { snoozeBrainDumpItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
     render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} />);
     const row = screen.getByText("capture me").closest("li")!;
-    await user.click(within(row).getByRole("button", { name: "Save for later" }));
+    await user.click(within(row).getByRole("button", { name: "Save" }));
     // The move went through moveItemToBucket → dropPlan(needsReview → savedLater)…
     expect(dropPlan).toHaveBeenCalledWith("needsReview", "savedLater");
     // …whose savedLater action lands the item in the Saved bucket
@@ -937,15 +963,14 @@ describe("InboxView — needs-review rows adopt the v5 inline-actions frame", ()
     expect(snoozeBrainDumpItem).toHaveBeenCalledWith("n1", 60);
   });
 
-  it("the ▾ menu's Save for later duplicate dispatches the same Saved-bucket move", async () => {
+  it("the ▾ menu's full-label 'Save for later' dispatches the same Saved-bucket move as the inline 'Save'", async () => {
     const user = userEvent.setup();
     render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} />);
     const row = screen.getByText("capture me").closest("li")!;
+    // Inline short button is "Save"; the dropdown carries the full "Save for later".
+    expect(within(row).getByRole("button", { name: "Save" })).toBeInTheDocument();
     await user.click(within(row).getByRole("button", { name: "All options" }));
-    // Two "Save for later" buttons exist now (inline + ▾ duplicate); click the duplicate.
-    const duplicates = within(row).getAllByRole("button", { name: "Save for later" });
-    expect(duplicates).toHaveLength(2);
-    await user.click(duplicates[1]);
+    await user.click(within(row).getByRole("button", { name: "Save for later" }));
     expect(dropPlan).toHaveBeenCalledWith("needsReview", "savedLater");
   });
 
@@ -959,7 +984,7 @@ describe("InboxView — needs-review rows adopt the v5 inline-actions frame", ()
     expect(deleteBrainDumpItem).toHaveBeenCalledWith("n1");
   });
 
-  it("▾ All options duplicates the inline actions plus Move to… (pinned first), Snooze 1h, and Edit", async () => {
+  it("▾ All options mirrors the actions in full: Move to… (pinned first), full labels, Snooze 1h, Edit task title", async () => {
     const user = userEvent.setup();
     render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} />);
     const row = screen.getByText("capture me").closest("li")!;
@@ -967,11 +992,13 @@ describe("InboxView — needs-review rows adopt the v5 inline-actions frame", ()
     const menuButtons = within(row).getAllByRole("button");
     const moveToIndex = menuButtons.findIndex((b) => b.textContent === "Move to…");
     expect(moveToIndex).toBeGreaterThan(-1);
-    // Move to… is the first entry inside the popover (everything before it on
-    // the row is the always-visible inline/end-cluster controls).
-    expect(menuButtons[moveToIndex + 1]).toHaveTextContent(/Break into steps/);
+    // Move to… is pinned first; the next entry is the FULL-label breakdown.
+    expect(menuButtons[moveToIndex + 1]).toHaveTextContent(/Break into smaller steps/);
     expect(within(row).getByRole("button", { name: "Snooze 1h" })).toBeInTheDocument();
-    expect(within(row).getAllByRole("button", { name: "Edit capture me" })).toHaveLength(2);
+    // v6: the dropdown edit entry is the text "Edit task title"; the ✏️ pencil
+    // beside the title stays (aria-label "Edit capture me").
+    expect(within(row).getByRole("button", { name: "Edit task title" })).toBeInTheDocument();
+    expect(within(row).getAllByRole("button", { name: "Edit capture me" })).toHaveLength(1);
   });
 
   it("Snooze 1h in the ▾ menu is a SEPARATE direct snooze — it does not go through the move dispatcher", async () => {

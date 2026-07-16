@@ -33,6 +33,16 @@ export const STRINGS = {
   "action.reopenAll":    { plain: "Reopen all",        playful: "Reopen all" },
   "action.moveTo":       { plain: "Move to…",          playful: "Move to…" },
 
+  // v6 row redesign — short CTA on the visible buttons, full descriptive wording
+  // in the ▾ dropdown. The button variants above stay short; these are the
+  // dropdown's full-length mirrors (+ a short "Save" for the button).
+  "action.breakdownFull":{ plain: "Break into smaller steps", playful: "🍿 Snack-size into smaller steps" },
+  "action.addTodoFull":  { plain: "Add as single task to do", playful: "🍽️ Add as single task to do" },
+  "action.saveShort":    { plain: "Save",                      playful: "🥫 Save" },
+  "action.completeFull": { plain: "Mark as completed",         playful: "✅ Mark as completed" },
+  "action.editTitle":    { plain: "Edit task title",           playful: "Edit task title" },
+  "action.schedule":     { plain: "Schedule",                  playful: "🗓️ Schedule" },
+
   // ── Inbox section headers ──────────────────────────────────────────────────
   "section.needsReview":    { plain: "Needs review",      playful: "Needs review" },
   "section.toDo":           { plain: "To do",             playful: "To do" },

@@ -46,7 +46,7 @@ import { TaskSteps } from "@/components/breakdown/task-steps";
 import { bucketItems, bucketOfItem, isBucketId, type Item, type BucketId } from "@/components/inbox/bucket";
 import { dropPlan } from "@/components/inbox/move-dispatch";
 import { MoveToMenu } from "@/components/inbox/move-to-menu";
-import { RowActions, type ScheduleControlProps } from "@/components/inbox/row-actions";
+import { RowActions, ScheduleControl, type ScheduleControlProps } from "@/components/inbox/row-actions";
 import { t } from "@/lib/strings";
 import { useVoice } from "@/components/voice-provider";
 import type { Voice } from "@/lib/strings";
@@ -279,7 +279,20 @@ export function InboxView({
       onClick={() => setEditingId(item.id)}
       className="text-muted-foreground hover:text-foreground shrink-0 px-1 text-xs"
     >
-      ✎
+      ✏️
+    </button>
+  );
+
+  // v6: the ▾ dropdown's edit entry is the full text "Edit task title" (the
+  // title-line affordance stays the ✏️ pencil above). Keyed for the menu array.
+  const editMenuItem = (item: Item) => (
+    <button
+      key={`edit-menu-${item.id}`}
+      type="button"
+      onClick={() => setEditingId(item.id)}
+      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+    >
+      {t("action.editTitle", voice)}
     </button>
   );
   const titleEditor = (item: Item) => (
@@ -363,7 +376,11 @@ export function InboxView({
   // so confirming/cancelling either one keeps the other in sync. `fullWidth`
   // switches on the menu-entry styling (menu items are left-aligned, full
   // width rows; the end-cluster one is a compact inline button).
-  const deleteControl = (itemId: string, key: string, fullWidth = false) =>
+  const deleteControl = (
+    itemId: string,
+    key: string,
+    { fullWidth = false, icon = false }: { fullWidth?: boolean; icon?: boolean } = {},
+  ) =>
     confirmDeleteId === itemId ? (
       <span key={key} className="flex items-center gap-2">
         <button
@@ -380,6 +397,18 @@ export function InboxView({
           {t("action.cancel", voice)}
         </button>
       </span>
+    ) : icon ? (
+      // v6 end-cluster: 🗑 icon (aria-label carries the meaning; two-step confirm
+      // preserved — the first tap swaps to the Delete · Cancel text above).
+      <button
+        key={key}
+        aria-label={t("action.delete", voice)}
+        title={t("action.delete", voice)}
+        className="text-muted-foreground hover:text-destructive rounded-md px-2.5 py-1"
+        onClick={() => requestDelete(itemId)}
+      >
+        🗑
+      </button>
     ) : (
       <button
         key={key}
@@ -497,8 +526,18 @@ export function InboxView({
                           onMove={(target) => moveItemToBucket(item.id, target)}
                         />
                       }
+                      moveIcon={
+                        <MoveToMenu
+                          key="move-icon"
+                          compact
+                          currentBucket={bucketOfItem(item, now)}
+                          voice={voice}
+                          onMove={(target) => moveItemToBucket(item.id, target)}
+                        />
+                      }
                       dragGrip={<DragGrip id={item.id} label={item.text} />}
                       editButton={pencil(item)}
+                      editMenuItem={editMenuItem(item)}
                       titleEditor={editingId === item.id ? titleEditor(item) : undefined}
                     />
                   );
@@ -587,8 +626,17 @@ export function InboxView({
                               <CompleteButton key="complete" voice={voice} onClick={() => run(() => completeItem(item.id))} />
                             ),
                           ]}
+                          move={
+                            <MoveToMenu
+                              key="move-icon"
+                              compact
+                              currentBucket={bucketOfItem(item, now)}
+                              voice={voice}
+                              onMove={(target) => moveItemToBucket(item.id, target)}
+                            />
+                          }
                           schedule={schedule}
-                          del={deleteControl(item.id, "delete")}
+                          del={deleteControl(item.id, "delete", { icon: true })}
                           menu={[
                             <MoveToMenu
                               key="move"
@@ -612,11 +660,19 @@ export function InboxView({
                                 className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
                                 onClick={() => run(() => completeItem(item.id))}
                               >
-                                {t("action.complete", voice)}
+                                {t("action.completeFull", voice)}
                               </button>
                             ),
-                            pencil(item),
-                            deleteControl(item.id, "delete-m", true),
+                            schedule ? (
+                              <ScheduleControl
+                                key="schedule-m"
+                                {...schedule}
+                                variant="menu"
+                                label={t("action.schedule", voice)}
+                              />
+                            ) : null,
+                            editMenuItem(item),
+                            deleteControl(item.id, "delete-m", { fullWidth: true }),
                           ]}
                         />
                         {scheduleErrors[item.id] && (
@@ -692,8 +748,17 @@ export function InboxView({
                             </button>,
                             <CompleteButton key="complete" voice={voice} onClick={() => run(() => completeItem(item.id))} />,
                           ]}
+                          move={
+                            <MoveToMenu
+                              key="move-icon"
+                              compact
+                              currentBucket={bucketOfItem(item, now)}
+                              voice={voice}
+                              onMove={(target) => moveItemToBucket(item.id, target)}
+                            />
+                          }
                           schedule={schedule}
-                          del={deleteControl(item.id, "delete")}
+                          del={deleteControl(item.id, "delete", { icon: true })}
                           menu={[
                             <MoveToMenu
                               key="move"
@@ -715,10 +780,18 @@ export function InboxView({
                               className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
                               onClick={() => run(() => completeItem(item.id))}
                             >
-                              {t("action.complete", voice)}
+                              {t("action.completeFull", voice)}
                             </button>,
-                            pencil(item),
-                            deleteControl(item.id, "delete-m", true),
+                            schedule ? (
+                              <ScheduleControl
+                                key="schedule-m"
+                                {...schedule}
+                                variant="menu"
+                                label={t("action.schedule", voice)}
+                              />
+                            ) : null,
+                            editMenuItem(item),
+                            deleteControl(item.id, "delete-m", { fullWidth: true }),
                           ]}
                         />
                         {scheduleErrors[item.id] && (
@@ -766,72 +839,112 @@ export function InboxView({
                             </span>
                           )}
                         </div>
-                        {/* Idle: Review now + Move to…. Reviewing: the full
-                            review-row button set replaces it ("Save for
-                            later" re-snoozes and puts the row back to sleep). */}
-                        <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                          {optionsOpen ? (
-                            <>
+                        {/* Idle: Review now + 📥 Move. Reviewing: the full v6
+                            review-row frame (short buttons + ▾ full mirror);
+                            the short "Save" re-snoozes and puts the row back
+                            to sleep. */}
+                        {optionsOpen ? (
+                          <RowActions
+                            inline={[
                               <button
+                                key="breakdown"
                                 onClick={() => breakdown(item.id)}
                                 className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
                               >
                                 {t("action.breakdown", voice)} →
-                              </button>
-                              <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => run(() => keepAsTask(item.id))}>
-                                {t("action.addTodo", voice)}
-                              </button>
+                              </button>,
                               <button
+                                key="keep"
+                                className="hover:bg-accent rounded-md border px-2.5 py-1"
+                                onClick={() => run(() => keepAsTask(item.id))}
+                              >
+                                {t("action.addTodo", voice)}
+                              </button>,
+                              <button
+                                key="save"
                                 className="hover:bg-accent rounded-md border px-2.5 py-1"
                                 onClick={() => {
                                   setSavedOptionsId(null);
                                   run(() => snoozeBrainDumpItem(item.id, 60));
                                 }}
                               >
-                                {t("action.saveForLater", voice)}
-                              </button>
-                              <CompleteButton voice={voice} onClick={() => run(() => completeItem(item.id))} />
+                                {t("action.saveShort", voice)}
+                              </button>,
+                              <CompleteButton key="complete" voice={voice} onClick={() => run(() => completeItem(item.id))} />,
+                            ]}
+                            move={
                               <MoveToMenu
+                                key="move-icon"
+                                compact
                                 currentBucket={bucketOfItem(item, now)}
                                 voice={voice}
                                 onMove={(target) => moveItemToBucket(item.id, target)}
                               />
-                              {confirmDeleteId === item.id ? (
-                                <span className="ml-auto flex items-center gap-2">
-                                  <button className="text-destructive rounded-md px-2.5 py-1 font-medium" onClick={() => confirmDelete(item.id)}>
-                                    {t("action.delete", voice)}
-                                  </button>
-                                  <span className="text-muted-foreground">·</span>
-                                  <button className="text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1" onClick={cancelDelete}>
-                                    {t("action.cancel", voice)}
-                                  </button>
-                                </span>
-                              ) : (
-                                <button className="text-muted-foreground hover:text-destructive ml-auto rounded-md px-2.5 py-1" onClick={() => requestDelete(item.id)}>
-                                  {t("action.delete", voice)}
-                                </button>
-                              )}
-                            </>
-                          ) : (
-                            <>
-                              {/* Wakes the item for review IN the bucket — same
-                                  toggle as pressing the row title. */}
+                            }
+                            del={deleteControl(item.id, "delete-saved", { icon: true })}
+                            menu={[
+                              <MoveToMenu
+                                key="move"
+                                currentBucket={bucketOfItem(item, now)}
+                                voice={voice}
+                                onMove={(target) => moveItemToBucket(item.id, target)}
+                              />,
                               <button
-                                type="button"
-                                aria-expanded={optionsOpen}
-                                onClick={() => setSavedOptionsId(item.id)}
-                                className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
+                                key="breakdown-m"
+                                onClick={() => breakdown(item.id)}
+                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
                               >
-                                {t("action.reviewNow", voice)}
-                              </button>
-                              <MoveToMenu
-                                currentBucket={bucketOfItem(item, now)}
-                                voice={voice}
-                                onMove={(target) => moveItemToBucket(item.id, target)}
-                              />
-                            </>
-                          )}
-                        </div>
+                                {t("action.breakdownFull", voice)}
+                              </button>,
+                              <button
+                                key="keep-m"
+                                onClick={() => run(() => keepAsTask(item.id))}
+                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                              >
+                                {t("action.addTodoFull", voice)}
+                              </button>,
+                              <button
+                                key="save-m"
+                                onClick={() => {
+                                  setSavedOptionsId(null);
+                                  run(() => snoozeBrainDumpItem(item.id, 60));
+                                }}
+                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                              >
+                                {t("action.saveForLater", voice)}
+                              </button>,
+                              <button
+                                key="complete-m"
+                                onClick={() => run(() => completeItem(item.id))}
+                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                              >
+                                {t("action.completeFull", voice)}
+                              </button>,
+                              editMenuItem(item),
+                              deleteControl(item.id, "delete-saved-m", { fullWidth: true }),
+                            ]}
+                          />
+                        ) : (
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                            {/* Wakes the item for review IN the bucket — same
+                                toggle as pressing the row title. */}
+                            <button
+                              type="button"
+                              aria-expanded={optionsOpen}
+                              onClick={() => setSavedOptionsId(item.id)}
+                              className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
+                            >
+                              {t("action.reviewNow", voice)}
+                            </button>
+                            <span className="flex-1" />
+                            <MoveToMenu
+                              compact
+                              currentBucket={bucketOfItem(item, now)}
+                              voice={voice}
+                              onMove={(target) => moveItemToBucket(item.id, target)}
+                            />
+                          </div>
+                        )}
                       </li>
                     );
                   })}
@@ -874,7 +987,7 @@ export function InboxView({
                             </span>
                           )}
                         </div>
-                        <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                           <button
                             type="button"
                             className="hover:bg-accent rounded-md border px-2.5 py-1"
@@ -886,7 +999,9 @@ export function InboxView({
                           >
                             {t("action.reopen", voice)}
                           </button>
+                          <span className="flex-1" />
                           <MoveToMenu
+                            compact
                             currentBucket={bucketOfItem(item, now)}
                             voice={voice}
                             onMove={(target) => moveItemToBucket(item.id, target)}
@@ -1137,8 +1252,10 @@ function ItemRow({
   schedule,
   scheduleError,
   moveMenu,
+  moveIcon,
   dragGrip,
   editButton,
+  editMenuItem,
   titleEditor,
 }: {
   item: Item;
@@ -1164,8 +1281,12 @@ function ItemRow({
   schedule: ScheduleControlProps | null;
   scheduleError?: string;
   moveMenu?: React.ReactNode;
+  /** v6: 📥 Move-to icon for the end cluster (compact MoveToMenu). */
+  moveIcon?: React.ReactNode;
   dragGrip?: React.ReactNode;
   editButton?: React.ReactNode;
+  /** v6: "Edit task title" text entry for the ▾ dropdown (title line keeps editButton). */
+  editMenuItem?: React.ReactNode;
   titleEditor?: React.ReactNode;
 }) {
   const aging = isAging(item.createdAt, settings);
@@ -1178,7 +1299,7 @@ function ItemRow({
   );
   // v5: 🗑 delete appears twice — once inline in the end cluster, once as a
   // duplicate ▾-menu entry — both driven by the same confirmingDelete state.
-  const deleteControl = (key: string, fullWidth = false) =>
+  const deleteControl = (key: string, { fullWidth = false, icon = false } = {}) =>
     confirmingDelete ? (
       <span key={key} className="flex items-center gap-2">
         <button
@@ -1195,6 +1316,16 @@ function ItemRow({
           {t("action.cancel", voice)}
         </button>
       </span>
+    ) : icon ? (
+      <button
+        key={key}
+        aria-label={t("action.delete", voice)}
+        title={t("action.delete", voice)}
+        className="text-muted-foreground hover:text-destructive rounded-md px-2.5 py-1"
+        onClick={onRequestDelete}
+      >
+        🗑
+      </button>
     ) : (
       <button
         key={key}
@@ -1269,12 +1400,13 @@ function ItemRow({
             onClick={onSaveForLater}
             className="hover:bg-accent rounded-md border px-2.5 py-1"
           >
-            {t("action.saveForLater", voice)}
+            {t("action.saveShort", voice)}
           </button>,
           <CompleteButton key="complete" voice={voice} onClick={onComplete} />,
         ]}
+        move={moveIcon}
         schedule={schedule}
-        del={deleteControl("delete")}
+        del={deleteControl("delete", { icon: true })}
         menu={[
           moveMenu,
           <button
@@ -1282,14 +1414,14 @@ function ItemRow({
             onClick={onBreakdown}
             className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
           >
-            {t("action.breakdown", voice)} →
+            {t("action.breakdownFull", voice)}
           </button>,
           <button
             key="keep-m"
             onClick={onKeep}
             className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
           >
-            {t("action.addTodo", voice)}
+            {t("action.addTodoFull", voice)}
           </button>,
           <button
             key="save-for-later-m"
@@ -1303,7 +1435,7 @@ function ItemRow({
             onClick={onComplete}
             className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
           >
-            {t("action.complete", voice)}
+            {t("action.completeFull", voice)}
           </button>,
           // "Snooze 1h" lives only here (▾ menu) — a SEPARATE action from
           // "Save for later": snooze is the literal 1-hour timer
@@ -1316,8 +1448,16 @@ function ItemRow({
           >
             Snooze 1h
           </button>,
-          editButton,
-          deleteControl("delete-m", true),
+          schedule ? (
+            <ScheduleControl
+              key="schedule-m"
+              {...schedule}
+              variant="menu"
+              label={t("action.schedule", voice)}
+            />
+          ) : null,
+          editMenuItem,
+          deleteControl("delete-m", { fullWidth: true }),
         ]}
       />
       {scheduleError && <p className="text-destructive mt-1 text-xs">{scheduleError}</p>}
