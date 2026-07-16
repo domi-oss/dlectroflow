@@ -302,3 +302,31 @@ git commit -m "feat(inbox): needs-review rows adopt the shared action frame"
 - [ ] **Step 1:** Full gate: `npx tsc --noEmit && npm run lint && npx vitest run && npm run build` — all clean; test count strictly above the pre-plan 440.
 - [ ] **Step 2:** Runtime verify (prod build, boot-guard env, dev DB — recipe in `.superpowers/sdd/task-9-report.md` from the integrations plan): anonymous `/inbox` renders rows with NO Schedule control; kill servers after.
 - [ ] **Step 3:** Push + MR: title `feat(inbox): task-row redesign + row scheduling — #25`, description covering the approved mockup (link the #25 issue images), the three row kinds, 📅 behaviors and failure states, reviewers dlectronique + GitLabDuo, milestone v0.0.2, label none-beyond-defaults. Do NOT merge — owner merges after Duo. Update #25: status stays In progress, tick delivered checkboxes, comment with MR link. Owner phone-verifies drag+schedule on the review app.
+
+---
+
+### Task 8: RowActions v5 — inline slots + end cluster (revision)
+
+**Files:**
+- Modify: `src/components/inbox/row-actions.tsx` + `src/components/inbox/row-actions.test.tsx`
+
+**Interfaces:**
+- Produces (REPLACES the Task-4 shape; update all call sites in Task 9):
+  `RowActions({ inline, schedule, del, menu }: { inline: ReactNode[]; schedule?: ScheduleControlProps | null; del?: ReactNode; menu: ReactNode[] })`
+  renders: inline buttons (in order) · flex spacer · end cluster `[📅?][del?][▾]`. The ▾ trigger: `aria-label="All options"`, opens a dismissable popover (same idiom as now, NO `role="menu"`) listing `menu` entries verbatim (caller pins Move-to first). `ScheduleControlProps` unchanged from Task 4/5 (incl. `pending`), PLUS the two final-review fixes: number input gains `max={MAX_CUSTOM_MINUTES}` and the Go button disables (or a `text-destructive` hint shows) when the typed value is outside 1..480 — the callback still never fires out-of-range.
+
+- [ ] Steps: rewrite tests first (inline buttons render in order and fire directly; ▾ shows all menu entries; end-cluster order 📅→del→▾; out-of-range custom duration visibly refused; no role="menu" anywhere; schedule=null hides 📅 only), then implement, full gate, commit `feat(inbox): RowActions v5 — inline actions + end cluster`.
+
+### Task 9: v5 wiring — all three row kinds + server clamp
+
+**Files:**
+- Modify: `src/components/inbox/inbox-view.tsx` (+ its test), `src/app/actions/google-schedule.ts` (+ single.test)
+
+**Interfaces:**
+- Consumes Task 8's RowActions. Spec: the v5 revision section (read it).
+
+- [ ] Review rows (`ItemRow`): pencil back beside the title (restore the pre-Task-6 placement); inline = [existing Break-down CTA, "Add as single to-do" (onKeep, voice key for Keep-as-task), "Save for later" (direct `moveItemToBucket(item.id, "savedLater")` — verify the Saved bucket's BucketId in bucket.ts and reuse MoveToMenu's dispatch), Complete]; schedule = duration popover (scheduleSingleTask — review rows are now schedulable); del = existing two-step confirm; menu = [Move to… (pinned), Break down, Add as single to-do, Save for later, Complete, Snooze 1h, Edit, Delete].
+- [ ] Multi-step rows: inline = [Break-now CTA (awaiting) else Complete]; single-task rows: inline = [▶ Focus, Complete]; both keep their schedule mapping from Task 5; del inline; menu = full duplicate list with Move to… pinned.
+- [ ] Pencil beside title restored on board rows too (Task 5 had moved it into ⋯).
+- [ ] Server clamp (final-review fix): top of `scheduleSingleTask`: round + reject outside 1..480 with `{ ok:false, reason:"error", message:"Duration must be 1-480 minutes" }` + one test (9999 → ok:false).
+- [ ] Update all affected tests (review/board row tests currently open "More actions"); full gate; commit `feat(inbox): v5 rows — inline actions, end cluster, review-row scheduling`.
