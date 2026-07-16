@@ -167,7 +167,7 @@ build_app:
 # deploy_production is stage-scheduled behind the build stage on main.
 test_app:
   stage: build
-  image: node:22-alpine
+  image: node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
   interruptible: true
   needs: []          # starts at pipeline start, in parallel with build_app
   # Real Postgres for the *.integration.test.ts files (they exercise actual
