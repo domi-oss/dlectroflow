@@ -53,7 +53,13 @@ export async function proxy(req: NextRequest) {
     if (p?.kind === "guest") wsId = p.wsId;
   }
   if (!wsId) {
-    wsId = crypto.randomUUID();
+    // Review apps only: seat every new guest into ONE shared, pre-seeded demo
+    // workspace (see prisma/seed.ts) so reviewers land on populated content
+    // instead of an empty sandbox. REVIEW_DEMO_WS is set only by the review
+    // Helm deploy; it is unset in production, where each guest keeps getting an
+    // isolated random workspace. The id is still wrapped in a signed JWT below,
+    // so the IDOR defense (verify the token, never trust a raw id) is unchanged.
+    wsId = process.env.REVIEW_DEMO_WS || crypto.randomUUID();
     // Sign inline (Edge-compatible via jose used in verifySession's module).
     const { SignJWT } = await import("jose");
     guestToken = await new SignJWT({ kind: "guest", wsId })
