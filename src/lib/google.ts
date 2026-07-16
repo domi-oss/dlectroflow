@@ -179,11 +179,28 @@ export async function getGoogleStatus(): Promise<{
   };
 }
 
+const REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke";
+
+/**
+ * Disconnect Google: best-effort server-side revoke (refresh token preferred —
+ * revoking it kills the whole grant), then delete the stored row regardless.
+ * Idempotent; revoke failures must never keep dead tokens around.
+ */
 export async function disconnectGoogle(): Promise<void> {
-  await prisma.googleAuth.update({
-    where: { id: SINGLETON_ID },
-    data: { accessToken: null, refreshToken: null, expiresAt: null, scope: null },
-  });
+  const auth = await getAuth();
+  const token = decryptNullable(auth.refreshToken) ?? decryptNullable(auth.accessToken);
+  if (token) {
+    try {
+      await fetch(REVOKE_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ token }),
+      });
+    } catch {
+      // Best-effort: the row still gets deleted below.
+    }
+  }
+  await prisma.googleAuth.deleteMany({ where: { id: SINGLETON_ID } });
 }
 
 // ── Google Tasks API ──────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ const { prismaMock } = vi.hoisted(() => ({
     googleAuth: {
       upsert: vi.fn(),
       update: vi.fn().mockResolvedValue({}),
+      deleteMany: vi.fn(),
     },
   },
 }));
@@ -158,5 +159,51 @@ describe("status + reconnect healing", () => {
     const call = prismaMock.googleAuth.upsert.mock.calls.at(-1)![0];
     expect(call.update.needsReconnect).toBe(false);
     expect(call.create.needsReconnect).toBe(false);
+  });
+});
+
+describe("disconnectGoogle", () => {
+  it("revokes the refresh token then deletes the row", async () => {
+    const { encryptToken } = await import("@/lib/crypto/token-cipher");
+    prismaMock.googleAuth.upsert.mockResolvedValue({
+      id: "singleton",
+      accessToken: encryptToken("at"), refreshToken: encryptToken("rt"),
+      expiresAt: null, needsReconnect: false,
+    });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    const { disconnectGoogle } = await import("./google");
+    await disconnectGoogle();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://oauth2.googleapis.com/revoke",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(String(fetchMock.mock.calls[0][1].body)).toContain("token=rt");
+    expect(prismaMock.googleAuth.deleteMany).toHaveBeenCalled();
+  });
+
+  it("still deletes when revoke fails", async () => {
+    const { encryptToken } = await import("@/lib/crypto/token-cipher");
+    prismaMock.googleAuth.upsert.mockResolvedValue({
+      id: "singleton",
+      accessToken: encryptToken("at"), refreshToken: null,
+      expiresAt: null, needsReconnect: false,
+    });
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net down")));
+    const { disconnectGoogle } = await import("./google");
+    await expect(disconnectGoogle()).resolves.toBeUndefined();
+    expect(prismaMock.googleAuth.deleteMany).toHaveBeenCalled();
+  });
+
+  it("is a no-op-safe delete when nothing is stored", async () => {
+    prismaMock.googleAuth.upsert.mockResolvedValue({
+      id: "singleton", accessToken: null, refreshToken: null,
+      expiresAt: null, needsReconnect: false,
+    });
+    vi.stubGlobal("fetch", vi.fn());
+    const { disconnectGoogle } = await import("./google");
+    await disconnectGoogle();
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    expect(prismaMock.googleAuth.deleteMany).toHaveBeenCalled();
   });
 });
