@@ -50,31 +50,6 @@ function reclaimTitle(
 }
 
 /**
- * Find the Google Tasks list Reclaim syncs from, returning just its id.
- * Thin wrapper over `@/lib/google`'s `findReclaimList` (same tasklists fetch,
- * same case-insensitive "reclaim" title match) — kept module-private here so
- * `scheduleSingleTask` can resolve a list id without needing its title.
- */
-async function findReclaimListId(token: string): Promise<string | null> {
-  const list = await findReclaimList(token);
-  return list?.id ?? null;
-}
-
-/**
- * Insert one Google Task into the given list. Thin wrapper over
- * `@/lib/google`'s `createGoogleTask` — same request (URL, headers, body)
- * and same error path (throws on a non-ok response) — kept module-private
- * here so `scheduleSingleTask` can reuse it with just a title.
- */
-async function insertGoogleTask(
-  token: string,
-  listId: string,
-  title: string,
-): Promise<{ id: string } | null> {
-  return createGoogleTask(token, listId, { title });
-}
-
-/**
  * Push a task's steps into the Reclaim-synced Google Tasks list. Reclaim then
  * auto-syncs + schedules them. Sidesteps the MCP write gate entirely.
  */
@@ -121,10 +96,7 @@ export async function pushStepsToGoogleTasks(
         s.text,
         s.estMinutes,
       );
-      const created = await insertGoogleTask(token, list.id, title);
-      if (!created) {
-        throw new Error("Google Tasks create failed");
-      }
+      const created = await createGoogleTask(token, list.id, { title });
       // Guard step ownership before update
       const stepCheck = await prisma.step.findFirst({ where: { id: s.id, task: { workspaceId } } });
       if (stepCheck) {
