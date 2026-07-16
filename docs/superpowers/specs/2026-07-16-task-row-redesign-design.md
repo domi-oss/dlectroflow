@@ -91,3 +91,45 @@ hidden menu.** Approved via mockup (`assets/2026-07-16-row-v5-inline-actions.png
 - **▾ (triangle) replaces ⋯**: lists **ALL the row's options including duplicates**,
   with `Move to…` pinned first. Snooze lives only here (review rows).
 - Supersedes the "single contextual primary" rule from the original approach-A design.
+
+## Revision v6 (2026-07-16 late — owner copy/layout + emoji-consistency pass)
+
+Owner refined the built v5 rows: **short CTA on the visible buttons, full descriptive
+wording in the dropdown**, and unified every row affordance to emoji (v5 mixed the `✎`/`▾`
+glyphs with 📅/🗑 emoji).
+
+**Label split (visible button → dropdown entry) — applies to all row kinds.** Both voices
+get new full-label string keys:
+
+| Button (short) | Dropdown (full) |
+|---|---|
+| Break into steps → | Break into smaller steps |
+| Add to-do | Add as single task to do |
+| Save | Save for later |
+| Complete | Mark as completed |
+
+- The button keeps its `→`; the dropdown entry drops it.
+- Snooze stays dropdown-only (review rows), as in v5.
+
+**Row end cluster — all emoji, left → right:** `📥` (Move to) · `📅` (Schedule) — visible
+gap — `🗑` (Delete, two-step confirm preserved) · `🔽` (more / all options).
+
+- `▾` → `🔽`. The dropdown is the **full-text mirror + extras**: `Move to…` (pinned first)
+  · the full-label version of every visible button · `Schedule` · `Edit task title` ·
+  `Delete` — only the entries valid for that row's state.
+- The gap between `📅` and `🗑` prevents schedule/delete misclicks.
+
+**Title line:** `✎` glyph → **✏️** emoji pencil, kept beside the title (also surfaces as
+the text entry `Edit task title` in the dropdown).
+
+**Per-affordance icon-vs-text (same component, two triggers):**
+- **Move to** — row: `📥` icon trigger; dropdown: `Move to…` text. One `MoveToMenu`.
+- **Schedule** — row: `📅` icon; dropdown: `Schedule` text. One `ScheduleControl`.
+- **Delete** — row: `🗑` icon (aria-label "Delete"); dropdown: `Delete` text.
+- All icon-only buttons carry a text `aria-label`; emoji remain decorative (`aria-hidden`
+  where a label is already present).
+
+**Scope:** needs-review, multi-step, single-task, saved-for-later, and completed rows all
+share the convention (completed rows keep their minimal Reopen/Move set, emoji-normalised).
+
+Supersedes v5's `[📅][🗑][▾]` cluster and its shared full-length button labels.
