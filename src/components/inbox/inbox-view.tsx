@@ -258,8 +258,9 @@ export function InboxView({
     });
   };
 
-  // Row-follows-finger feedback (#26): track the active drag so DragOverlay can
-  // float a copy of the row while the source row dims. Cleared on drop/cancel.
+  // Row-follows-finger feedback (#26): DragOverlay floats a copy of the row;
+  // rows compare their id against activeDragId to dim themselves (dnd-kit does
+  // NOT hide the source automatically). Cleared on drop/cancel.
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const handleDragStart = (e: DragStartEvent) => setActiveDragId(String(e.active.id));
   const handleDragEnd = (e: DragEndEvent) => {
@@ -353,6 +354,7 @@ export function InboxView({
               <ul className={cn("space-y-2", pending && "opacity-70")}>
                 {needsReview.map((item) => (
                   <ItemRow
+                    isDragging={activeDragId === item.id}
                     key={item.id}
                     item={item}
                     settings={settings}
@@ -404,7 +406,7 @@ export function InboxView({
                     const expanded = expandedId === item.id;
                     const awaitingBreakdown = item.stepsTotal === 0;
                     return (
-                      <li key={item.id} className="rounded-lg border px-4 py-3 text-sm">
+                      <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", item.id === activeDragId && "opacity-40")}>
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
                         <div className="flex items-start gap-3">
                           <DragGrip id={item.id} label={item.text} />
@@ -483,7 +485,7 @@ export function InboxView({
               ) : (
                 <ul className={cn("space-y-2", pending && "opacity-70")}>
                   {singleTask.map((item) => (
-                    <li key={item.id} className="rounded-lg border px-4 py-3 text-sm">
+                    <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", item.id === activeDragId && "opacity-40")}>
                       {/* Title line + action row below — mirrors the Needs-review row layout. */}
                       <div className="flex items-start gap-3">
                         <DragGrip id={item.id} label={item.text} />
@@ -540,7 +542,7 @@ export function InboxView({
                        Idle rows are dimmed; a row under review looks active. */
                     const optionsOpen = savedOptionsId === item.id;
                     return (
-                      <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", !optionsOpen && "opacity-70")}>
+                      <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", !optionsOpen && "opacity-70", item.id === activeDragId && "opacity-40")}>
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
                         <div className="flex items-start gap-3">
                           <DragGrip id={item.id} label={item.text} />
@@ -656,7 +658,7 @@ export function InboxView({
                        simpler reopens whole, as before. */
                     const pickingSteps = reopenPickerId === item.id;
                     return (
-                      <li key={item.id} className="rounded-lg border px-4 py-3 text-sm">
+                      <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", item.id === activeDragId && "opacity-40")}>
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
                         <div className="flex items-start gap-3">
                           <DragGrip id={item.id} label={item.text} />
@@ -916,6 +918,7 @@ function ItemRow({
   settings,
   voice,
   now,
+  isDragging,
   onBreakdown,
   onKeep,
   onSnooze,
@@ -935,6 +938,7 @@ function ItemRow({
   settings: AgingSettings;
   voice: Voice;
   now: number;
+  isDragging?: boolean;
   onBreakdown: () => void;
   onKeep: () => void;
   onSnooze: () => void;
@@ -959,7 +963,7 @@ function ItemRow({
     settings,
   );
   return (
-    <li className="rounded-lg border px-4 py-3">
+    <li className={cn("rounded-lg border px-4 py-3", isDragging && "opacity-40")}>
       <div className="flex items-start gap-3">
         {dragGrip}
         <div className="min-w-0 flex-1 space-y-1">
