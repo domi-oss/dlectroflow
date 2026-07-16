@@ -155,6 +155,15 @@ export async function scheduleSingleTask(
   const workspaceId = await currentWorkspaceId();
   if (workspaceId !== OWNER_WORKSPACE_ID) throw new Error("owner only");
 
+  // Server-side clamp (final-review fix): the client popover already refuses
+  // out-of-range custom durations, but this action is the single source of
+  // truth — round to the nearest minute and reject anything outside 1..480
+  // rather than trust caller input.
+  const minutes = Math.round(estMinutes);
+  if (!Number.isFinite(minutes) || minutes < 1 || minutes > 480) {
+    return { ok: false, reason: "error", message: "Duration must be 1-480 minutes" };
+  }
+
   if (!googleConfigured()) return { ok: false, reason: "not_configured" };
   const token = await getValidAccessToken();
   if (!token) {
@@ -186,7 +195,7 @@ export async function scheduleSingleTask(
     const list = await findReclaimList(token);
     if (!list) return { ok: false, reason: "no_reclaim_list" };
 
-    const title = `${item.text} (duration:${estMinutes}m)`;
+    const title = `${item.text} (duration:${minutes}m)`;
     const created = await createGoogleTask(token, list.id, { title });
 
     await prisma.task.update({

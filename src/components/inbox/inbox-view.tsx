@@ -357,6 +357,42 @@ export function InboxView({
     run(() => deleteBrainDumpItem(id));
   };
 
+  // v5: 🗑 delete lives inline in every row's end cluster AND (per the "▾
+  // lists ALL the row's options including duplicates" rule) a second time
+  // inside the ▾ menu — both instances share the same confirmDeleteId state,
+  // so confirming/cancelling either one keeps the other in sync. `fullWidth`
+  // switches on the menu-entry styling (menu items are left-aligned, full
+  // width rows; the end-cluster one is a compact inline button).
+  const deleteControl = (itemId: string, key: string, fullWidth = false) =>
+    confirmDeleteId === itemId ? (
+      <span key={key} className="flex items-center gap-2">
+        <button
+          className="text-destructive rounded-md px-2.5 py-1 font-medium"
+          onClick={() => confirmDelete(itemId)}
+        >
+          {t("action.delete", voice)}
+        </button>
+        <span className="text-muted-foreground">·</span>
+        <button
+          className="text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1"
+          onClick={cancelDelete}
+        >
+          {t("action.cancel", voice)}
+        </button>
+      </span>
+    ) : (
+      <button
+        key={key}
+        className={cn(
+          "text-muted-foreground hover:text-destructive rounded-md px-2.5 py-1",
+          fullWidth && "hover:bg-accent hover:text-foreground w-full text-left",
+        )}
+        onClick={() => requestDelete(itemId)}
+      >
+        {t("action.delete", voice)}
+      </button>
+    );
+
   return (
     <div className="space-y-6">
       <NavBadge untriagedCount={untriagedCount} agingCount={agingCount} />
@@ -420,37 +456,52 @@ export function InboxView({
               </p>
             ) : (
               <ul className={cn("space-y-2", pending && "opacity-70")}>
-                {needsReview.map((item) => (
-                  <ItemRow
-                    isDragging={activeDragId === item.id}
-                    key={item.id}
-                    item={item}
-                    settings={settings}
-                    voice={voice}
-                    now={now}
-                    onBreakdown={() => breakdown(item.id)}
-                    onKeep={() => run(() => keepAsTask(item.id))}
-                    onSnooze={() => run(() => snoozeBrainDumpItem(item.id, 60))}
-                    onComplete={() => run(() => completeItem(item.id))}
-                    confirmingDelete={confirmDeleteId === item.id}
-                    onRequestDelete={() => requestDelete(item.id)}
-                    onConfirmDelete={() => confirmDelete(item.id)}
-                    onCancelDelete={cancelDelete}
-                    onFreshen={() => run(() => freshenItem(item.id))}
-                    onDismissPrompt={() => run(() => dismissPrompt(item.id))}
-                    moveMenu={
-                      <MoveToMenu
-                        key="move"
-                        currentBucket={bucketOfItem(item, now)}
-                        voice={voice}
-                        onMove={(target) => moveItemToBucket(item.id, target)}
-                      />
-                    }
-                    dragGrip={<DragGrip id={item.id} label={item.text} />}
-                    editButton={pencil(item)}
-                    titleEditor={editingId === item.id ? titleEditor(item) : undefined}
-                  />
-                ))}
+                {needsReview.map((item) => {
+                  // v5: review rows are now schedulable — an unclarified
+                  // capture has no steps, so 📅 always offers the same
+                  // duration popover a Single-task row uses.
+                  const schedule: ScheduleControlProps | null = effectiveGoogle
+                    ? {
+                        state: scheduleState(effectiveGoogle, "needs_duration"),
+                        onScheduleSingle: (minutes: number) =>
+                          runSchedule(item.id, () => scheduleSingleTask(item.id, minutes)),
+                        pending,
+                      }
+                    : null;
+                  return (
+                    <ItemRow
+                      isDragging={activeDragId === item.id}
+                      key={item.id}
+                      item={item}
+                      settings={settings}
+                      voice={voice}
+                      now={now}
+                      onBreakdown={() => breakdown(item.id)}
+                      onKeep={() => run(() => keepAsTask(item.id))}
+                      onSaveForLater={() => moveItemToBucket(item.id, "savedLater")}
+                      onComplete={() => run(() => completeItem(item.id))}
+                      confirmingDelete={confirmDeleteId === item.id}
+                      onRequestDelete={() => requestDelete(item.id)}
+                      onConfirmDelete={() => confirmDelete(item.id)}
+                      onCancelDelete={cancelDelete}
+                      onFreshen={() => run(() => freshenItem(item.id))}
+                      onDismissPrompt={() => run(() => dismissPrompt(item.id))}
+                      schedule={schedule}
+                      scheduleError={scheduleErrors[item.id]}
+                      moveMenu={
+                        <MoveToMenu
+                          key="move"
+                          currentBucket={bucketOfItem(item, now)}
+                          voice={voice}
+                          onMove={(target) => moveItemToBucket(item.id, target)}
+                        />
+                      }
+                      dragGrip={<DragGrip id={item.id} label={item.text} />}
+                      editButton={pencil(item)}
+                      titleEditor={editingId === item.id ? titleEditor(item) : undefined}
+                    />
+                  );
+                })}
               </ul>
             )}
           </DroppableBucket>
@@ -513,6 +564,7 @@ export function InboxView({
                               </button>
                             </span>
                           )}
+                          {editingId !== item.id && pencil(item)}
                           {editingId !== item.id && !awaitingBreakdown && (
                             <span className="text-muted-foreground shrink-0 text-xs">
                               {item.stepsTotal} steps · {item.stepsDone} {t("progress.done", voice)}
@@ -520,9 +572,10 @@ export function InboxView({
                           )}
                         </div>
                         <RowActions
-                          primary={
+                          inline={[
                             awaitingBreakdown ? (
                               <button
+                                key="break-now"
                                 type="button"
                                 onClick={() => breakdown(item.id)}
                                 className="bg-destructive rounded-md px-2.5 py-1 font-medium text-white hover:opacity-90"
@@ -530,18 +583,39 @@ export function InboxView({
                                 {t("prompt.breakNow", voice)}
                               </button>
                             ) : (
-                              <CompleteButton voice={voice} onClick={() => run(() => completeItem(item.id))} />
-                            )
-                          }
+                              <CompleteButton key="complete" voice={voice} onClick={() => run(() => completeItem(item.id))} />
+                            ),
+                          ]}
                           schedule={schedule}
-                          overflow={[
+                          del={deleteControl(item.id, "delete")}
+                          menu={[
                             <MoveToMenu
                               key="move"
                               currentBucket={bucketOfItem(item, now)}
                               voice={voice}
                               onMove={(target) => moveItemToBucket(item.id, target)}
                             />,
+                            awaitingBreakdown ? (
+                              <button
+                                key="break-now-m"
+                                type="button"
+                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                onClick={() => breakdown(item.id)}
+                              >
+                                {t("prompt.breakNow", voice)}
+                              </button>
+                            ) : (
+                              <button
+                                key="complete-m"
+                                type="button"
+                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                onClick={() => run(() => completeItem(item.id))}
+                              >
+                                {t("action.complete", voice)}
+                              </button>
+                            ),
                             pencil(item),
+                            deleteControl(item.id, "delete-m", true),
                           ]}
                         />
                         {scheduleErrors[item.id] && (
@@ -598,6 +672,7 @@ export function InboxView({
                           ) : (
                             <span className="min-w-0 flex-1 break-words">{item.text}</span>
                           )}
+                          {editingId !== item.id && pencil(item)}
                           {editingId !== item.id && (
                             <span className="text-muted-foreground shrink-0 text-xs">
                               captured {formatAgo(now - new Date(item.createdAt).getTime())}
@@ -605,34 +680,44 @@ export function InboxView({
                           )}
                         </div>
                         <RowActions
-                          primary={
+                          inline={[
                             <button
+                              key="focus"
                               type="button"
                               onClick={() => focusOnItem(item.id)}
                               className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
                             >
                               ▶ Focus
-                            </button>
-                          }
-                          schedule={schedule}
-                          overflow={[
+                            </button>,
                             <CompleteButton key="complete" voice={voice} onClick={() => run(() => completeItem(item.id))} />,
+                          ]}
+                          schedule={schedule}
+                          del={deleteControl(item.id, "delete")}
+                          menu={[
                             <MoveToMenu
                               key="move"
                               currentBucket={bucketOfItem(item, now)}
                               voice={voice}
                               onMove={(target) => moveItemToBucket(item.id, target)}
                             />,
+                            <button
+                              key="focus-m"
+                              type="button"
+                              className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                              onClick={() => focusOnItem(item.id)}
+                            >
+                              ▶ Focus
+                            </button>,
+                            <button
+                              key="complete-m"
+                              type="button"
+                              className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                              onClick={() => run(() => completeItem(item.id))}
+                            >
+                              {t("action.complete", voice)}
+                            </button>,
                             pencil(item),
-                            confirmDeleteId === item.id ? (
-                              <span key="delete" className="flex items-center gap-2">
-                                <button className="text-destructive rounded-md px-2.5 py-1 font-medium" onClick={() => confirmDelete(item.id)}>{t("action.delete", voice)}</button>
-                                <span className="text-muted-foreground">·</span>
-                                <button className="text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1" onClick={cancelDelete}>{t("action.cancel", voice)}</button>
-                              </span>
-                            ) : (
-                              <button key="delete" className="text-muted-foreground hover:text-destructive w-full rounded-md px-2.5 py-1 text-left" onClick={() => requestDelete(item.id)}>{t("action.delete", voice)}</button>
-                            ),
+                            deleteControl(item.id, "delete-m", true),
                           ]}
                         />
                         {scheduleErrors[item.id] && (
@@ -1039,7 +1124,7 @@ function ItemRow({
   isDragging,
   onBreakdown,
   onKeep,
-  onSnooze,
+  onSaveForLater,
   onComplete,
   confirmingDelete,
   onRequestDelete,
@@ -1047,6 +1132,8 @@ function ItemRow({
   onCancelDelete,
   onFreshen,
   onDismissPrompt,
+  schedule,
+  scheduleError,
   moveMenu,
   dragGrip,
   editButton,
@@ -1059,7 +1146,7 @@ function ItemRow({
   isDragging?: boolean;
   onBreakdown: () => void;
   onKeep: () => void;
-  onSnooze: () => void;
+  onSaveForLater: () => void;
   onComplete: () => void;
   confirmingDelete: boolean;
   onRequestDelete: () => void;
@@ -1067,6 +1154,8 @@ function ItemRow({
   onCancelDelete: () => void;
   onFreshen: () => void;
   onDismissPrompt: () => void;
+  schedule: ScheduleControlProps | null;
+  scheduleError?: string;
   moveMenu?: React.ReactNode;
   dragGrip?: React.ReactNode;
   editButton?: React.ReactNode;
@@ -1080,6 +1169,37 @@ function ItemRow({
     item.promptDismissedAt,
     settings,
   );
+  // v5: 🗑 delete appears twice — once inline in the end cluster, once as a
+  // duplicate ▾-menu entry — both driven by the same confirmingDelete state.
+  const deleteControl = (key: string, fullWidth = false) =>
+    confirmingDelete ? (
+      <span key={key} className="flex items-center gap-2">
+        <button
+          onClick={onConfirmDelete}
+          className="text-destructive rounded-md px-2.5 py-1 font-medium"
+        >
+          {t("action.delete", voice)}
+        </button>
+        <span className="text-muted-foreground">·</span>
+        <button
+          onClick={onCancelDelete}
+          className="text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1"
+        >
+          {t("action.cancel", voice)}
+        </button>
+      </span>
+    ) : (
+      <button
+        key={key}
+        className={cn(
+          "text-muted-foreground hover:text-destructive rounded-md px-2.5 py-1",
+          fullWidth && "hover:bg-accent hover:text-foreground w-full text-left",
+        )}
+        onClick={onRequestDelete}
+      >
+        {t("action.delete", voice)}
+      </button>
+    );
   return (
     <li className={cn("rounded-lg border px-4 py-3", isDragging && "opacity-40")}>
       <div className="flex items-start gap-3">
@@ -1087,7 +1207,12 @@ function ItemRow({
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex items-center gap-2">
             <StatusPill tier={tier} voice={voice} />
-            {titleEditor ?? <span className="break-words">{item.text}</span>}
+            {titleEditor ?? (
+              <>
+                <span className="break-words">{item.text}</span>
+                {editButton}
+              </>
+            )}
           </div>
           <AgeLabel createdAt={item.createdAt} aging={aging} now={now} />
         </div>
@@ -1117,17 +1242,14 @@ function ItemRow({
         </div>
       )}
       <RowActions
-        primary={
+        inline={[
           <button
+            key="breakdown"
             onClick={onBreakdown}
             className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
           >
             {t("action.breakdown", voice)} →
-          </button>
-        }
-        // Unclarified captures aren't scheduled — 📅 is never offered here.
-        schedule={null}
-        overflow={[
+          </button>,
           <button
             key="keep"
             onClick={onKeep}
@@ -1136,42 +1258,62 @@ function ItemRow({
             {t("action.addTodo", voice)}
           </button>,
           <button
-            key="snooze"
-            onClick={onSnooze}
+            key="save-for-later"
+            onClick={onSaveForLater}
             className="hover:bg-accent rounded-md border px-2.5 py-1"
           >
             {t("action.saveForLater", voice)}
           </button>,
           <CompleteButton key="complete" voice={voice} onClick={onComplete} />,
+        ]}
+        schedule={schedule}
+        del={deleteControl("delete")}
+        menu={[
           moveMenu,
+          <button
+            key="breakdown-m"
+            onClick={onBreakdown}
+            className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+          >
+            {t("action.breakdown", voice)} →
+          </button>,
+          <button
+            key="keep-m"
+            onClick={onKeep}
+            className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+          >
+            {t("action.addTodo", voice)}
+          </button>,
+          <button
+            key="save-for-later-m"
+            onClick={onSaveForLater}
+            className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+          >
+            {t("action.saveForLater", voice)}
+          </button>,
+          <button
+            key="complete-m"
+            onClick={onComplete}
+            className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+          >
+            {t("action.complete", voice)}
+          </button>,
+          // "Snooze 1h" lives only here — the inline "Save for later" button
+          // is the same underlying snooze-to-Saved-bucket action dispatched
+          // via moveItemToBucket; this is the literal-duration fallback the
+          // ▾ menu always exposes alongside it.
+          <button
+            key="snooze-m"
+            onClick={onSaveForLater}
+            className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+          >
+            Snooze 1h
+          </button>,
           editButton,
-          confirmingDelete ? (
-            <span key="delete" className="flex items-center gap-2">
-              <button
-                onClick={onConfirmDelete}
-                className="text-destructive rounded-md px-2.5 py-1 font-medium"
-              >
-                {t("action.delete", voice)}
-              </button>
-              <span className="text-muted-foreground">·</span>
-              <button
-                onClick={onCancelDelete}
-                className="text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1"
-              >
-                {t("action.cancel", voice)}
-              </button>
-            </span>
-          ) : (
-            <button
-              key="delete"
-              onClick={onRequestDelete}
-              className="text-muted-foreground hover:text-destructive w-full rounded-md px-2.5 py-1 text-left"
-            >
-              {t("action.delete", voice)}
-            </button>
-          ),
+          deleteControl("delete-m", true),
         ]}
       />
+      {scheduleError && <p className="text-destructive mt-1 text-xs">{scheduleError}</p>}
     </li>
   );
 }

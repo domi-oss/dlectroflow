@@ -65,6 +65,20 @@ describe("scheduleSingleTask", () => {
     await expect(scheduleSingleTask("item-1", 30)).rejects.toThrow("owner only");
   });
 
+  it("rejects a duration outside 1..480 minutes (server clamp) without touching Google", async () => {
+    workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
+    configuredMock.mockReturnValue(true);
+    tokenMock.mockResolvedValue("tok");
+
+    expect(await scheduleSingleTask("item-1", 9999)).toEqual({
+      ok: false,
+      reason: "error",
+      message: "Duration must be 1-480 minutes",
+    });
+    expect(itemFindFirstMock).not.toHaveBeenCalled();
+    expect(createGoogleTaskMock).not.toHaveBeenCalled();
+  });
+
   it("returns reconnect_required when tokens are dead", async () => {
     workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
     configuredMock.mockReturnValue(true);
