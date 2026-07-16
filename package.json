@@ -17,7 +17,7 @@
     "setup": "docker compose up -d db && npm install && prisma migrate dev"
   },
   "engines": {
-    "node": ">=20.9.0"
+    "node": ">=20.19.0"
   },
   "overrides": {
     "postcss": "^8.5.16"
