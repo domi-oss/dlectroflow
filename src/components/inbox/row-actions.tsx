@@ -18,8 +18,10 @@ export type ScheduleControlProps = {
 /**
  * The 📅 control. `ready_steps` schedules immediately on click; `needs_duration`
  * opens an inline popover (15/30/60 presets + a custom number input) and fires
- * `onScheduleSingle` once a duration is chosen; `connect`/`reconnect` render an
- * OAuth link instead of a button (nothing to click-handle client-side).
+ * `onScheduleSingle` once a valid duration is chosen; out-of-range custom values
+ * (0, negative, non-numeric, or >480) visibly disable Go and show a hint instead
+ * of silently doing nothing. `connect`/`reconnect` render an OAuth link instead
+ * of a button (nothing to click-handle client-side).
  */
 function ScheduleControl({ state, onScheduleSteps, onScheduleSingle, pending }: ScheduleControlProps) {
   const [open, setOpen] = useState(false);
@@ -50,12 +52,16 @@ function ScheduleControl({ state, onScheduleSteps, onScheduleSingle, pending }: 
     );
   }
 
+  const customMinutes = Number(custom);
+  const customOutOfRange =
+    custom !== "" &&
+    (!Number.isFinite(customMinutes) || customMinutes <= 0 || customMinutes > MAX_CUSTOM_MINUTES);
+
   const fireCustom = () => {
-    const minutes = Number(custom);
-    if (!Number.isFinite(minutes) || minutes <= 0 || minutes > MAX_CUSTOM_MINUTES) return;
+    if (custom === "" || customOutOfRange) return;
     setOpen(false);
     setCustom("");
-    onScheduleSingle?.(minutes);
+    onScheduleSingle?.(customMinutes);
   };
 
   return (
@@ -100,6 +106,7 @@ function ScheduleControl({ state, onScheduleSteps, onScheduleSingle, pending }: 
             <input
               type="number"
               min={1}
+              max={MAX_CUSTOM_MINUTES}
               step={1}
               value={custom}
               onChange={(e) => setCustom(e.target.value)}
@@ -108,13 +115,16 @@ function ScheduleControl({ state, onScheduleSteps, onScheduleSingle, pending }: 
             />
             <button
               type="button"
-              disabled={pending}
+              disabled={pending || custom === "" || customOutOfRange}
               className="rounded-md px-2.5 py-1 font-medium disabled:opacity-50"
               onClick={fireCustom}
             >
               Go
             </button>
           </span>
+          {customOutOfRange && (
+            <span className="text-destructive">Enter 1–{MAX_CUSTOM_MINUTES} minutes</span>
+          )}
         </span>
       )}
     </span>
@@ -122,21 +132,25 @@ function ScheduleControl({ state, onScheduleSteps, onScheduleSingle, pending }: 
 }
 
 /**
- * The action line shared by every task row: an optional primary action slot,
- * the 📅 schedule control (omitted entirely when `schedule` is null — guest
- * rows have nothing to schedule into), a ⋯ overflow menu, and optional quiet
- * meta text pinned to the right.
+ * The action line shared by every task row (v5): visible `inline` actions in
+ * order, a flex spacer, then the end cluster — 📅 (omitted when `schedule` is
+ * null, e.g. guest rows), `del` (omitted when not provided), and the ▾ trigger
+ * which opens a dismissable (Escape / outside-click) list of ALL of the row's
+ * options — `menu`, rendered verbatim, caller-ordered (Move to… pinned first
+ * by the caller). This is a plain dismissable popover, not an ARIA menu — no
+ * `role="menu"` anywhere here, since `menu` entries are ordinary buttons/links,
+ * not menuitems with roving-focus semantics.
  */
 export function RowActions({
-  primary,
+  inline,
   schedule,
-  overflow,
-  meta,
+  del,
+  menu,
 }: {
-  primary?: ReactNode;
+  inline: ReactNode[];
   schedule?: ScheduleControlProps | null;
-  overflow: ReactNode[];
-  meta?: string;
+  del?: ReactNode;
+  menu: ReactNode[];
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLSpanElement>(null);
@@ -159,29 +173,27 @@ export function RowActions({
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-      {primary}
+      {inline}
+      <span className="flex-1" />
       {schedule && <ScheduleControl {...schedule} />}
+      {del}
       <span ref={menuRef} className="relative">
         <button
           type="button"
-          aria-label="More actions"
-          aria-haspopup="menu"
+          aria-label="All options"
+          aria-haspopup="true"
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((o) => !o)}
           className="rounded-md px-2.5 py-1 font-medium"
         >
-          ⋯
+          ▾
         </button>
         {menuOpen && (
-          <span
-            role="menu"
-            className="bg-background absolute right-0 z-10 mt-1 flex min-w-40 flex-col gap-1 rounded-md border p-1 shadow-md"
-          >
-            {overflow}
+          <span className="bg-background absolute right-0 z-10 mt-1 flex min-w-40 flex-col gap-1 rounded-md border p-1 shadow-md">
+            {menu}
           </span>
         )}
       </span>
-      {meta && <span className="text-muted-foreground ml-auto">{meta}</span>}
     </div>
   );
 }
