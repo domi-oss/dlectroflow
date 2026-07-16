@@ -47,3 +47,8 @@ yarn-error.log*
 
 # Superpowers SDD agent scratch (briefs, reports, review diffs, ledger)
 /.superpowers/
+
+# Claude Code local state + background-agent git worktrees (never committed)
+.claude/
+# Nested build output inside agent worktrees (root /.next/ above only anchors top-level)
+**/.next/
