@@ -80,12 +80,14 @@ async function storeTokens(t: TokenResponse) {
       refreshToken: t.refresh_token ? encryptToken(t.refresh_token) : null,
       expiresAt,
       scope,
+      needsReconnect: false,
     },
     update: {
       accessToken: encryptToken(t.access_token),
       ...(t.refresh_token ? { refreshToken: encryptToken(t.refresh_token) } : {}),
       expiresAt,
       scope,
+      needsReconnect: false,
     },
   });
 }
@@ -167,9 +169,14 @@ export async function getValidAccessToken(): Promise<string | null> {
 export async function getGoogleStatus(): Promise<{
   configured: boolean;
   connected: boolean;
+  needsReconnect: boolean;
 }> {
   const auth = await getAuth();
-  return { configured: googleConfigured(), connected: Boolean(auth.accessToken) };
+  return {
+    configured: googleConfigured(),
+    connected: Boolean(auth.accessToken),
+    needsReconnect: Boolean(auth.needsReconnect),
+  };
 }
 
 export async function disconnectGoogle(): Promise<void> {

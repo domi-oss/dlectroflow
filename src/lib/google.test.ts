@@ -121,3 +121,42 @@ describe("invalid_grant handling", () => {
     expect(prismaMock.googleAuth.update).not.toHaveBeenCalled();
   });
 });
+
+describe("status + reconnect healing", () => {
+  it("getGoogleStatus surfaces needsReconnect", async () => {
+    prismaMock.googleAuth.upsert.mockResolvedValue({
+      id: "singleton",
+      accessToken: null,
+      refreshToken: null,
+      expiresAt: null,
+      needsReconnect: true,
+    });
+    const { getGoogleStatus } = await import("./google");
+    expect(await getGoogleStatus()).toMatchObject({
+      connected: false,
+      needsReconnect: true,
+    });
+  });
+
+  it("storeTokens resets needsReconnect", async () => {
+    process.env.GOOGLE_CLIENT_ID = "google-cid";
+    process.env.GOOGLE_CLIENT_SECRET = "google-csecret";
+    prismaMock.googleAuth.upsert.mockResolvedValue({ id: "singleton" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          access_token: "g-at",
+          refresh_token: "g-rt",
+          expires_in: 3600,
+        }),
+      }),
+    );
+    const { exchangeCode } = await import("./google");
+    await exchangeCode("code", "verifier", "https://app/cb");
+    const call = prismaMock.googleAuth.upsert.mock.calls.at(-1)![0];
+    expect(call.update.needsReconnect).toBe(false);
+    expect(call.create.needsReconnect).toBe(false);
+  });
+});
