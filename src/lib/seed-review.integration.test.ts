@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { prisma } from "@/lib/db";
+import { PrismaClient } from "@prisma/client";
 import { seedReviewApp } from "../../prisma/seed";
+
+// Use a DEDICATED client (not the shared @/lib/db singleton) so calling
+// $disconnect() here can never tear the connection out from under sibling tests
+// if vitest module isolation is ever disabled.
+const prisma = new PrismaClient();
 
 // A test-only workspace id so this never clobbers the real "review-demo"
 // workspace and cleans up fully afterwards.

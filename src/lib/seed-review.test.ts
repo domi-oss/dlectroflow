@@ -29,6 +29,17 @@ describe("assertReviewEnv", () => {
     );
   });
 
+  it("refuses a non-review env (staging) even WITH a review signal — allowlist, not blocklist", () => {
+    // The whole point of the allowlist: a blocklist that only knew "production"
+    // would happily seed a staging deploy that also had SEED_REVIEW_APP=1.
+    expect(() =>
+      assertReviewEnv({ SEED_REVIEW_APP: "1", APP_ENV: "staging" }),
+    ).toThrow(/non-review environment/i);
+    expect(() =>
+      assertReviewEnv({ SEED_REVIEW_APP: "1", CI_ENVIRONMENT_NAME: "staging/7" }),
+    ).toThrow(/non-review environment/i);
+  });
+
   it("hard-refuses production even if a review signal is somehow also present", () => {
     expect(() =>
       assertReviewEnv({ SEED_REVIEW_APP: "1", APP_ENV: "production" }),

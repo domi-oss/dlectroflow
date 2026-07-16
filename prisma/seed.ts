@@ -33,23 +33,42 @@ function hasReviewSignal(env: SeedEnv): boolean {
   );
 }
 
-function looksLikeProduction(env: SeedEnv): boolean {
+function isProductionEnv(env: SeedEnv): boolean {
   // NOTE: NODE_ENV is deliberately NOT consulted — the review app image boots
   // with NODE_ENV=production too, so it can't distinguish review from prod.
   return env.APP_ENV === "production" || env.CI_ENVIRONMENT_NAME === "production";
 }
 
+// Allowlist: an environment marker is acceptable only when it's a review value
+// or absent. Any OTHER value (staging, qa, sandbox, …) is treated as hostile.
+function appEnvAllowed(env: SeedEnv): boolean {
+  return !env.APP_ENV || env.APP_ENV === "review";
+}
+function ciEnvAllowed(env: SeedEnv): boolean {
+  return !env.CI_ENVIRONMENT_NAME || env.CI_ENVIRONMENT_NAME.startsWith("review/");
+}
+
 /**
- * Guard: throw unless the environment is unambiguously a review app. Production
- * is hard-refused even if a review signal is also (mistakenly) present, so a
- * copy-paste into a prod deploy can never seed real data.
+ * Guard: throw unless the environment is unambiguously a review app. Uses
+ * ALLOWLIST semantics — a blocklist that only refused "production" would let a
+ * non-review env like `APP_ENV=staging` (plus SEED_REVIEW_APP=1) slip through.
+ * So we require, in order: (1) not production, (2) APP_ENV/CI_ENVIRONMENT_NAME
+ * are each a review value OR absent, (3) a positive review signal is present.
  */
 export function assertReviewEnv(env: SeedEnv): void {
-  if (looksLikeProduction(env)) {
+  // (1) Explicit production hard-refuse first, for a clear, prod-specific error.
+  if (isProductionEnv(env)) {
     throw new Error(
       "refusing to run review seed: production environment detected (APP_ENV/CI_ENVIRONMENT_NAME)",
     );
   }
+  // (2) Any non-review, non-absent env marker (staging, etc.) is refused.
+  if (!appEnvAllowed(env) || !ciEnvAllowed(env)) {
+    throw new Error(
+      "refusing to run review seed: APP_ENV/CI_ENVIRONMENT_NAME is set to a non-review environment",
+    );
+  }
+  // (3) Require a positive review signal so an all-absent env can't seed either.
   if (!hasReviewSignal(env)) {
     throw new Error(
       "refusing to run review seed: no review environment signal (set SEED_REVIEW_APP=1 or APP_ENV=review)",
