@@ -11,7 +11,13 @@ import {
   getGoogleStatus,
   disconnectGoogle,
 } from "@/lib/google";
-import { RewardType, BadgeKey, OWNER_WORKSPACE_ID } from "@/lib/constants";
+import {
+  RewardType,
+  BadgeKey,
+  OWNER_WORKSPACE_ID,
+  TaskSource,
+  TaskStatus,
+} from "@/lib/constants";
 import { logReward, awardBadge } from "@/lib/rewards";
 import { currentWorkspaceId } from "@/lib/workspace";
 
@@ -113,6 +119,83 @@ export async function pushStepsToGoogleTasks(
 
     revalidatePath(`/tasks/${taskId}`);
     return { ok: true, scheduled, listTitle: list.title };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: "error",
+      message: err instanceof Error ? err.message : "Google Tasks push failed",
+    };
+  }
+}
+
+export type GoogleScheduleSingleResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason:
+        | "not_configured"
+        | "not_connected"
+        | "no_reclaim_list"
+        | "reconnect_required"
+        | "error";
+      message?: string;
+    };
+
+/**
+ * Schedule a single to-do (Single-task bucket row) as one Google Task, using
+ * the same `(duration:Nm)` convention Reclaim parses off step titles. The row
+ * may not have a linked Task yet (e.g. triaged straight from the inbox with
+ * no steps) — mirrors `keepAsTask`/`ensureFocusStep` in braindump.ts by
+ * creating one lazily so the googleTaskId has somewhere to live.
+ */
+export async function scheduleSingleTask(
+  itemId: string,
+  estMinutes: number,
+): Promise<GoogleScheduleSingleResult> {
+  const workspaceId = await currentWorkspaceId();
+  if (workspaceId !== OWNER_WORKSPACE_ID) throw new Error("owner only");
+
+  if (!googleConfigured()) return { ok: false, reason: "not_configured" };
+  const token = await getValidAccessToken();
+  if (!token) {
+    const status = await getGoogleStatus();
+    return { ok: false, reason: status.needsReconnect ? "reconnect_required" : "not_connected" };
+  }
+
+  const item = await prisma.brainDumpItem.findFirst({
+    where: { id: itemId, workspaceId },
+    include: { task: true },
+  });
+  if (!item) return { ok: false, reason: "error", message: "Item not found" };
+
+  let taskId = item.taskId;
+  if (!taskId) {
+    const task = await prisma.task.create({
+      data: {
+        title: item.text,
+        source: TaskSource.BrainDump,
+        status: TaskStatus.Active,
+        workspaceId,
+      },
+    });
+    taskId = task.id;
+    await prisma.brainDumpItem.update({ where: { id: item.id }, data: { taskId } });
+  }
+
+  try {
+    const list = await findReclaimList(token);
+    if (!list) return { ok: false, reason: "no_reclaim_list" };
+
+    const title = `${item.text} (duration:${estMinutes}m)`;
+    const created = await createGoogleTask(token, list.id, { title });
+
+    await prisma.task.update({
+      where: { id: taskId },
+      data: { googleTaskId: created.id, googleTaskListId: list.id },
+    });
+
+    revalidatePath("/inbox");
+    return { ok: true };
   } catch (err) {
     return {
       ok: false,
