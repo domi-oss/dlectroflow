@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
   DndContext,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   KeyboardSensor,
   useSensor,
   useSensors,
@@ -226,7 +227,15 @@ export function InboxView({
   // two paths can never diverge (Task 10). Every drop moves immediately —
   // a Multi-step drop parks the item there with a "Break into steps now?"
   // call-to-action (requestBreakdown) instead of a blocking prompt.
-  const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor));
+  // Mouse/touch split (#26): a bare PointerSensor loses the gesture race to
+  // page scrolling on touch screens, so drags never started on mobile.
+  // Touch = long-press to lift (the standard mobile list pattern); mouse keeps
+  // a 5px threshold (imperceptible, and stops stray clicks becoming drags).
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
+    useSensor(KeyboardSensor),
+  );
   const itemsById = new Map(initialItems.map((i) => [i.id, i]));
 
   const moveItemToBucket = (itemId: string, target: BucketId) => {
@@ -840,7 +849,7 @@ function DragGrip({ id, label }: { id: string; label: string }) {
       {...attributes}
       {...listeners}
       aria-label={`Drag ${label}`}
-      className="text-muted-foreground hover:text-foreground shrink-0 cursor-grab px-1 text-xs"
+      className="text-muted-foreground hover:text-foreground touch-none shrink-0 cursor-grab px-1 text-xs"
     >
       ⠿
     </button>
