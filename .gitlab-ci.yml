@@ -412,7 +412,7 @@ renovate:
   # every npm lockfile regen died (surfaced as `undefined` artifact errors).
   # -full ships node/npm preinstalled (binarySource=global), no GitHub lookup.
   # Alternative documented fix if we ever go back to slim: GITHUB_COM_TOKEN.
-  image: renovate/renovate:43-full@sha256:b8efce2f968c25f5a7597d3bb3dfe193fd4217061aa75717251eba08a17abfb7
+  image: renovate/renovate:43-full@sha256:52553c7ad78ef2498d973c05609ab556d58e0b626fb500bed82183cc702fb221
   # NOT interruptible: a maintenance run should finish, not be cancelled by a
   # newer main pipeline mid-run (which could leave update MRs half-created).
   variables:
