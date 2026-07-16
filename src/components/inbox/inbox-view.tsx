@@ -542,7 +542,7 @@ export function InboxView({
                        Idle rows are dimmed; a row under review looks active. */
                     const optionsOpen = savedOptionsId === item.id;
                     return (
-                      <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", !optionsOpen && "opacity-70", item.id === activeDragId && "opacity-40")}>
+                      <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", item.id === activeDragId ? "opacity-40" : !optionsOpen && "opacity-70")}>
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
                         <div className="flex items-start gap-3">
                           <DragGrip id={item.id} label={item.text} />
