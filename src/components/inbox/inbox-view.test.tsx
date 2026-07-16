@@ -52,12 +52,23 @@ vi.mock("@/components/breakdown/task-steps", () => ({
   ),
 }));
 
+// Passthrough spy on the shared move dispatcher: dropPlan keeps its REAL
+// behavior, but its calls become observable — so tests can assert an action
+// was routed through moveItemToBucket (e.g. the review row's "Save for
+// later" = a direct move to the Saved bucket) versus a direct server-action
+// call that bypasses the dispatcher (e.g. "Snooze 1h").
+vi.mock("@/components/inbox/move-dispatch", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/inbox/move-dispatch")>();
+  return { ...actual, dropPlan: vi.fn(actual.dropPlan) };
+});
+
 import {
   createBrainDumpItem,
   deleteBrainDumpItem,
   dismissPrompt,
   freshenItem,
 } from "@/app/actions/braindump";
+import { dropPlan } from "@/components/inbox/move-dispatch";
 
 const settings: AgingSettings = {
   agingThresholdMinutes: 30,
@@ -913,13 +924,29 @@ describe("InboxView — needs-review rows adopt the v5 inline-actions frame", ()
     expect(keepAsTask).toHaveBeenCalledWith("n1");
   });
 
-  it("clicking Save for later dispatches the direct move to the Saved bucket (moveItemToBucket → snooze)", async () => {
+  it("clicking Save for later is a direct MOVE to the Saved bucket via the shared dispatcher", async () => {
     const { snoozeBrainDumpItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
     render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} />);
     const row = screen.getByText("capture me").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Save for later" }));
+    // The move went through moveItemToBucket → dropPlan(needsReview → savedLater)…
+    expect(dropPlan).toHaveBeenCalledWith("needsReview", "savedLater");
+    // …whose savedLater action lands the item in the Saved bucket
+    // (ACTION_FOR_BUCKET.savedLater — snooze is how Saved membership is stored).
     expect(snoozeBrainDumpItem).toHaveBeenCalledWith("n1", 60);
+  });
+
+  it("the ▾ menu's Save for later duplicate dispatches the same Saved-bucket move", async () => {
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} />);
+    const row = screen.getByText("capture me").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "All options" }));
+    // Two "Save for later" buttons exist now (inline + ▾ duplicate); click the duplicate.
+    const duplicates = within(row).getAllByRole("button", { name: "Save for later" });
+    expect(duplicates).toHaveLength(2);
+    await user.click(duplicates[1]);
+    expect(dropPlan).toHaveBeenCalledWith("needsReview", "savedLater");
   });
 
   it("delete is inline in the end cluster and still requires a two-step confirm", async () => {
@@ -947,7 +974,7 @@ describe("InboxView — needs-review rows adopt the v5 inline-actions frame", ()
     expect(within(row).getAllByRole("button", { name: "Edit capture me" })).toHaveLength(2);
   });
 
-  it("Snooze 1h in the ▾ menu fires the same snooze-to-Saved-bucket action as Save for later", async () => {
+  it("Snooze 1h in the ▾ menu is a SEPARATE direct snooze — it does not go through the move dispatcher", async () => {
     const { snoozeBrainDumpItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
     render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} />);
@@ -955,5 +982,6 @@ describe("InboxView — needs-review rows adopt the v5 inline-actions frame", ()
     await user.click(within(row).getByRole("button", { name: "All options" }));
     await user.click(within(row).getByRole("button", { name: "Snooze 1h" }));
     expect(snoozeBrainDumpItem).toHaveBeenCalledWith("n1", 60);
+    expect(dropPlan).not.toHaveBeenCalled();
   });
 });

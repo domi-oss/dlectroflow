@@ -479,6 +479,7 @@ export function InboxView({
                       onBreakdown={() => breakdown(item.id)}
                       onKeep={() => run(() => keepAsTask(item.id))}
                       onSaveForLater={() => moveItemToBucket(item.id, "savedLater")}
+                      onSnooze={() => run(() => snoozeBrainDumpItem(item.id, 60))}
                       onComplete={() => run(() => completeItem(item.id))}
                       confirmingDelete={confirmDeleteId === item.id}
                       onRequestDelete={() => requestDelete(item.id)}
@@ -1125,6 +1126,7 @@ function ItemRow({
   onBreakdown,
   onKeep,
   onSaveForLater,
+  onSnooze,
   onComplete,
   confirmingDelete,
   onRequestDelete,
@@ -1146,7 +1148,12 @@ function ItemRow({
   isDragging?: boolean;
   onBreakdown: () => void;
   onKeep: () => void;
+  /** "Save for later" — a direct MOVE to the Saved bucket, dispatched through
+   * the same `moveItemToBucket` path drag and MoveToMenu use. */
   onSaveForLater: () => void;
+  /** "Snooze 1h" (▾-menu only) — the literal-duration snooze action, kept
+   * SEPARATE from the Save-for-later bucket move. */
+  onSnooze: () => void;
   onComplete: () => void;
   confirmingDelete: boolean;
   onRequestDelete: () => void;
@@ -1298,13 +1305,13 @@ function ItemRow({
           >
             {t("action.complete", voice)}
           </button>,
-          // "Snooze 1h" lives only here — the inline "Save for later" button
-          // is the same underlying snooze-to-Saved-bucket action dispatched
-          // via moveItemToBucket; this is the literal-duration fallback the
-          // ▾ menu always exposes alongside it.
+          // "Snooze 1h" lives only here (▾ menu) — a SEPARATE action from
+          // "Save for later": snooze is the literal 1-hour timer
+          // (snoozeBrainDumpItem), Save for later is a direct move to the
+          // Saved bucket via the shared moveItemToBucket dispatcher.
           <button
             key="snooze-m"
-            onClick={onSaveForLater}
+            onClick={onSnooze}
             className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
           >
             Snooze 1h
