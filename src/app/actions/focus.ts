@@ -213,9 +213,17 @@ export async function requeueFocus(
   const stepCheck = await prisma.step.findFirst({ where: { id: step.id, task: { workspaceId } } });
   if (!stepCheck) return { ok: false };
 
-  const history: number[] = step.estimateHistory
-    ? (JSON.parse(step.estimateHistory) as number[])
-    : [];
+  // Guard the stored history: corrupt/malformed JSON (or a non-array value)
+  // must not break requeue — fall back to an empty history and carry on (#21 P5.4).
+  let history: number[] = [];
+  if (step.estimateHistory) {
+    try {
+      const parsed = JSON.parse(step.estimateHistory);
+      if (Array.isArray(parsed)) history = parsed as number[];
+    } catch {
+      history = [];
+    }
+  }
   history.push(step.estMinutes);
   const newEst = Math.max(1, Math.round(opts.newEstMinutes));
 
