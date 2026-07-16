@@ -3,7 +3,7 @@
 **For:** Claude Code, to produce an implementation plan and ship it.
 **Inputs:**
 - Interactive wireframe: `docs/wireframe/dlectroflow-wireframe.html` (open in a browser; self-contained HTML/CSS/JS).
-- Phased code-mapping plan (written earlier, still the base): `docs/dlectroflow-wireframe-merge-plan.md`.
+- Phased code-mapping plan (written earlier, still the base): `MERGE-PLAN.md`.
 
 This brief records the **finalized UX decisions** from the design sessions so the implementation plan matches the wireframe exactly. Where this brief and the older merge-plan differ, **this brief wins** (it's newer).
 
@@ -28,7 +28,7 @@ Six screens, reached via the ☰ menu (menu shows: Inbox, Focus Timer, Dashboard
    - Each section has a **see all →** deep-link into the matching Library tab.
 2. **Task Breakdown** (`/tasks/[id]`) — chat + editable step list (emoji, text, editable time estimate); confirm; then a confirmed state that branches on scheduling success (scheduled vs saved-not-scheduled).
 3. **Focus Timer** (`/focus/[stepId]`) — state machine: Setup → Running/Paused → Time's up → Done. Low-shame **Pause for now** exit keeps the step in its task and surfaces a resume banner in the Inbox.
-4. **Dashboard** — 4 stats, daily spark, end-of-day round-up, best streaks, 7 badges.
+4. **Dashboard** — 4 stats, daily spark, end-of-day round-up, best streaks, 6 badges (see the reconciled badge list below).
 5. **Settings** — voice, freshness thresholds, integrations (Reclaim/Google Tasks), notifications, + a **Demo: First-run preview** toggle.
 6. **Everything** (Library hub) — tabs: **Single-task · Multi-step · Saved for later · Done**. Has a **← Back** button. Rows open the breakdown.
 
@@ -79,7 +79,7 @@ Voice toggle **modes are named "Plain" and "Playful"** in the UI.
 - **Multi-step / Sorted** shows step progress; a task with **all steps done graduates to the Done bucket** (closure pile).
 - **Focus → Pause for now**: ends the session, keeps the step in its task, surfaces a resume banner in the Inbox ("Focus step … paused — resume →").
 - **First-run / empty state**: welcome card offering Plain/Playful + a capture-first empty Inbox. Exposed as a **Demo toggle in Settings** (and a wireframe preview toggle in the harness).
-- **Streak rule** (open decision → confirm): wireframe assumes streak = engagement per working day; current code advances on step-completion only. **Badges** (7): First breakdown, First scheduled, First focus, Task complete, Full work week (5 working-day streak), Inbox zero, Comeback.
+- **Streak rule** (open decision → confirm): wireframe assumes streak = engagement per working day; current code advances on step-completion only. **Badges — 6 shipped** (reconciled to `BadgeKey` in `src/lib/constants.ts`): First breakdown (`first_breakdown`), First schedule (`first_schedule`), 5-working-day streak / "Full work week" (`streak_5`), Ten steps in a day (`ten_steps_day`), Beat your best streak (`beat_best_streak`), Task complete (`task_complete`). *(The earlier 7-badge design here — First focus, Inbox zero, Comeback — drifted and never shipped; Ten-steps-in-a-day and Beat-your-best-streak shipped in their place.)*
 
 ### Baseline accessibility to bake in (from the ADHD/COGA review)
 - Honour `prefers-reduced-motion` for the completion confetti.
@@ -95,7 +95,7 @@ Voice toggle **modes are named "Plain" and "Playful"** in the UI.
 
 ---
 
-## Suggested phasing (see `docs/dlectroflow-wireframe-merge-plan.md` for the file-level detail)
+## Suggested phasing (see `MERGE-PLAN.md` for the file-level detail)
 1. Voice/string foundation (`voice` field + `strings.ts` + toggle) — unblocks all relabeling.
 2. Inbox IA: Needs review + To do (single/multi-step sub-buckets) + Saved for later; freshness tiers.
 3. Library ("Everything") hub with Done tab; deep-links; back button.

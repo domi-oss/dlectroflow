@@ -18,20 +18,21 @@ Brain Dump  →  Break down (Claude, conversational)  →  Schedule in Reclaim
 |---|---|
 | Framework | Next.js (App Router) + TypeScript |
 | UI | Tailwind CSS + shadcn/ui + Framer Motion |
-| Data | Prisma + SQLite (local) → Postgres for deploy |
-| AI | Claude API (`@anthropic-ai/sdk`), model `claude-opus-4-8`, adaptive thinking, streaming |
-| Reclaim | Official Reclaim MCP server `https://mcp.reclaim.ai` (OAuth), reached via Claude API remote MCP connector |
-| Email (opt-in) | Resend + a scheduled job (only if round-up email enabled) |
+| Data | Prisma + **PostgreSQL everywhere** (local dev via Docker Compose; production on GKE) |
+| AI | Claude API (`@anthropic-ai/sdk`); breakdown model is role-based — `claude-sonnet-4-6` (owner default, owner-selectable) / `claude-haiku-4-5` (guests); adaptive thinking + streaming on Sonnet/Opus |
+| Scheduling | **Google Tasks** (OAuth) is the primary route — steps land in a Google Tasks list that a Reclaim-synced list auto-schedules. Direct Reclaim MCP task-creation (`https://mcp.reclaim.ai`, OAuth via the Claude remote-MCP connector) exists only as a fallback and is **account-gated / largely unused** |
+| Email (opt-in) | Resend — the round-up email is **client-triggered** (fires when the owner opens the dashboard / taps "Trigger now"), **not a scheduled job**; only when round-up email is enabled |
 | Notifications | Web Notifications API + service worker |
 | Deploy | Dockerfile + `.gitlab-ci.yml` |
 
 ### Verified Claude API integration details
-- Model `claude-opus-4-8`; `thinking: {type: "adaptive"}`; stream long/interactive responses via `.stream()` → `.finalMessage()`.
-- **Remote MCP connector** (how the app writes to Reclaim): `client.beta.messages.create` with beta `mcp-client-2025-11-20`, and **both**:
+- Breakdown model is role-based: **`claude-sonnet-4-6`** (owner default; owner can pick haiku/sonnet/opus) and **`claude-haiku-4-5`** (guests, a cost lever). `claude-opus-4-8` is only used by the "kinder re-estimate" helper, not the breakdown default. `thinking: {type: "adaptive"}` + `output_config.effort: "low"` on Sonnet/Opus (Haiku takes neither); stream via `.stream()` → `.finalMessage()`.
+- **Scheduling actually ships via Google Tasks**, not the Reclaim MCP connector. Confirmed steps are written to a Google Tasks list (with duration syntax) that a Reclaim-synced list ingests + auto-schedules.
+- **Remote MCP connector (fallback only, account-gated / largely unused):** `client.beta.messages.create` with beta `mcp-client-2025-11-20`, and **both**:
   - `mcp_servers: [{ type: "url", url: "https://mcp.reclaim.ai", name: "reclaim", authorization_token: <reclaim bearer token> }]`
   - `tools: [{ type: "mcp_toolset", mcp_server_name: "reclaim" }]`
-- Reclaim MCP is OAuth → run its OAuth authorize flow once, store the bearer token, pass it as `authorization_token`.
-- Never log secrets. Keep `ANTHROPIC_API_KEY` and the Reclaim token server-side only.
+  - Reclaim gates task-*creation* via MCP per account; where it's not granted the connector can't write, so this path is a fallback and steps save locally instead. Reclaim MCP is OAuth → authorize once, store the bearer token, pass it as `authorization_token`.
+- Never log secrets. Keep `ANTHROPIC_API_KEY` and the Reclaim/Google tokens server-side only.
 
 ---
 
@@ -50,13 +51,18 @@ Data: `BrainDumpItem { id, text, createdAt, status: inbox|triaged|archived, tria
 
 ---
 
-## Feature 2 — ✂️ Task Breakdown → Reclaim (centerpiece)
+## Feature 2 — ✂️ Task Breakdown → Schedule (centerpiece)
+
+> **Reality check (post-build):** the scheduling route that shipped is **Google Tasks**, not
+> direct Reclaim MCP writes. Steps are pushed to a Google Tasks list (with duration syntax)
+> that a Reclaim-synced list auto-schedules. The direct Reclaim-MCP write path below is an
+> account-gated fallback that's largely unused. The rest of this section is otherwise accurate.
 
 Turn a vague/big task into tiny steps through a short conversation, then auto-schedule.
 
 - **Trigger:** from a Brain Dump item or a new task; input is a title/phrase.
 - **Conversational breakdown (Claude):** proposes a breakdown (no fixed count) with a **creative, varied opening line** generated fresh each time (warm, task-specific, ends inviting confirmation). Chat-style panel with quick replies: 👍 Looks right · ⬇️ Too big · ⬆️ Too small/too many · ✍️ free text. Per-chunk `Break this down further ↳`. Re-proposes until confirmed; chunks editable, each with `estMinutes`.
-- **Push to Reclaim** (via Claude MCP connector): Claude creates each chunk as a Reclaim task; Reclaim auto-schedules onto the calendar.
+- **Push to schedule** (shipped: **Google Tasks**): each chunk is written to a Google Tasks list with duration syntax; a Reclaim-synced list ingests it and auto-schedules onto the calendar. (Original plan: create each chunk directly as a Reclaim task via the Claude MCP connector — kept only as an account-gated fallback.)
 - **Reclaim task naming convention:**
   `{parentEmoji} {Parent Task}: {n} of {total} {subtaskEmoji} {subtask name} ({estMinutes} mins)`
   e.g. `🎤 Prep the Customer Demo: 2 of 5 ✍️ Draft the opening script (25 mins)`
@@ -80,7 +86,7 @@ Beat starting/sustaining attention; fight time blindness.
 - **When time's up — confirm, never assume:** "Did you finish?" → ✅ Yes → completion flow · 🔁 Not yet → back to backlog, **Claude proposes a new estimate**, user confirms/adjusts, `estMinutes` updates and linked Reclaim task is updated/rescheduled.
 - **Completion flow:** mark step done → feeds Rewards; **Reclaim sync** marks the linked task complete via MCP complete-task tool (graceful fallback if disconnected); tee up next step.
 - **Stats (live):** focus minutes today · sessions · time per task.
-- **🌇 End-of-day round-up:** user-set workday-end time (default ~5pm) fires a browser notification → in-app summary; plus a "trigger now" demo override. Claude writes a warm, personalized recap (wins first, guilt-free): steps done, focus minutes/sessions, points, streak, gentle carry-over. Delivery settings: in-app (always) · browser notification (default on) · **email opt-in** (Resend + scheduler; only when enabled). Optional "plan tomorrow" one-tap.
+- **🌇 End-of-day round-up:** user-set workday-end time (default ~5pm) fires a browser notification → in-app summary; plus a "trigger now" demo override. Claude writes a warm, personalized recap (wins first, guilt-free): steps done, focus minutes/sessions, points, streak, gentle carry-over. Delivery settings: in-app (always) · browser notification (default on) · **email opt-in** (Resend; **client-triggered — it sends when the owner opens the dashboard / taps "Trigger now", there is no scheduled server job**; only when enabled). Optional "plan tomorrow" one-tap.
 
 Data: `FocusSession { id, stepId?, taskId?, plannedMin, addedMin, startedAt, endedAt, durationMin, outcome: completed|requeued|gaveup, reclaimSynced? }` · `Step.estimateHistory?` · `TimerSettings { defaultFromEstimate, addTimeIncrementMin }` · `DayRollup { id, date, focusMin, sessions, stepsDone, pointsEarned, streakDay, narrative, emailedAt? }` · `Settings { workdayEndTime, roundupDemoOverride?, roundupEmailEnabled, roundupEmail }`.
 
@@ -96,7 +102,7 @@ Immediate dopamine + a reason to return.
 - **Streaks — working days only:** consecutive working days with ≥1 completion; non-working days skipped (weekend keeps it intact). Working days = user setting (default Mon–Fri). Missing a working day resets to 0.
 - **🏆 Best-streaks leaderboard:** ended streaks save final length to a personal Top 3 (🥇🥈🥉 with counts + dates); a new streak surpassing an entry bumps in live.
 - **🌱 Fresh-start encouragement:** starting a new streak after a reset → Claude offers warm, varied encouragement reframing the restart; guilt-free.
-- **Badges (light):** first breakdown, first Reclaim schedule, 5-day streak, 10 steps in a day, beat your best streak.
+- **Badges (light) — 6 shipped** (`BadgeKey` in `src/lib/constants.ts`): first breakdown (`first_breakdown`), first schedule (`first_schedule`), 5-day streak (`streak_5`), 10 steps in a day (`ten_steps_day`), beat your best streak (`beat_best_streak`), task complete (`task_complete`).
 - **Dashboard:** ✨ daily spark · today's points · current streak · Top 3 best streaks · focus minutes · steps done.
 
 Data: `RewardEvent { id, type, points, createdAt }` · `Streak { current, lastActiveWorkday }` · `StreakRecord { id, length, startedAt, endedAt }` (Top 3 by length) · `Badge { id, key, earnedAt }` · `DailySpark { id, date, quote, source: ai|fallback }` · `Settings { workingDays: [Mon..Fri] }`.
@@ -105,7 +111,7 @@ Data: `RewardEvent { id, type, points, createdAt }` · `Streak { current, lastAc
 
 ## Build order (each a checkpoint)
 
-1. **Scaffold** — Next.js + TS + Tailwind + shadcn/ui + Prisma/SQLite; app runs.
+1. **Scaffold** — Next.js + TS + Tailwind + shadcn/ui + Prisma/**Postgres** (local dev via Docker Compose); app runs.
 2. **Data models** — Prisma schema for all entities above; migrate.
 3. **Brain Dump** — capture + inbox + triage zones + status pills + dismissable nav badge.
 4. **Aging + notifications** — threshold setting + demo override; service worker + Web Notifications.
@@ -113,8 +119,8 @@ Data: `RewardEvent { id, type, points, createdAt }` · `Streak { current, lastAc
 6. **Reclaim OAuth + MCP connector** — one-time Reclaim OAuth authorize + token store; push chunks with the naming convention via the MCP connector; per-chunk status + fallback.
 7. **Focus Timer** — visual timer + controls; time's-up confirm flow + re-estimate; completion + Reclaim complete-sync.
 8. **Rewards & Streaks** — points, confetti, working-day streaks, Top 3 leaderboard, fresh-start encouragement, daily spark, dashboard.
-9. **End-of-day round-up** — recap generation; in-app + notification; email opt-in (Resend + scheduler).
-10. **Polish + deploy** — animations pass; Dockerfile + `.gitlab-ci.yml`; Postgres switch for deploy.
+9. **End-of-day round-up** — recap generation; in-app + notification; email opt-in (Resend, client-triggered from the dashboard — no scheduled job).
+10. **Polish + deploy** — animations pass; Dockerfile + `.gitlab-ci.yml`; deploy to GKE (Postgres is used in dev too, so no provider switch is needed at this step).
 
 ---
 
