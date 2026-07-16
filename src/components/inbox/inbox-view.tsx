@@ -12,7 +12,9 @@ import {
   useSensors,
   useDraggable,
   useDroppable,
+  DragOverlay,
   type DragEndEvent,
+  type DragStartEvent,
 } from "@dnd-kit/core";
 import {
   isAging,
@@ -256,10 +258,16 @@ export function InboxView({
     });
   };
 
+  // Row-follows-finger feedback (#26): track the active drag so DragOverlay can
+  // float a copy of the row while the source row dims. Cleared on drop/cancel.
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const handleDragStart = (e: DragStartEvent) => setActiveDragId(String(e.active.id));
   const handleDragEnd = (e: DragEndEvent) => {
+    setActiveDragId(null);
     const move = dragEndToMove(String(e.active.id), e.over ? String(e.over.id) : null);
     if (move) moveItemToBucket(move.itemId, move.target);
   };
+  const activeDragItem = activeDragId ? (itemsById.get(activeDragId) ?? null) : null;
 
   const submit = () => {
     const value = text.trim();
@@ -325,7 +333,7 @@ export function InboxView({
         )}
       </div>
 
-      <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragCancel={() => setActiveDragId(null)} onDragEnd={handleDragEnd}>
         {/* Needs review */}
         <section>
           <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
@@ -697,6 +705,16 @@ export function InboxView({
             </DroppableBucket>
           </div>
         </section>
+        {/* #26: floating copy of the dragged row — the whole card visibly follows
+            the finger/pointer during a drag, with a short settle animation on drop. */}
+        <DragOverlay dropAnimation={{ duration: 180, easing: "ease-out" }}>
+          {activeDragItem ? (
+            <div className="bg-background ring-primary/40 pointer-events-none scale-[1.02] rounded-lg border px-4 py-3 text-sm shadow-lg ring-2">
+              <span className="text-muted-foreground pr-2 text-xs">⠿</span>
+              {activeDragItem.text}
+            </div>
+          ) : null}
+        </DragOverlay>
       </DndContext>
     </div>
   );
