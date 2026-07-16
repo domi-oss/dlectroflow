@@ -89,6 +89,46 @@ spec:
             limits:
               cpu: {{ .Values.resources.app.cpu }}
               memory: {{ .Values.resources.app.memory }}
+        {{- if eq .Values.env "review" }}
+        # Review apps ONLY (#25): seed a small demo data set so the review app
+        # has content across the inbox buckets instead of an empty sandbox. Runs
+        # after `migrate`, reusing the app image (which carries the Prisma CLI +
+        # tsx via Dockerfile.ci). Never rendered for production; prisma/seed.ts
+        # ALSO self-guards via assertReviewEnv (defense in depth), and is
+        # best-effort — a seed failure logs and exits 0 so it can't block the
+        # deploy. Sized like `migrate`, and since initContainers run
+        # sequentially it doesn't raise the pod's effective resource request, so
+        # the review-only ResourceQuota is unaffected.
+        - name: seed
+          image: "{{ .Values.image.repository }}:{{ required "image.tag must be set (CI passes $CI_COMMIT_SHA)" .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["npx", "tsx", "prisma/seed.ts"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: dlectroflow-secrets
+                  key: DATABASE_URL
+            # Positive review signal for prisma/seed.ts's assertReviewEnv guard.
+            - name: SEED_REVIEW_APP
+              value: "1"
+            # Also pass env so the guard hard-refuses if this ever renders in prod.
+            - name: APP_ENV
+              value: {{ .Values.env | quote }}
+            - name: REVIEW_DEMO_WS
+              value: {{ .Values.reviewDemoWorkspaceId | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: {{ .Values.resources.app.cpu }}
+              memory: {{ .Values.resources.app.memory }}
+            limits:
+              cpu: {{ .Values.resources.app.cpu }}
+              memory: {{ .Values.resources.app.memory }}
+        {{- end }}
       containers:
         - name: app
           image: "{{ .Values.image.repository }}:{{ required "image.tag must be set (CI passes $CI_COMMIT_SHA)" .Values.image.tag }}"
@@ -104,6 +144,13 @@ spec:
             # vs. Host/X-Forwarded-* spoofing). requestOrigin() prefers this.
             - name: PUBLIC_ORIGIN
               value: "https://{{ .Values.host }}"
+            {{- if eq .Values.env "review" }}
+            # Review apps ONLY (#25): seat guests into the shared, pre-seeded
+            # demo workspace (see src/proxy.ts). Unset in production, where each
+            # guest keeps getting an isolated random workspace.
+            - name: REVIEW_DEMO_WS
+              value: {{ .Values.reviewDemoWorkspaceId | quote }}
+            {{- end }}
           envFrom:
             - secretRef:
                 name: dlectroflow-secrets
