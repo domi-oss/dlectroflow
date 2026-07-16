@@ -36,10 +36,12 @@ COPY ci-dist/static ./.next/static
 COPY public ./public
 
 # Prisma CLI + engines + migrations for the migrate initContainer (same image).
+# tsx runs the TypeScript review-app seed (prisma/seed.ts) in the review-only
+# `seed` initContainer — see charts/dlectroflow/templates/deployment.yaml.
 # --no-save installs alongside the traced node_modules without touching lockfiles.
 COPY prisma ./prisma
 COPY prisma.config.ts ./prisma.config.ts
-RUN npm install --no-save prisma@6.19.3 dotenv@16.4.7
+RUN npm install --no-save prisma@6.19.3 dotenv@16.4.7 tsx@4.19.2
 
 # Run as the non-root `node` user (uid 1000, present in node images).
 RUN chown -R node:node /app

@@ -8,6 +8,11 @@ host: dlectroflow.dlectronique.dev
 replicas: 2            # review apps pinned to 1 via CI (no HA need on spot)
 spot: false            # true for review apps
 
+# Review apps only (#25): the shared demo workspace that gets pre-seeded
+# (prisma/seed.ts) and that the proxy seats every guest into, so reviewers land
+# on populated content. Only rendered when env=review; never used in production.
+reviewDemoWorkspaceId: review-demo
+
 resources:
   app:
     cpu: 500m
