@@ -131,7 +131,23 @@ async function refreshAccessToken(): Promise<string | null> {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    let errCode: string | undefined;
+    try {
+      errCode = ((await res.json()) as { error?: string }).error;
+    } catch {
+      /* non-JSON error body — treat as transient */
+    }
+    if (errCode === "invalid_grant") {
+      // The refresh token is dead (revoked/expired). Presence of stale tokens
+      // is what makes `connected` lie — clear them and flag for reconnect.
+      await prisma.googleAuth.update({
+        where: { id: SINGLETON_ID },
+        data: { accessToken: null, refreshToken: null, expiresAt: null, needsReconnect: true },
+      });
+    }
+    return null;
+  }
   const data = (await res.json()) as TokenResponse;
   await storeTokens(data);
   return data.access_token;

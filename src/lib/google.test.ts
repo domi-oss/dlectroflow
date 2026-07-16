@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { decryptToken } from "@/lib/crypto/token-cipher";
+import { decryptToken, encryptToken } from "@/lib/crypto/token-cipher";
 
 const { prismaMock } = vi.hoisted(() => ({
   prismaMock: {
@@ -70,5 +70,54 @@ describe("google token encryption", () => {
     expect(decryptToken(update.accessToken)).toBe("g-at");
     expect(update.refreshToken).toMatch(/^v1:/);
     expect(decryptToken(update.refreshToken)).toBe("g-rt");
+  });
+});
+
+describe("invalid_grant handling", () => {
+  function connectedRow() {
+    return {
+      id: "singleton",
+      accessToken: encryptToken("stale-at"),
+      refreshToken: encryptToken("dead-rt"),
+      expiresAt: new Date(Date.now() - 1000), // forces refresh path
+      needsReconnect: false,
+    };
+  }
+
+  it("clears tokens and sets needsReconnect on invalid_grant", async () => {
+    process.env.GOOGLE_CLIENT_ID = "google-cid";
+    process.env.GOOGLE_CLIENT_SECRET = "google-csecret";
+    prismaMock.googleAuth.upsert.mockResolvedValue(connectedRow());
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({ error: "invalid_grant" }),
+      }),
+    );
+    const { getValidAccessToken } = await import("./google");
+    expect(await getValidAccessToken()).toBeNull();
+    expect(prismaMock.googleAuth.update).toHaveBeenCalledWith({
+      where: { id: "singleton" },
+      data: { accessToken: null, refreshToken: null, expiresAt: null, needsReconnect: true },
+    });
+  });
+
+  it("leaves stored tokens untouched on transient refresh errors", async () => {
+    process.env.GOOGLE_CLIENT_ID = "google-cid";
+    process.env.GOOGLE_CLIENT_SECRET = "google-csecret";
+    prismaMock.googleAuth.upsert.mockResolvedValue(connectedRow());
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: async () => ({ error: "temporarily_unavailable" }),
+      }),
+    );
+    const { getValidAccessToken } = await import("./google");
+    expect(await getValidAccessToken()).toBeNull();
+    expect(prismaMock.googleAuth.update).not.toHaveBeenCalled();
   });
 });
