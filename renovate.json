@@ -46,6 +46,13 @@
         "eslint"
       ],
       "allowedVersions": "<10"
+    },
+    {
+      "description": "Defer TypeScript 7 (!68): TS 7 is the Go-native compiler; @typescript-eslint 8.62.1 peers typescript >=4.8.4 <6.1.0 (via eslint-config-next), so typescript-estree crashes at module load and lint/build fail. The <6.1 ceiling matches that peer range and still lets Renovate propose TS 6.0.x (the JS-based sibling release). This cap also applies to vulnerabilityAlerts MRs (Renovate does not auto-bypass allowedVersions for security fixes) - accepted trade-off: typescript is a devDependency (never in the runtime bundle), TS itself rarely carries CVEs, and a TS-7-only fix would crash this same lint toolchain regardless, so the real remediation is lifting this defer. Lift this line once the typescript-eslint chain ships TS-7 support - Renovate will re-propose the major automatically.",
+      "matchPackageNames": [
+        "typescript"
+      ],
+      "allowedVersions": "<6.1"
     }
   ],
   "vulnerabilityAlerts": {
