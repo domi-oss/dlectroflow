@@ -6,25 +6,52 @@
     ":semanticCommits"
   ],
   "timezone": "Europe/London",
-  "labels": ["dependencies", "renovate"],
+  "labels": [
+    "dependencies",
+    "renovate"
+  ],
   "prConcurrentLimit": 5,
   "prHourlyLimit": 0,
   "platformAutomerge": true,
   "packageRules": [
     {
-      "description": "Automerge patch/minor/digest/pin once the MR pipeline passes. The pipeline runs all scanners as REQUIRED jobs on MRs (they must execute), and new Critical/High findings are blocked by the Scan Result Policy (issue #2, task 4.2) — enable that policy before turning the Renovate schedule on. Majors always need manual review + Duo.",
-      "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
+      "description": "Automerge patch/minor/digest/pin once the MR pipeline passes. The pipeline runs all scanners as REQUIRED jobs on MRs (they must execute), and new Critical/High findings are blocked by the Scan Result Policy (issue #2, task 4.2) \u2014 enable that policy before turning the Renovate schedule on. Majors always need manual review + Duo.",
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest",
+        "pin"
+      ],
       "automerge": true
     },
     {
       "description": "Group and label the Docker/CI base-image (node:22-alpine) bumps together.",
-      "matchManagers": ["dockerfile", "gitlabci"],
-      "matchPackageNames": ["node"],
+      "matchManagers": [
+        "dockerfile",
+        "gitlabci"
+      ],
+      "matchPackageNames": [
+        "node"
+      ],
       "groupName": "node base image",
-      "labels": ["dependencies", "docker", "base-image"]
+      "labels": [
+        "dependencies",
+        "docker",
+        "base-image"
+      ]
+    },
+    {
+      "description": "Defer ESLint 10 (#21/!51): no released eslint-plugin-react supports it (latest 7.37.5 peers eslint ^3||...||^9.7, pinned via eslint-config-next). Lift this line once the Next plugin chain ships ESLint-10 support - Renovate will re-propose the major automatically.",
+      "matchPackageNames": [
+        "eslint"
+      ],
+      "allowedVersions": "<10"
     }
   ],
   "vulnerabilityAlerts": {
-    "labels": ["dependencies", "security"]
+    "labels": [
+      "dependencies",
+      "security"
+    ]
   }
 }
