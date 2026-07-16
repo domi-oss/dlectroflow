@@ -58,7 +58,7 @@ function renderChat() {
       title="Plan the party"
       initialProposal={proposal}
       reclaimConnected={false}
-      google={{ configured: false, connected: false }}
+      google={{ configured: false, connected: false, needsReconnect: false }}
     />,
   );
 }

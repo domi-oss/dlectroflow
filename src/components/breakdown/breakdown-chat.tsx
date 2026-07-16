@@ -19,6 +19,7 @@ type ScheduleState = {
   status: "idle" | "scheduling" | "done" | "error";
   count?: number;
   message?: string;
+  reason?: string;
 };
 
 export function BreakdownChat({
@@ -36,7 +37,7 @@ export function BreakdownChat({
   /** Start with one blank step and skip the automatic AI proposal (manual re-plan). */
   startManual?: boolean;
   reclaimConnected: boolean;
-  google: { configured: boolean; connected: boolean };
+  google: { configured: boolean; connected: boolean; needsReconnect: boolean };
   isGuest?: boolean;
 }) {
   const router = useRouter();
@@ -206,11 +207,14 @@ export function BreakdownChat({
         not_configured:
           "Google isn't configured (set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).",
         not_connected: "Google Tasks isn't connected.",
+        reconnect_required:
+          "Google needs reconnecting — your access expired or was revoked.",
         no_steps: "No steps to send.",
       };
       setGsched({
         status: "error",
         message: map[res.reason] ?? res.message ?? "Sending to Google Tasks failed.",
+        reason: res.reason,
       });
     }
   }
@@ -250,11 +254,23 @@ export function BreakdownChat({
             <p className="font-medium">📅 Schedule onto your calendar</p>
 
             {google.configured ? (
-              !google.connected ? (
+              google.needsReconnect ? (
                 <div className="space-y-2">
                   <p className="text-muted-foreground">
-                    Connect Google Tasks — steps land in your Reclaim-synced list
-                    and Reclaim auto-schedules them. Steps are saved either way.
+                    Google needs reconnecting — your access expired or was revoked.
+                  </p>
+                  <a
+                    href="/api/google/oauth/start"
+                    className="bg-primary text-primary-foreground inline-block rounded-md px-3 py-2 font-medium"
+                  >
+                    Reconnect Google →
+                  </a>
+                </div>
+              ) : !google.connected ? (
+                <div className="space-y-2">
+                  <p className="text-muted-foreground">
+                    Connect Google Tasks — steps land in your task list, and a
+                    Reclaim-synced list is scheduled automatically.
                   </p>
                   <a
                     href="/api/google/oauth/start"
@@ -266,13 +282,13 @@ export function BreakdownChat({
               ) : gsched.status === "done" ? (
                 <p className="font-medium text-green-700">
                   ✅ Sent {gsched.count} task{gsched.count === 1 ? "" : "s"} to your
-                  &quot;{gsched.message}&quot; list — they&apos;ll sync into Reclaim shortly.
+                  &quot;{gsched.message}&quot; list.
                 </p>
               ) : (
                 <div className="space-y-2">
                   <p className="text-muted-foreground">
-                    Send these steps to your Reclaim-synced Google Tasks list;
-                    Reclaim picks them up and auto-schedules them.
+                    Send these steps to your Google Tasks list — a Reclaim-synced
+                    list is scheduled automatically.
                   </p>
                   <button
                     onClick={sendToGoogle}
@@ -281,10 +297,20 @@ export function BreakdownChat({
                   >
                     {gsched.status === "scheduling"
                       ? "Sending…"
-                      : "📅 Send to Reclaim (via Google Tasks)"}
+                      : "📅 Send to Google Tasks"}
                   </button>
                   {gsched.status === "error" && (
-                    <p className="text-red-700">{gsched.message}</p>
+                    <div className="space-y-2">
+                      <p className="text-red-700">{gsched.message}</p>
+                      {gsched.reason === "reconnect_required" && (
+                        <a
+                          href="/api/google/oauth/start"
+                          className="bg-primary text-primary-foreground inline-block rounded-md px-3 py-2 font-medium"
+                        >
+                          Reconnect Google →
+                        </a>
+                      )}
+                    </div>
                   )}
                 </div>
               )
