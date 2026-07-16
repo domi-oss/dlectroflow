@@ -248,7 +248,10 @@ export function InboxView({
       }
       setScheduleErrors((prev) => ({
         ...prev,
-        [itemId]: SCHEDULE_ERROR_MESSAGES[res.reason] ?? res.message ?? "Scheduling failed.",
+        // Prefer the action's own message — e.g. pushStepsToGoogleTasks's
+        // no_reclaim_list failure lists the available lists, which is more
+        // useful than the generic dictionary copy for the same reason.
+        [itemId]: res.message ?? SCHEDULE_ERROR_MESSAGES[res.reason] ?? "Scheduling failed.",
       }));
     });
 
@@ -1083,12 +1086,7 @@ function ItemRow({
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex items-center gap-2">
             <StatusPill tier={tier} voice={voice} />
-            {titleEditor ?? (
-              <>
-                <span className="break-words">{item.text}</span>
-                {editButton}
-              </>
-            )}
+            {titleEditor ?? <span className="break-words">{item.text}</span>}
           </div>
           <AgeLabel createdAt={item.createdAt} aging={aging} now={now} />
         </div>
@@ -1117,52 +1115,62 @@ function ItemRow({
           </span>
         </div>
       )}
-      <div className="mt-2 flex flex-wrap gap-2 text-xs">
-        <button
-          onClick={onBreakdown}
-          className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
-        >
-          {t("action.breakdown", voice)} →
-        </button>
-        <button
-          onClick={onKeep}
-          className="hover:bg-accent rounded-md border px-2.5 py-1"
-        >
-          {t("action.addTodo", voice)}
-        </button>
-        <button
-          onClick={onSnooze}
-          className="hover:bg-accent rounded-md border px-2.5 py-1"
-        >
-          {t("action.saveForLater", voice)}
-        </button>
-        <CompleteButton voice={voice} onClick={onComplete} />
-        {moveMenu}
-        {confirmingDelete ? (
-          <span className="ml-auto flex items-center gap-2">
+      <RowActions
+        primary={
+          <button
+            onClick={onBreakdown}
+            className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
+          >
+            {t("action.breakdown", voice)} →
+          </button>
+        }
+        // Unclarified captures aren't scheduled — 📅 is never offered here.
+        schedule={null}
+        overflow={[
+          <button
+            key="keep"
+            onClick={onKeep}
+            className="hover:bg-accent rounded-md border px-2.5 py-1"
+          >
+            {t("action.addTodo", voice)}
+          </button>,
+          <button
+            key="snooze"
+            onClick={onSnooze}
+            className="hover:bg-accent rounded-md border px-2.5 py-1"
+          >
+            {t("action.saveForLater", voice)}
+          </button>,
+          <CompleteButton key="complete" voice={voice} onClick={onComplete} />,
+          moveMenu,
+          editButton,
+          confirmingDelete ? (
+            <span key="delete" className="flex items-center gap-2">
+              <button
+                onClick={onConfirmDelete}
+                className="text-destructive rounded-md px-2.5 py-1 font-medium"
+              >
+                {t("action.delete", voice)}
+              </button>
+              <span className="text-muted-foreground">·</span>
+              <button
+                onClick={onCancelDelete}
+                className="text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1"
+              >
+                {t("action.cancel", voice)}
+              </button>
+            </span>
+          ) : (
             <button
-              onClick={onConfirmDelete}
-              className="text-destructive rounded-md px-2.5 py-1 font-medium"
+              key="delete"
+              onClick={onRequestDelete}
+              className="text-muted-foreground hover:text-destructive w-full rounded-md px-2.5 py-1 text-left"
             >
               {t("action.delete", voice)}
             </button>
-            <span className="text-muted-foreground">·</span>
-            <button
-              onClick={onCancelDelete}
-              className="text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1"
-            >
-              {t("action.cancel", voice)}
-            </button>
-          </span>
-        ) : (
-          <button
-            onClick={onRequestDelete}
-            className="text-muted-foreground hover:text-destructive ml-auto rounded-md px-2.5 py-1"
-          >
-            {t("action.delete", voice)}
-          </button>
-        )}
-      </div>
+          ),
+        ]}
+      />
     </li>
   );
 }
