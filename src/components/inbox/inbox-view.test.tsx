@@ -657,6 +657,24 @@ describe("InboxView — single to-do ▶ Focus", () => {
     await user.click(within(row).getByRole("button", { name: "▶ Focus" }));
     expect(push).not.toHaveBeenCalled();
   });
+
+  it("v6: the ▾ menu's focus entry reads 'Start visual focus timer' and navigates to the timer", async () => {
+    const { ensureFocusStep } = await import("@/app/actions/braindump");
+    (ensureFocusStep as ReturnType<typeof vi.fn>).mockResolvedValue("step-9");
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        initialItems={[makeItem({ id: "s1", text: "focusable todo", status: "triaged" })]}
+        settings={settings}
+      />,
+    );
+    const row = screen.getByText("focusable todo").closest("li")!;
+    // Inline stays the short "▶ Focus"; the dropdown carries the full label.
+    await user.click(within(row).getByRole("button", { name: "All options" }));
+    await user.click(within(row).getByRole("button", { name: "Start visual focus timer" }));
+    expect(ensureFocusStep).toHaveBeenCalledWith("s1");
+    expect(push).toHaveBeenCalledWith("/focus/step-9");
+  });
 });
 
 describe("InboxView — saved-for-later inline sorting options", () => {
@@ -822,7 +840,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     expect(await within(row).findByText(/Reclaim-synced Google Tasks list/i)).toBeInTheDocument();
   });
 
-  it("google={null} (guest): no Schedule control on any row", () => {
+  it("v6 guest (google={null}): rows show the 📅 control DISABLED (owner-only, guest-locked), not hidden", () => {
     render(
       <InboxView
         initialItems={[makeMultiStep(), makeItem({ id: "st1", text: "single todo", status: "triaged" })]}
@@ -830,7 +848,26 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
         google={null}
       />,
     );
-    expect(screen.queryByRole("button", { name: /schedule/i })).toBeNull();
+    // Layout stays identical to the owner view; scheduling is just disabled.
+    const scheduleButtons = screen.getAllByRole("button", { name: /schedule/i });
+    expect(scheduleButtons.length).toBeGreaterThanOrEqual(2); // one 📅 per row (menus closed)
+    scheduleButtons.forEach((b) => expect(b).toBeDisabled());
+  });
+
+  it("v6 guest: the ▾ dropdown also carries a disabled 'Schedule' entry", async () => {
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        initialItems={[makeItem({ id: "st1", text: "single todo", status: "triaged" })]}
+        settings={settings}
+        google={null}
+      />,
+    );
+    const row = screen.getByText("single todo").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "All options" }));
+    const scheduleEntries = within(row).getAllByRole("button", { name: /schedule/i });
+    expect(scheduleEntries).toHaveLength(2); // inline 📅 + full-text menu entry, both disabled
+    scheduleEntries.forEach((b) => expect(b).toBeDisabled());
   });
 
   it("needsReconnect: rows show the Reconnect link instead of the 📅 button", () => {

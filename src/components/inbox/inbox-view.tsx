@@ -496,7 +496,7 @@ export function InboxView({
                           runSchedule(item.id, () => scheduleSingleTask(item.id, minutes)),
                         pending,
                       }
-                    : null;
+                    : { state: "guest" };
                   return (
                     <ItemRow
                       isDragging={activeDragId === item.id}
@@ -569,7 +569,7 @@ export function InboxView({
                     // duration popover a single-task row uses. Rows with
                     // steps push them straight to Google Tasks on tap.
                     const schedule: ScheduleControlProps | null = !effectiveGoogle
-                      ? null
+                      ? { state: "guest" }
                       : awaitingBreakdown
                         ? {
                             state: scheduleState(effectiveGoogle, "needs_duration"),
@@ -591,7 +591,9 @@ export function InboxView({
                           {editingId === item.id ? (
                             titleEditor(item)
                           ) : awaitingBreakdown ? (
-                            <span className="min-w-0 flex-1 break-words">{item.text}</span>
+                            <span className="min-w-0 flex-1 break-words">
+                              {item.text} {pencil(item)}
+                            </span>
                           ) : (
                             <span className="min-w-0 flex-1 break-words">
                               <button
@@ -601,10 +603,10 @@ export function InboxView({
                                 className="break-words text-left hover:underline"
                               >
                                 {item.text}
-                              </button>
+                              </button>{" "}
+                              {pencil(item)}
                             </span>
                           )}
-                          {editingId !== item.id && pencil(item)}
                           {editingId !== item.id && !awaitingBreakdown && (
                             <span className="text-muted-foreground shrink-0 text-xs">
                               {item.stepsTotal} steps · {item.stepsDone} {t("progress.done", voice)}
@@ -718,7 +720,7 @@ export function InboxView({
                             runSchedule(item.id, () => scheduleSingleTask(item.id, minutes)),
                           pending,
                         }
-                      : null;
+                      : { state: "guest" };
                     return (
                       <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", item.id === activeDragId && "opacity-40")}>
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
@@ -727,9 +729,10 @@ export function InboxView({
                           {editingId === item.id ? (
                             titleEditor(item)
                           ) : (
-                            <span className="min-w-0 flex-1 break-words">{item.text}</span>
+                            <span className="min-w-0 flex-1 break-words">
+                              {item.text} {pencil(item)}
+                            </span>
                           )}
-                          {editingId !== item.id && pencil(item)}
                           {editingId !== item.id && (
                             <span className="text-muted-foreground shrink-0 text-xs">
                               captured {formatAgo(now - new Date(item.createdAt).getTime())}
@@ -772,7 +775,7 @@ export function InboxView({
                               className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
                               onClick={() => focusOnItem(item.id)}
                             >
-                              ▶ Focus
+                              Start visual focus timer
                             </button>,
                             <button
                               key="complete-m"

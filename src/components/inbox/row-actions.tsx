@@ -7,7 +7,7 @@ const DURATION_PRESETS = [15, 30, 60] as const;
 const MAX_CUSTOM_MINUTES = 480;
 
 export type ScheduleControlProps = {
-  state: "ready_steps" | "needs_duration" | "connect" | "reconnect";
+  state: "ready_steps" | "needs_duration" | "connect" | "reconnect" | "guest";
   onScheduleSteps?: () => void;
   onScheduleSingle?: (minutes: number) => void;
   /** True while a schedule call for this row is in flight — disables the 📅
@@ -71,6 +71,27 @@ export function ScheduleControl({
       >
         {state === "reconnect" ? "Reconnect Google →" : "Connect Google →"}
       </a>
+    );
+  }
+
+  if (state === "guest") {
+    // Guests see the SAME affordance, visibly disabled — scheduling is owner-only
+    // (Google Tasks). Keeps the row layout identical to the owner view, with a
+    // clear "not available in guest mode" cue (grayed-out, cf. #11).
+    return (
+      <button
+        type="button"
+        disabled
+        aria-label="Schedule (not available in guest mode)"
+        title="Scheduling isn't available in guest mode — sign in to schedule"
+        className={
+          isMenu
+            ? "w-full cursor-not-allowed rounded-md px-2.5 py-1 text-left font-medium opacity-50"
+            : "cursor-not-allowed rounded-md px-2.5 py-1 font-medium opacity-50"
+        }
+      >
+        {isMenu ? label : "📅"}
+      </button>
     );
   }
 
