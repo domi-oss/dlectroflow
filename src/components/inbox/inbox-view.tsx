@@ -646,6 +646,29 @@ export function InboxView({
                               voice={voice}
                               onMove={(target) => moveItemToBucket(item.id, target)}
                             />,
+                            // Rows with steps: view the broken-down list (inline
+                            // expand) + jump to the task page to focus a step —
+                            // above "Mark as completed". Hidden while awaiting.
+                            !awaitingBreakdown ? (
+                              <button
+                                key="view-list-m"
+                                type="button"
+                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                onClick={() => setExpandedId(expanded ? null : item.id)}
+                              >
+                                View multi-step task list
+                              </button>
+                            ) : null,
+                            !awaitingBreakdown ? (
+                              <button
+                                key="focus-list-m"
+                                type="button"
+                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                onClick={() => router.push(`/tasks/${item.taskId}`)}
+                              >
+                                Start visual focus timer
+                              </button>
+                            ) : null,
                             awaitingBreakdown ? (
                               <button
                                 key="break-now-m"

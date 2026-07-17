@@ -445,6 +445,43 @@ describe("InboxView — multi-step step count + expand", () => {
   });
 });
 
+describe("InboxView — multi-step ▾ menu: view list + focus (v6)", () => {
+  it("'View multi-step task list' expands the inline step list", async () => {
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} />);
+    const row = screen.getByText("plan trip").closest("li")!;
+    expect(screen.queryByTestId("inline-steps")).not.toBeInTheDocument();
+    await user.click(within(row).getByRole("button", { name: "All options" }));
+    await user.click(within(row).getByRole("button", { name: "View multi-step task list" }));
+    expect(screen.getByTestId("inline-steps")).toBeInTheDocument();
+  });
+
+  it("'Start visual focus timer' opens the task page", async () => {
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} />);
+    const row = screen.getByText("plan trip").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "All options" }));
+    await user.click(within(row).getByRole("button", { name: "Start visual focus timer" }));
+    expect(push).toHaveBeenCalledWith("/tasks/t1");
+  });
+
+  it("awaiting-breakdown rows omit both entries (nothing to view/focus yet)", async () => {
+    const user = userEvent.setup();
+    const awaiting = makeItem({
+      id: "aw1",
+      text: "needs a plan",
+      status: "triaged",
+      breakdownRequestedAt: new Date(),
+      stepsTotal: 0,
+    });
+    render(<InboxView initialItems={[awaiting]} settings={settings} />);
+    const row = screen.getByText("needs a plan").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "All options" }));
+    expect(within(row).queryByRole("button", { name: "View multi-step task list" })).not.toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: "Start visual focus timer" })).not.toBeInTheDocument();
+  });
+});
+
 describe("dragEndToMove (pure)", () => {
   it("maps an over-a-bucket drop to { itemId, target }", () => {
     expect(dragEndToMove("item-1", "completed")).toEqual({ itemId: "item-1", target: "completed" });
