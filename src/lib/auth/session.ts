@@ -13,18 +13,57 @@ export type SessionPayload =
   | { kind: "owner"; sub: string }
   | { kind: "guest"; wsId: string };
 
+// The single HMAC alg we sign with and the ONLY one we accept on verify. Pinning
+// it (issue #21 P5 batch B) stops an attacker downgrading a forged token to a
+// different HS* variant — jose accepts any HS* for a symmetric key otherwise.
+// Exported so proxy.ts (guest signing) shares this one constant (Duo review).
+export const SESSION_ALG = "HS256";
+
+/**
+ * Owner session lifetime, in seconds. Kept at 30 days (owner decision on !76 —
+ * declined the 7-day shorten; no server-side revocation yet). The JWT `exp` and
+ * the owner-cookie `maxAge` both derive from this single const so they can't
+ * drift (Duo CWE-613). Guests are signed separately in proxy.ts with their own
+ * GUEST_SANDBOX_TTL_HOURS.
+ */
+export const OWNER_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
+
 function key(secret: string): Uint8Array {
   return new TextEncoder().encode(secret);
 }
 
-export async function signSession(
-  payload: SessionPayload,
+export async function signOwnerSession(
+  // Owner-only signer: the 7-day OWNER_SESSION_TTL_SECONDS is baked in, so it must
+  // never sign a guest payload (guests are signed inline in proxy.ts with their
+  // own shorter TTL). Narrowed from the SessionPayload union (Duo review, CWE-840).
+  payload: { kind: "owner"; sub: string },
   secret: string,
 ): Promise<string> {
+  // Stamp iat/exp from a single `now` so exp - iat is exactly the TTL.
+  const nowSec = Math.floor(Date.now() / 1000);
   return new SignJWT({ ...payload })
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuedAt()
-    .setExpirationTime("30d")
+    .setProtectedHeader({ alg: SESSION_ALG })
+    .setIssuedAt(nowSec)
+    .setExpirationTime(nowSec + OWNER_SESSION_TTL_SECONDS)
+    .sign(key(secret));
+}
+
+/**
+ * Guest session signer — used by proxy.ts (and tests). Takes an EXPLICIT TTL so
+ * a guest token can never inherit the owner's 7-day expiry (Duo review, CWE-840),
+ * and shares SESSION_ALG so there is a single canonical signing algorithm across
+ * both signing sites (CWE-327).
+ */
+export async function signGuestSession(
+  wsId: string,
+  secret: string,
+  ttlSeconds: number,
+): Promise<string> {
+  const nowSec = Math.floor(Date.now() / 1000);
+  return new SignJWT({ kind: "guest", wsId })
+    .setProtectedHeader({ alg: SESSION_ALG })
+    .setIssuedAt(nowSec)
+    .setExpirationTime(nowSec + ttlSeconds)
     .sign(key(secret));
 }
 
@@ -33,7 +72,9 @@ export async function verifySession(
   secret: string,
 ): Promise<SessionPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, key(secret));
+    const { payload } = await jwtVerify(token, key(secret), {
+      algorithms: [SESSION_ALG],
+    });
     if (payload.kind === "owner" && typeof payload.sub === "string") {
       return { kind: "owner", sub: payload.sub };
     }

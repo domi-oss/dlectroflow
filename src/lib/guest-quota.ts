@@ -9,16 +9,43 @@ export function guestQuotaConfig() {
   };
 }
 
-/** Salted SHA-256 of the client IP; never store the raw IP. */
+/**
+ * Salted SHA-256 of the client IP; never store the raw IP.
+ *
+ * Item 9 (#21 P5 batch B): trust the RIGHT-MOST x-forwarded-for hop — the value
+ * appended by our trusted ingress — not the LEFT-MOST, which is client-supplied
+ * and spoofable (a guest could forge it to rotate the per-IP quota key). Falls
+ * back to x-real-ip.
+ *
+ * ⚠️ CLUSTER-CONFIG ASSUMPTION (owner must verify): this is only correct if the
+ * ingress produces a trustworthy right-most XFF hop / x-real-ip — i.e.
+ * ingress-nginx `use-forwarded-headers` is false (or the trusted-hop count is
+ * configured) so inbound client-supplied XFF is not preserved on the left, and
+ * no upstream L4 LB hides the real client. If the ingress trusts inbound XFF,
+ * revisit this derivation.
+ */
 export function clientIpHash(headers: Headers): string | null {
-  const xff = headers.get("x-forwarded-for");
-  const ip = (xff ? xff.split(",")[0] : headers.get("x-real-ip"))?.trim();
+  const ip = clientIp(headers);
   if (!ip) return null;
   const salt = process.env.GUEST_IP_HASH_SALT ?? "";
   if (!salt && process.env.NODE_ENV !== "test" && process.env.NODE_ENV !== "production") {
     console.warn("[guest-quota] GUEST_IP_HASH_SALT is not set — IP hashing provides no privacy");
   }
   return createHash("sha256").update(salt + ip).digest("hex");
+}
+
+/**
+ * Resolve the trustworthy client IP: the RIGHT-MOST x-forwarded-for hop (added
+ * by the trusted ingress), else x-real-ip. See clientIpHash for the topology
+ * assumption the deployment must satisfy.
+ */
+function clientIp(headers: Headers): string | null {
+  const xff = headers.get("x-forwarded-for");
+  if (xff) {
+    const hops = xff.split(",").map((s) => s.trim()).filter(Boolean);
+    if (hops.length) return hops[hops.length - 1];
+  }
+  return headers.get("x-real-ip")?.trim() || null;
 }
 
 function utcDay(d = new Date()): string {

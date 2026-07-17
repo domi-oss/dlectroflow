@@ -44,7 +44,16 @@ export default async function AppLayout({
           </Link>
           <div className="text-muted-foreground flex items-center gap-4 text-sm">
             {owner ? (
-              <a href="/api/auth/logout" className="text-xs text-muted-foreground">Sign out</a>
+              // Logout is a state change → POST-only (CSRF-safe), so it's a
+              // small form/button rather than a GET link. See #21 (P5 batch B).
+              <form action="/api/auth/logout" method="post" className="flex">
+                <button
+                  type="submit"
+                  className="text-xs text-muted-foreground hover:underline"
+                >
+                  Sign out
+                </button>
+              </form>
             ) : (
               <a href="/login" className="text-xs text-muted-foreground">Owner sign in</a>
             )}

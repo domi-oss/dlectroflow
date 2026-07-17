@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { NextResponse } from "next/server";
 import { requestOrigin } from "@/lib/origin";
+import * as reclaim from "@/lib/reclaim";
+import { GET as reclaimStart } from "./start/route";
 
 vi.mock("@/lib/origin");
 vi.mock("@/lib/reclaim");
@@ -11,6 +14,49 @@ describe("Reclaim OAuth Routes - SSRF Prevention", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  // Item 6b (#21 P5 batch B): the Reclaim OAuth PKCE/state cookies must derive
+  // their Secure attribute from the DEPLOYED origin (PUBLIC_ORIGIN via
+  // requestOrigin), NOT the pod-observed protocol. This was fixed alongside the
+  // SSRF hardening (commit 97fa2e6); these regression tests lock it in so it
+  // can't silently revert to the pod-observed http:// behind the ingress.
+  describe("PKCE/state cookie Secure flag follows the deployed origin", () => {
+    function mockReclaimHappyPath() {
+      vi.mocked(reclaim.ensureClient).mockResolvedValue({
+        clientId: "cid",
+        clientSecret: null,
+      });
+      vi.mocked(reclaim.createPkce).mockReturnValue({
+        verifier: "v",
+        challenge: "c",
+      });
+      vi.mocked(reclaim.randomState).mockReturnValue("st");
+      vi.mocked(reclaim.buildAuthorizeUrl).mockReturnValue(
+        "https://reclaim.example/authorize",
+      );
+    }
+
+    it("marks cookies Secure for an https origin even when the pod request is http", async () => {
+      vi.mocked(requestOrigin).mockReturnValue("https://dlectroflow.dlectronique.dev");
+      mockReclaimHappyPath();
+      // Pod sees http:// behind the ingress.
+      const res = (await reclaimStart(
+        new Request("http://pod.internal/api/reclaim/oauth/start"),
+      )) as NextResponse;
+      expect(res.cookies.get("reclaim_pkce_verifier")?.secure).toBe(true);
+      expect(res.cookies.get("reclaim_oauth_state")?.secure).toBe(true);
+    });
+
+    it("leaves cookies non-Secure for an http origin (local dev)", async () => {
+      vi.mocked(requestOrigin).mockReturnValue("http://localhost:3000");
+      mockReclaimHappyPath();
+      const res = (await reclaimStart(
+        new Request("http://localhost:3000/api/reclaim/oauth/start"),
+      )) as NextResponse;
+      expect(res.cookies.get("reclaim_pkce_verifier")?.secure).toBe(false);
+      expect(res.cookies.get("reclaim_oauth_state")?.secure).toBe(false);
+    });
   });
 
   describe("requestOrigin usage in OAuth routes", () => {

@@ -31,12 +31,30 @@ beforeEach(() => {
 });
 
 describe("clientIpHash", () => {
-  it("hashes the leftmost x-forwarded-for IP deterministically", () => {
+  // Item 9 (#21 P5 batch B): the client IP is derived from the RIGHT-MOST
+  // x-forwarded-for hop (the value appended by the trusted ingress), NOT the
+  // left-most (client-supplied, spoofable). Determinism + 64-hex format + a
+  // single stable IP per request are preserved.
+  it("hashes the right-most x-forwarded-for hop deterministically", () => {
     const h = new Headers({ "x-forwarded-for": "1.2.3.4, 5.6.7.8" });
     const a = clientIpHash(h);
-    const b = clientIpHash(new Headers({ "x-forwarded-for": "1.2.3.4" }));
+    const b = clientIpHash(new Headers({ "x-forwarded-for": "5.6.7.8" }));
     expect(a).toBe(b);
     expect(a).toMatch(/^[0-9a-f]{64}$/);
+  });
+  it("ignores a spoofed left-most XFF entry (uses the trusted right-most hop)", () => {
+    // A client forging the left-most segment must not change the quota key.
+    const spoofed = clientIpHash(new Headers({ "x-forwarded-for": "6.6.6.6, 5.6.7.8" }));
+    const real = clientIpHash(new Headers({ "x-forwarded-for": "5.6.7.8" }));
+    expect(spoofed).toBe(real);
+    // ...and it is NOT the attacker-controlled left-most value.
+    const attackerControlled = clientIpHash(new Headers({ "x-forwarded-for": "6.6.6.6" }));
+    expect(spoofed).not.toBe(attackerControlled);
+  });
+  it("tolerates surrounding whitespace / trailing empty segments", () => {
+    const a = clientIpHash(new Headers({ "x-forwarded-for": " 1.1.1.1 , 5.6.7.8 , " }));
+    const b = clientIpHash(new Headers({ "x-forwarded-for": "5.6.7.8" }));
+    expect(a).toBe(b);
   });
   it("returns null when no IP header present", () => {
     expect(clientIpHash(new Headers())).toBeNull();

@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   verifySession,
+  signGuestSession,
   OWNER_COOKIE,
   GUEST_COOKIE,
   GUEST_WS_HEADER,
 } from "@/lib/auth/session";
 import { authConfig } from "@/lib/auth/config";
 import { isPublicPath, isOwnerOnlyPath } from "@/lib/auth/gate";
+import { requestOrigin } from "@/lib/origin";
 
 export const config = {
   // Skip Next internals + static assets; run on everything else.
@@ -60,13 +62,8 @@ export async function proxy(req: NextRequest) {
     // isolated random workspace. The id is still wrapped in a signed JWT below,
     // so the IDOR defense (verify the token, never trust a raw id) is unchanged.
     wsId = process.env.REVIEW_DEMO_WS || crypto.randomUUID();
-    // Sign inline (Edge-compatible via jose used in verifySession's module).
-    const { SignJWT } = await import("jose");
-    guestToken = await new SignJWT({ kind: "guest", wsId })
-      .setProtectedHeader({ alg: "HS256" })
-      .setIssuedAt()
-      .setExpirationTime(`${guestTtlHours}h`)
-      .sign(new TextEncoder().encode(sessionSecret));
+    // One canonical guest signer (shares SESSION_ALG; no inline alg to drift).
+    guestToken = await signGuestSession(wsId, sessionSecret, guestTtlHours * 3600);
   }
 
   // Security: forward the signed JWT, not the raw wsId. The workspace resolver
@@ -75,7 +72,12 @@ export async function proxy(req: NextRequest) {
   const res = NextResponse.next({ request: { headers: requestHeaders } });
   res.cookies.set(GUEST_COOKIE, guestToken!, {
     httpOnly: true,
-    secure: req.nextUrl.protocol === "https:",
+    // Derive Secure from the DEPLOYED origin (PUBLIC_ORIGIN), not the pod-observed
+    // protocol: behind ingress-nginx TLS terminates at the ingress so the pod sees
+    // http://, which previously left the guest cookie non-Secure in production.
+    // requestOrigin pins PUBLIC_ORIGIN in prod and falls back to forwarded headers
+    // in local dev (keeping http:// dev working). Mirrors the owner cookie. (#21)
+    secure: requestOrigin(req).startsWith("https"),
     sameSite: "lax",
     path: "/",
     maxAge: 60 * 60 * guestTtlHours,
