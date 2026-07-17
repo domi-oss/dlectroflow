@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { SignJWT } from "jose";
-import { signSession, verifySession } from "./session";
+import { SignJWT, decodeJwt } from "jose";
+import {
+  signSession,
+  verifySession,
+  OWNER_SESSION_TTL_SECONDS,
+} from "./session";
 
 const SECRET = "test-secret-at-least-32-bytes-long-xxxxx";
 
@@ -50,5 +54,49 @@ describe("session cookie", () => {
       .setExpirationTime("30d")
       .sign(key(SECRET));
     expect(await verifySession(token, SECRET)).toBeNull();
+  });
+
+  // Item 6c (#21 P5 batch B): pin the JWT algorithm on verify. jose accepts any
+  // HS* alg for a symmetric key unless `algorithms` is passed, so a token signed
+  // with the SAME secret but a different HMAC alg (HS512 here) would otherwise
+  // verify — an alg-downgrade foothold. It must be rejected.
+  it("rejects a same-secret token signed with a non-pinned HMAC alg (HS512)", async () => {
+    const token = await new SignJWT({ kind: "owner", sub: "13595692" })
+      .setProtectedHeader({ alg: "HS512" })
+      .setIssuedAt()
+      .setExpirationTime("30d")
+      .sign(key(SECRET));
+    expect(await verifySession(token, SECRET)).toBeNull();
+  });
+
+  it("still accepts the pinned HS256 alg", async () => {
+    const token = await signSession({ kind: "owner", sub: "abc" }, SECRET);
+    expect(await verifySession(token, SECRET)).toEqual({
+      kind: "owner",
+      sub: "abc",
+    });
+  });
+
+  it("signs sessions with the HS256 header (matching the verify pin)", async () => {
+    const token = await signSession({ kind: "owner", sub: "abc" }, SECRET);
+    const header = JSON.parse(
+      Buffer.from(token.split(".")[0], "base64url").toString(),
+    );
+    expect(header.alg).toBe("HS256");
+  });
+});
+
+// Item 7a (#21 P5 batch B): owner session TTL shortened from 30d to 7d to limit
+// the blast radius of a stolen stateless owner JWT (no server-side revocation yet).
+describe("owner session TTL", () => {
+  it("is 7 days", () => {
+    expect(OWNER_SESSION_TTL_SECONDS).toBe(60 * 60 * 24 * 7);
+  });
+
+  it("stamps exp exactly OWNER_SESSION_TTL_SECONDS after iat (not 30d)", async () => {
+    const token = await signSession({ kind: "owner", sub: "abc" }, SECRET);
+    const { iat, exp } = decodeJwt(token);
+    expect(exp! - iat!).toBe(OWNER_SESSION_TTL_SECONDS);
+    expect(exp! - iat!).not.toBe(60 * 60 * 24 * 30);
   });
 });
