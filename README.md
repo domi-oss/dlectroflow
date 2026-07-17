@@ -225,7 +225,13 @@ docker run -p 3000:3000 \
   dlectroflow
 ```
 
-Migrations run automatically on start. Visit **http://localhost:3000**.
+> **Migrations are not run by the plain image.** Its command is just `node server.js`
+> — it does **not** apply migrations on start. Point it at a database whose schema is
+> already migrated, or run `npx prisma migrate deploy` yourself first. (In the Kubernetes
+> deploy this is handled separately by a dedicated `migrate` initContainer that reuses this
+> same image — see [docs/deploy-runbook.md](docs/deploy-runbook.md).)
+
+Visit **http://localhost:3000**.
 
 ---
 
