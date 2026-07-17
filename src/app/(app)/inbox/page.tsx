@@ -54,6 +54,7 @@ export default async function InboxPage({
     stepsDone: task?.steps.filter((s) => s.done).length ?? 0,
     taskStatus: task?.status ?? null,
     completedAt: item.completedAt,
+    scheduledAt: task?.scheduledAt ?? null,
     steps: task?.steps.map((s) => ({
       id: s.id,
       order: s.order,

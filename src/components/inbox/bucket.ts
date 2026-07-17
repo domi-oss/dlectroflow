@@ -22,6 +22,9 @@ export type Item = {
   stepsDone: number;
   taskStatus: string | null;
   completedAt: Date | null;
+  /** Set on the first schedule via any method (ICS or Google) — drives the
+   *  "Scheduled ✓" row indicator. */
+  scheduledAt: Date | null;
   steps: { id: string; order: number; text: string; done: boolean; estMinutes: number; subtaskEmoji: string | null; resumable: boolean }[];
 };
 

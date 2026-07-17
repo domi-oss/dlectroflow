@@ -585,6 +585,7 @@ export function InboxView({
                       onFreshen={() => run(() => freshenItem(item.id))}
                       onDismissPrompt={() => run(() => dismissPrompt(item.id))}
                       schedule={schedule}
+                      scheduled={item.scheduledAt != null}
                       icsMenu={
                         effectiveGoogle ? (
                           <ScheduleControl
@@ -713,6 +714,7 @@ export function InboxView({
                           )}
                         </div>
                         <RowActions
+                          scheduled={item.scheduledAt != null}
                           inline={
                             awaitingBreakdown
                               ? [
@@ -887,6 +889,7 @@ export function InboxView({
                           )}
                         </div>
                         <RowActions
+                          scheduled={item.scheduledAt != null}
                           inline={[
                             <button
                               key="focus"
@@ -1394,6 +1397,7 @@ function ItemRow({
   onFreshen,
   onDismissPrompt,
   schedule,
+  scheduled = false,
   icsMenu,
   scheduleError,
   moveMenu,
@@ -1424,6 +1428,8 @@ function ItemRow({
   onFreshen: () => void;
   onDismissPrompt: () => void;
   schedule: ScheduleControlProps | null;
+  /** Renders the "Scheduled ✓" indicator when the row's task has a scheduledAt marker. */
+  scheduled?: boolean;
   /** Owner-only ▾ "Add to calendar (.ics)" entry, rendered after the schedule
    *  mirror. Null for guests (whose primary control is already the ICS one). */
   icsMenu?: React.ReactNode;
@@ -1554,6 +1560,7 @@ function ItemRow({
         ]}
         move={moveIcon}
         schedule={schedule}
+        scheduled={scheduled}
         del={deleteControl("delete", { icon: true })}
         menu={[
           moveMenu,

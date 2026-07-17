@@ -102,6 +102,7 @@ function makeItem(overrides: Partial<Item> = {}): Item {
     stepsDone: 0,
     taskStatus: null,
     completedAt: null,
+    scheduledAt: null,
     steps: [],
     ...overrides,
   };
@@ -1105,6 +1106,27 @@ describe("InboxView — ICS 'Add to calendar' (S0 #29)", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "All options" }));
     expect(screen.getByRole("button", { name: /add to calendar/i })).toBeInTheDocument();
+  });
+
+  it("shows a 'Scheduled ✓' indicator on a row whose task has been scheduled", () => {
+    render(
+      <InboxView
+        initialItems={[makeItem({ id: "s1", status: "triaged", taskId: "t-s1", stepsTotal: 0, scheduledAt: new Date() })]}
+        settings={settings}
+        google={null}
+      />,
+    );
+    expect(screen.getByText(/scheduled ✓/i)).toBeInTheDocument();
+  });
+  it("no 'Scheduled ✓' indicator when scheduledAt is null", () => {
+    render(
+      <InboxView
+        initialItems={[makeItem({ id: "s1", status: "triaged", taskId: "t-s1", stepsTotal: 0 })]}
+        settings={settings}
+        google={null}
+      />,
+    );
+    expect(screen.queryByText(/scheduled ✓/i)).toBeNull();
   });
 });
 
