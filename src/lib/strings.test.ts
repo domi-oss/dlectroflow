@@ -74,6 +74,19 @@ describe("t() function", () => {
     ["action.completeFull",  "plain", "Mark as completed"],
     ["action.editTitle",     "plain", "Edit task title"],
     ["action.schedule",      "plain", "Schedule"],
+    // #25 step-row labels — voice-aware (plain literal, playful food-themed)
+    ["step.startFocus",       "plain",   "Start Focus"],
+    ["step.resumeFocus",      "plain",   "Resume Focus"],
+    ["step.resumeFocus",      "playful", "🍴 Resume Focus"],
+    ["step.startFocusTimer",  "plain",   "Start focus timer"],
+    ["step.resumeFocusTimer", "plain",   "Resume focus timer"],
+    ["step.resumeFocusTimer", "playful", "🍴 Resume focus timer"],
+    ["step.complete",         "plain",   "Complete Step"],
+    ["step.complete",         "playful", "✅ Complete Step"],
+    ["step.editEstimate",     "plain",   "Edit time estimate"],
+    ["step.editTitle",        "plain",   "Edit step title"],
+    ["step.sendToReview",     "plain",   "Send back to review"],
+    ["step.sendToReview",     "playful", "🥫 Send back to review"],
   ];
 
   for (const [key, voice, expected] of cases) {
@@ -377,6 +390,15 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "action.reopenSelected",
     "action.reopenAll",
     "prompt.reopenWhich",
+    // #25 step-row labels — plain variants are literal + emoji-free
+    "step.startFocus",
+    "step.resumeFocus",
+    "step.startFocusTimer",
+    "step.resumeFocusTimer",
+    "step.complete",
+    "step.editEstimate",
+    "step.editTitle",
+    "step.sendToReview",
   ];
 
   for (const key of plainOnlyKeys) {

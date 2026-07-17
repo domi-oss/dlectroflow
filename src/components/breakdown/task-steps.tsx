@@ -8,7 +8,7 @@ import { completeStep, renameStep, updateStepEstimate } from "@/app/actions/focu
 import { CompleteButton } from "@/components/inbox/complete-button";
 import { RowActions } from "@/components/inbox/row-actions";
 import { useVoice } from "@/components/voice-provider";
-import type { Voice } from "@/lib/strings";
+import { t, type Voice } from "@/lib/strings";
 import { cn } from "@/lib/utils";
 
 export type TaskStepRow = {
@@ -139,8 +139,11 @@ export function TaskSteps({
 
         const editingTitle = editTitleId === s.id;
         const editingEst = editEstId === s.id;
-        const focusLabel = s.resumable ? "Resume Focus" : "Start Focus";
-        const focusMenuLabel = s.resumable ? "Resume focus timer" : "Start focus timer";
+        const focusLabel = t(s.resumable ? "step.resumeFocus" : "step.startFocus", voice);
+        const focusMenuLabel = t(
+          s.resumable ? "step.resumeFocusTimer" : "step.startFocusTimer",
+          voice,
+        );
         return (
           <li key={s.id} className="rounded-lg border px-3 py-2 text-sm">
             {/* Title line — mirrors the inbox ItemRow's title row. */}
@@ -203,7 +206,7 @@ export function TaskSteps({
                   onClick={() => complete(s.id)}
                   className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
                 >
-                  Complete Step
+                  {t("step.complete", voice)}
                 </button>,
                 <button
                   key="edit-est-m"
@@ -214,7 +217,7 @@ export function TaskSteps({
                   }}
                   className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
                 >
-                  Edit time estimate
+                  {t("step.editEstimate", voice)}
                 </button>,
                 <button
                   key="edit-title-m"
@@ -225,7 +228,7 @@ export function TaskSteps({
                   }}
                   className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
                 >
-                  Edit step title
+                  {t("step.editTitle", voice)}
                 </button>,
                 <button
                   key="review-m"
@@ -233,7 +236,7 @@ export function TaskSteps({
                   onClick={() => sendToReview(s.id)}
                   className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
                 >
-                  Send back to review
+                  {t("step.sendToReview", voice)}
                 </button>,
               ]}
             />
