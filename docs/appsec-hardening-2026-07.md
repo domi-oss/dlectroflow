@@ -33,7 +33,7 @@ Dashboard automatically on every push.
 |---|---|---|
 | `Content-Security-Policy` | scoped to self + Anthropic/Google APIs | Prevents XSS and data injection |
 | `Strict-Transport-Security` | `max-age=63072000; includeSubDomains; preload` | Enforces HTTPS for 2 years |
-| `X-Frame-Options` | `SAMEORIGIN` | Prevents clickjacking |
+| `X-Frame-Options` | `DENY` | Prevents clickjacking (the app is never framed; matches CSP `frame-ancestors 'none'`) |
 | `X-Content-Type-Options` | `nosniff` | Prevents MIME-type sniffing |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | Limits referrer leakage |
 | `Permissions-Policy` | camera, mic, geolocation, payment disabled | Reduces browser attack surface |
@@ -78,22 +78,26 @@ primary controls; these annotations add a defence-in-depth backstop.
 
 ---
 
-### 5. Container Image Slimming (`Dockerfile`)
+### 5. Container Image Slimming (`Dockerfile` / `Dockerfile.ci`)
 
-**What changed:** The `openssl` install now uses `--no-install-recommends` (in both the
-build and runtime stages) so apt doesn't pull in recommended-but-unneeded packages. The
-runtime image still contains the Prisma CLI + schema, because the Kubernetes migrate
-initContainer reuses this same image to run `prisma migrate deploy`.
+**What changed:** The images are built on the **`node:22-alpine`** (musl) base — a much
+smaller attack surface than Debian slim. openssl (required by the Prisma query engine) is
+installed with **`apk add --no-cache openssl`**, and the runtime stage runs
+**`apk upgrade --no-cache`** first so the base is refreshed on every build. The base image
+is pinned by digest. The runtime image still contains the Prisma CLI + schema, because the
+Kubernetes migrate initContainer reuses this same image to run `prisma migrate deploy`.
 
-**Why:** Keep the runtime image as small as reasonable. `--no-install-recommends` trims the
-apt footprint on top of `node:22-slim`.
+**Why:** Alpine avoids Debian-only packages (perl-base, zlib1g, ncurses, gzip) whose CVEs had
+no upstream fix, so those findings simply don't exist on this base. `--no-cache` keeps no apk
+index in the layer; `apk upgrade` keeps the base current between rebuilds.
 
 **Compliance:** CIS Docker Benchmark 4.3 (minimal base image), SOC 2 CC7.1
 
-> Note: an earlier version of this doc claimed the base image shipped ImageMagick/HDF5/libraw
-> causing "140+ CVEs" and that this change would drop CVEs from ~150 to <10. That was not
-> substantiated — `node:22-slim` does not ship those packages. Any actual CVE reduction should
-> be read from the Container Scanning job's report, not asserted here.
+> Note: an earlier version of this doc described a `node:22-slim` (Debian) base with
+> `apt --no-install-recommends`, and claimed the base shipped ImageMagick/HDF5/libraw causing
+> "140+ CVEs". Neither matches what shipped: the images are `node:22-alpine` + `apk`, and the
+> CVE claim was never substantiated. Read any actual CVE reduction from the Container Scanning
+> job's report, not from this doc.
 
 ---
 

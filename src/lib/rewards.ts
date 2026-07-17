@@ -7,7 +7,7 @@ import {
   type RewardType as RewardTypeT,
   type BadgeKey as BadgeKeyT,
 } from "@/lib/constants";
-import { getSettings, getStreak } from "@/lib/db";
+import { getSettings, getStreak, isUniqueViolation } from "@/lib/db";
 
 // ── helpers ────────────────────────────────────────────────────────────────
 function ymd(d: Date): string {
@@ -58,14 +58,25 @@ export async function maybeAwardInboxZero(workspaceId: string) {
 }
 
 // ── badges ─────────────────────────────────────────────────────────────────
-/** Award a badge once. Returns true if it was newly earned. */
+/**
+ * Award a badge once. Returns true if it was newly earned, false if it was
+ * already held. The findUnique→create pair is a TOCTOU: two concurrent awards
+ * can both pass the existence check and one loses the unique (workspaceId,key)
+ * constraint with P2002. Treat that as "already earned" (return false) rather
+ * than throwing — the badge exists either way.
+ */
 export async function awardBadge(workspaceId: string, key: BadgeKeyT): Promise<boolean> {
   const existing = await prisma.badge.findUnique({
     where: { workspaceId_key: { workspaceId, key } },
   });
   if (existing) return false;
-  await prisma.badge.create({ data: { key, workspaceId } });
-  return true;
+  try {
+    await prisma.badge.create({ data: { key, workspaceId } });
+    return true;
+  } catch (e) {
+    if (isUniqueViolation(e)) return false; // concurrent award won the race
+    throw e;
+  }
 }
 
 /** Award ten-steps-in-a-day once StepDone count for today reaches 10. */
@@ -107,13 +118,9 @@ export async function touchStreakOnCompletion(workspaceId: string): Promise<Stre
   const now = new Date();
   if (!workingDays.includes(isoWeekday(now))) return null; // non-working day: skip
 
-  const streak = await getStreak(workspaceId);
   const today = ymd(now);
-  if (streak.lastActiveWorkday === today) {
-    return { current: streak.current, freshStart: false, continued: false };
-  }
 
-  // Most recent working day strictly before today.
+  // Most recent working day strictly before today (pure — no DB access).
   const prev = new Date(now);
   let prevWorkingDay: string | null = null;
   for (let i = 0; i < 14; i++) {
@@ -124,45 +131,67 @@ export async function touchStreakOnCompletion(workspaceId: string): Promise<Stre
     }
   }
 
-  const continues =
-    streak.current > 0 && streak.lastActiveWorkday === prevWorkingDay;
+  // Ensure the Streak row exists (race-safe) before we lock it in the txn.
+  await getStreak(workspaceId);
 
-  let current: number;
-  let freshStart = false;
-  if (continues) {
-    current = streak.current + 1;
-  } else {
-    // reset — file the ended streak (if any) into Top-3 records
-    if (streak.current > 0) {
-      await prisma.streakRecord.create({
-        data: {
-          length: streak.current,
-          startedAt: now,
-          endedAt: now,
-          workspaceId,
-        },
-      });
+  // Read-decide-write in one interactive transaction. The leading
+  // `SELECT … FOR UPDATE` serialises concurrent first-completions-of-the-day
+  // for this workspace: a second caller blocks until the first commits, then
+  // re-reads `lastActiveWorkday === today` and early-returns. So the streak
+  // advances at most once and at most one StreakRecord is filed on a reset,
+  // instead of the previous read→compute→write TOCTOU that could double both.
+  const result = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT 1 FROM "Streak" WHERE "workspaceId" = ${workspaceId} FOR UPDATE`;
+    const streak = await tx.streak.findUnique({ where: { workspaceId } });
+    if (!streak) {
+      // Ensured above; treat an unexpectedly-missing row as a safe no-op.
+      return { current: 0, freshStart: false, continued: false, changed: false };
     }
-    current = 1;
-    freshStart = streak.current > 0; // only "fresh start" if there was a prior streak
-  }
 
-  await prisma.streak.update({
-    where: { workspaceId },
-    data: { current, lastActiveWorkday: today },
+    if (streak.lastActiveWorkday === today) {
+      return { current: streak.current, freshStart: false, continued: false, changed: false };
+    }
+
+    const continues = streak.current > 0 && streak.lastActiveWorkday === prevWorkingDay;
+
+    let current: number;
+    let freshStart = false;
+    if (continues) {
+      current = streak.current + 1;
+    } else {
+      // reset — file the ended streak (if any) into Top-3 records
+      if (streak.current > 0) {
+        await tx.streakRecord.create({
+          data: { length: streak.current, startedAt: now, endedAt: now, workspaceId },
+        });
+      }
+      current = 1;
+      freshStart = streak.current > 0; // only "fresh start" if there was a prior streak
+    }
+
+    await tx.streak.update({
+      where: { workspaceId },
+      data: { current, lastActiveWorkday: today },
+    });
+
+    return { current, freshStart, continued: continues, changed: true };
   });
 
-  // streak badges
-  if (current >= 5) await awardBadge(workspaceId, BadgeKey.Streak5);
-  const best = await prisma.streakRecord.aggregate({
-    _max: { length: true },
-    where: { workspaceId },
-  });
-  if ((best._max.length ?? 0) > 0 && current > (best._max.length ?? 0)) {
-    await awardBadge(workspaceId, BadgeKey.BeatBestStreak);
+  // Streak badges — only when the streak actually moved (matches the prior
+  // early-return for same-day repeats). awardBadge is itself P2002-safe.
+  const { changed, ...update } = result;
+  if (changed) {
+    if (update.current >= 5) await awardBadge(workspaceId, BadgeKey.Streak5);
+    const best = await prisma.streakRecord.aggregate({
+      _max: { length: true },
+      where: { workspaceId },
+    });
+    if ((best._max.length ?? 0) > 0 && update.current > (best._max.length ?? 0)) {
+      await awardBadge(workspaceId, BadgeKey.BeatBestStreak);
+    }
   }
 
-  return { current, freshStart, continued: continues };
+  return update;
 }
 
 // ── dashboard aggregation ──────────────────────────────────────────────────
