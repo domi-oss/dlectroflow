@@ -64,7 +64,7 @@ export function MoveToMenu({
         onClick={() => setOpen((o) => !o)}
         className={
           compact
-            ? "rounded-md px-2.5 py-1 font-medium"
+            ? "text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1 font-medium"
             : "text-muted-foreground hover:text-foreground rounded-md border px-2 py-1 text-xs"
         }
       >

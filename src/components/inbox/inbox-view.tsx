@@ -248,6 +248,10 @@ export function InboxView({
       }
       if (res.reason === "reconnect_required") {
         setReconnectRequired(true);
+        // Every row's control just swapped to the Reconnect link, so any per-row
+        // schedule error left from an earlier attempt is now stale — clear them
+        // all rather than show a red error beside a Reconnect prompt (Duo review).
+        setScheduleErrors({});
         return;
       }
       setScheduleErrors((prev) => ({
@@ -709,7 +713,10 @@ export function InboxView({
                                 key="focus-list-m"
                                 type="button"
                                 className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                onClick={() => router.push(`/tasks/${item.taskId}`)}
+                                // Guard rather than assert: a multi-step row's Task always
+                                // exists by construction, but a data inconsistency must not
+                                // navigate to `/tasks/null` (Duo review).
+                                onClick={() => item.taskId && router.push(`/tasks/${item.taskId}`)}
                               >
                                 Start visual focus timer
                               </button>

@@ -996,6 +996,31 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     expect(await within(row).findByRole("link", { name: /reconnect google/i })).toBeInTheDocument();
   });
 
+  it("a reconnect_required response clears a stale schedule error left on another row (Duo review)", async () => {
+    const { scheduleSingleTask, pushStepsToGoogleTasks } = await import("@/app/actions/google-schedule");
+    (scheduleSingleTask as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, reason: "no_reclaim_list" });
+    (pushStepsToGoogleTasks as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, reason: "reconnect_required" });
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        initialItems={[makeItem({ id: "st1", text: "single todo", status: "triaged" }), makeMultiStep()]}
+        settings={settings}
+        google={connected}
+      />,
+    );
+    // Row A (single to-do) fails with an inline error.
+    const rowA = screen.getByText("single todo").closest("li")!;
+    await user.click(within(rowA).getByRole("button", { name: /schedule/i }));
+    await user.click(within(rowA).getByRole("button", { name: /^30 min$/i }));
+    expect(await within(rowA).findByText(/Reclaim-synced Google Tasks list/i)).toBeInTheDocument();
+    // Row B (multi-step) then hits the workspace-wide reconnect_required condition.
+    const rowB = screen.getByText("plan trip").closest("li")!;
+    await user.click(within(rowB).getByRole("button", { name: /schedule/i }));
+    await within(rowB).findByRole("link", { name: /reconnect google/i });
+    // Row A's now-stale error must not sit beside a Reconnect prompt.
+    expect(within(rowA).queryByText(/Reclaim-synced Google Tasks list/i)).not.toBeInTheDocument();
+  });
+
   it("a scheduleSingleTask failure shows an inline error message under the row", async () => {
     const { scheduleSingleTask } = await import("@/app/actions/google-schedule");
     (scheduleSingleTask as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
