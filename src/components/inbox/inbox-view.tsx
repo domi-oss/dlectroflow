@@ -272,6 +272,14 @@ export function InboxView({
       if (stepId) router.push(`/focus/${stepId}`);
     });
 
+  // ▶ Focus a multi-step row: jump straight into the next unfinished step's
+  // timer (mirrors the single-task ▶ Focus). Steps already exist, so there's
+  // nothing to ensure.
+  const focusNextStep = (item: Item) => {
+    const next = item.steps.find((s) => !s.done);
+    if (next) router.push(`/focus/${next.id}`);
+  };
+
   // ✎ inline title editing — shared by every bucket's rows. Keyed so it's
   // safe to drop directly into a RowActions `overflow` array too.
   const pencil = (item: Item) => (
@@ -617,20 +625,32 @@ export function InboxView({
                           )}
                         </div>
                         <RowActions
-                          inline={[
-                            awaitingBreakdown ? (
-                              <button
-                                key="break-now"
-                                type="button"
-                                onClick={() => breakdown(item.id)}
-                                className="bg-destructive rounded-md px-2.5 py-1 font-medium text-white hover:opacity-90"
-                              >
-                                {t("prompt.breakNow", voice)}
-                              </button>
-                            ) : (
-                              <CompleteButton key="complete" voice={voice} onClick={() => run(() => completeItem(item.id))} />
-                            ),
-                          ]}
+                          inline={
+                            awaitingBreakdown
+                              ? [
+                                  <button
+                                    key="break-now"
+                                    type="button"
+                                    onClick={() => breakdown(item.id)}
+                                    className="bg-destructive rounded-md px-2.5 py-1 font-medium text-white hover:opacity-90"
+                                  >
+                                    {t("prompt.breakNow", voice)}
+                                  </button>,
+                                ]
+                              : [
+                                  // Primary CTA — matches the single-task row (▶ Focus + Complete):
+                                  // jumps straight into the next unfinished step's timer.
+                                  <button
+                                    key="focus"
+                                    type="button"
+                                    onClick={() => focusNextStep(item)}
+                                    className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
+                                  >
+                                    ▶ Focus
+                                  </button>,
+                                  <CompleteButton key="complete" voice={voice} onClick={() => run(() => completeItem(item.id))} />,
+                                ]
+                          }
                           move={
                             <MoveToMenu
                               key="move-icon"
