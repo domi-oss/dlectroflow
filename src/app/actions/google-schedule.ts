@@ -177,6 +177,13 @@ export async function scheduleSingleTask(
   });
   if (!item) return { ok: false, reason: "error", message: "Item not found" };
 
+  // Reward parity with pushStepsToGoogleTasks (#25): a successful schedule earns
+  // Scheduled (+10) and, first ever, the FirstSchedule badge. A task that
+  // already carries a googleTaskId was scheduled before — don't re-award (the
+  // Scheduled points aren't idempotent; awardBadge already is). Captured before
+  // the update below so re-scheduling the same row is a no-op reward-wise.
+  const alreadyScheduled = Boolean(item.task?.googleTaskId);
+
   let taskId = item.taskId;
   if (!taskId) {
     // Atomic lazy-create (Duo review): the Task insert and the item link must
@@ -211,6 +218,11 @@ export async function scheduleSingleTask(
       where: { id: taskId },
       data: { googleTaskId: created.id, googleTaskListId: list.id },
     });
+
+    if (!alreadyScheduled) {
+      await logReward(workspaceId, RewardType.Scheduled);
+      await awardBadge(workspaceId, BadgeKey.FirstSchedule);
+    }
 
     revalidatePath("/inbox");
     return { ok: true };

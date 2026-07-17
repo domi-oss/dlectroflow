@@ -59,7 +59,8 @@ vi.mock("@/lib/google", () => ({
 }));
 vi.mock("@/lib/workspace", () => ({ currentWorkspaceId: workspaceMock }));
 
-import { OWNER_WORKSPACE_ID } from "@/lib/constants";
+import { OWNER_WORKSPACE_ID, RewardType, BadgeKey } from "@/lib/constants";
+import { logReward, awardBadge } from "@/lib/rewards";
 import { scheduleSingleTask } from "./google-schedule";
 
 beforeEach(() => vi.clearAllMocks());
@@ -167,6 +168,83 @@ describe("scheduleSingleTask", () => {
         data: expect.objectContaining({ googleTaskId: "gtask-3" }),
       }),
     );
+  });
+
+  // ── reward parity with the steps path (#25) ──────────────────────────────
+  it("awards Scheduled (+10) and the FirstSchedule badge on a successful single-task schedule", async () => {
+    workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
+    configuredMock.mockReturnValue(true);
+    tokenMock.mockResolvedValue("tok");
+    itemFindFirstMock.mockResolvedValue({
+      id: "item-1",
+      text: "Call the dentist",
+      taskId: "task-1",
+      task: { id: "task-1", title: "Call the dentist", googleTaskId: null },
+    });
+    findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
+    createGoogleTaskMock.mockResolvedValue({ id: "gtask-9" });
+
+    const res = await scheduleSingleTask("item-1", 30);
+
+    expect(res).toEqual({ ok: true });
+    // Same helpers, same args as pushStepsToGoogleTasks (google-schedule.ts).
+    expect(logReward).toHaveBeenCalledWith(OWNER_WORKSPACE_ID, RewardType.Scheduled);
+    expect(awardBadge).toHaveBeenCalledWith(OWNER_WORKSPACE_ID, BadgeKey.FirstSchedule);
+  });
+
+  it("awards Scheduled + FirstSchedule for a lazily-created task (first-ever schedule)", async () => {
+    workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
+    configuredMock.mockReturnValue(true);
+    tokenMock.mockResolvedValue("tok");
+    itemFindFirstMock.mockResolvedValue({ id: "item-2", text: "Water the plants", taskId: null, task: null });
+    taskCreateMock.mockResolvedValue({ id: "task-2" });
+    findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
+    createGoogleTaskMock.mockResolvedValue({ id: "gtask-3" });
+
+    const res = await scheduleSingleTask("item-2", 15);
+
+    expect(res).toEqual({ ok: true });
+    expect(logReward).toHaveBeenCalledWith(OWNER_WORKSPACE_ID, RewardType.Scheduled);
+    expect(awardBadge).toHaveBeenCalledWith(OWNER_WORKSPACE_ID, BadgeKey.FirstSchedule);
+  });
+
+  it("does not re-award when the task was already scheduled (idempotency — task has a googleTaskId)", async () => {
+    workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
+    configuredMock.mockReturnValue(true);
+    tokenMock.mockResolvedValue("tok");
+    itemFindFirstMock.mockResolvedValue({
+      id: "item-1",
+      text: "Call the dentist",
+      taskId: "task-1",
+      task: { id: "task-1", title: "Call the dentist", googleTaskId: "gtask-old" },
+    });
+    findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
+    createGoogleTaskMock.mockResolvedValue({ id: "gtask-9" });
+
+    const res = await scheduleSingleTask("item-1", 30);
+
+    expect(res).toEqual({ ok: true });
+    expect(logReward).not.toHaveBeenCalled();
+    expect(awardBadge).not.toHaveBeenCalled();
+  });
+
+  it("does not award when the Google push fails", async () => {
+    workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
+    configuredMock.mockReturnValue(true);
+    tokenMock.mockResolvedValue("tok");
+    itemFindFirstMock.mockResolvedValue({
+      id: "item-1",
+      text: "Call the dentist",
+      taskId: "task-1",
+      task: { id: "task-1", title: "Call the dentist", googleTaskId: null },
+    });
+    findReclaimListMock.mockResolvedValue(null); // no Reclaim list → push fails
+
+    const res = await scheduleSingleTask("item-1", 30);
+
+    expect(res).toEqual({ ok: false, reason: "no_reclaim_list" });
+    expect(logReward).not.toHaveBeenCalled();
+    expect(awardBadge).not.toHaveBeenCalled();
   });
 
   it("revalidates /inbox after the lazy Task-create even when the Google push fails (Duo review)", async () => {
