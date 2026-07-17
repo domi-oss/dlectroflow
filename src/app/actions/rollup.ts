@@ -82,7 +82,17 @@ export async function triggerRollup(opts?: {
         // Already sent (or being sent) today by a concurrent trigger.
         email = { attempted: false };
       } else {
-        const result = await deliver();
+        // Release the claim on ANY failure — a returned { ok: false } OR a
+        // thrown/rejected send (network error, unhandled Resend rejection).
+        // Otherwise the day stays stamped as emailed and every future
+        // auto-trigger skips forever, never retrying.
+        let result;
+        try {
+          result = await deliver();
+        } catch (err) {
+          await releaseRollupEmailClaim(workspaceId, rollup.date);
+          throw err;
+        }
         if (!result.ok) await releaseRollupEmailClaim(workspaceId, rollup.date);
         email = { attempted: true, ok: result.ok, reason: result.ok ? undefined : result.reason };
       }

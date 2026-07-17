@@ -149,6 +149,21 @@ describe("triggerRollup duplicate-send race (#18)", () => {
     expect(markRollupEmailedMock).not.toHaveBeenCalled();
   });
 
+  it("releases the claim when the send THROWS and re-raises, so a later trigger can retry", async () => {
+    // A network error / unhandled Resend rejection throws instead of returning
+    // { ok: false }. The claim was already stamped, so it must be released or
+    // every future auto-trigger would skip forever (Duo regression on !74).
+    claimRollupEmailMock.mockResolvedValue(true);
+    const boom = new Error("resend network blip");
+    sendRoundupEmailMock.mockRejectedValue(boom);
+
+    const { triggerRollup } = await import("./rollup");
+
+    await expect(triggerRollup({ force: false, sendEmail: true })).rejects.toThrow(boom);
+    expect(releaseRollupEmailClaimMock).toHaveBeenCalledWith("owner", rollupFixture.date);
+    expect(markRollupEmailedMock).not.toHaveBeenCalled();
+  });
+
   it("manual force trigger still (re)sends, bypassing the once-per-day claim", async () => {
     const { triggerRollup } = await import("./rollup");
     const res = await triggerRollup({ force: true, sendEmail: true });
