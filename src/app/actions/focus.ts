@@ -221,7 +221,7 @@ export async function requeueFocus(
       const parsed = JSON.parse(step.estimateHistory);
       if (Array.isArray(parsed)) history = parsed as number[];
     } catch {
-      history = [];
+      // history stays [] — fall back to empty on corrupt JSON
     }
   }
   history.push(step.estMinutes);

@@ -97,7 +97,9 @@ describe("consumeGuestBreakdown", () => {
     db.guestDailyActivity.findUnique.mockResolvedValue(null);
     db.guestDailyActivity.count.mockResolvedValue(0);
     db.guestDailyActivity.create.mockResolvedValue({});
-    db.guestAiUsage.findUnique.mockResolvedValueOnce(null); // pre-check: no row
+    db.guestAiUsage.findUnique
+      .mockResolvedValueOnce(null) // pre-check: no row
+      .mockResolvedValueOnce(null); // step-3 guard: still no row
     db.guestAiUsage.updateMany
       .mockResolvedValueOnce({ count: 0 }) // reset: nothing
       .mockResolvedValueOnce({ count: 0 }); // increment: no row
@@ -107,20 +109,37 @@ describe("consumeGuestBreakdown", () => {
     expect(r.remaining).toBe(4); // 5 - 1
     expect(db.guestAiUsage.create).toHaveBeenCalledTimes(1);
   });
-  it("create race: create loses P2002 → retries the guarded increment", async () => {
+  it("create race: guard sees no row, create loses P2002 → retries the guarded increment", async () => {
     db.guestDailyActivity.findUnique.mockResolvedValue(null);
     db.guestDailyActivity.count.mockResolvedValue(0);
     db.guestDailyActivity.create.mockResolvedValue({});
-    db.guestAiUsage.findUnique.mockResolvedValueOnce(null); // pre-check
+    db.guestAiUsage.findUnique
+      .mockResolvedValueOnce(null) // pre-check
+      .mockResolvedValueOnce(null) // step-3 guard: row not visible yet
+      .mockResolvedValueOnce({ count: 3, windowStartedAt: new Date() }); // remaining re-read
     db.guestAiUsage.updateMany
       .mockResolvedValueOnce({ count: 0 }) // reset
       .mockResolvedValueOnce({ count: 0 }) // first increment (no row)
       .mockResolvedValueOnce({ count: 1 }); // retry increment (row appeared)
     db.guestAiUsage.create.mockRejectedValueOnce(new FakeP2002("unique"));
-    db.guestAiUsage.findUnique.mockResolvedValueOnce({ count: 3, windowStartedAt: new Date() });
     const r = await consumeGuestBreakdown("iphash");
     expect(r.allowed).toBe(true);
     expect(r.remaining).toBe(2); // 5 - 3
+  });
+  it("exhausted active window (race): guard sees the row → blocks quota, no wasteful create", async () => {
+    // pre-check passes (4 < 5) but the last slot is taken before we increment.
+    db.guestDailyActivity.findUnique.mockResolvedValue({ day: "x", ipHash: "iphash" }); // counted today
+    db.guestAiUsage.findUnique
+      .mockResolvedValueOnce({ count: 4, windowStartedAt: new Date() }) // pre-check: 4 < 5
+      .mockResolvedValueOnce({ count: 5, windowStartedAt: new Date() }); // step-3 guard: now full
+    db.guestAiUsage.updateMany
+      .mockResolvedValueOnce({ count: 0 }) // reset: active window
+      .mockResolvedValueOnce({ count: 0 }) // increment: last slot already taken
+      .mockResolvedValueOnce({ count: 0 }); // retry increment: still full
+    const r = await consumeGuestBreakdown("iphash");
+    expect(r.allowed).toBe(false);
+    expect(r.reason).toBe("quota");
+    expect(db.guestAiUsage.create).not.toHaveBeenCalled(); // no create on the exhausted path
   });
 });
 

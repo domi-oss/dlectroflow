@@ -114,14 +114,23 @@ async function meterConsume(
     return { allowed: true, remaining: await remainingInWindow(ipHash, quota, windowThreshold) };
   }
 
-  // 3) Nothing to increment: either the row is absent (first use) or the active
-  //    window is exhausted. Create it; a lost create race retries the increment.
-  try {
-    await prisma.guestAiUsage.create({ data: { ipHash, count: 1, windowStartedAt: now } });
-    return { allowed: true, remaining: Math.max(0, quota - 1) };
-  } catch (e) {
-    if (!isUniqueViolation(e)) throw e;
+  // 3) Nothing was incremented: the row is either absent (first use) or the
+  //    active window is exhausted. Only pay for a create when the row is truly
+  //    absent — otherwise a create would always throw P2002 on every blocked
+  //    request (an expired row would already have been reset in step 1).
+  const existing = await prisma.guestAiUsage.findUnique({ where: { ipHash } });
+  if (!existing) {
+    try {
+      await prisma.guestAiUsage.create({ data: { ipHash, count: 1, windowStartedAt: now } });
+      return { allowed: true, remaining: Math.max(0, quota - 1) };
+    } catch (e) {
+      if (!isUniqueViolation(e)) throw e;
+      // Lost the create race — a concurrent first-use won; fall through to the
+      // guarded increment against the row it created.
+    }
   }
+  // Row exists (present all along, or created concurrently): increment while the
+  // active window still has room, else it is genuinely exhausted.
   const retry = await prisma.guestAiUsage.updateMany({
     where: { ipHash, count: { lt: quota }, windowStartedAt: { gt: windowThreshold } },
     data: { count: { increment: 1 } },
