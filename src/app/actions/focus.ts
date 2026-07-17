@@ -90,6 +90,37 @@ export async function completeStep(stepId: string) {
   revalidatePath("/dashboard");
 }
 
+/**
+ * Rename a step's text from the TaskSteps inline "Edit step title" editor.
+ * Workspace-scoped; trims and ignores empty/unchanged titles.
+ */
+export async function renameStep(stepId: string, title: string) {
+  const workspaceId = await currentWorkspaceId();
+  const step = await prisma.step.findFirst({ where: { id: stepId, task: { workspaceId } } });
+  if (!step) return;
+  const trimmed = title.trim();
+  if (!trimmed || trimmed === step.text) return;
+
+  await prisma.step.update({ where: { id: stepId }, data: { text: trimmed } });
+  revalidatePath(`/tasks/${step.taskId}`);
+  revalidatePath("/inbox");
+}
+
+/**
+ * Update a step's time estimate from the TaskSteps inline "Edit time estimate"
+ * editor. Workspace-scoped; rounds and clamps to 1..480 minutes.
+ */
+export async function updateStepEstimate(stepId: string, minutes: number) {
+  const workspaceId = await currentWorkspaceId();
+  const step = await prisma.step.findFirst({ where: { id: stepId, task: { workspaceId } } });
+  if (!step) return;
+  const estMinutes = Math.min(480, Math.max(1, Math.round(minutes)));
+
+  await prisma.step.update({ where: { id: stepId }, data: { estMinutes } });
+  revalidatePath(`/tasks/${step.taskId}`);
+  revalidatePath("/inbox");
+}
+
 export type CompleteResult = {
   ok: boolean;
   nextStepId: string | null;
