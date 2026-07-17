@@ -23,7 +23,16 @@ export default async function TaskPage({
   const [task, reclaim, google, owner] = await Promise.all([
     prisma.task.findFirst({
       where: { id: taskId, workspaceId },
-      include: { steps: { orderBy: { order: "asc" } } },
+      include: {
+        steps: {
+          orderBy: { order: "asc" },
+          // Resumable = has an unfinished focus session (started, never ended).
+          // Batched by Prisma into one query, so not a per-step N+1.
+          include: {
+            focusSessions: { where: { endedAt: null }, select: { id: true }, take: 1 },
+          },
+        },
+      },
     }),
     getReclaimStatus(),
     getGoogleStatus(),
@@ -95,6 +104,7 @@ export default async function TaskPage({
           subtaskEmoji: s.subtaskEmoji,
           estMinutes: s.estMinutes,
           done: s.done,
+          resumable: s.focusSessions.length > 0,
         }))}
       />
 

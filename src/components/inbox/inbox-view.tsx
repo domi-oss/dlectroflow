@@ -47,6 +47,7 @@ import { bucketItems, bucketOfItem, isBucketId, type Item, type BucketId } from 
 import { dropPlan } from "@/components/inbox/move-dispatch";
 import { MoveToMenu } from "@/components/inbox/move-to-menu";
 import { RowActions, ScheduleControl, type ScheduleControlProps } from "@/components/inbox/row-actions";
+import { CompleteButton } from "@/components/inbox/complete-button";
 import { t } from "@/lib/strings";
 import { useVoice } from "@/components/voice-provider";
 import type { Voice } from "@/lib/strings";
@@ -730,6 +731,7 @@ export function InboxView({
                           <div className="mt-2">
                             <TaskSteps
                               taskId={item.taskId}
+                              voice={voice}
                               steps={item.steps.map((s) => ({
                                 id: s.id,
                                 order: s.order,
@@ -738,6 +740,7 @@ export function InboxView({
                                 subtaskEmoji: s.subtaskEmoji,
                                 estMinutes: s.estMinutes,
                                 done: s.done,
+                                resumable: s.resumable,
                               }))}
                             />
                           </div>
@@ -1117,20 +1120,6 @@ function EditTitleInput({
       }}
       className="border-input bg-background focus-visible:ring-ring min-w-0 flex-1 rounded-md border px-2 py-1 text-sm outline-none focus-visible:ring-2"
     />
-  );
-}
-
-/** The secondary "Complete" button every bucket row shows — one source for its
- * styling instead of four copies. */
-function CompleteButton({ voice, onClick }: { voice: Voice; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="hover:bg-accent rounded-md border px-2.5 py-1"
-    >
-      {t("action.complete", voice)}
-    </button>
   );
 }
 

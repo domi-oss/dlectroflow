@@ -109,9 +109,9 @@ function makeMultiStep() {
     stepsTotal: 3,
     stepsDone: 1,
     steps: [
-      { id: "s1", order: 1, text: "book", done: true, estMinutes: 10, subtaskEmoji: null },
-      { id: "s2", order: 2, text: "pack", done: false, estMinutes: 20, subtaskEmoji: null },
-      { id: "s3", order: 3, text: "go", done: false, estMinutes: 5, subtaskEmoji: null },
+      { id: "s1", order: 1, text: "book", done: true, estMinutes: 10, subtaskEmoji: null, resumable: false },
+      { id: "s2", order: 2, text: "pack", done: false, estMinutes: 20, subtaskEmoji: null, resumable: false },
+      { id: "s3", order: 3, text: "go", done: false, estMinutes: 5, subtaskEmoji: null, resumable: false },
     ],
   });
 }
@@ -343,11 +343,11 @@ describe("InboxView — per-step Undo picker (completed multi-step)", () => {
       stepsDone: 3,
       taskStatus: "done",
       steps: [
-        { id: "s1", order: 1, text: "book", done: true, estMinutes: 10, subtaskEmoji: null },
+        { id: "s1", order: 1, text: "book", done: true, estMinutes: 10, subtaskEmoji: null, resumable: false },
         // Emoji on purpose: it must stay decorative (aria-hidden), so the
         // checkbox's accessible name is still exactly "pack".
-        { id: "s2", order: 2, text: "pack", done: true, estMinutes: 20, subtaskEmoji: "🧳" },
-        { id: "s3", order: 3, text: "go", done: true, estMinutes: 5, subtaskEmoji: null },
+        { id: "s2", order: 2, text: "pack", done: true, estMinutes: 20, subtaskEmoji: "🧳", resumable: false },
+        { id: "s3", order: 3, text: "go", done: true, estMinutes: 5, subtaskEmoji: null, resumable: false },
       ],
     });
 

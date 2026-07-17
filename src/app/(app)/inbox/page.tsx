@@ -21,7 +21,21 @@ export default async function InboxPage({
     prisma.brainDumpItem.findMany({
       where: { workspaceId, status: { not: BrainDumpStatus.Archived } },
       orderBy: { createdAt: "desc" },
-      include: { task: { include: { steps: { orderBy: { order: "asc" } } } } },
+      include: {
+        task: {
+          include: {
+            steps: {
+              orderBy: { order: "asc" },
+              // A step is "resumable" if it has an unfinished focus session
+              // (started, never ended). Batched by Prisma into one query per
+              // relation, so this is not a per-step N+1.
+              include: {
+                focusSessions: { where: { endedAt: null }, select: { id: true }, take: 1 },
+              },
+            },
+          },
+        },
+      },
     }),
     getSettings(workspaceId),
     searchParams,
@@ -44,6 +58,7 @@ export default async function InboxPage({
       done: s.done,
       estMinutes: s.estMinutes,
       subtaskEmoji: s.subtaskEmoji,
+      resumable: s.focusSessions.length > 0,
     })) ?? [],
   }));
 

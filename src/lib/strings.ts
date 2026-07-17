@@ -43,6 +43,18 @@ export const STRINGS = {
   "action.editTitle":    { plain: "Edit task title",           playful: "Edit task title" },
   "action.schedule":     { plain: "Schedule",                  playful: "🗓️ Schedule" },
 
+  // ── Step rows (TaskSteps working view, #25) ────────────────────────────────
+  // Voice-aware labels for the redesigned step rows. Plain = literal; playful =
+  // food-themed to match the rest of the row (🍽️/🍴 = at the table, focusing).
+  "step.startFocus":       { plain: "Start Focus",         playful: "🍽️ Start Focus" },
+  "step.resumeFocus":      { plain: "Resume Focus",        playful: "🍴 Resume Focus" },
+  "step.startFocusTimer":  { plain: "Start focus timer",   playful: "🍽️ Start focus timer" },
+  "step.resumeFocusTimer": { plain: "Resume focus timer",  playful: "🍴 Resume focus timer" },
+  "step.complete":         { plain: "Complete Step",       playful: "✅ Complete Step" },
+  "step.editEstimate":     { plain: "Edit time estimate",  playful: "⏱️ Edit time estimate" },
+  "step.editTitle":        { plain: "Edit step title",     playful: "✏️ Edit step title" },
+  "step.sendToReview":     { plain: "Send back to review", playful: "🥫 Send back to review" },
+
   // ── Inbox section headers ──────────────────────────────────────────────────
   "section.needsReview":    { plain: "Needs review",      playful: "Needs review" },
   "section.toDo":           { plain: "To do",             playful: "To do" },
