@@ -67,6 +67,27 @@ describe("t() function", () => {
     ["prompt.breakNow",   "plain",   "Break into steps now?"],
     ["action.reviewNow",  "plain",   "Review now"],
     ["action.reviewNow",  "playful", "🥫 Review now"],
+    // v6 dropdown full-labels + short button
+    ["action.breakdownFull", "plain", "Break into smaller steps"],
+    ["action.addTodoFull",   "plain", "Add as single task to do"],
+    ["action.saveShort",     "plain", "Save"],
+    ["action.completeFull",  "plain", "Mark as completed"],
+    ["action.editTitle",     "plain", "Edit task title"],
+    ["action.schedule",      "plain", "Schedule"],
+    // #25 step-row labels — voice-aware (plain literal, playful food-themed)
+    ["step.startFocus",       "plain",   "▶ Start Focus"],
+    ["step.startFocus",       "playful", "▶ Start Focus"],
+    ["step.resumeFocus",      "plain",   "▶ Resume Focus"],
+    ["step.resumeFocus",      "playful", "▶ Resume Focus"],
+    ["step.startFocusTimer",  "plain",   "Start focus timer"],
+    ["step.resumeFocusTimer", "plain",   "Resume focus timer"],
+    ["step.resumeFocusTimer", "playful", "🍴 Resume focus timer"],
+    ["step.complete",         "plain",   "Complete step"],
+    ["step.complete",         "playful", "✅ Complete step"],
+    ["step.editEstimate",     "plain",   "Edit time estimate"],
+    ["step.editTitle",        "plain",   "Edit step title"],
+    ["step.sendToReview",     "plain",   "Send back to review"],
+    ["step.sendToReview",     "playful", "🥫 Send back to review"],
   ];
 
   for (const [key, voice, expected] of cases) {
@@ -341,6 +362,12 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "action.delete",
     "action.cancel",
     "action.moveTo",
+    "action.breakdownFull",
+    "action.addTodoFull",
+    "action.saveShort",
+    "action.completeFull",
+    "action.editTitle",
+    "action.schedule",
     "capture.confirm",
     "prompt.stillNeeded",
     "prompt.breakNow",
@@ -364,6 +391,15 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "action.reopenSelected",
     "action.reopenAll",
     "prompt.reopenWhich",
+    // #25 step-row labels — plain variants are literal + emoji-free
+    "step.startFocus",
+    "step.resumeFocus",
+    "step.startFocusTimer",
+    "step.resumeFocusTimer",
+    "step.complete",
+    "step.editEstimate",
+    "step.editTitle",
+    "step.sendToReview",
   ];
 
   for (const key of plainOnlyKeys) {

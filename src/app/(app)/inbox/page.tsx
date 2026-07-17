@@ -1,5 +1,6 @@
 import { prisma, getSettings } from "@/lib/db";
-import { currentWorkspaceId } from "@/lib/workspace";
+import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
+import { getGoogleStatus } from "@/lib/google";
 import { BrainDumpStatus } from "@/lib/constants";
 import { InboxView } from "@/components/inbox/inbox-view";
 
@@ -16,15 +17,36 @@ export default async function InboxPage({
   }>;
 }) {
   const workspaceId = await currentWorkspaceId();
-  const [rawItems, settings, sp] = await Promise.all([
+  const [rawItems, settings, sp, owner, googleStatus] = await Promise.all([
     prisma.brainDumpItem.findMany({
       where: { workspaceId, status: { not: BrainDumpStatus.Archived } },
       orderBy: { createdAt: "desc" },
-      include: { task: { include: { steps: { orderBy: { order: "asc" } } } } },
+      include: {
+        task: {
+          include: {
+            steps: {
+              orderBy: { order: "asc" },
+              // A step is "resumable" if it has an unfinished focus session
+              // (started, never ended). Batched by Prisma into one query per
+              // relation, so this is not a per-step N+1.
+              include: {
+                focusSessions: { where: { endedAt: null }, select: { id: true }, take: 1 },
+              },
+            },
+          },
+        },
+      },
     }),
     getSettings(workspaceId),
     searchParams,
+    isOwnerRequest(),
+    // Fetched in parallel and discarded for guests, so owner page-load latency
+    // stays flat (Duo review: was a serial round-trip after the Promise.all).
+    getGoogleStatus(),
   ]);
+  // Owner-gated, same as the settings page's Integrations panel — guests get
+  // null and every row's 📅 control is omitted.
+  const google = owner ? googleStatus : null;
 
   const items = rawItems.map(({ task, ...item }) => ({
     ...item,
@@ -39,6 +61,7 @@ export default async function InboxPage({
       done: s.done,
       estMinutes: s.estMinutes,
       subtaskEmoji: s.subtaskEmoji,
+      resumable: s.focusSessions.length > 0,
     })) ?? [],
   }));
 
@@ -77,6 +100,7 @@ export default async function InboxPage({
           overdueHours: settings.overdueHours,
           wayOverdueHours: settings.wayOverdueHours,
         }}
+        google={google}
       />
     </div>
   );

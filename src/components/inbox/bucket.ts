@@ -22,7 +22,7 @@ export type Item = {
   stepsDone: number;
   taskStatus: string | null;
   completedAt: Date | null;
-  steps: { id: string; order: number; text: string; done: boolean; estMinutes: number; subtaskEmoji: string | null }[];
+  steps: { id: string; order: number; text: string; done: boolean; estMinutes: number; subtaskEmoji: string | null; resumable: boolean }[];
 };
 
 export type Buckets = {

@@ -23,10 +23,14 @@ export function MoveToMenu({
   currentBucket,
   voice,
   onMove,
+  compact = false,
 }: {
   currentBucket: BucketId;
   voice: Voice;
   onMove: (target: BucketId) => void;
+  /** v6: row end-cluster variant — a 📥 icon trigger (aria-label "Move to")
+   * instead of the full "Move to…" text button used in the ▾ dropdown. */
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLSpanElement>(null);
@@ -55,10 +59,16 @@ export function MoveToMenu({
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={compact ? "Move to" : undefined}
+        title={compact ? "Move to" : undefined}
         onClick={() => setOpen((o) => !o)}
-        className="text-muted-foreground hover:text-foreground rounded-md border px-2 py-1 text-xs"
+        className={
+          compact
+            ? "text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1 font-medium"
+            : "text-muted-foreground hover:text-foreground rounded-md border px-2 py-1 text-xs"
+        }
       >
-        {t("action.moveTo", voice)}
+        {compact ? "📥" : t("action.moveTo", voice)}
       </button>
       {open && (
         <span

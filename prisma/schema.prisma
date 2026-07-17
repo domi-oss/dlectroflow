@@ -106,16 +106,18 @@ model BrainDumpItem {
 
 // ── Feature 2 — Task Breakdown → Reclaim ──────────────────────────────────
 model Task {
-  id             String          @id @default(cuid())
-  title          String
-  source         String          @default("braindump") // braindump | manual
-  createdAt      DateTime        @default(now())
-  status         String          @default("active") // active | done | archived
-  parentEmoji    String?
-  steps          Step[]
-  turns          BreakdownTurn[]
-  brainDumpItems BrainDumpItem[]
-  workspaceId    String
+  id               String          @id @default(cuid())
+  title            String
+  source           String          @default("braindump") // braindump | manual
+  createdAt        DateTime        @default(now())
+  status           String          @default("active") // active | done | archived
+  parentEmoji      String?
+  googleTaskId     String?
+  googleTaskListId String?
+  steps            Step[]
+  turns            BreakdownTurn[]
+  brainDumpItems   BrainDumpItem[]
+  workspaceId      String
 
   @@index([workspaceId])
 }
