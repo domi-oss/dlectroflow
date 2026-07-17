@@ -36,6 +36,13 @@ vi.mock("@/app/actions/google-schedule", () => ({
   pushStepsToGoogleTasks: pushStepsToGoogleTasksMock,
 }));
 
+const { scheduleViaIcsMock, downloadIcsMock } = vi.hoisted(() => ({
+  scheduleViaIcsMock: vi.fn(),
+  downloadIcsMock: vi.fn(),
+}));
+vi.mock("@/app/actions/ics-schedule", () => ({ scheduleViaIcs: scheduleViaIcsMock }));
+vi.mock("@/lib/download-ics", () => ({ downloadIcs: downloadIcsMock }));
+
 const proposal: Proposal = {
   parentEmoji: "🗂️",
   steps: [{ text: "Only step", estMinutes: 10, subtaskEmoji: "🌱" }],
@@ -51,6 +58,11 @@ beforeEach(() => {
     ok: true,
     scheduled: 0,
     listTitle: "🗓 Reclaim",
+  });
+  scheduleViaIcsMock.mockResolvedValue({
+    ok: true,
+    ics: "BEGIN:VCALENDAR",
+    icsFilename: "dlectroflow-plan-the-party.ics",
   });
 });
 afterEach(cleanup);
@@ -135,5 +147,13 @@ describe("BreakdownChat — schedule section (Google-first wording, #22)", () =>
         "/api/google/oauth/start",
       ),
     );
+  });
+
+  it("re-routes 'Download calendar (.ics)' through scheduleViaIcs (uniform reward) + downloads", async () => {
+    await renderChat({ google: { configured: true, connected: true, needsReconnect: false } });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /download calendar/i }));
+    await waitFor(() => expect(scheduleViaIcsMock).toHaveBeenCalledWith("task-1"));
+    expect(downloadIcsMock).toHaveBeenCalledWith("BEGIN:VCALENDAR", "dlectroflow-plan-the-party.ics");
   });
 });
