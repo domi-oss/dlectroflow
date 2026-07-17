@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { currentWorkspaceId } from "@/lib/workspace";
-import { buildTaskIcs } from "@/lib/ics";
+import { buildTaskIcs, icsFilename } from "@/lib/ics";
 
 export const runtime = "nodejs";
 
@@ -25,11 +25,10 @@ export async function GET(
       subtaskEmoji: s.subtaskEmoji,
     })),
   });
-  const safe = task.title.replace(/[^a-z0-9]+/gi, "-").slice(0, 40) || "task";
   return new Response(ics, {
     headers: {
       "Content-Type": "text/calendar; charset=utf-8",
-      "Content-Disposition": `attachment; filename="dlectroflow-${safe}.ics"`,
+      "Content-Disposition": `attachment; filename="${icsFilename(task.title)}"`,
       "Cache-Control": "no-store",
     },
   });
