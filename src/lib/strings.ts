@@ -42,6 +42,7 @@ export const STRINGS = {
   "action.completeFull": { plain: "Mark as completed",         playful: "✅ Mark as completed" },
   "action.editTitle":    { plain: "Edit task title",           playful: "Edit task title" },
   "action.schedule":     { plain: "Schedule",                  playful: "🗓️ Schedule" },
+  "action.addToCalendar": { plain: "Add to calendar (.ics)", playful: "📅 Add to calendar (.ics)" },
 
   // ── Step rows (TaskSteps working view, #25) ────────────────────────────────
   // Voice-aware labels for the redesigned step rows. Plain = literal; playful =

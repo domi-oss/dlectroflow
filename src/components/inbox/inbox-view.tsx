@@ -41,6 +41,8 @@ import {
 } from "@/app/actions/braindump";
 import { startBreakdown } from "@/app/actions/breakdown";
 import { pushStepsToGoogleTasks, scheduleSingleTask } from "@/app/actions/google-schedule";
+import { scheduleViaIcs } from "@/app/actions/ics-schedule";
+import { downloadIcs } from "@/lib/download-ics";
 import { StatusPill } from "@/components/inbox/status-pill";
 import { TaskSteps } from "@/components/breakdown/task-steps";
 import { bucketItems, bucketOfItem, isBucketId, type Item, type BucketId } from "@/components/inbox/bucket";
@@ -100,7 +102,14 @@ const SCHEDULE_ERROR_MESSAGES: Record<string, string> = {
   not_connected: "Google Tasks isn't connected.",
   no_reclaim_list: "Couldn't find your Reclaim-synced Google Tasks list.",
   no_steps: "No steps to send.",
+  not_found: "This task couldn't be found.",
 };
+
+/** ICS states carry the "Add to calendar" label; Google states carry "Schedule". */
+const isIcsState = (s: ScheduleControlProps["state"]) =>
+  s === "ics_ready_steps" || s === "ics_needs_duration";
+const scheduleMenuLabel = (s: ScheduleControlProps["state"], voice: Voice): string =>
+  isIcsState(s) ? t("action.addToCalendar", voice) : t("action.schedule", voice);
 
 export function InboxView({
   initialItems,
@@ -262,6 +271,49 @@ export function InboxView({
         [itemId]: res.message ?? SCHEDULE_ERROR_MESSAGES[res.reason] ?? "Scheduling failed.",
       }));
     });
+
+  // ICS "Add to calendar" runner: builds the .ics server-side (marks + rewards),
+  // then downloads it client-side. Guest-allowed (no owner gate) + no reconnect
+  // handling (there's no external service to reconnect).
+  const runScheduleIcs = (
+    itemId: string,
+    fn: () => Promise<
+      | { ok: true; ics: string; icsFilename: string }
+      | { ok: false; reason: string; message?: string }
+    >,
+  ) =>
+    startTransition(async () => {
+      setScheduleErrors((prev) => {
+        if (!(itemId in prev)) return prev;
+        const next = { ...prev };
+        delete next[itemId];
+        return next;
+      });
+      const res = await fn();
+      if (res.ok) {
+        downloadIcs(res.ics, res.icsFilename);
+        router.refresh();
+        return;
+      }
+      setScheduleErrors((prev) => ({
+        ...prev,
+        [itemId]: res.message ?? SCHEDULE_ERROR_MESSAGES[res.reason] ?? "Couldn't build the calendar file.",
+      }));
+    });
+
+  // Guest primary control + owner ▾ alternative both use this. State depends
+  // on whether the task already has steps (per-step events vs. one timed event).
+  const icsProps = (item: Item): ScheduleControlProps => ({
+    state: item.stepsTotal > 0 ? "ics_ready_steps" : "ics_needs_duration",
+    onScheduleIcs: (minutes?: number) => {
+      const tid = item.taskId; // guard, mirroring the multi-step Google wiring
+      if (!tid) return;
+      runScheduleIcs(item.id, () =>
+        scheduleViaIcs(tid, minutes != null ? { durationMin: minutes } : undefined),
+      );
+    },
+    pending,
+  });
 
   const breakdown = (id: string) =>
     startTransition(async () => {
@@ -512,7 +564,7 @@ export function InboxView({
                           runSchedule(item.id, () => scheduleSingleTask(item.id, minutes)),
                         pending,
                       }
-                    : { state: "guest" };
+                    : icsProps(item);
                   return (
                     <ItemRow
                       isDragging={activeDragId === item.id}
@@ -533,6 +585,16 @@ export function InboxView({
                       onFreshen={() => run(() => freshenItem(item.id))}
                       onDismissPrompt={() => run(() => dismissPrompt(item.id))}
                       schedule={schedule}
+                      icsMenu={
+                        effectiveGoogle ? (
+                          <ScheduleControl
+                            key="ics-m"
+                            variant="menu"
+                            {...icsProps(item)}
+                            label={t("action.addToCalendar", voice)}
+                          />
+                        ) : null
+                      }
                       scheduleError={scheduleErrors[item.id]}
                       moveMenu={
                         <MoveToMenu
@@ -585,7 +647,7 @@ export function InboxView({
                     // duration popover a single-task row uses. Rows with
                     // steps push them straight to Google Tasks on tap.
                     const schedule: ScheduleControlProps | null = !effectiveGoogle
-                      ? { state: "guest" }
+                      ? icsProps(item)
                       : awaitingBreakdown
                         ? {
                             state: scheduleState(effectiveGoogle, "needs_duration"),
@@ -745,7 +807,15 @@ export function InboxView({
                                 key="schedule-m"
                                 {...schedule}
                                 variant="menu"
-                                label={t("action.schedule", voice)}
+                                label={scheduleMenuLabel(schedule.state, voice)}
+                              />
+                            ) : null,
+                            effectiveGoogle ? (
+                              <ScheduleControl
+                                key="ics-m"
+                                variant="menu"
+                                {...icsProps(item)}
+                                label={t("action.addToCalendar", voice)}
                               />
                             ) : null,
                             editMenuItem(item),
@@ -797,7 +867,7 @@ export function InboxView({
                             runSchedule(item.id, () => scheduleSingleTask(item.id, minutes)),
                           pending,
                         }
-                      : { state: "guest" };
+                      : icsProps(item);
                     return (
                       <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", item.id === activeDragId && "opacity-40")}>
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
@@ -867,7 +937,15 @@ export function InboxView({
                                 key="schedule-m"
                                 {...schedule}
                                 variant="menu"
-                                label={t("action.schedule", voice)}
+                                label={scheduleMenuLabel(schedule.state, voice)}
+                              />
+                            ) : null,
+                            effectiveGoogle ? (
+                              <ScheduleControl
+                                key="ics-m"
+                                variant="menu"
+                                {...icsProps(item)}
+                                label={t("action.addToCalendar", voice)}
                               />
                             ) : null,
                             editMenuItem(item),
@@ -1316,6 +1394,7 @@ function ItemRow({
   onFreshen,
   onDismissPrompt,
   schedule,
+  icsMenu,
   scheduleError,
   moveMenu,
   moveIcon,
@@ -1345,6 +1424,9 @@ function ItemRow({
   onFreshen: () => void;
   onDismissPrompt: () => void;
   schedule: ScheduleControlProps | null;
+  /** Owner-only ▾ "Add to calendar (.ics)" entry, rendered after the schedule
+   *  mirror. Null for guests (whose primary control is already the ICS one). */
+  icsMenu?: React.ReactNode;
   scheduleError?: string;
   moveMenu?: React.ReactNode;
   /** v6: 📥 Move-to icon for the end cluster (compact MoveToMenu). */
@@ -1519,9 +1601,10 @@ function ItemRow({
               key="schedule-m"
               {...schedule}
               variant="menu"
-              label={t("action.schedule", voice)}
+              label={scheduleMenuLabel(schedule.state, voice)}
             />
           ) : null,
+          icsMenu,
           editMenuItem,
           deleteControl("delete-m", { fullWidth: true }),
         ]}
