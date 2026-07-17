@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   verifySession,
+  signGuestSession,
   OWNER_COOKIE,
   GUEST_COOKIE,
   GUEST_WS_HEADER,
@@ -61,13 +62,8 @@ export async function proxy(req: NextRequest) {
     // isolated random workspace. The id is still wrapped in a signed JWT below,
     // so the IDOR defense (verify the token, never trust a raw id) is unchanged.
     wsId = process.env.REVIEW_DEMO_WS || crypto.randomUUID();
-    // Sign inline (Edge-compatible via jose used in verifySession's module).
-    const { SignJWT } = await import("jose");
-    guestToken = await new SignJWT({ kind: "guest", wsId })
-      .setProtectedHeader({ alg: "HS256" })
-      .setIssuedAt()
-      .setExpirationTime(`${guestTtlHours}h`)
-      .sign(new TextEncoder().encode(sessionSecret));
+    // One canonical guest signer (shares SESSION_ALG; no inline alg to drift).
+    guestToken = await signGuestSession(wsId, sessionSecret, guestTtlHours * 3600);
   }
 
   // Security: forward the signed JWT, not the raw wsId. The workspace resolver

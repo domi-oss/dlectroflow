@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { getAuthProvider, isOwner } from "@/lib/auth/providers";
 import { authConfig } from "@/lib/auth/config";
 import {
-  signSession,
+  signOwnerSession,
   OWNER_COOKIE,
   OWNER_SESSION_TTL_SECONDS,
 } from "@/lib/auth/session";
@@ -52,7 +52,7 @@ export async function GET(req: Request): Promise<Response> {
   const { ownerAllowlist, sessionSecret } = authConfig();
   if (!isOwner(identity, ownerAllowlist)) return fail("not_authorized");
 
-  const session = await signSession({ kind: "owner", sub: identity }, sessionSecret);
+  const session = await signOwnerSession({ kind: "owner", sub: identity }, sessionSecret);
   const res = NextResponse.redirect(`${origin}/inbox`);
   res.cookies.set(OWNER_COOKIE, session, {
     httpOnly: true,

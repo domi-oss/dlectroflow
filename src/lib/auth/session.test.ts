@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { SignJWT, decodeJwt } from "jose";
 import {
-  signSession,
+  signOwnerSession,
+  signGuestSession,
   verifySession,
   OWNER_SESSION_TTL_SECONDS,
 } from "./session";
@@ -14,7 +15,7 @@ function key(secret: string): Uint8Array {
 
 describe("session cookie", () => {
   it("round-trips an owner payload", async () => {
-    const token = await signSession({ kind: "owner", sub: "13595692" }, SECRET);
+    const token = await signOwnerSession({ kind: "owner", sub: "13595692" }, SECRET);
     expect(await verifySession(token, SECRET)).toEqual({
       kind: "owner",
       sub: "13595692",
@@ -22,7 +23,7 @@ describe("session cookie", () => {
   });
 
   it("round-trips a guest payload", async () => {
-    const token = await signSession({ kind: "guest", wsId: "abc" }, SECRET);
+    const token = await signGuestSession("abc", SECRET, 3600);
     expect(await verifySession(token, SECRET)).toEqual({
       kind: "guest",
       wsId: "abc",
@@ -30,7 +31,7 @@ describe("session cookie", () => {
   });
 
   it("rejects a token signed with a different secret", async () => {
-    const token = await signSession({ kind: "guest", wsId: "abc" }, SECRET);
+    const token = await signGuestSession("abc", SECRET, 3600);
     expect(await verifySession(token, "another-secret-32-bytes-long-yyyyyyyy")).toBeNull();
   });
 
@@ -70,7 +71,7 @@ describe("session cookie", () => {
   });
 
   it("still accepts the pinned HS256 alg", async () => {
-    const token = await signSession({ kind: "owner", sub: "abc" }, SECRET);
+    const token = await signOwnerSession({ kind: "owner", sub: "abc" }, SECRET);
     expect(await verifySession(token, SECRET)).toEqual({
       kind: "owner",
       sub: "abc",
@@ -78,7 +79,7 @@ describe("session cookie", () => {
   });
 
   it("signs sessions with the HS256 header (matching the verify pin)", async () => {
-    const token = await signSession({ kind: "owner", sub: "abc" }, SECRET);
+    const token = await signOwnerSession({ kind: "owner", sub: "abc" }, SECRET);
     const header = JSON.parse(
       Buffer.from(token.split(".")[0], "base64url").toString(),
     );
@@ -94,7 +95,7 @@ describe("owner session TTL", () => {
   });
 
   it("stamps exp exactly OWNER_SESSION_TTL_SECONDS after iat (not 30d)", async () => {
-    const token = await signSession({ kind: "owner", sub: "abc" }, SECRET);
+    const token = await signOwnerSession({ kind: "owner", sub: "abc" }, SECRET);
     const { iat, exp } = decodeJwt(token);
     expect(exp! - iat!).toBe(OWNER_SESSION_TTL_SECONDS);
     expect(exp! - iat!).not.toBe(60 * 60 * 24 * 30);
