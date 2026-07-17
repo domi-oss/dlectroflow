@@ -154,6 +154,17 @@ describe("RowActions", () => {
     expect(screen.getByText(/1.*480/)).toBeInTheDocument();
   });
 
+  it("Duo fix: a fractional custom duration below 1 (e.g. 0.5) is out of range", () => {
+    const fn = vi.fn();
+    render(<RowActions inline={[]} menu={[]} schedule={{ state: "needs_duration", onScheduleSingle: fn }} />);
+    fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
+    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "0.5" } });
+    const goButton = screen.getByRole("button", { name: /go/i });
+    expect(goButton).toBeDisabled();
+    fireEvent.click(goButton);
+    expect(fn).not.toHaveBeenCalled();
+  });
+
   it("clears the custom duration input when the popover is dismissed + reopened (Duo review)", () => {
     render(<RowActions inline={[]} menu={[]} schedule={{ state: "needs_duration", onScheduleSingle: vi.fn() }} />);
     fireEvent.click(screen.getByRole("button", { name: /schedule/i }));

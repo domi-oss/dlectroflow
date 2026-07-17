@@ -591,8 +591,12 @@ export function InboxView({
                           }
                         : {
                             state: scheduleState(effectiveGoogle, "ready_steps"),
-                            onScheduleSteps: () =>
-                              runSchedule(item.id, () => pushStepsToGoogleTasks(item.taskId!)),
+                            onScheduleSteps: () => {
+                              // Guard taskId instead of asserting it — a data
+                              // inconsistency should no-op, not POST undefined (Duo review).
+                              const tid = item.taskId;
+                              if (tid) runSchedule(item.id, () => pushStepsToGoogleTasks(tid));
+                            },
                             pending,
                           };
                     return (

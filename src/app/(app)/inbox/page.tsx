@@ -17,7 +17,7 @@ export default async function InboxPage({
   }>;
 }) {
   const workspaceId = await currentWorkspaceId();
-  const [rawItems, settings, sp, owner] = await Promise.all([
+  const [rawItems, settings, sp, owner, googleStatus] = await Promise.all([
     prisma.brainDumpItem.findMany({
       where: { workspaceId, status: { not: BrainDumpStatus.Archived } },
       orderBy: { createdAt: "desc" },
@@ -40,10 +40,13 @@ export default async function InboxPage({
     getSettings(workspaceId),
     searchParams,
     isOwnerRequest(),
+    // Fetched in parallel and discarded for guests, so owner page-load latency
+    // stays flat (Duo review: was a serial round-trip after the Promise.all).
+    getGoogleStatus(),
   ]);
   // Owner-gated, same as the settings page's Integrations panel — guests get
   // null and every row's 📅 control is omitted.
-  const google = owner ? await getGoogleStatus() : null;
+  const google = owner ? googleStatus : null;
 
   const items = rawItems.map(({ task, ...item }) => ({
     ...item,

@@ -105,7 +105,7 @@ export function ScheduleControl({
   const customMinutes = Number(custom);
   const customOutOfRange =
     custom !== "" &&
-    (!Number.isFinite(customMinutes) || customMinutes <= 0 || customMinutes > MAX_CUSTOM_MINUTES);
+    (!Number.isFinite(customMinutes) || customMinutes < 1 || customMinutes > MAX_CUSTOM_MINUTES);
 
   const fireCustom = () => {
     if (custom === "" || customOutOfRange) return;

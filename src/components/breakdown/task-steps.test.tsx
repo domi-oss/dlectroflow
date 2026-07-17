@@ -201,4 +201,15 @@ describe("TaskSteps — inline editors", () => {
     expect(updateStepEstimate).not.toHaveBeenCalled();
     expect(screen.queryByLabelText("Edit time estimate")).not.toBeInTheDocument();
   });
+
+  it("Edit time estimate: a value over 480 + Enter cancels, not saved (Duo review)", async () => {
+    const user = userEvent.setup();
+    render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
+    await openMenu(user);
+    await user.click(screen.getByText("Edit time estimate"));
+    const input = screen.getByLabelText("Edit time estimate");
+    await user.clear(input);
+    await user.type(input, "999{Enter}");
+    expect(updateStepEstimate).not.toHaveBeenCalled();
+  });
 });
