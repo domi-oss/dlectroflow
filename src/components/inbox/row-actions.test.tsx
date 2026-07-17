@@ -208,6 +208,37 @@ describe("RowActions", () => {
   });
 });
 
+describe("ScheduleControl — ICS states", () => {
+  it("ics_ready_steps: 📅 fires onScheduleIcs() immediately (icon variant, aria 'Add to calendar')", () => {
+    const fn = vi.fn();
+    render(<RowActions inline={[]} menu={[]} schedule={{ state: "ics_ready_steps", onScheduleIcs: fn }} />);
+    fireEvent.click(screen.getByRole("button", { name: /add to calendar/i }));
+    expect(fn).toHaveBeenCalledWith();
+  });
+  it("ics_needs_duration: opens the popover; picking 30 fires onScheduleIcs(30)", () => {
+    const fn = vi.fn();
+    render(<RowActions inline={[]} menu={[]} schedule={{ state: "ics_needs_duration", onScheduleIcs: fn }} />);
+    fireEvent.click(screen.getByRole("button", { name: /add to calendar/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^30 min$/i }));
+    expect(fn).toHaveBeenCalledWith(30);
+  });
+  it("menu variant renders the label and fires onScheduleIcs", () => {
+    const fn = vi.fn();
+    render(<ScheduleControl variant="menu" state="ics_ready_steps" onScheduleIcs={fn} label="Add to calendar (.ics)" />);
+    fireEvent.click(screen.getByRole("button", { name: "Add to calendar (.ics)" }));
+    expect(fn).toHaveBeenCalledWith();
+  });
+});
+
+describe("RowActions — Scheduled indicator", () => {
+  it("renders 'Scheduled ✓' when scheduled, hides it otherwise", () => {
+    const { rerender } = render(<RowActions inline={[]} schedule={null} menu={[]} scheduled />);
+    expect(screen.getByText(/scheduled ✓/i)).toBeInTheDocument();
+    rerender(<RowActions inline={[]} schedule={null} menu={[]} />);
+    expect(screen.queryByText(/scheduled ✓/i)).toBeNull();
+  });
+});
+
 describe("ScheduleControl — menu variant (▾ dropdown 'Schedule' entry)", () => {
   it("ready_steps: renders a 'Schedule' text button that fires onScheduleSteps", () => {
     const fn = vi.fn();

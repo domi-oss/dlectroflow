@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildTaskIcs } from "./ics";
+import { buildTaskIcs, icsFilename } from "./ics";
 
 describe("buildTaskIcs", () => {
   // Local-time construction (month is 0-indexed: 6 = July) so local accessors
@@ -31,5 +31,31 @@ describe("buildTaskIcs", () => {
   it("escapes commas in summaries", () => {
     const s = buildTaskIcs({ title: "A, B", steps: [{ text: "x, y", estMinutes: 5 }] });
     expect(s).toContain("x\\, y");
+  });
+  it("no-steps task with fallbackDurationMin emits exactly one VEVENT titled with the task title", () => {
+    const s = buildTaskIcs({
+      title: "Call dentist",
+      parentEmoji: "📞",
+      steps: [],
+      fallbackDurationMin: 45,
+      start: new Date(2026, 6, 8, 9, 0, 0),
+    });
+    expect((s.match(/BEGIN:VEVENT/g) ?? []).length).toBe(1);
+    expect(s).toContain("SUMMARY:📞 Call dentist");
+    expect(s).toContain("DTSTART:20260708T090000");
+    expect(s).toContain("DTEND:20260708T094500"); // +45 min
+  });
+  it("empty steps and no fallbackDurationMin emits zero VEVENTs (unchanged)", () => {
+    const s = buildTaskIcs({ title: "x", steps: [] });
+    expect((s.match(/BEGIN:VEVENT/g) ?? []).length).toBe(0);
+  });
+});
+
+describe("icsFilename", () => {
+  it("slugifies the title and prefixes dlectroflow-", () => {
+    expect(icsFilename("Ship the thing")).toBe("dlectroflow-Ship-the-thing.ics");
+  });
+  it("falls back to 'task' for an empty title", () => {
+    expect(icsFilename("")).toBe("dlectroflow-task.ics");
   });
 });

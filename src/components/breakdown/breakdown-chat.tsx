@@ -7,6 +7,8 @@ import { confirmBreakdown } from "@/app/actions/breakdown";
 import { createBrainDumpItem } from "@/app/actions/braindump";
 import { scheduleTaskInReclaim } from "@/app/actions/reclaim";
 import { pushStepsToGoogleTasks } from "@/app/actions/google-schedule";
+import { scheduleViaIcs } from "@/app/actions/ics-schedule";
+import { downloadIcs } from "@/lib/download-ics";
 import type { Feedback, Proposal, StreamEvent } from "@/lib/breakdown";
 import { reorder, blankStep } from "@/lib/breakdown";
 import { EmojiPicker } from "@/components/breakdown/emoji-picker";
@@ -219,6 +221,20 @@ export function BreakdownChat({
     }
   }
 
+  const [icsBusy, setIcsBusy] = useState(false);
+  async function addToCalendar() {
+    setIcsBusy(true);
+    try {
+      const res = await scheduleViaIcs(taskId);
+      if (res.ok) {
+        downloadIcs(res.ics, res.icsFilename);
+        router.refresh();
+      }
+    } finally {
+      setIcsBusy(false);
+    }
+  }
+
   const totalMin = proposal?.steps.reduce((n, s) => n + (s.estMinutes || 0), 0) ?? 0;
   const busy = streaming || confirmPending;
 
@@ -241,12 +257,14 @@ export function BreakdownChat({
             Download an .ics with each step as a timed event — import into Google,
             Apple, or Outlook. No account needed.
           </p>
-          <a
-            href={`/api/ics/${taskId}`}
-            className="bg-primary text-primary-foreground inline-block rounded-md px-3 py-2 font-medium"
+          <button
+            type="button"
+            onClick={addToCalendar}
+            disabled={icsBusy}
+            className="bg-primary text-primary-foreground inline-block rounded-md px-3 py-2 font-medium disabled:opacity-50"
           >
-            ⬇️ Download calendar (.ics)
-          </a>
+            {icsBusy ? "Preparing…" : "⬇️ Download calendar (.ics)"}
+          </button>
         </div>
 
         {!isGuest && (

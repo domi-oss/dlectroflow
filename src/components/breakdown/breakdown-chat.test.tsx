@@ -30,6 +30,13 @@ vi.mock("@/app/actions/google-schedule", () => ({
   pushStepsToGoogleTasks: vi.fn().mockResolvedValue({ ok: true, scheduled: 0 }),
 }));
 
+const { scheduleViaIcsMock, downloadIcsMock } = vi.hoisted(() => ({
+  scheduleViaIcsMock: vi.fn(),
+  downloadIcsMock: vi.fn(),
+}));
+vi.mock("@/app/actions/ics-schedule", () => ({ scheduleViaIcs: scheduleViaIcsMock }));
+vi.mock("@/lib/download-ics", () => ({ downloadIcs: downloadIcsMock }));
+
 const proposal: Proposal = {
   parentEmoji: "🗂️",
   steps: [

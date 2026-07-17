@@ -29,6 +29,7 @@ export function buildTaskIcs(input: {
   parentEmoji?: string | null;
   steps: IcsStep[];
   start?: Date;
+  fallbackDurationMin?: number;
 }): string {
   const start = input.start ?? nextTopOfHour();
   let cursor = new Date(start);
@@ -54,6 +55,27 @@ export function buildTaskIcs(input: {
     );
     cursor = end;
   });
+  if (input.steps.length === 0 && input.fallbackDurationMin != null) {
+    const dur = Math.max(1, Math.round(input.fallbackDurationMin));
+    const end = new Date(start.getTime() + dur * 60_000);
+    const summary = `${input.parentEmoji ? input.parentEmoji + " " : ""}${input.title}`;
+    lines.push(
+      "BEGIN:VEVENT",
+      `UID:${floating(start)}-0@dlectroflow`,
+      `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").slice(0, 15)}Z`,
+      `DTSTART:${floating(start)}`,
+      `DTEND:${floating(end)}`,
+      `SUMMARY:${esc(summary)}`,
+      "END:VEVENT",
+    );
+  }
   lines.push("END:VCALENDAR");
   return lines.join("\r\n");
+}
+
+/** Download filename for a task's .ics — shared by the ICS route and the
+ *  scheduleViaIcs action so the name is defined in exactly one place. */
+export function icsFilename(title: string): string {
+  const safe = title.replace(/[^a-z0-9]+/gi, "-").slice(0, 40) || "task";
+  return `dlectroflow-${safe}.ics`;
 }

@@ -114,17 +114,25 @@ export async function pushStepsToGoogleTasks(
       scheduled++;
     }
 
-    // Best-effort rewards: the steps are already pushed + committed above, so a
-    // reward failure must not return { ok: false } and prompt a retry (which
-    // would duplicate the Google tasks). Run independently (a logReward failure
-    // must not skip the idempotent awardBadge) + log for observability (Duo !77).
-    const rewardResults = await Promise.allSettled([
-      logReward(workspaceId, RewardType.Scheduled),
-      awardBadge(workspaceId, BadgeKey.FirstSchedule),
-    ]);
-    for (const r of rewardResults) {
-      if (r.status === "rejected") {
-        console.error("[pushStepsToGoogleTasks] best-effort reward failed:", r.reason);
+    // Provider-agnostic marker + reward once (mirrors scheduleViaIcs so ICS and
+    // Google share one "already scheduled" signal). The steps are already pushed
+    // + committed above, so a reward failure must not return { ok: false } and
+    // prompt a retry (which would duplicate the Google tasks). Run independently
+    // via allSettled (a logReward failure must not skip the idempotent
+    // awardBadge) + log for observability (Duo !77).
+    if (task.scheduledAt == null) {
+      await prisma.task.update({
+        where: { id: task.id },
+        data: { scheduledAt: new Date(), scheduledVia: "google" },
+      });
+      const rewardResults = await Promise.allSettled([
+        logReward(workspaceId, RewardType.Scheduled),
+        awardBadge(workspaceId, BadgeKey.FirstSchedule),
+      ]);
+      for (const r of rewardResults) {
+        if (r.status === "rejected") {
+          console.error("[pushStepsToGoogleTasks] best-effort reward failed:", r.reason);
+        }
       }
     }
 
@@ -189,11 +197,13 @@ export async function scheduleSingleTask(
   if (!item) return { ok: false, reason: "error", message: "Item not found" };
 
   // Reward parity with pushStepsToGoogleTasks (#25): a successful schedule earns
-  // Scheduled (+10) and, first ever, the FirstSchedule badge. A task that
-  // already carries a googleTaskId was scheduled before — don't re-award (the
-  // Scheduled points aren't idempotent; awardBadge already is). Captured before
-  // the update below so re-scheduling the same row is a no-op reward-wise.
-  const alreadyScheduled = Boolean(item.task?.googleTaskId);
+  // Scheduled (+10) and, first ever, the FirstSchedule badge. Idempotency is
+  // now keyed on the provider-agnostic `scheduledAt` marker (S0, #29) so ICS and
+  // Google share one "already scheduled" signal — a task scheduled by EITHER
+  // method won't re-award (the Scheduled points aren't idempotent; awardBadge
+  // already is). Captured before the update below so re-scheduling is a no-op
+  // reward-wise.
+  const alreadyScheduled = item.task?.scheduledAt != null;
 
   let taskId = item.taskId;
   if (!taskId) {
@@ -227,7 +237,12 @@ export async function scheduleSingleTask(
 
     await prisma.task.update({
       where: { id: taskId },
-      data: { googleTaskId: created.id, googleTaskListId: list.id },
+      data: {
+        googleTaskId: created.id,
+        googleTaskListId: list.id,
+        // Stamp the provider-agnostic marker on the first schedule (any method).
+        ...(alreadyScheduled ? {} : { scheduledAt: new Date(), scheduledVia: "google" }),
+      },
     });
 
     if (!alreadyScheduled) {

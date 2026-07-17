@@ -7,9 +7,13 @@ const DURATION_PRESETS = [15, 30, 60] as const;
 const MAX_CUSTOM_MINUTES = 480;
 
 export type ScheduleControlProps = {
-  state: "ready_steps" | "needs_duration" | "connect" | "reconnect" | "guest";
+  state: "ready_steps" | "needs_duration" | "connect" | "reconnect" | "ics_ready_steps" | "ics_needs_duration";
   onScheduleSteps?: () => void;
   onScheduleSingle?: (minutes: number) => void;
+  /** ICS "Add to calendar" handler — called with the chosen minutes for a
+   *  stepless task (ics_needs_duration) or with no args for a task with steps
+   *  (ics_ready_steps). */
+  onScheduleIcs?: (minutes?: number) => void;
   /** True while a schedule call for this row is in flight — disables the 📅
    * button/popover Go so a slow request can't be double-submitted. */
   pending?: boolean;
@@ -34,6 +38,7 @@ export function ScheduleControl({
   state,
   onScheduleSteps,
   onScheduleSingle,
+  onScheduleIcs,
   pending,
   variant = "icon",
   label = "Schedule",
@@ -42,6 +47,8 @@ export function ScheduleControl({
   const [custom, setCustom] = useState("");
   const rootRef = useRef<HTMLSpanElement>(null);
   const isMenu = variant === "menu";
+  const isIcs = state === "ics_ready_steps" || state === "ics_needs_duration";
+  const needsDuration = state === "needs_duration" || state === "ics_needs_duration";
 
   useEffect(() => {
     if (!open) return;
@@ -81,27 +88,6 @@ export function ScheduleControl({
     );
   }
 
-  if (state === "guest") {
-    // Guests see the SAME affordance, visibly disabled — scheduling is owner-only
-    // (Google Tasks). Keeps the row layout identical to the owner view, with a
-    // clear "not available in guest mode" cue (grayed-out, cf. #11).
-    return (
-      <button
-        type="button"
-        disabled
-        aria-label="Schedule (not available in guest mode)"
-        title="Scheduling isn't available in guest mode — sign in to schedule"
-        className={
-          isMenu
-            ? "w-full cursor-not-allowed rounded-md px-2.5 py-1 text-left font-medium opacity-50"
-            : "cursor-not-allowed rounded-md px-2.5 py-1 font-medium opacity-50"
-        }
-      >
-        {isMenu ? label : "📅"}
-      </button>
-    );
-  }
-
   const customMinutes = Number(custom);
   const customOutOfRange =
     custom !== "" &&
@@ -111,24 +97,23 @@ export function ScheduleControl({
     if (custom === "" || customOutOfRange) return;
     setOpen(false);
     setCustom("");
-    onScheduleSingle?.(customMinutes);
+    if (isIcs) onScheduleIcs?.(customMinutes);
+    else onScheduleSingle?.(customMinutes);
   };
 
   return (
     <span ref={rootRef} className={isMenu ? "flex flex-col" : "relative"}>
       <button
         type="button"
-        aria-label={isMenu ? undefined : "Schedule"}
-        title={isMenu ? undefined : "Schedule"}
-        aria-haspopup={state === "needs_duration" ? "dialog" : undefined}
-        aria-expanded={state === "needs_duration" ? open : undefined}
+        aria-label={isMenu ? undefined : isIcs ? "Add to calendar (.ics)" : "Schedule"}
+        title={isMenu ? undefined : isIcs ? "Add to calendar (.ics)" : "Schedule"}
+        aria-haspopup={needsDuration ? "dialog" : undefined}
+        aria-expanded={needsDuration ? open : undefined}
         disabled={pending}
         onClick={() => {
-          if (state === "ready_steps") {
-            onScheduleSteps?.();
-          } else {
-            setOpen((o) => !o);
-          }
+          if (state === "ready_steps") onScheduleSteps?.();
+          else if (state === "ics_ready_steps") onScheduleIcs?.();
+          else setOpen((o) => !o); // needs_duration | ics_needs_duration
         }}
         className={
           isMenu
@@ -138,7 +123,7 @@ export function ScheduleControl({
       >
         {isMenu ? label : "📅"}
       </button>
-      {state === "needs_duration" && open && (
+      {needsDuration && open && (
         <span
           className={
             isMenu
@@ -155,7 +140,8 @@ export function ScheduleControl({
                 className="rounded-md px-2.5 py-1 font-medium disabled:opacity-50"
                 onClick={() => {
                   setOpen(false);
-                  onScheduleSingle?.(minutes);
+                  if (isIcs) onScheduleIcs?.(minutes);
+                  else onScheduleSingle?.(minutes);
                 }}
               >
                 {minutes} min
@@ -207,6 +193,7 @@ export function RowActions({
   schedule,
   del,
   menu,
+  scheduled = false,
 }: {
   inline: ReactNode[];
   /** v6: 📥 Move-to icon, first in the end cluster (omitted when not provided). */
@@ -214,6 +201,9 @@ export function RowActions({
   schedule?: ScheduleControlProps | null;
   del?: ReactNode;
   menu: ReactNode[];
+  /** Renders a "Scheduled ✓" indicator when the row's task has a scheduledAt
+   *  marker (any method). */
+  scheduled?: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLSpanElement>(null);
@@ -236,6 +226,11 @@ export function RowActions({
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+      {scheduled && (
+        <span className="text-emerald-600 font-medium" title="Scheduled">
+          Scheduled ✓
+        </span>
+      )}
       {inline}
       <span className="flex-1" />
       {move}

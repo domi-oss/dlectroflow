@@ -20,6 +20,7 @@ function item(overrides: Partial<Item> & { id: string }): Item {
     stepsDone: 0,
     taskStatus: null,
     completedAt: null,
+    scheduledAt: null,
     steps: [],
     ...overrides,
   };

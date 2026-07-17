@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, act, fireEvent, cleanup, within } from "@testing-library/react";
+import { render, screen, act, fireEvent, cleanup, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { InboxView, dragEndToMove } from "@/components/inbox/inbox-view";
 import type { Item } from "@/components/inbox/bucket";
@@ -37,6 +37,13 @@ vi.mock("@/app/actions/google-schedule", () => ({
   pushStepsToGoogleTasks: vi.fn().mockResolvedValue({ ok: true, scheduled: 1, listTitle: "Reclaim" }),
   scheduleSingleTask: vi.fn().mockResolvedValue({ ok: true }),
 }));
+
+const { scheduleViaIcsMock, downloadIcsMock } = vi.hoisted(() => ({
+  scheduleViaIcsMock: vi.fn(),
+  downloadIcsMock: vi.fn(),
+}));
+vi.mock("@/app/actions/ics-schedule", () => ({ scheduleViaIcs: scheduleViaIcsMock }));
+vi.mock("@/lib/download-ics", () => ({ downloadIcs: downloadIcsMock }));
 
 vi.mock("@/lib/notifications", () => ({
   notificationPermission: () => "default",
@@ -95,6 +102,7 @@ function makeItem(overrides: Partial<Item> = {}): Item {
     stepsDone: 0,
     taskStatus: null,
     completedAt: null,
+    scheduledAt: null,
     steps: [],
     ...overrides,
   };
@@ -118,6 +126,11 @@ function makeMultiStep() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  scheduleViaIcsMock.mockResolvedValue({
+    ok: true,
+    ics: "BEGIN:VCALENDAR",
+    icsFilename: "dlectroflow-x.ics",
+  });
 });
 
 afterEach(() => {
@@ -915,7 +928,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     expect(await within(row).findByText(/Reclaim-synced Google Tasks list/i)).toBeInTheDocument();
   });
 
-  it("v6 guest (google={null}): rows show the 📅 control DISABLED (owner-only, guest-locked), not hidden", () => {
+  it("S0 guest (google={null}): rows show an ENABLED 'Add to calendar' control per row (not hidden, not disabled)", () => {
     render(
       <InboxView
         initialItems={[makeMultiStep(), makeItem({ id: "st1", text: "single todo", status: "triaged" })]}
@@ -923,13 +936,16 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
         google={null}
       />,
     );
-    // Layout stays identical to the owner view; scheduling is just disabled.
-    const scheduleButtons = screen.getAllByRole("button", { name: /schedule/i });
-    expect(scheduleButtons.length).toBeGreaterThanOrEqual(2); // one 📅 per row (menus closed)
-    scheduleButtons.forEach((b) => expect(b).toBeDisabled());
+    // S0 (#29): guests now schedule via .ics (no Google needed) — there's no
+    // "Schedule" control at all; every schedulable row exposes an enabled
+    // "Add to calendar" affordance instead of the old guest-locked 📅.
+    expect(screen.queryByRole("button", { name: /^schedule$/i })).toBeNull();
+    const icsButtons = screen.getAllByRole("button", { name: /add to calendar/i });
+    expect(icsButtons.length).toBeGreaterThanOrEqual(2); // one 📅 per row (menus closed)
+    icsButtons.forEach((b) => expect(b).toBeEnabled());
   });
 
-  it("v6 guest: the ▾ dropdown also carries a disabled 'Schedule' entry", async () => {
+  it("S0 guest: the ▾ dropdown also carries an 'Add to calendar' entry (enabled)", async () => {
     const user = userEvent.setup();
     render(
       <InboxView
@@ -940,9 +956,9 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     );
     const row = screen.getByText("single todo").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "All options" }));
-    const scheduleEntries = within(row).getAllByRole("button", { name: /schedule/i });
-    expect(scheduleEntries).toHaveLength(2); // inline 📅 + full-text menu entry, both disabled
-    scheduleEntries.forEach((b) => expect(b).toBeDisabled());
+    const icsEntries = within(row).getAllByRole("button", { name: /add to calendar/i });
+    expect(icsEntries).toHaveLength(2); // inline 📅 + full-text menu mirror
+    icsEntries.forEach((b) => expect(b).toBeEnabled());
   });
 
   it("needsReconnect: rows show the Reconnect link instead of the 📅 button", () => {
@@ -1056,6 +1072,61 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     // copy for the same reason ("Couldn't find your Reclaim-synced...").
     expect(await within(row).findByText(/Available: Personal, Work/)).toBeInTheDocument();
     expect(within(row).queryByText(/Couldn't find your Reclaim-synced/)).not.toBeInTheDocument();
+  });
+});
+
+describe("InboxView — ICS 'Add to calendar' (S0 #29)", () => {
+  it("guest single-task row shows an enabled 'Add to calendar' that schedules via ICS + downloads", async () => {
+    render(
+      <InboxView
+        initialItems={[makeItem({ id: "s1", text: "Call dentist", status: "triaged", taskId: "t-s1", stepsTotal: 0 })]}
+        settings={settings}
+        google={null}
+      />,
+    );
+    const user = userEvent.setup();
+    const btn = screen.getByRole("button", { name: /add to calendar/i });
+    expect(btn).toBeEnabled();
+    await user.click(btn);
+    await user.click(screen.getByRole("button", { name: /^30 min$/i }));
+    await waitFor(() =>
+      expect(scheduleViaIcsMock).toHaveBeenCalledWith("t-s1", { durationMin: 30 }),
+    );
+    expect(downloadIcsMock).toHaveBeenCalledWith("BEGIN:VCALENDAR", "dlectroflow-x.ics");
+  });
+
+  it("owner ▾ menu offers 'Add to calendar (.ics)' as an alternative to Google", async () => {
+    render(
+      <InboxView
+        initialItems={[makeItem({ id: "s1", status: "triaged", taskId: "t-s1", stepsTotal: 0 })]}
+        settings={settings}
+        google={{ configured: true, connected: true, needsReconnect: false }}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "All options" }));
+    expect(screen.getByRole("button", { name: /add to calendar/i })).toBeInTheDocument();
+  });
+
+  it("shows a 'Scheduled ✓' indicator on a row whose task has been scheduled", () => {
+    render(
+      <InboxView
+        initialItems={[makeItem({ id: "s1", status: "triaged", taskId: "t-s1", stepsTotal: 0, scheduledAt: new Date() })]}
+        settings={settings}
+        google={null}
+      />,
+    );
+    expect(screen.getByText(/scheduled ✓/i)).toBeInTheDocument();
+  });
+  it("no 'Scheduled ✓' indicator when scheduledAt is null", () => {
+    render(
+      <InboxView
+        initialItems={[makeItem({ id: "s1", status: "triaged", taskId: "t-s1", stepsTotal: 0 })]}
+        settings={settings}
+        google={null}
+      />,
+    );
+    expect(screen.queryByText(/scheduled ✓/i)).toBeNull();
   });
 });
 

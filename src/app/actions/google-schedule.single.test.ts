@@ -170,6 +170,29 @@ describe("scheduleSingleTask", () => {
     );
   });
 
+  it("sets the provider-agnostic scheduled marker (scheduledVia='google') on success", async () => {
+    workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
+    configuredMock.mockReturnValue(true);
+    tokenMock.mockResolvedValue("tok");
+    itemFindFirstMock.mockResolvedValue({
+      id: "item-1",
+      text: "Call the dentist",
+      taskId: "task-1",
+      task: { id: "task-1", scheduledAt: null },
+    });
+    findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
+    createGoogleTaskMock.mockResolvedValue({ id: "gtask-9" });
+
+    await scheduleSingleTask("item-1", 30);
+
+    expect(taskUpdateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "task-1" },
+        data: expect.objectContaining({ scheduledVia: "google", googleTaskId: "gtask-9" }),
+      }),
+    );
+  });
+
   // ── reward parity with the steps path (#25) ──────────────────────────────
   it("awards Scheduled (+10) and the FirstSchedule badge on a successful single-task schedule", async () => {
     workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
@@ -208,15 +231,17 @@ describe("scheduleSingleTask", () => {
     expect(awardBadge).toHaveBeenCalledWith(OWNER_WORKSPACE_ID, BadgeKey.FirstSchedule);
   });
 
-  it("does not re-award when the task was already scheduled (idempotency — task has a googleTaskId)", async () => {
+  it("does not re-award when the task was already scheduled (idempotency — task has a scheduledAt marker)", async () => {
     workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
+    // S0 (#29): idempotency moved from googleTaskId → the provider-agnostic
+    // scheduledAt marker, so a task scheduled via ICS or Google won't re-award.
     itemFindFirstMock.mockResolvedValue({
       id: "item-1",
       text: "Call the dentist",
       taskId: "task-1",
-      task: { id: "task-1", title: "Call the dentist", googleTaskId: "gtask-old" },
+      task: { id: "task-1", title: "Call the dentist", scheduledAt: new Date("2026-07-17T10:00:00Z") },
     });
     findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
     createGoogleTaskMock.mockResolvedValue({ id: "gtask-9" });
