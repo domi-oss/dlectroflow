@@ -87,17 +87,16 @@ describe("session cookie", () => {
   });
 });
 
-// Item 7a (#21 P5 batch B): owner session TTL shortened from 30d to 7d to limit
-// the blast radius of a stolen stateless owner JWT (no server-side revocation yet).
+// Owner session TTL kept at 30 days (owner decision on !76 — declined the 7-day
+// shorten). Both the JWT exp and the owner-cookie maxAge derive from this const.
 describe("owner session TTL", () => {
-  it("is 7 days", () => {
-    expect(OWNER_SESSION_TTL_SECONDS).toBe(60 * 60 * 24 * 7);
+  it("is 30 days", () => {
+    expect(OWNER_SESSION_TTL_SECONDS).toBe(60 * 60 * 24 * 30);
   });
 
-  it("stamps exp exactly OWNER_SESSION_TTL_SECONDS after iat (not 30d)", async () => {
+  it("stamps exp exactly OWNER_SESSION_TTL_SECONDS after iat", async () => {
     const token = await signOwnerSession({ kind: "owner", sub: "abc" }, SECRET);
     const { iat, exp } = decodeJwt(token);
     expect(exp! - iat!).toBe(OWNER_SESSION_TTL_SECONDS);
-    expect(exp! - iat!).not.toBe(60 * 60 * 24 * 30);
   });
 });

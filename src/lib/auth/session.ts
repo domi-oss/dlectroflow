@@ -20,12 +20,13 @@ export type SessionPayload =
 export const SESSION_ALG = "HS256";
 
 /**
- * Owner session lifetime, in seconds. Shortened from 30d to 7d (issue #21 P5
- * batch B) to bound the blast radius of a stolen stateless owner JWT — there is
- * no server-side revocation yet (follow-up). Guests are signed separately in
- * proxy.ts with their own GUEST_SANDBOX_TTL_HOURS.
+ * Owner session lifetime, in seconds. Kept at 30 days (owner decision on !76 —
+ * declined the 7-day shorten; no server-side revocation yet). The JWT `exp` and
+ * the owner-cookie `maxAge` both derive from this single const so they can't
+ * drift (Duo CWE-613). Guests are signed separately in proxy.ts with their own
+ * GUEST_SANDBOX_TTL_HOURS.
  */
-export const OWNER_SESSION_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
+export const OWNER_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
 
 function key(secret: string): Uint8Array {
   return new TextEncoder().encode(secret);
