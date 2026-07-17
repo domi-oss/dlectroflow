@@ -166,6 +166,19 @@ export function TaskSteps({
                   {s.text}
                 </span>
               )}
+              {!editingTitle && (
+                <button
+                  type="button"
+                  aria-label={`Edit ${s.text}`}
+                  onClick={() => {
+                    setEditEstId(null);
+                    setEditTitleId(s.id);
+                  }}
+                  className="text-muted-foreground hover:text-foreground shrink-0 px-1 text-xs"
+                >
+                  ✏️
+                </button>
+              )}
               {editingEst ? (
                 <StepEstimateInput
                   initial={s.estMinutes}
@@ -183,7 +196,6 @@ export function TaskSteps({
                 inline, everything (state-dependent) in the 🔽 dropdown. */}
             <RowActions
               inline={[
-                <CompleteButton key="complete" voice={voice} onClick={() => complete(s.id)} />,
                 <Link
                   key="focus"
                   href={`/focus/${s.id}`}
@@ -191,6 +203,7 @@ export function TaskSteps({
                 >
                   {focusLabel}
                 </Link>,
+                <CompleteButton key="complete" voice={voice} onClick={() => complete(s.id)} />,
               ]}
               menu={[
                 <Link

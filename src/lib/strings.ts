@@ -46,11 +46,11 @@ export const STRINGS = {
   // ── Step rows (TaskSteps working view, #25) ────────────────────────────────
   // Voice-aware labels for the redesigned step rows. Plain = literal; playful =
   // food-themed to match the rest of the row (🍽️/🍴 = at the table, focusing).
-  "step.startFocus":       { plain: "Start Focus",         playful: "🍽️ Start Focus" },
-  "step.resumeFocus":      { plain: "Resume Focus",        playful: "🍴 Resume Focus" },
+  "step.startFocus":       { plain: "▶ Start Focus",       playful: "▶ Start Focus" },
+  "step.resumeFocus":      { plain: "▶ Resume Focus",      playful: "▶ Resume Focus" },
   "step.startFocusTimer":  { plain: "Start focus timer",   playful: "🍽️ Start focus timer" },
   "step.resumeFocusTimer": { plain: "Resume focus timer",  playful: "🍴 Resume focus timer" },
-  "step.complete":         { plain: "Complete Step",       playful: "✅ Complete Step" },
+  "step.complete":         { plain: "Complete step",       playful: "✅ Complete step" },
   "step.editEstimate":     { plain: "Edit time estimate",  playful: "⏱️ Edit time estimate" },
   "step.editTitle":        { plain: "Edit step title",     playful: "✏️ Edit step title" },
   "step.sendToReview":     { plain: "Send back to review", playful: "🥫 Send back to review" },

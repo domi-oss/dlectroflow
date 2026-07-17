@@ -598,7 +598,21 @@ export function InboxView({
                     return (
                       <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", item.id === activeDragId && "opacity-40")}>
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
-                        <div className="flex items-start gap-3">
+                        {/* Tapping anywhere on the title line toggles the inline
+                            step list (a step-bearing row); the title button keeps
+                            aria-expanded for keyboard/AT, and the pencil stops
+                            propagation so editing doesn't also toggle. */}
+                        <div
+                          className={cn(
+                            "flex items-start gap-3",
+                            !awaitingBreakdown && editingId !== item.id && "cursor-pointer",
+                          )}
+                          onClick={
+                            !awaitingBreakdown && editingId !== item.id
+                              ? () => setExpandedId(expanded ? null : item.id)
+                              : undefined
+                          }
+                        >
                           <DragGrip id={item.id} label={item.text} />
                           {editingId === item.id ? (
                             titleEditor(item)
@@ -611,12 +625,15 @@ export function InboxView({
                               <button
                                 type="button"
                                 aria-expanded={expanded}
-                                onClick={() => setExpandedId(expanded ? null : item.id)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExpandedId(expanded ? null : item.id);
+                                }}
                                 className="break-words text-left hover:underline"
                               >
                                 {item.text}
                               </button>{" "}
-                              {pencil(item)}
+                              <span onClick={(e) => e.stopPropagation()}>{pencil(item)}</span>
                             </span>
                           )}
                           {editingId !== item.id && !awaitingBreakdown && (
@@ -647,7 +664,7 @@ export function InboxView({
                                     onClick={() => focusNextStep(item)}
                                     className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
                                   >
-                                    ▶ Focus
+                                    ▶ Start Focus
                                   </button>,
                                   <CompleteButton key="complete" voice={voice} onClick={() => run(() => completeItem(item.id))} />,
                                 ]
@@ -796,7 +813,7 @@ export function InboxView({
                               onClick={() => focusOnItem(item.id)}
                               className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
                             >
-                              ▶ Focus
+                              ▶ Start Focus
                             </button>,
                             <CompleteButton key="complete" voice={voice} onClick={() => run(() => completeItem(item.id))} />,
                           ]}

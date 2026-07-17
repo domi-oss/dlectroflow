@@ -47,7 +47,7 @@ describe("TaskSteps — row layout mirrors the inbox ItemRow", () => {
     // Shared CompleteButton (plain voice → "Complete") on each row.
     expect(screen.getAllByRole("button", { name: "Complete" })).toHaveLength(2);
     // Inline Start Focus CTA on each row.
-    expect(screen.getAllByText("Start Focus")).toHaveLength(2);
+    expect(screen.getAllByText("▶ Start Focus")).toHaveLength(2);
     // 🔽 dropdown trigger on each row.
     expect(screen.getAllByRole("button", { name: "All options" })).toHaveLength(2);
     // The old ↗ send-to-review icon is gone.
@@ -59,7 +59,7 @@ describe("TaskSteps — row layout mirrors the inbox ItemRow", () => {
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
     await openMenu(user);
     expect(screen.getByText("Start focus timer")).toBeInTheDocument();
-    expect(screen.getByText("Complete Step")).toBeInTheDocument();
+    expect(screen.getByText("Complete step")).toBeInTheDocument();
     expect(screen.getByText("Edit time estimate")).toBeInTheDocument();
     expect(screen.getByText("Edit step title")).toBeInTheDocument();
     expect(screen.getByText("Send back to review")).toBeInTheDocument();
@@ -68,8 +68,8 @@ describe("TaskSteps — row layout mirrors the inbox ItemRow", () => {
   it("uses Resume labels for a resumable step (inline + dropdown)", async () => {
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={[{ ...baseStep(), resumable: true }]} />);
-    expect(screen.getByText("Resume Focus")).toBeInTheDocument();
-    expect(screen.queryByText("Start Focus")).not.toBeInTheDocument();
+    expect(screen.getByText("▶ Resume Focus")).toBeInTheDocument();
+    expect(screen.queryByText("▶ Start Focus")).not.toBeInTheDocument();
     await openMenu(user);
     expect(screen.getByText("Resume focus timer")).toBeInTheDocument();
     expect(screen.queryByText("Start focus timer")).not.toBeInTheDocument();
@@ -77,7 +77,7 @@ describe("TaskSteps — row layout mirrors the inbox ItemRow", () => {
 
   it("Start Focus points at /focus/[stepId]", () => {
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
-    expect(screen.getByText("Start Focus").closest("a")).toHaveAttribute("href", "/focus/s1");
+    expect(screen.getByText("▶ Start Focus").closest("a")).toHaveAttribute("href", "/focus/s1");
   });
 });
 
@@ -88,7 +88,7 @@ describe("TaskSteps — done steps", () => {
     expect(title.className).toContain("line-through");
     expect(screen.getByText("✓")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Complete" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Start Focus")).not.toBeInTheDocument();
+    expect(screen.queryByText("▶ Start Focus")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "All options" })).not.toBeInTheDocument();
   });
 });
@@ -101,11 +101,11 @@ describe("TaskSteps — complete step", () => {
     expect(completeStep).toHaveBeenCalledWith("s1");
   });
 
-  it("the dropdown Complete Step entry calls completeStep", async () => {
+  it("the dropdown Complete step entry calls completeStep", async () => {
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
     await openMenu(user);
-    await user.click(screen.getByText("Complete Step"));
+    await user.click(screen.getByText("Complete step"));
     expect(completeStep).toHaveBeenCalledWith("s1");
   });
 });
@@ -160,6 +160,13 @@ describe("TaskSteps — inline editors", () => {
     await user.clear(input);
     await user.type(input, "Renamed step{Enter}");
     expect(renameStep).toHaveBeenCalledWith("s1", "Renamed step");
+  });
+
+  it("the ✏️ pencil beside the title opens the inline rename editor (no menu needed)", async () => {
+    const user = userEvent.setup();
+    render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
+    await user.click(screen.getByRole("button", { name: "Edit First" }));
+    expect(screen.getByLabelText("Edit step title")).toBeInTheDocument();
   });
 
   it("Edit step title Escape cancels without saving", async () => {

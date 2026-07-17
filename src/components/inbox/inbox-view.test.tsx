@@ -482,14 +482,25 @@ describe("InboxView — multi-step ▾ menu: view list + focus (v6)", () => {
   });
 });
 
+describe("InboxView — tap multi-step row body to expand (v6)", () => {
+  it("tapping a non-button part of the row (the step-count meta) expands the inline step list", async () => {
+    const user = userEvent.setup();
+    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} />);
+    const row = screen.getByText("plan trip").closest("li")!;
+    expect(within(row).queryByTestId("inline-steps")).not.toBeInTheDocument();
+    await user.click(within(row).getByText(/steps ·/));
+    expect(within(row).getByTestId("inline-steps")).toBeInTheDocument();
+  });
+});
+
 describe("InboxView — multi-step row primary CTA (v6 fix)", () => {
   it("a multi-step row with steps shows ▶ Focus + Complete; ▶ Focus opens the next unfinished step's timer", async () => {
     const user = userEvent.setup();
     render(<InboxView initialItems={[makeMultiStep()]} settings={settings} />);
     const row = screen.getByText("plan trip").closest("li")!;
-    expect(within(row).getByRole("button", { name: "▶ Focus" })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "▶ Start Focus" })).toBeInTheDocument();
     expect(within(row).getByRole("button", { name: "Complete" })).toBeInTheDocument();
-    await user.click(within(row).getByRole("button", { name: "▶ Focus" }));
+    await user.click(within(row).getByRole("button", { name: "▶ Start Focus" }));
     // makeMultiStep: s1 done, s2 is the first unfinished step.
     expect(push).toHaveBeenCalledWith("/focus/s2");
   });
@@ -505,7 +516,7 @@ describe("InboxView — multi-step row primary CTA (v6 fix)", () => {
     render(<InboxView initialItems={[awaiting]} settings={settings} />);
     const row = screen.getByText("needs a plan").closest("li")!;
     expect(within(row).getByRole("button", { name: "Break into steps now?" })).toBeInTheDocument();
-    expect(within(row).queryByRole("button", { name: "▶ Focus" })).not.toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: "▶ Start Focus" })).not.toBeInTheDocument();
   });
 });
 
@@ -702,7 +713,7 @@ describe("InboxView — single to-do ▶ Focus", () => {
       />,
     );
     const row = screen.getByText("focusable todo").closest("li")!;
-    await user.click(within(row).getByRole("button", { name: "▶ Focus" }));
+    await user.click(within(row).getByRole("button", { name: "▶ Start Focus" }));
     expect(ensureFocusStep).toHaveBeenCalledWith("s1");
     expect(push).toHaveBeenCalledWith("/focus/step-7");
   });
@@ -718,7 +729,7 @@ describe("InboxView — single to-do ▶ Focus", () => {
       />,
     );
     const row = screen.getByText("focusable todo").closest("li")!;
-    await user.click(within(row).getByRole("button", { name: "▶ Focus" }));
+    await user.click(within(row).getByRole("button", { name: "▶ Start Focus" }));
     expect(push).not.toHaveBeenCalled();
   });
 
