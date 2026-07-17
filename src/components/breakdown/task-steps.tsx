@@ -163,21 +163,19 @@ export function TaskSteps({
               ) : (
                 <span className="min-w-0 flex-1 break-words">
                   {s.subtaskEmoji ? `${s.subtaskEmoji} ` : ""}
-                  {s.text}
+                  {s.text}{" "}
+                  <button
+                    type="button"
+                    aria-label={`Edit ${s.text}`}
+                    onClick={() => {
+                      setEditEstId(null);
+                      setEditTitleId(s.id);
+                    }}
+                    className="text-muted-foreground hover:text-foreground shrink-0 px-1 text-xs"
+                  >
+                    ✏️
+                  </button>
                 </span>
-              )}
-              {!editingTitle && (
-                <button
-                  type="button"
-                  aria-label={`Edit ${s.text}`}
-                  onClick={() => {
-                    setEditEstId(null);
-                    setEditTitleId(s.id);
-                  }}
-                  className="text-muted-foreground hover:text-foreground shrink-0 px-1 text-xs"
-                >
-                  ✏️
-                </button>
               )}
               {editingEst ? (
                 <StepEstimateInput
