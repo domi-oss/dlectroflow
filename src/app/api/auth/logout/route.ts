@@ -9,11 +9,23 @@ export const runtime = "nodejs";
 // prefetch / <img src> could force a sign-out. SameSite=lax on the owner cookie
 // already blocks the cookie on cross-site requests; requiring POST closes the
 // same-site GET/prefetch vector too. The owner JWT is stateless — deleting the
-// cookie is the client-side sign-out; server-side revocation and an explicit
-// Origin/same-site check on this POST are follow-ups (see #21).
+// cookie is the client-side sign-out; server-side revocation remains a follow-up
+// (see #21).
 export async function POST(req: Request): Promise<Response> {
+  const allowedOrigin = requestOrigin(req);
+
+  // Defense-in-depth (CWE-352): SameSite=lax does not block *same-site* POST, so a
+  // page on the same eTLD+1 (e.g. a subdomain) could POST here to force a sign-out.
+  // Reject when the Origin header is present but doesn't match our origin. A missing
+  // Origin is allowed (non-browser clients); POST-only + SameSite=lax still bound
+  // the cross-site case.
+  const origin = req.headers.get("origin");
+  if (origin && origin !== allowedOrigin) {
+    return new NextResponse("Forbidden", { status: 403 });
+  }
+
   // 303 See Other so the browser follows up with a GET to /inbox after the POST.
-  const res = NextResponse.redirect(`${requestOrigin(req)}/inbox`, 303);
+  const res = NextResponse.redirect(`${allowedOrigin}/inbox`, 303);
   res.cookies.delete(OWNER_COOKIE);
   return res;
 }

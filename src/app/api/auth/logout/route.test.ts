@@ -41,4 +41,46 @@ describe("owner logout route", () => {
     expect(setCookie).toContain(`${OWNER_COOKIE}=`);
     expect(setCookie).toMatch(/Max-Age=0|Expires=Thu, 01 Jan 1970/i);
   });
+
+  // Defense-in-depth (CWE-352): SameSite=lax does not block *same-site* POST, so a
+  // page on the same eTLD+1 (e.g. a subdomain) could POST here to force a sign-out.
+  // Reject when an Origin header is present but does not match our origin.
+  it("rejects a cross-origin POST with 403 and does NOT clear the cookie", async () => {
+    const res = (await logout.POST(
+      new Request("https://dlectroflow.dlectronique.dev/api/auth/logout", {
+        method: "POST",
+        headers: { origin: "https://evil.example.com" },
+      }),
+    )) as NextResponse;
+
+    expect(res.status).toBe(403);
+    // No sign-out happened — no Set-Cookie on the rejected request.
+    expect(res.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("allows a same-origin POST (matching Origin header) and clears the cookie", async () => {
+    const res = (await logout.POST(
+      new Request("https://dlectroflow.dlectronique.dev/api/auth/logout", {
+        method: "POST",
+        headers: { origin: "https://dlectroflow.dlectronique.dev" },
+      }),
+    )) as NextResponse;
+
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe(
+      "https://dlectroflow.dlectronique.dev/inbox",
+    );
+    expect(res.cookies.get(OWNER_COOKIE)?.value).toBe("");
+  });
+
+  it("allows a POST with no Origin header (non-browser client)", async () => {
+    const res = (await logout.POST(
+      new Request("https://dlectroflow.dlectronique.dev/api/auth/logout", {
+        method: "POST",
+      }),
+    )) as NextResponse;
+
+    expect(res.status).toBe(303);
+    expect(res.cookies.get(OWNER_COOKIE)?.value).toBe("");
+  });
 });
