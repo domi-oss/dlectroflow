@@ -262,4 +262,28 @@ describe("scheduleSingleTask", () => {
     // regardless of the Google failure.
     expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
   });
+
+  it("still returns ok when a reward call fails — reward errors must not fail scheduling (Duo !77)", async () => {
+    workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
+    configuredMock.mockReturnValue(true);
+    tokenMock.mockResolvedValue("tok");
+    itemFindFirstMock.mockResolvedValue({
+      id: "item-1",
+      text: "Call the dentist",
+      taskId: "task-1",
+      task: { id: "task-1", title: "Call the dentist", googleTaskId: null },
+    });
+    findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
+    createGoogleTaskMock.mockResolvedValue({ id: "gtask-9" });
+    // The Google task + task.update have already committed by the time rewards run;
+    // a reward failure must NOT return { ok: false } (a retry would duplicate the
+    // Google task). The reward calls are isolated in their own try/catch.
+    vi.mocked(logReward).mockRejectedValueOnce(new Error("reward store down"));
+
+    const res = await scheduleSingleTask("item-1", 30);
+
+    expect(res).toEqual({ ok: true });
+    expect(taskUpdateMock).toHaveBeenCalled();
+    expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
+  });
 });

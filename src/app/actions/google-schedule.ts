@@ -114,8 +114,15 @@ export async function pushStepsToGoogleTasks(
       scheduled++;
     }
 
-    await logReward(workspaceId, RewardType.Scheduled);
-    await awardBadge(workspaceId, BadgeKey.FirstSchedule);
+    // Best-effort rewards: the steps are already pushed + committed above, so a
+    // reward failure must not return { ok: false } and prompt a retry (which
+    // would duplicate the Google tasks). Isolate them (Duo !77).
+    try {
+      await logReward(workspaceId, RewardType.Scheduled);
+      await awardBadge(workspaceId, BadgeKey.FirstSchedule);
+    } catch {
+      // scheduling already succeeded
+    }
 
     revalidatePath(`/tasks/${taskId}`);
     return { ok: true, scheduled, listTitle: list.title };
@@ -220,8 +227,16 @@ export async function scheduleSingleTask(
     });
 
     if (!alreadyScheduled) {
-      await logReward(workspaceId, RewardType.Scheduled);
-      await awardBadge(workspaceId, BadgeKey.FirstSchedule);
+      // A reward-system failure must NOT surface as a scheduling failure: the
+      // Google task + task.update have already committed here, so returning
+      // { ok: false } would prompt a user retry and create a duplicate Google
+      // task. Isolate the reward calls so they degrade gracefully (Duo !77).
+      try {
+        await logReward(workspaceId, RewardType.Scheduled);
+        await awardBadge(workspaceId, BadgeKey.FirstSchedule);
+      } catch {
+        // best-effort rewards; scheduling already succeeded
+      }
     }
 
     revalidatePath("/inbox");
