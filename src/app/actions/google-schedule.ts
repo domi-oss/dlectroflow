@@ -114,8 +114,19 @@ export async function pushStepsToGoogleTasks(
       scheduled++;
     }
 
-    await logReward(workspaceId, RewardType.Scheduled);
-    await awardBadge(workspaceId, BadgeKey.FirstSchedule);
+    // Best-effort rewards: the steps are already pushed + committed above, so a
+    // reward failure must not return { ok: false } and prompt a retry (which
+    // would duplicate the Google tasks). Run independently (a logReward failure
+    // must not skip the idempotent awardBadge) + log for observability (Duo !77).
+    const rewardResults = await Promise.allSettled([
+      logReward(workspaceId, RewardType.Scheduled),
+      awardBadge(workspaceId, BadgeKey.FirstSchedule),
+    ]);
+    for (const r of rewardResults) {
+      if (r.status === "rejected") {
+        console.error("[pushStepsToGoogleTasks] best-effort reward failed:", r.reason);
+      }
+    }
 
     revalidatePath(`/tasks/${taskId}`);
     return { ok: true, scheduled, listTitle: list.title };
@@ -177,6 +188,13 @@ export async function scheduleSingleTask(
   });
   if (!item) return { ok: false, reason: "error", message: "Item not found" };
 
+  // Reward parity with pushStepsToGoogleTasks (#25): a successful schedule earns
+  // Scheduled (+10) and, first ever, the FirstSchedule badge. A task that
+  // already carries a googleTaskId was scheduled before — don't re-award (the
+  // Scheduled points aren't idempotent; awardBadge already is). Captured before
+  // the update below so re-scheduling the same row is a no-op reward-wise.
+  const alreadyScheduled = Boolean(item.task?.googleTaskId);
+
   let taskId = item.taskId;
   if (!taskId) {
     // Atomic lazy-create (Duo review): the Task insert and the item link must
@@ -211,6 +229,22 @@ export async function scheduleSingleTask(
       where: { id: taskId },
       data: { googleTaskId: created.id, googleTaskListId: list.id },
     });
+
+    if (!alreadyScheduled) {
+      // Best-effort rewards: the Google task + task.update have already committed,
+      // so a reward failure must NOT return { ok: false } (a retry would duplicate
+      // the Google task). Run independently (a logReward failure must not skip the
+      // idempotent awardBadge) + log for observability (Duo !77).
+      const rewardResults = await Promise.allSettled([
+        logReward(workspaceId, RewardType.Scheduled),
+        awardBadge(workspaceId, BadgeKey.FirstSchedule),
+      ]);
+      for (const r of rewardResults) {
+        if (r.status === "rejected") {
+          console.error("[scheduleSingleTask] best-effort reward failed:", r.reason);
+        }
+      }
+    }
 
     revalidatePath("/inbox");
     return { ok: true };
