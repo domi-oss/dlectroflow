@@ -243,3 +243,39 @@ export async function markRollupEmailed(workspaceId: string, date: string): Prom
     data: { emailedAt: new Date() },
   });
 }
+
+/**
+ * Atomically claim today's once-per-day round-up email (#18).
+ *
+ * The delivery path is client-triggered (it fires when the owner opens the
+ * dashboard), so two triggers can overlap. A check-then-act guard — read
+ * `emailedAt`, then send, then write it — lets both callers pass the check
+ * before either records the send, so the owner gets the email twice.
+ *
+ * Instead, stamp `emailedAt` in a single conditional UPDATE that only touches
+ * the row while it is still unclaimed (`emailedAt IS NULL`). Postgres serialises
+ * concurrent writes to the same row, so exactly one caller's UPDATE affects a
+ * row (`count === 1`) and wins the right to send; every other overlapping caller
+ * sees the row already claimed and gets `count === 0`. Send the email only when
+ * this returns true.
+ */
+export async function claimRollupEmail(workspaceId: string, date: string): Promise<boolean> {
+  const { count } = await prisma.dayRollup.updateMany({
+    where: { workspaceId, date, emailedAt: null },
+    data: { emailedAt: new Date() },
+  });
+  return count === 1;
+}
+
+/**
+ * Release a claim taken by {@link claimRollupEmail} when the send failed, so a
+ * later trigger can re-claim and retry. Only the caller that won the claim ever
+ * calls this, and no other caller can have claimed the day in the meantime, so
+ * clearing `emailedAt` here can't stomp another delivery.
+ */
+export async function releaseRollupEmailClaim(workspaceId: string, date: string): Promise<void> {
+  await prisma.dayRollup.updateMany({
+    where: { workspaceId, date },
+    data: { emailedAt: null },
+  });
+}
