@@ -224,6 +224,9 @@ describe("scheduleSingleTask", () => {
     const res = await scheduleSingleTask("item-1", 30);
 
     expect(res).toEqual({ ok: true });
+    // Re-scheduling still performs the Google push + update — only the reward is skipped.
+    expect(createGoogleTaskMock).toHaveBeenCalled();
+    expect(taskUpdateMock).toHaveBeenCalled();
     expect(logReward).not.toHaveBeenCalled();
     expect(awardBadge).not.toHaveBeenCalled();
   });
@@ -283,6 +286,8 @@ describe("scheduleSingleTask", () => {
     const res = await scheduleSingleTask("item-1", 30);
 
     expect(res).toEqual({ ok: true });
+    // allSettled: a logReward failure must NOT skip the idempotent awardBadge.
+    expect(awardBadge).toHaveBeenCalledWith(OWNER_WORKSPACE_ID, BadgeKey.FirstSchedule);
     expect(taskUpdateMock).toHaveBeenCalled();
     expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
   });

@@ -116,12 +116,16 @@ export async function pushStepsToGoogleTasks(
 
     // Best-effort rewards: the steps are already pushed + committed above, so a
     // reward failure must not return { ok: false } and prompt a retry (which
-    // would duplicate the Google tasks). Isolate them (Duo !77).
-    try {
-      await logReward(workspaceId, RewardType.Scheduled);
-      await awardBadge(workspaceId, BadgeKey.FirstSchedule);
-    } catch {
-      // scheduling already succeeded
+    // would duplicate the Google tasks). Run independently (a logReward failure
+    // must not skip the idempotent awardBadge) + log for observability (Duo !77).
+    const rewardResults = await Promise.allSettled([
+      logReward(workspaceId, RewardType.Scheduled),
+      awardBadge(workspaceId, BadgeKey.FirstSchedule),
+    ]);
+    for (const r of rewardResults) {
+      if (r.status === "rejected") {
+        console.error("[pushStepsToGoogleTasks] best-effort reward failed:", r.reason);
+      }
     }
 
     revalidatePath(`/tasks/${taskId}`);
@@ -227,15 +231,18 @@ export async function scheduleSingleTask(
     });
 
     if (!alreadyScheduled) {
-      // A reward-system failure must NOT surface as a scheduling failure: the
-      // Google task + task.update have already committed here, so returning
-      // { ok: false } would prompt a user retry and create a duplicate Google
-      // task. Isolate the reward calls so they degrade gracefully (Duo !77).
-      try {
-        await logReward(workspaceId, RewardType.Scheduled);
-        await awardBadge(workspaceId, BadgeKey.FirstSchedule);
-      } catch {
-        // best-effort rewards; scheduling already succeeded
+      // Best-effort rewards: the Google task + task.update have already committed,
+      // so a reward failure must NOT return { ok: false } (a retry would duplicate
+      // the Google task). Run independently (a logReward failure must not skip the
+      // idempotent awardBadge) + log for observability (Duo !77).
+      const rewardResults = await Promise.allSettled([
+        logReward(workspaceId, RewardType.Scheduled),
+        awardBadge(workspaceId, BadgeKey.FirstSchedule),
+      ]);
+      for (const r of rewardResults) {
+        if (r.status === "rejected") {
+          console.error("[scheduleSingleTask] best-effort reward failed:", r.reason);
+        }
       }
     }
 
