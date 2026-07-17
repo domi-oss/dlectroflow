@@ -5,6 +5,8 @@ import { getSettings } from "@/lib/db";
 import {
   generateTodayRollup,
   markRollupEmailed,
+  claimRollupEmail,
+  releaseRollupEmailClaim,
   type Rollup,
 } from "@/lib/rollup";
 import {
@@ -43,29 +45,47 @@ export async function triggerRollup(opts?: {
     settings.roundupEmailEnabled &&
     (opts?.sendEmail ?? true);
 
+  // Build + send the email; shared by the manual and auto paths so the
+  // recipient and content stay identical.
+  const deliver = () =>
+    sendRoundupEmail(
+      settings.roundupEmail,
+      "🌇 Your dlectroflow day, wrapped",
+      roundupEmailHtml({
+        narrative: rollup.narrative,
+        stepsDone: rollup.stepsDone,
+        focusMin: rollup.focusMin,
+        sessions: rollup.sessions,
+        points: rollup.points,
+        streakDay: rollup.streakDay,
+        spark: rollup.spark,
+      }),
+    );
+
   let email: TriggerResult["email"] = { attempted: false };
   if (wantsEmail) {
     if (!emailConfigured()) {
       email = { attempted: true, ok: false, reason: "disabled" };
-    } else if (!force && rollup.emailedAt) {
-      // auto-path already sent today
-      email = { attempted: false };
-    } else {
-      const result = await sendRoundupEmail(
-        settings.roundupEmail,
-        "🌇 Your dlectroflow day, wrapped",
-        roundupEmailHtml({
-          narrative: rollup.narrative,
-          stepsDone: rollup.stepsDone,
-          focusMin: rollup.focusMin,
-          sessions: rollup.sessions,
-          points: rollup.points,
-          streakDay: rollup.streakDay,
-          spark: rollup.spark,
-        }),
-      );
+    } else if (force) {
+      // Manual "Trigger now" demo override: always (re)send, bypassing the
+      // once-per-day guard so the button can be re-demoed on stage.
+      const result = await deliver();
       if (result.ok) await markRollupEmailed(workspaceId, rollup.date);
       email = { attempted: true, ok: result.ok, reason: result.ok ? undefined : result.reason };
+    } else {
+      // Auto/client-triggered path: atomically claim the once-per-day send so
+      // two overlapping triggers can't both email the owner (#18). Only the
+      // caller that wins the claim sends; the rest skip silently. If the send
+      // fails, release the claim so a later trigger can retry.
+      const claimed = await claimRollupEmail(workspaceId, rollup.date);
+      if (!claimed) {
+        // Already sent (or being sent) today by a concurrent trigger.
+        email = { attempted: false };
+      } else {
+        const result = await deliver();
+        if (!result.ok) await releaseRollupEmailClaim(workspaceId, rollup.date);
+        email = { attempted: true, ok: result.ok, reason: result.ok ? undefined : result.reason };
+      }
     }
   }
 
