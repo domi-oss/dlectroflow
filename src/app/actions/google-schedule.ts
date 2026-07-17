@@ -194,6 +194,10 @@ export async function scheduleSingleTask(
       await tx.brainDumpItem.update({ where: { id: item.id }, data: { taskId: task.id } });
       return task.id;
     });
+    // Invalidate the cache now that the item has a linked Task, regardless of
+    // whether the Google Tasks push below succeeds — a later failure must not
+    // leave the inbox serving stale data for the new task row (Duo review).
+    revalidatePath("/inbox");
   }
 
   try {

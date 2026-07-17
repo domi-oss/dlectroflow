@@ -168,4 +168,20 @@ describe("scheduleSingleTask", () => {
       }),
     );
   });
+
+  it("revalidates /inbox after the lazy Task-create even when the Google push fails (Duo review)", async () => {
+    workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
+    configuredMock.mockReturnValue(true);
+    tokenMock.mockResolvedValue("tok");
+    itemFindFirstMock.mockResolvedValue({ id: "item-3", text: "Water the plants", taskId: null, task: null });
+    taskCreateMock.mockResolvedValue({ id: "task-3" });
+    findReclaimListMock.mockResolvedValue(null); // Google push fails after the lazy-create
+
+    const res = await scheduleSingleTask("item-3", 15);
+
+    expect(res).toEqual({ ok: false, reason: "no_reclaim_list" });
+    // The item is now linked to a new Task, so the inbox cache MUST be invalidated
+    // regardless of the Google failure.
+    expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
+  });
 });
