@@ -154,6 +154,15 @@ describe("RowActions", () => {
     expect(screen.getByText(/1.*480/)).toBeInTheDocument();
   });
 
+  it("clears the custom duration input when the popover is dismissed + reopened (Duo review)", () => {
+    render(<RowActions inline={[]} menu={[]} schedule={{ state: "needs_duration", onScheduleSingle: vi.fn() }} />);
+    fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
+    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "99" } });
+    fireEvent.keyDown(document, { key: "Escape" }); // dismiss
+    fireEvent.click(screen.getByRole("button", { name: /schedule/i })); // reopen
+    expect(screen.getByRole("spinbutton")).toHaveValue(null);
+  });
+
   it("reconnect state renders the OAuth link, not a button", () => {
     render(<RowActions inline={[]} menu={[]} schedule={{ state: "reconnect" }} />);
     expect(screen.getByRole("link", { name: /reconnect google/i })).toHaveAttribute(

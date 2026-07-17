@@ -59,6 +59,13 @@ export function ScheduleControl({
     };
   }, [open]);
 
+  // Clear the custom-duration input whenever the popover closes (Escape /
+  // outside-click / preset pick) so a stale value can't reappear on reopen
+  // (Duo review).
+  useEffect(() => {
+    if (!open) setCustom("");
+  }, [open]);
+
   if (state === "connect" || state === "reconnect") {
     return (
       <a

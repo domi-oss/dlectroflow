@@ -313,7 +313,11 @@ function StepEstimateInput({
       onKeyDown={(e) => {
         if (e.key === "Enter") {
           e.preventDefault();
-          onSave(Number(value));
+          // Empty / non-positive input → cancel, don't save. `Number("")` is 0
+          // and passes isFinite, which would otherwise be clamped to 1 (Duo review).
+          const n = Number(value);
+          if (value.trim() === "" || !Number.isFinite(n) || n < 1) onCancel();
+          else onSave(n);
         }
         if (e.key === "Escape") onCancel();
       }}
