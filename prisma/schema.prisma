@@ -114,6 +114,8 @@ model Task {
   parentEmoji      String?
   googleTaskId     String?
   googleTaskListId String?
+  scheduledAt      DateTime?  // when the task was first scheduled (any method)
+  scheduledVia     String?    // "ics" | "google" (method-agnostic marker)
   steps            Step[]
   turns            BreakdownTurn[]
   brainDumpItems   BrainDumpItem[]
