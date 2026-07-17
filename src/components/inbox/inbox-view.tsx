@@ -711,6 +711,7 @@ export function InboxView({
                           <div className="mt-2">
                             <TaskSteps
                               taskId={item.taskId}
+                              voice={voice}
                               steps={item.steps.map((s) => ({
                                 id: s.id,
                                 order: s.order,
@@ -719,6 +720,7 @@ export function InboxView({
                                 subtaskEmoji: s.subtaskEmoji,
                                 estMinutes: s.estMinutes,
                                 done: s.done,
+                                resumable: s.resumable,
                               }))}
                             />
                           </div>
