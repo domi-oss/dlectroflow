@@ -113,7 +113,7 @@ export function ScheduleControl({
         type="button"
         aria-label={isMenu ? undefined : "Schedule"}
         title={isMenu ? undefined : "Schedule"}
-        aria-haspopup={state === "needs_duration" ? "menu" : undefined}
+        aria-haspopup={state === "needs_duration" ? "true" : undefined}
         aria-expanded={state === "needs_duration" ? open : undefined}
         disabled={pending}
         onClick={() => {

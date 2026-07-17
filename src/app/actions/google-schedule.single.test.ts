@@ -27,8 +27,8 @@ const {
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
-vi.mock("@/lib/db", () => ({
-  prisma: {
+vi.mock("@/lib/db", () => {
+  const prisma: Record<string, unknown> = {
     brainDumpItem: {
       findFirst: itemFindFirstMock,
       update: itemUpdateMock,
@@ -37,8 +37,13 @@ vi.mock("@/lib/db", () => ({
       create: taskCreateMock,
       update: taskUpdateMock,
     },
-  },
-}));
+    // Interactive transaction: run the callback with the same mock client, so
+    // the lazy Task-create + item-link (now wrapped in $transaction) still hit
+    // taskCreateMock / itemUpdateMock.
+    $transaction: (fn: (tx: unknown) => unknown) => fn(prisma),
+  };
+  return { prisma };
+});
 vi.mock("@/lib/rewards", () => ({
   logReward: vi.fn().mockResolvedValue(undefined),
   awardBadge: vi.fn().mockResolvedValue(undefined),

@@ -108,6 +108,11 @@ describe("RowActions", () => {
     expect(fn).toHaveBeenCalledWith(30);
   });
 
+  it("Duo a11y fix: needs_duration 📅 uses aria-haspopup='true' (popover has no role=menu)", () => {
+    render(<RowActions inline={[]} menu={[]} schedule={{ state: "needs_duration", onScheduleSingle: vi.fn() }} />);
+    expect(screen.getByRole("button", { name: /schedule/i })).toHaveAttribute("aria-haspopup", "true");
+  });
+
   it("custom duration input schedules with the typed minutes", () => {
     const fn = vi.fn();
     render(<RowActions inline={[]} menu={[]} schedule={{ state: "needs_duration", onScheduleSingle: fn }} />);

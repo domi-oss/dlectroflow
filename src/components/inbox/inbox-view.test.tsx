@@ -932,6 +932,19 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     expect(screen.getByRole("link", { name: /connect google/i })).toBeInTheDocument();
   });
 
+  it("Duo fix: configured but NOT connected → Connect link, not a live 📅 button", () => {
+    const configuredNotConnected = { configured: true, connected: false, needsReconnect: false };
+    render(
+      <InboxView
+        initialItems={[makeItem({ id: "st1", text: "single todo", status: "triaged" })]}
+        settings={settings}
+        google={configuredNotConnected}
+      />,
+    );
+    expect(screen.getByRole("link", { name: /connect google/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /schedule/i })).toBeNull();
+  });
+
   it("a reconnect_required push failure swaps the row's control to the Reconnect link", async () => {
     const { pushStepsToGoogleTasks } = await import("@/app/actions/google-schedule");
     (pushStepsToGoogleTasks as ReturnType<typeof vi.fn>).mockResolvedValueOnce({

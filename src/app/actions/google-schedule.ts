@@ -179,16 +179,21 @@ export async function scheduleSingleTask(
 
   let taskId = item.taskId;
   if (!taskId) {
-    const task = await prisma.task.create({
-      data: {
-        title: item.text,
-        source: TaskSource.BrainDump,
-        status: TaskStatus.Active,
-        workspaceId,
-      },
+    // Atomic lazy-create (Duo review): the Task insert and the item link must
+    // commit together — otherwise a failed link orphans the Task row and a
+    // retry creates a second one (the item's taskId stays null).
+    taskId = await prisma.$transaction(async (tx) => {
+      const task = await tx.task.create({
+        data: {
+          title: item.text,
+          source: TaskSource.BrainDump,
+          status: TaskStatus.Active,
+          workspaceId,
+        },
+      });
+      await tx.brainDumpItem.update({ where: { id: item.id }, data: { taskId: task.id } });
+      return task.id;
     });
-    taskId = task.id;
-    await prisma.brainDumpItem.update({ where: { id: item.id }, data: { taskId } });
   }
 
   try {

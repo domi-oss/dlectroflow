@@ -85,6 +85,9 @@ function scheduleState(
 ): ScheduleControlProps["state"] {
   if (!google.configured) return "connect";
   if (google.needsReconnect) return "reconnect";
+  // Configured but the owner never completed OAuth → offer Connect, not a live
+  // 📅 that would fail (Duo review: the `connected=false` case was missing).
+  if (!google.connected) return "connect";
   return ready;
 }
 
