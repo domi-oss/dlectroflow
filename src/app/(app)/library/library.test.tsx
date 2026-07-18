@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, within } from "@testing-library/react";
 import LibraryPage from "./page";
 
 // Hoisted so the vi.mock factory (which runs before imports) can close over them.
@@ -21,6 +21,16 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/workspace", () => ({
   currentWorkspaceId: currentWorkspaceIdMock,
+}));
+// The in-flight tabs (plated/pantry) render the interactive <LibraryRows>,
+// which needs a router + the (mocked) server actions to mount in jsdom.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+}));
+vi.mock("@/app/actions/braindump", () => ({
+  ensureFocusStep: vi.fn().mockResolvedValue(null),
+  completeItem: vi.fn().mockResolvedValue(undefined),
+  deleteBrainDumpItem: vi.fn().mockResolvedValue(undefined),
 }));
 
 const DAY = 86_400_000;
@@ -126,6 +136,20 @@ describe("LibraryPage — tabs render their correct set", () => {
     expect(screen.getByText(/1\/3 done · not scheduled/)).toBeInTheDocument();
     // graduated + completed items are NOT here
     expect(screen.queryByText("Sort the tax docs")).not.toBeInTheDocument();
+  });
+
+  it("orders the tabs Single-task · Multi-step · Saved for later · Done", async () => {
+    await renderTab("plated");
+    const nav = screen.getByRole("navigation", { name: /Library tabs/i });
+    const labels = within(nav)
+      .getAllByRole("link")
+      .map((a) => a.textContent ?? "");
+    expect(labels).toEqual([
+      expect.stringContaining("Single-task"),
+      expect.stringContaining("Multi-step"),
+      expect.stringContaining("Saved for later"),
+      expect.stringContaining("Done"),
+    ]);
   });
 
   it("defaults to the Single-task tab when ?tab is absent/invalid", async () => {

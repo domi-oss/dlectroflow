@@ -5,6 +5,7 @@ import { BrainDumpStatus } from "@/lib/constants";
 import { libraryBuckets, type Item, type LibraryBuckets } from "@/components/inbox/bucket";
 import { t, type StringKey, type Voice } from "@/lib/strings";
 import { cn } from "@/lib/utils";
+import { LibraryRows } from "@/components/library/library-rows";
 
 // DB-backed, always fresh (mirrors the Inbox — reads live workspace data).
 export const dynamic = "force-dynamic";
@@ -14,8 +15,8 @@ export const dynamic = "force-dynamic";
 // (plated / pantry / sorted / done); `bucket` names the LibraryBuckets field.
 const TABS = [
   { param: "plated", bucket: "singleTask", labelKey: "lib.tab.singleTask", hintKey: "lib.plated.hint" },
-  { param: "pantry", bucket: "savedLater", labelKey: "section.savedLater", hintKey: "lib.pantry.hint" },
   { param: "sorted", bucket: "multiStep", labelKey: "lib.tab.multiStep", hintKey: "lib.sorted.hint" },
+  { param: "pantry", bucket: "savedLater", labelKey: "section.savedLater", hintKey: "lib.pantry.hint" },
   { param: "done", bucket: "done", labelKey: "nav.done", hintKey: "lib.done.hint" },
 ] as const satisfies ReadonlyArray<{
   param: string;
@@ -130,10 +131,15 @@ export default async function LibraryPage({
           <p className="text-muted-foreground rounded-lg border border-dashed px-4 py-6 text-center text-sm">
             {t("bucket.empty", voice)}
           </p>
+        ) : active === "plated" || active === "pantry" ? (
+          // In-flight rows are interactive: Start focusing / Complete / Delete,
+          // reusing the Inbox's action wiring (see LibraryRows).
+          <LibraryRows items={rows} tab={active} voice={voice} now={now} />
         ) : (
+          // Sorted / Done are closure views — the whole row reopens the breakdown.
           <ul className="space-y-2">
             {rows.map((item) => (
-              <LibraryRow key={item.id} item={item} tab={active} voice={voice} now={now} />
+              <LibraryRow key={item.id} item={item} tab={active} voice={voice} />
             ))}
           </ul>
         )}
@@ -142,20 +148,19 @@ export default async function LibraryPage({
   );
 }
 
-/** A single hub row. Rows that back a Task link into its breakdown ("whole rows
- * reopen the breakdown"); the trailing meta/pill matches the tab. */
+/** A closure-view hub row (Sorted / Done). Rows that back a Task link into
+ * their breakdown ("whole rows reopen the breakdown"); the trailing pill shows
+ * step progress. The in-flight tabs (Single-task / Saved for later) render via
+ * the interactive <LibraryRows> client component instead. */
 function LibraryRow({
   item,
   tab,
   voice,
-  now,
 }: {
   item: Item;
-  tab: TabParam;
+  tab: Extract<TabParam, "sorted" | "done">;
   voice: Voice;
-  now: number;
 }) {
-  const meta = <RowMeta item={item} tab={tab} voice={voice} now={now} />;
   const title = (
     <span className="min-w-0 flex-1 break-words">
       {item.text}
@@ -167,7 +172,7 @@ function LibraryRow({
   const body = (
     <div className={cn("flex items-center justify-between gap-3", tab === "done" && "opacity-70")}>
       {title}
-      {meta}
+      <ProgressPill item={item} tab={tab} voice={voice} />
     </div>
   );
 
@@ -185,35 +190,16 @@ function LibraryRow({
   );
 }
 
-/** Trailing indicator per tab: age (plated), wake time (pantry), or a progress
- * pill (sorted / done). */
-function RowMeta({
+/** Step-progress pill for the Sorted / Done closure views. */
+function ProgressPill({
   item,
   tab,
   voice,
-  now,
 }: {
   item: Item;
-  tab: TabParam;
+  tab: Extract<TabParam, "sorted" | "done">;
   voice: Voice;
-  now: number;
 }) {
-  if (tab === "plated") {
-    return (
-      <span className="text-muted-foreground shrink-0 text-xs">
-        {t("lib.added", voice)} {formatAgo(now - new Date(item.createdAt).getTime())}
-      </span>
-    );
-  }
-  if (tab === "pantry") {
-    return (
-      <span className="text-muted-foreground shrink-0 text-xs">
-        {item.snoozedUntil
-          ? `${t("lib.wakes", voice)} ${formatWake(item.snoozedUntil)}`
-          : null}
-      </span>
-    );
-  }
   if (tab === "sorted") {
     const notScheduled = item.scheduledAt == null;
     return (
@@ -236,24 +222,4 @@ function RowMeta({
         : `✅ ${t("progress.done", voice)}`}
     </span>
   );
-}
-
-/** Compact relative age, e.g. "2h ago". Mirrors the Inbox's formatter. */
-function formatAgo(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
-}
-
-/** Wake time for a saved-for-later row, e.g. "Mon 08:00". */
-function formatWake(when: Date): string {
-  return new Date(when).toLocaleString(undefined, {
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
