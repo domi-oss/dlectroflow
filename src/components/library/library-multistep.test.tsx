@@ -104,12 +104,40 @@ describe("LibraryMultistep", () => {
     expect(bulkBrainDumpAction).toHaveBeenCalledWith(["new"], "delete");
   });
 
-  it("'Open task' link carries ?from=library so the task page's back link can return to the Library (#8 follow-up)", () => {
+  it("'Open task' sits in the header (not the panel) when a row is expanded, arrow-free, and carries ?from=library so the task page's back link can return to the Library (#8 follow-up, !83 header move)", () => {
     render(<LibraryMultistep items={items} voice="plain" now={Date.now()} settings={settings} />);
-    // "new" is expanded by default (it's the latest row).
-    expect(screen.getByRole("link", { name: /open task/i })).toHaveAttribute(
-      "href",
-      "/tasks/Tnew?from=library",
-    );
+    // "new" is expanded by default (it's the latest row) — the header link
+    // points at it, with no "→" (owner's no-icons-in-text-buttons call).
+    const openTaskLink = screen.getByRole("link", { name: /^open task$/i });
+    expect(openTaskLink).toHaveAttribute("href", "/tasks/Tnew?from=library");
+    expect(openTaskLink.textContent).toBe("Open task");
+    // It's not inside the expanded row's panel — that panel is just the
+    // stubbed TaskSteps.
+    const panel = screen.getByTestId("task-steps").parentElement!;
+    expect(within(panel).queryByRole("link", { name: /open task/i })).toBeNull();
+  });
+
+  it("'Open task' is absent from the header when nothing is expanded", () => {
+    render(<LibraryMultistep items={items} voice="plain" now={Date.now()} settings={settings} />);
+    fireEvent.click(screen.getByRole("button", { name: /^collapse all$/i }));
+    expect(screen.queryByRole("link", { name: /open task/i })).toBeNull();
+  });
+
+  it("'Collapse all' collapses the currently-expanded row (TaskSteps unmounts)", () => {
+    render(<LibraryMultistep items={items} voice="plain" now={Date.now()} settings={settings} />);
+    // "new" is expanded by default.
+    expect(screen.getByTestId("task-steps")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^collapse all$/i }));
+    expect(screen.queryByTestId("task-steps")).toBeNull();
+    // Also collapses the row's aria-expanded state.
+    expect(screen.getByRole("button", { name: /task new/i })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("'Collapse all' is harmless when nothing is expanded (no throw, stays collapsed)", () => {
+    render(<LibraryMultistep items={items} voice="plain" now={Date.now()} settings={settings} />);
+    fireEvent.click(screen.getByRole("button", { name: /^collapse all$/i }));
+    expect(screen.queryByTestId("task-steps")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^collapse all$/i }));
+    expect(screen.queryByTestId("task-steps")).toBeNull();
   });
 });

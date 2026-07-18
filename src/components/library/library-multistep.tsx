@@ -25,6 +25,12 @@ import { RowNumber, NextStepLine, ProgressBar, AgeLabel, EstimatePill, rowEmoji,
  * row toggles its checkbox instead of opening it — and reuses
  * `bulkBrainDumpAction` (Task 4) for the batch complete/save/delete ops so the
  * hub never re-implements the workspace-scoped per-item logic.
+ *
+ * Header row (!83 follow-up): "Collapse all" sits to the left and always
+ * collapses whichever single row is open (harmless when none is). On the
+ * right, next to "Select", an "Open task" control links to the
+ * currently-expanded row's task page — shown only while a row is expanded,
+ * hidden entirely in select mode.
  */
 export function LibraryMultistep({
   items, voice, now, settings,
@@ -35,6 +41,7 @@ export function LibraryMultistep({
   const sel = useSelectMode();
   const [pending, startTransition] = useTransition();
   const ids = items.map((i) => i.id);
+  const expandedItem = items.find((i) => i.id === expandedId) ?? null;
 
   const runBulk = (action: "complete" | "saveForLater" | "delete") =>
     startTransition(async () => {
@@ -45,7 +52,14 @@ export function LibraryMultistep({
 
   return (
     <div className="space-y-2">
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          className="hover:bg-accent rounded-md border px-2.5 py-1 text-sm"
+          onClick={() => setExpandedId(null)}
+        >
+          {t("lib.collapseAll", voice)}
+        </button>
         {sel.selecting ? (
           <div className="flex gap-2 text-sm">
             <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => sel.selectAll(ids)}>
@@ -56,9 +70,23 @@ export function LibraryMultistep({
             </button>
           </div>
         ) : (
-          <button className="hover:bg-accent rounded-md border px-2.5 py-1 text-sm" onClick={sel.enter}>
-            {t("lib.select", voice)}
-          </button>
+          <div className="flex gap-2 text-sm">
+            {/* `?from=library` lets the task page's back link return here
+                (→ /library?tab=sorted) instead of always going to /inbox
+                (#8 follow-up — Library "Open task" back-button bug). Only
+                shown while a row is expanded (moved from the panel — !83). */}
+            {expandedItem?.taskId && (
+              <Link
+                href={`/tasks/${expandedItem.taskId}?from=library`}
+                className="hover:bg-accent rounded-md border px-2.5 py-1"
+              >
+                {t("lib.openTask", voice)}
+              </Link>
+            )}
+            <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={sel.enter}>
+              {t("lib.select", voice)}
+            </button>
+          </div>
         )}
       </div>
 
@@ -113,12 +141,6 @@ export function LibraryMultistep({
                       subtaskEmoji: s.subtaskEmoji, estMinutes: s.estMinutes, done: s.done, resumable: s.resumable,
                     }))}
                   />
-                  {/* `?from=library` lets the task page's back link return here
-                      (→ /library?tab=sorted) instead of always going to /inbox
-                      (#8 follow-up — Library "Open task" back-button bug). */}
-                  <Link href={`/tasks/${item.taskId}?from=library`} className="text-muted-foreground hover:text-foreground inline-block text-xs">
-                    {t("lib.openTask", voice)} →
-                  </Link>
                 </div>
               )}
             </li>

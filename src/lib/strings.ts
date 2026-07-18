@@ -175,6 +175,7 @@ export const STRINGS = {
   "lib.aToDo":           { plain: "a to-do",           playful: "a to-do" },
   "lib.select":          { plain: "Select",            playful: "Select" },
   "lib.selectAll":       { plain: "Select all",        playful: "Select all" },
+  "lib.collapseAll":     { plain: "Collapse all",      playful: "Collapse all" },
   "lib.selected":        { plain: "selected",          playful: "selected" },
   "lib.openTask":        { plain: "Open task",         playful: "Open task" },
   "lib.deleteConfirm":   { plain: "Delete these?",     playful: "Delete these?" },
