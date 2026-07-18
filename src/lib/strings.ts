@@ -141,6 +141,12 @@ export const STRINGS = {
 
   // ── Progress ───────────────────────────────────────────────────────────────
   "progress.done":       { plain: "done",              playful: "done" },
+
+  // ── First-run welcome card (Phase 5, #8) ──────────────────────────────────
+  "welcome.title":   { plain: "👋 Welcome to dlectroflow", playful: "👋 Welcome to dlectroflow" },
+  "welcome.body":    { plain: "Jot anything on your mind in the box above. Break big things into steps, focus one at a time, and tick them off — everything you capture lives in your Library.", playful: "Brain full? Dump it in the box above. Snack-size the big stuff into steps, focus one bite at a time, and check them off — it all keeps in your Larder." },
+  "welcome.help":    { plain: "How it works →", playful: "How it works →" },
+  "welcome.dismiss": { plain: "Got it",         playful: "Got it" },
 } as const;
 
 export type StringKey = keyof typeof STRINGS;
