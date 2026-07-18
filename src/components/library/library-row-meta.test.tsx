@@ -21,6 +21,7 @@ describe("meta helpers", () => {
   });
   it("remainingMinutes sums only not-done step minutes", () => {
     expect(remainingMinutes(base)).toBe(20); // 15 + 5
+    expect(remainingMinutes({ ...base, steps: [] })).toBe(0);
   });
   it("singleTaskEstimate falls back to 5 when null", () => {
     expect(singleTaskEstimate({ ...base, estMinutes: null })).toBe(5);
@@ -28,5 +29,6 @@ describe("meta helpers", () => {
   });
   it("rowEmoji is the first not-done step's emoji", () => {
     expect(rowEmoji(base)).toBe("🥕");
+    expect(rowEmoji({ ...base, steps: base.steps.map((s) => ({ ...s, done: true })) })).toBe("🍳");
   });
 });
