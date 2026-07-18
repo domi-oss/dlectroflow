@@ -116,6 +116,49 @@ export function bucketItems(items: Item[], now: number = Date.now()): Buckets {
   return { needsReview, singleTask, multiStep, savedLater, completed, completedTodayCount };
 }
 
+/** The four tabs of the Library ("Everything") hub (#8 Phase 3). */
+export type LibraryBuckets = {
+  /** "plated" tab — single-task to-dos (no breakdown). */
+  singleTask: Item[];
+  /** "sorted" tab — broken-down tasks still in progress. */
+  multiStep: Item[];
+  /** "pantry" tab — items saved for later (freshness paused). */
+  savedLater: Item[];
+  /**
+   * "done" tab — the closure pile. A task graduates here when ALL its steps
+   * are done (isFullyDone) OR it was explicitly completed (completedAt). A task
+   * with no steps or only some steps done does NOT graduate on step-completion.
+   */
+  done: Item[];
+};
+
+/** Sort key for the Done pile: when it was completed, else when it was captured. */
+const doneKey = (i: Item): number =>
+  i.completedAt ? toMs(i.completedAt) : toMs(i.createdAt);
+
+/**
+ * Library hub buckets. The three in-flight tabs mirror the Inbox exactly (same
+ * `bucketItems` rules, so the hub and the Inbox can never disagree); Done is
+ * the union of step-graduated tasks and explicitly-completed items, newest
+ * first and NOT capped (the Inbox's `completed` preview caps at 10; the hub
+ * shows the whole pile).
+ */
+export function libraryBuckets(
+  items: Item[],
+  now: number = Date.now(),
+): LibraryBuckets {
+  const base = bucketItems(items, now);
+  const done = items
+    .filter((i) => isFullyDone(i) || isCompleted(i))
+    .sort((a, b) => doneKey(b) - doneKey(a));
+  return {
+    singleTask: base.singleTask,
+    multiStep: base.multiStep,
+    savedLater: base.savedLater,
+    done,
+  };
+}
+
 /**
  * Which bucket a single item currently lives in — mirrors bucketItems'
  * membership rules. Used by the drag/menu dispatcher to detect same-bucket

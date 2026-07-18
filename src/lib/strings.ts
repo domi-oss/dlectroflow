@@ -141,6 +141,38 @@ export const STRINGS = {
 
   // ── Progress ───────────────────────────────────────────────────────────────
   "progress.done":       { plain: "done",              playful: "done" },
+
+  // ── Library "Everything" hub (#8 Phase 3) ──────────────────────────────────
+  // Tab labels are the SHORT forms the hub uses (the Inbox sub-headers keep the
+  // longer "…to-dos" wording via section.* above). Saved-for-later reuses
+  // section.savedLater; Done reuses nav.done.
+  "action.back":         { plain: "← Back",            playful: "← Back" },
+  "lib.tab.singleTask":  { plain: "Single-task",       playful: "😋 Quick bites" },
+  "lib.tab.multiStep":   { plain: "Multi-step",        playful: "✅ Sorted" },
+  "lib.intro":           {
+    plain: "Everything that's left your inbox — committed single tasks, stored items, and finished breakdowns.",
+    playful: "Everything that's left your inbox — committed single tasks, stored items, and finished breakdowns.",
+  },
+  "lib.plated.hint":     {
+    plain: "Single action items you committed without breaking into steps. Do them whole, or break one into steps later.",
+    playful: "Single action items you committed without breaking into steps. Do them whole, or snack-size one later.",
+  },
+  "lib.pantry.hint":     {
+    plain: "Stored for later — the freshness clock is paused until each one wakes.",
+    playful: "Stored for later — the freshness clock is paused until each one wakes.",
+  },
+  "lib.sorted.hint":     {
+    plain: "Broken-down tasks in progress — the count shows how many steps you've done. Finished ones move to Done. Tap to reopen.",
+    playful: "Broken-down tasks in progress — the count shows how many steps you've done. Finished ones move to Done. Tap to reopen.",
+  },
+  "lib.done.hint":       {
+    plain: "Finished — every step done.",
+    playful: "Finished — every step done. 🎉",
+  },
+  "lib.added":           { plain: "added",             playful: "added" },
+  "lib.wakes":           { plain: "wakes",             playful: "wakes" },
+  "lib.notScheduled":    { plain: "not scheduled",     playful: "not scheduled" },
+  "lib.aToDo":           { plain: "a to-do",           playful: "a to-do" },
 } as const;
 
 export type StringKey = keyof typeof STRINGS;

@@ -400,6 +400,19 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "step.editEstimate",
     "step.editTitle",
     "step.sendToReview",
+    // Library "Everything" hub (#8 Phase 3) — plain variants emoji-free
+    "action.back",
+    "lib.tab.singleTask",
+    "lib.tab.multiStep",
+    "lib.intro",
+    "lib.plated.hint",
+    "lib.pantry.hint",
+    "lib.sorted.hint",
+    "lib.done.hint",
+    "lib.added",
+    "lib.wakes",
+    "lib.notScheduled",
+    "lib.aToDo",
   ];
 
   for (const key of plainOnlyKeys) {
