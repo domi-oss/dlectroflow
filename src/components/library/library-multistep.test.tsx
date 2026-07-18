@@ -51,6 +51,22 @@ describe("LibraryMultistep", () => {
     // stubbed TaskSteps subtree, so scope with within(row).
     const oldRow = screen.getByRole("button", { name: /task old/i }).closest("li")!;
     expect(within(oldRow).getByText("first", { selector: "*" })).toBeTruthy();
+    // Both of "old"'s steps are not-done (10 + 5 min), so the collapsed row's
+    // estimate pill reads "≈15 min left" (lib.minLeft) — assert it renders on
+    // this row, scoped with within() so it can't match another row's pill.
+    expect(within(oldRow).getByText(/≈15\s*min left/)).toBeTruthy();
+  });
+  it("playful voice shows the row's emoji anchor (first not-done step's subtaskEmoji)", () => {
+    render(<LibraryMultistep items={items} voice="playful" now={Date.now()} settings={settings} />);
+    // rowEmoji() picks the first not-done step's subtaskEmoji — for both fixture
+    // rows that's step "a" ("🍳"). Scope to one row so this can't accidentally
+    // match the sibling row's identical emoji.
+    const newRow = screen.getByRole("button", { name: /task new/i }).closest("li")!;
+    expect(within(newRow).getByText("🍳")).toBeTruthy();
+  });
+  it("plain voice renders no emoji anchor", () => {
+    render(<LibraryMultistep items={items} voice="plain" now={Date.now()} settings={settings} />);
+    expect(screen.queryByText("🍳")).toBeNull();
   });
   it("select mode: Select → tick a row → Delete calls bulkBrainDumpAction", async () => {
     const { bulkBrainDumpAction } = await import("@/app/actions/braindump");
