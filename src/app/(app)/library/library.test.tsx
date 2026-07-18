@@ -31,6 +31,13 @@ vi.mock("@/app/actions/braindump", () => ({
   ensureFocusStep: vi.fn().mockResolvedValue(null),
   completeItem: vi.fn().mockResolvedValue(undefined),
   deleteBrainDumpItem: vi.fn().mockResolvedValue(undefined),
+  bulkBrainDumpAction: vi.fn().mockResolvedValue({ count: 0 }),
+}));
+// The Multi-step tab's <LibraryMultistep> auto-opens its latest row into
+// <TaskSteps>, which pulls in its own server actions (breakdown/focus) — stub
+// it like the sibling component test does; we only need it to mount.
+vi.mock("@/components/breakdown/task-steps", () => ({
+  TaskSteps: ({ taskId }: { taskId: string }) => <div data-testid="task-steps">{taskId}</div>,
 }));
 
 const DAY = 86_400_000;
@@ -130,10 +137,12 @@ describe("LibraryPage — tabs render their correct set", () => {
     expect(screen.queryByText("Reply to Sam's email")).not.toBeInTheDocument();
   });
 
-  it("Multi-step (sorted) lists in-progress tasks with a progress pill", async () => {
+  it("Multi-step (sorted) lists in-progress tasks, auto-opening the latest into its breakdown", async () => {
     await renderTab("sorted");
     expect(screen.getByText("Plan the offsite")).toBeInTheDocument();
-    expect(screen.getByText(/1\/3 done · not scheduled/)).toBeInTheDocument();
+    // It's the only (=latest) Multi-step row, so <LibraryMultistep> auto-opens
+    // it into its step breakdown (stubbed <TaskSteps>) rather than a static pill.
+    expect(screen.getByTestId("task-steps")).toHaveTextContent("t-sorted");
     // graduated + completed items are NOT here
     expect(screen.queryByText("Sort the tax docs")).not.toBeInTheDocument();
   });

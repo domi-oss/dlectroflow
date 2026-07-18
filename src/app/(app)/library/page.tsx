@@ -6,6 +6,7 @@ import { libraryBuckets, type Item, type LibraryBuckets } from "@/components/inb
 import { t, type StringKey, type Voice } from "@/lib/strings";
 import { cn } from "@/lib/utils";
 import { LibraryRows } from "@/components/library/library-rows";
+import { LibraryMultistep } from "@/components/library/library-multistep";
 
 // DB-backed, always fresh (mirrors the Inbox — reads live workspace data).
 export const dynamic = "force-dynamic";
@@ -75,6 +76,16 @@ export default async function LibraryPage({
   const active = isTabParam(tab) ? tab : "plated";
   const activeTab = TABS.find((it) => it.param === active)!;
   const rows = buckets[activeTab.bucket];
+  // Mirrors the Inbox's own AgingSettings slice (inbox/page.tsx) — the same
+  // five fields, threaded down to both LibraryRows and LibraryMultistep so
+  // "added Xh ago" aging agrees everywhere in the hub.
+  const agingSettings = {
+    agingThresholdMinutes: settings.agingThresholdMinutes,
+    demoOverrideSeconds: settings.demoOverrideSeconds,
+    agingHours: settings.agingHours,
+    overdueHours: settings.overdueHours,
+    wayOverdueHours: settings.wayOverdueHours,
+  };
 
   return (
     <div className="space-y-4">
@@ -135,9 +146,13 @@ export default async function LibraryPage({
         ) : active === "plated" || active === "pantry" ? (
           // In-flight rows are interactive: Start focusing / Complete / Delete,
           // reusing the Inbox's action wiring (see LibraryRows).
-          <LibraryRows items={rows} tab={active} voice={voice} now={now} settings={settings} />
+          <LibraryRows items={rows} tab={active} voice={voice} now={now} settings={agingSettings} />
+        ) : active === "sorted" ? (
+          // Multi-step rows inline-expand into their full step breakdown —
+          // the whole hub, not just /tasks/[id], can drive focus/complete.
+          <LibraryMultistep items={rows} voice={voice} now={now} settings={agingSettings} />
         ) : (
-          // Sorted / Done are closure views — the whole row reopens the breakdown.
+          // Done is a closure view — the whole row reopens the breakdown.
           <ul className="space-y-2">
             {rows.map((item) => (
               <LibraryRow key={item.id} item={item} tab={active} voice={voice} />
@@ -149,17 +164,17 @@ export default async function LibraryPage({
   );
 }
 
-/** A closure-view hub row (Sorted / Done). Rows that back a Task link into
- * their breakdown ("whole rows reopen the breakdown"); the trailing pill shows
- * step progress. The in-flight tabs (Single-task / Saved for later) render via
- * the interactive <LibraryRows> client component instead. */
+/** A closure-view hub row (Done). Rows that back a Task link into their
+ * breakdown ("whole rows reopen the breakdown"); the trailing pill shows step
+ * progress. The other tabs render via client components instead: Single-task /
+ * Saved for later via <LibraryRows>, Multi-step via <LibraryMultistep>. */
 function LibraryRow({
   item,
   tab,
   voice,
 }: {
   item: Item;
-  tab: Extract<TabParam, "sorted" | "done">;
+  tab: "done";
   voice: Voice;
 }) {
   const title = (
@@ -173,7 +188,7 @@ function LibraryRow({
   const body = (
     <div className={cn("flex items-center justify-between gap-3", tab === "done" && "opacity-70")}>
       {title}
-      <ProgressPill item={item} tab={tab} voice={voice} />
+      <ProgressPill item={item} voice={voice} />
     </div>
   );
 
@@ -191,31 +206,14 @@ function LibraryRow({
   );
 }
 
-/** Step-progress pill for the Sorted / Done closure views. */
+/** Step-progress pill for the Done closure view. */
 function ProgressPill({
   item,
-  tab,
   voice,
 }: {
   item: Item;
-  tab: Extract<TabParam, "sorted" | "done">;
   voice: Voice;
 }) {
-  if (tab === "sorted") {
-    const notScheduled = item.scheduledAt == null;
-    return (
-      <span
-        className={cn(
-          "shrink-0 rounded-full border px-2 py-0.5 text-xs",
-          notScheduled ? "text-muted-foreground" : "border-green-700 text-green-700",
-        )}
-      >
-        {item.stepsDone}/{item.stepsTotal} {t("progress.done", voice)}
-        {notScheduled && <> · {t("lib.notScheduled", voice)}</>}
-      </span>
-    );
-  }
-  // done
   return (
     <span className="shrink-0 rounded-full border border-green-700 px-2 py-0.5 text-xs text-green-700">
       {item.stepsTotal > 0
