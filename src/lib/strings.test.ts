@@ -88,6 +88,9 @@ describe("t() function", () => {
     ["step.editTitle",        "plain",   "Edit step title"],
     ["step.sendToReview",     "plain",   "Send back to review"],
     ["step.sendToReview",     "playful", "🥫 Send back to review"],
+    // welcome-card v2 (#8) — Help link uses clearer, voice-neutral copy
+    ["welcome.help",          "plain",   "View the help page for more →"],
+    ["welcome.help",          "playful", "View the help page for more →"],
   ];
 
   for (const [key, voice, expected] of cases) {

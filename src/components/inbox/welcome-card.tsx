@@ -34,6 +34,31 @@ export function WelcomeCard({ voice }: { voice: Voice }) {
       <p className="text-muted-foreground mt-1 text-sm">
         {t("welcome.body", voice)}
       </p>
+      {/* Quick links — speak the same section vocabulary as the ☰ menu:
+       * nav.everything → /library, nav.focusTimer → /focus, plus Help. */}
+      <nav
+        aria-label="Where to next"
+        className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm"
+      >
+        <Link
+          href="/library"
+          className="text-green-800 hover:underline dark:text-green-300"
+        >
+          {t("nav.everything", voice)}
+        </Link>
+        <Link
+          href="/focus"
+          className="text-green-800 hover:underline dark:text-green-300"
+        >
+          {t("nav.focusTimer", voice)}
+        </Link>
+        <Link
+          href="/help"
+          className="text-green-800 hover:underline dark:text-green-300"
+        >
+          {t("welcome.help", voice)}
+        </Link>
+      </nav>
       <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
         <div
           className="inline-flex rounded-md border"
@@ -58,12 +83,6 @@ export function WelcomeCard({ voice }: { voice: Voice }) {
             </button>
           ))}
         </div>
-        <Link
-          href="/help"
-          className="text-green-800 hover:underline dark:text-green-300"
-        >
-          {t("welcome.help", voice)}
-        </Link>
         <span className="flex-1" />
         <button
           type="button"

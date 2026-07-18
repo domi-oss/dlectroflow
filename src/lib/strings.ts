@@ -148,9 +148,12 @@ export const STRINGS = {
   "progress.done":       { plain: "done",              playful: "done" },
 
   // ── First-run welcome card (Phase 5, #8) ──────────────────────────────────
+  // v2: the card links out using the app's own section vocabulary (nav.everything
+  // for /library, nav.focusTimer for /focus). welcome.help stays voice-neutral,
+  // mirroring link.seeAll — a → arrow is a functional glyph, allowed in Plain.
   "welcome.title":   { plain: "👋 Welcome to dlectroflow", playful: "👋 Welcome to dlectroflow" },
   "welcome.body":    { plain: "Jot anything on your mind in the box below. Break big things into steps, focus one at a time, and tick them off — everything you capture lives in your Library.", playful: "Brain full? Dump it in the box below. Snack-size the big stuff into steps, focus one bite at a time, and check them off — it all keeps in your Larder." },
-  "welcome.help":    { plain: "How it works →", playful: "How it works →" },
+  "welcome.help":    { plain: "View the help page for more →", playful: "View the help page for more →" },
   "welcome.dismiss": { plain: "Got it",         playful: "Got it" },
 } as const;
 
