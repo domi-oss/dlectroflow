@@ -122,6 +122,12 @@ export const STRINGS = {
   // ── Breakdown confirm ──────────────────────────────────────────────────────
   "breakdown.looksRight": { plain: "Looks right",       playful: "👍 Looks right" },
 
+  // ── Schedule status banner (ground truth, Phase 4) ─────────────────────────
+  // Reflects the PERSISTED task.scheduledAt marker — never optimistic UI. ⚠️/✅
+  // are functional glyphs (allowed in plain); 🔌 is playful-only flavour.
+  "banner.scheduled":    { plain: "✅ Scheduled — these steps are on your calendar.", playful: "✅ Scheduled — these steps are on your calendar." },
+  "banner.notScheduled": { plain: "⚠️ Not scheduled yet — connect a calendar to send these steps automatically.", playful: "🔌 Not scheduled yet — connect a calendar to send these steps automatically." },
+
   // ── Breakdown step counter ─────────────────────────────────────────────────
   "step.counter":        { plain: "Step",              playful: "bite" },
 

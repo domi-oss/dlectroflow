@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
 import { BreakdownChat } from "@/components/breakdown/breakdown-chat";
 import { TaskSteps } from "@/components/breakdown/task-steps";
+import { ScheduleStatusBanner } from "@/components/breakdown/schedule-status-banner";
 import { getReclaimStatus } from "@/lib/reclaim";
 import { getGoogleStatus } from "@/lib/google";
 import type { Proposal } from "@/lib/breakdown";
@@ -64,6 +65,7 @@ export default async function TaskPage({
         reclaimConnected={reclaim.connected}
         google={google}
         isGuest={!owner}
+        scheduled={task.scheduledAt != null}
       />
     );
   }
@@ -93,6 +95,10 @@ export default async function TaskPage({
           </>
         )}
       </p>
+
+      {/* Ground-truth scheduling banner for a reopened "Sorted" task —
+          reads the persisted marker, so it never shows a false success. */}
+      <ScheduleStatusBanner scheduled={task.scheduledAt != null} />
 
       <TaskSteps
         taskId={task.id}
