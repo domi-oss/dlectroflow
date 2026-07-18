@@ -549,7 +549,7 @@ export function InboxView({
               submit();
             }
           }}
-          placeholder="Brain dump anything… (Enter to save, / to focus)"
+          placeholder="Brain dump anything… (Enter to save)"
           className="border-input bg-background focus-visible:ring-ring w-full rounded-lg border px-4 py-3 text-base shadow-sm outline-none focus-visible:ring-2"
           autoFocus
         />

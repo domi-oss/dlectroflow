@@ -26,7 +26,7 @@ describe("WelcomeCard", () => {
       screen.getByText("👋 Welcome to dlectroflow"),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Jot anything on your mind in the box above/),
+      screen.getByText(/Jot anything on your mind in the box below/),
     ).toBeInTheDocument();
   });
 
