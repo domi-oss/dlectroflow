@@ -103,4 +103,13 @@ describe("LibraryMultistep", () => {
     fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));       // confirm
     expect(bulkBrainDumpAction).toHaveBeenCalledWith(["new"], "delete");
   });
+
+  it("'Open task' link carries ?from=library so the task page's back link can return to the Library (#8 follow-up)", () => {
+    render(<LibraryMultistep items={items} voice="plain" now={Date.now()} settings={settings} />);
+    // "new" is expanded by default (it's the latest row).
+    expect(screen.getByRole("link", { name: /open task/i })).toHaveAttribute(
+      "href",
+      "/tasks/Tnew?from=library",
+    );
+  });
 });

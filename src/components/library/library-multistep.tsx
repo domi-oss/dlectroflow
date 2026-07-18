@@ -113,7 +113,10 @@ export function LibraryMultistep({
                       subtaskEmoji: s.subtaskEmoji, estMinutes: s.estMinutes, done: s.done, resumable: s.resumable,
                     }))}
                   />
-                  <Link href={`/tasks/${item.taskId}`} className="text-muted-foreground hover:text-foreground inline-block text-xs">
+                  {/* `?from=library` lets the task page's back link return here
+                      (→ /library?tab=sorted) instead of always going to /inbox
+                      (#8 follow-up — Library "Open task" back-button bug). */}
+                  <Link href={`/tasks/${item.taskId}?from=library`} className="text-muted-foreground hover:text-foreground inline-block text-xs">
                     {t("lib.openTask", voice)} →
                   </Link>
                 </div>

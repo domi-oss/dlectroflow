@@ -21,6 +21,7 @@ export const STRINGS = {
   "action.moreSteps":    { plain: "More steps",        playful: "🍞 More steps" },
   "action.fewerSteps":   { plain: "Fewer steps",       playful: "🥖 Fewer steps" },
   "action.backToInbox":  { plain: "Back to inbox",     playful: "🍳 Back to inbox" },
+  "action.backToLibrary":{ plain: "Back to Library",   playful: "🍱 Back to the Larder" },
   "action.addStep":      { plain: "Add a step",        playful: "🍞 Add a step" },
   "action.removeStep":   { plain: "Remove step",       playful: "🥖 Remove step" },
   "action.dismiss":      { plain: "Dismiss",           playful: "Not now" },
@@ -181,6 +182,13 @@ export const STRINGS = {
   "lib.minLeft":         { plain: "min left",          playful: "min left" },
   "lib.min":             { plain: "min",               playful: "min" },
   "lib.editEstimate":    { plain: "Edit estimate",     playful: "Edit estimate" },
+
+  // ── Task working-view — schedule indicator (#8 follow-up) ─────────────────
+  // Mirrors the Inbox row's hardcoded "Scheduled ✓" text (row-actions.tsx) —
+  // kept identical across voices, same as capture.confirm, rather than
+  // inventing new playful copy for a status marker.
+  "task.scheduled":      { plain: "Scheduled ✓",       playful: "Scheduled ✓" },
+  "task.notScheduled":   { plain: "Not scheduled yet", playful: "Not scheduled yet" },
 } as const;
 
 export type StringKey = keyof typeof STRINGS;
