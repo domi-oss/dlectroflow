@@ -71,7 +71,7 @@ export const STRINGS = {
   // ── Nav / hub labels ───────────────────────────────────────────────────────
   "nav.inbox":           { plain: "Inbox",             playful: "🧠 Inbox" },
   "nav.dashboard":       { plain: "Dashboard",         playful: "🎉 Dashboard" },
-  "nav.everything":      { plain: "Everything",        playful: "🍱 Larder" },
+  "nav.everything":      { plain: "Library",           playful: "🍱 Larder" },
   "nav.done":            { plain: "Done",              playful: "🍽️ Devoured" },
   "nav.focusTimer":      { plain: "Focus Timer",       playful: "⏱️ Focus Timer" },
   "nav.settings":        { plain: "Settings",          playful: "⚙️ Settings" },
@@ -173,6 +173,15 @@ export const STRINGS = {
   "lib.wakes":           { plain: "wakes",             playful: "wakes" },
   "lib.notScheduled":    { plain: "not scheduled",     playful: "not scheduled" },
   "lib.aToDo":           { plain: "a to-do",           playful: "a to-do" },
+  "lib.select":          { plain: "Select",            playful: "Select" },
+  "lib.selectAll":       { plain: "Select all",        playful: "Select all" },
+  "lib.selected":        { plain: "selected",          playful: "selected" },
+  "lib.openTask":        { plain: "Open task",         playful: "Open task" },
+  "lib.deleteConfirm":   { plain: "Delete these?",     playful: "Delete these?" },
+  "lib.next":            { plain: "Next:",             playful: "Next:" },
+  "lib.minLeft":         { plain: "min left",          playful: "min left" },
+  "lib.min":             { plain: "min",               playful: "min" },
+  "lib.editEstimate":    { plain: "Edit estimate",     playful: "Edit estimate" },
 } as const;
 
 export type StringKey = keyof typeof STRINGS;

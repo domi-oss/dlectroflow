@@ -42,7 +42,7 @@ describe("t() function", () => {
     ["action.breakdown",    "playful", "🍿 Snack-size it"],
     ["action.complete",     "plain",   "Complete"],
     ["action.reopen",       "plain",   "Reopen"],
-    ["nav.everything",      "plain",   "Everything"],
+    ["nav.everything",      "plain",   "Library"],
     ["nav.everything",      "playful", "🍱 Larder"],
     ["nav.inbox",           "plain",   "Inbox"],
     ["nav.inbox",           "playful", "🧠 Inbox"],
@@ -327,6 +327,19 @@ describe("Task 2 — inbox/focus/breakdown keys (plain vs playful)", () => {
   });
 });
 
+describe("library strings", () => {
+  it("renames Everything → Library (plain) keeping Larder (playful)", () => {
+    expect(t("nav.everything", "plain")).toBe("Library");
+    expect(t("nav.everything", "playful")).toBe("🍱 Larder");
+  });
+  it("has the new bulk/meta keys in both voices", () => {
+    for (const k of ["lib.select","lib.selectAll","lib.selected","lib.openTask","lib.deleteConfirm","lib.next","lib.minLeft","lib.min","lib.editEstimate"] as const) {
+      expect(t(k, "plain")).toBeTruthy();
+      expect(t(k, "playful")).toBeTruthy();
+    }
+  });
+});
+
 describe("Plain voice is emoji-free for nav and badge keys", () => {
   // Allowed functional glyphs in plain voice: status dots, ✅, ▶/⏸/➕/➖, 🗑️, 🔒, ⚠️
   const FUNCTIONAL_GLYPHS = /[✅▶⏸️➕➖🗑🔒⚠🟢🟡🟠🔴]/gu;
@@ -413,6 +426,15 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "lib.wakes",
     "lib.notScheduled",
     "lib.aToDo",
+    "lib.select",
+    "lib.selectAll",
+    "lib.selected",
+    "lib.openTask",
+    "lib.deleteConfirm",
+    "lib.next",
+    "lib.minLeft",
+    "lib.min",
+    "lib.editEstimate",
   ];
 
   for (const key of plainOnlyKeys) {
