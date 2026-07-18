@@ -13,7 +13,7 @@ vi.mock("next/link", () => ({
   ),
 }));
 vi.mock("@/app/actions/breakdown", () => ({
-  extractStepToInbox: vi.fn(),
+  ejectStepToInbox: vi.fn(),
 }));
 vi.mock("@/app/actions/focus", () => ({
   completeStep: vi.fn().mockResolvedValue(undefined),
@@ -21,7 +21,7 @@ vi.mock("@/app/actions/focus", () => ({
   updateStepEstimate: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { extractStepToInbox } from "@/app/actions/breakdown";
+import { ejectStepToInbox } from "@/app/actions/breakdown";
 import { completeStep, renameStep, updateStepEstimate } from "@/app/actions/focus";
 
 function steps(overrides: Partial<ReturnType<typeof baseStep>>[] = []) {
@@ -112,19 +112,19 @@ describe("TaskSteps — complete step", () => {
 
 describe("TaskSteps — send back to review (dropdown)", () => {
   it("extracts a step and refreshes when steps remain", async () => {
-    (extractStepToInbox as ReturnType<typeof vi.fn>).mockResolvedValue({ taskId: "t1", remaining: 1 });
+    (ejectStepToInbox as ReturnType<typeof vi.fn>).mockResolvedValue({ taskId: "t1", remaining: 1 });
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={steps()} />);
 
     await openMenu(user);
     await user.click(screen.getByText("Send back to review"));
-    await waitFor(() => expect(extractStepToInbox).toHaveBeenCalledWith("s1"));
+    await waitFor(() => expect(ejectStepToInbox).toHaveBeenCalledWith("s1"));
     expect(refresh).toHaveBeenCalled();
     expect(push).not.toHaveBeenCalled();
   });
 
   it("shows the empty-task chooser when the last step is extracted", async () => {
-    (extractStepToInbox as ReturnType<typeof vi.fn>).mockResolvedValue({ taskId: "t1", remaining: 0 });
+    (ejectStepToInbox as ReturnType<typeof vi.fn>).mockResolvedValue({ taskId: "t1", remaining: 0 });
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
 
@@ -135,7 +135,7 @@ describe("TaskSteps — send back to review (dropdown)", () => {
   });
 
   it("chooser routes: AI editor, manual editor, keep-as-todo", async () => {
-    (extractStepToInbox as ReturnType<typeof vi.fn>).mockResolvedValue({ taskId: "t1", remaining: 0 });
+    (ejectStepToInbox as ReturnType<typeof vi.fn>).mockResolvedValue({ taskId: "t1", remaining: 0 });
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
     await openMenu(user);

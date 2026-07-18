@@ -104,6 +104,10 @@ export const STRINGS = {
   "badge.comeback":             { plain: "Comeback",          playful: "📦 Back for Seconds" },
   "badge.ten_steps_day":        { plain: "10 steps in a day", playful: "🔟 Ten-Bite Day" },
   "badge.beat_best_streak":     { plain: "Beat your best streak", playful: "🏆 New Record" },
+  "badge.sectionTitle":         { plain: "Badges",                    playful: "Badges" },
+  "badge.legend":               { plain: "· faded = not earned yet",  playful: "· faded = not earned yet" },
+  "badge.earned":               { plain: "Earned",                    playful: "Earned" },
+  "badge.notEarned":            { plain: "Not earned yet",            playful: "Not earned yet" },
 
   // ── Focus timer labels ─────────────────────────────────────────────────────
   "focus.startTimer":   { plain: "▶ Start focusing",   playful: "▶ Start focusing" },
@@ -118,6 +122,12 @@ export const STRINGS = {
 
   // ── Breakdown confirm ──────────────────────────────────────────────────────
   "breakdown.looksRight": { plain: "Looks right",       playful: "👍 Looks right" },
+
+  // ── Schedule status banner (ground truth, Phase 4) ─────────────────────────
+  // Reflects the PERSISTED task.scheduledAt marker — never optimistic UI. ⚠️/✅
+  // are functional glyphs (allowed in plain); 🔌 is playful-only flavour.
+  "banner.scheduled":    { plain: "✅ Scheduled — these steps are on your calendar.", playful: "✅ Scheduled — these steps are on your calendar." },
+  "banner.notScheduled": { plain: "⚠️ Not scheduled yet — connect a calendar to send these steps automatically.", playful: "🔌 Not scheduled yet — connect a calendar to send these steps automatically." },
 
   // ── Breakdown step counter ─────────────────────────────────────────────────
   "step.counter":        { plain: "Step",              playful: "bite" },

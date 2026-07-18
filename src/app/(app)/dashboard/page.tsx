@@ -7,23 +7,10 @@ import { currentWorkspaceId } from "@/lib/workspace";
 import { emailConfigured } from "@/lib/email";
 import { SparkCard } from "@/components/dashboard/spark-card";
 import { RoundupCard } from "@/components/dashboard/roundup-card";
-import { t, type Voice, type StringKey } from "@/lib/strings";
+import { BadgeGrid } from "@/components/dashboard/badge-grid";
+import { t, type Voice } from "@/lib/strings";
 
 export const dynamic = "force-dynamic";
-
-// Maps badge DB keys to STRINGS keys; unknown badges fall back to raw key.
-const BADGE_STRING_KEYS: Record<string, StringKey> = {
-  first_breakdown:  "badge.first_breakdown",
-  first_schedule:   "badge.first_schedule",
-  first_focus:      "badge.first_focus",
-  task_complete:    "badge.task_complete",
-  streak_5:         "badge.streak_5",
-  inbox_zero:       "badge.inbox_zero",
-  comeback:         "badge.comeback",
-  // Actively awarded (rewards.ts) — must stay mapped so earned badges render a label.
-  ten_steps_day:    "badge.ten_steps_day",
-  beat_best_streak: "badge.beat_best_streak",
-};
 
 const MEDALS = ["🥇", "🥈", "🥉"];
 
@@ -88,22 +75,8 @@ export default async function DashboardPage() {
         )}
       </section>
 
-      {/* Badges */}
-      {data.badges.length > 0 && (
-        <section className="rounded-xl border p-4">
-          <h2 className="mb-2 text-sm font-semibold">Badges</h2>
-          <div className="flex flex-wrap gap-2">
-            {data.badges.map((b) => (
-              <span
-                key={b}
-                className="bg-secondary text-secondary-foreground rounded-full px-3 py-1 text-xs font-medium"
-              >
-                {BADGE_STRING_KEYS[b] ? t(BADGE_STRING_KEYS[b], voice) : b}
-              </span>
-            ))}
-          </div>
-        </section>
-      )}
+      {/* Badges — the seven named badges, earned + not-earned-yet */}
+      <BadgeGrid voice={voice} earned={data.badges} />
 
       <p className="text-muted-foreground text-xs">
         {t("stat.totalPoints", voice)}: {data.totalPoints}

@@ -131,11 +131,12 @@ describe("BreakdownChat — manual step editing", () => {
     expect(remaining[0]).toHaveValue("First step");
   });
 
-  it("'Send to review' removes the row and creates a needs-review inbox item", async () => {
+  it("'Back to inbox' removes the row and creates a needs-review inbox item", async () => {
     const { createBrainDumpItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
     renderChat();
-    await user.click(screen.getAllByTitle("Send to review")[0]);
+    // Voice-aware per-step eject control (plain voice → "Back to inbox").
+    await user.click(screen.getAllByRole("button", { name: "Back to inbox" })[0]);
     expect(createBrainDumpItem).toHaveBeenCalledWith("First step");
     expect(screen.getAllByLabelText("Step text")).toHaveLength(1);
     expect(screen.getByLabelText("Step text")).toHaveValue("Second step");

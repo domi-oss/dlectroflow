@@ -90,6 +90,7 @@ export default async function TaskPage({
         reclaimConnected={reclaim.connected}
         google={google}
         isGuest={!owner}
+        scheduled={task.scheduledAt != null}
       />
     );
   }

@@ -9,7 +9,7 @@ import {
   RewardType,
   BadgeKey,
 } from "@/lib/constants";
-import { logReward, awardBadge } from "@/lib/rewards";
+import { logReward, awardBadge, touchStreakOnEngagement } from "@/lib/rewards";
 import type { Proposal } from "@/lib/breakdown";
 import { currentWorkspaceId } from "@/lib/workspace";
 
@@ -55,13 +55,15 @@ export async function createTask(title: string): Promise<string | null> {
 }
 
 /**
- * Move a persisted step back into the inbox as its own "needs review" item
+ * Eject a persisted step back into the inbox as its own "needs review" item
  * (a bigger task to re-triage), remove it from its task, and renumber the
- * remaining steps so order/total stay contiguous. Workspace-scoped.
- * Returns the task id and how many steps remain (0 ⇒ the task is now empty,
- * which the caller resolves via the re-plan / keep-as-todo chooser).
+ * remaining steps so order/total stay contiguous. Workspace-scoped + IDOR-safe
+ * (findFirst gated on `task.workspaceId`, so another workspace's step id
+ * resolves to null and is a no-op). Returns the task id and how many steps
+ * remain (0 ⇒ the task is now empty, which the caller resolves via the re-plan
+ * / keep-as-todo chooser).
  */
-export async function extractStepToInbox(
+export async function ejectStepToInbox(
   stepId: string,
 ): Promise<{ taskId: string; remaining: number } | null> {
   const workspaceId = await currentWorkspaceId();
@@ -133,6 +135,9 @@ export async function confirmBreakdown(taskId: string, proposal: Proposal) {
 
   await logReward(workspaceId, RewardType.BreakdownConfirmed);
   await awardBadge(workspaceId, BadgeKey.FirstBreakdown);
+  // A breakdown-confirm is a qualifying engagement (Decision 1) — advances the
+  // streak at most once per working day.
+  await touchStreakOnEngagement(workspaceId);
 
   revalidatePath(`/tasks/${taskId}`);
   revalidatePath("/inbox");
