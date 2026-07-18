@@ -28,6 +28,7 @@ export default async function SettingsPage() {
           agingHours: settings.agingHours,
           overdueHours: settings.overdueHours,
           wayOverdueHours: settings.wayOverdueHours,
+          firstRunPreview: settings.firstRunPreview,
         }}
         isOwner={owner}
         breakdownModel={settings.breakdownModel ?? null}
