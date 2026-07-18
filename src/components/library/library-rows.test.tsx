@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { LibraryRows } from "@/components/library/library-rows";
 import type { Item } from "@/components/inbox/bucket";
+import type { AgingSettings } from "@/lib/aging";
 
 const push = vi.fn();
 const refresh = vi.fn();
@@ -17,13 +18,25 @@ vi.mock("@/app/actions/braindump", () => ({
   ensureFocusStep: vi.fn().mockResolvedValue(null),
   completeItem: vi.fn().mockResolvedValue(undefined),
   deleteBrainDumpItem: vi.fn().mockResolvedValue(undefined),
+  bulkBrainDumpAction: vi.fn().mockResolvedValue({ count: 1 }),
+  setItemEstimate: vi.fn().mockResolvedValue(undefined),
 }));
 
 import {
   ensureFocusStep,
   completeItem,
   deleteBrainDumpItem,
+  bulkBrainDumpAction,
+  setItemEstimate,
 } from "@/app/actions/braindump";
+
+const settings: AgingSettings = {
+  agingThresholdMinutes: 60,
+  demoOverrideSeconds: null,
+  agingHours: 24,
+  overdueHours: 48,
+  wayOverdueHours: 72,
+};
 
 function makeItem(overrides: Partial<Item> & { id: string }): Item {
   return {
@@ -59,7 +72,7 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
   it("Start focusing ensures a step, then navigates to the focus timer", async () => {
     vi.mocked(ensureFocusStep).mockResolvedValue("step-9");
     const user = userEvent.setup();
-    render(<LibraryRows items={[makeItem({ id: "plated-1" })]} tab="plated" voice="plain" now={NOW} />);
+    render(<LibraryRows items={[makeItem({ id: "plated-1" })]} tab="plated" voice="plain" now={NOW} settings={settings} />);
 
     await user.click(screen.getByRole("button", { name: "Start focusing" }));
 
@@ -69,7 +82,7 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
 
   it("Complete marks the item done and refreshes", async () => {
     const user = userEvent.setup();
-    render(<LibraryRows items={[makeItem({ id: "plated-1" })]} tab="plated" voice="plain" now={NOW} />);
+    render(<LibraryRows items={[makeItem({ id: "plated-1" })]} tab="plated" voice="plain" now={NOW} settings={settings} />);
 
     await user.click(screen.getByRole("button", { name: "Complete" }));
 
@@ -79,7 +92,7 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
 
   it("Delete is a two-step confirm (first tap arms, second tap deletes)", async () => {
     const user = userEvent.setup();
-    render(<LibraryRows items={[makeItem({ id: "plated-1" })]} tab="plated" voice="plain" now={NOW} />);
+    render(<LibraryRows items={[makeItem({ id: "plated-1" })]} tab="plated" voice="plain" now={NOW} settings={settings} />);
 
     // First tap: arms the confirm — nothing deleted yet, Cancel now visible.
     await user.click(screen.getByRole("button", { name: "Delete" }));
@@ -93,7 +106,7 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
 
   it("Cancel aborts the delete without calling the action", async () => {
     const user = userEvent.setup();
-    render(<LibraryRows items={[makeItem({ id: "plated-1" })]} tab="plated" voice="plain" now={NOW} />);
+    render(<LibraryRows items={[makeItem({ id: "plated-1" })]} tab="plated" voice="plain" now={NOW} settings={settings} />);
 
     await user.click(screen.getByRole("button", { name: "Delete" }));
     await user.click(screen.getByRole("button", { name: "Cancel" }));
@@ -111,11 +124,70 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
         tab="pantry"
         voice="plain"
         now={NOW}
+        settings={settings}
       />,
     );
 
     expect(screen.getByRole("button", { name: "Start focusing" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Complete" }));
     await waitFor(() => expect(completeItem).toHaveBeenCalledWith("pantry-1"));
+  });
+
+  it("pantry rows show no Select button, meta, or estimate pill (unchanged behavior)", () => {
+    render(
+      <LibraryRows
+        items={[makeItem({ id: "pantry-1", status: "inbox", snoozedUntil: new Date(Date.now() + 86_400_000) })]}
+        tab="pantry"
+        voice="plain"
+        now={NOW}
+        settings={settings}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /^select$/i })).toBeNull();
+    expect(screen.queryByText(/≈\d+ min/)).toBeNull();
+    expect(screen.getByText(/wakes/i)).toBeInTheDocument();
+  });
+});
+
+describe("LibraryRows (plated) — meta, editable estimate, select mode", () => {
+  it("shows a 5-min default estimate that persists on edit", () => {
+    render(
+      <LibraryRows
+        items={[makeItem({ id: "a", text: "todo a", estMinutes: null })]}
+        tab="plated"
+        voice="plain"
+        now={NOW}
+        settings={settings}
+      />,
+    );
+    expect(screen.getByText(/≈5 min/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /edit estimate/i }));
+    const input = screen.getByRole("spinbutton", { name: /edit estimate/i });
+    fireEvent.change(input, { target: { value: "20" } });
+    fireEvent.blur(input);
+
+    expect(setItemEstimate).toHaveBeenCalledWith("a", 20);
+  });
+
+  it("select mode → complete calls bulkBrainDumpAction with the ticked ids", async () => {
+    render(
+      <LibraryRows
+        items={[
+          makeItem({ id: "a", text: "todo a", estMinutes: null }),
+          makeItem({ id: "b", text: "todo b", estMinutes: 10 }),
+        ]}
+        tab="plated"
+        voice="plain"
+        now={NOW}
+        settings={settings}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^select$/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /todo a/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^complete$/i }));
+
+    await waitFor(() => expect(bulkBrainDumpAction).toHaveBeenCalledWith(["a"], "complete"));
   });
 });

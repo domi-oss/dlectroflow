@@ -135,7 +135,7 @@ export default async function LibraryPage({
         ) : active === "plated" || active === "pantry" ? (
           // In-flight rows are interactive: Start focusing / Complete / Delete,
           // reusing the Inbox's action wiring (see LibraryRows).
-          <LibraryRows items={rows} tab={active} voice={voice} now={now} />
+          <LibraryRows items={rows} tab={active} voice={voice} now={now} settings={settings} />
         ) : (
           // Sorted / Done are closure views — the whole row reopens the breakdown.
           <ul className="space-y-2">
