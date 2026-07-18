@@ -8,6 +8,7 @@ import {
   logReward,
   awardBadge,
   touchStreakOnCompletion,
+  touchStreakOnEngagement,
 } from "@/lib/rewards";
 import {
   BrainDumpStatus,
@@ -25,6 +26,9 @@ export async function createBrainDumpItem(text: string) {
   const trimmed = text.trim();
   if (!trimmed) return;
   await prisma.brainDumpItem.create({ data: { text: trimmed, workspaceId } });
+  // A capture is a qualifying engagement (Decision 1) — advances the streak at
+  // most once per working day.
+  await touchStreakOnEngagement(workspaceId);
   revalidatePath(INBOX_PATH);
 }
 

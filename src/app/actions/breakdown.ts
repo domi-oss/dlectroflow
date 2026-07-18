@@ -9,7 +9,7 @@ import {
   RewardType,
   BadgeKey,
 } from "@/lib/constants";
-import { logReward, awardBadge } from "@/lib/rewards";
+import { logReward, awardBadge, touchStreakOnEngagement } from "@/lib/rewards";
 import type { Proposal } from "@/lib/breakdown";
 import { currentWorkspaceId } from "@/lib/workspace";
 
@@ -133,6 +133,9 @@ export async function confirmBreakdown(taskId: string, proposal: Proposal) {
 
   await logReward(workspaceId, RewardType.BreakdownConfirmed);
   await awardBadge(workspaceId, BadgeKey.FirstBreakdown);
+  // A breakdown-confirm is a qualifying engagement (Decision 1) — advances the
+  // streak at most once per working day.
+  await touchStreakOnEngagement(workspaceId);
 
   revalidatePath(`/tasks/${taskId}`);
   revalidatePath("/inbox");

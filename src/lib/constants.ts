@@ -64,12 +64,29 @@ export type SparkSource = (typeof SparkSource)[keyof typeof SparkSource];
 export const BadgeKey = {
   FirstBreakdown: "first_breakdown",
   FirstSchedule: "first_schedule",
+  FirstFocus: "first_focus",
   Streak5: "streak_5",
   TenStepsDay: "ten_steps_day",
   BeatBestStreak: "beat_best_streak",
   TaskComplete: "task_complete",
+  InboxZero: "inbox_zero",
+  Comeback: "comeback",
 } as const;
 export type BadgeKey = (typeof BadgeKey)[keyof typeof BadgeKey];
+
+// The seven named badges shown on the dashboard (wireframe § Dashboard), in
+// display order. Full work week = the 5-working-day streak (`streak_5`). The
+// other actively-awarded keys (ten_steps_day, beat_best_streak) are earned in
+// the background but intentionally not part of this named set.
+export const DASHBOARD_BADGE_KEYS: BadgeKey[] = [
+  BadgeKey.FirstBreakdown,
+  BadgeKey.FirstSchedule,
+  BadgeKey.FirstFocus,
+  BadgeKey.TaskComplete,
+  BadgeKey.Streak5,
+  BadgeKey.InboxZero,
+  BadgeKey.Comeback,
+];
 
 export const SINGLETON_ID = "singleton";
 
