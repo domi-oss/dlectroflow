@@ -324,3 +324,27 @@ export async function setItemEstimate(id: string, minutes: number) {
   revalidatePath(INBOX_PATH);
   revalidatePath("/library");
 }
+
+/**
+ * Bulk edit for the Library to-do tabs. Reuses the per-item actions (which are
+ * each workspace-scoped + carry the reward/badge/streak/graduation logic) so we
+ * never re-implement that. Pre-filters ids to the caller's workspace for an
+ * accurate count + explicit IDOR guard.
+ */
+export async function bulkBrainDumpAction(
+  ids: string[],
+  action: "complete" | "saveForLater" | "delete",
+): Promise<{ count: number }> {
+  if (!ids.length) return { count: 0 };
+  const workspaceId = await currentWorkspaceId();
+  const owned = await prisma.brainDumpItem.findMany({
+    where: { id: { in: ids }, workspaceId },
+    select: { id: true },
+  });
+  for (const { id } of owned) {
+    if (action === "delete") await deleteBrainDumpItem(id);
+    else if (action === "saveForLater") await snoozeBrainDumpItem(id, 60);
+    else await completeItem(id);
+  }
+  return { count: owned.length };
+}
