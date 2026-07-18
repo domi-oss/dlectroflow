@@ -127,6 +127,11 @@ export function FocusTimer({
     router.refresh();
   }, [sessionId, addedMin, router]);
 
+  // Light exit: leaves the FocusSession OPEN (endedAt null) so the step stays
+  // `resumable` and Task 3's Inbox resume banner surfaces it. No server call —
+  // distinct from `giveUp` below, which ends the session.
+  const pauseForNow = () => router.push("/inbox");
+
   const giveUp = async () => {
     if (!sessionId) {
       router.push(`/tasks/${taskId}`);
@@ -338,6 +343,12 @@ export function FocusTimer({
           </button>
           <button onClick={() => addTime(inc * 2)} className="hover:bg-accent rounded-md border px-3 py-2">
             ➕ {inc * 2}m
+          </button>
+          <button
+            onClick={pauseForNow}
+            className="text-muted-foreground hover:text-foreground rounded-md px-3 py-2 text-sm"
+          >
+            {t("focus.pauseForNow", voice)}
           </button>
           <button
             onClick={giveUp}

@@ -114,6 +114,7 @@ export const STRINGS = {
   "focus.yesDone":      { plain: "✅ Yes, done!",        playful: "✅ Yes, done!" },
   "focus.notYet":       { plain: "Not yet",             playful: "🔁 Not yet" },
   "focus.nextStep":     { plain: "Focus the next step", playful: "Focus the next bite" },
+  "focus.pauseForNow":  { plain: "⏸️ Pause for now",    playful: "⏸️ Pause for now" },
 
   // ── Resume banner (Phase 5, #8) — surfaces the most-recent paused/open focus
   // step on the Inbox so a user can jump straight back in. ⏸/→ are functional
