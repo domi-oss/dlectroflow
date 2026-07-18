@@ -12,6 +12,7 @@ import { downloadIcs } from "@/lib/download-ics";
 import type { Feedback, Proposal, StreamEvent } from "@/lib/breakdown";
 import { reorder, blankStep } from "@/lib/breakdown";
 import { EmojiPicker } from "@/components/breakdown/emoji-picker";
+import { ScheduleStatusBanner } from "@/components/breakdown/schedule-status-banner";
 import { cn } from "@/lib/utils";
 import { t } from "@/lib/strings";
 import { useVoice } from "@/components/voice-provider";
@@ -32,6 +33,7 @@ export function BreakdownChat({
   reclaimConnected,
   google,
   isGuest = false,
+  scheduled = false,
 }: {
   taskId: string;
   title: string;
@@ -41,6 +43,8 @@ export function BreakdownChat({
   reclaimConnected: boolean;
   google: { configured: boolean; connected: boolean; needsReconnect: boolean };
   isGuest?: boolean;
+  /** Persisted ground truth: has this task ever been scheduled (task.scheduledAt)? */
+  scheduled?: boolean;
 }) {
   const router = useRouter();
   const voice = useVoice();
@@ -143,10 +147,11 @@ export function BreakdownChat({
     );
   }
 
-  // Send a step back to the inbox "needs review" bucket as its own bigger task.
+  // Eject a step back to the inbox "needs review" bucket as its own bigger task.
   // In the editor the steps aren't persisted yet, so this just drops the row
-  // locally and captures its text as a fresh inbox item.
-  function sendStepToReview(i: number) {
+  // locally and captures its text as a fresh inbox item. (Once confirmed, the
+  // working view uses the persisted ejectStepToInbox server action instead.)
+  function backToInbox(i: number) {
     const text = proposal?.steps[i]?.text.trim();
     removeStep(i);
     if (text) void createBrainDumpItem(text);
@@ -249,6 +254,13 @@ export function BreakdownChat({
             🎉 Saved {proposal?.steps.length} steps ({totalMin} min total).
           </p>
         </div>
+
+        {/* Ground truth: reflects the persisted scheduledAt marker (plus an
+            in-session schedule success), never an optimistic assumption. */}
+        <ScheduleStatusBanner
+          scheduled={scheduled || schedule.status === "done" || gsched.status === "done"}
+          voice={voice}
+        />
 
         {/* Calendar export — always available, no integrations needed */}
         <div className="space-y-2 rounded-lg border p-4 text-sm">
@@ -512,14 +524,14 @@ export function BreakdownChat({
                   />
                   <span className="text-muted-foreground text-xs">min</span>
                 </div>
-                <div className="flex flex-col gap-1">
+                <div className="flex flex-col items-stretch gap-1">
                   <button
-                    title="Send to review"
-                    aria-label="Send to review"
-                    onClick={() => sendStepToReview(i)}
-                    className="text-muted-foreground hover:text-foreground rounded px-1 text-xs"
+                    title="Send back to the inbox as its own item to re-break-down"
+                    aria-label="Back to inbox"
+                    onClick={() => backToInbox(i)}
+                    className="text-muted-foreground hover:text-foreground hover:bg-accent rounded border px-1.5 py-0.5 text-xs whitespace-nowrap"
                   >
-                    ↗
+                    {t("action.backToInbox", voice)}
                   </button>
                   <button
                     title="Remove this step"

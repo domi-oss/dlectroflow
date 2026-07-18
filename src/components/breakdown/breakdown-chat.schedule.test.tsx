@@ -69,7 +69,12 @@ afterEach(cleanup);
 
 /** Minimal props for BreakdownChat, then drive it into the confirmed (schedule) view. */
 async function renderChat(
-  overrides: { google?: Partial<GoogleProp>; reclaimConnected?: boolean; isGuest?: boolean } = {},
+  overrides: {
+    google?: Partial<GoogleProp>;
+    reclaimConnected?: boolean;
+    isGuest?: boolean;
+    scheduled?: boolean;
+  } = {},
 ) {
   const google: GoogleProp = {
     configured: false,
@@ -85,6 +90,7 @@ async function renderChat(
       reclaimConnected={overrides.reclaimConnected ?? false}
       google={google}
       isGuest={overrides.isGuest ?? false}
+      scheduled={overrides.scheduled ?? false}
     />,
   );
   const user = userEvent.setup();
@@ -155,5 +161,30 @@ describe("BreakdownChat — schedule section (Google-first wording, #22)", () =>
     await user.click(screen.getByRole("button", { name: /download calendar/i }));
     await waitFor(() => expect(scheduleViaIcsMock).toHaveBeenCalledWith("task-1"));
     expect(downloadIcsMock).toHaveBeenCalledWith("BEGIN:VCALENDAR", "dlectroflow-plan-the-party.ics");
+  });
+});
+
+describe("BreakdownChat — confirmed banner reflects ground truth (not optimistic)", () => {
+  it("a freshly-confirmed, never-scheduled task shows the 'not scheduled yet' banner", async () => {
+    await renderChat();
+    expect(screen.getByText(/not scheduled yet — connect a calendar/i)).toBeInTheDocument();
+    expect(screen.queryByText(/these steps are on your calendar/i)).toBeNull();
+  });
+
+  it("a persisted-scheduled task shows the 'scheduled' banner on reopen", async () => {
+    await renderChat({ scheduled: true });
+    expect(screen.getByText(/scheduled — these steps are on your calendar/i)).toBeInTheDocument();
+    expect(screen.queryByText(/not scheduled yet/i)).toBeNull();
+  });
+
+  it("flips to 'scheduled' after an in-session Google send succeeds", async () => {
+    pushStepsToGoogleTasksMock.mockResolvedValue({ ok: true, scheduled: 1, listTitle: "🗓 Reclaim" });
+    await renderChat({ google: { configured: true, connected: true, needsReconnect: false } });
+    expect(screen.getByText(/not scheduled yet/i)).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /send to google tasks/i }));
+    await waitFor(() =>
+      expect(screen.getByText(/scheduled — these steps are on your calendar/i)).toBeInTheDocument(),
+    );
   });
 });
