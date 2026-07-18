@@ -100,25 +100,72 @@ export default async function TaskPage({
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      {/* Origin-aware back breadcrumb, promoted to the top of the page (!83
+          top redesign) — it used to sit isolated at the bottom, far from the
+          actions it relates to. `backTarget` is resolved above from the
+          whitelist-guarded `from` query param; label + href are unchanged. */}
+      <Link
+        href={backTarget.href}
+        className="text-muted-foreground hover:text-foreground inline-flex items-center text-sm"
+      >
+        ← {t(backTarget.labelKey, voice)}
+      </Link>
+
+      {/* Distinct task-view header (!83 top redesign, owner: "Both") — a
+          bordered card + small "Task" eyebrow so this open-task view reads as
+          clearly distinct from the Library hub's plain (unboxed) header at a
+          glance, using only existing tokens (border/rounded-lg, the same
+          "card" shape as the Done rows + empty-state on the Library page).
+          The Refine/Schedule row lives inside it, directly under the meta
+          line, per the owner's #1 request. */}
+      <div className="space-y-3 rounded-lg border p-4">
+        <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
+          {t("task.eyebrow", voice)}
+        </p>
         <h1 className="text-2xl font-semibold">
           {task.parentEmoji ? `${task.parentEmoji} ` : ""}
           {task.title}
         </h1>
-        <Link href={backTarget.href} className="text-muted-foreground text-sm hover:underline">
-          ← {t(backTarget.labelKey, voice)}
-        </Link>
-      </div>
 
-      <p className="text-muted-foreground text-sm">
-        {doneCount}/{task.steps.length} done
-        {nextStep && (
-          <>
-            {" · next up: "}
-            <span className="text-foreground">{nextStep.text}</span>
-          </>
-        )}
-      </p>
+        <p className="text-muted-foreground text-sm">
+          {doneCount}/{task.steps.length} done
+          {nextStep && (
+            <>
+              {" · next up: "}
+              <span className="text-foreground">{nextStep.text}</span>
+            </>
+          )}
+        </p>
+
+        {/* Refine breakdown + Schedule share one left-aligned row (owner
+            styling tweak on !83) — both styled as bordered buttons matching
+            the Library's "Select" button (lib.select: "hover:bg-accent
+            rounded-md border px-2.5 py-1 text-sm"). Refine breakdown drops
+            its old ↻ glyph (follow-up owner ask: clean text, no icon) — the
+            Schedule button keeps its 📅 (owner: functional glyphs stay in
+            Plain voice). The "Scheduled ✓ / Not scheduled yet" indicator
+            stays a plain inline status inside <TaskSchedule>, not a button.
+            Moved here from the bottom of the page on !83 (owner #1): same
+            row, same behavior, only its position changed. */}
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <Link
+            href={`/tasks/${task.id}?edit=1`}
+            className="hover:bg-accent rounded-md border px-2.5 py-1"
+          >
+            Refine breakdown
+          </Link>
+
+          {/* Split out of the old merged "Refine breakdown / schedule" link
+              (#8 follow-up) — this control actually schedules, reusing the
+              Inbox's ScheduleControl + owner/guest wiring verbatim. */}
+          <TaskSchedule
+            taskId={task.id}
+            scheduledAt={task.scheduledAt}
+            google={owner ? google : null}
+            voice={voice}
+          />
+        </div>
+      </div>
 
       <TaskSteps
         taskId={task.id}
@@ -133,33 +180,6 @@ export default async function TaskPage({
           resumable: s.focusSessions.length > 0,
         }))}
       />
-
-      {/* Refine breakdown + Schedule share one left-aligned row (owner
-          styling tweak on !83) — both styled as bordered buttons matching the
-          Library's "Select" button (lib.select: "hover:bg-accent rounded-md
-          border px-2.5 py-1 text-sm"). Refine breakdown drops its old ↻ glyph
-          (follow-up owner ask: clean text, no icon) — the Schedule button
-          keeps its 📅 (owner: functional glyphs stay in Plain voice). The
-          "Scheduled ✓ / Not scheduled yet" indicator stays a plain inline
-          status inside <TaskSchedule>, not a button. */}
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <Link
-          href={`/tasks/${task.id}?edit=1`}
-          className="hover:bg-accent rounded-md border px-2.5 py-1"
-        >
-          Refine breakdown
-        </Link>
-
-        {/* Split out of the old merged "Refine breakdown / schedule" link
-            (#8 follow-up) — this control actually schedules, reusing the
-            Inbox's ScheduleControl + owner/guest wiring verbatim. */}
-        <TaskSchedule
-          taskId={task.id}
-          scheduledAt={task.scheduledAt}
-          google={owner ? google : null}
-          voice={voice}
-        />
-      </div>
     </div>
   );
 }

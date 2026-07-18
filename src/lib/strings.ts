@@ -189,6 +189,11 @@ export const STRINGS = {
   // inventing new playful copy for a status marker.
   "task.scheduled":      { plain: "Scheduled ✓",       playful: "Scheduled ✓" },
   "task.notScheduled":   { plain: "Not scheduled yet", playful: "Not scheduled yet" },
+  // Task working-view header eyebrow (!83 top redesign) — a small structural
+  // label so the open-task view reads as distinct from the Library hub at a
+  // glance. Structural chrome, not a flavour opportunity, so it's kept
+  // identical across voices (same call as task.scheduled/notScheduled above).
+  "task.eyebrow":        { plain: "Task",              playful: "Task" },
 } as const;
 
 export type StringKey = keyof typeof STRINGS;
