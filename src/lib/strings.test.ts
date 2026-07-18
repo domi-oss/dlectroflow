@@ -254,12 +254,6 @@ describe("Task 2 — inbox/focus/breakdown keys (plain vs playful)", () => {
   it('t("focus.resume", "plain") → "▶ Resume"', () => {
     expect(t("focus.resume", "plain")).toBe("▶ Resume");
   });
-  it('t("focus.giveUp", "plain") → "Pause for now"', () => {
-    expect(t("focus.giveUp", "plain")).toBe("Pause for now");
-  });
-  it('t("focus.giveUp", "playful") → "⏸️ Pause for now"', () => {
-    expect(t("focus.giveUp", "playful")).toBe("⏸️ Pause for now");
-  });
   it('t("focus.timesUp", "plain") → "Time\'s up — did you finish?"', () => {
     expect(t("focus.timesUp", "plain")).toBe("Time's up — did you finish?");
   });
@@ -374,7 +368,6 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "action.reviewNow",
     "bucket.empty",
     "inbox.zero",
-    "focus.giveUp",
     "focus.nextStep",
     "breakdown.looksRight",
     "action.fewerSteps",

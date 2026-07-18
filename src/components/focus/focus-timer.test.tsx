@@ -50,26 +50,32 @@ async function renderRunning() {
 beforeEach(() => vi.clearAllMocks());
 afterEach(cleanup);
 
-// NOTE: the pre-existing "Give up" button's plain-voice label is also, confusingly,
-// "Pause for now" (no emoji) — see focus.giveUp in strings.ts. It ends the session
-// (giveUpFocus). The new control below is distinguished by its ⏸️ glyph so this
-// test doesn't collide with it; the label collision itself is flagged in the report.
+// Owner reconcile (#8 Phase 5): there is now exactly ONE low-shame exit
+// control, labelled "⏸️ Pause for now" (focus.pauseForNow). It does NOT end
+// the FocusSession — no server call at all — so the step stays `resumable`
+// and Task 3's Inbox resume banner can surface it. It shows the
+// "Paused — no guilt" card (phase "gaveup").
 const PAUSE_FOR_NOW = "⏸️ Pause for now";
 
-describe("FocusTimer — Pause for now (light exit)", () => {
-  it("shows a 'Pause for now' control once the session is running", async () => {
+describe("FocusTimer — Pause for now (light exit, keeps session open)", () => {
+  it("shows exactly one 'Pause for now' control once the session is running", async () => {
     await renderRunning();
     expect(beginFocus).toHaveBeenCalledWith("s1", 10);
     expect(
-      screen.getByRole("button", { name: PAUSE_FOR_NOW }),
-    ).toBeInTheDocument();
+      screen.getAllByRole("button", { name: PAUSE_FOR_NOW }),
+    ).toHaveLength(1);
   });
 
-  it("navigates to /inbox and does not end the session", async () => {
+  it("leaves the session open (no giveUpFocus/completeFocus call) and shows the paused card", async () => {
     const user = await renderRunning();
     await user.click(screen.getByRole("button", { name: PAUSE_FOR_NOW }));
-    expect(push).toHaveBeenCalledWith("/inbox");
+
+    // The session is left OPEN — no server call ends it. This is what keeps
+    // the step `resumable` so Task 3's Inbox banner surfaces it.
     expect(giveUpFocus).not.toHaveBeenCalled();
     expect(completeFocus).not.toHaveBeenCalled();
+
+    // The "Paused — no guilt" card renders in place of the timer.
+    expect(screen.getByText("Paused — no guilt.")).toBeInTheDocument();
   });
 });
