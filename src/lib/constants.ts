@@ -74,10 +74,10 @@ export const BadgeKey = {
 } as const;
 export type BadgeKey = (typeof BadgeKey)[keyof typeof BadgeKey];
 
-// The seven named badges shown on the dashboard (wireframe § Dashboard), in
-// display order. Full work week = the 5-working-day streak (`streak_5`). The
-// other actively-awarded keys (ten_steps_day, beat_best_streak) are earned in
-// the background but intentionally not part of this named set.
+// The badges shown on the dashboard, in display order: the seven named badges
+// (wireframe § Dashboard) followed by the two legacy badges the owner chose to
+// surface (owner decision on !82). Full work week = the 5-working-day streak
+// (`streak_5`).
 export const DASHBOARD_BADGE_KEYS: BadgeKey[] = [
   BadgeKey.FirstBreakdown,
   BadgeKey.FirstSchedule,
@@ -86,6 +86,9 @@ export const DASHBOARD_BADGE_KEYS: BadgeKey[] = [
   BadgeKey.Streak5,
   BadgeKey.InboxZero,
   BadgeKey.Comeback,
+  // Legacy badges, surfaced per owner decision on !82.
+  BadgeKey.TenStepsDay,
+  BadgeKey.BeatBestStreak,
 ];
 
 export const SINGLETON_ID = "singleton";

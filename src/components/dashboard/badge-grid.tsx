@@ -1,10 +1,9 @@
 import { t, type Voice, type StringKey } from "@/lib/strings";
 import { DASHBOARD_BADGE_KEYS, type BadgeKey } from "@/lib/constants";
 
-// Every BadgeKey maps to its voice-aware label. The extras (ten_steps_day,
-// beat_best_streak) are still awarded in the background but are not part of the
-// named dashboard set (DASHBOARD_BADGE_KEYS); they're mapped here only to keep
-// the record total.
+// Every BadgeKey maps to its voice-aware label. The dashboard shows the set in
+// DASHBOARD_BADGE_KEYS (the 7 wireframe badges + the 2 legacy badges surfaced
+// per the owner decision on !82).
 const BADGE_STRING_KEY: Record<BadgeKey, StringKey> = {
   first_breakdown: "badge.first_breakdown",
   first_schedule: "badge.first_schedule",
@@ -18,9 +17,10 @@ const BADGE_STRING_KEY: Record<BadgeKey, StringKey> = {
 };
 
 /**
- * The seven named badges (wireframe § Dashboard), each shown earned or
- * not-earned-yet. Status is conveyed by more than colour (a 🔒 glyph + reduced
- * opacity + an aria-label / title) per the COGA accessibility baseline.
+ * The dashboard badge set (7 wireframe badges + 2 surfaced legacy badges),
+ * each shown earned or not-earned-yet. Status is conveyed by more than colour
+ * (a 🔒 glyph + reduced opacity + an aria-label / title) per the COGA
+ * accessibility baseline.
  */
 export function BadgeGrid({ voice, earned }: { voice: Voice; earned: string[] }) {
   const earnedSet = new Set(earned);

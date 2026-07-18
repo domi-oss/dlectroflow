@@ -7,7 +7,7 @@ import { DASHBOARD_BADGE_KEYS } from "@/lib/constants";
 afterEach(cleanup);
 
 describe("BadgeGrid", () => {
-  it("renders all seven named badges (plain voice)", () => {
+  it("renders all nine dashboard badges (7 wireframe + 2 legacy, plain voice)", () => {
     render(<BadgeGrid voice="plain" earned={[]} />);
     for (const label of [
       "First breakdown",
@@ -17,10 +17,24 @@ describe("BadgeGrid", () => {
       "Full work week",
       "Inbox zero",
       "Comeback",
+      "10 steps in a day",
+      "Beat your best streak",
     ]) {
       expect(screen.getByText(new RegExp(label))).toBeInTheDocument();
     }
-    expect(DASHBOARD_BADGE_KEYS).toHaveLength(7);
+    expect(DASHBOARD_BADGE_KEYS).toHaveLength(9);
+  });
+
+  it("surfaces the legacy badges with accessible earned/locked state", () => {
+    render(<BadgeGrid voice="plain" earned={["ten_steps_day"]} />);
+
+    const earned = screen.getByLabelText("10 steps in a day — earned");
+    expect(earned).toHaveAttribute("data-earned", "true");
+    expect(earned.textContent).not.toContain("🔒");
+
+    const locked = screen.getByLabelText("Beat your best streak — not earned yet");
+    expect(locked).toHaveAttribute("data-earned", "false");
+    expect(locked.textContent).toContain("🔒");
   });
 
   it("shows earned badges without a lock and unearned badges locked", () => {
