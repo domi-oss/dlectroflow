@@ -50,6 +50,9 @@ model Settings {
   agingHours            Int      @default(4)
   overdueHours          Int      @default(8)
   wayOverdueHours       Int      @default(12)
+  // Phase 5 — first-run welcome + demo preview
+  welcomeDismissedAt    DateTime?
+  firstRunPreview       Boolean  @default(false)
   updatedAt             DateTime @updatedAt
   workspaceId           String   @unique
 }
