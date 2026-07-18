@@ -122,7 +122,7 @@ export function LibraryMultistep({
                     type="button"
                     className="block w-full text-left font-medium break-words"
                     aria-expanded={sel.selecting ? undefined : expanded}
-                    aria-controls={`lib-steps-${item.id}`}
+                    aria-controls={expanded && item.taskId ? `lib-steps-${item.id}` : undefined}
                     onClick={() => (sel.selecting ? sel.toggle(item.id) : setExpandedId(expanded ? null : item.id))}
                   >
                     {item.text}

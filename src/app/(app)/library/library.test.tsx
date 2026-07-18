@@ -69,6 +69,7 @@ function raw(
     breakdownRequestedAt: null,
     taskId: null,
     workspaceId: "owner",
+    estMinutes: null,
     task: null,
     ...overrides,
   };

@@ -52,7 +52,7 @@ function EstimateEditor({
       </button>
     );
   }
-  const commit = () => {
+  const commit = async () => {
     setEditing(false);
     // Guard against non-numeric/empty input. Both cases end up as `val = 0`
     // (a `type="number"` input sanitizes an invalid string to "" before
@@ -61,7 +61,9 @@ function EstimateEditor({
     // Only persist + refresh a real, changed, positive value; the server
     // still clamps 1–600 on save.
     if (Number.isFinite(val) && val > 0 && val !== minutes) {
-      void setItemEstimate(id, val);
+      // Await the write before refreshing, or router.refresh() can re-render
+      // the route with the stale estimate before the server action commits.
+      await setItemEstimate(id, val);
       onSaved();
     }
   };
@@ -73,9 +75,9 @@ function EstimateEditor({
       aria-label={t("lib.editEstimate", voice)}
       value={val}
       onChange={(e) => setVal(Number(e.target.value))}
-      onBlur={commit}
+      onBlur={() => void commit()}
       onKeyDown={(e) => {
-        if (e.key === "Enter") commit();
+        if (e.key === "Enter") void commit();
       }}
       className="border-input w-16 rounded-md border px-1 py-0.5 text-right text-xs"
     />
