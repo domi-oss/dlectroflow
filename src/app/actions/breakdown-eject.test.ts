@@ -1,5 +1,5 @@
 /**
- * Action tests for breakdown.ts › extractStepToInbox — moving a step back to
+ * Action tests for breakdown.ts › ejectStepToInbox — moving a step back to
  * the inbox "needs review" bucket as its own item and renumbering the rest.
  * Mocks mirror braindump.test.ts: next/cache, @/lib/db, @/lib/workspace.
  */
@@ -33,7 +33,7 @@ vi.mock("@/lib/workspace", () => ({
   MissingWorkspaceError: class MissingWorkspaceError extends Error {},
 }));
 
-describe("breakdown.ts › extractStepToInbox", () => {
+describe("breakdown.ts › ejectStepToInbox", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     currentWorkspaceIdMock.mockResolvedValue("owner");
@@ -52,8 +52,8 @@ describe("breakdown.ts › extractStepToInbox", () => {
 
   it("is workspace-scoped and no-ops when the step isn't the caller's", async () => {
     prismaMock.step.findFirst.mockResolvedValueOnce(null);
-    const { extractStepToInbox } = await import("./breakdown");
-    const res = await extractStepToInbox("s2");
+    const { ejectStepToInbox } = await import("./breakdown");
+    const res = await ejectStepToInbox("s2");
     expect(res).toBeNull();
     expect(prismaMock.step.findFirst.mock.calls[0][0].where).toEqual({
       id: "s2",
@@ -64,8 +64,8 @@ describe("breakdown.ts › extractStepToInbox", () => {
   });
 
   it("creates a needs-review inbox item from the step text", async () => {
-    const { extractStepToInbox } = await import("./breakdown");
-    await extractStepToInbox("s2");
+    const { ejectStepToInbox } = await import("./breakdown");
+    await ejectStepToInbox("s2");
     expect(prismaMock.brainDumpItem.create).toHaveBeenCalledTimes(1);
     expect(prismaMock.brainDumpItem.create.mock.calls[0][0].data).toMatchObject({
       text: "book the venue",
@@ -75,8 +75,8 @@ describe("breakdown.ts › extractStepToInbox", () => {
   });
 
   it("deletes the step and renumbers the remaining ones contiguously", async () => {
-    const { extractStepToInbox } = await import("./breakdown");
-    const res = await extractStepToInbox("s2");
+    const { ejectStepToInbox } = await import("./breakdown");
+    const res = await ejectStepToInbox("s2");
 
     expect(prismaMock.step.delete).toHaveBeenCalledWith({ where: { id: "s2" } });
     // s1 → order 1/total 2, s3 → order 2/total 2
@@ -90,15 +90,15 @@ describe("breakdown.ts › extractStepToInbox", () => {
 
   it("reports remaining:0 when the last step is extracted", async () => {
     prismaMock.step.findMany.mockResolvedValueOnce([]);
-    const { extractStepToInbox } = await import("./breakdown");
-    const res = await extractStepToInbox("s2");
+    const { ejectStepToInbox } = await import("./breakdown");
+    const res = await ejectStepToInbox("s2");
     expect(res).toEqual({ taskId: "t1", remaining: 0 });
     expect(prismaMock.step.update).not.toHaveBeenCalled();
   });
 
   it("revalidates the task page and the inbox", async () => {
-    const { extractStepToInbox } = await import("./breakdown");
-    await extractStepToInbox("s2");
+    const { ejectStepToInbox } = await import("./breakdown");
+    await ejectStepToInbox("s2");
     expect(revalidatePathMock).toHaveBeenCalledWith("/tasks/t1");
     expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
   });

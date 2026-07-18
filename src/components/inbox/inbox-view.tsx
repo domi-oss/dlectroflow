@@ -60,6 +60,7 @@ import {
   showReminder,
   subscribeNotificationPermission,
 } from "@/lib/notifications";
+import { formatAgo } from "@/lib/format";
 
 /** Map a dnd-kit drop onto a bucket to a move intent (null when dropped nowhere). */
 export function dragEndToMove(
@@ -81,8 +82,11 @@ type GoogleStatus = { configured: boolean; connected: boolean; needsReconnect: b
 
 /** Maps a row's connection status + its own "ready" state (what it'd show if
  * Google were connected) onto the 📅 control's actual state — not-configured
- * and needs-reconnect override every row the same way. */
-function scheduleState(
+ * and needs-reconnect override every row the same way. Exported so other
+ * schedule-control call sites (e.g. the task working-view's <TaskSchedule>,
+ * #8 follow-up) reuse this exact owner/guest logic instead of reimplementing
+ * it. */
+export function scheduleState(
   google: GoogleStatus,
   ready: ScheduleControlProps["state"],
 ): ScheduleControlProps["state"] {
@@ -97,7 +101,9 @@ function scheduleState(
 // Mirrors the failure-reason copy `breakdown-chat.tsx` already uses for the
 // same Google Tasks actions — `reconnect_required` is handled separately
 // (swaps the row's control to the Reconnect link instead of showing text).
-const SCHEDULE_ERROR_MESSAGES: Record<string, string> = {
+// Exported for reuse by <TaskSchedule> (#8 follow-up) — same single source
+// of truth as `scheduleState` above.
+export const SCHEDULE_ERROR_MESSAGES: Record<string, string> = {
   not_configured: "Google isn't configured (set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).",
   not_connected: "Google Tasks isn't connected.",
   no_reclaim_list: "Couldn't find your Reclaim-synced Google Tasks list.",
@@ -1630,17 +1636,6 @@ function AgeLabel({ createdAt, aging, now }: { createdAt: Date; aging: boolean; 
     </p>
   );
 }
-
-function formatAgo(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
-}
-
 /**
  * Persistent "N need triage" badge. Dismissable (✕); once dismissed it stays
  * hidden until a new item is captured or an item crosses into Aging (tracked
