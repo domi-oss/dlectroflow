@@ -43,6 +43,13 @@ spec:
               type: RuntimeDefault
           imagePullSecrets:
             - name: dlectroflow-registry
+          volumes:
+            # Writable scratch for `npx tsx` under readOnlyRootFilesystem — tsx
+            # creates an IPC socket dir under /tmp on startup, so it needs a
+            # writable HOME/TMPDIR (pointed at /tmp below), same as backup.yaml.
+            - name: tmp
+              emptyDir:
+                sizeLimit: 64Mi
           containers:
             - name: purge
               image: "{{ .Values.image.repository }}:{{ required "image.tag must be set (CI passes $CI_COMMIT_SHA)" .Values.image.tag }}"
@@ -56,11 +63,20 @@ spec:
                     secretKeyRef:
                       name: dlectroflow-secrets
                       key: DATABASE_URL
+                # npx/tsx need a writable HOME/TMPDIR even under
+                # readOnlyRootFilesystem; point both at the tmp emptyDir below.
+                - name: HOME
+                  value: /tmp
+                - name: TMPDIR
+                  value: /tmp
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
                 capabilities:
                   drop: ["ALL"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
               resources:
                 requests:
                   cpu: 100m
