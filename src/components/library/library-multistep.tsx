@@ -26,11 +26,13 @@ import { RowNumber, NextStepLine, ProgressBar, AgeLabel, EstimatePill, rowEmoji,
  * `bulkBrainDumpAction` (Task 4) for the batch complete/save/delete ops so the
  * hub never re-implements the workspace-scoped per-item logic.
  *
- * Header row (!83 follow-up): "Collapse all" sits to the left and always
- * collapses whichever single row is open (harmless when none is). On the
- * right, next to "Select", an "Open task" control links to the
+ * Header row (!83 follow-up): a single-open expand/collapse toggle sits on the
+ * left. When a row is open it reads "Collapse all" and clears the single-open
+ * state; when none is open it reads "Expand all" and re-opens just the latest
+ * row (items[0]) — it never fans out every row, so single-open holds either
+ * way. Immediately to its LEFT, an "Open task" control links to the
  * currently-expanded row's task page — shown only while a row is expanded,
- * hidden entirely in select mode.
+ * hidden entirely in select mode. "Select" stays on the right.
  */
 export function LibraryMultistep({
   items, voice, now, settings,
@@ -53,13 +55,33 @@ export function LibraryMultistep({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <button
-          type="button"
-          className="hover:bg-accent rounded-md border px-2.5 py-1 text-sm"
-          onClick={() => setExpandedId(null)}
-        >
-          {t("lib.collapseAll", voice)}
-        </button>
+        <div className="flex items-center gap-2 text-sm">
+          {/* `?from=library` lets the task page's back link return here
+              (→ /library?tab=sorted) instead of always going to /inbox
+              (#8 follow-up — Library "Open task" back-button bug). Sits to the
+              LEFT of the expand/collapse toggle; shown only while a row is
+              expanded, hidden entirely in select mode (moved from the panel to
+              the header in !83; positioned left of the toggle in its follow-up). */}
+          {!sel.selecting && expandedItem?.taskId && (
+            <Link
+              href={`/tasks/${expandedItem.taskId}?from=library`}
+              className="hover:bg-accent rounded-md border px-2.5 py-1"
+            >
+              {t("lib.openTask", voice)}
+            </Link>
+          )}
+          {/* Single-open expand/collapse toggle. Open → "Collapse all" clears
+              the single-open state; none open → "Expand all" re-opens just the
+              latest row (items[0]; bucket is createdAt desc). It never fans out
+              every row — single-open is preserved either way. */}
+          <button
+            type="button"
+            className="hover:bg-accent rounded-md border px-2.5 py-1"
+            onClick={() => setExpandedId(expandedItem ? null : (items[0]?.id ?? null))}
+          >
+            {t(expandedItem ? "lib.collapseAll" : "lib.expandAll", voice)}
+          </button>
+        </div>
         {sel.selecting ? (
           <div className="flex gap-2 text-sm">
             <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => sel.selectAll(ids)}>
@@ -70,23 +92,9 @@ export function LibraryMultistep({
             </button>
           </div>
         ) : (
-          <div className="flex gap-2 text-sm">
-            {/* `?from=library` lets the task page's back link return here
-                (→ /library?tab=sorted) instead of always going to /inbox
-                (#8 follow-up — Library "Open task" back-button bug). Only
-                shown while a row is expanded (moved from the panel — !83). */}
-            {expandedItem?.taskId && (
-              <Link
-                href={`/tasks/${expandedItem.taskId}?from=library`}
-                className="hover:bg-accent rounded-md border px-2.5 py-1"
-              >
-                {t("lib.openTask", voice)}
-              </Link>
-            )}
-            <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={sel.enter}>
-              {t("lib.select", voice)}
-            </button>
-          </div>
+          <button className="hover:bg-accent rounded-md border px-2.5 py-1 text-sm" onClick={sel.enter}>
+            {t("lib.select", voice)}
+          </button>
         )}
       </div>
 

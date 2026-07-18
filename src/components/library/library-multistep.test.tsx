@@ -133,11 +133,37 @@ describe("LibraryMultistep", () => {
     expect(screen.getByRole("button", { name: /task new/i })).toHaveAttribute("aria-expanded", "false");
   });
 
-  it("'Collapse all' is harmless when nothing is expanded (no throw, stays collapsed)", () => {
+  it("header toggle reads 'Collapse all' when a row is open and flips to 'Expand all' once collapsed", () => {
+    render(<LibraryMultistep items={items} voice="plain" now={Date.now()} settings={settings} />);
+    // "new" opens by default, so the toggle offers to collapse.
+    expect(screen.getByRole("button", { name: /^collapse all$/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^expand all$/i })).toBeNull();
+    // Collapse it → the same control flips to "Expand all".
+    fireEvent.click(screen.getByRole("button", { name: /^collapse all$/i }));
+    expect(screen.getByRole("button", { name: /^expand all$/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^collapse all$/i })).toBeNull();
+  });
+
+  it("'Expand all' re-opens only the latest (first) row — single-open is preserved, not every row", () => {
     render(<LibraryMultistep items={items} voice="plain" now={Date.now()} settings={settings} />);
     fireEvent.click(screen.getByRole("button", { name: /^collapse all$/i }));
     expect(screen.queryByTestId("task-steps")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /^collapse all$/i }));
-    expect(screen.queryByTestId("task-steps")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^expand all$/i }));
+    // Exactly one row re-opens (single-open), and it's the latest ("new").
+    const panels = screen.getAllByTestId("task-steps");
+    expect(panels).toHaveLength(1);
+    expect(panels[0]).toHaveTextContent("Tnew");
+    // The toggle is back to offering "Collapse all".
+    expect(screen.getByRole("button", { name: /^collapse all$/i })).toBeTruthy();
+  });
+
+  it("'Open task' sits to the LEFT of the expand/collapse toggle in the header (shared cluster, earlier in DOM order)", () => {
+    render(<LibraryMultistep items={items} voice="plain" now={Date.now()} settings={settings} />);
+    const openTask = screen.getByRole("link", { name: /^open task$/i });
+    const toggle = screen.getByRole("button", { name: /^collapse all$/i });
+    // Same header cluster…
+    expect(openTask.parentElement).toBe(toggle.parentElement);
+    // …with "Open task" before the toggle (to its left).
+    expect(openTask.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
