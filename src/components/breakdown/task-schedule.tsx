@@ -7,7 +7,6 @@ import { scheduleViaIcs } from "@/app/actions/ics-schedule";
 import { downloadIcs } from "@/lib/download-ics";
 import { ScheduleControl, type ScheduleControlProps } from "@/components/inbox/row-actions";
 import { scheduleState, SCHEDULE_ERROR_MESSAGES } from "@/components/inbox/inbox-view";
-import { useVoice } from "@/components/voice-provider";
 import { t, type Voice } from "@/lib/strings";
 
 type GoogleStatus = { configured: boolean; connected: boolean; needsReconnect: boolean };
@@ -32,7 +31,7 @@ export function TaskSchedule({
   taskId,
   scheduledAt,
   google,
-  voice: voiceProp,
+  voice,
 }: {
   taskId: string;
   scheduledAt: Date | null;
@@ -40,10 +39,10 @@ export function TaskSchedule({
    *  inbox/page.tsx's `google = owner ? googleStatus : null` (guests always
    *  get the ICS control, never a live Google one). */
   google: GoogleStatus | null;
-  voice?: Voice;
+  // Required — the sole caller (tasks/[taskId]/page.tsx) always resolves and
+  // passes this from settings, so a useVoice() context fallback here was dead.
+  voice: Voice;
 }) {
-  const contextVoice = useVoice();
-  const voice = voiceProp ?? contextVoice;
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -87,7 +86,7 @@ export function TaskSchedule({
               router.refresh();
               return;
             }
-            setError(res.message ?? "Couldn't build the calendar file.");
+            setError(res.message ?? SCHEDULE_ERROR_MESSAGES[res.reason] ?? "Couldn't build the calendar file.");
           });
         },
         pending,

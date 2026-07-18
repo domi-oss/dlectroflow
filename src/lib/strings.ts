@@ -21,7 +21,7 @@ export const STRINGS = {
   "action.moreSteps":    { plain: "More steps",        playful: "🍞 More steps" },
   "action.fewerSteps":   { plain: "Fewer steps",       playful: "🥖 Fewer steps" },
   "action.backToInbox":  { plain: "Back to inbox",     playful: "🍳 Back to inbox" },
-  "action.backToLibrary":{ plain: "Back to Library",   playful: "🍱 Back to the Larder" },
+  "action.backToLibrary": { plain: "Back to Library",  playful: "🍱 Back to the Larder" },
   "action.addStep":      { plain: "Add a step",        playful: "🍞 Add a step" },
   "action.removeStep":   { plain: "Remove step",       playful: "🥖 Remove step" },
   "action.dismiss":      { plain: "Dismiss",           playful: "Not now" },

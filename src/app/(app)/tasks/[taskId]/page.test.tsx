@@ -136,6 +136,12 @@ describe("TaskPage — back link (#8 follow-up, Fix 1)", () => {
     expect(link).toHaveAttribute("href", "/inbox");
   });
 
+  it("`?from=__proto__` (an inherited Object.prototype key, not an own key of BACK_TARGETS) falls back to /inbox instead of crashing", async () => {
+    await renderPage({ from: "__proto__" });
+    const link = screen.getByRole("link", { name: /back to inbox/i });
+    expect(link).toHaveAttribute("href", "/inbox");
+  });
+
   it("is voice-aware: playful voice renders the playful back-to-inbox copy", async () => {
     getSettingsMock.mockResolvedValue({ voice: "playful" });
     await renderPage();

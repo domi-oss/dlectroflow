@@ -113,8 +113,19 @@ describe("TaskSchedule — guest / no Google (google=null)", () => {
     await waitFor(() => expect(downloadIcsMock).toHaveBeenCalledWith("ICSDATA", "task.ics"));
   });
 
-  it("shows an inline error on ICS failure", async () => {
+  it("shows the SCHEDULE_ERROR_MESSAGES dictionary copy for a known failure reason (not the generic fallback)", async () => {
     scheduleViaIcsMock.mockResolvedValue({ ok: false, reason: "not_found" });
+    render(<TaskSchedule taskId="t1" scheduledAt={null} google={null} voice="plain" />);
+    fireEvent.click(screen.getByRole("button", { name: /add to calendar/i }));
+    // "not_found" → SCHEDULE_ERROR_MESSAGES.not_found, mirroring the Google
+    // branch above and inbox-view's own ICS failure path — not the generic
+    // "Couldn't build the calendar file." fallback.
+    expect(await screen.findByText("This task couldn't be found.")).toBeInTheDocument();
+    expect(screen.queryByText(/couldn't build the calendar file/i)).toBeNull();
+  });
+
+  it("falls back to the generic message for a reason with no dictionary entry", async () => {
+    scheduleViaIcsMock.mockResolvedValue({ ok: false, reason: "some_unmapped_reason" });
     render(<TaskSchedule taskId="t1" scheduledAt={null} google={null} voice="plain" />);
     fireEvent.click(screen.getByRole("button", { name: /add to calendar/i }));
     expect(await screen.findByText(/couldn't build the calendar file/i)).toBeInTheDocument();

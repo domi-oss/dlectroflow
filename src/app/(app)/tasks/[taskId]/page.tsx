@@ -59,7 +59,12 @@ export default async function TaskPage({
   if (!task) notFound();
 
   const voice: Voice = settings.voice === "playful" ? "playful" : "plain";
-  const backTarget = (from && BACK_TARGETS[from]) || DEFAULT_BACK_TARGET;
+  // `Object.hasOwn` (not just truthiness of the lookup) matters here: BACK_TARGETS
+  // is a plain object, so `from` values like "__proto__" / "constructor" /
+  // "toString" resolve to inherited Object.prototype members — truthy, but
+  // missing `.href` / `.labelKey`, which would otherwise 500 the page below.
+  const backTarget =
+    from && Object.hasOwn(BACK_TARGETS, from) ? BACK_TARGETS[from] : DEFAULT_BACK_TARGET;
 
   const hasSteps = task.steps.length > 0;
   const editing = edit === "1" || !hasSteps;
