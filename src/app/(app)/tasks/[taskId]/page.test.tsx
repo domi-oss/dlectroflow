@@ -193,6 +193,35 @@ describe("TaskPage — scheduled indicator (driven by task.scheduledAt, Fix 2)",
   });
 });
 
+describe("TaskPage — top redesign (!83): breadcrumb + distinct header + refine/schedule row order", () => {
+  it("renders a 'Task' eyebrow inside the distinct header block", async () => {
+    await renderPage();
+    expect(screen.getByText("Task")).toBeInTheDocument();
+  });
+
+  it("orders the page top-to-bottom: back breadcrumb → header (title + meta) → refine/schedule row → step list", async () => {
+    await renderPage();
+    const back = screen.getByRole("link", { name: /back to inbox/i });
+    const heading = screen.getByRole("heading", { name: /plan the offsite/i });
+    const refine = screen.getByRole("link", { name: /refine breakdown/i });
+    const steps = screen.getByTestId("task-steps");
+
+    // a precedes b in document order.
+    const precedes = (a: Element, b: Element) =>
+      (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+
+    expect(precedes(back, heading)).toBe(true);
+    expect(precedes(heading, refine)).toBe(true);
+    expect(precedes(refine, steps)).toBe(true);
+  });
+
+  it("the back breadcrumb is the first link on the page — no more isolated bottom instance", async () => {
+    const { container } = await renderPage();
+    const links = container.querySelectorAll("a");
+    expect(links[0]).toHaveTextContent(/back to inbox/i);
+  });
+});
+
 describe("TaskPage — workspace scoping", () => {
   it("only ever reads the task for the current workspace", async () => {
     currentWorkspaceIdMock.mockResolvedValue("guest-42");
