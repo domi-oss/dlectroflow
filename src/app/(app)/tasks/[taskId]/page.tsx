@@ -134,12 +134,19 @@ export default async function TaskPage({
         }))}
       />
 
-      <div className="space-y-3">
-        <div className="flex gap-4 text-sm">
-          <Link href={`/tasks/${task.id}?edit=1`} className="text-muted-foreground hover:underline">
-            ↻ Refine breakdown
-          </Link>
-        </div>
+      {/* Refine breakdown + Schedule share one left-aligned row (owner
+          styling tweak on !83) — both styled as bordered buttons matching the
+          Library's "Select" button (lib.select: "hover:bg-accent rounded-md
+          border px-2.5 py-1 text-sm"). The "Scheduled ✓ / Not scheduled yet"
+          indicator stays a plain inline status inside <TaskSchedule>, not a
+          button. */}
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <Link
+          href={`/tasks/${task.id}?edit=1`}
+          className="hover:bg-accent rounded-md border px-2.5 py-1"
+        >
+          ↻ Refine breakdown
+        </Link>
 
         {/* Split out of the old merged "Refine breakdown / schedule" link
             (#8 follow-up) — this control actually schedules, reusing the

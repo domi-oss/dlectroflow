@@ -93,14 +93,23 @@ export function TaskSchedule({
       };
 
   return (
-    <div className="flex flex-wrap items-center gap-3 text-sm">
+    <div className="flex flex-wrap items-center gap-2 text-sm">
       <span
         className={scheduledAt != null ? "font-medium text-emerald-600" : "text-muted-foreground"}
         title={scheduledAt != null ? "Scheduled" : undefined}
       >
         {t(scheduledAt != null ? "task.scheduled" : "task.notScheduled", voice)}
       </span>
-      <ScheduleControl {...schedule} />
+      {/* Outer-trigger wrap (!83 owner tweak): <ScheduleControl> is shared
+          verbatim with every Inbox row and takes no `className`, so the
+          bordered "Select"-button look is applied to a wrapping span here
+          instead of editing the shared component's own button classes —
+          doing that there would also restyle every Inbox row's 📅 / Connect /
+          Reconnect control. No padding on the wrapper: the inner button
+          already carries "px-2.5 py-1", so adding it here would double it. */}
+      <span className="hover:bg-accent rounded-md border text-sm">
+        <ScheduleControl {...schedule} />
+      </span>
       {error && <span className="text-destructive text-xs">{error}</span>}
     </div>
   );
