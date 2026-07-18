@@ -88,7 +88,12 @@ export function SettingsPanel({
 
   const toggleFirstRun = (v: boolean) => {
     setFirstRun(v);
-    startFr(() => updateFirstRunPreview(v));
+    // Async transition callback so frPending stays true for the whole write
+    // (a sync callback returning an unawaited promise drops pending immediately,
+    // leaving the checkbox re-clickable mid-request). Matches saveVoice.
+    startFr(async () => {
+      await updateFirstRunPreview(v);
+    });
   };
 
   return (

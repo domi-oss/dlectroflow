@@ -10,7 +10,7 @@ export type ResumeStepTarget = { id: string; text: string };
  * matching the Inbox page's query order), or null if none.
  *
  * `resumable` means "has an unfinished FocusSession" — a heuristic, not a
- * true pause/resume (see #25). After a pause→resume→complete cycle the
+ * true pause/resume (see #27). After a pause→resume→complete cycle the
  * step's *original* FocusSession is never closed (only the resumed
  * session's row is), so a COMPLETED step can still read `resumable: true`.
  * The `!st.done` guard here keeps the Inbox resume banner from pointing at
