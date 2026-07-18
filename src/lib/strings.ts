@@ -171,7 +171,6 @@ export const STRINGS = {
   },
   "lib.added":           { plain: "added",             playful: "added" },
   "lib.wakes":           { plain: "wakes",             playful: "wakes" },
-  "lib.notScheduled":    { plain: "not scheduled",     playful: "not scheduled" },
   "lib.aToDo":           { plain: "a to-do",           playful: "a to-do" },
   "lib.select":          { plain: "Select",            playful: "Select" },
   "lib.selectAll":       { plain: "Select all",        playful: "Select all" },

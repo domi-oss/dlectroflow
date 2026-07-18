@@ -85,7 +85,8 @@ export function LibraryMultistep({
                   <button
                     type="button"
                     className="block w-full text-left font-medium break-words"
-                    aria-expanded={expanded}
+                    aria-expanded={sel.selecting ? undefined : expanded}
+                    aria-controls={`lib-steps-${item.id}`}
                     onClick={() => (sel.selecting ? sel.toggle(item.id) : setExpandedId(expanded ? null : item.id))}
                   >
                     {item.text}
@@ -99,11 +100,11 @@ export function LibraryMultistep({
                     {item.stepsDone}/{item.stepsTotal} {t("progress.done", voice)}
                   </span>
                 )}
-                {!expanded && <EstimatePill minutes={remainingMinutes(item)} voice={voice} variant="left" />}
+                {!expanded && <EstimatePill minutes={remainingMinutes(item)} voice={voice} />}
               </div>
 
               {expanded && item.taskId && (
-                <div className="mt-3 space-y-2">
+                <div id={`lib-steps-${item.id}`} className="mt-3 space-y-2">
                   <TaskSteps
                     taskId={item.taskId}
                     voice={voice}

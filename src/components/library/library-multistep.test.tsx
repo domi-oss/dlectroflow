@@ -77,6 +77,23 @@ describe("LibraryMultistep", () => {
     expect(within(oldRow).getByRole("checkbox", { name: /task old/i })).toBeChecked();
     expect(within(oldRow).queryByTestId("task-steps")).toBeNull();
   });
+  it("row title button exposes aria-expanded + aria-controls in normal mode, but not while selecting", () => {
+    render(<LibraryMultistep items={items} voice="plain" now={Date.now()} settings={settings} />);
+    const newTitle = screen.getByRole("button", { name: /task new/i });
+    const oldTitle = screen.getByRole("button", { name: /task old/i });
+    // "new" opens by default — expanded, with aria-controls pointing at its panel.
+    expect(newTitle).toHaveAttribute("aria-expanded", "true");
+    expect(newTitle).toHaveAttribute("aria-controls", "lib-steps-new");
+    expect(document.getElementById("lib-steps-new")).toBe(screen.getByTestId("task-steps").parentElement);
+    // "old" starts collapsed.
+    expect(oldTitle).toHaveAttribute("aria-expanded", "false");
+
+    // Entering select mode suppresses the disclosure semantics entirely —
+    // it's not announced as expandable while a tap just toggles selection.
+    fireEvent.click(screen.getByRole("button", { name: /^select$/i }));
+    expect(screen.getByRole("button", { name: /task new/i })).not.toHaveAttribute("aria-expanded");
+    expect(screen.getByRole("button", { name: /task old/i })).not.toHaveAttribute("aria-expanded");
+  });
   it("select mode: Select → tick a row → Delete calls bulkBrainDumpAction", async () => {
     const { bulkBrainDumpAction } = await import("@/app/actions/braindump");
     render(<LibraryMultistep items={items} voice="plain" now={Date.now()} settings={settings} />);

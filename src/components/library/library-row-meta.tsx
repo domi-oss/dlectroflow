@@ -54,12 +54,13 @@ export function AgeLabel({ item, now, voice, settings }: { item: Item; now: numb
   );
 }
 
-/** Right-aligned estimate pill. `min left` for multi-step, `min` for single. */
-export function EstimatePill({ minutes, voice, variant }: { minutes: number; voice: Voice; variant: "left" | "flat" }) {
+/** Right-aligned "min left" estimate pill (multi-step rows only — single-task
+ * rows use the editable `EstimateEditor` in library-rows.tsx instead). */
+export function EstimatePill({ minutes, voice }: { minutes: number; voice: Voice }) {
   if (minutes <= 0) return null;
   return (
     <span className="text-muted-foreground shrink-0 rounded-full border px-2 py-0.5 text-xs">
-      ≈{minutes} {t(variant === "left" ? "lib.minLeft" : "lib.min", voice)}
+      ≈{minutes} {t("lib.minLeft", voice)}
     </span>
   );
 }

@@ -54,7 +54,13 @@ function EstimateEditor({
   }
   const commit = () => {
     setEditing(false);
-    if (val !== minutes) {
+    // Guard against non-numeric/empty input. Both cases end up as `val = 0`
+    // (a `type="number"` input sanitizes an invalid string to "" before
+    // onChange fires, and Number("") is 0 — never literal NaN in practice,
+    // but Number.isFinite is kept as a defensive belt-and-suspenders check).
+    // Only persist + refresh a real, changed, positive value; the server
+    // still clamps 1–600 on save.
+    if (Number.isFinite(val) && val > 0 && val !== minutes) {
       void setItemEstimate(id, val);
       onSaved();
     }

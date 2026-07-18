@@ -170,6 +170,35 @@ describe("LibraryRows (plated) — meta, editable estimate, select mode", () => 
     expect(setItemEstimate).toHaveBeenCalledWith("a", 20);
   });
 
+  it("entering a non-numeric or empty value does not persist an estimate", () => {
+    render(
+      <LibraryRows
+        items={[makeItem({ id: "a", text: "todo a", estMinutes: null })]}
+        tab="plated"
+        voice="plain"
+        now={NOW}
+        settings={settings}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /edit estimate/i }));
+    const input = screen.getByRole("spinbutton", { name: /edit estimate/i });
+
+    // A type="number" input sanitizes an invalid string to "" before onChange
+    // fires, so "abc" ends up as val = 0 (Number("") = 0) here too — the
+    // val > 0 guard blocks it regardless of whether it arrives as 0 or NaN.
+    fireEvent.change(input, { target: { value: "abc" } });
+    fireEvent.blur(input);
+    expect(setItemEstimate).not.toHaveBeenCalled();
+
+    // Re-open and clear the field entirely — same "" → 0 path, should not
+    // persist a "0 min" estimate.
+    fireEvent.click(screen.getByRole("button", { name: /edit estimate/i }));
+    const input2 = screen.getByRole("spinbutton", { name: /edit estimate/i });
+    fireEvent.change(input2, { target: { value: "" } });
+    fireEvent.blur(input2);
+    expect(setItemEstimate).not.toHaveBeenCalled();
+  });
+
   it("select mode → complete calls bulkBrainDumpAction with the ticked ids", async () => {
     render(
       <LibraryRows

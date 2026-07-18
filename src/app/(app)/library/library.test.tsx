@@ -81,6 +81,10 @@ const step = (done: boolean, order: number) => ({
   done,
   estMinutes: 10,
   subtaskEmoji: null,
+  // Matches the `include: { focusSessions: { where: { endedAt: null }, ... } }`
+  // shape the query now asks for (mirrors inbox/page.tsx) — no open session by
+  // default, so `resumable` computes to false.
+  focusSessions: [] as { id: string }[],
 });
 
 // One item per tab (+ the graduation edge cases).

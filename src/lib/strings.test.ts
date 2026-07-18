@@ -424,7 +424,6 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "lib.done.hint",
     "lib.added",
     "lib.wakes",
-    "lib.notScheduled",
     "lib.aToDo",
     "lib.select",
     "lib.selectAll",
