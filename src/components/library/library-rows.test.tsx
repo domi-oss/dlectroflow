@@ -42,6 +42,7 @@ function makeItem(overrides: Partial<Item> & { id: string }): Item {
     taskStatus: null,
     completedAt: null,
     scheduledAt: null,
+    estMinutes: null,
     steps: [],
     ...overrides,
   };

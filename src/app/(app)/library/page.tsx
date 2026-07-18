@@ -55,6 +55,7 @@ export default async function LibraryPage({
     stepsDone: task?.steps.filter((s) => s.done).length ?? 0,
     taskStatus: task?.status ?? null,
     scheduledAt: task?.scheduledAt ?? null,
+    estMinutes: item.estMinutes,
     steps:
       task?.steps.map((s) => ({
         id: s.id,
