@@ -60,6 +60,7 @@ import {
   showReminder,
   subscribeNotificationPermission,
 } from "@/lib/notifications";
+import { formatAgo } from "@/lib/format";
 
 /** Map a dnd-kit drop onto a bucket to a move intent (null when dropped nowhere). */
 export function dragEndToMove(
@@ -1630,17 +1631,6 @@ function AgeLabel({ createdAt, aging, now }: { createdAt: Date; aging: boolean; 
     </p>
   );
 }
-
-function formatAgo(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
-}
-
 /**
  * Persistent "N need triage" badge. Dismissable (✕); once dismissed it stays
  * hidden until a new item is captured or an item crosses into Aging (tracked
