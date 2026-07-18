@@ -125,6 +125,15 @@ export const STRINGS = {
   "focus.pausedBanner": { plain: "⏸ Paused focus step —", playful: "⏸ Paused focus step —" },
   "focus.resumeArrow":  { plain: "resume →",              playful: "resume →" },
 
+  // ── Focus launcher (/focus step-picker) ────────────────────────────────────
+  // ⏸ is an allowed functional glyph (see the plain-voice glyph note above).
+  "focus.launcher.intro": { plain: "Pick a step to focus on.", playful: "Pick a bite to focus on." },
+  "focus.launcher.empty": {
+    plain: "Nothing to focus yet. Capture something in your Inbox and break it into steps, then come back to focus.",
+    playful: "Nothing on the menu yet. Capture something in your Inbox and snack-size it into steps, then come back to focus.",
+  },
+  "focus.paused":       { plain: "⏸ paused",             playful: "⏸ paused" },
+
   // ── Breakdown confirm ──────────────────────────────────────────────────────
   "breakdown.looksRight": { plain: "Looks right",       playful: "👍 Looks right" },
 
