@@ -216,7 +216,8 @@ guest-scoped rate-limit counters (`GuestDailyActivity`, `GuestAiUsage`, keyed
 by IP hash, not by workspace) need their own age-based cleanup since they
 outlive any single workspace. A daily CronJob purges both.
 
-**What it purges** (`scripts/scheduled-purge.ts`, `src/lib/purge.ts`):
+**What it purges** (`prisma/scheduled-purge.ts` — self-contained so it runs in
+the standalone prod image; imports only `@prisma/client`, no app source):
 - `purgeExpiredGuests` — deletes `Workspace` rows with `kind: "guest"` and
   `expiresAt` in the past (bounded to 25/call, looped until drained). All
   workspace-scoped rows cascade via FK (Settings, Streak, BrainDumpItem, Task,
@@ -233,7 +234,7 @@ tag to check what a run actually did.
 `CronJob dlectroflow-guest-purge` when `purge.enabled` and `env=production`
 (both true by default; review apps' ephemeral emptyDir DB is out of scope).
 Schedule **03:30 UTC daily** (after the 02:00 UTC DB backup, §12). Single
-container, the app image, running `npx tsx scripts/scheduled-purge.ts` against
+container, the app image, running `npx tsx prisma/scheduled-purge.ts` against
 the same `DATABASE_URL` secret the app uses.
 
 **Check it's healthy:**

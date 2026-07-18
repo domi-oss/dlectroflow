@@ -4,8 +4,9 @@ Rendered only in production and only when purge.enabled — review apps use an
 ephemeral emptyDir DB with a handful of throwaway guests, so there's nothing
 worth purging on a schedule there. Reuses the app image (already carries tsx
 via Dockerfile.ci, so `npx tsx` resolves with no registry fetch) and runs
-scripts/scheduled-purge.ts, which:
-  - deletes guest workspaces past their TTL (src/lib/purge.ts purgeExpiredGuests)
+prisma/scheduled-purge.ts — a SELF-CONTAINED entrypoint (imports only
+@prisma/client, no app source) because the standalone image has no src/. It:
+  - deletes guest workspaces past their TTL (purgeExpiredGuests)
   - deletes guest daily-activity/AI-usage counters older than 30 days
     (purgeStaleGuestCounters)
 and logs a single structured line tagged "scheduled_purge" with counts.
@@ -54,7 +55,7 @@ spec:
             - name: purge
               image: "{{ .Values.image.repository }}:{{ required "image.tag must be set (CI passes $CI_COMMIT_SHA)" .Values.image.tag }}"
               imagePullPolicy: {{ .Values.image.pullPolicy }}
-              command: ["npx", "tsx", "scripts/scheduled-purge.ts"]
+              command: ["npx", "tsx", "prisma/scheduled-purge.ts"]
               env:
                 # Same secret/key the app Deployment + migrate/seed initContainers
                 # use — already carries sslmode=require (dlectroflow.databaseUrl).

@@ -15,7 +15,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "setup": "docker compose up -d db && npm install && prisma migrate dev",
-    "purge:scheduled": "npx tsx scripts/scheduled-purge.ts"
+    "purge:scheduled": "npx tsx prisma/scheduled-purge.ts"
   },
   "engines": {
     "node": ">=20.19.0"
