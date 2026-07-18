@@ -75,12 +75,17 @@ describe("purgeExpiredGuests", () => {
     );
   });
 
-  it("is best-effort: a per-row delete failure is skipped, not fatal", async () => {
+  it("is best-effort: a per-row delete failure is skipped + logged, not fatal", async () => {
     const db = makeDb();
     db.workspace.findMany.mockResolvedValue([{ id: "g1" }, { id: "g2" }]);
     db.workspace.delete.mockRejectedValueOnce(new Error("row locked"));
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const n = await purgeExpiredGuests(db);
     expect(n).toBe(1);
+    // The skipped row is surfaced as a structured purge_skip line, not swallowed.
+    expect(errSpy).toHaveBeenCalledTimes(1);
+    expect(String(errSpy.mock.calls[0][0])).toContain("purge_skip");
+    errSpy.mockRestore();
   });
 });
 

@@ -63,8 +63,14 @@ export async function purgeExpiredGuests(db: PurgeClient): Promise<number> {
     try {
       await purgeWorkspace(db, w.id);
       purged++;
-    } catch {
-      /* best-effort; skip on error */
+    } catch (err) {
+      // Best-effort: skip a row that won't delete, but SURFACE it. Otherwise a
+      // lower guestsPurged count — or a whole batch failing, which makes
+      // purgeExpiredGuests return 0 and ends the drain loop early — is silent.
+      // The row is simply retried on the next scheduled run.
+      console.error(
+        JSON.stringify({ tag: "purge_skip", workspaceId: w.id, error: String(err) }),
+      );
     }
   }
   return purged;
