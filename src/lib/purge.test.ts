@@ -1,28 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { tx, db } = vi.hoisted(() => {
-  const tx = {
-    brainDumpItem: { deleteMany: vi.fn() },
-    step: { deleteMany: vi.fn() },
-    breakdownTurn: { deleteMany: vi.fn() },
-    focusSession: { deleteMany: vi.fn() },
-    dayRollup: { deleteMany: vi.fn() },
-    rewardEvent: { deleteMany: vi.fn() },
-    streak: { deleteMany: vi.fn() },
-    streakRecord: { deleteMany: vi.fn() },
-    badge: { deleteMany: vi.fn() },
-    dailySpark: { deleteMany: vi.fn() },
-    settings: { deleteMany: vi.fn() },
-    task: { deleteMany: vi.fn() },
-    workspace: { delete: vi.fn() },
-    guestDailyActivity: { deleteMany: vi.fn() },
-    guestAiUsage: { deleteMany: vi.fn() },
-  };
+const { db } = vi.hoisted(() => {
   const db = {
     $transaction: vi.fn(async (input: unknown) => {
       // Handle both callback-based and array-based transactions
       if (typeof input === "function") {
-        return input(tx);
+        return input(db);
       }
       // Array-based transaction
       if (Array.isArray(input)) {
@@ -30,11 +13,11 @@ const { tx, db } = vi.hoisted(() => {
       }
       return input;
     }),
-    workspace: { findMany: vi.fn() },
+    workspace: { findMany: vi.fn(), delete: vi.fn() },
     guestDailyActivity: { deleteMany: vi.fn() },
     guestAiUsage: { deleteMany: vi.fn() },
   };
-  return { tx, db };
+  return { db };
 });
 
 vi.mock("@/lib/db", () => ({ prisma: db }));
@@ -46,26 +29,12 @@ beforeEach(() => vi.clearAllMocks());
 describe("purgeWorkspace", () => {
   it("refuses to purge the owner workspace", async () => {
     await expect(purgeWorkspace("owner")).rejects.toThrow();
-    expect(db.$transaction).not.toHaveBeenCalled();
+    expect(db.workspace.delete).not.toHaveBeenCalled();
   });
-  it("deletes across scoped models then the workspace row", async () => {
+  it("deletes the workspace row (cascade removes scoped rows at the DB level)", async () => {
     await purgeWorkspace("guest-123");
-    // Relation-filtered children (cascade via Task)
-    expect(tx.step.deleteMany).toHaveBeenCalledWith({ where: { task: { workspaceId: "guest-123" } } });
-    expect(tx.breakdownTurn.deleteMany).toHaveBeenCalledWith({ where: { task: { workspaceId: "guest-123" } } });
-    // Direct-workspaceId models
-    expect(tx.brainDumpItem.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
-    expect(tx.focusSession.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
-    expect(tx.dayRollup.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
-    expect(tx.rewardEvent.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
-    expect(tx.streak.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
-    expect(tx.streakRecord.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
-    expect(tx.badge.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
-    expect(tx.dailySpark.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
-    expect(tx.settings.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
-    expect(tx.task.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
-    // Workspace row last
-    expect(tx.workspace.delete).toHaveBeenCalledWith({ where: { id: "guest-123" } });
+    expect(db.workspace.delete).toHaveBeenCalledWith({ where: { id: "guest-123" } });
+    expect(db.workspace.delete).toHaveBeenCalledTimes(1);
   });
 });
 
