@@ -27,9 +27,9 @@ export function BadgeGrid({ voice, earned }: { voice: Voice; earned: string[] })
   return (
     <section className="rounded-xl border p-4">
       <h2 className="mb-2 text-sm font-semibold">
-        Badges{" "}
+        {t("badge.sectionTitle", voice)}{" "}
         <span className="text-muted-foreground text-xs font-normal">
-          · faded = not earned yet
+          {t("badge.legend", voice)}
         </span>
       </h2>
       <div className="flex flex-wrap gap-2">
@@ -41,8 +41,8 @@ export function BadgeGrid({ voice, earned }: { voice: Voice; earned: string[] })
               key={key}
               data-badge={key}
               data-earned={isEarned}
-              title={isEarned ? "Earned" : "Not earned yet"}
-              aria-label={`${label} — ${isEarned ? "earned" : "not earned yet"}`}
+              title={t(isEarned ? "badge.earned" : "badge.notEarned", voice)}
+              aria-label={`${label} — ${t(isEarned ? "badge.earned" : "badge.notEarned", voice)}`}
               className={
                 "rounded-full px-3 py-1 text-xs font-medium " +
                 (isEarned

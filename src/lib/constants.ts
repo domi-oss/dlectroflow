@@ -78,7 +78,7 @@ export type BadgeKey = (typeof BadgeKey)[keyof typeof BadgeKey];
 // (wireframe § Dashboard) followed by the two legacy badges the owner chose to
 // surface (owner decision on !82). Full work week = the 5-working-day streak
 // (`streak_5`).
-export const DASHBOARD_BADGE_KEYS: BadgeKey[] = [
+export const DASHBOARD_BADGE_KEYS: readonly BadgeKey[] = [
   BadgeKey.FirstBreakdown,
   BadgeKey.FirstSchedule,
   BadgeKey.FirstFocus,

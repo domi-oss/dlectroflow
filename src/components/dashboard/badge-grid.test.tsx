@@ -28,11 +28,11 @@ describe("BadgeGrid", () => {
   it("surfaces the legacy badges with accessible earned/locked state", () => {
     render(<BadgeGrid voice="plain" earned={["ten_steps_day"]} />);
 
-    const earned = screen.getByLabelText("10 steps in a day — earned");
+    const earned = screen.getByLabelText("10 steps in a day — Earned");
     expect(earned).toHaveAttribute("data-earned", "true");
     expect(earned.textContent).not.toContain("🔒");
 
-    const locked = screen.getByLabelText("Beat your best streak — not earned yet");
+    const locked = screen.getByLabelText("Beat your best streak — Not earned yet");
     expect(locked).toHaveAttribute("data-earned", "false");
     expect(locked.textContent).toContain("🔒");
   });
@@ -40,11 +40,11 @@ describe("BadgeGrid", () => {
   it("shows earned badges without a lock and unearned badges locked", () => {
     render(<BadgeGrid voice="plain" earned={["first_focus"]} />);
 
-    const earned = screen.getByLabelText("First focus — earned");
+    const earned = screen.getByLabelText("First focus — Earned");
     expect(earned).toHaveAttribute("data-earned", "true");
     expect(earned.textContent).not.toContain("🔒");
 
-    const locked = screen.getByLabelText("Comeback — not earned yet");
+    const locked = screen.getByLabelText("Comeback — Not earned yet");
     expect(locked).toHaveAttribute("data-earned", "false");
     expect(locked.textContent).toContain("🔒");
   });
