@@ -20,59 +20,48 @@ import { dismissWelcome } from "@/app/actions/settings";
 afterEach(cleanup);
 
 describe("WelcomeCard", () => {
-  it("renders the welcome title and body", () => {
+  it("opens with the greeting in the body (👋); the separate title heading is dropped", () => {
     render(<WelcomeCard voice="plain" />);
-    expect(screen.getByText("👋 Welcome to dlectroflow")).toBeInTheDocument();
+    const body = screen.getByText(/Welcome to dlectroflow, you are in the inbox/);
+    expect(body).toBeInTheDocument();
+    expect(body.textContent).toContain("👋");
+    // No standalone <h2> title any more — the greeting lives in the body.
     expect(
-      screen.getByText(/Jot anything on your mind in the box below/),
-    ).toBeInTheDocument();
+      screen.queryByRole("heading", { name: /Welcome to dlectroflow/ }),
+    ).toBeNull();
   });
 
-  // ── v2: quick links speak the app's own section-title vocabulary ──────────
-  it("links to the Library using the app's plain section label (Everything)", () => {
+  // ── Links are embedded INLINE in the body sentences (no separate row) ──────
+  it("embeds the Focus Timer link (→ /focus)", () => {
     render(<WelcomeCard voice="plain" />);
-    expect(screen.getByRole("link", { name: /Everything/ })).toHaveAttribute(
-      "href",
-      "/library",
-    );
-  });
-
-  it("links to the Library using the playful section label (Larder)", () => {
-    render(<WelcomeCard voice="playful" />);
-    expect(screen.getByRole("link", { name: /Larder/ })).toHaveAttribute(
-      "href",
-      "/library",
-    );
-  });
-
-  it("links to Focus using the plain nav label (Focus Timer)", () => {
-    render(<WelcomeCard voice="plain" />);
-    expect(screen.getByRole("link", { name: /Focus Timer/ })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Focus Timer" })).toHaveAttribute(
       "href",
       "/focus",
     );
   });
 
-  it("links to Focus using the playful nav label (Focus Timer)", () => {
-    render(<WelcomeCard voice="playful" />);
-    expect(screen.getByRole("link", { name: /Focus Timer/ })).toHaveAttribute(
+  it("embeds the Library link (→ /library) with the plain label", () => {
+    render(<WelcomeCard voice="plain" />);
+    expect(screen.getByRole("link", { name: "Library" })).toHaveAttribute(
       "href",
-      "/focus",
+      "/library",
     );
   });
 
-  it("renders a Help link to /help with the clearer v2 copy", () => {
-    render(<WelcomeCard voice="plain" />);
-    expect(
-      screen.getByRole("link", { name: "View the help page for more →" }),
-    ).toHaveAttribute("href", "/help");
+  it("embeds the Library link with the playful label (Larder → /library)", () => {
+    render(<WelcomeCard voice="playful" />);
+    expect(screen.getByRole("link", { name: "Larder" })).toHaveAttribute(
+      "href",
+      "/library",
+    );
   });
 
-  it("keeps the Help copy identical in playful voice", () => {
-    render(<WelcomeCard voice="playful" />);
-    expect(
-      screen.getByRole("link", { name: "View the help page for more →" }),
-    ).toHaveAttribute("href", "/help");
+  it("embeds only 'Help section' as the /help link", () => {
+    render(<WelcomeCard voice="plain" />);
+    expect(screen.getByRole("link", { name: "Help section" })).toHaveAttribute(
+      "href",
+      "/help",
+    );
   });
 
   it("renders both voice options", () => {

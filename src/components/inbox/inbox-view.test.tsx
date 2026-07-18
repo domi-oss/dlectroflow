@@ -1229,7 +1229,9 @@ describe("InboxView — welcome card (Task 3, #8)", () => {
       />,
     );
     expect(screen.getByRole("region", { name: "Welcome" })).toBeInTheDocument();
-    expect(screen.getByText("👋 Welcome to dlectroflow")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Welcome to dlectroflow, you are in the inbox/),
+    ).toBeInTheDocument();
   });
 
   it("welcomeVisible=false renders no WelcomeCard", () => {

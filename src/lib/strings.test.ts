@@ -88,9 +88,12 @@ describe("t() function", () => {
     ["step.editTitle",        "plain",   "Edit step title"],
     ["step.sendToReview",     "plain",   "Send back to review"],
     ["step.sendToReview",     "playful", "🥫 Send back to review"],
-    // welcome-card v2 (#8) — Help link uses clearer, voice-neutral copy
-    ["welcome.help",          "plain",   "View the help page for more →"],
-    ["welcome.help",          "playful", "View the help page for more →"],
+    // welcome-card (#8) — inline links are voice-aware: Library (plain) vs
+    // Larder (playful); the Focus Timer + Help section labels are shared.
+    ["welcome.libraryLink",   "plain",   "Library"],
+    ["welcome.libraryLink",   "playful", "Larder"],
+    ["welcome.focusLink",     "plain",   "Focus Timer"],
+    ["welcome.helpLink",      "plain",   "Help section"],
   ];
 
   for (const [key, voice, expected] of cases) {

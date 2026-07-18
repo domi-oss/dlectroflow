@@ -150,10 +150,17 @@ export const STRINGS = {
   // ── First-run welcome card (Phase 5, #8) ──────────────────────────────────
   // v2: the card links out using the app's own section vocabulary (nav.everything
   // for /library, nav.focusTimer for /focus). welcome.help stays voice-neutral,
-  // mirroring link.seeAll — a → arrow is a functional glyph, allowed in Plain.
-  "welcome.title":   { plain: "👋 Welcome to dlectroflow", playful: "👋 Welcome to dlectroflow" },
-  "welcome.body":    { plain: "Jot anything on your mind in the box below. Break big things into steps, focus one at a time, and tick them off — everything you capture lives in your Library.", playful: "Brain full? Dump it in the box below. Snack-size the big stuff into steps, focus one bite at a time, and check them off — it all keeps in your Larder." },
-  "welcome.help":    { plain: "View the help page for more →", playful: "View the help page for more →" },
+  // Welcome body is composed from fragments so the Focus Timer / Library / Help
+  // links can sit INLINE in the sentences (see welcome-card.tsx). The 👋 lives
+  // in the lead (the separate title was dropped). welcome.* keys are exempt from
+  // the emoji-free-Plain guard, so the 👋 in Plain is intentional.
+  "welcome.lead":         { plain: "👋 Welcome to dlectroflow, you are in the inbox. Write down anything on your mind in the box below. Break big tasks into smaller steps, use the ", playful: "👋 Welcome to dlectroflow, you're in the inbox. Dump anything on your mind in the box below. Snack-size big tasks into bite-size steps, use the " },
+  "welcome.focusLink":    { plain: "Focus Timer", playful: "Focus Timer" },
+  "welcome.afterFocus":   { plain: " to focus on a task at a time, and tick them off as you go, earning points for your activity! Everything you have captured lives in your ", playful: " to chew through one bite at a time, and check them off as you go — racking up points for every bite! Everything you've captured keeps in your " },
+  "welcome.libraryLink":  { plain: "Library", playful: "Larder" },
+  "welcome.afterLibrary": { plain: ". View the ", playful: ". Peek at the " },
+  "welcome.helpLink":     { plain: "Help section", playful: "Help section" },
+  "welcome.afterHelp":    { plain: " for further information.", playful: " for the full recipe." },
   "welcome.dismiss": { plain: "Got it",         playful: "Got it" },
 } as const;
 

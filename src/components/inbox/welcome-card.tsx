@@ -6,6 +6,11 @@ import { useRouter } from "next/navigation";
 import { dismissWelcome, updateVoice } from "@/app/actions/settings";
 import { t, type Voice } from "@/lib/strings";
 
+// Inline links sit inside the welcome sentences — underline so they read as
+// links in running prose (not colour-only).
+const welcomeLinkClass =
+  "text-green-800 underline underline-offset-2 hover:text-green-900 dark:text-green-300";
+
 /** Phase 5 (#8) — first-run welcome card shown above the capture box until
  * the workspace dismisses it. Lets a brand-new user pick their voice, learn
  * how the app works, and dismiss without leaving the Inbox. */
@@ -30,35 +35,25 @@ export function WelcomeCard({ voice }: { voice: Voice }) {
       aria-label="Welcome"
       className="rounded-xl border border-green-700/40 bg-green-50 p-4 dark:bg-green-950/20"
     >
-      <h2 className="text-sm font-semibold">{t("welcome.title", voice)}</h2>
-      <p className="text-muted-foreground mt-1 text-sm">
-        {t("welcome.body", voice)}
+      {/* Body copy with the Focus Timer / Library / Help links embedded INLINE
+       * in the sentences (owner direction). The 👋 greeting opens the body — the
+       * separate title heading was dropped. Composed from welcome.* fragments so
+       * the copy stays voice-aware in strings.ts. */}
+      <p className="text-muted-foreground text-sm">
+        {t("welcome.lead", voice)}
+        <Link href="/focus" className={welcomeLinkClass}>
+          {t("welcome.focusLink", voice)}
+        </Link>
+        {t("welcome.afterFocus", voice)}
+        <Link href="/library" className={welcomeLinkClass}>
+          {t("welcome.libraryLink", voice)}
+        </Link>
+        {t("welcome.afterLibrary", voice)}
+        <Link href="/help" className={welcomeLinkClass}>
+          {t("welcome.helpLink", voice)}
+        </Link>
+        {t("welcome.afterHelp", voice)}
       </p>
-      {/* Quick links — speak the same section vocabulary as the ☰ menu:
-       * nav.everything → /library, nav.focusTimer → /focus, plus Help. */}
-      <nav
-        aria-label="Where to next"
-        className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm"
-      >
-        <Link
-          href="/library"
-          className="text-green-800 hover:underline dark:text-green-300"
-        >
-          {t("nav.everything", voice)}
-        </Link>
-        <Link
-          href="/focus"
-          className="text-green-800 hover:underline dark:text-green-300"
-        >
-          {t("nav.focusTimer", voice)}
-        </Link>
-        <Link
-          href="/help"
-          className="text-green-800 hover:underline dark:text-green-300"
-        >
-          {t("welcome.help", voice)}
-        </Link>
-      </nav>
       <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
         <div
           className="inline-flex rounded-md border"
