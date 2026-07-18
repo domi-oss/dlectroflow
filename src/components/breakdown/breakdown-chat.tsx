@@ -527,6 +527,7 @@ export function BreakdownChat({
                 <div className="flex flex-col items-stretch gap-1">
                   <button
                     title="Send back to the inbox as its own item to re-break-down"
+                    aria-label="Back to inbox"
                     onClick={() => backToInbox(i)}
                     className="text-muted-foreground hover:text-foreground hover:bg-accent rounded border px-1.5 py-0.5 text-xs whitespace-nowrap"
                   >
