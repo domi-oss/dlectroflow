@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 import {
   DndContext,
@@ -50,6 +51,7 @@ import { dropPlan } from "@/components/inbox/move-dispatch";
 import { MoveToMenu } from "@/components/inbox/move-to-menu";
 import { RowActions, ScheduleControl, type ScheduleControlProps } from "@/components/inbox/row-actions";
 import { CompleteButton } from "@/components/inbox/complete-button";
+import { WelcomeCard } from "@/components/inbox/welcome-card";
 import { t } from "@/lib/strings";
 import { useVoice } from "@/components/voice-provider";
 import type { Voice } from "@/lib/strings";
@@ -115,10 +117,19 @@ export function InboxView({
   initialItems,
   settings,
   google = null,
+  welcomeVisible,
+  resumeStep,
 }: {
   initialItems: Item[];
   settings: AgingSettings;
   google?: GoogleStatus | null;
+  /** First-run welcome card (Phase 5, #8) — shown above everything else until
+   * the workspace dismisses it (or while previewing the demo first-run state). */
+  welcomeVisible: boolean;
+  /** Most-recent resumable step (an open, un-ended focus session), computed
+   * server-side by the Inbox page. Null when there's nothing to resume — or
+   * while previewing the demo first-run empty state, which never shows it. */
+  resumeStep: { id: string; text: string } | null;
 }) {
   const router = useRouter();
   const voice = useVoice();
@@ -492,6 +503,23 @@ export function InboxView({
 
   return (
     <div className="space-y-6">
+      {welcomeVisible && <WelcomeCard voice={voice} />}
+      {resumeStep && (
+        <div
+          role="status"
+          className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-50 px-4 py-2 text-sm dark:bg-amber-950/20"
+        >
+          <span className="flex-1">
+            {t("focus.pausedBanner", voice)} <strong>&ldquo;{resumeStep.text}&rdquo;</strong>
+          </span>
+          <Link
+            href={`/focus/${resumeStep.id}`}
+            className="text-amber-800 hover:underline dark:text-amber-300"
+          >
+            {t("focus.resumeArrow", voice)}
+          </Link>
+        </div>
+      )}
       <NavBadge untriagedCount={untriagedCount} agingCount={agingCount} />
 
       {permission === "default" && (

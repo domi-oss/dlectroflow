@@ -66,6 +66,21 @@ export default async function InboxPage({
     })) ?? [],
   }));
 
+  // Phase 5 (#8): the demo/first-run preview override shows the Inbox as a
+  // brand-new workspace would see it (empty, welcome card, no resume banner)
+  // without touching real data. welcomeVisible otherwise reflects whether the
+  // workspace has ever dismissed the welcome card.
+  const firstRun = settings.firstRunPreview;
+  const welcomeVisible = firstRun || settings.welcomeDismissedAt == null;
+  // Most-recent resumable step (open focus session) for the resume banner.
+  const resumeStep = (() => {
+    for (const it of items) {
+      const s = it.steps.find((st) => st.resumable);
+      if (s) return { id: s.id, text: s.text };
+    }
+    return null;
+  })();
+
   return (
     <div className="space-y-4">
       {sp.reclaim === "connected" && (
@@ -93,7 +108,7 @@ export default async function InboxPage({
         </div>
       )}
       <InboxView
-        initialItems={items}
+        initialItems={firstRun ? [] : items}
         settings={{
           agingThresholdMinutes: settings.agingThresholdMinutes,
           demoOverrideSeconds: settings.demoOverrideSeconds,
@@ -102,6 +117,8 @@ export default async function InboxPage({
           wayOverdueHours: settings.wayOverdueHours,
         }}
         google={google}
+        welcomeVisible={welcomeVisible}
+        resumeStep={firstRun ? null : resumeStep}
       />
     </div>
   );

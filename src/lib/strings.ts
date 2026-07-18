@@ -115,6 +115,12 @@ export const STRINGS = {
   "focus.notYet":       { plain: "Not yet",             playful: "🔁 Not yet" },
   "focus.nextStep":     { plain: "Focus the next step", playful: "Focus the next bite" },
 
+  // ── Resume banner (Phase 5, #8) — surfaces the most-recent paused/open focus
+  // step on the Inbox so a user can jump straight back in. ⏸/→ are functional
+  // status glyphs, allowed in Plain voice.
+  "focus.pausedBanner": { plain: "⏸ Paused focus step —", playful: "⏸ Paused focus step —" },
+  "focus.resumeArrow":  { plain: "resume →",              playful: "resume →" },
+
   // ── Breakdown confirm ──────────────────────────────────────────────────────
   "breakdown.looksRight": { plain: "Looks right",       playful: "👍 Looks right" },
 
