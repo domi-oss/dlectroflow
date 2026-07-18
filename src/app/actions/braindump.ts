@@ -308,3 +308,19 @@ export async function moveToReview(id: string) {
   });
   revalidatePath(INBOX_PATH);
 }
+
+/**
+ * Set a single-task item's time estimate (minutes). Workspace-scoped +
+ * IDOR-safe via updateMany's workspace filter. Clamped to a sane [1, 600].
+ */
+export async function setItemEstimate(id: string, minutes: number) {
+  if (!Number.isFinite(minutes)) return;
+  const workspaceId = await currentWorkspaceId();
+  const clamped = Math.max(1, Math.min(600, Math.round(minutes)));
+  await prisma.brainDumpItem.updateMany({
+    where: { id, workspaceId },
+    data: { estMinutes: clamped },
+  });
+  revalidatePath(INBOX_PATH);
+  revalidatePath("/library");
+}
