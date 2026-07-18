@@ -127,4 +127,20 @@
   html {
     @apply font-sans;
   }
+
+  /* a11y: honour the OS "reduce motion" setting for CSS-driven animation and
+   * transitions (the countdown-ring sweep, hover/colour transitions, the
+   * "thinking" pulse, etc). JS-driven Motion animation (the focus confetti) is
+   * handled separately via usePrefersReducedMotion. Near-instant (not fully 0)
+   * so one-shot transitionend/animationend handlers still fire. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }

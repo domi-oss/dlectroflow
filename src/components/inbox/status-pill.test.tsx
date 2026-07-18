@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, afterEach } from "vitest";
+import { render, screen, cleanup } from "@testing-library/react";
 import { StatusPill } from "@/components/inbox/status-pill";
+
+afterEach(cleanup);
 
 describe("StatusPill", () => {
   it("renders dot + word per tier (recent, plain)", () => {
@@ -40,5 +42,22 @@ describe("StatusPill", () => {
 
     render(<StatusPill tier="wayOverdue" voice="playful" />);
     expect(screen.getByText(/Stale/)).toBeInTheDocument();
+  });
+
+  it("a11y: state is not colour-only — the dot is decorative (aria-hidden) and a text word label carries the tier", () => {
+    const { container } = render(<StatusPill tier="overdue" voice="plain" />);
+    // Word label is real text (perceivable without colour).
+    expect(screen.getByText(/Overdue/)).toBeInTheDocument();
+    // The coloured dot is decorative only.
+    expect(container.querySelector('[aria-hidden="true"]')).toHaveTextContent("🟠");
+  });
+
+  it("a11y: uses AA-tuned per-theme colour tokens (-700 light / dark:-400), not a fixed low-contrast hex", () => {
+    const { container } = render(<StatusPill tier="recent" voice="plain" />);
+    const pill = container.querySelector("span");
+    expect(pill?.className).toContain("text-green-700");
+    expect(pill?.className).toContain("dark:text-green-400");
+    // The pre-a11y hardcoded hex is gone.
+    expect(pill?.getAttribute("style") ?? "").not.toContain("#2f7d32");
   });
 });

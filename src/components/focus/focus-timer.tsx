@@ -187,7 +187,7 @@ export function FocusTimer({
           </p>
         )}
         {result?.streak ? (
-          <p className="text-sm font-medium text-amber-600">
+          <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
             {result.freshStart
               ? "🌱 Fresh start — day 1 again, and that's completely okay."
               : `🔥 ${result.streak}-day streak!`}

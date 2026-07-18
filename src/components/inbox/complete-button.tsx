@@ -2,6 +2,7 @@
 
 import { t } from "@/lib/strings";
 import type { Voice } from "@/lib/strings";
+import { cn, touchTarget } from "@/lib/utils";
 
 /**
  * The secondary "Complete" button every inbox bucket row shows — one source for
@@ -14,7 +15,7 @@ export function CompleteButton({ voice, onClick }: { voice: Voice; onClick: () =
     <button
       type="button"
       onClick={onClick}
-      className="hover:bg-accent rounded-md border px-2.5 py-1"
+      className={cn("hover:bg-accent rounded-md border px-2.5 py-1", touchTarget)}
     >
       {t("action.complete", voice)}
     </button>
