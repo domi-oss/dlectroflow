@@ -102,6 +102,7 @@ export default async function InboxPage({
           wayOverdueHours: settings.wayOverdueHours,
         }}
         google={google}
+        notifyAging={settings.notifyAging}
       />
     </div>
   );

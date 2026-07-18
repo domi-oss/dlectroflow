@@ -151,6 +151,26 @@ export const STRINGS = {
 
   // ── Progress ───────────────────────────────────────────────────────────────
   "progress.done":       { plain: "done",              playful: "done" },
+
+  // ── Phase 6 — auto-save affordance ─────────────────────────────────────────
+  // ✓ is a functional glyph (allowed in plain); → in link/body text likewise.
+  "settings.saved":      { plain: "Saved ✓",           playful: "Saved ✓" },
+  "settings.saveError":  { plain: "Couldn't save — still editable, try again.", playful: "Couldn't save — still editable, try again." },
+
+  // ── Phase 6 — Notifications settings ───────────────────────────────────────
+  "notify.heading":      { plain: "Notifications",       playful: "🔔 Notifications" },
+  "notify.intro":        { plain: "Choose which desktop notifications you'd like. Each needs your browser's permission.", playful: "Pick your desktop nudges. Each needs your browser's permission." },
+  "notify.roundup":      { plain: "End-of-day round-up", playful: "🌇 End-of-day round-up" },
+  "notify.roundupHint":  { plain: "A desktop notification when your workday ends. The in-app recap still shows either way.", playful: "A desktop nudge when your workday wraps. The in-app recap shows either way." },
+  "notify.aging":        { plain: "Aging reminders",     playful: "🍞 Aging reminders" },
+  "notify.agingHint":    { plain: "A desktop notification when an inbox item has been sitting too long.", playful: "A desktop nudge when a snack's been sitting too long." },
+  "notify.dailyReview":  { plain: "Daily review nudge",  playful: "🌙 Daily review nudge" },
+  "notify.dailyReviewHint": { plain: "A once-a-day reminder to review your inbox.", playful: "A once-a-day nudge to tidy your tray." },
+  "notify.nudgeTime":    { plain: "Nudge time",          playful: "Nudge time" },
+  "notify.enable":       { plain: "Enable desktop notifications", playful: "🔔 Enable desktop notifications" },
+  "notify.blocked":      { plain: "Notifications are blocked in your browser settings.", playful: "Notifications are blocked in your browser settings." },
+  "notify.nudgeTitle":   { plain: "Time for your daily review", playful: "🌙 Time for your daily review" },
+  "notify.nudgeBody":    { plain: "Open your inbox to see what's left →", playful: "Open your inbox to see what's left →" },
 } as const;
 
 export type StringKey = keyof typeof STRINGS;
