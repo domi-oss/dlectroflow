@@ -64,12 +64,32 @@ export type SparkSource = (typeof SparkSource)[keyof typeof SparkSource];
 export const BadgeKey = {
   FirstBreakdown: "first_breakdown",
   FirstSchedule: "first_schedule",
+  FirstFocus: "first_focus",
   Streak5: "streak_5",
   TenStepsDay: "ten_steps_day",
   BeatBestStreak: "beat_best_streak",
   TaskComplete: "task_complete",
+  InboxZero: "inbox_zero",
+  Comeback: "comeback",
 } as const;
 export type BadgeKey = (typeof BadgeKey)[keyof typeof BadgeKey];
+
+// The badges shown on the dashboard, in display order: the seven named badges
+// (wireframe § Dashboard) followed by the two legacy badges the owner chose to
+// surface (owner decision on !82). Full work week = the 5-working-day streak
+// (`streak_5`).
+export const DASHBOARD_BADGE_KEYS: readonly BadgeKey[] = [
+  BadgeKey.FirstBreakdown,
+  BadgeKey.FirstSchedule,
+  BadgeKey.FirstFocus,
+  BadgeKey.TaskComplete,
+  BadgeKey.Streak5,
+  BadgeKey.InboxZero,
+  BadgeKey.Comeback,
+  // Legacy badges, surfaced per owner decision on !82.
+  BadgeKey.TenStepsDay,
+  BadgeKey.BeatBestStreak,
+];
 
 export const SINGLETON_ID = "singleton";
 
