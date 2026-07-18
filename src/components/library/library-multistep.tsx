@@ -86,7 +86,6 @@ export function LibraryMultistep({
                     type="button"
                     className="block w-full text-left font-medium break-words"
                     aria-expanded={expanded}
-                    disabled={sel.selecting}
                     onClick={() => (sel.selecting ? sel.toggle(item.id) : setExpandedId(expanded ? null : item.id))}
                   >
                     {item.text}

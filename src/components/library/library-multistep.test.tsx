@@ -68,6 +68,15 @@ describe("LibraryMultistep", () => {
     render(<LibraryMultistep items={items} voice="plain" now={Date.now()} settings={settings} />);
     expect(screen.queryByText("🍳")).toBeNull();
   });
+  it("select mode: tapping a row's title toggles its checkbox instead of expanding it", () => {
+    render(<LibraryMultistep items={items} voice="plain" now={Date.now()} settings={settings} />);
+    fireEvent.click(screen.getByRole("button", { name: /^select$/i }));
+    // "old" starts collapsed (only "new" opens by default) — tap its title.
+    const oldRow = screen.getByRole("button", { name: /task old/i }).closest("li")!;
+    fireEvent.click(within(oldRow).getByRole("button", { name: /task old/i }));
+    expect(within(oldRow).getByRole("checkbox", { name: /task old/i })).toBeChecked();
+    expect(within(oldRow).queryByTestId("task-steps")).toBeNull();
+  });
   it("select mode: Select → tick a row → Delete calls bulkBrainDumpAction", async () => {
     const { bulkBrainDumpAction } = await import("@/app/actions/braindump");
     render(<LibraryMultistep items={items} voice="plain" now={Date.now()} settings={settings} />);
