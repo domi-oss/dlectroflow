@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 const BANNER =
-  "👋 You're in guest mode — a private sandbox just for this browser session. You get 5 AI-powered task breakdowns per session (on a speedy model), plus the focus timer, rewards, and one-click calendar export — all yours. Live integrations (Google/Reclaim) are owner-only for now. Self-hosted option and BYOK coming soon.";
+  "👋 You're in guest mode — a private sandbox just for this browser session. You get 5 AI-powered task breakdowns per session (on a speedy model), plus the focus timer, rewards, and one-click calendar export — all yours. Live integrations (Google Tasks) are owner-only for now. Self-hosted option and BYOK coming soon.";
 
 function useCountdown(expiresAtIso: string): string {
   const [label, setLabel] = useState("");

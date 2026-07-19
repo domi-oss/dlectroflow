@@ -23,9 +23,6 @@ vi.mock("@/app/actions/breakdown", () => ({
 vi.mock("@/app/actions/braindump", () => ({
   createBrainDumpItem: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@/app/actions/reclaim", () => ({
-  scheduleTaskInReclaim: vi.fn().mockResolvedValue({ ok: true, scheduled: 0 }),
-}));
 vi.mock("@/app/actions/google-schedule", () => ({
   pushStepsToGoogleTasks: vi.fn().mockResolvedValue({ ok: true, scheduled: 0 }),
 }));
@@ -64,7 +61,6 @@ function renderChat() {
       taskId="task-1"
       title="Plan the party"
       initialProposal={proposal}
-      reclaimConnected={false}
       google={{ configured: false, connected: false, needsReconnect: false }}
     />,
   );

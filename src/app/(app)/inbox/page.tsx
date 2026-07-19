@@ -12,7 +12,6 @@ export default async function InboxPage({
   searchParams,
 }: {
   searchParams: Promise<{
-    reclaim?: string;
     google?: string;
     reason?: string;
   }>;
@@ -80,18 +79,6 @@ export default async function InboxPage({
 
   return (
     <div className="space-y-4">
-      {sp.reclaim === "connected" && (
-        <div className="rounded-lg border border-green-600/30 bg-green-600/10 px-4 py-2 text-sm font-medium text-green-700">
-          ✅ Reclaim connected — you can now schedule task breakdowns onto your
-          calendar.
-        </div>
-      )}
-      {sp.reclaim === "error" && (
-        <div className="rounded-lg border border-red-600/30 bg-red-600/10 px-4 py-2 text-sm text-red-700">
-          Reclaim connection failed{sp.reason ? `: ${sp.reason}` : ""}. You can
-          try again from a task breakdown.
-        </div>
-      )}
       {sp.google === "connected" && (
         <div className="rounded-lg border border-green-600/30 bg-green-600/10 px-4 py-2 text-sm font-medium text-green-700">
           ✅ Google Tasks connected — task breakdowns can now sync into Reclaim

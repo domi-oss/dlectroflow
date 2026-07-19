@@ -101,7 +101,8 @@ export async function ejectStepToInbox(
 
 /**
  * Persist a confirmed breakdown: set the parent emoji and replace the task's
- * steps with the proposal. (Reclaim scheduling is wired in step 6.)
+ * steps with the proposal. (Scheduling is wired via the Google Tasks / calendar
+ * export routes.)
  */
 export async function confirmBreakdown(taskId: string, proposal: Proposal) {
   const workspaceId = await currentWorkspaceId();

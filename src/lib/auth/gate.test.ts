@@ -23,7 +23,9 @@ describe("gate paths", () => {
   });
   it("integration oauth is owner-only", () => {
     expect(isOwnerOnlyPath("/api/google/oauth/start")).toBe(true);
-    expect(isOwnerOnlyPath("/api/reclaim/oauth/callback")).toBe(true);
+  });
+  it("the removed Reclaim oauth path is no longer owner-only (#36)", () => {
+    expect(isOwnerOnlyPath("/api/reclaim/oauth/callback")).toBe(false);
   });
   it("inbox is not owner-only", () => {
     expect(isOwnerOnlyPath("/inbox")).toBe(false);
