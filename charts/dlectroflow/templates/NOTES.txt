@@ -1,0 +1,34 @@
+dlectroflow ({{ .Values.env }}) has been {{ if .Release.IsInstall }}installed{{ else }}upgraded{{ end }} as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+App URL:
+  https://{{ .Values.host }}
+
+Deployment summary:
+  Image:            {{ .Values.image.repository }}:{{ .Values.image.tag | default "<image.tag unset — CI passes $CI_COMMIT_SHA>" }}
+  App replicas:     {{ .Values.replicas }}
+  Postgres storage: {{ if .Values.postgres.persistent }}persistent PVC ({{ .Values.postgres.storageSize }}){{ else }}ephemeral emptyDir (data is LOST on pod restart){{ end }}
+  Postgres image:   {{ .Values.postgres.image }}
+  Spot nodes:       {{ .Values.spot }}
+  NetworkPolicy:    {{ if .Values.networkPolicy.enabled }}enabled (postgres :5432 restricted to app pods){{ else }}disabled{{ end }}
+{{- if eq .Values.env "production" }}
+  DB backup:        {{ if .Values.backup.enabled }}enabled → gs://{{ .Values.backup.gcsBucket }}/pg/ ({{ .Values.backup.schedule }}){{ else }}disabled{{ end }}
+  Guest purge:      {{ if .Values.purge.enabled }}enabled ({{ .Values.purge.schedule }}){{ else }}disabled{{ end }}
+{{- end }}
+{{- if eq .Values.env "review" }}
+
+Review app: guests are seated into the pre-seeded demo workspace "{{ .Values.reviewDemoWorkspaceId }}".
+The database is ephemeral — do not store anything you need to keep.
+{{- end }}
+
+Database migrations run automatically via the `migrate` initContainer on the app
+pod (Prisma `migrate deploy`) before the app container starts.
+
+Handy commands:
+  kubectl -n {{ .Release.Namespace }} get pods,svc,ingress
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/dlectroflow
+  kubectl -n {{ .Release.Namespace }} logs deploy/dlectroflow -c app -f
+  kubectl -n {{ .Release.Namespace }} logs deploy/dlectroflow -c migrate
+
+Reminder: `postgres.persistent` is fixed at first install — it drives the
+StatefulSet volumeClaimTemplates (an immutable field). Do not flip it on an
+existing release; recreate the release instead.
