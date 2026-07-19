@@ -77,5 +77,9 @@ describe("FocusTimer — Pause for now (light exit, keeps session open)", () => 
 
     // The "Paused — no guilt" card renders in place of the timer.
     expect(screen.getByText("Paused — no guilt.")).toBeInTheDocument();
+    // …and offers a low-shame route back via the Inbox resume banner.
+    expect(
+      screen.getByRole("link", { name: /see it on your Inbox/i }),
+    ).toHaveAttribute("href", "/inbox");
   });
 });
