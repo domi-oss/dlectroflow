@@ -73,3 +73,11 @@ backup:
   serviceAccountName: dlectroflow-backup
   dumpImage: ""                        # defaults to postgres.image (keeps pg_dump matched to the server major); override only for a different version
   uploadImage: google/cloud-sdk:slim@sha256:85419a311666821eb3a195d86753cb9bf253c0b869492fdaf632bd2f983d0d83
+
+# Daily purge of expired guest workspaces + stale guest counters (#21; prod
+# only; see templates/purge-cronjob.yaml). Enabled by default — unlike backup,
+# this needs no external infra (just DATABASE_URL, already in every env), but
+# the prod-only gate still keeps review apps' ephemeral DB out of scope.
+purge:
+  enabled: true
+  schedule: "30 3 * * *"          # 03:30 UTC daily, after the 02:00 DB backup

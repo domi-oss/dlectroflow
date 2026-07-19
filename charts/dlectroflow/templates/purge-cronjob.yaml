@@ -1,0 +1,88 @@
+{{- /*
+Daily purge of expired guest workspaces + stale guest-scoped counters (#21).
+Rendered only in production and only when purge.enabled — review apps use an
+ephemeral emptyDir DB with a handful of throwaway guests, so there's nothing
+worth purging on a schedule there. Reuses the app image (already carries tsx
+via Dockerfile.ci, so `npx tsx` resolves with no registry fetch) and runs
+prisma/scheduled-purge.ts — a SELF-CONTAINED entrypoint (imports only
+@prisma/client, no app source) because the standalone image has no src/. It:
+  - deletes guest workspaces past their TTL (purgeExpiredGuests)
+  - deletes guest daily-activity/AI-usage counters older than 30 days
+    (purgeStaleGuestCounters)
+and logs a single structured line tagged "scheduled_purge" with counts.
+*/ -}}
+{{- if and .Values.purge.enabled (eq .Values.env "production") }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dlectroflow-guest-purge
+  labels:
+    {{- include "dlectroflow.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.purge.schedule | quote }}
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 900
+      template:
+        metadata:
+          labels:
+            {{- include "dlectroflow.labels" . | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          imagePullSecrets:
+            - name: dlectroflow-registry
+          volumes:
+            # Writable scratch for `npx tsx` under readOnlyRootFilesystem — tsx
+            # creates an IPC socket dir under /tmp on startup, so it needs a
+            # writable HOME/TMPDIR (pointed at /tmp below), same as backup.yaml.
+            - name: tmp
+              emptyDir:
+                sizeLimit: 64Mi
+          containers:
+            - name: purge
+              image: "{{ .Values.image.repository }}:{{ required "image.tag must be set (CI passes $CI_COMMIT_SHA)" .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["npx", "tsx", "prisma/scheduled-purge.ts"]
+              env:
+                # Same secret/key the app Deployment + migrate/seed initContainers
+                # use — already carries sslmode=require (dlectroflow.databaseUrl).
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: dlectroflow-secrets
+                      key: DATABASE_URL
+                # npx/tsx need a writable HOME/TMPDIR even under
+                # readOnlyRootFilesystem; point both at the tmp emptyDir below.
+                - name: HOME
+                  value: /tmp
+                - name: TMPDIR
+                  value: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 250m
+                  memory: 256Mi
+{{- end }}
