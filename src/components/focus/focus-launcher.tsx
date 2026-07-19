@@ -66,7 +66,10 @@ export function FocusLauncher({
             {resumeHero.stepText}
           </p>
           <p className="text-muted-foreground text-xs tabular-nums">
-            {t("step.counter", voice)} {resumeHero.stepIndex}/{resumeHero.stepsTotal} · ~{resumeHero.estMinutes}m {t("focus.hero.left", voice)}
+            {t("step.counter", voice)} {resumeHero.stepIndex}/{resumeHero.stepsTotal}
+            {resumeHero.estMinutes > 0
+              ? ` · ~${resumeHero.estMinutes}m ${t("focus.hero.left", voice)}`
+              : ""}
           </p>
           <div
             className="h-1.5 w-full overflow-hidden rounded-full bg-amber-200 dark:bg-amber-900"

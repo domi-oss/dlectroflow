@@ -50,7 +50,9 @@ export function SingleTaskLane({ items, voice }: { items: SingleFocusable[]; voi
       {visible.map((s) => (
         <li key={s.itemId} className="flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm">
           <span className="min-w-0 flex-1 break-words">{s.text}</span>
-          <span className="text-muted-foreground shrink-0 text-xs tabular-nums">{s.estMinutes}m</span>
+          {s.estMinutes > 0 && (
+            <span className="text-muted-foreground shrink-0 text-xs tabular-nums">{s.estMinutes}m</span>
+          )}
           <button
             type="button"
             onClick={() => start(s.itemId)}
@@ -94,7 +96,9 @@ export function MultiStepLane({ items, voice }: { items: FocusableStep[]; voice:
             <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
               {e.stepsDone}/{e.stepsTotal}
             </span>
-            <span className="text-muted-foreground shrink-0 text-xs tabular-nums">{e.estMinutes}m</span>
+            {e.estMinutes > 0 && (
+              <span className="text-muted-foreground shrink-0 text-xs tabular-nums">{e.estMinutes}m</span>
+            )}
             <button
               type="button"
               onClick={() => router.push(`/focus/${e.stepId}`)}
