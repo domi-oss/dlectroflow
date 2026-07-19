@@ -70,7 +70,7 @@ export const STRINGS = {
 
   // ── Nav / hub labels ───────────────────────────────────────────────────────
   "nav.inbox":           { plain: "Inbox",             playful: "🧠 Inbox" },
-  "nav.dashboard":       { plain: "Dashboard",         playful: "🎉 Dashboard" },
+  "nav.dashboard":       { plain: "Activity",          playful: "🎉 Activity" },
   "nav.everything":      { plain: "Library",           playful: "🍱 Larder" },
   "nav.done":            { plain: "Done",              playful: "🍽️ Devoured" },
   "nav.focusTimer":      { plain: "Focus Timer",       playful: "⏱️ Focus Timer" },

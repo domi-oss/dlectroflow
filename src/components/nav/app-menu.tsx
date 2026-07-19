@@ -8,8 +8,8 @@ import { t, type Voice } from "@/lib/strings";
 const DESTINATIONS = [
   { key: "nav.inbox", href: "/inbox" },
   { key: "nav.focusTimer", href: "/focus" },
-  { key: "nav.dashboard", href: "/dashboard" },
   { key: "nav.everything", href: "/library" },
+  { key: "nav.dashboard", href: "/dashboard" },
   { key: "nav.settings", href: "/settings" },
   { key: "nav.help", href: "/help" },
 ] as const;
