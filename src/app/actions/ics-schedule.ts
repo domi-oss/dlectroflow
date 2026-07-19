@@ -3,9 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { buildTaskIcs, icsFilename } from "@/lib/ics";
-import { RewardType, BadgeKey } from "@/lib/constants";
-import { logReward, awardBadge } from "@/lib/rewards";
 import { currentWorkspaceId } from "@/lib/workspace";
+import { awardFirstSchedule } from "@/lib/scheduling/award";
+import { SchedulingMethod } from "@/lib/scheduling/types";
 
 const DEFAULT_ICS_DURATION_MIN = 25;
 
@@ -50,17 +50,14 @@ export async function scheduleViaIcs(
   });
 
   // Mark + reward once (idempotent on scheduledAt). Re-downloads skip both.
+  // The marker stamp stays here (each write site owns it — scheduleSingleTask
+  // folds it into another update); the shared helper owns the best-effort reward.
   if (task.scheduledAt == null) {
     await prisma.task.update({
       where: { id: task.id },
-      data: { scheduledAt: new Date(), scheduledVia: "ics" },
+      data: { scheduledAt: new Date(), scheduledVia: SchedulingMethod.Ics },
     });
-    try {
-      await logReward(workspaceId, RewardType.Scheduled);
-      await awardBadge(workspaceId, BadgeKey.FirstSchedule);
-    } catch {
-      // Reward is a bonus; the .ics is the product. Never fail scheduling.
-    }
+    await awardFirstSchedule(workspaceId, false);
     revalidatePath("/inbox");
     revalidatePath(`/tasks/${taskId}`);
   }
