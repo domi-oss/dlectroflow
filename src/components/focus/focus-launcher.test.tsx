@@ -2,100 +2,125 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, within } from "@testing-library/react";
 import { FocusLauncher } from "@/components/focus/focus-launcher";
-import type { FocusableStep } from "@/lib/focus-launcher";
+import type { LauncherData, FocusableStep } from "@/lib/focus-launcher";
 
 vi.mock("next/link", () => ({
   default: ({ children, href }: { children: React.ReactNode; href: string }) => (
     <a href={href}>{children}</a>
   ),
 }));
+// Render the lanes as light stand-ins — their interactivity is covered by
+// focus-lanes.test.tsx; here we assert the shell's own structure.
+vi.mock("@/components/focus/focus-lanes", () => ({
+  SingleTaskLane: ({ items }: { items: { itemId: string; text: string }[] }) => (
+    <ul data-testid="single-lane">{items.map((i) => <li key={i.itemId}>{i.text}</li>)}</ul>
+  ),
+  MultiStepLane: ({ items }: { items: FocusableStep[] }) => (
+    <ul data-testid="multi-lane">{items.map((e) => <li key={e.stepId}>{e.stepText}</li>)}</ul>
+  ),
+}));
 
-function entry(overrides: Partial<FocusableStep> & { stepId: string }): FocusableStep {
-  return {
-    stepText: overrides.stepId,
-    subtaskEmoji: null,
-    estMinutes: 15,
-    taskId: "task-" + overrides.stepId,
-    taskTitle: "Task " + overrides.stepId,
-    resumable: false,
-    ...overrides,
-  };
-}
+const hero = (o: Partial<FocusableStep> & { stepId: string }): FocusableStep => ({
+  stepText: o.stepId,
+  subtaskEmoji: null,
+  estMinutes: 12,
+  taskId: "task-" + o.stepId,
+  taskTitle: "Task " + o.stepId,
+  resumable: true,
+  resumeAt: 1,
+  stepIndex: 2,
+  stepsDone: 1,
+  stepsTotal: 4,
+  nextStepText: null,
+  nextStepEmoji: null,
+  ...o,
+});
+
+const data = (over: Partial<LauncherData> = {}): LauncherData => ({
+  resumeHero: null,
+  singleTasks: [],
+  multiStep: [],
+  meta: { minutesToClear: 0 },
+  ...over,
+});
 
 afterEach(cleanup);
 
-describe("FocusLauncher", () => {
-  it("renders one row per entry, each linking to /focus/[stepId] with task title + step text + estimate", () => {
+describe("FocusLauncher shell", () => {
+  it("renders ← Back to /inbox, the title, and a meta line linking to /dashboard", () => {
     render(
       <FocusLauncher
         voice="plain"
-        entries={[
-          entry({ stepId: "s1", stepText: "Draft intro", taskTitle: "Write report", estMinutes: 25 }),
-          entry({ stepId: "s2", stepText: "Book flights", taskTitle: "Plan trip", estMinutes: 10 }),
-        ]}
+        focusMinToday={30}
+        currentStreak={4}
+        clearedToday={false}
+        data={data({ singleTasks: [{ itemId: "i1", text: "Buy milk", estMinutes: 8 }], meta: { minutesToClear: 42 } })}
       />,
     );
-
-    const links = screen.getAllByRole("link");
-    // Two focusable rows (no /inbox empty-state link present).
-    expect(links).toHaveLength(2);
-    expect(links[0]).toHaveAttribute("href", "/focus/s1");
-    expect(links[1]).toHaveAttribute("href", "/focus/s2");
-
-    const first = within(links[0]);
-    expect(first.getByText("Write report")).toBeInTheDocument();
-    expect(first.getByText(/Draft intro/)).toBeInTheDocument();
-    expect(first.getByText(/25m/)).toBeInTheDocument();
-
-    // Intro copy is shown when there are entries.
-    expect(screen.getByText("Pick a step to focus on.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /back/i })).toHaveAttribute("href", "/inbox");
+    expect(screen.getByRole("heading", { name: /focus timer/i })).toBeInTheDocument();
+    const meta = screen.getByRole("link", { name: /focused today/i });
+    expect(meta).toHaveAttribute("href", "/dashboard");
+    expect(within(meta).getByText(/30m/)).toBeInTheDocument();
+    expect(within(meta).getByText(/4-day/)).toBeInTheDocument(); // streak count (unambiguous vs "42m")
+    expect(within(meta).getByText(/42m/)).toBeInTheDocument();
   });
 
-  it("shows the emoji when present", () => {
+  it("renders both lanes with the exact inbox SubHeader labels, counts + see-all hrefs", () => {
     render(
       <FocusLauncher
         voice="plain"
-        entries={[entry({ stepId: "s1", stepText: "Draft", subtaskEmoji: "✍️" })]}
+        focusMinToday={0}
+        currentStreak={0}
+        clearedToday={false}
+        data={data({
+          singleTasks: [{ itemId: "i1", text: "Buy milk", estMinutes: 8 }],
+          multiStep: [hero({ stepId: "m1", stepText: "Draft intro", resumable: false })],
+        })}
       />,
     );
-    expect(screen.getByText(/✍️/)).toBeInTheDocument();
+    expect(screen.getByText("Single-task to-dos")).toBeInTheDocument();
+    expect(screen.getByText("Multi-step to-dos")).toBeInTheDocument();
+    const seeAll = screen.getAllByRole("link", { name: /see all/i });
+    const hrefs = seeAll.map((a) => a.getAttribute("href"));
+    expect(hrefs).toContain("/library?tab=plated");
+    expect(hrefs).toContain("/library?tab=sorted");
+    expect(within(screen.getByTestId("single-lane")).getByText("Buy milk")).toBeInTheDocument();
+    expect(within(screen.getByTestId("multi-lane")).getByText("Draft intro")).toBeInTheDocument();
   });
 
-  it("shows a paused badge only on resumable rows", () => {
+  it("renders the resume hero with step X/Y, ~Nm left, a progressbar, and ▶ Resume → /focus/[stepId]", () => {
     render(
       <FocusLauncher
         voice="plain"
-        entries={[
-          entry({ stepId: "s-resumable", stepText: "Draft", taskTitle: "Report", resumable: true }),
-          entry({ stepId: "s-fresh", stepText: "Book", taskTitle: "Trip", resumable: false }),
-        ]}
+        focusMinToday={0}
+        currentStreak={0}
+        clearedToday={false}
+        data={data({ resumeHero: hero({ stepId: "h1", stepText: "Wire the API", stepIndex: 2, stepsTotal: 4, estMinutes: 12 }) })}
       />,
     );
-    const badges = screen.getAllByText(/paused/i);
-    expect(badges).toHaveLength(1);
-    // The badge lives inside the resumable row's link.
-    expect(screen.getByRole("link", { name: /paused/i })).toHaveAttribute(
-      "href",
-      "/focus/s-resumable",
-    );
+    expect(screen.getByText(/Wire the API/)).toBeInTheDocument();
+    expect(screen.getByText(/2\/4/)).toBeInTheDocument();
+    expect(screen.getByText(/12m/)).toBeInTheDocument();
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "1");
+    expect(screen.getByRole("link", { name: /resume focus/i })).toHaveAttribute("href", "/focus/h1");
   });
 
-  it("renders the empty state (copy + link to /inbox) when there are no entries", () => {
-    render(<FocusLauncher voice="plain" entries={[]} />);
-    expect(
-      screen.getByText(
-        "Nothing to focus yet. Capture something in your Inbox and break it into steps, then come back to focus.",
-      ),
-    ).toBeInTheDocument();
-    const links = screen.getAllByRole("link");
-    expect(links).toHaveLength(1);
-    expect(links[0]).toHaveAttribute("href", "/inbox");
-    // No focusable rows rendered in the empty state.
-    expect(screen.queryByText("Pick a step to focus on.")).not.toBeInTheDocument();
+  it("shows the new-user empty state (Inbox card) when nothing is focusable and nothing was cleared", () => {
+    render(<FocusLauncher voice="plain" focusMinToday={0} currentStreak={0} clearedToday={false} data={data()} />);
+    expect(screen.getByText(/Nothing to focus yet/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /inbox/i })).toHaveAttribute("href", "/inbox");
+    expect(screen.queryByText("Single-task to-dos")).not.toBeInTheDocument();
   });
 
-  it("is voice-aware (playful intro differs from plain)", () => {
-    render(<FocusLauncher voice="playful" entries={[entry({ stepId: "s1" })]} />);
-    expect(screen.getByText("Pick a bite to focus on.")).toBeInTheDocument();
+  it("shows the all-cleared moment when nothing is focusable but work was done today", () => {
+    render(<FocusLauncher voice="plain" focusMinToday={45} currentStreak={3} clearedToday data={data()} />);
+    expect(screen.getByText(/All caught up/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing to focus yet/i)).not.toBeInTheDocument();
+  });
+
+  it("is voice-aware (playful all-clear differs from plain)", () => {
+    render(<FocusLauncher voice="playful" focusMinToday={45} currentStreak={3} clearedToday data={data()} />);
+    expect(screen.getByText(/Plates cleared/i)).toBeInTheDocument();
   });
 });
