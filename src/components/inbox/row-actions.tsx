@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { cn, touchTarget } from "@/lib/utils";
 
 const DURATION_PRESETS = [15, 30, 60] as const;
 
@@ -77,11 +78,12 @@ export function ScheduleControl({
     return (
       <a
         href="/api/google/oauth/start"
-        className={
+        className={cn(
           isMenu
             ? "hover:bg-accent w-full rounded-md px-2.5 py-1 text-left font-medium"
-            : "rounded-md px-2.5 py-1 font-medium"
-        }
+            : "rounded-md px-2.5 py-1 font-medium",
+          !isMenu && touchTarget,
+        )}
       >
         {state === "reconnect" ? "Reconnect Google →" : "Connect Google →"}
       </a>
@@ -115,11 +117,12 @@ export function ScheduleControl({
           else if (state === "ics_ready_steps") onScheduleIcs?.();
           else setOpen((o) => !o); // needs_duration | ics_needs_duration
         }}
-        className={
+        className={cn(
           isMenu
             ? "hover:bg-accent w-full rounded-md px-2.5 py-1 text-left font-medium disabled:opacity-50"
-            : "rounded-md px-2.5 py-1 font-medium disabled:opacity-50"
-        }
+            : "rounded-md px-2.5 py-1 font-medium disabled:opacity-50",
+          !isMenu && touchTarget,
+        )}
       >
         {isMenu ? label : "📅"}
       </button>
@@ -137,7 +140,7 @@ export function ScheduleControl({
                 key={minutes}
                 type="button"
                 disabled={pending}
-                className="rounded-md px-2.5 py-1 font-medium disabled:opacity-50"
+                className={cn("rounded-md px-2.5 py-1 font-medium disabled:opacity-50", touchTarget)}
                 onClick={() => {
                   setOpen(false);
                   if (isIcs) onScheduleIcs?.(minutes);
@@ -162,7 +165,7 @@ export function ScheduleControl({
             <button
               type="button"
               disabled={pending || custom === "" || customOutOfRange}
-              className="rounded-md px-2.5 py-1 font-medium disabled:opacity-50"
+              className={cn("rounded-md px-2.5 py-1 font-medium disabled:opacity-50", touchTarget)}
               onClick={fireCustom}
             >
               Go
@@ -227,7 +230,10 @@ export function RowActions({
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
       {scheduled && (
-        <span className="text-emerald-600 font-medium" title="Scheduled">
+        <span
+          className="text-emerald-700 dark:text-emerald-400 font-medium"
+          title="Scheduled"
+        >
           Scheduled ✓
         </span>
       )}
@@ -245,7 +251,7 @@ export function RowActions({
           aria-haspopup="true"
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((o) => !o)}
-          className="rounded-md px-2.5 py-1 font-medium"
+          className={cn("rounded-md px-2.5 py-1 font-medium", touchTarget)}
         >
           🔽
         </button>

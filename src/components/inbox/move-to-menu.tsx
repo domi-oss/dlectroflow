@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { BucketId } from "./bucket";
 import { t, type Voice, type StringKey } from "@/lib/strings";
+import { cn, touchTarget } from "@/lib/utils";
 
 // Menu order + the section string each bucket shows as its label.
 const BUCKET_ORDER: BucketId[] = ["needsReview", "multiStep", "singleTask", "savedLater", "completed"];
@@ -62,11 +63,12 @@ export function MoveToMenu({
         aria-label={compact ? "Move to" : undefined}
         title={compact ? "Move to" : undefined}
         onClick={() => setOpen((o) => !o)}
-        className={
+        className={cn(
           compact
             ? "text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1 font-medium"
-            : "text-muted-foreground hover:text-foreground rounded-md border px-2 py-1 text-xs"
-        }
+            : "text-muted-foreground hover:text-foreground rounded-md border px-2 py-1 text-xs",
+          compact && touchTarget,
+        )}
       >
         {compact ? "📥" : t("action.moveTo", voice)}
       </button>
