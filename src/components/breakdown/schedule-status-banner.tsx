@@ -28,9 +28,11 @@ export function ScheduleStatusBanner({
       role="status"
       className={cn(
         "rounded-lg border p-3 text-sm font-medium",
+        // Per-theme text tone: -700 is AA on the light tint, but fails AA on the
+        // dark tint, so dark mode uses the lighter -400 (a11y contrast).
         scheduled
-          ? "border-green-600/30 bg-green-600/10 text-green-700"
-          : "border-amber-500/30 bg-amber-500/10 text-amber-700",
+          ? "border-green-600/30 bg-green-600/10 text-green-700 dark:text-green-400"
+          : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
       )}
     >
       {t(scheduled ? "banner.scheduled" : "banner.notScheduled", voice)}

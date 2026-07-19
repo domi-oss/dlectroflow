@@ -237,6 +237,36 @@ describe("RowActions — Scheduled indicator", () => {
     rerender(<RowActions inline={[]} schedule={null} menu={[]} />);
     expect(screen.queryByText(/scheduled ✓/i)).toBeNull();
   });
+
+  it("a11y: 'Scheduled ✓' uses AA-tuned per-theme emerald (not the sub-AA emerald-600)", () => {
+    render(<RowActions inline={[]} schedule={null} menu={[]} scheduled />);
+    const el = screen.getByText(/scheduled ✓/i);
+    expect(el.className).toContain("text-emerald-700");
+    expect(el.className).toContain("dark:text-emerald-400");
+    expect(el.className).not.toContain("text-emerald-600");
+  });
+});
+
+describe("a11y: touch targets ≥ 44px on icon/pill controls", () => {
+  const hasMinTarget = (el: HTMLElement) =>
+    el.className.includes("min-h-11") && el.className.includes("min-w-11");
+
+  it("📅 schedule icon button has a ≥44px hit area", () => {
+    render(<RowActions inline={[]} menu={[]} schedule={{ state: "ready_steps", onScheduleSteps: vi.fn() }} />);
+    expect(hasMinTarget(screen.getByRole("button", { name: /schedule/i }))).toBe(true);
+  });
+
+  it("🔽 All-options icon button has a ≥44px hit area", () => {
+    render(<RowActions inline={[]} menu={[]} schedule={null} />);
+    expect(hasMinTarget(screen.getByRole("button", { name: "All options" }))).toBe(true);
+  });
+
+  it("duration preset + Go pill buttons have a ≥44px hit area", () => {
+    render(<RowActions inline={[]} menu={[]} schedule={{ state: "needs_duration", onScheduleSingle: vi.fn() }} />);
+    fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
+    expect(hasMinTarget(screen.getByRole("button", { name: /^30 min$/i }))).toBe(true);
+    expect(hasMinTarget(screen.getByRole("button", { name: /go/i }))).toBe(true);
+  });
 });
 
 describe("ScheduleControl — menu variant (▾ dropdown 'Schedule' entry)", () => {

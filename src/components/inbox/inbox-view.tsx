@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { cn } from "@/lib/utils";
+import { cn, touchTarget } from "@/lib/utils";
 import {
   DndContext,
   MouseSensor,
@@ -366,7 +366,7 @@ export function InboxView({
       type="button"
       aria-label={`Edit ${item.text}`}
       onClick={() => setEditingId(item.id)}
-      className="text-muted-foreground hover:text-foreground shrink-0 px-1 text-xs"
+      className={cn("text-muted-foreground hover:text-foreground shrink-0 px-1 text-xs", touchTarget)}
     >
       ✏️
     </button>
@@ -493,7 +493,7 @@ export function InboxView({
         key={key}
         aria-label={t("action.delete", voice)}
         title={t("action.delete", voice)}
-        className="text-muted-foreground hover:text-destructive rounded-md px-2.5 py-1"
+        className={cn("text-muted-foreground hover:text-destructive rounded-md px-2.5 py-1", touchTarget)}
         onClick={() => requestDelete(itemId)}
       >
         🗑
@@ -1373,7 +1373,10 @@ function DragGrip({ id, label }: { id: string; label: string }) {
       {...attributes}
       {...listeners}
       aria-label={`Drag ${label}`}
-      className="text-muted-foreground hover:text-foreground touch-none shrink-0 cursor-grab px-1 text-xs"
+      className={cn(
+        "text-muted-foreground hover:text-foreground touch-none shrink-0 cursor-grab px-1 text-xs",
+        touchTarget,
+      )}
     >
       ⠿
     </button>
@@ -1556,14 +1559,14 @@ function ItemRow({
           <span className="flex shrink-0 items-center gap-2">
             <button
               onClick={onFreshen}
-              className="rounded-md border px-2 py-1 font-medium"
+              className={cn("rounded-md border px-2 py-1 font-medium", touchTarget)}
               style={{ borderColor: "#c0392b", color: "#c0392b" }}
             >
               {t("action.stillNeeded", voice)}
             </button>
             <button
               onClick={onDismissPrompt}
-              className="rounded-md border px-2 py-1 font-medium"
+              className={cn("rounded-md border px-2 py-1 font-medium", touchTarget)}
               style={{ borderColor: "#c0392b", color: "#c0392b" }}
             >
               {t("action.dismiss", voice)}
