@@ -22,12 +22,34 @@ resources:
     memory: 512Mi
 
 postgres:
+  # persistent is NOT safely togglable on an existing release: it drives the
+  # StatefulSet's volumeClaimTemplates, and once a StatefulSet exists that field
+  # is immutable — flipping true<->false makes `helm upgrade` fail with
+  # "Forbidden: updates to statefulset spec for fields other than ...". Pick it
+  # at first install per env (prod=true, review=false) and never change it in
+  # place; recreate the release (uninstall/install) if it must change.
   persistent: true     # false for review (emptyDir)
   storageSize: 8Gi
-  image: postgres:16@sha256:17e67d7b9890c99b055ba1e0d5c5be4ec27c9d3a72bda32db24a5e5d8a85af0c
+  # Pin the postgres MINOR (not the floating `16` tag) + a matching digest so
+  # nodes can't drift across minors under pullPolicy: IfNotPresent. Digest is
+  # authoritative for the pull; the human-readable minor is kept in sync with it
+  # (verified against docker.io/library/postgres:16.10). In-major (16.x -> 16.y)
+  # bumps are binary-compatible and need no dump/restore. NOTE (follow-up): no
+  # Renovate manager tracks values.yaml image tags yet — see the "Pin/track
+  # values.yaml image tags via Renovate" item in #15.
+  image: postgres:16.10@sha256:21f6013073bc6b92830a2129570e2f5ec42a6c734b5a985a41e83aa58f54c3c1
 
 tls:
   clusterIssuer: letsencrypt-prod
+
+# Optional NetworkPolicy that restricts Postgres :5432 ingress to the app pods
+# (app Deployment + migrate/seed init + backup/purge jobs all carry the
+# app.kubernetes.io/name=dlectroflow label). Off by default: it is a no-op on
+# clusters without a NetworkPolicy controller, and on GKE Dataplane V2 it should
+# be smoke-tested on a review app before enabling in prod. Probes are exec (not
+# network), so the postgres liveness/readiness checks are unaffected.
+networkPolicy:
+  enabled: false
 
 # Rendered into a dockerconfigjson pull secret (private GitLab registry).
 registry:
