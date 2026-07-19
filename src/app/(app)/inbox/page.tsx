@@ -55,6 +55,7 @@ export default async function InboxPage({
     taskStatus: task?.status ?? null,
     completedAt: item.completedAt,
     scheduledAt: task?.scheduledAt ?? null,
+    estMinutes: item.estMinutes,
     steps: task?.steps.map((s) => ({
       id: s.id,
       order: s.order,

@@ -17,7 +17,7 @@ describe("AppMenu", () => {
     expect(screen.getByRole("link", { name: /Inbox/ })).toHaveAttribute("href", "/inbox");
     expect(screen.getByRole("link", { name: /Focus Timer/ })).toHaveAttribute("href", "/focus");
     expect(screen.getByRole("link", { name: /Dashboard/ })).toHaveAttribute("href", "/dashboard");
-    expect(screen.getByRole("link", { name: /Everything/ })).toHaveAttribute("href", "/library");
+    expect(screen.getByRole("link", { name: /Library/ })).toHaveAttribute("href", "/library");
     expect(screen.getByRole("link", { name: /Settings/ })).toHaveAttribute("href", "/settings");
     expect(screen.getByRole("link", { name: /Help/ })).toHaveAttribute("href", "/help");
     expect(screen.queryByText(/Task Breakdown|Break into steps/)).not.toBeInTheDocument();
