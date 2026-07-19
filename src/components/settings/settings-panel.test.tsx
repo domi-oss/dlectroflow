@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SettingsPanel } from "@/components/settings/settings-panel";
 import type { AgingSettings } from "@/lib/aging";
@@ -21,6 +21,7 @@ vi.mock("@/app/actions/settings", () => ({
 import { updateAgingSettings, updateFirstRunPreview } from "@/app/actions/settings";
 
 afterEach(cleanup);
+beforeEach(() => vi.clearAllMocks());
 
 const settings: AgingSettings & { firstRunPreview: boolean } = {
   agingThresholdMinutes: 30,
@@ -31,54 +32,65 @@ const settings: AgingSettings & { firstRunPreview: boolean } = {
   firstRunPreview: false,
 };
 
-describe("SettingsPanel freshness tier hours", () => {
-  it("renders three tier-hour inputs seeded from settings", () => {
-    render(
-      <SettingsPanel
-        settings={settings}
-        isOwner={false}
-        breakdownModel={null}
-        voice="plain"
-      />,
-    );
+const renderPanel = (overrides?: Partial<AgingSettings>) =>
+  render(
+    <SettingsPanel
+      settings={{ ...settings, ...overrides }}
+      isOwner={false}
+      breakdownModel={null}
+      voice="plain"
+      autoSaveDelayMs={20}
+    />,
+  );
 
+describe("SettingsPanel auto-save (Phase 6)", () => {
+  it("renders the tier-hour inputs seeded from settings", () => {
+    renderPanel();
     expect(screen.getByLabelText("Aging (hours)")).toHaveValue(4);
     expect(screen.getByLabelText("Overdue (hours)")).toHaveValue(8);
     expect(screen.getByLabelText("Way overdue (hours)")).toHaveValue(12);
   });
 
-  it("saves edited tier hours alongside existing fields", async () => {
+  it("no Save button is rendered", () => {
+    renderPanel();
+    expect(screen.queryByRole("button", { name: /save/i })).toBeNull();
+  });
+
+  it("auto-saves (debounced) when a freshness input changes", async () => {
     const user = userEvent.setup();
-    render(
-      <SettingsPanel
-        settings={settings}
-        isOwner={false}
-        breakdownModel={null}
-        voice="plain"
-      />,
-    );
+    renderPanel();
 
     const agingInput = screen.getByLabelText("Aging (hours)");
     await user.clear(agingInput);
     await user.type(agingInput, "6");
 
+    await waitFor(() =>
+      expect(updateAgingSettings).toHaveBeenLastCalledWith({
+        agingThresholdMinutes: 30,
+        demoOverrideSeconds: null,
+        agingHours: 6,
+        overdueHours: 8,
+        wayOverdueHours: 12,
+      }),
+    );
+  });
+
+  it("failure path: leaves the field editable and surfaces a non-blocking error", async () => {
+    vi.mocked(updateAgingSettings).mockRejectedValueOnce(new Error("boom"));
+    const user = userEvent.setup();
+    renderPanel();
+
     const overdueInput = screen.getByLabelText("Overdue (hours)");
     await user.clear(overdueInput);
-    await user.type(overdueInput, "10");
+    await user.type(overdueInput, "9");
 
-    const wayOverdueInput = screen.getByLabelText("Way overdue (hours)");
-    await user.clear(wayOverdueInput);
-    await user.type(wayOverdueInput, "20");
-
-    await user.click(screen.getByRole("button", { name: /save/i }));
-
-    expect(updateAgingSettings).toHaveBeenCalledWith({
-      agingThresholdMinutes: 30,
-      demoOverrideSeconds: null,
-      agingHours: 6,
-      overdueHours: 10,
-      wayOverdueHours: 20,
-    });
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(/couldn't save/i),
+    );
+    // Field is still editable (not disabled) after a failed write.
+    expect(overdueInput).not.toBeDisabled();
+    await user.type(overdueInput, "0"); // still accepts input
+    expect(overdueInput).toHaveValue(90);
   });
 });
 

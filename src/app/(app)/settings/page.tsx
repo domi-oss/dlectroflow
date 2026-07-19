@@ -3,6 +3,7 @@ import { getSettings } from "@/lib/db";
 import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
 import { getGoogleStatus } from "@/lib/google";
 import { SettingsPanel } from "@/components/settings/settings-panel";
+import { NotificationsSection } from "@/components/settings/notifications-section";
 import { IntegrationsPanel } from "@/components/settings/integrations-panel";
 import { t, type Voice } from "@/lib/strings";
 
@@ -34,6 +35,15 @@ export default async function SettingsPage() {
         breakdownModel={settings.breakdownModel ?? null}
         voice={voice}
       />
+      <div className="border-t pt-4">
+        <NotificationsSection
+          notifyRoundup={settings.notifyRoundup}
+          notifyAging={settings.notifyAging}
+          notifyDailyReview={settings.notifyDailyReview}
+          dailyReviewNudgeTime={settings.dailyReviewNudgeTime}
+          voice={voice}
+        />
+      </div>
       {owner && google && <IntegrationsPanel google={google} />}
       <div className="flex gap-4 text-sm">
         <Link href="/help" className="underline">

@@ -71,3 +71,67 @@ describe("updateRoundupSettings", () => {
     expect(call.update.roundupEmail).toBe("me@example.com");
   });
 });
+
+describe("updateNotificationSettings (Phase 6)", () => {
+  it("persists the four notification prefs, workspace-scoped, in both upsert branches", async () => {
+    currentWorkspaceIdMock.mockResolvedValue("g_guest");
+    const { updateNotificationSettings } = await import("./settings");
+    await updateNotificationSettings({
+      notifyRoundup: false,
+      notifyAging: true,
+      notifyDailyReview: true,
+      dailyReviewNudgeTime: "08:30",
+    });
+
+    expect(prismaMock.settings.upsert).toHaveBeenCalledTimes(1);
+    const call = prismaMock.settings.upsert.mock.calls[0][0];
+    expect(call.where).toEqual({ workspaceId: "g_guest" });
+    for (const branch of [call.create, call.update]) {
+      expect(branch.notifyRoundup).toBe(false);
+      expect(branch.notifyAging).toBe(true);
+      expect(branch.notifyDailyReview).toBe(true);
+      expect(branch.dailyReviewNudgeTime).toBe("08:30");
+    }
+    // create branch also seeds the keys
+    expect(call.create.workspaceId).toBe("g_guest");
+  });
+
+  it("coerces non-boolean inputs to booleans", async () => {
+    const { updateNotificationSettings } = await import("./settings");
+    await updateNotificationSettings({
+      notifyRoundup: 1 as unknown as boolean,
+      notifyAging: 0 as unknown as boolean,
+      notifyDailyReview: "" as unknown as boolean,
+      dailyReviewNudgeTime: "17:00",
+    });
+    const call = prismaMock.settings.upsert.mock.calls[0][0];
+    expect(call.update.notifyRoundup).toBe(true);
+    expect(call.update.notifyAging).toBe(false);
+    expect(call.update.notifyDailyReview).toBe(false);
+  });
+
+  it("falls back to 17:00 when the nudge time is not valid HH:mm", async () => {
+    const { updateNotificationSettings } = await import("./settings");
+    await updateNotificationSettings({
+      notifyRoundup: true,
+      notifyAging: true,
+      notifyDailyReview: true,
+      dailyReviewNudgeTime: "25:99",
+    });
+    const call = prismaMock.settings.upsert.mock.calls[0][0];
+    expect(call.update.dailyReviewNudgeTime).toBe("17:00");
+    expect(call.create.dailyReviewNudgeTime).toBe("17:00");
+  });
+
+  it("accepts a valid HH:mm nudge time unchanged", async () => {
+    const { updateNotificationSettings } = await import("./settings");
+    await updateNotificationSettings({
+      notifyRoundup: true,
+      notifyAging: true,
+      notifyDailyReview: true,
+      dailyReviewNudgeTime: "21:15",
+    });
+    const call = prismaMock.settings.upsert.mock.calls[0][0];
+    expect(call.update.dailyReviewNudgeTime).toBe("21:15");
+  });
+});

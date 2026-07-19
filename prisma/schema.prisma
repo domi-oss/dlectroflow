@@ -24,6 +24,17 @@ model Workspace {
   lastSeenAt DateTime @default(now())
   expiresAt DateTime? // guest sandbox TTL (null = owner / no expiry)
 
+  settings       Settings?
+  streak         Streak?
+  brainDumpItems BrainDumpItem[]
+  tasks          Task[]
+  focusSessions  FocusSession[]
+  dayRollups     DayRollup[]
+  rewardEvents   RewardEvent[]
+  streakRecords  StreakRecord[]
+  badges         Badge[]
+  dailySparks    DailySpark[]
+
   @@index([lastSeenAt])
 }
 
@@ -53,8 +64,14 @@ model Settings {
   // Phase 5 — first-run welcome + demo preview
   welcomeDismissedAt    DateTime?
   firstRunPreview       Boolean  @default(false)
+  // Phase 6 — per-type notification preferences (client-delivered only)
+  notifyRoundup         Boolean  @default(true)
+  notifyAging           Boolean  @default(true)
+  notifyDailyReview     Boolean  @default(false)
+  dailyReviewNudgeTime  String   @default("17:00") // HH:mm
   updatedAt             DateTime @updatedAt
   workspaceId           String   @unique
+  workspace             Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 // ── Reclaim MCP OAuth (single-user demo; all values obtained at runtime) ──
@@ -103,6 +120,7 @@ model BrainDumpItem {
   taskId           String?
   task             Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
   workspaceId      String
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([status])
   @@index([workspaceId])
@@ -124,6 +142,7 @@ model Task {
   turns            BreakdownTurn[]
   brainDumpItems   BrainDumpItem[]
   workspaceId      String
+  workspace        Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId])
 }
@@ -175,6 +194,7 @@ model FocusSession {
   outcome       String? // completed | requeued | gaveup
   reclaimSynced Boolean   @default(false)
   workspaceId   String
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([stepId])
   @@index([workspaceId])
@@ -191,6 +211,7 @@ model DayRollup {
   narrative    String?
   emailedAt    DateTime?
   workspaceId  String
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, date])
 }
@@ -202,6 +223,7 @@ model RewardEvent {
   points      Int
   createdAt   DateTime @default(now())
   workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([createdAt])
   @@index([workspaceId])
@@ -212,6 +234,7 @@ model Streak {
   current           Int     @default(0)
   lastActiveWorkday String? // YYYY-MM-DD
   workspaceId       String  @unique
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 model StreakRecord {
@@ -220,6 +243,7 @@ model StreakRecord {
   startedAt   DateTime
   endedAt     DateTime
   workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([length])
   @@index([workspaceId])
@@ -230,6 +254,7 @@ model Badge {
   key         String   // first_breakdown | first_schedule | streak_5 | ten_steps_day | beat_best_streak
   earnedAt    DateTime @default(now())
   workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId])
   @@unique([workspaceId, key])
@@ -241,6 +266,7 @@ model DailySpark {
   quote       String
   source      String // ai | fallback
   workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, date])
 }

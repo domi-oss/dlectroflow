@@ -208,7 +208,48 @@ jsonpath='{.spec.csi.volumeHandle}'`, last path segment.)
 > crash-consistent (not application-consistent); the pg_dump in this section stays
 > the primary restore path, snapshots are the disaster fallback.
 
-## 13. Rollback
+## 13. Guest retention purge (prod only)
+
+Guest workspaces are ephemeral by design (#21): each guest session gets an
+isolated workspace with a TTL (`GUEST_SANDBOX_TTL_HOURS`, default 24h), and
+guest-scoped rate-limit counters (`GuestDailyActivity`, `GuestAiUsage`, keyed
+by IP hash, not by workspace) need their own age-based cleanup since they
+outlive any single workspace. A daily CronJob purges both.
+
+**What it purges** (`prisma/scheduled-purge.ts` — self-contained so it runs in
+the standalone prod image; imports only `@prisma/client`, no app source):
+- `purgeExpiredGuests` — deletes `Workspace` rows with `kind: "guest"` and
+  `expiresAt` in the past (bounded to 25/call, looped until drained). All
+  workspace-scoped rows cascade via FK (Settings, Streak, BrainDumpItem, Task,
+  FocusSession, DayRollup, RewardEvent, StreakRecord, Badge, DailySpark;
+  Step/BreakdownTurn cascade transitively through Task).
+- `purgeStaleGuestCounters` — deletes `GuestDailyActivity`/`GuestAiUsage` rows
+  older than **30 days**.
+
+Each run logs one structured JSON line tagged `"scheduled_purge"` with counts
+(`guestsPurged`, `dailyActivity`, `aiUsage`) — grep pod/CronJob logs for that
+tag to check what a run actually did.
+
+**How it runs:** `charts/dlectroflow/templates/purge-cronjob.yaml` renders
+`CronJob dlectroflow-guest-purge` when `purge.enabled` and `env=production`
+(both true by default; review apps' ephemeral emptyDir DB is out of scope).
+Schedule **03:30 UTC daily** (after the 02:00 UTC DB backup, §12). Single
+container, the app image, running `npx tsx prisma/scheduled-purge.ts` against
+the same `DATABASE_URL` secret the app uses.
+
+**Check it's healthy:**
+```
+kubectl -n dlectroflow-prod get cronjob dlectroflow-guest-purge
+kubectl -n dlectroflow-prod get jobs -l app.kubernetes.io/name=dlectroflow --sort-by=.metadata.creationTimestamp | tail
+kubectl -n dlectroflow-prod logs -l app.kubernetes.io/name=dlectroflow --tail=200 | grep scheduled_purge
+```
+
+**Run one on demand** (e.g. to clear a backlog after a TTL/schedule change):
+```
+kubectl -n dlectroflow-prod create job --from=cronjob/dlectroflow-guest-purge purge-manual-$(date +%s)
+```
+
+## 14. Rollback
 
 **App-only (no schema change in the bad deploy):** deploys use `helm upgrade --atomic`,
 so a rollout that fails to become Ready **auto-rolls back** to the last good release.
@@ -228,7 +269,7 @@ Options, in order of preference:
 - **Discipline going forward:** keep migrations backward-compatible (expand/contract)
   so an app rollback is always safe without a DB restore.
 
-## 14. DB leaked — what to rotate, in what order
+## 15. DB leaked — what to rotate, in what order
 
 If a database copy may have left your control (stolen backup dump, exposed
 `POSTGRES_PASSWORD`, compromised pod, suspicious GCS access), work this list

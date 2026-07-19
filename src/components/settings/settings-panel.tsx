@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   updateAgingSettings,
@@ -12,6 +12,7 @@ import type { AgingSettings } from "@/lib/aging";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { OWNER_BREAKDOWN_ALLOWLIST, OWNER_BREAKDOWN_MODEL_DEFAULT } from "@/lib/constants";
 import { t, type Voice } from "@/lib/strings";
+import { useSaveStatus, SaveIndicator } from "@/components/settings/use-save-status";
 
 const FABLE_LINES = [
   "Our most capable model. Also $50/M tokens. To split 'clean the kitchen' into 3 steps? We love you, but no.",
@@ -33,14 +34,16 @@ export function SettingsPanel({
   isOwner,
   breakdownModel,
   voice,
+  autoSaveDelayMs = 600,
 }: {
   settings: AgingSettings & { firstRunPreview: boolean };
   isOwner: boolean;
   breakdownModel: string | null;
   voice: Voice;
+  /** Debounce for numeric auto-saves. Overridable so tests stay fast + deterministic. */
+  autoSaveDelayMs?: number;
 }) {
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
   const [voicePending, startVoiceTransition] = useTransition();
   const [frPending, startFr] = useTransition();
   const [firstRun, setFirstRun] = useState(settings.firstRunPreview);
@@ -60,6 +63,48 @@ export function SettingsPanel({
   const [fable] = useState(() => FABLE_LINES[Math.floor(Math.random() * FABLE_LINES.length)]);
   const [currentVoice, setCurrentVoice] = useState<Voice>(voice);
 
+  // ── Auto-save for the freshness/aging numeric inputs (debounced). ──────────
+  // The Save button is gone; each change schedules a debounced write. A failed
+  // write surfaces a non-blocking error and leaves every input editable.
+  const { status, markSaving, markSaved, markError } = useSaveStatus();
+  const valuesRef = useRef({ minutes, demo, agingHours, overdueHours, wayOverdueHours });
+  // Keep the ref current for the debounced flush (reads the latest values when
+  // it eventually fires) without touching the ref during render.
+  useEffect(() => {
+    valuesRef.current = { minutes, demo, agingHours, overdueHours, wayOverdueHours };
+  });
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
+
+  const flushAgingSave = async () => {
+    const v = valuesRef.current;
+    markSaving();
+    try {
+      await updateAgingSettings({
+        agingThresholdMinutes: v.minutes,
+        demoOverrideSeconds: v.demo.trim() === "" ? null : Number(v.demo),
+        agingHours: v.agingHours,
+        overdueHours: v.overdueHours,
+        wayOverdueHours: v.wayOverdueHours,
+      });
+      markSaved();
+      router.refresh();
+    } catch {
+      markError();
+    }
+  };
+
+  const scheduleAgingSave = () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      void flushAgingSave();
+    }, autoSaveDelayMs);
+  };
+
   const saveVoice = (v: Voice) =>
     startVoiceTransition(async () => {
       setCurrentVoice(v);
@@ -67,20 +112,8 @@ export function SettingsPanel({
       router.refresh();
     });
 
-  const save = () =>
-    startTransition(async () => {
-      await updateAgingSettings({
-        agingThresholdMinutes: minutes,
-        demoOverrideSeconds: demo.trim() === "" ? null : Number(demo),
-        agingHours,
-        overdueHours,
-        wayOverdueHours,
-      });
-      router.refresh();
-    });
-
   const saveModel = (m: string) =>
-    startTransition(async () => {
+    startVoiceTransition(async () => {
       setModel(m);
       await updateBreakdownModel(m);
       router.refresh();
@@ -99,13 +132,14 @@ export function SettingsPanel({
   return (
     <div className="space-y-6 text-sm">
       <section className="space-y-3">
-        <h2 className="font-semibold">
+        <h2 className="flex items-center gap-2 font-semibold">
           Aging &amp; reminder
           {settings.demoOverrideSeconds != null && (
-            <span className="ml-2 text-xs font-normal text-amber-600">
+            <span className="text-xs font-normal text-amber-600">
               demo override: {settings.demoOverrideSeconds}s
             </span>
           )}
+          <SaveIndicator status={status} voice={voice} />
         </h2>
         <div className="flex flex-wrap items-end gap-4">
         <label className="flex flex-col gap-1">
@@ -116,7 +150,10 @@ export function SettingsPanel({
             type="number"
             min={1}
             value={minutes}
-            onChange={(e) => setMinutes(Number(e.target.value))}
+            onChange={(e) => {
+              setMinutes(Number(e.target.value));
+              scheduleAgingSave();
+            }}
             className="border-input w-32 rounded-md border px-2 py-1"
           />
         </label>
@@ -129,7 +166,10 @@ export function SettingsPanel({
             min={1}
             value={demo}
             placeholder="e.g. 10"
-            onChange={(e) => setDemo(e.target.value)}
+            onChange={(e) => {
+              setDemo(e.target.value);
+              scheduleAgingSave();
+            }}
             className="border-input w-40 rounded-md border px-2 py-1"
           />
         </label>
@@ -141,7 +181,10 @@ export function SettingsPanel({
             type="number"
             min={1}
             value={agingHours}
-            onChange={(e) => setAgingHours(Number(e.target.value))}
+            onChange={(e) => {
+              setAgingHours(Number(e.target.value));
+              scheduleAgingSave();
+            }}
             className="border-input w-32 rounded-md border px-2 py-1"
           />
         </label>
@@ -153,7 +196,10 @@ export function SettingsPanel({
             type="number"
             min={1}
             value={overdueHours}
-            onChange={(e) => setOverdueHours(Number(e.target.value))}
+            onChange={(e) => {
+              setOverdueHours(Number(e.target.value));
+              scheduleAgingSave();
+            }}
             className="border-input w-32 rounded-md border px-2 py-1"
           />
         </label>
@@ -165,21 +211,17 @@ export function SettingsPanel({
             type="number"
             min={1}
             value={wayOverdueHours}
-            onChange={(e) => setWayOverdueHours(Number(e.target.value))}
+            onChange={(e) => {
+              setWayOverdueHours(Number(e.target.value));
+              scheduleAgingSave();
+            }}
             className="border-input w-32 rounded-md border px-2 py-1"
           />
         </label>
-        <button
-          onClick={save}
-          disabled={pending}
-          className="bg-primary text-primary-foreground rounded-md px-3 py-1.5 font-medium disabled:opacity-50"
-        >
-          {pending ? "Saving…" : "Save"}
-        </button>
         </div>
         <p className="text-muted-foreground text-xs">
-          The demo override makes items age in seconds so reminders fire live on
-          stage.
+          Changes save automatically. The demo override makes items age in
+          seconds so reminders fire live on stage.
         </p>
       </section>
 
@@ -220,7 +262,7 @@ export function SettingsPanel({
                   type="radio"
                   name="breakdown-model"
                   checked={model === m}
-                  disabled={pending}
+                  disabled={voicePending}
                   onChange={() => saveModel(m)}
                 />
                 {MODEL_LABELS[m]}

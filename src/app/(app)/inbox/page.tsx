@@ -116,6 +116,7 @@ export default async function InboxPage({
         google={google}
         welcomeVisible={welcomeVisible}
         resumeStep={firstRun ? null : resumeStep}
+        notifyAging={settings.notifyAging}
       />
     </div>
   );
