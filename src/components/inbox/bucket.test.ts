@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bucketItems, bucketOfItem, type Item } from "@/components/inbox/bucket";
+import { bucketItems, bucketOfItem, libraryBuckets, type Item } from "@/components/inbox/bucket";
 import { BrainDumpStatus, TaskStatus } from "@/lib/constants";
 
 const NOW = new Date("2026-07-08T12:00:00Z").getTime();
@@ -21,6 +21,7 @@ function item(overrides: Partial<Item> & { id: string }): Item {
     taskStatus: null,
     completedAt: null,
     scheduledAt: null,
+    estMinutes: null,
     steps: [],
     ...overrides,
   };
@@ -182,6 +183,67 @@ describe("completed bucket", () => {
     ];
     const { completedTodayCount } = bucketItems(items, NOW);
     expect(completedTodayCount).toBe(1);
+  });
+});
+
+describe("libraryBuckets (Library hub tabs)", () => {
+  it("plated/sorted/pantry mirror the Inbox singleTask/multiStep/savedLater buckets", () => {
+    const items = [
+      item({ id: "single", status: BrainDumpStatus.Triaged, stepsTotal: 0 }),
+      item({ id: "partial", status: BrainDumpStatus.Triaged, taskId: "t", stepsTotal: 3, stepsDone: 1 }),
+      item({ id: "saved", snoozedUntil: new Date(NOW + 60_000) }),
+    ];
+    const lib = libraryBuckets(items, NOW);
+    expect(lib.singleTask.map((i) => i.id)).toEqual(["single"]);
+    expect(lib.multiStep.map((i) => i.id)).toEqual(["partial"]);
+    expect(lib.savedLater.map((i) => i.id)).toEqual(["saved"]);
+  });
+
+  it("Done: a task graduates when ALL steps are done", () => {
+    const items = [
+      item({ id: "allDone", status: BrainDumpStatus.Triaged, taskId: "t", stepsTotal: 4, stepsDone: 4 }),
+    ];
+    const lib = libraryBuckets(items, NOW);
+    expect(lib.done.map((i) => i.id)).toEqual(["allDone"]);
+    // and it has GRADUATED out of the in-progress Multi-step tab
+    expect(lib.multiStep).toEqual([]);
+  });
+
+  it("Done: a partially-done task does NOT graduate (stays in Multi-step)", () => {
+    const items = [
+      item({ id: "partial", status: BrainDumpStatus.Triaged, taskId: "t", stepsTotal: 4, stepsDone: 2 }),
+    ];
+    const lib = libraryBuckets(items, NOW);
+    expect(lib.done).toEqual([]);
+    expect(lib.multiStep.map((i) => i.id)).toEqual(["partial"]);
+  });
+
+  it("Done: a no-step task that isn't completed does NOT graduate (stays Single-task)", () => {
+    const items = [
+      item({ id: "single", status: BrainDumpStatus.Triaged, stepsTotal: 0 }),
+    ];
+    const lib = libraryBuckets(items, NOW);
+    expect(lib.done).toEqual([]);
+    expect(lib.singleTask.map((i) => i.id)).toEqual(["single"]);
+  });
+
+  it("Done also collects explicitly-completed items (e.g. a finished single to-do)", () => {
+    const items = [
+      item({ id: "todoDone", status: BrainDumpStatus.Triaged, stepsTotal: 0, completedAt: new Date(NOW) }),
+    ];
+    const lib = libraryBuckets(items, NOW);
+    expect(lib.done.map((i) => i.id)).toEqual(["todoDone"]);
+    // completed items are excluded from the in-progress tabs
+    expect(lib.singleTask).toEqual([]);
+  });
+
+  it("Done is newest-first and NOT capped at 10 (unlike the Inbox preview)", () => {
+    const items = Array.from({ length: 14 }, (_, n) =>
+      item({ id: `d${n}`, status: BrainDumpStatus.Triaged, completedAt: new Date(NOW - n * 1000) }),
+    );
+    const lib = libraryBuckets(items, NOW);
+    expect(lib.done).toHaveLength(14);
+    expect(lib.done[0].id).toBe("d0"); // newest first
   });
 });
 

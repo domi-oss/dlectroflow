@@ -97,6 +97,7 @@ model BrainDumpItem {
   freshenedAt      DateTime?
   promptDismissedAt DateTime?
   completedAt      DateTime?
+  estMinutes       Int?      // single-task time estimate (minutes); null → display default 5
   // Set when the item is moved into Multi-step without steps yet — it sits in
   // the Multi-step bucket with a "Break into steps now?" call-to-action.
   // Cleared by any move to another bucket.
