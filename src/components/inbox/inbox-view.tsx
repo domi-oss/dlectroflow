@@ -52,6 +52,7 @@ import { MoveToMenu } from "@/components/inbox/move-to-menu";
 import { RowActions, ScheduleControl, type ScheduleControlProps } from "@/components/inbox/row-actions";
 import { CompleteButton } from "@/components/inbox/complete-button";
 import { WelcomeCard } from "@/components/inbox/welcome-card";
+import { SubHeader, SEE_ALL } from "@/components/inbox/sub-header";
 import { t } from "@/lib/strings";
 import { useVoice } from "@/components/voice-provider";
 import type { Voice } from "@/lib/strings";
@@ -72,13 +73,6 @@ export function dragEndToMove(
   if (!overId || !isBucketId(overId)) return null;
   return { itemId: activeId, target: overId };
 }
-
-// Deep-link targets for each section's "see all →" link (Library, Task 10+).
-const SEE_ALL = {
-  singleTask: "/library?tab=plated",
-  multiStep: "/library?tab=sorted",
-  savedLater: "/library?tab=pantry",
-} as const;
 
 type GoogleStatus = { configured: boolean; connected: boolean; needsReconnect: boolean };
 
@@ -1389,34 +1383,6 @@ function EmptyBucket({ voice }: { voice: Voice }) {
     <p className="text-muted-foreground rounded-lg border border-dashed px-4 py-4 text-center text-xs">
       {t("bucket.empty", voice)}
     </p>
-  );
-}
-
-/** Sub-bucket heading: label + count badge + a "see all →" deep-link. */
-function SubHeader({
-  label,
-  count,
-  seeAllHref,
-  voice,
-}: {
-  label: string;
-  count: number;
-  seeAllHref: string;
-  voice: Voice;
-}) {
-  return (
-    <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
-      <span>{label}</span>
-      <span className="bg-secondary text-secondary-foreground rounded-full px-2 py-0.5 text-xs">
-        {count}
-      </span>
-      <a
-        href={seeAllHref}
-        className="text-muted-foreground hover:text-foreground ml-auto text-xs font-normal"
-      >
-        {t("link.seeAll", voice)}
-      </a>
-    </div>
   );
 }
 
