@@ -11,6 +11,7 @@ function step(overrides: Partial<FocusTask["steps"][number]> & { id: string }) {
     estMinutes: 10,
     subtaskEmoji: null,
     resumable: false,
+    resumeAt: null,
     ...overrides,
   };
 }
@@ -47,7 +48,26 @@ describe("focusableSteps", () => {
       taskId: "t1",
       taskTitle: "Write report",
       resumable: false,
+      resumeAt: null,
+      stepIndex: 2,
+      stepsDone: 1,
+      stepsTotal: 3,
+      nextStepText: "Later",
+      nextStepEmoji: null,
     });
+  });
+
+  it("carries resumeAt through from the next incomplete step", () => {
+    const tasks = [
+      task({
+        id: "t1",
+        steps: [
+          step({ id: "s1", order: 1, done: true, resumable: true, resumeAt: 111 }),
+          step({ id: "s2", order: 2, done: false, resumable: true, resumeAt: 222 }),
+        ],
+      }),
+    ];
+    expect(focusableSteps(tasks)[0]).toMatchObject({ stepId: "s2", resumable: true, resumeAt: 222 });
   });
 
   it("finds the next incomplete step by order even when steps arrive unsorted", () => {

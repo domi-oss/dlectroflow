@@ -15,6 +15,8 @@ export type FocusStep = {
   estMinutes: number;
   subtaskEmoji: string | null;
   resumable: boolean;
+  /** ms of the open FocusSession's startedAt; null when not resumable. Orders the resume hero. */
+  resumeAt: number | null;
 };
 
 export type FocusTask = {
@@ -37,6 +39,15 @@ export type FocusableStep = {
   /** The next incomplete step is paused (has an open FocusSession). Drives the
    * "paused" badge AND the resumable-first ordering. */
   resumable: boolean;
+  /** Carried from the next incomplete step's open session; null when not paused. */
+  resumeAt: number | null;
+  /** 1-based position of this (next-incomplete) step among the task's ordered steps. */
+  stepIndex: number;
+  stepsDone: number;
+  stepsTotal: number;
+  /** The step AFTER this one (hero "next → …" peek); null when this is the last step. */
+  nextStepText: string | null;
+  nextStepEmoji: string | null;
 };
 
 const toMs = (d: Date | string): number =>
@@ -53,10 +64,11 @@ const toMs = (d: Date | string): number =>
 export function focusableSteps(tasks: FocusTask[]): FocusableStep[] {
   const entries = tasks
     .map((task) => {
-      const next = [...task.steps]
-        .sort((a, b) => a.order - b.order)
-        .find((s) => !s.done);
-      if (!next) return null;
+      const sorted = [...task.steps].sort((a, b) => a.order - b.order);
+      const nextPos = sorted.findIndex((s) => !s.done);
+      if (nextPos === -1) return null;
+      const next = sorted[nextPos];
+      const peek = sorted[nextPos + 1] ?? null;
       const entry: FocusableStep = {
         stepId: next.id,
         stepText: next.text,
@@ -65,6 +77,12 @@ export function focusableSteps(tasks: FocusTask[]): FocusableStep[] {
         taskId: task.id,
         taskTitle: task.title,
         resumable: next.resumable,
+        resumeAt: next.resumeAt,
+        stepIndex: nextPos + 1,
+        stepsDone: sorted.filter((s) => s.done).length,
+        stepsTotal: sorted.length,
+        nextStepText: peek ? peek.text : null,
+        nextStepEmoji: peek ? peek.subtaskEmoji : null,
       };
       return { entry, createdAt: toMs(task.createdAt) };
     })
