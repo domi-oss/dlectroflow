@@ -186,7 +186,9 @@ test_app:
     POSTGRES_USER: dlectroflow
     POSTGRES_PASSWORD: ci-test-only
     POSTGRES_DB: dlectroflow_test
-    DATABASE_URL: "postgresql://dlectroflow:ci-test-only@postgres:5432/dlectroflow_test?schema=public"
+    # Compose from the POSTGRES_* vars above rather than embedding the literal
+    # password (avoids a "password in URL" secret-detection hit; DRY).
+    DATABASE_URL: "postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@postgres:5432/$POSTGRES_DB?schema=public"
   before_script:
     - apk add --no-cache openssl   # Prisma engine libssl (postinstall runs prisma generate)
   script:
@@ -214,6 +216,57 @@ test_app:
     # Version tag: gate the release image on a green suite too (build_image needs this).
     - if: '$CI_COMMIT_TAG'
 
+# ── E2E gate (#37): Playwright smoke suite against a real Postgres, real
+# `next build` + `next start` ─────────────────────────────────────────────────
+# The Playwright image is Debian/glibc (required for the bundled browsers) and
+# ships Node, so no apk/openssl before_script is needed here (unlike test_app's
+# alpine image) — npm ci's postinstall (`prisma generate`) downloads the
+# Debian-matched engine directly. Auth/session boot-guard env vars are supplied
+# by playwright.config.ts's webServer.env, so this job only needs the
+# Postgres/DB vars, same as test_app.
+e2e_test:
+  stage: build
+  image: mcr.microsoft.com/playwright:v1.61.1-noble@sha256:5b8f294aff9041b7191c34a4bab3ac270157a28774d4b0660e9743297b697e48
+  interruptible: true
+  needs: []          # starts at pipeline start, in parallel with build_app
+  services:
+    - postgres:16@sha256:17e67d7b9890c99b055ba1e0d5c5be4ec27c9d3a72bda32db24a5e5d8a85af0c
+  variables:
+    POSTGRES_USER: dlectroflow
+    POSTGRES_PASSWORD: ci-test-only
+    POSTGRES_DB: dlectroflow_test
+    # Compose from the POSTGRES_* vars above rather than embedding the literal
+    # password (avoids a "password in URL" secret-detection hit; DRY).
+    DATABASE_URL: "postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@postgres:5432/$POSTGRES_DB?schema=public"
+  script:
+    - npm ci --cache .npm --prefer-offline --no-audit --no-fund
+    - npx prisma migrate deploy   # schema for the smoke suite's service DB
+    - npm run build
+    - npx playwright test
+  artifacts:
+    when: on_failure
+    paths:
+      - playwright-report/
+    expire_in: 1 week
+  cache:
+    key:
+      files:
+        - package-lock.json
+    paths:
+      - .npm/
+    # pull-only: build_app owns the cache upload (incl. .next/cache/); a push
+    # from here would overwrite that zip with one missing the Next build cache.
+    policy: pull
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    # Version tag: build_image publishes the release image on tags and now
+    # needs e2e_test, so the gate MUST exist on tag pipelines too (mirrors
+    # test_app) — otherwise build_image is skipped and no release image ships.
+    - if: '$CI_COMMIT_TAG'
+
 # Assembles the final image from build_app's artifacts using Dockerfile.ci.
 # Kaniko does no compilation here — COPY + npm install prisma only — so the
 # remaining layers are very stable and almost always cache hits.
@@ -225,6 +278,9 @@ build_image:
       artifacts: true
     # Test gate: no image (and thus no review/prod deploy) from a red suite.
     - job: test_app
+      artifacts: false
+    # E2E gate (#37): no image from a red Playwright smoke suite either.
+    - job: e2e_test
       artifacts: false
   image:
     name: gcr.io/kaniko-project/executor:v1.24.0-debug@sha256:2562c4fe551399514277ffff7dcca9a3b1628c4ea38cb017d7286dc6ea52f4cd

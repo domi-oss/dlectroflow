@@ -52,3 +52,9 @@ yarn-error.log*
 .claude/
 # Nested build output inside agent worktrees (root /.next/ above only anchors top-level)
 **/.next/
+
+# Playwright
+/playwright/.auth/
+/playwright-report/
+/test-results/
+/.playwright/

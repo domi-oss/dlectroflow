@@ -1,0 +1,39 @@
+import { test, expect } from "@playwright/test";
+import { captureItem, needsReviewRow } from "../helpers";
+
+// Flow 3: focus timer start → pause. Create a to-do, launch focus from it
+// (navigates to /focus/{stepId}), start the timer, then pause it and assert
+// the control toggles to Resume.
+test("focus timer starts and pauses", async ({ page }) => {
+  const label = `E2E focus task ${Date.now()}`;
+  await page.goto("/inbox");
+
+  await captureItem(page, label);
+
+  // Item appears in the Needs review bucket; triage it into a to-do.
+  const row = needsReviewRow(page, label);
+  await expect(row).toBeVisible();
+  await row.getByRole("button", { name: "Add to-do" }).click();
+
+  // It now lives in the single-task bucket with a Start Focus affordance.
+  const todoRow = page
+    .locator('[data-bucket="singleTask"]')
+    .getByRole("listitem")
+    .filter({ hasText: label });
+  await expect(todoRow).toBeVisible();
+  await todoRow.getByRole("button", { name: /Start Focus/ }).click();
+
+  // ▶ Start Focus runs a server action (ensures the step exists) THEN
+  // navigates — wait for the URL rather than asserting timer controls first.
+  await page.waitForURL("**/focus/**");
+  await page.getByRole("button", { name: "▶ Start focusing" }).click();
+
+  // exact: true — "⏸️ Pause" would otherwise also match "⏸️ Pause for now"
+  // (the exit-without-finishing control), tripping strict mode.
+  await page.getByRole("button", { name: "⏸️ Pause", exact: true }).click();
+  // The ring/countdown are animated and time-dependent — assert only the
+  // stable post-pause control state, relying on Playwright auto-waiting.
+  await expect(
+    page.getByRole("button", { name: "▶ Resume", exact: true }),
+  ).toBeVisible();
+});
