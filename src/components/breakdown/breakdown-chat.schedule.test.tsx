@@ -20,18 +20,15 @@ vi.mock("@/components/voice-provider", () => ({ useVoice: () => "plain" }));
 const {
   confirmBreakdownMock,
   createBrainDumpItemMock,
-  scheduleTaskInReclaimMock,
   pushStepsToGoogleTasksMock,
 } = vi.hoisted(() => ({
   confirmBreakdownMock: vi.fn(),
   createBrainDumpItemMock: vi.fn(),
-  scheduleTaskInReclaimMock: vi.fn(),
   pushStepsToGoogleTasksMock: vi.fn(),
 }));
 
 vi.mock("@/app/actions/breakdown", () => ({ confirmBreakdown: confirmBreakdownMock }));
 vi.mock("@/app/actions/braindump", () => ({ createBrainDumpItem: createBrainDumpItemMock }));
-vi.mock("@/app/actions/reclaim", () => ({ scheduleTaskInReclaim: scheduleTaskInReclaimMock }));
 vi.mock("@/app/actions/google-schedule", () => ({
   pushStepsToGoogleTasks: pushStepsToGoogleTasksMock,
 }));
@@ -53,7 +50,6 @@ type GoogleProp = { configured: boolean; connected: boolean; needsReconnect: boo
 beforeEach(() => {
   vi.clearAllMocks();
   confirmBreakdownMock.mockResolvedValue(undefined);
-  scheduleTaskInReclaimMock.mockResolvedValue({ ok: true, scheduled: 0 });
   pushStepsToGoogleTasksMock.mockResolvedValue({
     ok: true,
     scheduled: 0,
@@ -71,7 +67,6 @@ afterEach(cleanup);
 async function renderChat(
   overrides: {
     google?: Partial<GoogleProp>;
-    reclaimConnected?: boolean;
     isGuest?: boolean;
     scheduled?: boolean;
   } = {},
@@ -87,7 +82,6 @@ async function renderChat(
       taskId="task-1"
       title="Plan the party"
       initialProposal={proposal}
-      reclaimConnected={overrides.reclaimConnected ?? false}
       google={google}
       isGuest={overrides.isGuest ?? false}
       scheduled={overrides.scheduled ?? false}
@@ -153,6 +147,15 @@ describe("BreakdownChat — schedule section (Google-first wording, #22)", () =>
         "/api/google/oauth/start",
       ),
     );
+  });
+
+  it("with Google unconfigured, shows the GOOGLE_CLIENT_ID hint and NO Reclaim controls (#36)", async () => {
+    await renderChat({ google: { configured: false, connected: false, needsReconnect: false } });
+    expect(screen.getByText(/to schedule into Google Tasks/i)).toBeInTheDocument();
+    expect(screen.getByText("GOOGLE_CLIENT_ID")).toBeInTheDocument();
+    // Reclaim OAuth/MCP scheduling has been removed entirely.
+    expect(screen.queryByRole("link", { name: /connect reclaim/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /schedule in reclaim/i })).toBeNull();
   });
 
   it("re-routes 'Download calendar (.ics)' through scheduleViaIcs (uniform reward) + downloads", async () => {

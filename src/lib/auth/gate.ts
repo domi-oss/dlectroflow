@@ -1,10 +1,9 @@
 export const PUBLIC_PREFIXES = ["/api/health", "/login", "/api/auth/"];
 
-// Integration connect/callback routes touch the owner's global Google/Reclaim
-// tokens — guests must never reach them.
+// Integration connect/callback routes touch the owner's global Google tokens —
+// guests must never reach them.
 export const OWNER_ONLY_PREFIXES = [
   "/api/google/oauth/",
-  "/api/reclaim/oauth/",
 ];
 
 export function isPublicPath(pathname: string): boolean {

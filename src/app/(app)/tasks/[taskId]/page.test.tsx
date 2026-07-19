@@ -9,7 +9,6 @@ const {
   getSettingsMock,
   currentWorkspaceIdMock,
   isOwnerRequestMock,
-  getReclaimStatusMock,
   getGoogleStatusMock,
   pushStepsToGoogleTasksMock,
   scheduleViaIcsMock,
@@ -20,7 +19,6 @@ const {
   getSettingsMock: vi.fn(),
   currentWorkspaceIdMock: vi.fn(),
   isOwnerRequestMock: vi.fn(),
-  getReclaimStatusMock: vi.fn(),
   getGoogleStatusMock: vi.fn(),
   pushStepsToGoogleTasksMock: vi.fn(),
   scheduleViaIcsMock: vi.fn(),
@@ -47,16 +45,13 @@ vi.mock("@/lib/workspace", () => ({
   currentWorkspaceId: currentWorkspaceIdMock,
   isOwnerRequest: isOwnerRequestMock,
 }));
-vi.mock("@/lib/reclaim", () => ({
-  getReclaimStatus: getReclaimStatusMock,
-}));
 vi.mock("@/lib/google", () => ({
   getGoogleStatus: getGoogleStatusMock,
 }));
 // BreakdownChat (the `editing` branch) pulls in a heavy tree of its own server
-// actions (reclaim / breakdown / anthropic) — none of our scenarios exercise
-// it (task always has steps, `edit` is never "1"), so stub it like the
-// Library hub test stubs the equally heavy <TaskSteps>.
+// actions (breakdown / anthropic) — none of our scenarios exercise it (task
+// always has steps, `edit` is never "1"), so stub it like the Library hub test
+// stubs the equally heavy <TaskSteps>.
 vi.mock("@/components/breakdown/breakdown-chat", () => ({
   BreakdownChat: () => <div data-testid="breakdown-chat" />,
 }));
@@ -109,7 +104,6 @@ beforeEach(() => {
   getSettingsMock.mockResolvedValue({ voice: "plain" });
   currentWorkspaceIdMock.mockResolvedValue("owner");
   isOwnerRequestMock.mockResolvedValue(true);
-  getReclaimStatusMock.mockResolvedValue({ connected: false, expiresAt: null });
   getGoogleStatusMock.mockResolvedValue({ configured: true, connected: true, needsReconnect: false });
 });
 afterEach(() => {

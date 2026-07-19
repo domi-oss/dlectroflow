@@ -176,7 +176,7 @@ export function FocusTimer({
         {result && (
           <p className="text-muted-foreground text-sm">
             +{result.points} points
-            {result.reclaimSynced ? " · marked complete in Reclaim ✅" : ""}
+            {result.googleSynced ? " · marked complete in Google Tasks ✅" : ""}
           </p>
         )}
         {result?.streak ? (

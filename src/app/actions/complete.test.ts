@@ -210,3 +210,39 @@ describe("completeFocus — task completion", () => {
     expect(prismaMock.task.update).not.toHaveBeenCalledWith({ where: { id: "t1" }, data: { status: "done" } });
   });
 });
+
+describe("completeFocus — Google Task sync (#36: reclaimSynced dropped)", () => {
+  it("returns googleSynced=true and completes the linked Google Task, without a reclaimSynced write", async () => {
+    const google = await import("@/lib/google");
+    (google.getValidAccessToken as ReturnType<typeof vi.fn>).mockResolvedValueOnce("tok");
+    (google.patchGoogleTask as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true);
+    prismaMock.focusSession.findFirst.mockResolvedValueOnce({ id: "sess" });
+    prismaMock.focusSession.update.mockResolvedValueOnce({
+      step: { id: "s1", taskId: "t1", order: 1, googleTaskId: "g1", googleTaskListId: "l1" },
+    });
+    prismaMock.step.findFirst.mockResolvedValueOnce({ id: "s1", taskId: "t1", task: { workspaceId: "owner" } });
+    prismaMock.step.count.mockResolvedValueOnce(1);
+    const { completeFocus } = await import("./focus");
+    const res = await completeFocus("sess", { durationMin: 25, addedMin: 0 });
+
+    expect(res.googleSynced).toBe(true);
+    expect(google.patchGoogleTask).toHaveBeenCalledWith("tok", "l1", "g1", { status: "completed" });
+    // The FocusSession.reclaimSynced column is gone — the only focusSession.update
+    // is closeSession, which must never write a reclaimSynced field.
+    for (const call of prismaMock.focusSession.update.mock.calls) {
+      expect((call[0] as { data?: Record<string, unknown> })?.data ?? {}).not.toHaveProperty("reclaimSynced");
+    }
+  });
+
+  it("returns googleSynced=false when the completed step has no linked Google Task", async () => {
+    prismaMock.focusSession.findFirst.mockResolvedValueOnce({ id: "sess" });
+    prismaMock.focusSession.update.mockResolvedValueOnce({
+      step: { id: "s1", taskId: "t1", order: 1, googleTaskId: null, googleTaskListId: null },
+    });
+    prismaMock.step.findFirst.mockResolvedValueOnce({ id: "s1", taskId: "t1", task: { workspaceId: "owner" } });
+    prismaMock.step.count.mockResolvedValueOnce(1);
+    const { completeFocus } = await import("./focus");
+    const res = await completeFocus("sess", { durationMin: 25, addedMin: 0 });
+    expect(res.googleSynced).toBe(false);
+  });
+});

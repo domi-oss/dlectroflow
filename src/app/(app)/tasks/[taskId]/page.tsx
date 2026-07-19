@@ -5,7 +5,6 @@ import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
 import { BreakdownChat } from "@/components/breakdown/breakdown-chat";
 import { TaskSteps } from "@/components/breakdown/task-steps";
 import { TaskSchedule } from "@/components/breakdown/task-schedule";
-import { getReclaimStatus } from "@/lib/reclaim";
 import { getGoogleStatus } from "@/lib/google";
 import { t, type StringKey, type Voice } from "@/lib/strings";
 import type { Proposal } from "@/lib/breakdown";
@@ -37,7 +36,7 @@ export default async function TaskPage({
   const workspaceId = await currentWorkspaceId();
   const { taskId } = await params;
   const { edit, manual, from } = await searchParams;
-  const [task, reclaim, google, owner, settings] = await Promise.all([
+  const [task, google, owner, settings] = await Promise.all([
     prisma.task.findFirst({
       where: { id: taskId, workspaceId },
       include: {
@@ -51,7 +50,6 @@ export default async function TaskPage({
         },
       },
     }),
-    getReclaimStatus(),
     getGoogleStatus(),
     isOwnerRequest(),
     getSettings(workspaceId),
@@ -87,7 +85,6 @@ export default async function TaskPage({
         title={task.title}
         initialProposal={initialProposal}
         startManual={manual === "1"}
-        reclaimConnected={reclaim.connected}
         google={google}
         isGuest={!owner}
         scheduled={task.scheduledAt != null}
