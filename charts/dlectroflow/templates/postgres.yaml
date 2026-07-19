@@ -76,6 +76,18 @@ spec:
               command: ["pg_isready", "-U", "dlectroflow"]
             initialDelaySeconds: 5
             periodSeconds: 10
+          # Liveness mirrors readiness (pg_isready) but is deliberately slow to
+          # trigger — a wedged postgres process (accepting no connections) gets
+          # restarted, while a brief hiccup does not (failureThreshold*period =
+          # ~60s grace). Without this, a hung postmaster would never recover
+          # without manual intervention.
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "dlectroflow"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
           resources:
             requests:
               cpu: {{ .Values.resources.postgres.cpu }}

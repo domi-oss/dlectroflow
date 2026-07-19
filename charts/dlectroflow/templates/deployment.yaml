@@ -135,6 +135,13 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false
+            # Immutable root FS completes the hardening story. The Next.js
+            # standalone server only needs two writable paths, mounted as
+            # emptyDir below: /tmp, and /app/.next/cache (the default
+            # incremental-cache handler — revalidatePath/revalidateTag write
+            # here). Not applied to the migrate/seed initContainers, which run
+            # `npx` and need a writable HOME/TMPDIR.
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           ports:
@@ -174,3 +181,23 @@ spec:
             limits:
               cpu: {{ .Values.resources.app.cpu }}
               memory: {{ .Values.resources.app.memory }}
+          # Writable scratch required under readOnlyRootFilesystem (above).
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: next-cache
+              mountPath: /app/.next/cache
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi
+        - name: next-cache
+          emptyDir:
+            # sizeLimit is a HARD kubelet eviction boundary: if the ISR on-disk
+            # cache (revalidatePath/revalidateTag) exceeds it the pod is evicted
+            # immediately (surfaces like an OOM kill but is a storage-limit
+            # eviction). 1Gi gives the ISR cache comfortable headroom for this
+            # app's route count. If the cache ever approaches this limit, bound
+            # its growth at the app level (a custom Next cache handler /
+            # NEXT_CACHE_* config) rather than only raising this number.
+            sizeLimit: 1Gi

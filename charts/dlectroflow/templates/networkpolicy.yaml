@@ -1,0 +1,31 @@
+{{- /*
+Restrict Postgres :5432 ingress to the app pods only (opt-in via
+networkPolicy.enabled). All in-chart clients of Postgres — the app Deployment,
+its migrate/seed initContainers, and the backup/purge Jobs — carry the
+app.kubernetes.io/name=dlectroflow label, so a single podSelector covers them.
+Same-namespace only (namespace-per-release model). Probes are exec, not network,
+so the postgres liveness/readiness checks are unaffected. No-op on clusters
+without a NetworkPolicy controller.
+*/ -}}
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dlectroflow-postgres
+  labels:
+    {{- include "dlectroflow.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: dlectroflow-postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: dlectroflow
+      ports:
+        - protocol: TCP
+          port: 5432
+{{- end }}

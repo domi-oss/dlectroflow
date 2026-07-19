@@ -2,5 +2,14 @@ apiVersion: v2
 name: dlectroflow
 description: dlectroflow — ADHD helper app (review + production)
 type: application
-version: 0.1.0
+version: 0.2.0
 appVersion: "1.0.0"
+# unhealthyPodEvictionPolicy (pdb.yaml) is GA in 1.27 / on-by-default beta in
+# 1.26; the -0 suffix lets GKE's prerelease version strings (e.g. 1.29.5-gke.x)
+# satisfy the constraint.
+kubeVersion: ">=1.26.0-0"
+icon: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/raw/main/domi-oss-group-logo.png
+maintainers:
+  - name: dtop
+    email: dtop@gitlab.com
+    url: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow
