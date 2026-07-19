@@ -14,6 +14,11 @@ describe("SubHeader", () => {
     expect(link).toHaveAttribute("href", "/library?tab=plated");
   });
 
+  it("gives the see-all link a >=44px hit target (a11y sweep)", () => {
+    render(<SubHeader label="Multi-step to-dos" count={1} seeAllHref={SEE_ALL.multiStep} voice="plain" />);
+    expect(screen.getByRole("link", { name: /see all/i }).className).toContain("min-h-[44px]");
+  });
+
   it("exposes the canonical deep-link hrefs", () => {
     expect(SEE_ALL.singleTask).toBe("/library?tab=plated");
     expect(SEE_ALL.multiStep).toBe("/library?tab=sorted");

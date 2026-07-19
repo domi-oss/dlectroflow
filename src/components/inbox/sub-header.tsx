@@ -28,7 +28,7 @@ export function SubHeader({
       </span>
       <a
         href={seeAllHref}
-        className="text-muted-foreground hover:text-foreground ml-auto text-xs font-normal"
+        className="text-muted-foreground hover:text-foreground ml-auto inline-flex min-h-[44px] items-center text-xs font-normal"
       >
         {t("link.seeAll", voice)}
       </a>
