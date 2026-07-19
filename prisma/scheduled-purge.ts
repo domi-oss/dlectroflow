@@ -123,7 +123,9 @@ if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
   main()
     .then(() => process.exit(0))
     .catch((e) => {
-      console.error(e);
+      // Structured error line so a failed run is greppable alongside the
+      // success path's "scheduled_purge" tag (same shape as purge_skip).
+      console.error(JSON.stringify({ tag: "scheduled_purge_error", error: String(e) }));
       process.exit(1);
     });
 }
