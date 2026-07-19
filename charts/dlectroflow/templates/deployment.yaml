@@ -193,4 +193,11 @@ spec:
             sizeLimit: 128Mi
         - name: next-cache
           emptyDir:
-            sizeLimit: 256Mi
+            # sizeLimit is a HARD kubelet eviction boundary: if the ISR on-disk
+            # cache (revalidatePath/revalidateTag) exceeds it the pod is evicted
+            # immediately (surfaces like an OOM kill but is a storage-limit
+            # eviction). 1Gi gives the ISR cache comfortable headroom for this
+            # app's route count. If the cache ever approaches this limit, bound
+            # its growth at the app level (a custom Next cache handler /
+            # NEXT_CACHE_* config) rather than only raising this number.
+            sizeLimit: 1Gi
