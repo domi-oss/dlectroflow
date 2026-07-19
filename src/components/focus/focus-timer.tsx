@@ -339,7 +339,8 @@ export function FocusTimer({
           </button>
           <button
             onClick={pauseForNow}
-            className="text-muted-foreground hover:text-foreground rounded-md px-3 py-2 text-sm"
+            disabled={pending}
+            className="text-muted-foreground hover:text-foreground rounded-md px-3 py-2 text-sm disabled:opacity-50"
           >
             {t("focus.pauseForNow", voice)}
           </button>
