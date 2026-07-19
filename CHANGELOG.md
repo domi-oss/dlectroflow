@@ -17,7 +17,14 @@ operators upgrading a self-hosted instance don't get surprised.
 ## [Unreleased]
 
 > Shipped to production but not yet tagged. At cut time this becomes
-> `## [0.1.0] - <date>` and a fresh empty `## [Unreleased]` is added above it.
+> `## [X.Y.Z] - <date>` and a fresh empty `## [Unreleased]` is added above it.
+
+## [0.1.0] - 2026-07-19
+
+The wireframe → product build (#8): a Plain/Playful voice layer, inbox
+information architecture, the Library hub, focus launcher, settings hub, and an
+accessibility pass — plus the #21 security-hardening suite and guest-data
+retention.
 
 ### ⚠️ Upgrade notes (operator action required)
 
@@ -49,6 +56,16 @@ operators upgrading a self-hosted instance don't get surprised.
   `helm --atomic` rollback runbook.
 - Operational observability: process-only liveness probe and surfaced AI
   provider failures instead of silent errors.
+- Library "Everything" hub — a dedicated `/library` view with Single-task /
+  Multi-step / Saved-for-later / Done tabs, per-row actions, and a single-open
+  expand/collapse toggle (#8).
+- First-run welcome card, a non-destructive "first-run preview" demo toggle, and
+  a low-shame "Pause for now" focus exit with an Inbox "resume →" banner (#8).
+- Settings hub finish — freshness settings that auto-save (the Save button is
+  gone), per-type desktop-notification toggles (end-of-day round-up / aging
+  reminders / daily-review nudge), and a client-triggered daily-review nudge (#8).
+- `/focus` launcher — lists the next incomplete step for each in-progress task
+  (resumable-first) and links straight into the focus timer (#8).
 
 ### Changed
 
@@ -61,6 +78,9 @@ operators upgrading a self-hosted instance don't get surprised.
   TypeScript (<6.1) majors until the plugin chain supports them.
 - Repointed deploy references to the `gl-demo-ultimate-dtop/domi-oss` subgroup.
 - Ignore `.claude/` agent worktrees in git and ESLint.
+- Accessibility pass — honour `prefers-reduced-motion` (the focus confetti no
+  longer animates under reduce), WCAG-AA contrast in both light and dark themes,
+  ≥44px touch targets, and status conveyed by text/icon (never colour alone) (#8).
 
 ### Fixed
 
@@ -87,6 +107,11 @@ operators upgrading a self-hosted instance don't get surprised.
   guest-accessible route.
 - **CI security gate** — type-check, lint, and tests now run ahead of image
   build and deploy, so a red suite can't reach production.
+- **Guest-data retention** (#21) — a 30-day purge of IP-hash-keyed guest
+  rate-limit counters plus an owner-guarded cascade delete of expired guest
+  workspaces, run by a daily production-only CronJob. Workspace-scoped rows now
+  cascade via foreign keys, so no orphaned guest data lingers after a sandbox
+  expires.
 
 ## [0.0.1] - 2026-07-08
 
@@ -108,5 +133,6 @@ Baseline — first tracked release of the shipped app.
 - GKE Autopilot deployment with valid TLS, per-MR review apps, and the full
   GitLab security-scanner suite.
 
-[Unreleased]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.0.1...main
+[Unreleased]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.1.0...main
+[0.1.0]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.0.1...v0.1.0
 [0.0.1]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/releases/v0.0.1
