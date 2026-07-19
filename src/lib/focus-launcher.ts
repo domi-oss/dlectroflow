@@ -97,3 +97,52 @@ export function focusableSteps(tasks: FocusTask[]): FocusableStep[] {
 
   return entries.map((e) => e.entry);
 }
+
+/** A single-task to-do row on the launcher — a BrainDumpItem, focus-launched via
+ * ensureFocusStep(itemId). No step/session fields: the resume hero is drawn from
+ * multi-step tasks only (see plan Task 2 decision). */
+export type SingleFocusable = {
+  itemId: string;
+  text: string;
+  estMinutes: number;
+};
+
+/** Everything the /focus launcher renders, derived purely (no React/DB). */
+export type LauncherData = {
+  /** Most-recently-active paused multi-step step, or null. */
+  resumeHero: FocusableStep | null;
+  singleTasks: SingleFocusable[];
+  /** Multi-step next steps, hero excluded, resumable-first then newest task. */
+  multiStep: FocusableStep[];
+  meta: { minutesToClear: number };
+};
+
+/**
+ * Derive the launcher view-model from the workspace's tasks + its single-task
+ * to-dos (already bucketed by the caller). Multi-step lane = next incomplete
+ * step of every 2+-step task; the resume hero is the most-recently-active paused
+ * one of those, removed from the lane. minutesToClear is a rough "clear
+ * everything" figure: Σ of each multi-step next step's estimate (hero included)
+ * + Σ of the single-task estimates.
+ */
+export function focusLauncherData(
+  tasks: FocusTask[],
+  singleTasks: SingleFocusable[],
+): LauncherData {
+  const multiFull = focusableSteps(tasks).filter((e) => e.stepsTotal >= 2);
+
+  const resumeHero =
+    [...multiFull]
+      .filter((e) => e.resumable)
+      .sort((a, b) => (b.resumeAt ?? 0) - (a.resumeAt ?? 0))[0] ?? null;
+
+  const multiStep = resumeHero
+    ? multiFull.filter((e) => e.stepId !== resumeHero.stepId)
+    : multiFull;
+
+  const minutesToClear =
+    multiFull.reduce((n, e) => n + e.estMinutes, 0) +
+    singleTasks.reduce((n, s) => n + s.estMinutes, 0);
+
+  return { resumeHero, singleTasks, multiStep, meta: { minutesToClear } };
+}

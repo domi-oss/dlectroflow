@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { focusableSteps, type FocusTask } from "@/lib/focus-launcher";
+import {
+  focusableSteps,
+  focusLauncherData,
+  type FocusTask,
+  type SingleFocusable,
+} from "@/lib/focus-launcher";
 
 const NOW = new Date("2026-07-18T12:00:00Z").getTime();
 
@@ -140,5 +145,70 @@ describe("focusableSteps", () => {
 
   it("returns an empty array when there are no focusable steps (new-user case)", () => {
     expect(focusableSteps([])).toEqual([]);
+  });
+});
+
+const single = (o: Partial<SingleFocusable> & { itemId: string }): SingleFocusable => ({
+  text: o.itemId,
+  estMinutes: 5,
+  ...o,
+});
+
+describe("focusLauncherData", () => {
+  it("passes single-task items straight through and keeps one-step tasks OUT of the multi-step lane", () => {
+    const tasks = [
+      task({ id: "single-task", steps: [step({ id: "st1" })] }), // one step → NOT multi
+      task({ id: "multi", steps: [step({ id: "m1", done: true }), step({ id: "m2" })] }),
+    ];
+    const items = [single({ itemId: "i1", text: "Buy milk", estMinutes: 8 })];
+    const data = focusLauncherData(tasks, items);
+    expect(data.singleTasks).toEqual(items);
+    expect(data.multiStep.map((e) => e.taskId)).toEqual(["multi"]);
+  });
+
+  it("picks the resume hero = the most-recently-active paused MULTI-step step (highest resumeAt)", () => {
+    // The paused step must be each task's NEXT INCOMPLETE step (leading steps
+    // done) — resumable is read off the next-incomplete step (see focusableSteps).
+    const tasks = [
+      task({ id: "a", steps: [step({ id: "a1", order: 1, done: true }), step({ id: "a2", order: 2, resumable: true, resumeAt: 100 })] }),
+      task({ id: "b", steps: [step({ id: "b1", order: 1, done: true }), step({ id: "b2", order: 2, resumable: true, resumeAt: 300 })] }),
+      task({ id: "c", steps: [step({ id: "c1", order: 1, done: true }), step({ id: "c2", order: 2, resumable: true, resumeAt: 200 })] }),
+    ];
+    const data = focusLauncherData(tasks, []);
+    expect(data.resumeHero?.stepId).toBe("b2");
+  });
+
+  it("excludes the hero from the multi-step lane (no duplication)", () => {
+    const tasks = [
+      task({ id: "a", steps: [step({ id: "a1", order: 1, done: true }), step({ id: "a2", order: 2, resumable: true, resumeAt: 100 })] }),
+      task({ id: "b", steps: [step({ id: "b1", order: 1 }), step({ id: "b2", order: 2 })] }),
+    ];
+    const data = focusLauncherData(tasks, []);
+    expect(data.resumeHero?.taskId).toBe("a");
+    expect(data.multiStep.map((e) => e.taskId)).toEqual(["b"]);
+  });
+
+  it("has no hero when no multi-step step is paused", () => {
+    const tasks = [task({ id: "b", steps: [step({ id: "b1" }), step({ id: "b2" })] })];
+    expect(focusLauncherData(tasks, []).resumeHero).toBeNull();
+  });
+
+  it("computes minutesToClear = Σ next multi-step est + Σ single-task est (hero included)", () => {
+    const tasks = [
+      task({ id: "a", steps: [step({ id: "a1", done: true }), step({ id: "a2", estMinutes: 20, resumable: true, resumeAt: 5 })] }),
+      task({ id: "b", steps: [step({ id: "b1", estMinutes: 15 }), step({ id: "b2" })] }),
+    ];
+    const items = [single({ itemId: "i1", estMinutes: 8 }), single({ itemId: "i2", estMinutes: 12 })];
+    // 20 (hero a2) + 15 (b1) + 8 + 12 = 55
+    expect(focusLauncherData(tasks, items).meta.minutesToClear).toBe(55);
+  });
+
+  it("returns empty lanes + null hero + 0 minutes for the empty/all-cleared case", () => {
+    expect(focusLauncherData([], [])).toEqual({
+      resumeHero: null,
+      singleTasks: [],
+      multiStep: [],
+      meta: { minutesToClear: 0 },
+    });
   });
 });
