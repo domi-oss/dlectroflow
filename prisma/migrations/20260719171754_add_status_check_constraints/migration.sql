@@ -4,7 +4,7 @@
 -- avoided so the value sets stay trivially extensible from application code).
 -- The allowed value sets live in src/lib/constants.ts and are the single
 -- source of truth; the CHECK constraints below mirror them exactly and are
--- kept in sync by src/lib/enum-constraints.sync.test.ts.
+-- kept in sync by src/lib/enum-constraint-sync.integration.test.ts.
 --
 -- Project is PostgreSQL everywhere (schema.prisma provider = "postgresql"),
 -- so CHECK constraints are portable across dev + prod. Nullable columns

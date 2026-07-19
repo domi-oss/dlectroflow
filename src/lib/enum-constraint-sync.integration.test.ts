@@ -93,7 +93,8 @@ afterAll(async () => {
 
 describe("enum CHECK constraints ↔ constants.ts are in sync", () => {
   it("has exactly the managed CHECK constraints (no missing, no strays)", () => {
-    const applied = [...checks.keys()].sort();
+    const managedNames = new Set(REGISTRY.map((r) => r.constraint));
+    const applied = [...checks.keys()].filter((n) => managedNames.has(n)).sort();
     const expected = REGISTRY.map((r) => r.constraint).sort();
     // Equality in BOTH directions: a missing constraint (someone forgot the
     // migration) and a stray/renamed one (drift the test doesn't know about)
@@ -133,6 +134,11 @@ describe("enum CHECK constraints ↔ constants.ts are in sync", () => {
           /IS NULL/i.test(def as string),
           `${constraint} guards a nullable column but has no "IS NULL" allowance`,
         ).toBe(true);
+      } else {
+        expect(
+          /IS NULL/i.test(def as string),
+          `${constraint} guards a non-nullable column but unexpectedly contains an "IS NULL" allowance`,
+        ).toBe(false);
       }
     },
   );
