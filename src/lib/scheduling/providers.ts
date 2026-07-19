@@ -10,6 +10,7 @@
 import { scheduleViaIcs } from "@/app/actions/ics-schedule";
 import { pushStepsToGoogleTasks } from "@/app/actions/google-schedule";
 import type {
+  GoogleConnStatus,
   ScheduleOpts,
   ScheduleResult,
   SchedulingContext,
@@ -67,4 +68,23 @@ export function availableProviders(ctx: SchedulingContext): SchedulingProvider[]
 /** Convenience predicate for a single provider against a context. */
 export function isProviderAvailable(provider: SchedulingProvider, ctx: SchedulingContext): boolean {
   return provider.isAvailable(ctx);
+}
+
+/**
+ * The method a workspace's schedule *control* leads with (the rest go in the ▾
+ * overflow), given the owner's resolved Google status (`null` = guest / non-owner,
+ * mirroring the page's `owner ? googleStatus : null`). Owners lead with Google
+ * Tasks — rendered as a Connect/Reconnect affordance by `scheduleState` until it
+ * is actually usable — and keep ICS as the universal alternative; guests get ICS.
+ *
+ * This is the UI's control-visibility choice, deliberately distinct from
+ * {@link isProviderAvailable} (which gates whether a method can run *right now*,
+ * owner + configured): an unconfigured owner still LEADS with the Google control
+ * even though `googleTasks` isn't yet available (spec §127 — the Connect
+ * affordance is separate from availability). Centralizes the rule the three
+ * client call sites previously each expressed as `effectiveGoogle ? … : ics` /
+ * `google ? … : ics` / `!isGuest`.
+ */
+export function leadSchedulingMethod(google: GoogleConnStatus | null): SchedulingProviderId {
+  return google != null ? "googleTasks" : "ics";
 }

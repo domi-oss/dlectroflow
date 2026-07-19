@@ -5,6 +5,7 @@ import {
   schedulingProviders,
   availableProviders,
   isProviderAvailable,
+  leadSchedulingMethod,
 } from "./providers";
 import type { SchedulingContext } from "./types";
 
@@ -68,6 +69,25 @@ describe("availableProviders — the single 'which methods?' answer", () => {
   });
   it("owner without a configured Google → [ics] (the Connect affordance is separate)", () => {
     expect(availableProviders(ownerNotConfigured).map((p) => p.id)).toEqual(["ics"]);
+  });
+});
+
+describe("leadSchedulingMethod — the UI's control-visibility choice", () => {
+  it("guest (google=null) → ics", () => {
+    expect(leadSchedulingMethod(null)).toBe("ics");
+  });
+  it("owner with a configured Google → googleTasks", () => {
+    expect(leadSchedulingMethod({ configured: true, connected: true, needsReconnect: false })).toBe(
+      "googleTasks",
+    );
+  });
+  it("owner WITHOUT a configured Google still leads with googleTasks (Connect affordance)", () => {
+    // Distinct from isAvailable: the control is offered (as Connect) even though
+    // the method can't run yet.
+    expect(
+      leadSchedulingMethod({ configured: false, connected: false, needsReconnect: false }),
+    ).toBe("googleTasks");
+    expect(googleTasksProvider.isAvailable(ownerNotConfigured)).toBe(false);
   });
 });
 

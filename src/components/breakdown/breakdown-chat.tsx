@@ -12,6 +12,8 @@ import type { Feedback, Proposal, StreamEvent } from "@/lib/breakdown";
 import { reorder, blankStep } from "@/lib/breakdown";
 import { EmojiPicker } from "@/components/breakdown/emoji-picker";
 import { ScheduleStatusBanner } from "@/components/breakdown/schedule-status-banner";
+import { leadSchedulingMethod } from "@/lib/scheduling/providers";
+import type { GoogleConnStatus } from "@/lib/scheduling/types";
 import { cn } from "@/lib/utils";
 import { t } from "@/lib/strings";
 import { useVoice } from "@/components/voice-provider";
@@ -38,7 +40,7 @@ export function BreakdownChat({
   initialProposal: Proposal | null;
   /** Start with one blank step and skip the automatic AI proposal (manual re-plan). */
   startManual?: boolean;
-  google: { configured: boolean; connected: boolean; needsReconnect: boolean };
+  google: GoogleConnStatus;
   isGuest?: boolean;
   /** Persisted ground truth: has this task ever been scheduled (task.scheduledAt)? */
   scheduled?: boolean;
@@ -222,6 +224,13 @@ export function BreakdownChat({
   const totalMin = proposal?.steps.reduce((n, s) => n + (s.estMinutes || 0), 0) ?? 0;
   const busy = streaming || confirmPending;
 
+  // Route the Google-vs-ICS control choice through the seam (S1, #34): the
+  // "Schedule onto your calendar" (Google Tasks) section is the owner-led method;
+  // guests only ever get the universal ICS export above it. `leadSchedulingMethod`
+  // maps a null status (guest) to "ics", any status (owner) to "googleTasks" —
+  // behaviourally identical to the previous `!isGuest`.
+  const showGoogleSection = leadSchedulingMethod(isGuest ? null : google) === "googleTasks";
+
   if (confirmed) {
     return (
       <div className="space-y-4">
@@ -258,7 +267,7 @@ export function BreakdownChat({
           </button>
         </div>
 
-        {!isGuest && (
+        {showGoogleSection && (
           <div className="space-y-2 rounded-lg border p-4 text-sm">
             <p className="font-medium">📅 Schedule onto your calendar</p>
 
