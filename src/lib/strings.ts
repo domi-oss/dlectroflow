@@ -20,6 +20,7 @@ export const STRINGS = {
   "action.moreSteps":    { plain: "More steps",        playful: "🍞 More steps" },
   "action.fewerSteps":   { plain: "Fewer steps",       playful: "🥖 Fewer steps" },
   "action.backToInbox":  { plain: "Back to inbox",     playful: "🍳 Back to inbox" },
+  "action.backToLibrary": { plain: "Back to Library",  playful: "🍱 Back to the Larder" },
   "action.addStep":      { plain: "Add a step",        playful: "🍞 Add a step" },
   "action.removeStep":   { plain: "Remove step",       playful: "🥖 Remove step" },
   "action.dismiss":      { plain: "Dismiss",           playful: "Not now" },
@@ -70,7 +71,7 @@ export const STRINGS = {
   // ── Nav / hub labels ───────────────────────────────────────────────────────
   "nav.inbox":           { plain: "Inbox",             playful: "🧠 Inbox" },
   "nav.dashboard":       { plain: "Dashboard",         playful: "🎉 Dashboard" },
-  "nav.everything":      { plain: "Everything",        playful: "🍱 Larder" },
+  "nav.everything":      { plain: "Library",           playful: "🍱 Larder" },
   "nav.done":            { plain: "Done",              playful: "🍽️ Devoured" },
   "nav.focusTimer":      { plain: "Focus Timer",       playful: "⏱️ Focus Timer" },
   "nav.settings":        { plain: "Settings",          playful: "⚙️ Settings" },
@@ -102,6 +103,10 @@ export const STRINGS = {
   "badge.comeback":             { plain: "Comeback",          playful: "📦 Back for Seconds" },
   "badge.ten_steps_day":        { plain: "10 steps in a day", playful: "🔟 Ten-Bite Day" },
   "badge.beat_best_streak":     { plain: "Beat your best streak", playful: "🏆 New Record" },
+  "badge.sectionTitle":         { plain: "Badges",                    playful: "Badges" },
+  "badge.legend":               { plain: "· faded = not earned yet",  playful: "· faded = not earned yet" },
+  "badge.earned":               { plain: "Earned",                    playful: "Earned" },
+  "badge.notEarned":            { plain: "Not earned yet",            playful: "Not earned yet" },
 
   // ── Focus timer labels ─────────────────────────────────────────────────────
   "focus.startTimer":   { plain: "▶ Start focusing",   playful: "▶ Start focusing" },
@@ -122,6 +127,12 @@ export const STRINGS = {
 
   // ── Breakdown confirm ──────────────────────────────────────────────────────
   "breakdown.looksRight": { plain: "Looks right",       playful: "👍 Looks right" },
+
+  // ── Schedule status banner (ground truth, Phase 4) ─────────────────────────
+  // Reflects the PERSISTED task.scheduledAt marker — never optimistic UI. ⚠️/✅
+  // are functional glyphs (allowed in plain); 🔌 is playful-only flavour.
+  "banner.scheduled":    { plain: "✅ Scheduled — these steps are on your calendar.", playful: "✅ Scheduled — these steps are on your calendar." },
+  "banner.notScheduled": { plain: "⚠️ Not scheduled yet — connect a calendar to send these steps automatically.", playful: "🔌 Not scheduled yet — connect a calendar to send these steps automatically." },
 
   // ── Breakdown step counter ─────────────────────────────────────────────────
   "step.counter":        { plain: "Step",              playful: "bite" },
@@ -162,6 +173,59 @@ export const STRINGS = {
   "welcome.helpLink":     { plain: "Help section", playful: "Help section" },
   "welcome.afterHelp":    { plain: " for further information.", playful: " for the full recipe." },
   "welcome.dismiss": { plain: "Got it",         playful: "Got it" },
+  // ── Library "Everything" hub (#8 Phase 3) ──────────────────────────────────
+  // Tab labels are the SHORT forms the hub uses (the Inbox sub-headers keep the
+  // longer "…to-dos" wording via section.* above). Saved-for-later reuses
+  // section.savedLater; Done reuses nav.done.
+  "action.back":         { plain: "← Back",            playful: "← Back" },
+  "lib.tab.singleTask":  { plain: "Single-task",       playful: "😋 Quick bites" },
+  "lib.tab.multiStep":   { plain: "Multi-step",        playful: "✅ Sorted" },
+  "lib.intro":           {
+    plain: "Everything that's left your inbox — committed single tasks, stored items, and finished breakdowns.",
+    playful: "Everything that's left your inbox — committed single tasks, stored items, and finished breakdowns.",
+  },
+  "lib.plated.hint":     {
+    plain: "Single action items you committed without breaking into steps. Do them whole, or break one into steps later.",
+    playful: "Single action items you committed without breaking into steps. Do them whole, or snack-size one later.",
+  },
+  "lib.pantry.hint":     {
+    plain: "Stored for later — the freshness clock is paused until each one wakes.",
+    playful: "Stored for later — the freshness clock is paused until each one wakes.",
+  },
+  "lib.sorted.hint":     {
+    plain: "Broken-down tasks in progress — the count shows how many steps you've done. Finished ones move to Done. Tap to reopen.",
+    playful: "Broken-down tasks in progress — the count shows how many steps you've done. Finished ones move to Done. Tap to reopen.",
+  },
+  "lib.done.hint":       {
+    plain: "Finished — every step done.",
+    playful: "Finished — every step done. 🎉",
+  },
+  "lib.added":           { plain: "added",             playful: "added" },
+  "lib.wakes":           { plain: "wakes",             playful: "wakes" },
+  "lib.aToDo":           { plain: "a to-do",           playful: "a to-do" },
+  "lib.select":          { plain: "Select",            playful: "Select" },
+  "lib.selectAll":       { plain: "Select all",        playful: "Select all" },
+  "lib.collapseAll":     { plain: "Collapse all",      playful: "Collapse all" },
+  "lib.expandAll":       { plain: "Expand all",        playful: "Expand all" },
+  "lib.selected":        { plain: "selected",          playful: "selected" },
+  "lib.openTask":        { plain: "Open task",         playful: "Open task" },
+  "lib.deleteConfirm":   { plain: "Delete these?",     playful: "Delete these?" },
+  "lib.next":            { plain: "Next:",             playful: "Next:" },
+  "lib.minLeft":         { plain: "min left",          playful: "min left" },
+  "lib.min":             { plain: "min",               playful: "min" },
+  "lib.editEstimate":    { plain: "Edit estimate",     playful: "Edit estimate" },
+
+  // ── Task working-view — schedule indicator (#8 follow-up) ─────────────────
+  // Mirrors the Inbox row's hardcoded "Scheduled ✓" text (row-actions.tsx) —
+  // kept identical across voices, same as capture.confirm, rather than
+  // inventing new playful copy for a status marker.
+  "task.scheduled":      { plain: "Scheduled ✓",       playful: "Scheduled ✓" },
+  "task.notScheduled":   { plain: "Not scheduled yet", playful: "Not scheduled yet" },
+  // Task working-view header eyebrow (!83 top redesign) — a small structural
+  // label so the open-task view reads as distinct from the Library hub at a
+  // glance. Structural chrome, not a flavour opportunity, so it's kept
+  // identical across voices (same call as task.scheduled/notScheduled above).
+  "task.eyebrow":        { plain: "Task",              playful: "Task" },
 } as const;
 
 export type StringKey = keyof typeof STRINGS;

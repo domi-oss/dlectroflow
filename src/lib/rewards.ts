@@ -38,7 +38,10 @@ export async function logReward(workspaceId: string, type: RewardTypeT, points?:
   });
 }
 
-/** Award inbox-zero once/day when the needs-triage queue just hit empty. */
+/**
+ * When the needs-triage queue just hit empty: award the once-ever Inbox-zero
+ * badge (idempotent) and the once/day Inbox-zero points.
+ */
 export async function maybeAwardInboxZero(workspaceId: string) {
   const now = new Date();
   const remaining = await prisma.brainDumpItem.count({
@@ -50,6 +53,9 @@ export async function maybeAwardInboxZero(workspaceId: string) {
     },
   });
   if (remaining > 0) return;
+  // Inbox-zero badge — once ever, awarded the first time the queue empties.
+  await awardBadge(workspaceId, BadgeKey.InboxZero);
+  // Inbox-zero points — once/day.
   const already = await prisma.rewardEvent.count({
     where: { workspaceId, type: RewardType.InboxZero, createdAt: { gte: startOfToday() } },
   });
@@ -95,7 +101,7 @@ export async function maybeAwardTenStepsDay(workspaceId: string): Promise<void> 
  */
 export async function rewardStepDone(workspaceId: string): Promise<StreakUpdate | null> {
   await logReward(workspaceId, RewardType.StepDone);
-  const streak = await touchStreakOnCompletion(workspaceId);
+  const streak = await touchStreakOnEngagement(workspaceId); // completion is a qualifying engagement
   await maybeAwardTenStepsDay(workspaceId);
   return streak;
 }
@@ -108,11 +114,14 @@ export type StreakUpdate = {
 };
 
 /**
- * Record a completion toward the working-day streak. Consecutive *working days*
- * with ≥1 completion; non-working days are skipped (don't break it). Missing a
- * working day resets to 1 and files the ended streak into the Top-3 records.
+ * Record a qualifying engagement toward the working-day streak. Any qualifying
+ * action counts (Decision 1): a capture, a breakdown-confirm, or a step/task
+ * completion. Consecutive *working days* with ≥1 engagement; non-working days
+ * are skipped (don't break it). Missing a working day resets to 1 and files the
+ * ended streak into the Top-3 records. Advances at most once per working day —
+ * the leading `SELECT … FOR UPDATE` serialises same-day callers.
  */
-export async function touchStreakOnCompletion(workspaceId: string): Promise<StreakUpdate | null> {
+export async function touchStreakOnEngagement(workspaceId: string): Promise<StreakUpdate | null> {
   const settings = await getSettings(workspaceId);
   const workingDays = parseWorkingDays(settings.workingDays);
   const now = new Date();
@@ -181,6 +190,9 @@ export async function touchStreakOnCompletion(workspaceId: string): Promise<Stre
   // early-return for same-day repeats). awardBadge is itself P2002-safe.
   const { changed, ...update } = result;
   if (changed) {
+    // Comeback — restarted after a gap (a prior streak had ended). No-shame.
+    if (update.freshStart) await awardBadge(workspaceId, BadgeKey.Comeback);
+    // Full work week — a 5-working-day streak.
     if (update.current >= 5) await awardBadge(workspaceId, BadgeKey.Streak5);
     const best = await prisma.streakRecord.aggregate({
       _max: { length: true },
@@ -192,6 +204,15 @@ export async function touchStreakOnCompletion(workspaceId: string): Promise<Stre
   }
 
   return update;
+}
+
+/**
+ * @deprecated A step/task completion is one kind of qualifying engagement.
+ * Retained as a thin alias so the completion call sites and existing tests keep
+ * working; prefer {@link touchStreakOnEngagement} for new call sites.
+ */
+export function touchStreakOnCompletion(workspaceId: string): Promise<StreakUpdate | null> {
+  return touchStreakOnEngagement(workspaceId);
 }
 
 // ── dashboard aggregation ──────────────────────────────────────────────────

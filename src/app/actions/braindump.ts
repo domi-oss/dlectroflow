@@ -8,6 +8,7 @@ import {
   logReward,
   awardBadge,
   touchStreakOnCompletion,
+  touchStreakOnEngagement,
 } from "@/lib/rewards";
 import {
   BrainDumpStatus,
@@ -25,6 +26,9 @@ export async function createBrainDumpItem(text: string) {
   const trimmed = text.trim();
   if (!trimmed) return;
   await prisma.brainDumpItem.create({ data: { text: trimmed, workspaceId } });
+  // A capture is a qualifying engagement (Decision 1) — advances the streak at
+  // most once per working day.
+  await touchStreakOnEngagement(workspaceId);
   revalidatePath(INBOX_PATH);
 }
 
@@ -307,4 +311,44 @@ export async function moveToReview(id: string) {
     },
   });
   revalidatePath(INBOX_PATH);
+}
+
+/**
+ * Set a single-task item's time estimate (minutes). Workspace-scoped +
+ * IDOR-safe via updateMany's workspace filter. Clamped to a sane [1, 600].
+ */
+export async function setItemEstimate(id: string, minutes: number) {
+  if (!Number.isFinite(minutes)) return;
+  const workspaceId = await currentWorkspaceId();
+  const clamped = Math.max(1, Math.min(600, Math.round(minutes)));
+  await prisma.brainDumpItem.updateMany({
+    where: { id, workspaceId },
+    data: { estMinutes: clamped },
+  });
+  revalidatePath(INBOX_PATH);
+  revalidatePath("/library");
+}
+
+/**
+ * Bulk edit for the Library to-do tabs. Reuses the per-item actions (which are
+ * each workspace-scoped + carry the reward/badge/streak/graduation logic) so we
+ * never re-implement that. Pre-filters ids to the caller's workspace for an
+ * accurate count + explicit IDOR guard.
+ */
+export async function bulkBrainDumpAction(
+  ids: string[],
+  action: "complete" | "saveForLater" | "delete",
+): Promise<{ count: number }> {
+  if (!ids.length) return { count: 0 };
+  const workspaceId = await currentWorkspaceId();
+  const owned = await prisma.brainDumpItem.findMany({
+    where: { id: { in: ids }, workspaceId },
+    select: { id: true },
+  });
+  for (const { id } of owned) {
+    if (action === "delete") await deleteBrainDumpItem(id);
+    else if (action === "saveForLater") await snoozeBrainDumpItem(id, 60);
+    else await completeItem(id);
+  }
+  return { count: owned.length };
 }

@@ -42,7 +42,7 @@ describe("t() function", () => {
     ["action.breakdown",    "playful", "🍿 Snack-size it"],
     ["action.complete",     "plain",   "Complete"],
     ["action.reopen",       "plain",   "Reopen"],
-    ["nav.everything",      "plain",   "Everything"],
+    ["nav.everything",      "plain",   "Library"],
     ["nav.everything",      "playful", "🍱 Larder"],
     ["nav.inbox",           "plain",   "Inbox"],
     ["nav.inbox",           "playful", "🧠 Inbox"],
@@ -325,6 +325,35 @@ describe("Task 2 — inbox/focus/breakdown keys (plain vs playful)", () => {
   it('t("action.backToInbox", "playful") → "🍳 Back to inbox"', () => {
     expect(t("action.backToInbox", "playful")).toBe("🍳 Back to inbox");
   });
+
+  // action.backToLibrary (task page back-link, #8 follow-up)
+  it('t("action.backToLibrary", "plain") → "Back to Library"', () => {
+    expect(t("action.backToLibrary", "plain")).toBe("Back to Library");
+  });
+  it('t("action.backToLibrary", "playful") → "🍱 Back to the Larder"', () => {
+    expect(t("action.backToLibrary", "playful")).toBe("🍱 Back to the Larder");
+  });
+
+  // task.scheduled / task.notScheduled (task page schedule indicator, #8 follow-up)
+  it('t("task.scheduled", "plain") → "Scheduled ✓"', () => {
+    expect(t("task.scheduled", "plain")).toBe("Scheduled ✓");
+  });
+  it('t("task.notScheduled", "plain") → "Not scheduled yet"', () => {
+    expect(t("task.notScheduled", "plain")).toBe("Not scheduled yet");
+  });
+});
+
+describe("library strings", () => {
+  it("renames Everything → Library (plain) keeping Larder (playful)", () => {
+    expect(t("nav.everything", "plain")).toBe("Library");
+    expect(t("nav.everything", "playful")).toBe("🍱 Larder");
+  });
+  it("has the new bulk/meta keys in both voices", () => {
+    for (const k of ["lib.select","lib.selectAll","lib.selected","lib.openTask","lib.deleteConfirm","lib.next","lib.minLeft","lib.min","lib.editEstimate"] as const) {
+      expect(t(k, "plain")).toBeTruthy();
+      expect(t(k, "playful")).toBeTruthy();
+    }
+  });
 });
 
 describe("Plain voice is emoji-free for nav and badge keys", () => {
@@ -399,6 +428,31 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "step.editEstimate",
     "step.editTitle",
     "step.sendToReview",
+    // Library "Everything" hub (#8 Phase 3) — plain variants emoji-free
+    "action.back",
+    "lib.tab.singleTask",
+    "lib.tab.multiStep",
+    "lib.intro",
+    "lib.plated.hint",
+    "lib.pantry.hint",
+    "lib.sorted.hint",
+    "lib.done.hint",
+    "lib.added",
+    "lib.wakes",
+    "lib.aToDo",
+    "lib.select",
+    "lib.selectAll",
+    "lib.selected",
+    "lib.openTask",
+    "lib.deleteConfirm",
+    "lib.next",
+    "lib.minLeft",
+    "lib.min",
+    "lib.editEstimate",
+    // Task working-view schedule indicator (#8 follow-up) — plain is literal.
+    "action.backToLibrary",
+    "task.scheduled",
+    "task.notScheduled",
   ];
 
   for (const key of plainOnlyKeys) {

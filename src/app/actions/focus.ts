@@ -24,6 +24,8 @@ export async function beginFocus(
       workspaceId,
     },
   });
+  // First focus — awarded the first time a focus session begins (idempotent).
+  await awardBadge(workspaceId, BadgeKey.FirstFocus);
   return session.id;
 }
 

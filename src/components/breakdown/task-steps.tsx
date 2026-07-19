@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { extractStepToInbox } from "@/app/actions/breakdown";
+import { ejectStepToInbox } from "@/app/actions/breakdown";
 import { completeStep, renameStep, updateStepEstimate } from "@/app/actions/focus";
 import { CompleteButton } from "@/components/inbox/complete-button";
 import { RowActions } from "@/components/inbox/row-actions";
@@ -56,7 +56,7 @@ export function TaskSteps({
 
   function sendToReview(stepId: string) {
     start(async () => {
-      const res = await extractStepToInbox(stepId);
+      const res = await ejectStepToInbox(stepId);
       if (!res) return;
       if (res.remaining === 0) setEmptied(true);
       else router.refresh();
