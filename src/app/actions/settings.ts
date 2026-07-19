@@ -135,3 +135,26 @@ export async function updateBreakdownModel(model: string) {
   });
   revalidatePath("/inbox");
 }
+
+/** Phase 5 — persist that the workspace dismissed the first-run welcome card. */
+export async function dismissWelcome() {
+  const workspaceId = await currentWorkspaceId();
+  await prisma.settings.upsert({
+    where: { workspaceId },
+    create: { id: workspaceId, workspaceId, welcomeDismissedAt: new Date() },
+    update: { welcomeDismissedAt: new Date() },
+  });
+  revalidatePath("/inbox");
+}
+
+/** Phase 5 — Demo: First-run preview toggle (auto-saved). Forces the Inbox to
+ * render as a brand-new user sees it (welcome + empty), non-destructively. */
+export async function updateFirstRunPreview(enabled: boolean) {
+  const workspaceId = await currentWorkspaceId();
+  await prisma.settings.upsert({
+    where: { workspaceId },
+    create: { id: workspaceId, workspaceId, firstRunPreview: Boolean(enabled) },
+    update: { firstRunPreview: Boolean(enabled) },
+  });
+  revalidatePath("/inbox");
+}

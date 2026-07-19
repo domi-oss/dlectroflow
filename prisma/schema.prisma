@@ -61,6 +61,9 @@ model Settings {
   agingHours            Int      @default(4)
   overdueHours          Int      @default(8)
   wayOverdueHours       Int      @default(12)
+  // Phase 5 — first-run welcome + demo preview
+  welcomeDismissedAt    DateTime?
+  firstRunPreview       Boolean  @default(false)
   // Phase 6 — per-type notification preferences (client-delivered only)
   notifyRoundup         Boolean  @default(true)
   notifyAging           Boolean  @default(true)

@@ -2,7 +2,12 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { updateAgingSettings, updateBreakdownModel, updateVoice } from "@/app/actions/settings";
+import {
+  updateAgingSettings,
+  updateBreakdownModel,
+  updateFirstRunPreview,
+  updateVoice,
+} from "@/app/actions/settings";
 import type { AgingSettings } from "@/lib/aging";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { OWNER_BREAKDOWN_ALLOWLIST, OWNER_BREAKDOWN_MODEL_DEFAULT } from "@/lib/constants";
@@ -31,7 +36,7 @@ export function SettingsPanel({
   voice,
   autoSaveDelayMs = 600,
 }: {
-  settings: AgingSettings;
+  settings: AgingSettings & { firstRunPreview: boolean };
   isOwner: boolean;
   breakdownModel: string | null;
   voice: Voice;
@@ -40,6 +45,8 @@ export function SettingsPanel({
 }) {
   const router = useRouter();
   const [voicePending, startVoiceTransition] = useTransition();
+  const [frPending, startFr] = useTransition();
+  const [firstRun, setFirstRun] = useState(settings.firstRunPreview);
   const [minutes, setMinutes] = useState(settings.agingThresholdMinutes);
   const [demo, setDemo] = useState<string>(
     settings.demoOverrideSeconds != null
@@ -111,6 +118,16 @@ export function SettingsPanel({
       await updateBreakdownModel(m);
       router.refresh();
     });
+
+  const toggleFirstRun = (v: boolean) => {
+    setFirstRun(v);
+    // Async transition callback so frPending stays true for the whole write
+    // (a sync callback returning an unawaited promise drops pending immediately,
+    // leaving the checkbox re-clickable mid-request). Matches saveVoice.
+    startFr(async () => {
+      await updateFirstRunPreview(v);
+    });
+  };
 
   return (
     <div className="space-y-6 text-sm">
@@ -258,6 +275,27 @@ export function SettingsPanel({
           </div>
         </section>
       )}
+
+      <section className="space-y-2 border-t pt-4">
+        <h2 className="font-semibold">Demo</h2>
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={firstRun}
+            disabled={frPending}
+            onChange={(e) => toggleFirstRun(e.target.checked)}
+            className="mt-1"
+          />
+          <span>
+            <span className="font-medium">First-run preview</span>
+            <br />
+            <span className="text-muted-foreground">
+              Show the app as a brand-new user sees it — welcome card + empty
+              Inbox. Non-destructive.
+            </span>
+          </span>
+        </label>
+      </section>
     </div>
   );
 }

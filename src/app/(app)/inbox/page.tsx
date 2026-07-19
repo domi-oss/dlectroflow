@@ -3,6 +3,7 @@ import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
 import { getGoogleStatus } from "@/lib/google";
 import { BrainDumpStatus } from "@/lib/constants";
 import { InboxView } from "@/components/inbox/inbox-view";
+import { firstResumableStep } from "@/components/inbox/resume-step";
 
 // DB-backed, always fresh.
 export const dynamic = "force-dynamic";
@@ -67,6 +68,16 @@ export default async function InboxPage({
     })) ?? [],
   }));
 
+  // Phase 5 (#8): the demo/first-run preview override shows the Inbox as a
+  // brand-new workspace would see it (empty, welcome card, no resume banner)
+  // without touching real data. welcomeVisible otherwise reflects whether the
+  // workspace has ever dismissed the welcome card.
+  const firstRun = settings.firstRunPreview;
+  const welcomeVisible = firstRun || settings.welcomeDismissedAt == null;
+  // Most-recent resumable, NOT-done step (open focus session) for the resume
+  // banner — see resume-step.ts for why the !done guard matters.
+  const resumeStep = firstResumableStep(items);
+
   return (
     <div className="space-y-4">
       {sp.reclaim === "connected" && (
@@ -94,7 +105,7 @@ export default async function InboxPage({
         </div>
       )}
       <InboxView
-        initialItems={items}
+        initialItems={firstRun ? [] : items}
         settings={{
           agingThresholdMinutes: settings.agingThresholdMinutes,
           demoOverrideSeconds: settings.demoOverrideSeconds,
@@ -103,6 +114,8 @@ export default async function InboxPage({
           wayOverdueHours: settings.wayOverdueHours,
         }}
         google={google}
+        welcomeVisible={welcomeVisible}
+        resumeStep={firstRun ? null : resumeStep}
         notifyAging={settings.notifyAging}
       />
     </div>

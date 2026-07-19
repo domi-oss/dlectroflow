@@ -88,6 +88,12 @@ describe("t() function", () => {
     ["step.editTitle",        "plain",   "Edit step title"],
     ["step.sendToReview",     "plain",   "Send back to review"],
     ["step.sendToReview",     "playful", "🥫 Send back to review"],
+    // welcome-card (#8) — inline links are voice-aware: Library (plain) vs
+    // Larder (playful); the Focus Timer + Help section labels are shared.
+    ["welcome.libraryLink",   "plain",   "Library"],
+    ["welcome.libraryLink",   "playful", "Larder"],
+    ["welcome.focusLink",     "plain",   "Focus Timer"],
+    ["welcome.helpLink",      "plain",   "Help section"],
     // Phase 6 — notifications + auto-save
     ["settings.saved",        "plain",   "Saved ✓"],
     ["settings.saved",        "playful", "Saved ✓"],
@@ -269,12 +275,6 @@ describe("Task 2 — inbox/focus/breakdown keys (plain vs playful)", () => {
   it('t("focus.resume", "plain") → "▶ Resume"', () => {
     expect(t("focus.resume", "plain")).toBe("▶ Resume");
   });
-  it('t("focus.giveUp", "plain") → "Pause for now"', () => {
-    expect(t("focus.giveUp", "plain")).toBe("Pause for now");
-  });
-  it('t("focus.giveUp", "playful") → "⏸️ Pause for now"', () => {
-    expect(t("focus.giveUp", "playful")).toBe("⏸️ Pause for now");
-  });
   it('t("focus.timesUp", "plain") → "Time\'s up — did you finish?"', () => {
     expect(t("focus.timesUp", "plain")).toBe("Time's up — did you finish?");
   });
@@ -418,7 +418,6 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "action.reviewNow",
     "bucket.empty",
     "inbox.zero",
-    "focus.giveUp",
     "focus.nextStep",
     "breakdown.looksRight",
     "action.fewerSteps",
