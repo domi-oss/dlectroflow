@@ -15,19 +15,21 @@ vi.mock("@/app/actions/settings", () => ({
   updateAgingSettings: vi.fn().mockResolvedValue(undefined),
   updateBreakdownModel: vi.fn().mockResolvedValue(undefined),
   updateVoice: vi.fn().mockResolvedValue(undefined),
+  updateFirstRunPreview: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { updateAgingSettings } from "@/app/actions/settings";
+import { updateAgingSettings, updateFirstRunPreview } from "@/app/actions/settings";
 
 afterEach(cleanup);
 beforeEach(() => vi.clearAllMocks());
 
-const settings: AgingSettings = {
+const settings: AgingSettings & { firstRunPreview: boolean } = {
   agingThresholdMinutes: 30,
   demoOverrideSeconds: null,
   agingHours: 4,
   overdueHours: 8,
   wayOverdueHours: 12,
+  firstRunPreview: false,
 };
 
 const renderPanel = (overrides?: Partial<AgingSettings>) =>
@@ -89,5 +91,28 @@ describe("SettingsPanel auto-save (Phase 6)", () => {
     expect(overdueInput).not.toBeDisabled();
     await user.type(overdueInput, "0"); // still accepts input
     expect(overdueInput).toHaveValue(90);
+  });
+});
+
+describe("SettingsPanel demo: first-run preview toggle", () => {
+  it("auto-saves on toggle, calling updateFirstRunPreview(true) then (false)", async () => {
+    const user = userEvent.setup();
+    render(
+      <SettingsPanel
+        settings={settings}
+        isOwner={false}
+        breakdownModel={null}
+        voice="plain"
+      />,
+    );
+
+    const toggle = screen.getByRole("checkbox", { name: /first-run preview/i });
+    expect(toggle).not.toBeChecked();
+
+    await user.click(toggle);
+    expect(updateFirstRunPreview).toHaveBeenCalledWith(true);
+
+    await user.click(toggle);
+    expect(updateFirstRunPreview).toHaveBeenCalledWith(false);
   });
 });

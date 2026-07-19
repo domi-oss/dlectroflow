@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import {
   beginFocus,
   completeFocus,
-  giveUpFocus,
   requeueFocus,
   proposeNewEstimate,
   type CompleteResult,
@@ -127,16 +126,10 @@ export function FocusTimer({
     router.refresh();
   }, [sessionId, addedMin, router]);
 
-  const giveUp = async () => {
-    if (!sessionId) {
-      router.push(`/tasks/${taskId}`);
-      return;
-    }
-    setPending(true);
-    await giveUpFocus(sessionId, { durationMin: durationMin(), addedMin });
-    setPending(false);
-    setPhase("gaveup");
-  };
+  // Low-shame exit: leaves the FocusSession OPEN (endedAt untouched, no server
+  // call) so the step stays `resumable` and Task 3's Inbox resume banner
+  // surfaces it. Shows the "Paused — no guilt" card below.
+  const pauseForNow = () => setPhase("gaveup");
 
   const startReestimate = async () => {
     setPhase("reestimate");
@@ -238,12 +231,17 @@ export function FocusTimer({
         <div className="text-5xl">💛</div>
         <p className="text-lg font-medium">Paused — no guilt.</p>
         <p className="text-muted-foreground text-sm">Come back whenever you&apos;re ready.</p>
-        <Link
-          href={`/tasks/${taskId}`}
-          className="bg-primary text-primary-foreground inline-block rounded-md px-4 py-2 font-medium"
-        >
-          ← back to task
-        </Link>
+        <div className="flex flex-col items-center gap-2">
+          <Link
+            href={`/tasks/${taskId}`}
+            className="bg-primary text-primary-foreground inline-block rounded-md px-4 py-2 font-medium"
+          >
+            ← back to task
+          </Link>
+          <Link href="/inbox" className="text-muted-foreground text-sm hover:underline">
+            or see it on your Inbox →
+          </Link>
+        </div>
       </div>
     );
   }
@@ -340,11 +338,11 @@ export function FocusTimer({
             ➕ {inc * 2}m
           </button>
           <button
-            onClick={giveUp}
+            onClick={pauseForNow}
             disabled={pending}
-            className="text-muted-foreground hover:text-foreground rounded-md px-3 py-2 text-sm"
+            className="text-muted-foreground hover:text-foreground rounded-md px-3 py-2 text-sm disabled:opacity-50"
           >
-            {t("focus.giveUp", voice)}
+            {t("focus.pauseForNow", voice)}
           </button>
         </div>
       )}

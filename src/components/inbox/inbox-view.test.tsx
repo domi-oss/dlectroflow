@@ -33,6 +33,13 @@ vi.mock("@/app/actions/breakdown", () => ({
   startBreakdown: vi.fn().mockResolvedValue(null),
 }));
 
+// InboxView renders <WelcomeCard> (Task 3, #8) which itself calls into these
+// server actions on click — mocked here the same way welcome-card.test.tsx does.
+vi.mock("@/app/actions/settings", () => ({
+  dismissWelcome: vi.fn().mockResolvedValue(undefined),
+  updateVoice: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("@/app/actions/google-schedule", () => ({
   pushStepsToGoogleTasks: vi.fn().mockResolvedValue({ ok: true, scheduled: 1, listTitle: "Reclaim" }),
   scheduleSingleTask: vi.fn().mockResolvedValue({ ok: true }),
@@ -145,8 +152,7 @@ describe("InboxView — capture confirm", () => {
     render(
       <InboxView
         initialItems={[]}
-        settings={settings}
-      />,
+        settings={settings} welcomeVisible={false} resumeStep={null} />,
     );
     const input = screen.getByPlaceholderText(/Brain dump/i);
     await user.type(input, "buy milk{enter}");
@@ -160,8 +166,7 @@ describe("InboxView — capture confirm", () => {
     render(
       <InboxView
         initialItems={[]}
-        settings={settings}
-      />,
+        settings={settings} welcomeVisible={false} resumeStep={null} />,
     );
     const input = screen.getByPlaceholderText(/Brain dump/i);
 
@@ -191,8 +196,7 @@ describe("InboxView — inline delete confirm", () => {
     render(
       <InboxView
         initialItems={[item]}
-        settings={settings}
-      />,
+        settings={settings} welcomeVisible={false} resumeStep={null} />,
     );
     // v5: Delete lives inline in the row's end cluster (no menu needed).
     const row = screen.getByText("delete me").closest("li")!;
@@ -224,8 +228,7 @@ describe("InboxView — 24h still-needed prompt", () => {
     render(
       <InboxView
         initialItems={[stale]}
-        settings={settings}
-      />,
+        settings={settings} welcomeVisible={false} resumeStep={null} />,
     );
 
     expect(
@@ -244,7 +247,7 @@ describe("InboxView — 24h still-needed prompt", () => {
       text: "keep this",
       createdAt: new Date(Date.now() - 25 * 3600_000),
     });
-    render(<InboxView initialItems={[stale]} settings={settings} />);
+    render(<InboxView initialItems={[stale]} settings={settings} welcomeVisible={false} resumeStep={null} />);
 
     const row = screen.getByText("keep this").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Still need it" }));
@@ -262,8 +265,7 @@ describe("InboxView — 24h still-needed prompt", () => {
     render(
       <InboxView
         initialItems={[stale]}
-        settings={settings}
-      />,
+        settings={settings} welcomeVisible={false} resumeStep={null} />,
     );
 
     expect(
@@ -277,8 +279,7 @@ describe("InboxView — inbox zero copy", () => {
     render(
       <InboxView
         initialItems={[]}
-        settings={settings}
-      />,
+        settings={settings} welcomeVisible={false} resumeStep={null} />,
     );
     expect(screen.getByText("Inbox zero. Nothing to review.")).toBeInTheDocument();
   });
@@ -289,8 +290,7 @@ describe("InboxView — settings panel moved to /settings", () => {
     render(
       <InboxView
         initialItems={[makeItem()]}
-        settings={settings}
-      />,
+        settings={settings} welcomeVisible={false} resumeStep={null} />,
     );
     // The aging/reminder settings now live on the /settings page (☰ menu),
     // not inline on the inbox.
@@ -304,7 +304,7 @@ describe("InboxView — complete + completed bucket", () => {
   it("a needs-review row's Complete button (v5: inline) calls completeItem", async () => {
     const { completeItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeItem({ id: "n1", text: "do it" })]} settings={settings} />);
+    render(<InboxView initialItems={[makeItem({ id: "n1", text: "do it" })]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("do it").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Complete" }));
     expect(completeItem).toHaveBeenCalledWith("n1");
@@ -316,8 +316,7 @@ describe("InboxView — complete + completed bucket", () => {
     render(
       <InboxView
         initialItems={[makeItem({ id: "st1", text: "single todo", status: "triaged" })]}
-        settings={settings}
-      />,
+        settings={settings} welcomeVisible={false} resumeStep={null} />,
     );
     const row = screen.getByText("single todo").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Complete" }));
@@ -327,7 +326,7 @@ describe("InboxView — complete + completed bucket", () => {
   it("a multi-step row's Complete button calls completeItem", async () => {
     const { completeItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} />);
+    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("plan trip").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Complete" }));
     expect(completeItem).toHaveBeenCalledWith("m1");
@@ -337,7 +336,7 @@ describe("InboxView — complete + completed bucket", () => {
     const { reopenItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
     const done = makeItem({ id: "d1", text: "finished", status: "triaged", completedAt: new Date() });
-    render(<InboxView initialItems={[done]} settings={settings} />);
+    render(<InboxView initialItems={[done]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     expect(screen.getByText(/Completed today/i)).toBeInTheDocument();
     const row = screen.getByText("finished").closest("li")!;
     await user.click(within(row).getByRole("button", { name: /Reopen|Undo/ }));
@@ -368,7 +367,7 @@ describe("InboxView — per-step Undo picker (completed multi-step)", () => {
   it("Reopen on a completed multi-step opens the step picker instead of reopening", async () => {
     const { reopenItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[doneMulti()]} settings={settings} />);
+    render(<InboxView initialItems={[doneMulti()]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("finished trip").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Reopen" }));
     expect(reopenItem).not.toHaveBeenCalled();
@@ -379,7 +378,7 @@ describe("InboxView — per-step Undo picker (completed multi-step)", () => {
   it("reopens only the checked steps", async () => {
     const { reopenItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[doneMulti()]} settings={settings} />);
+    render(<InboxView initialItems={[doneMulti()]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("finished trip").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Reopen" }));
     await user.click(within(row).getByRole("checkbox", { name: "pack" }));
@@ -390,7 +389,7 @@ describe("InboxView — per-step Undo picker (completed multi-step)", () => {
   it("confirm is disabled with nothing checked; Reopen all resets every step", async () => {
     const { reopenItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[doneMulti()]} settings={settings} />);
+    render(<InboxView initialItems={[doneMulti()]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("finished trip").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Reopen" }));
     expect(within(row).getByRole("button", { name: "Reopen selected" })).toBeDisabled();
@@ -401,7 +400,7 @@ describe("InboxView — per-step Undo picker (completed multi-step)", () => {
   it("Cancel closes the picker without reopening", async () => {
     const { reopenItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[doneMulti()]} settings={settings} />);
+    render(<InboxView initialItems={[doneMulti()]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("finished trip").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Reopen" }));
     await user.click(within(row).getByRole("button", { name: "Cancel" }));
@@ -412,7 +411,7 @@ describe("InboxView — per-step Undo picker (completed multi-step)", () => {
   it("Escape closes the picker without reopening (matches MoveToMenu)", async () => {
     const { reopenItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[doneMulti()]} settings={settings} />);
+    render(<InboxView initialItems={[doneMulti()]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("finished trip").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Reopen" }));
     await user.keyboard("{Escape}");
@@ -423,7 +422,7 @@ describe("InboxView — per-step Undo picker (completed multi-step)", () => {
 
 describe("InboxView — always-visible bucket board", () => {
   it("shows all four To-Do buckets with empty states when there are no to-dos", () => {
-    render(<InboxView initialItems={[]} settings={settings} />);
+    render(<InboxView initialItems={[]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     // Section headers present even when empty
     expect(screen.getByText("Multi-step to-dos")).toBeInTheDocument();
     expect(screen.getByText("Single-task to-dos")).toBeInTheDocument();
@@ -435,7 +434,7 @@ describe("InboxView — always-visible bucket board", () => {
 
   it("does not show the empty helper for a bucket that has items", () => {
     const todo = makeItem({ id: "t1", text: "a todo", status: "triaged" });
-    render(<InboxView initialItems={[todo]} settings={settings} />);
+    render(<InboxView initialItems={[todo]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const single = screen.getByText("a todo").closest<HTMLElement>("section, div")!;
     expect(within(single).queryByText("Nothing here yet")).not.toBeInTheDocument();
   });
@@ -443,13 +442,13 @@ describe("InboxView — always-visible bucket board", () => {
 
 describe("InboxView — multi-step step count + expand", () => {
   it("shows a step-count indicator", () => {
-    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} />);
+    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     expect(screen.getByText(/3 steps · 1 done/)).toBeInTheDocument();
   });
 
   it("expands the inline step list when the row body is tapped", async () => {
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} />);
+    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     expect(screen.queryByTestId("inline-steps")).not.toBeInTheDocument();
     // Exact match (not a substring regex): Task 10 adds a "Drag plan trip" grip
     // button alongside this title button, so a loose /plan trip/ match would be
@@ -462,7 +461,7 @@ describe("InboxView — multi-step step count + expand", () => {
 describe("InboxView — multi-step ▾ menu: view list + focus (v6)", () => {
   it("'View multi-step task list' expands the inline step list", async () => {
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} />);
+    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("plan trip").closest("li")!;
     expect(screen.queryByTestId("inline-steps")).not.toBeInTheDocument();
     await user.click(within(row).getByRole("button", { name: "All options" }));
@@ -472,7 +471,7 @@ describe("InboxView — multi-step ▾ menu: view list + focus (v6)", () => {
 
   it("'Start visual focus timer' opens the task page", async () => {
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} />);
+    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("plan trip").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "All options" }));
     await user.click(within(row).getByRole("button", { name: "Start visual focus timer" }));
@@ -488,7 +487,7 @@ describe("InboxView — multi-step ▾ menu: view list + focus (v6)", () => {
       breakdownRequestedAt: new Date(),
       stepsTotal: 0,
     });
-    render(<InboxView initialItems={[awaiting]} settings={settings} />);
+    render(<InboxView initialItems={[awaiting]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("needs a plan").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "All options" }));
     expect(within(row).queryByRole("button", { name: "View multi-step task list" })).not.toBeInTheDocument();
@@ -499,7 +498,7 @@ describe("InboxView — multi-step ▾ menu: view list + focus (v6)", () => {
 describe("InboxView — tap multi-step row body to expand (v6)", () => {
   it("tapping a non-button part of the row (the step-count meta) expands the inline step list", async () => {
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} />);
+    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("plan trip").closest("li")!;
     expect(within(row).queryByTestId("inline-steps")).not.toBeInTheDocument();
     await user.click(within(row).getByText(/steps ·/));
@@ -510,7 +509,7 @@ describe("InboxView — tap multi-step row body to expand (v6)", () => {
 describe("InboxView — multi-step row primary CTA (v6 fix)", () => {
   it("a multi-step row with steps shows ▶ Focus + Complete; ▶ Focus opens the next unfinished step's timer", async () => {
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} />);
+    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("plan trip").closest("li")!;
     expect(within(row).getByRole("button", { name: "▶ Start Focus" })).toBeInTheDocument();
     expect(within(row).getByRole("button", { name: "Complete" })).toBeInTheDocument();
@@ -527,7 +526,7 @@ describe("InboxView — multi-step row primary CTA (v6 fix)", () => {
       breakdownRequestedAt: new Date(),
       stepsTotal: 0,
     });
-    render(<InboxView initialItems={[awaiting]} settings={settings} />);
+    render(<InboxView initialItems={[awaiting]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("needs a plan").closest("li")!;
     expect(within(row).getByRole("button", { name: "Break into steps now?" })).toBeInTheDocument();
     expect(within(row).queryByRole("button", { name: "▶ Start Focus" })).not.toBeInTheDocument();
@@ -550,7 +549,7 @@ describe("InboxView — Move to… menu dispatch", () => {
   it("a single-task 'Move to Completed' completes the item", async () => {
     const { completeItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeItem({ id: "s1", text: "todo", status: "triaged" })]} settings={settings} />);
+    render(<InboxView initialItems={[makeItem({ id: "s1", text: "todo", status: "triaged" })]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("todo").closest("li")!;
     // Move to… now lives inside the row's ⋯ overflow menu.
     await user.click(within(row).getByRole("button", { name: "All options" }));
@@ -562,7 +561,7 @@ describe("InboxView — Move to… menu dispatch", () => {
   it("a single-task 'Move to Needs review' un-triages via moveToReview", async () => {
     const { moveToReview } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeItem({ id: "s1", text: "todo", status: "triaged" })]} settings={settings} />);
+    render(<InboxView initialItems={[makeItem({ id: "s1", text: "todo", status: "triaged" })]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("todo").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "All options" }));
     await user.click(within(row).getByRole("button", { name: "Move to…" }));
@@ -574,7 +573,7 @@ describe("InboxView — Move to… menu dispatch", () => {
     const { reopenItem, triageBrainDumpItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
     const done = makeItem({ id: "d1", text: "done item", status: "triaged", completedAt: new Date() });
-    render(<InboxView initialItems={[done]} settings={settings} />);
+    render(<InboxView initialItems={[done]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("done item").closest("li")!;
     // v6: completed rows' Move-to is the 📥 icon (aria "Move to").
     await user.click(within(row).getByRole("button", { name: "Move to" }));
@@ -587,7 +586,7 @@ describe("InboxView — Move to… menu dispatch", () => {
     const { requestBreakdown } = await import("@/app/actions/braindump");
     const { startBreakdown } = await import("@/app/actions/breakdown");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeItem({ id: "n1", text: "big thing" })]} settings={settings} />);
+    render(<InboxView initialItems={[makeItem({ id: "n1", text: "big thing" })]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("big thing").closest("li")!;
     // Move to… now lives inside the needs-review row's ⋯ overflow menu too.
     await user.click(within(row).getByRole("button", { name: "All options" }));
@@ -603,7 +602,7 @@ describe("InboxView — Move to… menu dispatch", () => {
     const { reopenItem, requestBreakdown } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
     const done = makeItem({ id: "d1", text: "finished big thing", status: "triaged", completedAt: new Date() });
-    render(<InboxView initialItems={[done]} settings={settings} />);
+    render(<InboxView initialItems={[done]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("finished big thing").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Move to" }));
     await user.click(within(row).getByRole("menuitem", { name: /Multi-step/ }));
@@ -623,7 +622,7 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
     });
 
   it("renders an awaiting-breakdown item in the Multi-step bucket with a 'Break into steps now?' CTA", () => {
-    render(<InboxView initialItems={[awaiting()]} settings={settings} />);
+    render(<InboxView initialItems={[awaiting()]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("needs a plan").closest("li")!;
     expect(row.closest('[data-bucket="multiStep"]')).not.toBeNull();
     expect(within(row).getByRole("button", { name: "Break into steps now?" })).toBeInTheDocument();
@@ -635,7 +634,7 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
     const { startBreakdown } = await import("@/app/actions/breakdown");
     (startBreakdown as ReturnType<typeof vi.fn>).mockResolvedValue("t9");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[awaiting()]} settings={settings} />);
+    render(<InboxView initialItems={[awaiting()]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     await user.click(screen.getByRole("button", { name: "Break into steps now?" }));
     expect(startBreakdown).toHaveBeenCalledWith("aw1");
     expect(push).toHaveBeenCalledWith("/tasks/t9");
@@ -644,7 +643,7 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
   it("not clicking the CTA blocks nothing: the row still moves elsewhere via Move to…", async () => {
     const { triageBrainDumpItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[awaiting()]} settings={settings} />);
+    render(<InboxView initialItems={[awaiting()]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("needs a plan").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "All options" }));
     await user.click(within(row).getByRole("button", { name: "Move to…" }));
@@ -657,7 +656,7 @@ describe("InboxView — ✎ edit title", () => {
   it("pencil → input → Enter renames the item (review row)", async () => {
     const { renameItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeItem({ id: "r1", text: "old name" })]} settings={settings} />);
+    render(<InboxView initialItems={[makeItem({ id: "r1", text: "old name" })]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     // v5: the ✎ pencil sits beside the title again — no menu needed.
     const row = screen.getByText("old name").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Edit old name" }));
@@ -670,7 +669,7 @@ describe("InboxView — ✎ edit title", () => {
   it("Escape cancels without renaming", async () => {
     const { renameItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeItem({ id: "r1", text: "old name" })]} settings={settings} />);
+    render(<InboxView initialItems={[makeItem({ id: "r1", text: "old name" })]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("old name").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Edit old name" }));
     await user.keyboard("{Escape}");
@@ -687,7 +686,7 @@ describe("InboxView — ✎ edit title", () => {
       makeItem({ id: "v1", text: "saved item", snoozedUntil: new Date(Date.now() + 3_600_000) }),
       makeItem({ id: "d1", text: "done item", status: "triaged", completedAt: new Date() }),
     ];
-    render(<InboxView initialItems={items} settings={settings} />);
+    render(<InboxView initialItems={items} settings={settings} welcomeVisible={false} resumeStep={null} />);
     for (const text of ["review item", "single item", "plan trip", "saved item", "done item"]) {
       expect(screen.getByRole("button", { name: `Edit ${text}` })).toBeInTheDocument();
     }
@@ -695,7 +694,7 @@ describe("InboxView — ✎ edit title", () => {
 
   it("v6: the ▾ menu carries an 'Edit task title' entry; the title keeps its single ✏️ pencil", async () => {
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeItem({ id: "r1", text: "review item" })]} settings={settings} />);
+    render(<InboxView initialItems={[makeItem({ id: "r1", text: "review item" })]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("review item").closest("li")!;
     expect(within(row).getAllByRole("button", { name: "Edit review item" })).toHaveLength(1);
     await user.click(within(row).getByRole("button", { name: "All options" }));
@@ -707,7 +706,7 @@ describe("InboxView — ✎ edit title", () => {
   it("unchanged text does not fire the action", async () => {
     const { renameItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeItem({ id: "r1", text: "same" })]} settings={settings} />);
+    render(<InboxView initialItems={[makeItem({ id: "r1", text: "same" })]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("same").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Edit same" }));
     await user.keyboard("{Enter}");
@@ -723,8 +722,7 @@ describe("InboxView — single to-do ▶ Focus", () => {
     render(
       <InboxView
         initialItems={[makeItem({ id: "s1", text: "focusable todo", status: "triaged" })]}
-        settings={settings}
-      />,
+        settings={settings} welcomeVisible={false} resumeStep={null} />,
     );
     const row = screen.getByText("focusable todo").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "▶ Start Focus" }));
@@ -739,8 +737,7 @@ describe("InboxView — single to-do ▶ Focus", () => {
     render(
       <InboxView
         initialItems={[makeItem({ id: "s1", text: "focusable todo", status: "triaged" })]}
-        settings={settings}
-      />,
+        settings={settings} welcomeVisible={false} resumeStep={null} />,
     );
     const row = screen.getByText("focusable todo").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "▶ Start Focus" }));
@@ -754,8 +751,7 @@ describe("InboxView — single to-do ▶ Focus", () => {
     render(
       <InboxView
         initialItems={[makeItem({ id: "s1", text: "focusable todo", status: "triaged" })]}
-        settings={settings}
-      />,
+        settings={settings} welcomeVisible={false} resumeStep={null} />,
     );
     const row = screen.getByText("focusable todo").closest("li")!;
     // Inline stays the short "▶ Focus"; the dropdown carries the full label.
@@ -776,7 +772,7 @@ describe("InboxView — saved-for-later inline sorting options", () => {
 
   it("clicking a saved row reveals the sorting options; clicking again hides them", async () => {
     const user = userEvent.setup();
-    render(<InboxView initialItems={[saved()]} settings={settings} />);
+    render(<InboxView initialItems={[saved()]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("stored thing").closest("li")!;
     expect(within(row).queryByRole("button", { name: /Break into steps/ })).not.toBeInTheDocument();
 
@@ -793,7 +789,7 @@ describe("InboxView — saved-for-later inline sorting options", () => {
   it("'Review now' swaps to the full review-row button set (Review now disappears) — no triage", async () => {
     const { triageBrainDumpItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[saved()]} settings={settings} />);
+    render(<InboxView initialItems={[saved()]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("stored thing").closest("li")!;
     expect(row.className).toContain("opacity-70"); // idle = dimmed
 
@@ -814,7 +810,7 @@ describe("InboxView — saved-for-later inline sorting options", () => {
   it("the inline 'Save' in the open options re-snoozes and puts the row back to sleep", async () => {
     const { snoozeBrainDumpItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[saved()]} settings={settings} />);
+    render(<InboxView initialItems={[saved()]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("stored thing").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Review now" }));
     await user.click(within(row).getByRole("button", { name: "Save" }));
@@ -825,7 +821,7 @@ describe("InboxView — saved-for-later inline sorting options", () => {
   it("the revealed options dispatch the same actions as a review row", async () => {
     const { keepAsTask } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[saved()]} settings={settings} />);
+    render(<InboxView initialItems={[saved()]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("stored thing").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "stored thing" }));
     await user.click(within(row).getByRole("button", { name: "Add to-do" }));
@@ -835,7 +831,7 @@ describe("InboxView — saved-for-later inline sorting options", () => {
   it("Delete in the options uses the two-step confirm", async () => {
     const { deleteBrainDumpItem: del } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[saved()]} settings={settings} />);
+    render(<InboxView initialItems={[saved()]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("stored thing").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "stored thing" }));
     await user.click(within(row).getByRole("button", { name: "Delete" }));
@@ -851,7 +847,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
   it("multi-step row with steps: 📅 pushes steps via pushStepsToGoogleTasks(taskId)", async () => {
     const { pushStepsToGoogleTasks } = await import("@/app/actions/google-schedule");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} google={connected} />);
+    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} google={connected} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("plan trip").closest("li")!;
     expect(within(row).getByRole("button", { name: /schedule/i })).toBeInTheDocument();
     await user.click(within(row).getByRole("button", { name: /schedule/i }));
@@ -865,8 +861,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       <InboxView
         initialItems={[makeItem({ id: "st1", text: "single todo", status: "triaged" })]}
         settings={settings}
-        google={connected}
-      />,
+        google={connected} welcomeVisible={false} resumeStep={null} />,
     );
     const row = screen.getByText("single todo").closest("li")!;
     await user.click(within(row).getByRole("button", { name: /schedule/i }));
@@ -884,7 +879,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       breakdownRequestedAt: new Date(),
       stepsTotal: 0,
     });
-    render(<InboxView initialItems={[awaiting]} settings={settings} google={connected} />);
+    render(<InboxView initialItems={[awaiting]} settings={settings} google={connected} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("needs a plan").closest("li")!;
     await user.click(within(row).getByRole("button", { name: /schedule/i }));
     await user.click(within(row).getByRole("button", { name: /^15 min$/i }));
@@ -899,8 +894,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       <InboxView
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
-        google={connected}
-      />,
+        google={connected} welcomeVisible={false} resumeStep={null} />,
     );
     const row = screen.getByText("capture me").closest("li")!;
     expect(within(row).getByRole("button", { name: /schedule/i })).toBeInTheDocument();
@@ -920,8 +914,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       <InboxView
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
-        google={connected}
-      />,
+        google={connected} welcomeVisible={false} resumeStep={null} />,
     );
     const row = screen.getByText("capture me").closest("li")!;
     await user.click(within(row).getByRole("button", { name: /schedule/i }));
@@ -934,8 +927,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       <InboxView
         initialItems={[makeMultiStep(), makeItem({ id: "st1", text: "single todo", status: "triaged" })]}
         settings={settings}
-        google={null}
-      />,
+        google={null} welcomeVisible={false} resumeStep={null} />,
     );
     // S0 (#29): guests now schedule via .ics (no Google needed) — there's no
     // "Schedule" control at all; every schedulable row exposes an enabled
@@ -952,8 +944,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       <InboxView
         initialItems={[makeItem({ id: "st1", text: "single todo", status: "triaged" })]}
         settings={settings}
-        google={null}
-      />,
+        google={null} welcomeVisible={false} resumeStep={null} />,
     );
     const row = screen.getByText("single todo").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "All options" }));
@@ -968,8 +959,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       <InboxView
         initialItems={[makeMultiStep(), makeItem({ id: "st1", text: "single todo", status: "triaged" })]}
         settings={settings}
-        google={needsReconnect}
-      />,
+        google={needsReconnect} welcomeVisible={false} resumeStep={null} />,
     );
     expect(screen.queryByRole("button", { name: /schedule/i })).toBeNull();
     expect(screen.getAllByRole("link", { name: /reconnect google/i })).toHaveLength(2);
@@ -981,8 +971,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       <InboxView
         initialItems={[makeItem({ id: "st1", text: "single todo", status: "triaged" })]}
         settings={settings}
-        google={notConfigured}
-      />,
+        google={notConfigured} welcomeVisible={false} resumeStep={null} />,
     );
     expect(screen.getByRole("link", { name: /connect google/i })).toBeInTheDocument();
   });
@@ -993,8 +982,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       <InboxView
         initialItems={[makeItem({ id: "st1", text: "single todo", status: "triaged" })]}
         settings={settings}
-        google={configuredNotConnected}
-      />,
+        google={configuredNotConnected} welcomeVisible={false} resumeStep={null} />,
     );
     expect(screen.getByRole("link", { name: /connect google/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /schedule/i })).toBeNull();
@@ -1007,7 +995,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       reason: "reconnect_required",
     });
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} google={connected} />);
+    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} google={connected} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("plan trip").closest("li")!;
     await user.click(within(row).getByRole("button", { name: /schedule/i }));
     expect(await within(row).findByRole("link", { name: /reconnect google/i })).toBeInTheDocument();
@@ -1022,8 +1010,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       <InboxView
         initialItems={[makeItem({ id: "st1", text: "single todo", status: "triaged" }), makeMultiStep()]}
         settings={settings}
-        google={connected}
-      />,
+        google={connected} welcomeVisible={false} resumeStep={null} />,
     );
     // Row A (single to-do) fails with an inline error.
     const rowA = screen.getByText("single todo").closest("li")!;
@@ -1049,8 +1036,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       <InboxView
         initialItems={[makeItem({ id: "st1", text: "single todo", status: "triaged" })]}
         settings={settings}
-        google={connected}
-      />,
+        google={connected} welcomeVisible={false} resumeStep={null} />,
     );
     const row = screen.getByText("single todo").closest("li")!;
     await user.click(within(row).getByRole("button", { name: /schedule/i }));
@@ -1066,7 +1052,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       message: 'Couldn\'t find a Google Tasks list matching "Reclaim". Available: Personal, Work.',
     });
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} google={connected} />);
+    render(<InboxView initialItems={[makeMultiStep()]} settings={settings} google={connected} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("plan trip").closest("li")!;
     await user.click(within(row).getByRole("button", { name: /schedule/i }));
     // The detailed "available lists" message wins over the generic dictionary
@@ -1082,8 +1068,7 @@ describe("InboxView — ICS 'Add to calendar' (S0 #29)", () => {
       <InboxView
         initialItems={[makeItem({ id: "s1", text: "Call dentist", status: "triaged", taskId: "t-s1", stepsTotal: 0 })]}
         settings={settings}
-        google={null}
-      />,
+        google={null} welcomeVisible={false} resumeStep={null} />,
     );
     const user = userEvent.setup();
     const btn = screen.getByRole("button", { name: /add to calendar/i });
@@ -1101,8 +1086,7 @@ describe("InboxView — ICS 'Add to calendar' (S0 #29)", () => {
       <InboxView
         initialItems={[makeItem({ id: "s1", status: "triaged", taskId: "t-s1", stepsTotal: 0 })]}
         settings={settings}
-        google={{ configured: true, connected: true, needsReconnect: false }}
-      />,
+        google={{ configured: true, connected: true, needsReconnect: false }} welcomeVisible={false} resumeStep={null} />,
     );
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "All options" }));
@@ -1114,8 +1098,7 @@ describe("InboxView — ICS 'Add to calendar' (S0 #29)", () => {
       <InboxView
         initialItems={[makeItem({ id: "s1", status: "triaged", taskId: "t-s1", stepsTotal: 0, scheduledAt: new Date() })]}
         settings={settings}
-        google={null}
-      />,
+        google={null} welcomeVisible={false} resumeStep={null} />,
     );
     expect(screen.getByText(/scheduled ✓/i)).toBeInTheDocument();
   });
@@ -1124,8 +1107,7 @@ describe("InboxView — ICS 'Add to calendar' (S0 #29)", () => {
       <InboxView
         initialItems={[makeItem({ id: "s1", status: "triaged", taskId: "t-s1", stepsTotal: 0 })]}
         settings={settings}
-        google={null}
-      />,
+        google={null} welcomeVisible={false} resumeStep={null} />,
     );
     expect(screen.queryByText(/scheduled ✓/i)).toBeNull();
   });
@@ -1133,7 +1115,7 @@ describe("InboxView — ICS 'Add to calendar' (S0 #29)", () => {
 
 describe("InboxView — needs-review rows adopt the v6 inline-actions frame", () => {
   it("renders SHORT inline buttons: Break into steps, Add to-do, Save, Complete (full labels live in ▾)", () => {
-    render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} />);
+    render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("capture me").closest("li")!;
     expect(within(row).getByRole("button", { name: /Break into steps/ })).toBeInTheDocument();
     expect(within(row).getByRole("button", { name: "Add to-do" })).toBeInTheDocument();
@@ -1145,7 +1127,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
 
   it("v6: shows a 📥 Move-to icon (aria 'Move to') in the end cluster, distinct from the ▾ 'Move to…' entry", async () => {
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} />);
+    render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("capture me").closest("li")!;
     expect(within(row).getByRole("button", { name: "Move to" })).toBeInTheDocument();
     expect(within(row).queryByRole("button", { name: "Move to…" })).not.toBeInTheDocument();
@@ -1156,7 +1138,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
   it("v6: with Google connected, the ▾ menu adds a full-text 'Schedule' entry alongside the 📅 icon", async () => {
     const user = userEvent.setup();
     const connected = { configured: true, connected: true, needsReconnect: false };
-    render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} google={connected} />);
+    render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} google={connected} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("capture me").closest("li")!;
     expect(within(row).getAllByRole("button", { name: "Schedule" })).toHaveLength(1); // 📅 icon only
     await user.click(within(row).getByRole("button", { name: "All options" }));
@@ -1166,7 +1148,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
   it("clicking Add as single to-do (Keep-as-task) fires directly, no menu involved", async () => {
     const { keepAsTask } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} />);
+    render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("capture me").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Add to-do" }));
     expect(keepAsTask).toHaveBeenCalledWith("n1");
@@ -1175,7 +1157,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
   it("clicking the inline 'Save' is a direct MOVE to the Saved bucket via the shared dispatcher", async () => {
     const { snoozeBrainDumpItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} />);
+    render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("capture me").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Save" }));
     // The move went through moveItemToBucket → dropPlan(needsReview → savedLater)…
@@ -1187,7 +1169,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
 
   it("the ▾ menu's full-label 'Save for later' dispatches the same Saved-bucket move as the inline 'Save'", async () => {
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} />);
+    render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("capture me").closest("li")!;
     // Inline short button is "Save"; the dropdown carries the full "Save for later".
     expect(within(row).getByRole("button", { name: "Save" })).toBeInTheDocument();
@@ -1198,7 +1180,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
 
   it("delete is inline in the end cluster and still requires a two-step confirm", async () => {
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} />);
+    render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("capture me").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Delete" }));
     expect(deleteBrainDumpItem).not.toHaveBeenCalled();
@@ -1208,7 +1190,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
 
   it("▾ All options mirrors the actions in full: Move to… (pinned first), full labels, Snooze 1h, Edit task title", async () => {
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} />);
+    render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("capture me").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "All options" }));
     const menuButtons = within(row).getAllByRole("button");
@@ -1226,11 +1208,78 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
   it("Snooze 1h in the ▾ menu is a SEPARATE direct snooze — it does not go through the move dispatcher", async () => {
     const { snoozeBrainDumpItem } = await import("@/app/actions/braindump");
     const user = userEvent.setup();
-    render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} />);
+    render(<InboxView initialItems={[makeItem({ id: "n1", text: "capture me" })]} settings={settings} welcomeVisible={false} resumeStep={null} />);
     const row = screen.getByText("capture me").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "All options" }));
     await user.click(within(row).getByRole("button", { name: "Snooze 1h" }));
     expect(snoozeBrainDumpItem).toHaveBeenCalledWith("n1", 60);
     expect(dropPlan).not.toHaveBeenCalled();
+  });
+});
+
+// Task 3 (Phase 5, #8) — first-run welcome card + resume banner, wired from
+// the Inbox page's computed welcomeVisible/resumeStep props.
+describe("InboxView — welcome card (Task 3, #8)", () => {
+  it("welcomeVisible=true renders the WelcomeCard above the rest of the inbox", () => {
+    render(
+      <InboxView
+        initialItems={[]}
+        settings={settings}
+        welcomeVisible={true}
+        resumeStep={null}
+      />,
+    );
+    expect(screen.getByRole("region", { name: "Welcome" })).toBeInTheDocument();
+    expect(
+      screen.getByText(/Welcome to dlectroflow, you are in the inbox/),
+    ).toBeInTheDocument();
+  });
+
+  it("welcomeVisible=false renders no WelcomeCard", () => {
+    render(
+      <InboxView
+        initialItems={[]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    expect(screen.queryByRole("region", { name: "Welcome" })).not.toBeInTheDocument();
+    expect(screen.queryByText("👋 Welcome to dlectroflow")).not.toBeInTheDocument();
+  });
+});
+
+describe("InboxView — resume banner (Task 3, #8)", () => {
+  it("resumeStep set renders a status banner with the step text + a resume link to /focus/<id>", () => {
+    render(
+      <InboxView
+        initialItems={[]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={{ id: "step-42", text: "draft the outline" }}
+      />,
+    );
+    // dnd-kit's own live region also has role="status", so scope from the
+    // resume link (unique) up to its containing banner rather than
+    // getByRole("status") directly.
+    const link = screen.getByRole("link", { name: /resume/i });
+    expect(link).toHaveAttribute("href", "/focus/step-42");
+    const banner = link.closest('[role="status"]');
+    expect(banner).not.toBeNull();
+    expect(banner).toHaveTextContent(/draft the outline/);
+    expect(banner).toHaveTextContent(/Paused focus step/);
+  });
+
+  it("resumeStep=null renders no resume banner", () => {
+    render(
+      <InboxView
+        initialItems={[]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    expect(screen.queryByText(/Paused focus step/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /resume/i })).not.toBeInTheDocument();
   });
 });

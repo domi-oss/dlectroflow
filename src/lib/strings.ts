@@ -17,7 +17,6 @@ export const STRINGS = {
   "action.saveForLater": { plain: "Save for later",    playful: "🥫 Save for later" },
   "action.confirmSteps": { plain: "Confirm steps",     playful: "✅ Confirm steps" },
   "action.startFocus":   { plain: "Start focusing",    playful: "🍽️ Start focusing" },
-  "action.pauseForNow":  { plain: "Pause for now",     playful: "⏸️ Pause for now" },
   "action.moreSteps":    { plain: "More steps",        playful: "🍞 More steps" },
   "action.fewerSteps":   { plain: "Fewer steps",       playful: "🥖 Fewer steps" },
   "action.backToInbox":  { plain: "Back to inbox",     playful: "🍳 Back to inbox" },
@@ -114,11 +113,17 @@ export const STRINGS = {
   "focus.complete":     { plain: "✅ Complete",          playful: "✅ Complete" },
   "focus.pause":        { plain: "⏸️ Pause",            playful: "⏸️ Pause" },
   "focus.resume":       { plain: "▶ Resume",            playful: "▶ Resume" },
-  "focus.giveUp":       { plain: "Pause for now",       playful: "⏸️ Pause for now" },
   "focus.timesUp":      { plain: "Time's up — did you finish?",    playful: "⏰ Time's up — did you finish?" },
   "focus.yesDone":      { plain: "✅ Yes, done!",        playful: "✅ Yes, done!" },
   "focus.notYet":       { plain: "Not yet",             playful: "🔁 Not yet" },
   "focus.nextStep":     { plain: "Focus the next step", playful: "Focus the next bite" },
+  "focus.pauseForNow":  { plain: "⏸️ Pause for now",    playful: "⏸️ Pause for now" },
+
+  // ── Resume banner (Phase 5, #8) — surfaces the most-recent paused/open focus
+  // step on the Inbox so a user can jump straight back in. ⏸/→ are functional
+  // status glyphs, allowed in Plain voice.
+  "focus.pausedBanner": { plain: "⏸ Paused focus step —", playful: "⏸ Paused focus step —" },
+  "focus.resumeArrow":  { plain: "resume →",              playful: "resume →" },
 
   // ── Breakdown confirm ──────────────────────────────────────────────────────
   "breakdown.looksRight": { plain: "Looks right",       playful: "👍 Looks right" },
@@ -153,6 +158,21 @@ export const STRINGS = {
   // ── Progress ───────────────────────────────────────────────────────────────
   "progress.done":       { plain: "done",              playful: "done" },
 
+  // ── First-run welcome card (Phase 5, #8) ──────────────────────────────────
+  // v2: the card links out using the app's own section vocabulary (nav.everything
+  // for /library, nav.focusTimer for /focus). welcome.help stays voice-neutral,
+  // Welcome body is composed from fragments so the Focus Timer / Library / Help
+  // links can sit INLINE in the sentences (see welcome-card.tsx). The 👋 lives
+  // in the lead (the separate title was dropped). welcome.* keys are exempt from
+  // the emoji-free-Plain guard, so the 👋 in Plain is intentional.
+  "welcome.lead":         { plain: "👋 Welcome to dlectroflow, you are in the inbox. Write down anything on your mind in the box below. Break big tasks into smaller steps, use the ", playful: "👋 Welcome to dlectroflow, you're in the inbox. Dump anything on your mind in the box below. Snack-size big tasks into bite-size steps, use the " },
+  "welcome.focusLink":    { plain: "Focus Timer", playful: "Focus Timer" },
+  "welcome.afterFocus":   { plain: " to focus on a task at a time, and tick them off as you go, earning points for your activity! Everything you have captured lives in your ", playful: " to chew through one bite at a time, and check them off as you go — racking up points for every bite! Everything you've captured keeps in your " },
+  "welcome.libraryLink":  { plain: "Library", playful: "Larder" },
+  "welcome.afterLibrary": { plain: ". View the ", playful: ". Peek at the " },
+  "welcome.helpLink":     { plain: "Help section", playful: "Help section" },
+  "welcome.afterHelp":    { plain: " for further information.", playful: " for the full recipe." },
+  "welcome.dismiss": { plain: "Got it",         playful: "Got it" },
   // ── Phase 6 — auto-save affordance ─────────────────────────────────────────
   // ✓ is a functional glyph (allowed in plain); → in link/body text likewise.
   "settings.saved":      { plain: "Saved ✓",           playful: "Saved ✓" },
