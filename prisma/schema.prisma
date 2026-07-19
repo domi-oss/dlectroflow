@@ -74,20 +74,6 @@ model Settings {
   workspace             Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
-// ── Reclaim MCP OAuth (single-user demo; all values obtained at runtime) ──
-// Never committed — lives in the DB (gitignored SQLite locally / Postgres deploy).
-model ReclaimAuth {
-  id           String    @id @default("singleton")
-  clientId     String? // from dynamic client registration
-  clientSecret String?
-  redirectUri  String? // origin the client was registered for; re-register on change
-  accessToken  String?
-  refreshToken String?
-  expiresAt    DateTime?
-  scope        String?
-  updatedAt    DateTime  @updatedAt
-}
-
 // ── Google Tasks OAuth (single-user demo; tokens obtained at runtime) ──────
 // client_id/secret come from env (GOOGLE_CLIENT_ID/SECRET); only tokens here.
 model GoogleAuth {
@@ -126,7 +112,7 @@ model BrainDumpItem {
   @@index([workspaceId])
 }
 
-// ── Feature 2 — Task Breakdown → Reclaim ──────────────────────────────────
+// ── Feature 2 — Task Breakdown → Scheduling ───────────────────────────────
 model Task {
   id               String          @id @default(cuid())
   title            String
@@ -156,8 +142,7 @@ model Step {
   total           Int
   estMinutes      Int
   subtaskEmoji    String?
-  reclaimTaskId   String?
-  googleTaskId    String? // id of the synced Google Task (Reclaim ingests it)
+  googleTaskId    String? // id of the synced Google Task (Reclaim ingests it downstream)
   googleTaskListId String?
   scheduledAt     DateTime?
   done            Boolean        @default(false)
@@ -192,7 +177,6 @@ model FocusSession {
   endedAt       DateTime?
   durationMin   Int?
   outcome       String? // completed | requeued | gaveup
-  reclaimSynced Boolean   @default(false)
   workspaceId   String
   workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 

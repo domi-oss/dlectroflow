@@ -127,12 +127,12 @@ export type CompleteResult = {
   ok: boolean;
   nextStepId: string | null;
   points: number;
-  reclaimSynced: boolean;
+  googleSynced: boolean;
   streak: number | null;
   freshStart: boolean;
 };
 
-/** Finish a session as completed: mark the step done, sync Reclaim, log rewards. */
+/** Finish a session as completed: mark the step done, complete its linked Google Task, log rewards. */
 export async function completeFocus(
   sessionId: string,
   opts: { durationMin: number; addedMin: number },
@@ -145,7 +145,7 @@ export async function completeFocus(
       ok: false,
       nextStepId: null,
       points: 0,
-      reclaimSynced: false,
+      googleSynced: false,
       streak: null,
       freshStart: false,
     };
@@ -164,23 +164,18 @@ export async function completeFocus(
       ok: false,
       nextStepId: null,
       points: 0,
-      reclaimSynced: false,
+      googleSynced: false,
       streak: null,
       freshStart: false,
     };
 
-  const reclaimSynced = await completeGoogleTaskForStep(step);
+  const googleSynced = await completeGoogleTaskForStep(step);
 
   // Guard step ownership before update
   const stepCheck = await prisma.step.findFirst({ where: { id: step.id, task: { workspaceId } } });
   if (stepCheck) {
     await prisma.step.update({ where: { id: step.id }, data: { done: true } });
   }
-
-  await prisma.focusSession.update({
-    where: { id: sessionId },
-    data: { reclaimSynced },
-  });
 
   // Points + streak + badges (dashboard reads these).
   const streak = await rewardStepDone(workspaceId);
@@ -205,7 +200,7 @@ export async function completeFocus(
     ok: true,
     nextStepId: next?.id ?? null,
     points: 15,
-    reclaimSynced,
+    googleSynced,
     streak: streak?.current ?? null,
     freshStart: streak?.freshStart ?? false,
   };
