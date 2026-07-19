@@ -18,6 +18,9 @@ export type RoundupSettings = {
   roundupDemoOverride: boolean;
   roundupEmailEnabled: boolean;
   roundupEmail: string | null;
+  // Phase 6 — gates the round-up's *browser notification* (the in-app recap is
+  // unaffected). Permission still gates delivery on top of this.
+  notifyRoundup: boolean;
 };
 
 function ymd(d: Date): string {
@@ -80,7 +83,7 @@ export function RoundupCard({
     });
 
   const fireNow = async () => {
-    if (permission === "granted") {
+    if (permission === "granted" && settings.notifyRoundup) {
       await showReminder(
         "🌇 Time to wrap up",
         "Here's how your day went — take a look before you clock off.",
@@ -109,7 +112,7 @@ export function RoundupCard({
       firedRef.current = true;
       if (!settings.roundupDemoOverride) localStorage.setItem(dayKey, "1");
       (async () => {
-        if (notificationPermission() === "granted") {
+        if (notificationPermission() === "granted" && settings.notifyRoundup) {
           await showReminder(
             "🌇 Time to wrap up",
             "Your end-of-day round-up is ready on the dashboard.",
@@ -124,7 +127,12 @@ export function RoundupCard({
     tick();
     const id = setInterval(tick, 5000);
     return () => clearInterval(id);
-  }, [settings.roundupDemoOverride, settings.workdayEndTime, router]);
+  }, [
+    settings.roundupDemoOverride,
+    settings.workdayEndTime,
+    settings.notifyRoundup,
+    router,
+  ]);
 
   return (
     <section className="rounded-xl border bg-gradient-to-br from-orange-50 to-amber-50 p-5 dark:from-orange-950/20 dark:to-amber-950/20">

@@ -8,7 +8,7 @@ import {
 } from "@/lib/auth/session";
 import { authConfig } from "@/lib/auth/config";
 import { OWNER_WORKSPACE_ID } from "@/lib/constants";
-import { guestSandboxTtlHours, purgeExpiredGuests } from "@/lib/purge";
+import { guestSandboxTtlHours } from "@/lib/purge";
 
 export class MissingWorkspaceError extends Error {
   constructor() {
@@ -60,7 +60,6 @@ export async function currentWorkspaceId(): Promise<string> {
     header: hdrs.get(GUEST_WS_HEADER) ?? undefined,
   });
   await touchWorkspace(id);
-  void purgeExpiredGuests().catch(() => {});
   return id;
 }
 

@@ -1,64 +1,25 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
+import { guestSandboxTtlHours } from "./purge";
 
-const { tx, db } = vi.hoisted(() => {
-  const tx = {
-    brainDumpItem: { deleteMany: vi.fn() },
-    step: { deleteMany: vi.fn() },
-    breakdownTurn: { deleteMany: vi.fn() },
-    focusSession: { deleteMany: vi.fn() },
-    dayRollup: { deleteMany: vi.fn() },
-    rewardEvent: { deleteMany: vi.fn() },
-    streak: { deleteMany: vi.fn() },
-    streakRecord: { deleteMany: vi.fn() },
-    badge: { deleteMany: vi.fn() },
-    dailySpark: { deleteMany: vi.fn() },
-    settings: { deleteMany: vi.fn() },
-    task: { deleteMany: vi.fn() },
-    workspace: { delete: vi.fn() },
-  };
-  const db = {
-    $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
-    workspace: { findMany: vi.fn() },
-  };
-  return { tx, db };
+// NOTE: the purge execution logic moved to the self-contained CronJob
+// entrypoint (prisma/scheduled-purge.ts, covered by scheduled-purge.test.ts)
+// so it can run inside the standalone prod image. Only the guest-TTL helper
+// remains here.
+
+const original = process.env.GUEST_SANDBOX_TTL_HOURS;
+afterEach(() => {
+  if (original === undefined) delete process.env.GUEST_SANDBOX_TTL_HOURS;
+  else process.env.GUEST_SANDBOX_TTL_HOURS = original;
 });
 
-vi.mock("@/lib/db", () => ({ prisma: db }));
-
-import { purgeWorkspace, purgeExpiredGuests } from "./purge";
-
-beforeEach(() => vi.clearAllMocks());
-
-describe("purgeWorkspace", () => {
-  it("refuses to purge the owner workspace", async () => {
-    await expect(purgeWorkspace("owner")).rejects.toThrow();
-    expect(db.$transaction).not.toHaveBeenCalled();
+describe("guestSandboxTtlHours", () => {
+  it("defaults to 24 hours when GUEST_SANDBOX_TTL_HOURS is unset", () => {
+    delete process.env.GUEST_SANDBOX_TTL_HOURS;
+    expect(guestSandboxTtlHours()).toBe(24);
   });
-  it("deletes across scoped models then the workspace row", async () => {
-    await purgeWorkspace("guest-123");
-    // Relation-filtered children (cascade via Task)
-    expect(tx.step.deleteMany).toHaveBeenCalledWith({ where: { task: { workspaceId: "guest-123" } } });
-    expect(tx.breakdownTurn.deleteMany).toHaveBeenCalledWith({ where: { task: { workspaceId: "guest-123" } } });
-    // Direct-workspaceId models
-    expect(tx.brainDumpItem.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
-    expect(tx.focusSession.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
-    expect(tx.dayRollup.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
-    expect(tx.rewardEvent.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
-    expect(tx.streak.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
-    expect(tx.streakRecord.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
-    expect(tx.badge.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
-    expect(tx.dailySpark.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
-    expect(tx.settings.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
-    expect(tx.task.deleteMany).toHaveBeenCalledWith({ where: { workspaceId: "guest-123" } });
-    // Workspace row last
-    expect(tx.workspace.delete).toHaveBeenCalledWith({ where: { id: "guest-123" } });
-  });
-});
 
-describe("purgeExpiredGuests", () => {
-  it("purges each expired guest and returns the count", async () => {
-    db.workspace.findMany.mockResolvedValue([{ id: "g1" }, { id: "g2" }]);
-    const n = await purgeExpiredGuests();
-    expect(n).toBe(2);
+  it("honors a configured GUEST_SANDBOX_TTL_HOURS value", () => {
+    process.env.GUEST_SANDBOX_TTL_HOURS = "72";
+    expect(guestSandboxTtlHours()).toBe(72);
   });
 });

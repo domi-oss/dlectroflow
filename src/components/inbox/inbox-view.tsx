@@ -121,10 +121,13 @@ export function InboxView({
   initialItems,
   settings,
   google = null,
+  notifyAging = true,
 }: {
   initialItems: Item[];
   settings: AgingSettings;
   google?: GoogleStatus | null;
+  /** Phase 6 — gates the aging→browser-notification firing (permission still applies). */
+  notifyAging?: boolean;
 }) {
   const router = useRouter();
   const voice = useVoice();
@@ -212,6 +215,7 @@ export function InboxView({
   // once means "stop bugging me about this," not just "don't show the banner."
   useEffect(() => {
     if (permission !== "granted") return;
+    if (!notifyAging) return; // Phase 6 — per-type notification preference
     const due = needsReview.filter(
       (i) =>
         isAging(i.createdAt, settings) &&
@@ -228,7 +232,7 @@ export function InboxView({
       }
       router.refresh();
     })();
-  }, [needsReview, permission, settings, router]);
+  }, [needsReview, permission, settings, router, notifyAging]);
 
   const run = (fn: () => Promise<unknown>) =>
     startTransition(async () => {
