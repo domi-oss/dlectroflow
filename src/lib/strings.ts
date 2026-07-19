@@ -134,6 +134,22 @@ export const STRINGS = {
   },
   "focus.paused":       { plain: "⏸ paused",             playful: "⏸ paused" },
 
+  // ── Focus launcher redesign (MR ①) — meta line, resume hero, lanes ──────────
+  // 🔥 / ▶ / ✓ / ⏸ are functional glyphs (allowed in plain). Numbers are
+  // composed in JSX around these static units (t() has no interpolation).
+  "focus.meta.focusedToday": { plain: "focused today", playful: "focused today" },
+  "focus.meta.dayStreak":    { plain: "-day streak",   playful: "-day streak" },
+  "focus.meta.toClear":      { plain: "to clear",      playful: "to clear" },
+  "focus.hero.left":         { plain: "left",          playful: "left" },
+  "focus.hero.next":         { plain: "next →",        playful: "next →" },
+  "focus.hero.resume":       { plain: "▶ Resume focus", playful: "▶ Resume focusing" },
+  "focus.lane.start":        { plain: "▶ Start",       playful: "▶ Start" },
+  "focus.lane.open":         { plain: "▶ Open",        playful: "▶ Open" },
+  "focus.launcher.allClear": {
+    plain: "All caught up — nothing left to focus right now. ✅",
+    playful: "🎉 Plates cleared! Nothing left to focus right now.",
+  },
+
   // ── Breakdown confirm ──────────────────────────────────────────────────────
   "breakdown.looksRight": { plain: "Looks right",       playful: "👍 Looks right" },
 
