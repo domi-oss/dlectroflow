@@ -96,7 +96,7 @@ export default async function TaskPage({
         title={task.title}
         initialProposal={initialProposal}
         startManual={manual === "1"}
-        google={google}
+        google={ctx.google ?? google}
         isGuest={!ctx.isOwner}
         scheduled={task.scheduledAt != null}
       />

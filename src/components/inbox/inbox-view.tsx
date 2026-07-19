@@ -44,7 +44,6 @@ import { startBreakdown } from "@/app/actions/breakdown";
 import { pushStepsToGoogleTasks, scheduleSingleTask } from "@/app/actions/google-schedule";
 import { scheduleViaIcs } from "@/app/actions/ics-schedule";
 import { downloadIcs } from "@/lib/download-ics";
-import { leadSchedulingMethod } from "@/lib/scheduling/providers";
 import type { GoogleConnStatus } from "@/lib/scheduling/types";
 import { StatusPill } from "@/components/inbox/status-pill";
 import { TaskSteps } from "@/components/breakdown/task-steps";
@@ -253,12 +252,9 @@ export function InboxView({
   const rawGoogle: GoogleConnStatus | null = google
     ? { ...google, needsReconnect: google.needsReconnect || reconnectRequired }
     : null;
-  // The seam decides whether these rows lead with the Google control (owner) or
-  // ICS (guest) (S1, #34). Behaviour-identical to the old `google != null` switch
-  // — `leadSchedulingMethod` returns "googleTasks" for any owner status, "ics"
-  // for guests — so every downstream `effectiveGoogle ? … : icsProps` is unchanged.
-  const effectiveGoogle: GoogleConnStatus | null =
-    leadSchedulingMethod(rawGoogle) === "googleTasks" ? rawGoogle : null;
+  // rawGoogle is already null for guests (owner-gated at the server boundary),
+  // so it directly encodes whether these rows lead with Google (owner) or ICS (guest).
+  const effectiveGoogle: GoogleConnStatus | null = rawGoogle;
 
   const runSchedule = (
     itemId: string,

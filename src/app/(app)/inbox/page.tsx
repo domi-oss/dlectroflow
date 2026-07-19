@@ -2,7 +2,6 @@ import { prisma, getSettings } from "@/lib/db";
 import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
 import { getGoogleStatus } from "@/lib/google";
 import { BrainDumpStatus } from "@/lib/constants";
-import type { SchedulingContext } from "@/lib/scheduling/types";
 import { InboxView } from "@/components/inbox/inbox-view";
 import { firstResumableStep } from "@/components/inbox/resume-step";
 
@@ -45,17 +44,11 @@ export default async function InboxPage({
     // stays flat (Duo review: was a serial round-trip after the Promise.all).
     getGoogleStatus(),
   ]);
-  // Build the scheduling context once at the server boundary (S1 seam, #34) —
-  // the single resolved-facts object the seam reasons over. `ctx.google` is the
-  // owner's status (null for guests, same as the settings Integrations panel);
-  // when F (#35) makes Google per-user, only this ctx construction + the
-  // provider's isAvailable() change, not the InboxView call site.
-  const ctx: SchedulingContext = {
-    workspaceId,
-    isOwner: owner,
-    google: owner ? googleStatus : null,
-  };
-  const google = ctx.google;
+  // The owner's Google status (null for guests, same as the settings
+  // Integrations panel) — resolved once at the server boundary (S1 seam, #34).
+  // When F (#35) makes Google per-user, only this owner-gate + the provider's
+  // isAvailable() change, not the InboxView call site.
+  const google = owner ? googleStatus : null;
 
   const items = rawItems.map(({ task, ...item }) => ({
     ...item,
