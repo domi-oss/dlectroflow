@@ -49,6 +49,7 @@ export default async function DashboardPage() {
           roundupDemoOverride: settings.roundupDemoOverride,
           roundupEmailEnabled: settings.roundupEmailEnabled,
           roundupEmail: settings.roundupEmail,
+          notifyRoundup: settings.notifyRoundup,
         }}
         emailConfigured={emailConfigured()}
       />

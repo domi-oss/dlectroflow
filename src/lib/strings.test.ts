@@ -88,6 +88,21 @@ describe("t() function", () => {
     ["step.editTitle",        "plain",   "Edit step title"],
     ["step.sendToReview",     "plain",   "Send back to review"],
     ["step.sendToReview",     "playful", "🥫 Send back to review"],
+    // Phase 6 — notifications + auto-save
+    ["settings.saved",        "plain",   "Saved ✓"],
+    ["settings.saved",        "playful", "Saved ✓"],
+    ["notify.heading",        "plain",   "Notifications"],
+    ["notify.heading",        "playful", "🔔 Notifications"],
+    ["notify.roundup",        "plain",   "End-of-day round-up"],
+    ["notify.roundup",        "playful", "🌇 End-of-day round-up"],
+    ["notify.aging",          "plain",   "Aging reminders"],
+    ["notify.aging",          "playful", "🍞 Aging reminders"],
+    ["notify.dailyReview",    "plain",   "Daily review nudge"],
+    ["notify.dailyReview",    "playful", "🌙 Daily review nudge"],
+    ["notify.nudgeTime",      "plain",   "Nudge time"],
+    ["notify.nudgeTitle",     "plain",   "Time for your daily review"],
+    ["notify.enable",         "plain",   "Enable desktop notifications"],
+    ["notify.enable",         "playful", "🔔 Enable desktop notifications"],
   ];
 
   for (const [key, voice, expected] of cases) {
@@ -429,6 +444,23 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "step.editEstimate",
     "step.editTitle",
     "step.sendToReview",
+    // Phase 6 — plain notification/auto-save copy stays emoji/jargon-free
+    // (✓ and → are functional glyphs, allowed in plain).
+    "settings.saved",
+    "settings.saveError",
+    "notify.heading",
+    "notify.intro",
+    "notify.roundup",
+    "notify.roundupHint",
+    "notify.aging",
+    "notify.agingHint",
+    "notify.dailyReview",
+    "notify.dailyReviewHint",
+    "notify.nudgeTime",
+    "notify.enable",
+    "notify.blocked",
+    "notify.nudgeTitle",
+    "notify.nudgeBody",
     // Library "Everything" hub (#8 Phase 3) — plain variants emoji-free
     "action.back",
     "lib.tab.singleTask",

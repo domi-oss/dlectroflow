@@ -5,6 +5,7 @@ import { isOwnerRequest, currentWorkspaceId } from "@/lib/workspace";
 import { clientIpHash, guestQuotaConfig, peekGuestAllowance } from "@/lib/guest-quota";
 import { GuestIndicator } from "@/components/guest/guest-indicator";
 import { VoiceProvider } from "@/components/voice-provider";
+import { ReviewNudge } from "@/components/dashboard/review-nudge";
 import { AppMenu } from "@/components/nav/app-menu";
 import { type Voice } from "@/lib/strings";
 
@@ -62,7 +63,13 @@ export default async function AppLayout({
         </div>
       </header>
       <div className="mx-auto w-full max-w-3xl flex-1 px-4 py-6">
-        <VoiceProvider voice={voice}>{children}</VoiceProvider>
+        <VoiceProvider voice={voice}>
+          <ReviewNudge
+            notifyDailyReview={settings.notifyDailyReview}
+            dailyReviewNudgeTime={settings.dailyReviewNudgeTime}
+          />
+          {children}
+        </VoiceProvider>
       </div>
     </div>
   );
