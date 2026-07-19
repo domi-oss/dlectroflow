@@ -1,11 +1,11 @@
 import { prisma } from "@/lib/db";
 import { SINGLETON_ID } from "@/lib/constants";
-import { createPkce, randomState } from "@/lib/reclaim";
+import { createPkce, randomState } from "@/lib/oauth-pkce";
 import { encryptToken, decryptNullable } from "@/lib/crypto/token-cipher";
 
-// Google OAuth 2.0 + Tasks API. Unlike Reclaim, Google has no dynamic client
-// registration — you create an OAuth client once in Google Cloud Console and
-// provide GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET via env.
+// Google OAuth 2.0 + Tasks API. Google has no dynamic client registration — you
+// create an OAuth client once in Google Cloud Console and provide
+// GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET via env.
 const AUTHORIZE_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const TASKS_API = "https://tasks.googleapis.com/tasks/v1";

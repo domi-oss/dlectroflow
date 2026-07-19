@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAuthProvider } from "@/lib/auth/providers";
-import { createPkce, randomState } from "@/lib/reclaim";
+import { createPkce, randomState } from "@/lib/oauth-pkce";
 import { requestOrigin } from "@/lib/origin";
 
 export const runtime = "nodejs";
