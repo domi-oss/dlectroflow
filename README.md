@@ -204,6 +204,37 @@ npm run db:studio         # open Prisma Studio to browse data
 
 ---
 
+## Running E2E tests (Playwright)
+
+Real-browser smoke suite (Chromium). Requires a local Postgres with the schema applied.
+
+```bash
+# One-time: install the browser
+npx playwright install chromium
+
+# Ensure the DB schema exists (uses your DATABASE_URL)
+npm run db:deploy
+
+# Build once (Playwright serves the app via `next start`)
+npm run build
+
+# Run the smoke suite
+npm run test:e2e
+```
+
+Auth is handled automatically: `e2e/global-setup.ts` forges a valid owner session
+cookie with `signSession()` — no OAuth login is performed and no bypass code exists
+in application source. Specs run serially against one owner workspace and scope
+assertions to unique per-run strings. On failure in CI, an HTML report is uploaded
+as a job artifact (`playwright-report/`).
+
+Running locally against your own dev database accumulates `E2E …` rows in the
+owner workspace across repeated runs — assertions stay correct regardless since
+each run's items are scoped by a unique timestamped label, and CI is unaffected
+because it runs against an ephemeral, per-job Postgres service.
+
+---
+
 ## 🐳 Deploy
 
 The app deploys automatically via **GitLab CI/CD to GKE Autopilot** (europe-west2):
