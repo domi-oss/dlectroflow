@@ -22,9 +22,8 @@ operators upgrading a self-hosted instance don't get surprised.
 ## [0.1.0] - 2026-07-19
 
 The wireframe → product build (#8): a Plain/Playful voice layer, inbox
-information architecture, the Library hub, focus launcher, settings hub, and an
-accessibility pass — plus the #21 security-hardening suite and guest-data
-retention.
+information architecture, the Library hub, settings hub, and an accessibility
+pass — plus the #21 security-hardening suite and guest-data retention.
 
 ### ⚠️ Upgrade notes (operator action required)
 
@@ -64,8 +63,6 @@ retention.
 - Settings hub finish — freshness settings that auto-save (the Save button is
   gone), per-type desktop-notification toggles (end-of-day round-up / aging
   reminders / daily-review nudge), and a client-triggered daily-review nudge (#8).
-- `/focus` launcher — lists the next incomplete step for each in-progress task
-  (resumable-first) and links straight into the focus timer (#8).
 
 ### Changed
 
