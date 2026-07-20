@@ -58,7 +58,16 @@ function main(): void {
     for (const key of extractUsedEnvKeys(contents)) usedKeys.add(key);
   }
 
-  const documentedKeys = extractDocumentedEnvKeys(readFileSync(ENV_EXAMPLE_PATH, "utf8"));
+  let envExampleContents: string;
+  try {
+    envExampleContents = readFileSync(ENV_EXAMPLE_PATH, "utf8");
+  } catch {
+    console.error(`env-drift check FAILED — could not read ${ENV_EXAMPLE_PATH}`);
+    console.error("Make sure .env.example exists at the project root.");
+    process.exitCode = 1;
+    return;
+  }
+  const documentedKeys = extractDocumentedEnvKeys(envExampleContents);
   const { missingFromExample, unusedInExample } = computeEnvDrift(usedKeys, documentedKeys);
 
   if (missingFromExample.length === 0 && unusedInExample.length === 0) {
