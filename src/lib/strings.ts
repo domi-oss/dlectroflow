@@ -150,6 +150,52 @@ export const STRINGS = {
     playful: "🎉 Plates cleared! Nothing left to focus right now.",
   },
 
+  // ── Focus timer redesign (MR ②) — timer page, hint, settings group ──────────
+  // ✓ / ⏰ / 🎧 / ⏱️ are functional or playful-only glyphs (see the voice note
+  // at the top). Numbers are composed in JSX around these static units.
+  "focus.timer.completeStep": { plain: "✓ Complete step", playful: "✓ Complete step" },
+  "focus.timer.of":           { plain: "of",              playful: "of" },
+  "focus.timer.leftInTask":   { plain: "left in task",    playful: "left in task" },
+  "focus.timer.steps":        { plain: "steps",           playful: "steps" },
+  "focus.tip.body": {
+    plain: "Make this timer yours — style, sounds, alarm & more.",
+    playful: "✨ Make this timer yours — style, sounds, alarm & more.",
+  },
+  "focus.tip.cta":            { plain: "Open settings →", playful: "Open settings →" },
+  "focusSettings.heading":    { plain: "Focus timer",     playful: "⏱️ Focus timer" },
+  "focusSettings.intro": {
+    plain: "How the focus timer looks and behaves.",
+    playful: "How your focus timer looks and behaves.",
+  },
+  "focusSettings.style":      { plain: "Timer style",     playful: "Timer style" },
+  "focusSettings.styleAuto":  { plain: "Match voice",     playful: "Match voice" },
+  "focusSettings.styleRing":  { plain: "Ring",            playful: "Ring" },
+  "focusSettings.styleDigits":{ plain: "Digits",          playful: "Digits" },
+  "focusSettings.styleBar":   { plain: "Bar",             playful: "Bar" },
+  "focusSettings.styleMug":   { plain: "Mug",             playful: "🍵 Mug" },
+  "focusSettings.minimal":    { plain: "Minimal / distraction-free", playful: "Minimal / distraction-free" },
+  "focusSettings.minimalHint": {
+    plain: "Hide the streak, task context and step tracker while the timer runs.",
+    playful: "Hide the streak, task context and step tracker while the timer runs.",
+  },
+  "focusSettings.keepAwake":  { plain: "Keep screen awake", playful: "Keep screen awake" },
+  "focusSettings.keepAwakeHint": {
+    plain: "Stop the screen dimming while a timer is running (where your device supports it).",
+    playful: "Stop the screen dimming while a timer is running (where your device supports it).",
+  },
+  "focusSettings.alarm":      { plain: "Alarm at time's-up", playful: "⏰ Alarm at time's-up" },
+  "focusSettings.alarmHint": {
+    plain: "Play a short chime (and vibrate on mobile) when the timer reaches zero.",
+    playful: "Play a short chime (and vibrate on mobile) when the timer reaches zero.",
+  },
+  "focusSettings.sound":      { plain: "Focus sounds",    playful: "🎧 Focus sounds" },
+  "focusSettings.soundHint": {
+    plain: "Loop a calm background track while you focus.",
+    playful: "Loop a calm background track while you focus.",
+  },
+  "focusSettings.soundOff":       { plain: "Off",         playful: "Off" },
+  "focusSettings.soundLofiCalm":  { plain: "Lo-fi (calm)", playful: "Lo-fi (calm)" },
+
   // ── Breakdown confirm ──────────────────────────────────────────────────────
   "breakdown.looksRight": { plain: "Looks right",       playful: "👍 Looks right" },
 
