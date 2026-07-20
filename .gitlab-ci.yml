@@ -167,11 +167,15 @@ build_app:
     # Version tag: compile so build_image can assemble the release image.
     - if: '$CI_COMMIT_TAG'
 
-# ── Test gate (#21 P3): tsc + eslint + vitest ahead of image/deploy ──────────
+# ── Test gate (#21 P3): tsc + eslint + env-drift + vitest ahead of image/deploy ─
 # Next 16's `next build` neither runs tests nor lints, so before this job a red
 # suite (or lint) could ride any compiling main commit straight into
 # deploy_production. Gating is double: build_image `needs` this job, and
 # deploy_production is stage-scheduled behind the build stage on main.
+# The env-drift check (#30) is folded in here rather than a separate job: it's
+# a cheap, DB-free static check (like tsc/lint) that reuses the same npm ci —
+# a standalone job would only add another install + runner spin-up for no
+# benefit.
 test_app:
   stage: build
   image: node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
@@ -197,6 +201,10 @@ test_app:
     # Errors fail the gate; the react-hooks compiler-era rules are warn-level
     # pending the #23 burn-down, so their findings stay visible but don't block.
     - npm run lint
+    # #30: keeps .env.example honest — fails on a process.env read in src/
+    # that isn't documented, or a documented key nothing reads any more (see
+    # src/lib/env-drift.ts for the diff logic + intentional-exception allowlist).
+    - npm run check:env
     - npx prisma migrate deploy   # schema for the integration tests' service DB
     - npm run test
   cache:
