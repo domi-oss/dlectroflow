@@ -4,6 +4,7 @@ import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
 import { getGoogleStatus } from "@/lib/google";
 import { SettingsPanel } from "@/components/settings/settings-panel";
 import { NotificationsSection } from "@/components/settings/notifications-section";
+import { FocusTimerSection } from "@/components/settings/focus-timer-section";
 import { IntegrationsPanel } from "@/components/settings/integrations-panel";
 import { t, type Voice } from "@/lib/strings";
 
@@ -41,6 +42,16 @@ export default async function SettingsPage() {
           notifyAging={settings.notifyAging}
           notifyDailyReview={settings.notifyDailyReview}
           dailyReviewNudgeTime={settings.dailyReviewNudgeTime}
+          voice={voice}
+        />
+      </div>
+      <div className="border-t pt-4">
+        <FocusTimerSection
+          timerStyle={settings.focusTimerStyle}
+          minimalMode={settings.focusMinimalMode}
+          keepAwake={settings.focusKeepAwake}
+          alarmEnabled={settings.focusAlarmEnabled}
+          sound={settings.focusSound}
           voice={voice}
         />
       </div>
