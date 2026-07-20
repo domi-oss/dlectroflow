@@ -69,6 +69,16 @@ model Settings {
   notifyAging           Boolean  @default(true)
   notifyDailyReview     Boolean  @default(false)
   dailyReviewNudgeTime  String   @default("17:00") // HH:mm
+  // MR ② — Focus timer redesign (appearance + behaviour). focusTimerStyle
+  // (nullable → resolve by voice) + focusSound mirror FocusTimerStyle /
+  // FocusSound in src/lib/constants.ts + their CHECK constraints
+  // (Settings_focusTimerStyle_check / Settings_focusSound_check).
+  focusTimerStyle          String?   // ring | digits | bar | mug (null → voice default)
+  focusMinimalMode         Boolean   @default(false)
+  focusKeepAwake           Boolean   @default(true)
+  focusAlarmEnabled        Boolean   @default(true)
+  focusSound               String    @default("off") // off | lofi_calm
+  focusTimerTipDismissedAt DateTime?
   updatedAt             DateTime @updatedAt
   workspaceId           String   @unique
   workspace             Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
