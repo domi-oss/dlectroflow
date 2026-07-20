@@ -30,9 +30,9 @@ vi.mock("@/components/voice-provider", () => ({ useVoice: () => mockVoice }));
 const alarmPlay = vi.fn();
 const loop = { play: vi.fn(), pause: vi.fn(), stop: vi.fn() };
 const wakeRelease = vi.fn();
-const createAlarm = vi.fn(() => ({ play: alarmPlay }));
-const createLoopPlayer = vi.fn(() => loop);
-const acquireWakeLock = vi.fn().mockResolvedValue({ release: wakeRelease });
+const createAlarm = vi.fn((..._args: unknown[]) => ({ play: alarmPlay }));
+const createLoopPlayer = vi.fn((..._args: unknown[]) => loop);
+const acquireWakeLock = vi.fn((..._args: unknown[]) => Promise.resolve({ release: wakeRelease }));
 vi.mock("@/lib/focus-sounds", () => ({
   createAlarm: (...a: unknown[]) => createAlarm(...a),
   createLoopPlayer: (...a: unknown[]) => createLoopPlayer(...a),
