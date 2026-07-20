@@ -7,6 +7,7 @@ import { TaskSteps } from "@/components/breakdown/task-steps";
 import { TaskSchedule } from "@/components/breakdown/task-schedule";
 import { getGoogleStatus } from "@/lib/google";
 import { t, type StringKey, type Voice } from "@/lib/strings";
+import type { SchedulingContext } from "@/lib/scheduling/types";
 import type { Proposal } from "@/lib/breakdown";
 
 export const dynamic = "force-dynamic";
@@ -56,6 +57,16 @@ export default async function TaskPage({
   ]);
   if (!task) notFound();
 
+  // Scheduling context resolved once at the server boundary (S1 seam, #34):
+  // `ctx.isOwner` drives the guest/owner control choice and `ctx.google` is the
+  // owner's status (null for guests). When F (#35) makes Google per-user, only
+  // this construction + the provider's isAvailable() change.
+  const ctx: SchedulingContext = {
+    workspaceId,
+    isOwner: owner,
+    google: owner ? google : null,
+  };
+
   const voice: Voice = settings.voice === "playful" ? "playful" : "plain";
   // `Object.hasOwn` (not just truthiness of the lookup) matters here: BACK_TARGETS
   // is a plain object, so `from` values like "__proto__" / "constructor" /
@@ -85,8 +96,11 @@ export default async function TaskPage({
         title={task.title}
         initialProposal={initialProposal}
         startManual={manual === "1"}
+        // BreakdownChat gates the Google section on `isGuest` (not on a nullable
+        // status), so it takes the always-present workspace status directly; the
+        // owner/guest split is carried by isGuest below.
         google={google}
-        isGuest={!owner}
+        isGuest={!ctx.isOwner}
         scheduled={task.scheduledAt != null}
       />
     );
@@ -159,7 +173,7 @@ export default async function TaskPage({
           <TaskSchedule
             taskId={task.id}
             scheduledAt={task.scheduledAt}
-            google={owner ? google : null}
+            google={ctx.google}
             voice={voice}
           />
         </div>

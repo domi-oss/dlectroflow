@@ -7,9 +7,9 @@ import { scheduleViaIcs } from "@/app/actions/ics-schedule";
 import { downloadIcs } from "@/lib/download-ics";
 import { ScheduleControl, type ScheduleControlProps } from "@/components/inbox/row-actions";
 import { scheduleState, SCHEDULE_ERROR_MESSAGES } from "@/components/inbox/inbox-view";
+import { leadSchedulingMethod } from "@/lib/scheduling/providers";
+import type { GoogleConnStatus } from "@/lib/scheduling/types";
 import { t, type Voice } from "@/lib/strings";
-
-type GoogleStatus = { configured: boolean; connected: boolean; needsReconnect: boolean };
 
 /**
  * The task working-view's own Schedule control (#8 follow-up to !83) — split
@@ -38,7 +38,7 @@ export function TaskSchedule({
   /** Owner + Google connection status; null for guests — mirrors
    *  inbox/page.tsx's `google = owner ? googleStatus : null` (guests always
    *  get the ICS control, never a live Google one). */
-  google: GoogleStatus | null;
+  google: GoogleConnStatus | null;
   // Required — the sole caller (tasks/[taskId]/page.tsx) always resolves and
   // passes this from settings, so a useVoice() context fallback here was dead.
   voice: Voice;
@@ -51,11 +51,15 @@ export function TaskSchedule({
   // red error next to a control that would just fail again.
   const [reconnectRequired, setReconnectRequired] = useState(false);
 
-  const effectiveGoogle: GoogleStatus | null = google
+  const effectiveGoogle: GoogleConnStatus | null = google
     ? { ...google, needsReconnect: google.needsReconnect || reconnectRequired }
     : null;
 
-  const schedule: ScheduleControlProps = effectiveGoogle
+  // Route the primary-vs-ICS choice through the seam (S1, #34): owners lead with
+  // the Google control, guests get ICS. `&& effectiveGoogle` only narrows the
+  // type — it is always non-null when the seam picks googleTasks.
+  const schedule: ScheduleControlProps =
+    leadSchedulingMethod(effectiveGoogle) === "googleTasks" && effectiveGoogle
     ? {
         state: scheduleState(effectiveGoogle, "ready_steps"),
         onScheduleSteps: () => {

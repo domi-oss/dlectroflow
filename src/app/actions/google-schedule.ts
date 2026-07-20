@@ -12,14 +12,13 @@ import {
   disconnectGoogle,
 } from "@/lib/google";
 import {
-  RewardType,
-  BadgeKey,
   OWNER_WORKSPACE_ID,
   TaskSource,
   TaskStatus,
 } from "@/lib/constants";
-import { logReward, awardBadge } from "@/lib/rewards";
 import { currentWorkspaceId } from "@/lib/workspace";
+import { awardFirstSchedule } from "@/lib/scheduling/award";
+import { SchedulingMethod } from "@/lib/scheduling/types";
 
 export type GoogleScheduleResult =
   | { ok: true; scheduled: number; listTitle: string }
@@ -117,23 +116,17 @@ export async function pushStepsToGoogleTasks(
     // Provider-agnostic marker + reward once (mirrors scheduleViaIcs so ICS and
     // Google share one "already scheduled" signal). The steps are already pushed
     // + committed above, so a reward failure must not return { ok: false } and
-    // prompt a retry (which would duplicate the Google tasks). Run independently
-    // via allSettled (a logReward failure must not skip the idempotent
-    // awardBadge) + log for observability (Duo !77).
+    // prompt a retry (which would duplicate the Google tasks) — the shared
+    // helper keeps rewards best-effort (#34).
     if (task.scheduledAt == null) {
       await prisma.task.update({
         where: { id: task.id },
-        data: { scheduledAt: new Date(), scheduledVia: "google" },
+        data: { scheduledAt: new Date(), scheduledVia: SchedulingMethod.GoogleTasks },
       });
-      const rewardResults = await Promise.allSettled([
-        logReward(workspaceId, RewardType.Scheduled),
-        awardBadge(workspaceId, BadgeKey.FirstSchedule),
-      ]);
-      for (const r of rewardResults) {
-        if (r.status === "rejected") {
-          console.error("[pushStepsToGoogleTasks] best-effort reward failed:", r.reason);
-        }
-      }
+      // Pass the captured pre-write state (false inside this guard, but robust to
+      // the guard being removed) rather than a hardcoded literal — matches
+      // awardFirstSchedule's contract + scheduleSingleTask's pattern (#34).
+      await awardFirstSchedule(workspaceId, task.scheduledAt != null);
     }
 
     revalidatePath(`/tasks/${taskId}`);
@@ -241,25 +234,17 @@ export async function scheduleSingleTask(
         googleTaskId: created.id,
         googleTaskListId: list.id,
         // Stamp the provider-agnostic marker on the first schedule (any method).
-        ...(alreadyScheduled ? {} : { scheduledAt: new Date(), scheduledVia: "google" }),
+        // Folded into this same update (rather than a second one) — which is why
+        // the shared reward helper stays marker-agnostic (it awards, callers stamp).
+        ...(alreadyScheduled ? {} : { scheduledAt: new Date(), scheduledVia: SchedulingMethod.GoogleTasks }),
       },
     });
 
-    if (!alreadyScheduled) {
-      // Best-effort rewards: the Google task + task.update have already committed,
-      // so a reward failure must NOT return { ok: false } (a retry would duplicate
-      // the Google task). Run independently (a logReward failure must not skip the
-      // idempotent awardBadge) + log for observability (Duo !77).
-      const rewardResults = await Promise.allSettled([
-        logReward(workspaceId, RewardType.Scheduled),
-        awardBadge(workspaceId, BadgeKey.FirstSchedule),
-      ]);
-      for (const r of rewardResults) {
-        if (r.status === "rejected") {
-          console.error("[scheduleSingleTask] best-effort reward failed:", r.reason);
-        }
-      }
-    }
+    // Best-effort rewards through the shared seam helper: the Google task +
+    // task.update have already committed, so a reward failure must NOT return
+    // { ok: false } (a retry would duplicate the Google task). Idempotent on the
+    // captured `alreadyScheduled` marker so re-scheduling never re-awards (#34).
+    await awardFirstSchedule(workspaceId, alreadyScheduled);
 
     revalidatePath("/inbox");
     return { ok: true };

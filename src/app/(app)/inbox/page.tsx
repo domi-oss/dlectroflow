@@ -44,8 +44,10 @@ export default async function InboxPage({
     // stays flat (Duo review: was a serial round-trip after the Promise.all).
     getGoogleStatus(),
   ]);
-  // Owner-gated, same as the settings page's Integrations panel — guests get
-  // null and every row's 📅 control is omitted.
+  // The owner's Google status (null for guests, same as the settings
+  // Integrations panel) — resolved once at the server boundary (S1 seam, #34).
+  // When F (#35) makes Google per-user, only this owner-gate + the provider's
+  // isAvailable() change, not the InboxView call site.
   const google = owner ? googleStatus : null;
 
   const items = rawItems.map(({ task, ...item }) => ({

@@ -44,6 +44,7 @@ import { startBreakdown } from "@/app/actions/breakdown";
 import { pushStepsToGoogleTasks, scheduleSingleTask } from "@/app/actions/google-schedule";
 import { scheduleViaIcs } from "@/app/actions/ics-schedule";
 import { downloadIcs } from "@/lib/download-ics";
+import type { GoogleConnStatus } from "@/lib/scheduling/types";
 import { StatusPill } from "@/components/inbox/status-pill";
 import { TaskSteps } from "@/components/breakdown/task-steps";
 import { bucketItems, bucketOfItem, isBucketId, type Item, type BucketId } from "@/components/inbox/bucket";
@@ -74,8 +75,6 @@ export function dragEndToMove(
   return { itemId: activeId, target: overId };
 }
 
-type GoogleStatus = { configured: boolean; connected: boolean; needsReconnect: boolean };
-
 /** Maps a row's connection status + its own "ready" state (what it'd show if
  * Google were connected) onto the 📅 control's actual state — not-configured
  * and needs-reconnect override every row the same way. Exported so other
@@ -83,7 +82,7 @@ type GoogleStatus = { configured: boolean; connected: boolean; needsReconnect: b
  * #8 follow-up) reuse this exact owner/guest logic instead of reimplementing
  * it. */
 export function scheduleState(
-  google: GoogleStatus,
+  google: GoogleConnStatus,
   ready: ScheduleControlProps["state"],
 ): ScheduleControlProps["state"] {
   if (!google.configured) return "connect";
@@ -123,7 +122,7 @@ export function InboxView({
 }: {
   initialItems: Item[];
   settings: AgingSettings;
-  google?: GoogleStatus | null;
+  google?: GoogleConnStatus | null;
   /** First-run welcome card (Phase 5, #8) — shown above everything else until
    * the workspace dismisses it (or while previewing the demo first-run state). */
   welcomeVisible: boolean;
@@ -250,7 +249,10 @@ export function InboxView({
   // Reconnect link rather than just showing an error message on one row.
   const [scheduleErrors, setScheduleErrors] = useState<Record<string, string>>({});
   const [reconnectRequired, setReconnectRequired] = useState(false);
-  const effectiveGoogle: GoogleStatus | null = google
+  // Already null for guests (owner-gated at the server boundary), so this directly
+  // encodes whether these rows lead with Google (owner) or ICS (guest). The
+  // needsReconnect override is workspace-wide (see reconnectRequired above).
+  const effectiveGoogle: GoogleConnStatus | null = google
     ? { ...google, needsReconnect: google.needsReconnect || reconnectRequired }
     : null;
 
