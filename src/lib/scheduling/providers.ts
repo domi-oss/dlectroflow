@@ -9,6 +9,7 @@
 // "which methods can this workspace use?" answer.
 import { scheduleViaIcs } from "@/app/actions/ics-schedule";
 import { pushStepsToGoogleTasks } from "@/app/actions/google-schedule";
+import { SchedulingMethod } from "./types";
 import type {
   GoogleConnStatus,
   ScheduleOpts,
@@ -31,7 +32,7 @@ export const icsProvider: SchedulingProvider = {
         ? await scheduleViaIcs(taskId, { durationMin: opts.durationMin })
         : await scheduleViaIcs(taskId);
     return res.ok
-      ? { ok: true, via: "ics", ics: res.ics, icsFilename: res.icsFilename }
+      ? { ok: true, via: SchedulingMethod.Ics, ics: res.ics, icsFilename: res.icsFilename }
       : { ok: false, reason: res.reason, message: res.message };
   },
 };
@@ -53,7 +54,7 @@ export const googleTasksProvider: SchedulingProvider = {
   async schedule(taskId: string, _ctx: SchedulingContext, _opts?: ScheduleOpts): Promise<ScheduleResult> {
     const res = await pushStepsToGoogleTasks(taskId);
     return res.ok
-      ? { ok: true, via: "google", scheduled: res.scheduled, listTitle: res.listTitle }
+      ? { ok: true, via: SchedulingMethod.GoogleTasks, scheduled: res.scheduled, listTitle: res.listTitle }
       : { ok: false, reason: res.reason, message: res.message };
   },
 };
