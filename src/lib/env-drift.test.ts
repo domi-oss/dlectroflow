@@ -22,6 +22,23 @@ describe("extractUsedEnvKeys", () => {
     expect(extractUsedEnvKeys(src).sort()).toEqual(["BAZ", "FOO_BAR"]);
   });
 
+  it("finds destructured reads and uses the source name, not the alias/default", () => {
+    const src = `
+      const { FOO, BAR: alias, QUX = "d" } = process.env;
+    `;
+    expect(extractUsedEnvKeys(src).sort()).toEqual(["BAR", "FOO", "QUX"]);
+  });
+
+  it("finds destructured reads spread across multiple lines", () => {
+    const src = `
+      const {
+        NODE_ENV,
+        PUBLIC_ORIGIN,
+      } = process.env;
+    `;
+    expect(extractUsedEnvKeys(src).sort()).toEqual(["NODE_ENV", "PUBLIC_ORIGIN"]);
+  });
+
   it("dedupes repeated reads of the same key", () => {
     const src = `process.env.FOO; process.env.FOO; process.env.FOO;`;
     expect(extractUsedEnvKeys(src)).toEqual(["FOO"]);

@@ -74,12 +74,28 @@ export function computeEnvDrift(
 const USED_ENV_KEY_RE =
   /process\.env(?:\.([A-Za-z_][A-Za-z0-9_]*)|\[["']([A-Za-z_][A-Za-z0-9_]*)["']\])/g;
 
+// Also catches destructured reads — `const { FOO, BAR: alias, QUX = "d" } =
+// process.env` — which the dot/bracket regex above misses. Without this a key
+// read only via destructuring is invisible: a false negative (an undocumented
+// read slips through) and, if the key IS in .env.example, a false positive
+// ("unused") that fails the pipeline. We grab the `{…}` binding list, then take
+// each comma-separated binding's *source* name (the identifier before any `:`
+// alias or `=` default). Rest/nested patterns aren't used for env reads.
+const DESTRUCTURED_ENV_RE = /\{([^{}]*)\}\s*=\s*process\.env\b/g;
+const BINDING_HEAD_RE = /^([A-Za-z_][A-Za-z0-9_]*)/;
+
 /** Extracts the deduped set of env keys read via `process.env` in `source`. */
 export function extractUsedEnvKeys(source: string): string[] {
   const keys = new Set<string>();
   for (const match of source.matchAll(USED_ENV_KEY_RE)) {
     const key = match[1] ?? match[2];
     if (key) keys.add(key);
+  }
+  for (const match of source.matchAll(DESTRUCTURED_ENV_RE)) {
+    for (const segment of match[1].split(",")) {
+      const name = segment.trim().match(BINDING_HEAD_RE);
+      if (name) keys.add(name[1]);
+    }
   }
   return [...keys];
 }

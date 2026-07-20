@@ -39,16 +39,17 @@ const SOURCE_EXTENSIONS = new Set([".ts", ".tsx"]);
 const TEST_FILE_RE = /\.test\.tsx?$/;
 
 function listSourceFiles(dir: string): string[] {
-  const files: string[] = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...listSourceFiles(full));
-    } else if (SOURCE_EXTENSIONS.has(extname(entry.name)) && !TEST_FILE_RE.test(entry.name)) {
-      files.push(full);
-    }
-  }
-  return files;
+  // `recursive: true` (Node 18.17+; the engine requires >=20.19) walks
+  // subdirectories via the OS instead of manual recursion, which also avoids
+  // the `entry.isDirectory()`-is-false-for-symlinked-dirs blind spot.
+  return readdirSync(dir, { withFileTypes: true, recursive: true })
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        SOURCE_EXTENSIONS.has(extname(entry.name)) &&
+        !TEST_FILE_RE.test(entry.name),
+    )
+    .map((entry) => join(entry.parentPath ?? entry.path, entry.name));
 }
 
 function main(): void {
