@@ -10,7 +10,23 @@ import {
   proposeNewEstimate,
   type CompleteResult,
 } from "@/app/actions/focus";
+import { dismissFocusTimerTip } from "@/app/actions/settings";
 import { Celebration } from "@/components/focus/celebration";
+import { TimerVisual } from "@/components/focus/timer-visual";
+import { FocusStepTracker, type TrackerStep } from "@/components/focus/focus-step-tracker";
+import { TimerCustomizationHint } from "@/components/focus/timer-customization-hint";
+import { resolveTimerStyle } from "@/lib/focus-timer-style";
+import { applyTimeDelta, netAddedMin } from "@/lib/focus-timer-clock";
+import {
+  createAlarm,
+  createLoopPlayer,
+  acquireWakeLock,
+  FOCUS_SOUND_SRC,
+  type Alarm,
+  type LoopPlayer,
+  type WakeGuard,
+} from "@/lib/focus-sounds";
+import { usePrefersReducedMotion } from "@/lib/use-prefers-reduced-motion";
 import { t } from "@/lib/strings";
 import { useVoice } from "@/components/voice-provider";
 
@@ -22,7 +38,7 @@ const DONE_MESSAGES = [
   "Done and dusted. Proud of you.",
 ];
 
-type Phase = "setup" | "running" | "paused" | "timeup" | "reestimate" | "done" | "requeued" | "gaveup";
+type Phase = "setup" | "running" | "paused" | "timeup" | "reestimate" | "done" | "requeued";
 
 type StepInfo = {
   id: string;
@@ -34,48 +50,75 @@ type StepInfo = {
   done: boolean;
 };
 
-function mmss(totalSec: number) {
-  const s = Math.max(0, totalSec);
-  const m = Math.floor(s / 60);
-  const sec = s % 60;
-  return `${m}:${sec.toString().padStart(2, "0")}`;
-}
+export type TimerSettings = {
+  timerStyle: string | null;
+  minimalMode: boolean;
+  keepAwake: boolean;
+  alarmEnabled: boolean;
+  sound: string;
+};
+
+export type NextStepPeek = { id: string; text: string; subtaskEmoji: string | null };
 
 export function FocusTimer({
   step,
+  steps,
   taskId,
   taskTitle,
   parentEmoji,
+  streak,
+  focusMinToday,
+  nextStep,
+  isSingleTask,
   addTimeIncrementMin,
-  initialStats,
-  nextStepId,
+  settings,
+  tipDismissed,
 }: {
   step: StepInfo;
+  steps: TrackerStep[];
   taskId: string;
   taskTitle: string;
   parentEmoji: string | null;
+  streak: number;
+  focusMinToday: number;
+  nextStep: NextStepPeek | null;
+  isSingleTask: boolean;
   addTimeIncrementMin: number;
-  initialStats: { focusMin: number; sessions: number };
-  nextStepId: string | null;
+  settings: TimerSettings;
+  tipDismissed: boolean;
 }) {
   const router = useRouter();
   const voice = useVoice();
+  const reducedMotion = usePrefersReducedMotion();
+  const timerStyle = resolveTimerStyle(settings.timerStyle, voice);
+
   const [phase, setPhase] = useState<Phase>("setup");
   const [plannedMin, setPlannedMin] = useState(step.estMinutes);
   const [totalSec, setTotalSec] = useState(step.estMinutes * 60);
   const [remainingSec, setRemainingSec] = useState(step.estMinutes * 60);
-  const [addedMin, setAddedMin] = useState(0);
   const elapsedRef = useRef(0);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [newEst, setNewEst] = useState(step.estMinutes);
   const [result, setResult] = useState<CompleteResult | null>(null);
-  const doneMsgRef = useRef(
-    DONE_MESSAGES[Math.floor(Math.random() * DONE_MESSAGES.length)],
-  );
+  const [expanded, setExpanded] = useState(false);
+  const [tipVisible, setTipVisible] = useState(!tipDismissed);
+  const doneMsgRef = useRef(DONE_MESSAGES[Math.floor(Math.random() * DONE_MESSAGES.length)]);
+
+  // Device-effect handles (created on Start inside the user gesture).
+  const alarmRef = useRef<Alarm | null>(null);
+  const loopRef = useRef<LoopPlayer | null>(null);
+  const wakeRef = useRef<WakeGuard | null>(null);
 
   const inc = Math.max(1, addTimeIncrementMin || 5);
   const durationMin = () => Math.max(0, Math.round(elapsedRef.current / 60));
+  const net = netAddedMin(totalSec, plannedMin * 60);
+  const atFloor = remainingSec <= 60;
+
+  const releaseWake = () => {
+    wakeRef.current?.release();
+    wakeRef.current = null;
+  };
 
   // Countdown ticker.
   useEffect(() => {
@@ -94,11 +137,51 @@ export function FocusTimer({
     return () => clearInterval(id);
   }, [phase]);
 
+  // Focus sound + wake lock follow the "running" phase.
+  useEffect(() => {
+    if (phase === "running") {
+      loopRef.current?.play();
+      if (settings.keepAwake && !wakeRef.current) {
+        void acquireWakeLock().then((g) => {
+          wakeRef.current = g;
+        });
+      }
+    } else {
+      loopRef.current?.pause();
+      releaseWake();
+    }
+  }, [phase, settings.keepAwake]);
+
+  // Alarm at time's-up.
+  useEffect(() => {
+    if (phase === "timeup") alarmRef.current?.play();
+  }, [phase]);
+
+  // Auto-expand the step tracker when the timer stops (calm while running,
+  // orienting when stopped).
+  useEffect(() => {
+    if (phase === "paused" || phase === "timeup") setExpanded(true);
+  }, [phase]);
+
+  // Cleanup on unmount — ← Back leaves the FocusSession OPEN (no server call),
+  // so we only stop local effects here.
+  useEffect(
+    () => () => {
+      loopRef.current?.stop();
+      releaseWake();
+    },
+    [],
+  );
+
   const start = async () => {
     setPending(true);
     const id = await beginFocus(step.id, plannedMin);
     setPending(false);
     if (!id) return;
+    // Prime device effects inside the user gesture (unlocks audio playback).
+    if (settings.alarmEnabled) alarmRef.current = createAlarm();
+    const src = FOCUS_SOUND_SRC[settings.sound] ?? null;
+    if (src) loopRef.current = createLoopPlayer(src);
     setSessionId(id);
     setTotalSec(plannedMin * 60);
     setRemainingSec(plannedMin * 60);
@@ -106,11 +189,11 @@ export function FocusTimer({
     setPhase("running");
   };
 
-  const addTime = (mins: number) => {
-    setTotalSec((t) => t + mins * 60);
-    setRemainingSec((r) => r + mins * 60);
-    setAddedMin((a) => a + mins);
-    if (phase === "timeup") setPhase("running");
+  const changeTime = (mins: number) => {
+    const next = applyTimeDelta({ totalSec, remainingSec }, mins * 60);
+    setTotalSec(next.totalSec);
+    setRemainingSec(next.remainingSec);
+    if (phase === "timeup" && mins > 0) setPhase("running");
   };
 
   const finishComplete = useCallback(async () => {
@@ -118,18 +201,15 @@ export function FocusTimer({
     setPending(true);
     const res = await completeFocus(sessionId, {
       durationMin: durationMin(),
-      addedMin,
+      addedMin: Math.max(0, net),
     });
     setPending(false);
     setResult(res);
+    loopRef.current?.stop();
+    releaseWake();
     setPhase("done");
     router.refresh();
-  }, [sessionId, addedMin, router]);
-
-  // Low-shame exit: leaves the FocusSession OPEN (endedAt untouched, no server
-  // call) so the step stays `resumable` and Task 3's Inbox resume banner
-  // surfaces it. Shows the "Paused — no guilt" card below.
-  const pauseForNow = () => setPhase("gaveup");
+  }, [sessionId, net, router]);
 
   const startReestimate = async () => {
     setPhase("reestimate");
@@ -144,30 +224,43 @@ export function FocusTimer({
     setPending(true);
     await requeueFocus(sessionId, {
       durationMin: durationMin(),
-      addedMin,
+      addedMin: Math.max(0, net),
       newEstMinutes: newEst,
     });
     setPending(false);
+    loopRef.current?.stop();
+    releaseWake();
     setPhase("requeued");
   };
 
-  const fraction = totalSec > 0 ? remainingSec / totalSec : 0;
+  const dismissTip = () => {
+    setTipVisible(false);
+    void dismissFocusTimerTip();
+  };
 
-  const title = (
-    <h1 className="text-xl font-semibold">
-      {parentEmoji ? `${parentEmoji} ` : ""}
-      {taskTitle}
-      <span className="text-muted-foreground font-normal">
-        {" "}· {t("step.counter", voice)} {step.order} of {step.total}
-      </span>
-    </h1>
+  const running = phase === "running";
+  const showContext = !isSingleTask && !(settings.minimalMode && running);
+  const showCorner = !(settings.minimalMode && running);
+  const remainingInTask = steps.filter((s) => !s.done).reduce((n, s) => n + s.estMinutes, 0);
+
+  const stepHeading = (
+    <div className="min-w-0">
+      <p className="text-muted-foreground truncate text-sm font-semibold">
+        {parentEmoji ? `${parentEmoji} ` : ""}
+        {taskTitle}
+      </p>
+      <h1 className="text-xl font-bold">
+        {step.subtaskEmoji ? `${step.subtaskEmoji} ` : ""}
+        {step.text}
+      </h1>
+    </div>
   );
 
-  // ── End screens ──────────────────────────────────────────────────────────
+  // ── End screens ────────────────────────────────────────────────────────────
   if (phase === "done") {
     return (
       <div className="space-y-5 text-center">
-        {title}
+        {stepHeading}
         <div className="flex justify-center pt-6">
           <Celebration />
         </div>
@@ -187,9 +280,9 @@ export function FocusTimer({
           </p>
         ) : null}
         <div className="flex flex-col items-center gap-2">
-          {nextStepId ? (
+          {nextStep ? (
             <Link
-              href={`/focus/${nextStepId}`}
+              href={`/focus/${nextStep.id}`}
               className="bg-primary text-primary-foreground rounded-md px-4 py-2 font-medium"
             >
               ▶ {t("focus.nextStep", voice)}
@@ -197,8 +290,8 @@ export function FocusTimer({
           ) : (
             <p className="text-sm">That was the last step of this task. 🏁</p>
           )}
-          <Link href={`/tasks/${taskId}`} className="text-muted-foreground text-sm hover:underline">
-            ← back to task
+          <Link href="/focus" className="text-muted-foreground text-sm hover:underline">
+            {t("action.back", voice)}
           </Link>
         </div>
       </div>
@@ -208,86 +301,73 @@ export function FocusTimer({
   if (phase === "requeued") {
     return (
       <div className="space-y-4 text-center">
-        {title}
+        {stepHeading}
         <div className="text-5xl">🌱</div>
         <p className="text-lg font-medium">No worries — bumped to {newEst} min.</p>
-        <p className="text-muted-foreground text-sm">
-          It&apos;s back on your list with a kinder estimate.
-        </p>
+        <p className="text-muted-foreground text-sm">It&apos;s back on your list with a kinder estimate.</p>
         <Link
-          href={`/tasks/${taskId}`}
+          href="/focus"
           className="bg-primary text-primary-foreground inline-block rounded-md px-4 py-2 font-medium"
         >
-          ← back to task
+          {t("action.back", voice)}
         </Link>
       </div>
     );
   }
 
-  if (phase === "gaveup") {
-    return (
-      <div className="space-y-4 text-center">
-        {title}
-        <div className="text-5xl">💛</div>
-        <p className="text-lg font-medium">Paused — no guilt.</p>
-        <p className="text-muted-foreground text-sm">Come back whenever you&apos;re ready.</p>
-        <div className="flex flex-col items-center gap-2">
-          <Link
-            href={`/tasks/${taskId}`}
-            className="bg-primary text-primary-foreground inline-block rounded-md px-4 py-2 font-medium"
-          >
-            ← back to task
-          </Link>
-          <Link href="/inbox" className="text-muted-foreground text-sm hover:underline">
-            or see it on your Inbox →
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Active / setup screen ──────────────────────────────────────────────────
+  // ── Active / setup screen ────────────────────────────────────────────────────
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        {title}
-        <span className="text-muted-foreground text-xs">
-          today: {initialStats.focusMin}m · {initialStats.sessions} sessions
-        </span>
+    <div className="space-y-5">
+      {/* ← Back → /focus (the launcher is the logical parent; leaving makes no
+          server call, so the FocusSession stays open/resumable). */}
+      <Link
+        href="/focus"
+        className="text-muted-foreground hover:text-foreground inline-flex min-h-[44px] items-center text-sm"
+      >
+        {t("action.back", voice)}
+      </Link>
+
+      <div className="flex items-start justify-between gap-2">
+        {stepHeading}
+        {showCorner && (
+          <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+            🔥{streak} · {focusMinToday}m today
+          </span>
+        )}
       </div>
 
-      <p className="text-center text-lg">
-        {step.subtaskEmoji ? `${step.subtaskEmoji} ` : ""}
-        {step.text}
-      </p>
+      {tipVisible && <TimerCustomizationHint voice={voice} onDismiss={dismissTip} />}
 
-      {/* Ring + countdown */}
-      <div className="flex justify-center">
-        <div className="relative h-64 w-64">
-          <svg viewBox="0 0 240 240" className="h-full w-full -rotate-90">
-            <circle
-              cx="120" cy="120" r="110" fill="none"
-              className="stroke-secondary" strokeWidth="12"
-            />
-            <circle
-              cx="120" cy="120" r="110" fill="none"
-              className={phase === "timeup" ? "stroke-amber-500" : "stroke-primary"}
-              strokeWidth="12" strokeLinecap="round"
-              strokeDasharray={2 * Math.PI * 110}
-              strokeDashoffset={2 * Math.PI * 110 * (1 - fraction)}
-              style={{ transition: "stroke-dashoffset 1s linear" }}
-            />
-          </svg>
-          <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-5xl font-semibold tabular-nums">
-              {mmss(remainingSec)}
-            </span>
-            {addedMin > 0 && (
-              <span className="text-muted-foreground text-xs">+{addedMin}m added</span>
-            )}
-          </div>
+      {showContext && (
+        <div className="space-y-2">
+          <p className="text-muted-foreground text-xs tabular-nums">
+            {t("step.counter", voice)} {step.order} of {step.total} · ~{remainingInTask}m{" "}
+            {t("focus.timer.leftInTask", voice)}
+          </p>
+          <FocusStepTracker
+            steps={steps}
+            currentStepId={step.id}
+            expanded={expanded}
+            onToggle={() => setExpanded((e) => !e)}
+            voice={voice}
+          />
         </div>
-      </div>
+      )}
+
+      <TimerVisual
+        style={timerStyle}
+        remainingSec={remainingSec}
+        totalSec={totalSec}
+        phase={phase === "reestimate" ? "timeup" : phase}
+        reducedMotion={reducedMotion}
+        voice={voice}
+      />
+      {net !== 0 && (
+        <p className="text-muted-foreground text-center text-xs tabular-nums">
+          {net > 0 ? "+" : "−"}
+          {Math.abs(net)}m
+        </p>
+      )}
 
       {/* Controls */}
       {phase === "setup" && (
@@ -295,7 +375,9 @@ export function FocusTimer({
           <label className="text-muted-foreground flex items-center gap-2 text-sm">
             Duration
             <input
-              type="number" min={1} value={plannedMin}
+              type="number"
+              min={1}
+              value={plannedMin}
               onChange={(e) => {
                 const v = Math.max(1, Number(e.target.value) || 1);
                 setPlannedMin(v);
@@ -321,28 +403,28 @@ export function FocusTimer({
           <button
             onClick={finishComplete}
             disabled={pending}
-            className="rounded-md bg-green-600 px-4 py-2 font-medium text-white disabled:opacity-50"
+            className="inline-flex min-h-[44px] items-center rounded-md bg-green-600 px-5 font-medium text-white disabled:opacity-50"
           >
-            {t("focus.complete", voice)}
+            {t("focus.timer.completeStep", voice)}
           </button>
           <button
             onClick={() => setPhase((p) => (p === "running" ? "paused" : "running"))}
-            className="hover:bg-accent rounded-md border px-4 py-2"
+            className="hover:bg-accent inline-flex min-h-[44px] items-center rounded-md border px-4"
           >
             {phase === "running" ? t("focus.pause", voice) : t("focus.resume", voice)}
           </button>
-          <button onClick={() => addTime(inc)} className="hover:bg-accent rounded-md border px-3 py-2">
-            ➕ {inc}m
-          </button>
-          <button onClick={() => addTime(inc * 2)} className="hover:bg-accent rounded-md border px-3 py-2">
-            ➕ {inc * 2}m
+          <button
+            onClick={() => changeTime(-inc)}
+            disabled={atFloor}
+            className="hover:bg-accent inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border disabled:opacity-40"
+          >
+            −{inc}m
           </button>
           <button
-            onClick={pauseForNow}
-            disabled={pending}
-            className="text-muted-foreground hover:text-foreground rounded-md px-3 py-2 text-sm disabled:opacity-50"
+            onClick={() => changeTime(inc)}
+            className="hover:bg-accent inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border"
           >
-            {t("focus.pauseForNow", voice)}
+            +{inc}m
           </button>
         </div>
       )}
@@ -354,20 +436,20 @@ export function FocusTimer({
             <button
               onClick={finishComplete}
               disabled={pending}
-              className="rounded-md bg-green-600 px-4 py-2 font-medium text-white disabled:opacity-50"
+              className="inline-flex min-h-[44px] items-center rounded-md bg-green-600 px-4 font-medium text-white disabled:opacity-50"
             >
               {t("focus.yesDone", voice)}
             </button>
             <button
-              onClick={() => addTime(inc)}
-              className="hover:bg-accent rounded-md border px-4 py-2"
+              onClick={() => changeTime(inc)}
+              className="hover:bg-accent inline-flex min-h-[44px] items-center rounded-md border px-4"
             >
-              ➕ {inc} more min
+              +{inc}m
             </button>
             <button
               onClick={startReestimate}
               disabled={pending}
-              className="hover:bg-accent rounded-md border px-4 py-2 disabled:opacity-50"
+              className="hover:bg-accent inline-flex min-h-[44px] items-center rounded-md border px-4 disabled:opacity-50"
             >
               {t("focus.notYet", voice)}
             </button>
@@ -383,14 +465,16 @@ export function FocusTimer({
           ) : (
             <div className="flex items-center justify-center gap-2">
               <input
-                type="number" min={1} value={newEst}
+                type="number"
+                min={1}
+                value={newEst}
                 onChange={(e) => setNewEst(Math.max(1, Number(e.target.value) || 1))}
                 className="border-input w-24 rounded-md border px-2 py-1 text-right"
               />
               <span className="text-muted-foreground text-sm">min</span>
               <button
                 onClick={confirmRequeue}
-                className="bg-primary text-primary-foreground rounded-md px-4 py-2 font-medium"
+                className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center rounded-md px-4 font-medium"
               >
                 Requeue
               </button>
@@ -399,11 +483,15 @@ export function FocusTimer({
         </div>
       )}
 
-      <div className="text-center">
-        <Link href={`/tasks/${taskId}`} className="text-muted-foreground text-xs hover:underline">
-          ← back to task
-        </Link>
-      </div>
+      {/* Next-step peek (below controls). Shown for any multi-step active/setup
+          phase; hidden by minimal mode while running (via showContext) and on the
+          done/requeued end screens (which return early above). */}
+      {showContext && nextStep && (
+        <p className="text-muted-foreground text-center text-xs">
+          {t("focus.hero.next", voice)} {nextStep.subtaskEmoji ? `${nextStep.subtaskEmoji} ` : ""}
+          {nextStep.text}
+        </p>
+      )}
     </div>
   );
 }
