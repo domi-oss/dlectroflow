@@ -123,7 +123,10 @@ export async function pushStepsToGoogleTasks(
         where: { id: task.id },
         data: { scheduledAt: new Date(), scheduledVia: SchedulingMethod.GoogleTasks },
       });
-      await awardFirstSchedule(workspaceId, false);
+      // Pass the captured pre-write state (false inside this guard, but robust to
+      // the guard being removed) rather than a hardcoded literal — matches
+      // awardFirstSchedule's contract + scheduleSingleTask's pattern (#34).
+      await awardFirstSchedule(workspaceId, task.scheduledAt != null);
     }
 
     revalidatePath(`/tasks/${taskId}`);

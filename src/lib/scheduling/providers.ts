@@ -46,7 +46,11 @@ export const googleTasksProvider: SchedulingProvider = {
   // connect/reconnect/needsReconnect nuances stay in `scheduleState`; this
   // answers only "is the method offered at all."
   isAvailable: (ctx) => ctx.isOwner && (ctx.google?.configured ?? false),
-  async schedule(taskId: string): Promise<ScheduleResult> {
+  // Google Tasks are date-based, so `opts.durationMin` doesn't apply and `ctx`
+  // isn't needed today — both are declared with a `_` prefix so the interface
+  // contract is satisfied explicitly and the omission is intentional, not silent
+  // (matches icsProvider, which does consume `opts`).
+  async schedule(taskId: string, _ctx: SchedulingContext, _opts?: ScheduleOpts): Promise<ScheduleResult> {
     const res = await pushStepsToGoogleTasks(taskId);
     return res.ok
       ? { ok: true, via: "google", scheduled: res.scheduled, listTitle: res.listTitle }
