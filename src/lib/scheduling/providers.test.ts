@@ -1,4 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// The providers wrap these two "use server" actions; mock them so schedule()'s
+// pure result-shape mapping can be tested without a DB, Google, or ICS render.
+vi.mock("@/app/actions/ics-schedule", () => ({ scheduleViaIcs: vi.fn() }));
+vi.mock("@/app/actions/google-schedule", () => ({ pushStepsToGoogleTasks: vi.fn() }));
+
+import { scheduleViaIcs } from "@/app/actions/ics-schedule";
+import { pushStepsToGoogleTasks } from "@/app/actions/google-schedule";
 import {
   icsProvider,
   googleTasksProvider,
@@ -88,6 +96,68 @@ describe("leadSchedulingMethod — the UI's control-visibility choice", () => {
       leadSchedulingMethod({ configured: false, connected: false, needsReconnect: false }),
     ).toBe("googleTasks");
     expect(googleTasksProvider.isAvailable(ownerNotConfigured)).toBe(false);
+  });
+});
+
+describe("icsProvider.schedule — result-shape mapping", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("maps a successful ICS result to a via:'ics' ScheduleResult", async () => {
+    vi.mocked(scheduleViaIcs).mockResolvedValue({
+      ok: true,
+      ics: "BEGIN:VCALENDAR",
+      icsFilename: "task.ics",
+    });
+    const res = await icsProvider.schedule("task1", guest);
+    expect(res).toEqual({ ok: true, via: "ics", ics: "BEGIN:VCALENDAR", icsFilename: "task.ics" });
+  });
+
+  it("passes durationMin through when provided, and omits opts entirely otherwise", async () => {
+    vi.mocked(scheduleViaIcs).mockResolvedValue({ ok: true, ics: "X", icsFilename: "t.ics" });
+
+    await icsProvider.schedule("task1", guest, { durationMin: 45 });
+    expect(scheduleViaIcs).toHaveBeenCalledWith("task1", { durationMin: 45 });
+
+    vi.mocked(scheduleViaIcs).mockClear();
+    await icsProvider.schedule("task1", guest);
+    // No trailing `undefined` opts — preserves the exact single-arg call.
+    expect(scheduleViaIcs).toHaveBeenCalledWith("task1");
+  });
+
+  it("propagates a failure reason + message", async () => {
+    vi.mocked(scheduleViaIcs).mockResolvedValue({ ok: false, reason: "not_found", message: "gone" });
+    const res = await icsProvider.schedule("task1", guest);
+    expect(res).toEqual({ ok: false, reason: "not_found", message: "gone" });
+  });
+});
+
+describe("googleTasksProvider.schedule — result-shape mapping", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("maps a successful Google push to a via:'google' ScheduleResult", async () => {
+    vi.mocked(pushStepsToGoogleTasks).mockResolvedValue({
+      ok: true,
+      scheduled: 3,
+      listTitle: "Reclaim",
+    });
+    const res = await googleTasksProvider.schedule("task1", ownerConfigured);
+    expect(res).toEqual({ ok: true, via: "google", scheduled: 3, listTitle: "Reclaim" });
+  });
+
+  it("propagates a failure reason + message", async () => {
+    vi.mocked(pushStepsToGoogleTasks).mockResolvedValue({
+      ok: false,
+      reason: "not_connected",
+      message: "connect first",
+    });
+    const res = await googleTasksProvider.schedule("task1", ownerConfigured);
+    expect(res).toEqual({ ok: false, reason: "not_connected", message: "connect first" });
+  });
+
+  it("ignores ctx/opts (Google Tasks are date-based) — calls the action with just the taskId", async () => {
+    vi.mocked(pushStepsToGoogleTasks).mockResolvedValue({ ok: true, scheduled: 1, listTitle: "L" });
+    await googleTasksProvider.schedule("task1", ownerConfigured, { durationMin: 30 });
+    expect(pushStepsToGoogleTasks).toHaveBeenCalledWith("task1");
   });
 });
 
