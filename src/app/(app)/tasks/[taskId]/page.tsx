@@ -96,7 +96,10 @@ export default async function TaskPage({
         title={task.title}
         initialProposal={initialProposal}
         startManual={manual === "1"}
-        google={ctx.google ?? google}
+        // BreakdownChat gates the Google section on `isGuest` (not on a nullable
+        // status), so it takes the always-present workspace status directly; the
+        // owner/guest split is carried by isGuest below.
+        google={google}
         isGuest={!ctx.isOwner}
         scheduled={task.scheduledAt != null}
       />

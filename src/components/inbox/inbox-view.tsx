@@ -249,12 +249,12 @@ export function InboxView({
   // Reconnect link rather than just showing an error message on one row.
   const [scheduleErrors, setScheduleErrors] = useState<Record<string, string>>({});
   const [reconnectRequired, setReconnectRequired] = useState(false);
-  const rawGoogle: GoogleConnStatus | null = google
+  // Already null for guests (owner-gated at the server boundary), so this directly
+  // encodes whether these rows lead with Google (owner) or ICS (guest). The
+  // needsReconnect override is workspace-wide (see reconnectRequired above).
+  const effectiveGoogle: GoogleConnStatus | null = google
     ? { ...google, needsReconnect: google.needsReconnect || reconnectRequired }
     : null;
-  // rawGoogle is already null for guests (owner-gated at the server boundary),
-  // so it directly encodes whether these rows lead with Google (owner) or ICS (guest).
-  const effectiveGoogle: GoogleConnStatus | null = rawGoogle;
 
   const runSchedule = (
     itemId: string,
