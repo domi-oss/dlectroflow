@@ -16,7 +16,7 @@ export const FOCUS_SOUND_SRC: Record<string, string | null> = {
   [FocusSound.LofiCalm]: "/audio/lofi-calm.mp3",
 };
 
-const ALARM_SRC = "/audio/alarm.mp3";
+const ALARM_SRC = "/audio/alarm.wav";
 
 export type Alarm = { play(): void };
 export type LoopPlayer = { play(): void; pause(): void; stop(): void };
