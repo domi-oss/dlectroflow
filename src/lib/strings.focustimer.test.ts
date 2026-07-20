@@ -18,7 +18,7 @@ describe("focus-timer redesign strings (MR ②)", () => {
   it("settings labels resolve; the heading gets a playful emoji anchor only in playful", () => {
     expect(t("focusSettings.heading", "plain")).toBe("Focus timer");
     expect(t("focusSettings.heading", "playful")).toBe("⏱️ Focus timer");
-    expect(t("focusSettings.styleAuto", "plain")).toBe("Match voice");
+    expect(t("focusSettings.styleMug", "plain")).toBe("Mug");
     expect(t("focusSettings.soundOff", "plain")).toBe("Off");
     expect(t("focusSettings.soundLofiCalm", "plain")).toBe("Lo-fi (calm)");
   });

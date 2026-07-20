@@ -24,17 +24,53 @@ const base = {
 };
 
 describe("FocusTimerSection", () => {
-  it("seeds the controls from props ('Match voice' when style is null)", () => {
+  it("offers exactly the 4 explicit styles — no 'match voice' / 'auto' option", () => {
     render(<FocusTimerSection {...base} />);
-    expect(screen.getByLabelText(/match voice/i)).toBeChecked();
+    expect(screen.getByRole("radio", { name: /^ring$/i })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /^digits$/i })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /^bar$/i })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /^mug$/i })).toBeInTheDocument();
+    expect(screen.getAllByRole("radio")).toHaveLength(4);
+    expect(screen.queryByRole("radio", { name: /match voice/i })).toBeNull();
+    expect(screen.queryByRole("radio", { name: /auto/i })).toBeNull();
+  });
+
+  it("seeds the other controls from props (keep-awake on, minimal off)", () => {
+    render(<FocusTimerSection {...base} />);
     expect(screen.getByLabelText(/keep screen awake/i)).toBeChecked();
     expect(screen.getByLabelText(/minimal/i)).not.toBeChecked();
   });
 
-  it("choosing the Mug style auto-saves the full pref set", async () => {
+  it("preselects the voice default when the stored style is null (plain → ring)", () => {
+    render(<FocusTimerSection {...base} />);
+    expect(screen.getByRole("radio", { name: /^ring$/i })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /^mug$/i })).not.toBeChecked();
+  });
+
+  it("preselects the voice default when the stored style is null (playful → mug)", () => {
+    render(<FocusTimerSection {...base} voice="playful" />);
+    expect(screen.getByRole("radio", { name: /mug/i })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /^ring$/i })).not.toBeChecked();
+  });
+
+  it("preselects the stored style verbatim when one is set", () => {
+    render(<FocusTimerSection {...base} timerStyle="digits" />);
+    expect(screen.getByRole("radio", { name: /^digits$/i })).toBeChecked();
+  });
+
+  it("renders a decorative (aria-hidden) preview beside each of the 4 style options", () => {
+    render(<FocusTimerSection {...base} />);
+    for (const style of ["ring", "digits", "bar", "mug"] as const) {
+      const preview = screen.getByTestId(`timer-style-preview-${style}`);
+      expect(preview).toBeInTheDocument();
+      expect(preview).toHaveAttribute("aria-hidden", "true");
+    }
+  });
+
+  it("choosing the Mug style auto-saves the full pref set (explicit value)", async () => {
     const user = userEvent.setup();
     render(<FocusTimerSection {...base} />);
-    await user.click(screen.getByLabelText(/^mug/i));
+    await user.click(screen.getByRole("radio", { name: /^mug$/i }));
     await waitFor(() =>
       expect(updateFocusTimerSettings).toHaveBeenCalledWith({
         timerStyle: "mug",

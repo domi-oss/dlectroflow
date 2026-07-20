@@ -168,7 +168,6 @@ export const STRINGS = {
     playful: "How your focus timer looks and behaves.",
   },
   "focusSettings.style":      { plain: "Timer style",     playful: "Timer style" },
-  "focusSettings.styleAuto":  { plain: "Match voice",     playful: "Match voice" },
   "focusSettings.styleRing":  { plain: "Ring",            playful: "Ring" },
   "focusSettings.styleDigits":{ plain: "Digits",          playful: "Digits" },
   "focusSettings.styleBar":   { plain: "Bar",             playful: "Bar" },

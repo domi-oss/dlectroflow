@@ -4,8 +4,10 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { updateFocusTimerSettings } from "@/app/actions/settings";
 import { FocusTimerStyle, FocusSound } from "@/lib/constants";
+import { resolveTimerStyle } from "@/lib/focus-timer-style";
 import { t, type Voice } from "@/lib/strings";
 import { useSaveStatus, SaveIndicator } from "@/components/settings/use-save-status";
+import { TimerStylePreview } from "@/components/focus/timer-style-preview";
 
 type Prefs = {
   timerStyle: string | null;
@@ -17,9 +19,14 @@ type Prefs = {
 
 /**
  * MR ② — the Focus-timer settings group. Auto-saves each change (no Save
- * button), mirroring NotificationsSection. "Match voice" persists a null style
- * (→ the timer resolves ring/mug from the voice). A failed write surfaces a
- * non-blocking error and leaves the controls editable.
+ * button), mirroring NotificationsSection. The style selector offers the four
+ * explicit visuals (ring / digits / bar / mug), each with a small static
+ * preview. The DB column stays nullable (null = never chosen → the timer
+ * resolves a style from the voice via resolveTimerStyle); when the stored value
+ * is null we preselect that voice-resolved default (mug for playful, ring for
+ * plain) so one option is always shown selected, and picking any option persists
+ * that explicit value. A failed write surfaces a non-blocking error and leaves
+ * the controls editable.
  */
 export function FocusTimerSection({
   timerStyle,
@@ -52,13 +59,15 @@ export function FocusTimerSection({
     persist(next);
   };
 
-  const styleOptions: { value: string; label: string }[] = [
-    { value: "", label: t("focusSettings.styleAuto", voice) },
+  const styleOptions: { value: FocusTimerStyle; label: string }[] = [
     { value: FocusTimerStyle.Ring, label: t("focusSettings.styleRing", voice) },
     { value: FocusTimerStyle.Digits, label: t("focusSettings.styleDigits", voice) },
     { value: FocusTimerStyle.Bar, label: t("focusSettings.styleBar", voice) },
     { value: FocusTimerStyle.Mug, label: t("focusSettings.styleMug", voice) },
   ];
+  // A null stored style means "not yet chosen" — show the voice-resolved default
+  // (mug for playful, ring for plain) selected so one option is always active.
+  const selectedStyle = resolveTimerStyle(prefs.timerStyle, voice);
 
   return (
     <section className="space-y-3">
@@ -71,13 +80,14 @@ export function FocusTimerSection({
       <fieldset className="space-y-1">
         <legend className="text-sm font-medium">{t("focusSettings.style", voice)}</legend>
         {styleOptions.map((o) => (
-          <label key={o.value || "auto"} className="flex min-h-[44px] items-center gap-2 text-sm">
+          <label key={o.value} className="flex min-h-[44px] items-center gap-2 text-sm">
             <input
               type="radio"
               name="focusTimerStyle"
-              checked={(prefs.timerStyle ?? "") === o.value}
-              onChange={() => set("timerStyle", o.value === "" ? null : o.value)}
+              checked={selectedStyle === o.value}
+              onChange={() => set("timerStyle", o.value)}
             />
+            <TimerStylePreview style={o.value} />
             {o.label}
           </label>
         ))}
