@@ -48,8 +48,8 @@ export type ScheduleFailReason =
  * `{scheduled, listTitle}` intact rather than forcing a lossy common shape.
  */
 export type ScheduleResult =
-  | { ok: true; via: "ics"; ics: string; icsFilename: string }
-  | { ok: true; via: "google"; scheduled: number; listTitle: string }
+  | { ok: true; via: typeof SchedulingMethod.Ics; ics: string; icsFilename: string }
+  | { ok: true; via: typeof SchedulingMethod.GoogleTasks; scheduled: number; listTitle: string }
   | { ok: false; reason: ScheduleFailReason; message?: string };
 
 /** Provider id surfaced to the UI/telemetry — distinct from the stored
