@@ -63,7 +63,6 @@ export type NextStepPeek = { id: string; text: string; subtaskEmoji: string | nu
 export function FocusTimer({
   step,
   steps,
-  taskId,
   taskTitle,
   parentEmoji,
   streak,
@@ -76,6 +75,9 @@ export function FocusTimer({
 }: {
   step: StepInfo;
   steps: TrackerStep[];
+  // taskId is accepted (the page passes it) but the redesigned timer navigates
+  // to /focus rather than /tasks/:id, so it isn't read here. Kept for the page's
+  // prop shape + potential future use.
   taskId: string;
   taskTitle: string;
   parentEmoji: string | null;

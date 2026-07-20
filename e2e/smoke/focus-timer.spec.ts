@@ -1,9 +1,9 @@
 import { test, expect } from "@playwright/test";
 import { captureItem, needsReviewRow } from "../helpers";
 
-// Flow 3: focus timer start → pause. Create a to-do, launch focus from it
-// (navigates to /focus/{stepId}), start the timer, then pause it and assert
-// the control toggles to Resume.
+// Flow 3: focus timer start → pause (redesigned /focus timer, MR ②). Create a
+// to-do, launch focus from it (navigates to /focus/{stepId}), start the timer,
+// then pause it and assert the control toggles to Resume.
 test("focus timer starts and pauses", async ({ page }) => {
   const label = `E2E focus task ${Date.now()}`;
   await page.goto("/inbox");
@@ -26,10 +26,17 @@ test("focus timer starts and pauses", async ({ page }) => {
   // ▶ Start Focus runs a server action (ensures the step exists) THEN
   // navigates — wait for the URL rather than asserting timer controls first.
   await page.waitForURL("**/focus/**");
+
+  // Redesigned timer: a consistent ← Back returns to the focus launcher (no
+  // server call — the session stays open/resumable).
+  await expect(page.getByRole("link", { name: /back/i })).toHaveAttribute("href", "/focus");
+
   await page.getByRole("button", { name: "▶ Start focusing" }).click();
 
-  // exact: true — "⏸️ Pause" would otherwise also match "⏸️ Pause for now"
-  // (the exit-without-finishing control), tripping strict mode.
+  // Complete-step + Pause/Resume are the on-page controls now; the old
+  // "Pause for now" control + the gaveup screen were removed in the redesign.
+  await expect(page.getByRole("button", { name: /complete step/i })).toBeVisible();
+
   await page.getByRole("button", { name: "⏸️ Pause", exact: true }).click();
   // The ring/countdown are animated and time-dependent — assert only the
   // stable post-pause control state, relying on Playwright auto-waiting.
