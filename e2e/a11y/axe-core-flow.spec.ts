@@ -87,6 +87,10 @@ test.describe("accessibility: core-flow routes (axe)", () => {
 
     await page.waitForURL("**/focus/**");
     await waitForShell(page);
+    // Wait for the timer page's own content (its <h1> step heading), not just the
+    // shared app shell, so axe scans a fully-hydrated page — mirrors the clarify
+    // test's wait on the "Step text" field. (The countdown span has no ARIA role.)
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await scanA11y(page, "/focus/[stepId]");
   });
 });
