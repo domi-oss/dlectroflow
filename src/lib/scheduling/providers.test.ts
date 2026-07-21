@@ -3,7 +3,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // The providers wrap these two "use server" actions; mock them so schedule()'s
 // pure result-shape mapping can be tested without a DB, Google, or ICS render.
 vi.mock("@/app/actions/ics-schedule", () => ({ scheduleViaIcs: vi.fn() }));
-vi.mock("@/app/actions/google-schedule", () => ({ pushStepsToGoogleTasks: vi.fn() }));
+vi.mock("@/app/actions/google-schedule", () => ({
+  pushStepsToGoogleTasks: vi.fn(),
+}));
 
 import { scheduleViaIcs } from "@/app/actions/ics-schedule";
 import { pushStepsToGoogleTasks } from "@/app/actions/google-schedule";
@@ -61,7 +63,9 @@ describe("googleTasksProvider.isAvailable — owner + configured truth table", (
   });
   it("owner + configured (even if not yet connected) → true", () => {
     expect(googleTasksProvider.isAvailable(ownerConfigured)).toBe(true);
-    expect(googleTasksProvider.isAvailable(ownerConfiguredNotConnected)).toBe(true);
+    expect(googleTasksProvider.isAvailable(ownerConfiguredNotConnected)).toBe(
+      true,
+    );
   });
   it("has the googleTasks id (distinct from the stored scheduledVia)", () => {
     expect(googleTasksProvider.id).toBe("googleTasks");
@@ -73,10 +77,15 @@ describe("availableProviders — the single 'which methods?' answer", () => {
     expect(availableProviders(guest).map((p) => p.id)).toEqual(["ics"]);
   });
   it("configured owner → [ics, googleTasks]", () => {
-    expect(availableProviders(ownerConfigured).map((p) => p.id)).toEqual(["ics", "googleTasks"]);
+    expect(availableProviders(ownerConfigured).map((p) => p.id)).toEqual([
+      "ics",
+      "googleTasks",
+    ]);
   });
   it("owner without a configured Google → [ics] (the Connect affordance is separate)", () => {
-    expect(availableProviders(ownerNotConfigured).map((p) => p.id)).toEqual(["ics"]);
+    expect(availableProviders(ownerNotConfigured).map((p) => p.id)).toEqual([
+      "ics",
+    ]);
   });
 });
 
@@ -85,15 +94,23 @@ describe("leadSchedulingMethod — the UI's control-visibility choice", () => {
     expect(leadSchedulingMethod(null)).toBe("ics");
   });
   it("owner with a configured Google → googleTasks", () => {
-    expect(leadSchedulingMethod({ configured: true, connected: true, needsReconnect: false })).toBe(
-      "googleTasks",
-    );
+    expect(
+      leadSchedulingMethod({
+        configured: true,
+        connected: true,
+        needsReconnect: false,
+      }),
+    ).toBe("googleTasks");
   });
   it("owner WITHOUT a configured Google still leads with googleTasks (Connect affordance)", () => {
     // Distinct from isAvailable: the control is offered (as Connect) even though
     // the method can't run yet.
     expect(
-      leadSchedulingMethod({ configured: false, connected: false, needsReconnect: false }),
+      leadSchedulingMethod({
+        configured: false,
+        connected: false,
+        needsReconnect: false,
+      }),
     ).toBe("googleTasks");
     expect(googleTasksProvider.isAvailable(ownerNotConfigured)).toBe(false);
   });
@@ -109,11 +126,20 @@ describe("icsProvider.schedule — result-shape mapping", () => {
       icsFilename: "task.ics",
     });
     const res = await icsProvider.schedule("task1", guest);
-    expect(res).toEqual({ ok: true, via: "ics", ics: "BEGIN:VCALENDAR", icsFilename: "task.ics" });
+    expect(res).toEqual({
+      ok: true,
+      via: "ics",
+      ics: "BEGIN:VCALENDAR",
+      icsFilename: "task.ics",
+    });
   });
 
   it("passes durationMin through when provided, and omits opts entirely otherwise", async () => {
-    vi.mocked(scheduleViaIcs).mockResolvedValue({ ok: true, ics: "X", icsFilename: "t.ics" });
+    vi.mocked(scheduleViaIcs).mockResolvedValue({
+      ok: true,
+      ics: "X",
+      icsFilename: "t.ics",
+    });
 
     await icsProvider.schedule("task1", guest, { durationMin: 45 });
     expect(scheduleViaIcs).toHaveBeenCalledWith("task1", { durationMin: 45 });
@@ -125,7 +151,11 @@ describe("icsProvider.schedule — result-shape mapping", () => {
   });
 
   it("propagates a failure reason + message", async () => {
-    vi.mocked(scheduleViaIcs).mockResolvedValue({ ok: false, reason: "not_found", message: "gone" });
+    vi.mocked(scheduleViaIcs).mockResolvedValue({
+      ok: false,
+      reason: "not_found",
+      message: "gone",
+    });
     const res = await icsProvider.schedule("task1", guest);
     expect(res).toEqual({ ok: false, reason: "not_found", message: "gone" });
   });
@@ -141,7 +171,12 @@ describe("googleTasksProvider.schedule — result-shape mapping", () => {
       listTitle: "Reclaim",
     });
     const res = await googleTasksProvider.schedule("task1", ownerConfigured);
-    expect(res).toEqual({ ok: true, via: "google", scheduled: 3, listTitle: "Reclaim" });
+    expect(res).toEqual({
+      ok: true,
+      via: "google",
+      scheduled: 3,
+      listTitle: "Reclaim",
+    });
   });
 
   it("propagates a failure reason + message", async () => {
@@ -151,12 +186,22 @@ describe("googleTasksProvider.schedule — result-shape mapping", () => {
       message: "connect first",
     });
     const res = await googleTasksProvider.schedule("task1", ownerConfigured);
-    expect(res).toEqual({ ok: false, reason: "not_connected", message: "connect first" });
+    expect(res).toEqual({
+      ok: false,
+      reason: "not_connected",
+      message: "connect first",
+    });
   });
 
   it("ignores ctx/opts (Google Tasks are date-based) — calls the action with just the taskId", async () => {
-    vi.mocked(pushStepsToGoogleTasks).mockResolvedValue({ ok: true, scheduled: 1, listTitle: "L" });
-    await googleTasksProvider.schedule("task1", ownerConfigured, { durationMin: 30 });
+    vi.mocked(pushStepsToGoogleTasks).mockResolvedValue({
+      ok: true,
+      scheduled: 1,
+      listTitle: "L",
+    });
+    await googleTasksProvider.schedule("task1", ownerConfigured, {
+      durationMin: 30,
+    });
     expect(pushStepsToGoogleTasks).toHaveBeenCalledWith("task1");
   });
 });
@@ -167,7 +212,9 @@ describe("registry + isProviderAvailable", () => {
     expect(schedulingProviders.googleTasks).toBe(googleTasksProvider);
   });
   it("isProviderAvailable mirrors the provider's own predicate", () => {
-    expect(isProviderAvailable(googleTasksProvider, ownerConfigured)).toBe(true);
+    expect(isProviderAvailable(googleTasksProvider, ownerConfigured)).toBe(
+      true,
+    );
     expect(isProviderAvailable(googleTasksProvider, guest)).toBe(false);
     expect(isProviderAvailable(icsProvider, guest)).toBe(true);
   });

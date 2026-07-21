@@ -12,7 +12,9 @@ vi.mock("@/lib/origin");
 describe("owner logout route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(requestOrigin).mockReturnValue("https://dlectroflow.dlectronique.dev");
+    vi.mocked(requestOrigin).mockReturnValue(
+      "https://dlectroflow.dlectronique.dev",
+    );
   });
   afterEach(() => vi.restoreAllMocks());
 

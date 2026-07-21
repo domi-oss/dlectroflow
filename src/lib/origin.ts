@@ -21,7 +21,8 @@ export function requestOrigin(req: Request): string {
   const h = req.headers;
   const url = new URL(req.url);
   const proto =
-    h.get("x-forwarded-proto")?.split(",")[0].trim() ?? url.protocol.replace(":", "");
+    h.get("x-forwarded-proto")?.split(",")[0].trim() ??
+    url.protocol.replace(":", "");
   const host = h.get("x-forwarded-host") ?? h.get("host") ?? url.host;
   return `${proto}://${host}`;
 }

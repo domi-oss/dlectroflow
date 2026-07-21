@@ -84,7 +84,9 @@ async function storeTokens(t: TokenResponse) {
     },
     update: {
       accessToken: encryptToken(t.access_token),
-      ...(t.refresh_token ? { refreshToken: encryptToken(t.refresh_token) } : {}),
+      ...(t.refresh_token
+        ? { refreshToken: encryptToken(t.refresh_token) }
+        : {}),
       expiresAt,
       scope,
       needsReconnect: false,
@@ -145,7 +147,12 @@ async function refreshAccessToken(): Promise<string | null> {
       // is what makes `connected` lie — clear them and flag for reconnect.
       await prisma.googleAuth.update({
         where: { id: SINGLETON_ID },
-        data: { accessToken: null, refreshToken: null, expiresAt: null, needsReconnect: true },
+        data: {
+          accessToken: null,
+          refreshToken: null,
+          expiresAt: null,
+          needsReconnect: true,
+        },
       });
     }
     return null;
@@ -188,7 +195,8 @@ const REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke";
  */
 export async function disconnectGoogle(): Promise<void> {
   const auth = await getAuth();
-  const token = decryptNullable(auth.refreshToken) ?? decryptNullable(auth.accessToken);
+  const token =
+    decryptNullable(auth.refreshToken) ?? decryptNullable(auth.accessToken);
   if (token) {
     try {
       await fetch(REVOKE_ENDPOINT, {
@@ -211,7 +219,8 @@ export async function listTaskLists(token: string): Promise<TaskList[]> {
   const res = await fetch(`${TASKS_API}/users/@me/lists?maxResults=100`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!res.ok) throw new Error(`Google Tasks list fetch failed (${res.status})`);
+  if (!res.ok)
+    throw new Error(`Google Tasks list fetch failed (${res.status})`);
   const data = (await res.json()) as { items?: TaskList[] };
   return data.items ?? [];
 }
@@ -220,7 +229,8 @@ export async function listTaskLists(token: string): Promise<TaskList[]> {
 export async function findReclaimList(token: string): Promise<TaskList | null> {
   const lists = await listTaskLists(token);
   return (
-    lists.find((l) => l.title.toLowerCase().includes(RECLAIM_LIST_MATCH)) ?? null
+    lists.find((l) => l.title.toLowerCase().includes(RECLAIM_LIST_MATCH)) ??
+    null
   );
 }
 

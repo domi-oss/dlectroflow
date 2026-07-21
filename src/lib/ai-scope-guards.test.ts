@@ -17,38 +17,40 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SparkSource } from "@/lib/constants";
 
 // ── vi.hoisted: create shared mock objects before vi.mock hoisting ──────────
-const { getAnthropicSpy, prismaMock, currentWorkspaceIdMock } = vi.hoisted(() => {
-  const getAnthropicSpy = vi.fn(() => {
-    throw new Error("getAnthropic must NOT be called for guests");
-  });
+const { getAnthropicSpy, prismaMock, currentWorkspaceIdMock } = vi.hoisted(
+  () => {
+    const getAnthropicSpy = vi.fn(() => {
+      throw new Error("getAnthropic must NOT be called for guests");
+    });
 
-  // Shared prisma stub — individual tests update the sub-objects they need.
-  const prismaMock = {
-    dailySpark: {
-      findUnique: vi.fn(),
-      upsert: vi.fn(),
-    },
-    dayRollup: {
-      findUnique: vi.fn(),
-      upsert: vi.fn(),
-    },
-    focusSession: {
-      findMany: vi.fn(),
-    },
-    rewardEvent: {
-      aggregate: vi.fn(),
-      count: vi.fn(),
-    },
-    step: {
-      findMany: vi.fn(),
-      findFirst: vi.fn(),
-    },
-  };
+    // Shared prisma stub — individual tests update the sub-objects they need.
+    const prismaMock = {
+      dailySpark: {
+        findUnique: vi.fn(),
+        upsert: vi.fn(),
+      },
+      dayRollup: {
+        findUnique: vi.fn(),
+        upsert: vi.fn(),
+      },
+      focusSession: {
+        findMany: vi.fn(),
+      },
+      rewardEvent: {
+        aggregate: vi.fn(),
+        count: vi.fn(),
+      },
+      step: {
+        findMany: vi.fn(),
+        findFirst: vi.fn(),
+      },
+    };
 
-  const currentWorkspaceIdMock = vi.fn();
+    const currentWorkspaceIdMock = vi.fn();
 
-  return { getAnthropicSpy, prismaMock, currentWorkspaceIdMock };
-});
+    return { getAnthropicSpy, prismaMock, currentWorkspaceIdMock };
+  },
+);
 
 // ── Module mocks (hoisted automatically by vitest) ──────────────────────────
 vi.mock("@/lib/anthropic", () => ({
@@ -90,8 +92,16 @@ describe("spark.ts › getTodaySpark", () => {
     // No cached spark in DB → quoteFor() is exercised on every call.
     prismaMock.dailySpark.findUnique.mockResolvedValue(null);
     prismaMock.dailySpark.upsert.mockImplementation(
-      ({ create }: { create: { quote: string; source: string; date: string; workspaceId: string } }) =>
-        Promise.resolve(create),
+      ({
+        create,
+      }: {
+        create: {
+          quote: string;
+          source: string;
+          date: string;
+          workspaceId: string;
+        };
+      }) => Promise.resolve(create),
     );
     // Reset spy to throwing behaviour (guards against false-positive owner tests)
     getAnthropicSpy.mockImplementation(() => {
@@ -223,7 +233,10 @@ describe("rollup.ts › generateTodayRollup (narrative guard)", () => {
   });
 
   it("owner workspace: getAnthropic IS called during narrative generation", async () => {
-    prismaMock.dayRollup.upsert.mockResolvedValue({ ...ROLLUP_ROW, workspaceId: "owner" });
+    prismaMock.dayRollup.upsert.mockResolvedValue({
+      ...ROLLUP_ROW,
+      workspaceId: "owner",
+    });
 
     const { generateTodayRollup } = await import("@/lib/rollup");
     // getAnthropic throws → caught → fallbackNarrative is used instead

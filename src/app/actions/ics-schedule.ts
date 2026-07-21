@@ -35,8 +35,9 @@ export async function scheduleViaIcs(
   // Stepless tasks synthesize one event of this length; clamp to the same
   // 1..480 bound the Google single-task path enforces.
   const raw = Math.round(opts?.durationMin ?? DEFAULT_ICS_DURATION_MIN);
-  const durationMin =
-    Number.isFinite(raw) ? Math.min(480, Math.max(1, raw)) : DEFAULT_ICS_DURATION_MIN;
+  const durationMin = Number.isFinite(raw)
+    ? Math.min(480, Math.max(1, raw))
+    : DEFAULT_ICS_DURATION_MIN;
 
   const ics = buildTaskIcs({
     title: task.title,

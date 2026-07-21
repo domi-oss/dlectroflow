@@ -15,7 +15,10 @@ function key(secret: string): Uint8Array {
 
 describe("session cookie", () => {
   it("round-trips an owner payload", async () => {
-    const token = await signOwnerSession({ kind: "owner", sub: "13595692" }, SECRET);
+    const token = await signOwnerSession(
+      { kind: "owner", sub: "13595692" },
+      SECRET,
+    );
     expect(await verifySession(token, SECRET)).toEqual({
       kind: "owner",
       sub: "13595692",
@@ -32,7 +35,9 @@ describe("session cookie", () => {
 
   it("rejects a token signed with a different secret", async () => {
     const token = await signGuestSession("abc", SECRET, 3600);
-    expect(await verifySession(token, "another-secret-32-bytes-long-yyyyyyyy")).toBeNull();
+    expect(
+      await verifySession(token, "another-secret-32-bytes-long-yyyyyyyy"),
+    ).toBeNull();
   });
 
   it("returns null for garbage", async () => {

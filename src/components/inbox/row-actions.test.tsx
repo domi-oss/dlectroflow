@@ -56,19 +56,34 @@ describe("RowActions", () => {
       <RowActions
         inline={[]}
         schedule={null}
-        menu={[<button key="m1">Move to…</button>, <button key="m2">Snooze 1h</button>]}
+        menu={[
+          <button key="m1">Move to…</button>,
+          <button key="m2">Snooze 1h</button>,
+        ]}
       />,
     );
     expect(screen.queryByRole("button", { name: /move to/i })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "All options" }));
-    expect(screen.getByRole("button", { name: /move to/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /snooze 1h/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /move to/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /snooze 1h/i }),
+    ).toBeInTheDocument();
   });
 
   it("Escape closes the ▾ popover (dismissable-popover idiom)", () => {
-    render(<RowActions inline={[]} schedule={null} menu={[<button key="m1">Move to…</button>]} />);
+    render(
+      <RowActions
+        inline={[]}
+        schedule={null}
+        menu={[<button key="m1">Move to…</button>]}
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: "All options" }));
-    expect(screen.getByRole("button", { name: /move to/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /move to/i }),
+    ).toBeInTheDocument();
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("button", { name: /move to/i })).toBeNull();
   });
@@ -76,18 +91,30 @@ describe("RowActions", () => {
   it("outside click closes the ▾ popover (dismissable-popover idiom)", () => {
     render(
       <div>
-        <RowActions inline={[]} schedule={null} menu={[<button key="m1">Move to…</button>]} />
+        <RowActions
+          inline={[]}
+          schedule={null}
+          menu={[<button key="m1">Move to…</button>]}
+        />
         <button>Outside</button>
       </div>,
     );
     fireEvent.click(screen.getByRole("button", { name: "All options" }));
-    expect(screen.getByRole("button", { name: /move to/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /move to/i }),
+    ).toBeInTheDocument();
     fireEvent.pointerDown(screen.getByRole("button", { name: "Outside" }));
     expect(screen.queryByRole("button", { name: /move to/i })).toBeNull();
   });
 
-  it("never renders role=\"menu\", even with the ▾ popover open", () => {
-    render(<RowActions inline={[]} schedule={null} menu={[<button key="m1">Move to…</button>]} />);
+  it('never renders role="menu", even with the ▾ popover open', () => {
+    render(
+      <RowActions
+        inline={[]}
+        schedule={null}
+        menu={[<button key="m1">Move to…</button>]}
+      />,
+    );
     expect(screen.queryByRole("menu")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "All options" }));
     expect(screen.queryByRole("menu")).toBeNull();
@@ -95,29 +122,58 @@ describe("RowActions", () => {
 
   it("ready_steps: 📅 fires onScheduleSteps immediately", () => {
     const fn = vi.fn();
-    render(<RowActions inline={[]} menu={[]} schedule={{ state: "ready_steps", onScheduleSteps: fn }} />);
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{ state: "ready_steps", onScheduleSteps: fn }}
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
     expect(fn).toHaveBeenCalledOnce();
   });
 
   it("needs_duration: 📅 opens the popover; picking 30 fires onScheduleSingle(30)", () => {
     const fn = vi.fn();
-    render(<RowActions inline={[]} menu={[]} schedule={{ state: "needs_duration", onScheduleSingle: fn }} />);
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{ state: "needs_duration", onScheduleSingle: fn }}
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
     fireEvent.click(screen.getByRole("button", { name: /^30 min$/i }));
     expect(fn).toHaveBeenCalledWith(30);
   });
 
   it("Duo a11y fix: needs_duration 📅 uses aria-haspopup='dialog' (focus-capturing popover, no role=menu)", () => {
-    render(<RowActions inline={[]} menu={[]} schedule={{ state: "needs_duration", onScheduleSingle: vi.fn() }} />);
-    expect(screen.getByRole("button", { name: /schedule/i })).toHaveAttribute("aria-haspopup", "dialog");
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{ state: "needs_duration", onScheduleSingle: vi.fn() }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /schedule/i })).toHaveAttribute(
+      "aria-haspopup",
+      "dialog",
+    );
   });
 
   it("custom duration input schedules with the typed minutes", () => {
     const fn = vi.fn();
-    render(<RowActions inline={[]} menu={[]} schedule={{ state: "needs_duration", onScheduleSingle: fn }} />);
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{ state: "needs_duration", onScheduleSingle: fn }}
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
-    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "25" } });
+    fireEvent.change(screen.getByRole("spinbutton"), {
+      target: { value: "25" },
+    });
     fireEvent.click(screen.getByRole("button", { name: /go/i }));
     expect(fn).toHaveBeenCalledWith(25);
   });
@@ -139,7 +195,13 @@ describe("RowActions", () => {
 
   it("custom duration input has min/max/step bounds and visibly refuses minutes over 480", () => {
     const fn = vi.fn();
-    render(<RowActions inline={[]} menu={[]} schedule={{ state: "needs_duration", onScheduleSingle: fn }} />);
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{ state: "needs_duration", onScheduleSingle: fn }}
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
     const input = screen.getByRole("spinbutton");
     expect(input).toHaveAttribute("min", "1");
@@ -156,9 +218,17 @@ describe("RowActions", () => {
 
   it("Duo fix: a fractional custom duration below 1 (e.g. 0.5) is out of range", () => {
     const fn = vi.fn();
-    render(<RowActions inline={[]} menu={[]} schedule={{ state: "needs_duration", onScheduleSingle: fn }} />);
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{ state: "needs_duration", onScheduleSingle: fn }}
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
-    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "0.5" } });
+    fireEvent.change(screen.getByRole("spinbutton"), {
+      target: { value: "0.5" },
+    });
     const goButton = screen.getByRole("button", { name: /go/i });
     expect(goButton).toBeDisabled();
     fireEvent.click(goButton);
@@ -166,24 +236,39 @@ describe("RowActions", () => {
   });
 
   it("clears the custom duration input when the popover is dismissed + reopened (Duo review)", () => {
-    render(<RowActions inline={[]} menu={[]} schedule={{ state: "needs_duration", onScheduleSingle: vi.fn() }} />);
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{ state: "needs_duration", onScheduleSingle: vi.fn() }}
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
-    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "99" } });
+    fireEvent.change(screen.getByRole("spinbutton"), {
+      target: { value: "99" },
+    });
     fireEvent.keyDown(document, { key: "Escape" }); // dismiss
     fireEvent.click(screen.getByRole("button", { name: /schedule/i })); // reopen
     expect(screen.getByRole("spinbutton")).toHaveValue(null);
   });
 
   it("reconnect state renders the OAuth link, not a button", () => {
-    render(<RowActions inline={[]} menu={[]} schedule={{ state: "reconnect" }} />);
-    expect(screen.getByRole("link", { name: /reconnect google/i })).toHaveAttribute(
-      "href",
-      "/api/google/oauth/start",
+    render(
+      <RowActions inline={[]} menu={[]} schedule={{ state: "reconnect" }} />,
     );
+    expect(
+      screen.getByRole("link", { name: /reconnect google/i }),
+    ).toHaveAttribute("href", "/api/google/oauth/start");
   });
 
   it("no schedule prop → no 📅 control (guest rows)", () => {
-    render(<RowActions inline={[]} schedule={null} menu={[<span key="a">Edit</span>]} />);
+    render(
+      <RowActions
+        inline={[]}
+        schedule={null}
+        menu={[<span key="a">Edit</span>]}
+      />,
+    );
     expect(screen.queryByRole("button", { name: /schedule/i })).toBeNull();
   });
 
@@ -204,35 +289,64 @@ describe("RowActions", () => {
     const names = screen
       .getAllByRole("button")
       .map((b) => b.getAttribute("aria-label") ?? b.textContent);
-    expect(names).toEqual(["First", "Move to", "Schedule", "Delete", "All options"]);
+    expect(names).toEqual([
+      "First",
+      "Move to",
+      "Schedule",
+      "Delete",
+      "All options",
+    ]);
   });
 });
 
 describe("ScheduleControl — ICS states", () => {
   it("ics_ready_steps: 📅 fires onScheduleIcs() immediately (icon variant, aria 'Add to calendar')", () => {
     const fn = vi.fn();
-    render(<RowActions inline={[]} menu={[]} schedule={{ state: "ics_ready_steps", onScheduleIcs: fn }} />);
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{ state: "ics_ready_steps", onScheduleIcs: fn }}
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: /add to calendar/i }));
     expect(fn).toHaveBeenCalledWith();
   });
   it("ics_needs_duration: opens the popover; picking 30 fires onScheduleIcs(30)", () => {
     const fn = vi.fn();
-    render(<RowActions inline={[]} menu={[]} schedule={{ state: "ics_needs_duration", onScheduleIcs: fn }} />);
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{ state: "ics_needs_duration", onScheduleIcs: fn }}
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: /add to calendar/i }));
     fireEvent.click(screen.getByRole("button", { name: /^30 min$/i }));
     expect(fn).toHaveBeenCalledWith(30);
   });
   it("menu variant renders the label and fires onScheduleIcs", () => {
     const fn = vi.fn();
-    render(<ScheduleControl variant="menu" state="ics_ready_steps" onScheduleIcs={fn} label="Add to calendar (.ics)" />);
-    fireEvent.click(screen.getByRole("button", { name: "Add to calendar (.ics)" }));
+    render(
+      <ScheduleControl
+        variant="menu"
+        state="ics_ready_steps"
+        onScheduleIcs={fn}
+        label="Add to calendar (.ics)"
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Add to calendar (.ics)" }),
+    );
     expect(fn).toHaveBeenCalledWith();
   });
 });
 
 describe("RowActions — Scheduled indicator", () => {
   it("renders 'Scheduled ✓' when scheduled, hides it otherwise", () => {
-    const { rerender } = render(<RowActions inline={[]} schedule={null} menu={[]} scheduled />);
+    const { rerender } = render(
+      <RowActions inline={[]} schedule={null} menu={[]} scheduled />,
+    );
     expect(screen.getByText(/scheduled ✓/i)).toBeInTheDocument();
     rerender(<RowActions inline={[]} schedule={null} menu={[]} />);
     expect(screen.queryByText(/scheduled ✓/i)).toBeNull();
@@ -252,34 +366,66 @@ describe("a11y: touch targets ≥ 44px on icon/pill controls", () => {
     el.className.includes("min-h-11") && el.className.includes("min-w-11");
 
   it("📅 schedule icon button has a ≥44px hit area", () => {
-    render(<RowActions inline={[]} menu={[]} schedule={{ state: "ready_steps", onScheduleSteps: vi.fn() }} />);
-    expect(hasMinTarget(screen.getByRole("button", { name: /schedule/i }))).toBe(true);
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{ state: "ready_steps", onScheduleSteps: vi.fn() }}
+      />,
+    );
+    expect(
+      hasMinTarget(screen.getByRole("button", { name: /schedule/i })),
+    ).toBe(true);
   });
 
   it("🔽 All-options icon button has a ≥44px hit area", () => {
     render(<RowActions inline={[]} menu={[]} schedule={null} />);
-    expect(hasMinTarget(screen.getByRole("button", { name: "All options" }))).toBe(true);
+    expect(
+      hasMinTarget(screen.getByRole("button", { name: "All options" })),
+    ).toBe(true);
   });
 
   it("duration preset + Go pill buttons have a ≥44px hit area", () => {
-    render(<RowActions inline={[]} menu={[]} schedule={{ state: "needs_duration", onScheduleSingle: vi.fn() }} />);
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{ state: "needs_duration", onScheduleSingle: vi.fn() }}
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
-    expect(hasMinTarget(screen.getByRole("button", { name: /^30 min$/i }))).toBe(true);
-    expect(hasMinTarget(screen.getByRole("button", { name: /go/i }))).toBe(true);
+    expect(
+      hasMinTarget(screen.getByRole("button", { name: /^30 min$/i })),
+    ).toBe(true);
+    expect(hasMinTarget(screen.getByRole("button", { name: /go/i }))).toBe(
+      true,
+    );
   });
 });
 
 describe("ScheduleControl — menu variant (▾ dropdown 'Schedule' entry)", () => {
   it("ready_steps: renders a 'Schedule' text button that fires onScheduleSteps", () => {
     const fn = vi.fn();
-    render(<ScheduleControl variant="menu" state="ready_steps" onScheduleSteps={fn} />);
+    render(
+      <ScheduleControl
+        variant="menu"
+        state="ready_steps"
+        onScheduleSteps={fn}
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: "Schedule" }));
     expect(fn).toHaveBeenCalledOnce();
   });
 
   it("needs_duration: 'Schedule' expands presets inline; picking 30 fires onScheduleSingle(30)", () => {
     const fn = vi.fn();
-    render(<ScheduleControl variant="menu" state="needs_duration" onScheduleSingle={fn} />);
+    render(
+      <ScheduleControl
+        variant="menu"
+        state="needs_duration"
+        onScheduleSingle={fn}
+      />,
+    );
     fireEvent.click(screen.getByRole("button", { name: "Schedule" }));
     fireEvent.click(screen.getByRole("button", { name: /^30 min$/i }));
     expect(fn).toHaveBeenCalledWith(30);
@@ -287,9 +433,8 @@ describe("ScheduleControl — menu variant (▾ dropdown 'Schedule' entry)", () 
 
   it("reconnect: renders the OAuth link even in menu variant", () => {
     render(<ScheduleControl variant="menu" state="reconnect" />);
-    expect(screen.getByRole("link", { name: /reconnect google/i })).toHaveAttribute(
-      "href",
-      "/api/google/oauth/start",
-    );
+    expect(
+      screen.getByRole("link", { name: /reconnect google/i }),
+    ).toHaveAttribute("href", "/api/google/oauth/start");
   });
 });

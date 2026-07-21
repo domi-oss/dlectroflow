@@ -15,12 +15,15 @@ vi.mock("@/lib/origin");
 describe("proxy: guest session cookie Secure flag", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.AUTH_SESSION_SECRET = "test-secret-at-least-32-bytes-long-xxxxx";
+    process.env.AUTH_SESSION_SECRET =
+      "test-secret-at-least-32-bytes-long-xxxxx";
   });
   afterEach(() => vi.restoreAllMocks());
 
   it("marks the guest cookie Secure when the deployed origin is https, even on an http pod request", async () => {
-    vi.mocked(requestOrigin).mockReturnValue("https://dlectroflow.dlectronique.dev");
+    vi.mocked(requestOrigin).mockReturnValue(
+      "https://dlectroflow.dlectronique.dev",
+    );
     // Pod sees http:// behind the ingress.
     const req = new NextRequest("http://pod.internal/inbox");
     const res = await proxy(req);

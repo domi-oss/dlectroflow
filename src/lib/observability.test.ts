@@ -33,7 +33,9 @@ describe("recordAnthropicFailure", () => {
   it("captures the HTTP status from Anthropic APIError-shaped errors", () => {
     const apiErr = Object.assign(new Error("rate limited"), { status: 429 });
     recordAnthropicFailure("breakdown", apiErr);
-    const parsed = JSON.parse(vi.mocked(console.error).mock.calls[0][0] as string);
+    const parsed = JSON.parse(
+      vi.mocked(console.error).mock.calls[0][0] as string,
+    );
     expect(parsed.status).toBe(429);
   });
 

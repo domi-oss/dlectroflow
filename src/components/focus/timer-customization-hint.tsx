@@ -18,7 +18,11 @@ export function TimerCustomizationHint({
     <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-50 p-3 text-sm dark:bg-amber-950/20">
       <p className="flex-1">
         {t("focus.tip.body", voice)}{" "}
-        <Link href="/settings" onClick={onDismiss} className="font-medium underline">
+        <Link
+          href="/settings"
+          onClick={onDismiss}
+          className="font-medium underline"
+        >
           {t("focus.tip.cta", voice)}
         </Link>
       </p>

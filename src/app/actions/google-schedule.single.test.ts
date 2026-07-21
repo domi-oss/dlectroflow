@@ -68,7 +68,9 @@ beforeEach(() => vi.clearAllMocks());
 describe("scheduleSingleTask", () => {
   it("rejects non-owner", async () => {
     workspaceMock.mockResolvedValue("guest-ws");
-    await expect(scheduleSingleTask("item-1", 30)).rejects.toThrow("owner only");
+    await expect(scheduleSingleTask("item-1", 30)).rejects.toThrow(
+      "owner only",
+    );
   });
 
   it("rejects a duration outside 1..480 minutes (server clamp) without touching Google", async () => {
@@ -89,8 +91,15 @@ describe("scheduleSingleTask", () => {
     workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue(null);
-    statusMock.mockResolvedValue({ configured: true, connected: false, needsReconnect: true });
-    expect(await scheduleSingleTask("item-1", 30)).toEqual({ ok: false, reason: "reconnect_required" });
+    statusMock.mockResolvedValue({
+      configured: true,
+      connected: false,
+      needsReconnect: true,
+    });
+    expect(await scheduleSingleTask("item-1", 30)).toEqual({
+      ok: false,
+      reason: "reconnect_required",
+    });
   });
 
   it("creates one Google task titled with the duration convention and stores ids", async () => {
@@ -112,12 +121,17 @@ describe("scheduleSingleTask", () => {
     expect(createGoogleTaskMock).toHaveBeenCalledWith(
       "tok",
       "list-9",
-      expect.objectContaining({ title: expect.stringContaining("(duration:45m)") }),
+      expect.objectContaining({
+        title: expect.stringContaining("(duration:45m)"),
+      }),
     );
     expect(taskUpdateMock).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "task-1" },
-        data: expect.objectContaining({ googleTaskId: "gtask-9", googleTaskListId: "list-9" }),
+        data: expect.objectContaining({
+          googleTaskId: "gtask-9",
+          googleTaskListId: "list-9",
+        }),
       }),
     );
     expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
@@ -135,7 +149,10 @@ describe("scheduleSingleTask", () => {
     });
     findReclaimListMock.mockResolvedValue(null);
 
-    expect(await scheduleSingleTask("item-1", 30)).toEqual({ ok: false, reason: "no_reclaim_list" });
+    expect(await scheduleSingleTask("item-1", 30)).toEqual({
+      ok: false,
+      reason: "no_reclaim_list",
+    });
     expect(createGoogleTaskMock).not.toHaveBeenCalled();
   });
 
@@ -157,10 +174,15 @@ describe("scheduleSingleTask", () => {
 
     expect(res).toEqual({ ok: true });
     expect(taskCreateMock).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ title: "Water the plants" }) }),
+      expect.objectContaining({
+        data: expect.objectContaining({ title: "Water the plants" }),
+      }),
     );
     expect(itemUpdateMock).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "item-2" }, data: expect.objectContaining({ taskId: "task-2" }) }),
+      expect.objectContaining({
+        where: { id: "item-2" },
+        data: expect.objectContaining({ taskId: "task-2" }),
+      }),
     );
     expect(taskUpdateMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -188,7 +210,10 @@ describe("scheduleSingleTask", () => {
     expect(taskUpdateMock).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "task-1" },
-        data: expect.objectContaining({ scheduledVia: "google", googleTaskId: "gtask-9" }),
+        data: expect.objectContaining({
+          scheduledVia: "google",
+          googleTaskId: "gtask-9",
+        }),
       }),
     );
   });
@@ -211,15 +236,26 @@ describe("scheduleSingleTask", () => {
 
     expect(res).toEqual({ ok: true });
     // Same helpers, same args as pushStepsToGoogleTasks (google-schedule.ts).
-    expect(logReward).toHaveBeenCalledWith(OWNER_WORKSPACE_ID, RewardType.Scheduled);
-    expect(awardBadge).toHaveBeenCalledWith(OWNER_WORKSPACE_ID, BadgeKey.FirstSchedule);
+    expect(logReward).toHaveBeenCalledWith(
+      OWNER_WORKSPACE_ID,
+      RewardType.Scheduled,
+    );
+    expect(awardBadge).toHaveBeenCalledWith(
+      OWNER_WORKSPACE_ID,
+      BadgeKey.FirstSchedule,
+    );
   });
 
   it("awards Scheduled + FirstSchedule for a lazily-created task (first-ever schedule)", async () => {
     workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
-    itemFindFirstMock.mockResolvedValue({ id: "item-2", text: "Water the plants", taskId: null, task: null });
+    itemFindFirstMock.mockResolvedValue({
+      id: "item-2",
+      text: "Water the plants",
+      taskId: null,
+      task: null,
+    });
     taskCreateMock.mockResolvedValue({ id: "task-2" });
     findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
     createGoogleTaskMock.mockResolvedValue({ id: "gtask-3" });
@@ -227,8 +263,14 @@ describe("scheduleSingleTask", () => {
     const res = await scheduleSingleTask("item-2", 15);
 
     expect(res).toEqual({ ok: true });
-    expect(logReward).toHaveBeenCalledWith(OWNER_WORKSPACE_ID, RewardType.Scheduled);
-    expect(awardBadge).toHaveBeenCalledWith(OWNER_WORKSPACE_ID, BadgeKey.FirstSchedule);
+    expect(logReward).toHaveBeenCalledWith(
+      OWNER_WORKSPACE_ID,
+      RewardType.Scheduled,
+    );
+    expect(awardBadge).toHaveBeenCalledWith(
+      OWNER_WORKSPACE_ID,
+      BadgeKey.FirstSchedule,
+    );
   });
 
   it("does not re-award when the task was already scheduled (idempotency — task has a scheduledAt marker)", async () => {
@@ -241,7 +283,11 @@ describe("scheduleSingleTask", () => {
       id: "item-1",
       text: "Call the dentist",
       taskId: "task-1",
-      task: { id: "task-1", title: "Call the dentist", scheduledAt: new Date("2026-07-17T10:00:00Z") },
+      task: {
+        id: "task-1",
+        title: "Call the dentist",
+        scheduledAt: new Date("2026-07-17T10:00:00Z"),
+      },
     });
     findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
     createGoogleTaskMock.mockResolvedValue({ id: "gtask-9" });
@@ -279,7 +325,12 @@ describe("scheduleSingleTask", () => {
     workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
-    itemFindFirstMock.mockResolvedValue({ id: "item-3", text: "Water the plants", taskId: null, task: null });
+    itemFindFirstMock.mockResolvedValue({
+      id: "item-3",
+      text: "Water the plants",
+      taskId: null,
+      task: null,
+    });
     taskCreateMock.mockResolvedValue({ id: "task-3" });
     findReclaimListMock.mockResolvedValue(null); // Google push fails after the lazy-create
 
@@ -312,7 +363,10 @@ describe("scheduleSingleTask", () => {
 
     expect(res).toEqual({ ok: true });
     // allSettled: a logReward failure must NOT skip the idempotent awardBadge.
-    expect(awardBadge).toHaveBeenCalledWith(OWNER_WORKSPACE_ID, BadgeKey.FirstSchedule);
+    expect(awardBadge).toHaveBeenCalledWith(
+      OWNER_WORKSPACE_ID,
+      BadgeKey.FirstSchedule,
+    );
     expect(taskUpdateMock).toHaveBeenCalled();
     expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
   });

@@ -5,11 +5,7 @@
 import type { BucketId } from "./bucket";
 
 export type BucketAction =
-  | "moveToReview"
-  | "triage"
-  | "requestBreakdown"
-  | "snooze"
-  | "complete";
+  "moveToReview" | "triage" | "requestBreakdown" | "snooze" | "complete";
 
 /** Destination bucket → the action its drop performs. */
 export const ACTION_FOR_BUCKET: Record<BucketId, BucketAction> = {
@@ -22,7 +18,12 @@ export const ACTION_FOR_BUCKET: Record<BucketId, BucketAction> = {
 
 export type DropPlan =
   | { kind: "noop" }
-  | { kind: "apply"; target: BucketId; action: BucketAction; reopenFirst: boolean };
+  | {
+      kind: "apply";
+      target: BucketId;
+      action: BucketAction;
+      reopenFirst: boolean;
+    };
 
 /**
  * Resolve a source→target move into a plan.

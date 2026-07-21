@@ -86,11 +86,14 @@ export function focusableSteps(tasks: FocusTask[]): FocusableStep[] {
       };
       return { entry, createdAt: toMs(task.createdAt) };
     })
-    .filter((e): e is { entry: FocusableStep; createdAt: number } => e !== null);
+    .filter(
+      (e): e is { entry: FocusableStep; createdAt: number } => e !== null,
+    );
 
   entries.sort((a, b) => {
     // Resumable (paused) first.
-    if (a.entry.resumable !== b.entry.resumable) return a.entry.resumable ? -1 : 1;
+    if (a.entry.resumable !== b.entry.resumable)
+      return a.entry.resumable ? -1 : 1;
     // Then newest task first.
     return b.createdAt - a.createdAt;
   });

@@ -6,7 +6,10 @@ import { updateFocusTimerSettings } from "@/app/actions/settings";
 import { FocusTimerStyle, FocusSound } from "@/lib/constants";
 import { resolveTimerStyle } from "@/lib/focus-timer-style";
 import { t, type Voice } from "@/lib/strings";
-import { useSaveStatus, SaveIndicator } from "@/components/settings/use-save-status";
+import {
+  useSaveStatus,
+  SaveIndicator,
+} from "@/components/settings/use-save-status";
 import { TimerStylePreview } from "@/components/focus/timer-style-preview";
 
 type Prefs = {
@@ -39,7 +42,13 @@ export function FocusTimerSection({
   const router = useRouter();
   const [, startTransition] = useTransition();
   const { status, markSaving, markSaved, markError } = useSaveStatus();
-  const [prefs, setPrefs] = useState<Prefs>({ timerStyle, minimalMode, keepAwake, alarmEnabled, sound });
+  const [prefs, setPrefs] = useState<Prefs>({
+    timerStyle,
+    minimalMode,
+    keepAwake,
+    alarmEnabled,
+    sound,
+  });
 
   const persist = (next: Prefs) =>
     startTransition(async () => {
@@ -61,7 +70,10 @@ export function FocusTimerSection({
 
   const styleOptions: { value: FocusTimerStyle; label: string }[] = [
     { value: FocusTimerStyle.Ring, label: t("focusSettings.styleRing", voice) },
-    { value: FocusTimerStyle.Digits, label: t("focusSettings.styleDigits", voice) },
+    {
+      value: FocusTimerStyle.Digits,
+      label: t("focusSettings.styleDigits", voice),
+    },
     { value: FocusTimerStyle.Bar, label: t("focusSettings.styleBar", voice) },
     { value: FocusTimerStyle.Mug, label: t("focusSettings.styleMug", voice) },
   ];
@@ -72,15 +84,24 @@ export function FocusTimerSection({
   return (
     <section className="space-y-3">
       <div className="flex items-center gap-2">
-        <h2 className="text-sm font-semibold">{t("focusSettings.heading", voice)}</h2>
+        <h2 className="text-sm font-semibold">
+          {t("focusSettings.heading", voice)}
+        </h2>
         <SaveIndicator status={status} voice={voice} />
       </div>
-      <p className="text-muted-foreground text-sm">{t("focusSettings.intro", voice)}</p>
+      <p className="text-muted-foreground text-sm">
+        {t("focusSettings.intro", voice)}
+      </p>
 
       <fieldset className="space-y-1">
-        <legend className="text-sm font-medium">{t("focusSettings.style", voice)}</legend>
+        <legend className="text-sm font-medium">
+          {t("focusSettings.style", voice)}
+        </legend>
         {styleOptions.map((o) => (
-          <label key={o.value} className="flex min-h-[44px] items-center gap-2 text-sm">
+          <label
+            key={o.value}
+            className="flex min-h-[44px] items-center gap-2 text-sm"
+          >
             <input
               type="radio"
               name="focusTimerStyle"
@@ -119,8 +140,12 @@ export function FocusTimerSection({
           onChange={(e) => set("sound", e.target.value)}
           className="border-input rounded-md border px-2 py-1"
         >
-          <option value={FocusSound.Off}>{t("focusSettings.soundOff", voice)}</option>
-          <option value={FocusSound.LofiCalm}>{t("focusSettings.soundLofiCalm", voice)}</option>
+          <option value={FocusSound.Off}>
+            {t("focusSettings.soundOff", voice)}
+          </option>
+          <option value={FocusSound.LofiCalm}>
+            {t("focusSettings.soundLofiCalm", voice)}
+          </option>
         </select>
       </label>
     </section>

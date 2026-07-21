@@ -50,12 +50,19 @@ export type BreakdownRequest = {
 export type StreamEvent =
   | { type: "text"; delta: string }
   | { type: "steps"; data: Proposal }
-  | { type: "fallback"; reason: "quota" | "global_cap" | "error"; data: Proposal }
+  | {
+      type: "fallback";
+      reason: "quota" | "global_cap" | "error";
+      data: Proposal;
+    }
   | { type: "done" }
   | { type: "error"; message: string };
 
 /** Turn a feedback intent into a natural-language instruction for Claude. */
-export function feedbackInstruction(fb: Feedback, proposal: Proposal | null): string {
+export function feedbackInstruction(
+  fb: Feedback,
+  proposal: Proposal | null,
+): string {
   switch (fb.kind) {
     case "propose":
       return "Propose an initial breakdown.";
@@ -84,11 +91,31 @@ export function localBreakdown(title: string): Proposal {
   return {
     parentEmoji: "🗂️",
     steps: [
-      { text: `Write down exactly what "done" looks like for: ${t}`, estMinutes: 5, subtaskEmoji: "🎯" },
-      { text: "Gather anything you need to start (files, links, tools)", estMinutes: 10, subtaskEmoji: "🧰" },
-      { text: "Do the smallest first piece for 10 minutes", estMinutes: 10, subtaskEmoji: "🌱" },
-      { text: "Continue the main work in one focused block", estMinutes: 25, subtaskEmoji: "🚀" },
-      { text: "Review, tidy up, and mark it complete", estMinutes: 10, subtaskEmoji: "✅" },
+      {
+        text: `Write down exactly what "done" looks like for: ${t}`,
+        estMinutes: 5,
+        subtaskEmoji: "🎯",
+      },
+      {
+        text: "Gather anything you need to start (files, links, tools)",
+        estMinutes: 10,
+        subtaskEmoji: "🧰",
+      },
+      {
+        text: "Do the smallest first piece for 10 minutes",
+        estMinutes: 10,
+        subtaskEmoji: "🌱",
+      },
+      {
+        text: "Continue the main work in one focused block",
+        estMinutes: 25,
+        subtaskEmoji: "🚀",
+      },
+      {
+        text: "Review, tidy up, and mark it complete",
+        estMinutes: 10,
+        subtaskEmoji: "✅",
+      },
     ],
   };
 }
@@ -103,6 +130,8 @@ export function buildUserPrompt(req: BreakdownRequest): string {
   } else {
     lines.push("No steps proposed yet.");
   }
-  lines.push(`Feedback: ${feedbackInstruction(req.feedback, req.currentProposal)}`);
+  lines.push(
+    `Feedback: ${feedbackInstruction(req.feedback, req.currentProposal)}`,
+  );
   return lines.join("\n");
 }

@@ -37,7 +37,9 @@ describe("scheduled-purge entrypoint is self-contained", () => {
   });
 
   it("has @prisma/client as its only package import (present in traced node_modules)", () => {
-    const specifiers = [...src.matchAll(/from\s+["']([^"']+)["']/g)].map((m) => m[1]);
+    const specifiers = [...src.matchAll(/from\s+["']([^"']+)["']/g)].map(
+      (m) => m[1],
+    );
     const packages = specifiers.filter(
       (s) => !s.startsWith(".") && !s.startsWith("node:"),
     );
@@ -55,7 +57,9 @@ describe("purgeWorkspace", () => {
   it("deletes a guest workspace (cascade removes scoped rows at the DB level)", async () => {
     const db = makeDb();
     await purgeWorkspace(db, "guest-123");
-    expect(db.workspace.delete).toHaveBeenCalledWith({ where: { id: "guest-123" } });
+    expect(db.workspace.delete).toHaveBeenCalledWith({
+      where: { id: "guest-123" },
+    });
     expect(db.workspace.delete).toHaveBeenCalledTimes(1);
   });
 });

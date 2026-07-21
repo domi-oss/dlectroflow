@@ -42,7 +42,11 @@ export async function gatherDayData(workspaceId: string): Promise<DayData> {
         orderBy: { endedAt: "asc" },
       }),
       prisma.focusSession.findMany({
-        where: { workspaceId, startedAt: { gte: start }, endedAt: { not: null } },
+        where: {
+          workspaceId,
+          startedAt: { gte: start },
+          endedAt: { not: null },
+        },
         select: { durationMin: true },
       }),
       prisma.rewardEvent.aggregate({
@@ -51,7 +55,10 @@ export async function gatherDayData(workspaceId: string): Promise<DayData> {
       }),
       getStreak(workspaceId),
       prisma.step.findMany({
-        where: { done: false, task: { workspaceId, status: TaskStatus.Active } },
+        where: {
+          done: false,
+          task: { workspaceId, status: TaskStatus.Active },
+        },
         include: { task: true },
         orderBy: [{ taskId: "asc" }, { order: "asc" }],
         take: 12,
@@ -91,7 +98,9 @@ function fallbackNarrative(d: DayData): string {
   }
   const wins: string[] = [];
   if (d.stepsDone > 0)
-    wins.push(`you finished ${d.stepsDone} step${d.stepsDone === 1 ? "" : "s"}`);
+    wins.push(
+      `you finished ${d.stepsDone} step${d.stepsDone === 1 ? "" : "s"}`,
+    );
   if (d.focusMin > 0)
     wins.push(
       `you held focus for ${d.focusMin} minute${d.focusMin === 1 ? "" : "s"} across ${d.sessions} session${d.sessions === 1 ? "" : "s"}`,
@@ -109,7 +118,10 @@ function fallbackNarrative(d: DayData): string {
   return `${winLine}${streakLine}${carryLine}`;
 }
 
-async function generateNarrative(d: DayData, workspaceId: string): Promise<string> {
+async function generateNarrative(
+  d: DayData,
+  workspaceId: string,
+): Promise<string> {
   // Guests never call Claude — use the local narrative builder.
   if (!isGuestWorkspace(workspaceId)) {
     try {
@@ -127,7 +139,14 @@ async function generateNarrative(d: DayData, workspaceId: string): Promise<strin
 - 2 short paragraphs max, ~90 words total. Second person ("you"). No emoji, no headings, no bullet points, no quotation marks around the whole thing.
 
 Today's data:
-- Steps completed: ${d.stepsDone}${d.completedStepTexts.length ? ` (${d.completedStepTexts.slice(0, 5).map((t) => `"${t}"`).join(", ")})` : ""}
+- Steps completed: ${d.stepsDone}${
+              d.completedStepTexts.length
+                ? ` (${d.completedStepTexts
+                    .slice(0, 5)
+                    .map((t) => `"${t}"`)
+                    .join(", ")})`
+                : ""
+            }
 - Focus time: ${d.focusMin} minutes over ${d.sessions} session(s)
 - Points earned: ${d.points}
 - Current working-day streak: ${d.streakDay}
@@ -164,7 +183,9 @@ export type Rollup = {
 };
 
 /** Read today's stored rollup, if one has been generated. */
-export async function getTodayRollup(workspaceId: string): Promise<Rollup | null> {
+export async function getTodayRollup(
+  workspaceId: string,
+): Promise<Rollup | null> {
   const date = ymd(new Date());
   const row = await prisma.dayRollup.findUnique({
     where: { workspaceId_date: { workspaceId, date } },
@@ -189,7 +210,10 @@ export async function getTodayRollup(workspaceId: string): Promise<Rollup | null
  * stats, ask Claude for a warm recap, and persist it to DayRollup. Returns the
  * full rollup for immediate display.
  */
-export async function generateTodayRollup(workspaceId: string, force = false): Promise<Rollup> {
+export async function generateTodayRollup(
+  workspaceId: string,
+  force = false,
+): Promise<Rollup> {
   const data = await gatherDayData(workspaceId);
   const existing = await prisma.dayRollup.findUnique({
     where: { workspaceId_date: { workspaceId, date: data.date } },
@@ -237,7 +261,10 @@ export async function generateTodayRollup(workspaceId: string, force = false): P
 }
 
 /** Mark today's rollup as emailed (once-per-day guard for the delivery job). */
-export async function markRollupEmailed(workspaceId: string, date: string): Promise<void> {
+export async function markRollupEmailed(
+  workspaceId: string,
+  date: string,
+): Promise<void> {
   await prisma.dayRollup.update({
     where: { workspaceId_date: { workspaceId, date } },
     data: { emailedAt: new Date() },
@@ -259,7 +286,10 @@ export async function markRollupEmailed(workspaceId: string, date: string): Prom
  * sees the row already claimed and gets `count === 0`. Send the email only when
  * this returns true.
  */
-export async function claimRollupEmail(workspaceId: string, date: string): Promise<boolean> {
+export async function claimRollupEmail(
+  workspaceId: string,
+  date: string,
+): Promise<boolean> {
   const { count } = await prisma.dayRollup.updateMany({
     where: { workspaceId, date, emailedAt: null },
     data: { emailedAt: new Date() },
@@ -273,7 +303,10 @@ export async function claimRollupEmail(workspaceId: string, date: string): Promi
  * calls this, and no other caller can have claimed the day in the meantime, so
  * clearing `emailedAt` here can't stomp another delivery.
  */
-export async function releaseRollupEmailClaim(workspaceId: string, date: string): Promise<void> {
+export async function releaseRollupEmailClaim(
+  workspaceId: string,
+  date: string,
+): Promise<void> {
   await prisma.dayRollup.updateMany({
     where: { workspaceId, date },
     data: { emailedAt: null },

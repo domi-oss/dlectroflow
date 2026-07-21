@@ -19,7 +19,9 @@ test("brain-dump item triages into a single-task to-do", async ({ page }) => {
   const singleTask = page.locator('[data-bucket="singleTask"]');
   await expect(singleTask).toContainText(label);
   await expect(
-    singleTask.getByRole("listitem").filter({ hasText: label })
+    singleTask
+      .getByRole("listitem")
+      .filter({ hasText: label })
       .getByRole("button", { name: /Start Focus/ }),
   ).toBeVisible();
 });

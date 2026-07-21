@@ -78,7 +78,8 @@ export function BreakdownChat({
     if (streaming) return;
     setError(null);
     setFallbackNote(null);
-    if (userLabel) setMessages((m) => [...m, { role: "user", text: userLabel }]);
+    if (userLabel)
+      setMessages((m) => [...m, { role: "user", text: userLabel }]);
     setStreaming(true);
     setStreamText("");
     let assistantText = "";
@@ -133,7 +134,12 @@ export function BreakdownChat({
 
   function updateStep(i: number, patch: Partial<Proposal["steps"][number]>) {
     setProposal((p) =>
-      p ? { ...p, steps: p.steps.map((s, j) => (j === i ? { ...s, ...patch } : s)) } : p,
+      p
+        ? {
+            ...p,
+            steps: p.steps.map((s, j) => (j === i ? { ...s, ...patch } : s)),
+          }
+        : p,
     );
   }
 
@@ -206,7 +212,8 @@ export function BreakdownChat({
       };
       setGsched({
         status: "error",
-        message: map[res.reason] ?? res.message ?? "Sending to Google Tasks failed.",
+        message:
+          map[res.reason] ?? res.message ?? "Sending to Google Tasks failed.",
         reason: res.reason,
       });
     }
@@ -226,7 +233,8 @@ export function BreakdownChat({
     }
   }
 
-  const totalMin = proposal?.steps.reduce((n, s) => n + (s.estMinutes || 0), 0) ?? 0;
+  const totalMin =
+    proposal?.steps.reduce((n, s) => n + (s.estMinutes || 0), 0) ?? 0;
   const busy = streaming || confirmPending;
 
   // Route the Google-vs-ICS control choice through the seam (S1, #34): the
@@ -234,7 +242,8 @@ export function BreakdownChat({
   // guests only ever get the universal ICS export above it. `leadSchedulingMethod`
   // maps a null status (guest) to "ics", any status (owner) to "googleTasks" —
   // behaviourally identical to the previous `!isGuest`.
-  const showGoogleSection = leadSchedulingMethod(isGuest ? null : google) === "googleTasks";
+  const showGoogleSection =
+    leadSchedulingMethod(isGuest ? null : google) === "googleTasks";
 
   if (confirmed) {
     return (
@@ -259,8 +268,8 @@ export function BreakdownChat({
         <div className="space-y-2 rounded-lg border p-4 text-sm">
           <p className="font-medium">📅 Add to your calendar</p>
           <p className="text-muted-foreground">
-            Download an .ics with each step as a timed event — import into Google,
-            Apple, or Outlook. No account needed.
+            Download an .ics with each step as a timed event — import into
+            Google, Apple, or Outlook. No account needed.
           </p>
           <button
             type="button"
@@ -280,7 +289,8 @@ export function BreakdownChat({
               google.needsReconnect ? (
                 <div className="space-y-2">
                   <p className="text-muted-foreground">
-                    Google needs reconnecting — your access expired or was revoked.
+                    Google needs reconnecting — your access expired or was
+                    revoked.
                   </p>
                   <a
                     href="/api/google/oauth/start"
@@ -304,14 +314,14 @@ export function BreakdownChat({
                 </div>
               ) : gsched.status === "done" ? (
                 <p className="font-medium text-green-700">
-                  ✅ Sent {gsched.count} task{gsched.count === 1 ? "" : "s"} to your
-                  &quot;{gsched.message}&quot; list.
+                  ✅ Sent {gsched.count} task{gsched.count === 1 ? "" : "s"} to
+                  your &quot;{gsched.message}&quot; list.
                 </p>
               ) : (
                 <div className="space-y-2">
                   <p className="text-muted-foreground">
-                    Send these steps to your Google Tasks list — a Reclaim-synced
-                    list is scheduled automatically.
+                    Send these steps to your Google Tasks list — a
+                    Reclaim-synced list is scheduled automatically.
                   </p>
                   <button
                     onClick={sendToGoogle}
@@ -339,10 +349,10 @@ export function BreakdownChat({
               )
             ) : (
               <p className="text-muted-foreground">
-                Set <code>GOOGLE_CLIENT_ID</code> / <code>GOOGLE_CLIENT_SECRET</code>{" "}
-                to schedule into Google Tasks (see the README). The calendar
-                download above works without any integration — steps are saved
-                either way.
+                Set <code>GOOGLE_CLIENT_ID</code> /{" "}
+                <code>GOOGLE_CLIENT_SECRET</code> to schedule into Google Tasks
+                (see the README). The calendar download above works without any
+                integration — steps are saved either way.
               </p>
             )}
           </div>
@@ -439,7 +449,8 @@ export function BreakdownChat({
                 key={i}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={() => {
-                  if (dragIndex !== null && dragIndex !== i) moveStep(dragIndex, i);
+                  if (dragIndex !== null && dragIndex !== i)
+                    moveStep(dragIndex, i);
                   setDragIndex(null);
                 }}
                 className={cn(
@@ -526,9 +537,7 @@ export function BreakdownChat({
           {t("action.fewerSteps", voice)}
         </button>
         <button
-          onClick={() =>
-            request({ kind: "too_big" }, "More, smaller steps ⬆️")
-          }
+          onClick={() => request({ kind: "too_big" }, "More, smaller steps ⬆️")}
           disabled={busy || !proposal}
           className="hover:bg-accent rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
         >
@@ -549,7 +558,6 @@ export function BreakdownChat({
           {t("action.removeStep", voice)}
         </button>
       </div>
-
     </div>
   );
 }
@@ -573,7 +581,8 @@ function ChatBubble({
       )}
     >
       {text}
-      {typing && (!text ? "…thinking" : <span className="animate-pulse">▍</span>)}
+      {typing &&
+        (!text ? "…thinking" : <span className="animate-pulse">▍</span>)}
     </div>
   );
 }

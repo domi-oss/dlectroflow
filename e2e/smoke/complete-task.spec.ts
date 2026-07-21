@@ -3,7 +3,9 @@ import { captureItem, needsReviewRow } from "../helpers";
 
 // Flow 4: complete an item. Create a fresh brain-dump item, then click its
 // "Complete" button (not a checkbox) and assert it lands in the Completed bucket.
-test("completing an item moves it to the Completed bucket", async ({ page }) => {
+test("completing an item moves it to the Completed bucket", async ({
+  page,
+}) => {
   const label = `E2E finish report ${Date.now()}`;
   await page.goto("/inbox");
 

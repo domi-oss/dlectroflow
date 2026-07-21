@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { upsert, currentWorkspaceIdMock, isOwnerRequestMock } = vi.hoisted(() => ({
-  upsert: vi.fn().mockResolvedValue(undefined),
-  currentWorkspaceIdMock: vi.fn().mockResolvedValue("ws-1"),
-  isOwnerRequestMock: vi.fn().mockResolvedValue(true),
-}));
+const { upsert, currentWorkspaceIdMock, isOwnerRequestMock } = vi.hoisted(
+  () => ({
+    upsert: vi.fn().mockResolvedValue(undefined),
+    currentWorkspaceIdMock: vi.fn().mockResolvedValue("ws-1"),
+    isOwnerRequestMock: vi.fn().mockResolvedValue(true),
+  }),
+);
 vi.mock("@/lib/db", () => ({ prisma: { settings: { upsert } } }));
 vi.mock("@/lib/workspace", () => ({
   currentWorkspaceId: currentWorkspaceIdMock,
@@ -12,7 +14,10 @@ vi.mock("@/lib/workspace", () => ({
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-import { updateFocusTimerSettings, dismissFocusTimerTip } from "@/app/actions/settings";
+import {
+  updateFocusTimerSettings,
+  dismissFocusTimerTip,
+} from "@/app/actions/settings";
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -48,7 +53,9 @@ describe("updateFocusTimerSettings", () => {
       sound: "off",
     });
     expect(upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ update: expect.objectContaining({ focusTimerStyle: null }) }),
+      expect.objectContaining({
+        update: expect.objectContaining({ focusTimerStyle: null }),
+      }),
     );
   });
 
@@ -62,7 +69,10 @@ describe("updateFocusTimerSettings", () => {
     });
     expect(upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        update: expect.objectContaining({ focusTimerStyle: null, focusSound: "off" }),
+        update: expect.objectContaining({
+          focusTimerStyle: null,
+          focusSound: "off",
+        }),
       }),
     );
   });

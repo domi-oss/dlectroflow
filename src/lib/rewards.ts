@@ -32,7 +32,11 @@ function parseWorkingDays(csv: string): number[] {
 }
 
 // ── points ───────────────────────────────────────────────────────────────
-export async function logReward(workspaceId: string, type: RewardTypeT, points?: number) {
+export async function logReward(
+  workspaceId: string,
+  type: RewardTypeT,
+  points?: number,
+) {
   await prisma.rewardEvent.create({
     data: { type, points: points ?? RewardPoints[type], workspaceId },
   });
@@ -57,7 +61,11 @@ export async function maybeAwardInboxZero(workspaceId: string) {
   await awardBadge(workspaceId, BadgeKey.InboxZero);
   // Inbox-zero points — once/day.
   const already = await prisma.rewardEvent.count({
-    where: { workspaceId, type: RewardType.InboxZero, createdAt: { gte: startOfToday() } },
+    where: {
+      workspaceId,
+      type: RewardType.InboxZero,
+      createdAt: { gte: startOfToday() },
+    },
   });
   if (already > 0) return;
   await logReward(workspaceId, RewardType.InboxZero);
@@ -71,7 +79,10 @@ export async function maybeAwardInboxZero(workspaceId: string) {
  * constraint with P2002. Treat that as "already earned" (return false) rather
  * than throwing — the badge exists either way.
  */
-export async function awardBadge(workspaceId: string, key: BadgeKeyT): Promise<boolean> {
+export async function awardBadge(
+  workspaceId: string,
+  key: BadgeKeyT,
+): Promise<boolean> {
   const existing = await prisma.badge.findUnique({
     where: { workspaceId_key: { workspaceId, key } },
   });
@@ -86,9 +97,15 @@ export async function awardBadge(workspaceId: string, key: BadgeKeyT): Promise<b
 }
 
 /** Award ten-steps-in-a-day once StepDone count for today reaches 10. */
-export async function maybeAwardTenStepsDay(workspaceId: string): Promise<void> {
+export async function maybeAwardTenStepsDay(
+  workspaceId: string,
+): Promise<void> {
   const stepsToday = await prisma.rewardEvent.count({
-    where: { workspaceId, type: RewardType.StepDone, createdAt: { gte: startOfToday() } },
+    where: {
+      workspaceId,
+      type: RewardType.StepDone,
+      createdAt: { gte: startOfToday() },
+    },
   });
   if (stepsToday >= 10) await awardBadge(workspaceId, BadgeKey.TenStepsDay);
 }
@@ -99,7 +116,9 @@ export async function maybeAwardTenStepsDay(workspaceId: string): Promise<void> 
  * the ten-steps-in-a-day badge. Does NOT log SessionFinished (that is the focus
  * timer's own bonus).
  */
-export async function rewardStepDone(workspaceId: string): Promise<StreakUpdate | null> {
+export async function rewardStepDone(
+  workspaceId: string,
+): Promise<StreakUpdate | null> {
   await logReward(workspaceId, RewardType.StepDone);
   const streak = await touchStreakOnEngagement(workspaceId); // completion is a qualifying engagement
   await maybeAwardTenStepsDay(workspaceId);
@@ -121,7 +140,9 @@ export type StreakUpdate = {
  * ended streak into the Top-3 records. Advances at most once per working day —
  * the leading `SELECT … FOR UPDATE` serialises same-day callers.
  */
-export async function touchStreakOnEngagement(workspaceId: string): Promise<StreakUpdate | null> {
+export async function touchStreakOnEngagement(
+  workspaceId: string,
+): Promise<StreakUpdate | null> {
   const settings = await getSettings(workspaceId);
   const workingDays = parseWorkingDays(settings.workingDays);
   const now = new Date();
@@ -154,14 +175,25 @@ export async function touchStreakOnEngagement(workspaceId: string): Promise<Stre
     const streak = await tx.streak.findUnique({ where: { workspaceId } });
     if (!streak) {
       // Ensured above; treat an unexpectedly-missing row as a safe no-op.
-      return { current: 0, freshStart: false, continued: false, changed: false };
+      return {
+        current: 0,
+        freshStart: false,
+        continued: false,
+        changed: false,
+      };
     }
 
     if (streak.lastActiveWorkday === today) {
-      return { current: streak.current, freshStart: false, continued: false, changed: false };
+      return {
+        current: streak.current,
+        freshStart: false,
+        continued: false,
+        changed: false,
+      };
     }
 
-    const continues = streak.current > 0 && streak.lastActiveWorkday === prevWorkingDay;
+    const continues =
+      streak.current > 0 && streak.lastActiveWorkday === prevWorkingDay;
 
     let current: number;
     let freshStart = false;
@@ -171,7 +203,12 @@ export async function touchStreakOnEngagement(workspaceId: string): Promise<Stre
       // reset — file the ended streak (if any) into Top-3 records
       if (streak.current > 0) {
         await tx.streakRecord.create({
-          data: { length: streak.current, startedAt: now, endedAt: now, workspaceId },
+          data: {
+            length: streak.current,
+            startedAt: now,
+            endedAt: now,
+            workspaceId,
+          },
         });
       }
       current = 1;
@@ -198,7 +235,10 @@ export async function touchStreakOnEngagement(workspaceId: string): Promise<Stre
       _max: { length: true },
       where: { workspaceId },
     });
-    if ((best._max.length ?? 0) > 0 && update.current > (best._max.length ?? 0)) {
+    if (
+      (best._max.length ?? 0) > 0 &&
+      update.current > (best._max.length ?? 0)
+    ) {
       await awardBadge(workspaceId, BadgeKey.BeatBestStreak);
     }
   }
@@ -211,7 +251,9 @@ export async function touchStreakOnEngagement(workspaceId: string): Promise<Stre
  * Retained as a thin alias so the completion call sites and existing tests keep
  * working; prefer {@link touchStreakOnEngagement} for new call sites.
  */
-export function touchStreakOnCompletion(workspaceId: string): Promise<StreakUpdate | null> {
+export function touchStreakOnCompletion(
+  workspaceId: string,
+): Promise<StreakUpdate | null> {
   return touchStreakOnEngagement(workspaceId);
 }
 
@@ -227,7 +269,9 @@ export type DashboardData = {
   badges: string[];
 };
 
-export async function getDashboardData(workspaceId: string): Promise<DashboardData> {
+export async function getDashboardData(
+  workspaceId: string,
+): Promise<DashboardData> {
   const start = startOfToday();
   const [
     todayAgg,
@@ -257,7 +301,11 @@ export async function getDashboardData(workspaceId: string): Promise<DashboardDa
       select: { durationMin: true },
     }),
     prisma.rewardEvent.count({
-      where: { workspaceId, type: RewardType.StepDone, createdAt: { gte: start } },
+      where: {
+        workspaceId,
+        type: RewardType.StepDone,
+        createdAt: { gte: start },
+      },
     }),
     prisma.badge.findMany({
       where: { workspaceId },
@@ -269,7 +317,10 @@ export async function getDashboardData(workspaceId: string): Promise<DashboardDa
     todayPoints: todayAgg._sum.points ?? 0,
     totalPoints: totalAgg._sum.points ?? 0,
     currentStreak: streak.current,
-    topStreaks: topStreaks.map((r) => ({ length: r.length, endedAt: r.endedAt })),
+    topStreaks: topStreaks.map((r) => ({
+      length: r.length,
+      endedAt: r.endedAt,
+    })),
     focusMinToday: todaySessions.reduce((n, s) => n + (s.durationMin ?? 0), 0),
     sessionsToday: todaySessions.length,
     stepsDoneToday,

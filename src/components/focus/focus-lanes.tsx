@@ -10,7 +10,13 @@ import type { SingleFocusable, FocusableStep } from "@/lib/focus-launcher";
 
 /** ≥44px inline ✓ quick-complete — glyph + text accessible name (a11y: status
  * not colour-only). */
-function QuickComplete({ voice, onClick }: { voice: Voice; onClick: () => void }) {
+function QuickComplete({
+  voice,
+  onClick,
+}: {
+  voice: Voice;
+  onClick: () => void;
+}) {
   return (
     <button
       type="button"
@@ -25,7 +31,13 @@ function QuickComplete({ voice, onClick }: { voice: Voice; onClick: () => void }
 }
 
 /** Single-task to-dos lane: ▶ Start (ensureFocusStep → route) + optimistic ✓. */
-export function SingleTaskLane({ items, voice }: { items: SingleFocusable[]; voice: Voice }) {
+export function SingleTaskLane({
+  items,
+  voice,
+}: {
+  items: SingleFocusable[];
+  voice: Voice;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [done, setDone] = useState<Set<string>>(new Set());
@@ -48,10 +60,15 @@ export function SingleTaskLane({ items, voice }: { items: SingleFocusable[]; voi
   return (
     <ul className={cn("space-y-2", pending && "opacity-70")}>
       {visible.map((s) => (
-        <li key={s.itemId} className="flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm">
+        <li
+          key={s.itemId}
+          className="flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm"
+        >
           <span className="min-w-0 flex-1 break-words">{s.text}</span>
           {s.estMinutes > 0 && (
-            <span className="text-muted-foreground shrink-0 text-xs tabular-nums">{s.estMinutes}m</span>
+            <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+              {s.estMinutes}m
+            </span>
           )}
           <button
             type="button"
@@ -69,7 +86,13 @@ export function SingleTaskLane({ items, voice }: { items: SingleFocusable[]; voi
 
 /** Multi-step to-dos lane: ▶ Open (route straight to the shown step) + optimistic
  * ✓ that completes that step (completeStep). */
-export function MultiStepLane({ items, voice }: { items: FocusableStep[]; voice: Voice }) {
+export function MultiStepLane({
+  items,
+  voice,
+}: {
+  items: FocusableStep[];
+  voice: Voice;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [done, setDone] = useState<Set<string>>(new Set());
@@ -86,7 +109,10 @@ export function MultiStepLane({ items, voice }: { items: FocusableStep[]; voice:
   return (
     <ul className={cn("space-y-2", pending && "opacity-70")}>
       {visible.map((e) => (
-        <li key={e.stepId} className="flex flex-col gap-1 rounded-lg border px-3 py-2.5 text-sm">
+        <li
+          key={e.stepId}
+          className="flex flex-col gap-1 rounded-lg border px-3 py-2.5 text-sm"
+        >
           <span className="text-muted-foreground text-xs">{e.taskTitle}</span>
           <div className="flex items-center gap-2">
             <span className="min-w-0 flex-1 break-words font-medium">
@@ -97,7 +123,9 @@ export function MultiStepLane({ items, voice }: { items: FocusableStep[]; voice:
               {e.stepsDone}/{e.stepsTotal}
             </span>
             {e.estMinutes > 0 && (
-              <span className="text-muted-foreground shrink-0 text-xs tabular-nums">{e.estMinutes}m</span>
+              <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+                {e.estMinutes}m
+              </span>
             )}
             <button
               type="button"

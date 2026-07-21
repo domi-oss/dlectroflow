@@ -5,7 +5,9 @@ import userEvent from "@testing-library/user-event";
 import { FocusTimerSection } from "@/components/settings/focus-timer-section";
 
 const refresh = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), refresh }) }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), refresh }),
+}));
 vi.mock("@/app/actions/settings", () => ({
   updateFocusTimerSettings: vi.fn().mockResolvedValue(undefined),
 }));
@@ -27,7 +29,9 @@ describe("FocusTimerSection", () => {
   it("offers exactly the 4 explicit styles — no 'match voice' / 'auto' option", () => {
     render(<FocusTimerSection {...base} />);
     expect(screen.getByRole("radio", { name: /^ring$/i })).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /^digits$/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("radio", { name: /^digits$/i }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /^bar$/i })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /^mug$/i })).toBeInTheDocument();
     expect(screen.getAllByRole("radio")).toHaveLength(4);
@@ -96,7 +100,10 @@ describe("FocusTimerSection", () => {
   it("choosing a sound auto-saves", async () => {
     const user = userEvent.setup();
     render(<FocusTimerSection {...base} />);
-    await user.selectOptions(screen.getByLabelText(/focus sounds/i), "lofi_calm");
+    await user.selectOptions(
+      screen.getByLabelText(/focus sounds/i),
+      "lofi_calm",
+    );
     await waitFor(() =>
       expect(updateFocusTimerSettings).toHaveBeenCalledWith(
         expect.objectContaining({ sound: "lofi_calm" }),

@@ -20,7 +20,10 @@ vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/lib/db", () => ({
   prisma: { task: { findFirst: taskFindFirstMock, update: taskUpdateMock } },
 }));
-vi.mock("@/lib/rewards", () => ({ logReward: logRewardMock, awardBadge: awardBadgeMock }));
+vi.mock("@/lib/rewards", () => ({
+  logReward: logRewardMock,
+  awardBadge: awardBadgeMock,
+}));
 vi.mock("@/lib/workspace", () => ({ currentWorkspaceId: workspaceMock }));
 
 import { scheduleViaIcs } from "./ics-schedule";
@@ -59,7 +62,10 @@ describe("scheduleViaIcs", () => {
       }),
     );
     expect(logRewardMock).toHaveBeenCalledWith("owner", RewardType.Scheduled);
-    expect(awardBadgeMock).toHaveBeenCalledWith("owner", BadgeKey.FirstSchedule);
+    expect(awardBadgeMock).toHaveBeenCalledWith(
+      "owner",
+      BadgeKey.FirstSchedule,
+    );
   });
 
   it("guest workspace earns the reward (no owner gate)", async () => {
@@ -67,12 +73,17 @@ describe("scheduleViaIcs", () => {
     taskFindFirstMock.mockResolvedValue(stepTask());
     const res = await scheduleViaIcs("task-1");
     expect(res.ok).toBe(true);
-    expect(logRewardMock).toHaveBeenCalledWith("guest-ws", RewardType.Scheduled);
+    expect(logRewardMock).toHaveBeenCalledWith(
+      "guest-ws",
+      RewardType.Scheduled,
+    );
   });
 
   it("is idempotent: an already-scheduled task returns the .ics but does NOT re-award", async () => {
     workspaceMock.mockResolvedValue("owner");
-    taskFindFirstMock.mockResolvedValue(stepTask({ scheduledAt: new Date("2026-07-17T10:00:00Z") }));
+    taskFindFirstMock.mockResolvedValue(
+      stepTask({ scheduledAt: new Date("2026-07-17T10:00:00Z") }),
+    );
     const res = await scheduleViaIcs("task-1");
     expect(res.ok).toBe(true);
     expect(taskUpdateMock).not.toHaveBeenCalled();

@@ -34,11 +34,17 @@ export async function createBrainDumpItem(text: string) {
 
 export async function triageBrainDumpItem(id: string) {
   const workspaceId = await currentWorkspaceId();
-  const existing = await prisma.brainDumpItem.findFirst({ where: { id, workspaceId } });
+  const existing = await prisma.brainDumpItem.findFirst({
+    where: { id, workspaceId },
+  });
   if (!existing) return;
   await prisma.brainDumpItem.update({
     where: { id },
-    data: { status: BrainDumpStatus.Triaged, triagedAt: new Date(), breakdownRequestedAt: null },
+    data: {
+      status: BrainDumpStatus.Triaged,
+      triagedAt: new Date(),
+      breakdownRequestedAt: null,
+    },
   });
   await maybeAwardInboxZero(workspaceId);
   revalidatePath(INBOX_PATH);
@@ -53,7 +59,9 @@ export async function triageBrainDumpItem(id: string) {
  */
 export async function requestBreakdown(id: string) {
   const workspaceId = await currentWorkspaceId();
-  const existing = await prisma.brainDumpItem.findFirst({ where: { id, workspaceId } });
+  const existing = await prisma.brainDumpItem.findFirst({
+    where: { id, workspaceId },
+  });
   if (!existing) return;
   await prisma.brainDumpItem.update({
     where: { id },
@@ -78,7 +86,9 @@ export async function requestBreakdown(id: string) {
  */
 export async function snoozeBrainDumpItem(id: string, minutes: number) {
   const workspaceId = await currentWorkspaceId();
-  const existing = await prisma.brainDumpItem.findFirst({ where: { id, workspaceId } });
+  const existing = await prisma.brainDumpItem.findFirst({
+    where: { id, workspaceId },
+  });
   if (!existing) return;
   await prisma.brainDumpItem.update({
     where: { id },
@@ -103,11 +113,16 @@ export async function renameItem(id: string, text: string) {
   const workspaceId = await currentWorkspaceId();
   const trimmed = text.trim();
   if (!trimmed) return;
-  const existing = await prisma.brainDumpItem.findFirst({ where: { id, workspaceId } });
+  const existing = await prisma.brainDumpItem.findFirst({
+    where: { id, workspaceId },
+  });
   if (!existing) return;
   await prisma.brainDumpItem.update({ where: { id }, data: { text: trimmed } });
   if (existing.taskId) {
-    await prisma.task.update({ where: { id: existing.taskId }, data: { title: trimmed } });
+    await prisma.task.update({
+      where: { id: existing.taskId },
+      data: { title: trimmed },
+    });
     revalidatePath(`/tasks/${existing.taskId}`);
   }
   revalidatePath(INBOX_PATH);
@@ -115,7 +130,9 @@ export async function renameItem(id: string, text: string) {
 
 export async function deleteBrainDumpItem(id: string) {
   const workspaceId = await currentWorkspaceId();
-  const existing = await prisma.brainDumpItem.findFirst({ where: { id, workspaceId } });
+  const existing = await prisma.brainDumpItem.findFirst({
+    where: { id, workspaceId },
+  });
   if (!existing) return;
   await prisma.brainDumpItem.delete({ where: { id } });
   await maybeAwardInboxZero(workspaceId);
@@ -125,7 +142,9 @@ export async function deleteBrainDumpItem(id: string) {
 /** Mark an aging item as reminded so we don't re-notify (step 4). */
 export async function markReminded(id: string) {
   const workspaceId = await currentWorkspaceId();
-  const existing = await prisma.brainDumpItem.findFirst({ where: { id, workspaceId } });
+  const existing = await prisma.brainDumpItem.findFirst({
+    where: { id, workspaceId },
+  });
   if (!existing) return;
   await prisma.brainDumpItem.update({
     where: { id },
@@ -160,7 +179,9 @@ export async function dismissPrompt(id: string) {
  */
 export async function keepAsTask(id: string) {
   const workspaceId = await currentWorkspaceId();
-  const item = await prisma.brainDumpItem.findFirst({ where: { id, workspaceId } });
+  const item = await prisma.brainDumpItem.findFirst({
+    where: { id, workspaceId },
+  });
   if (!item) return;
   const task = await prisma.task.create({
     data: {
@@ -238,9 +259,16 @@ export async function completeItem(id: string) {
 
   if (item.task) {
     const notDone = item.task.steps.filter((s) => !s.done);
-    await prisma.step.updateMany({ where: { taskId: item.task.id }, data: { done: true } });
-    await prisma.task.update({ where: { id: item.task.id }, data: { status: TaskStatus.Done } });
-    for (const _step of notDone) await logReward(workspaceId, RewardType.StepDone);
+    await prisma.step.updateMany({
+      where: { taskId: item.task.id },
+      data: { done: true },
+    });
+    await prisma.task.update({
+      where: { id: item.task.id },
+      data: { status: TaskStatus.Done },
+    });
+    for (const _step of notDone)
+      await logReward(workspaceId, RewardType.StepDone);
     await maybeAwardTenStepsDay(workspaceId);
   }
 
@@ -267,10 +295,16 @@ export async function reopenItem(id: string, stepIds?: string[]) {
   if (!item) return;
 
   await prisma.$transaction(async (tx) => {
-    await tx.brainDumpItem.update({ where: { id }, data: { completedAt: null } });
+    await tx.brainDumpItem.update({
+      where: { id },
+      data: { completedAt: null },
+    });
     if (item.task) {
       const steps = item.task.steps;
-      await tx.task.update({ where: { id: item.task.id }, data: { status: TaskStatus.Active } });
+      await tx.task.update({
+        where: { id: item.task.id },
+        data: { status: TaskStatus.Active },
+      });
       const resetIds = new Set(
         stepIds && stepIds.length
           ? steps.filter((s) => stepIds.includes(s.id)).map((s) => s.id)
@@ -280,7 +314,10 @@ export async function reopenItem(id: string, stepIds?: string[]) {
       const anyNotDone = steps.some((s) => resetIds.has(s.id) || !s.done);
       if (!anyNotDone && steps.length) resetIds.add(steps[steps.length - 1].id);
       if (resetIds.size) {
-        await tx.step.updateMany({ where: { id: { in: [...resetIds] } }, data: { done: false } });
+        await tx.step.updateMany({
+          where: { id: { in: [...resetIds] } },
+          data: { done: false },
+        });
       }
     }
   });
@@ -298,7 +335,9 @@ export async function reopenItem(id: string, stepIds?: string[]) {
  */
 export async function moveToReview(id: string) {
   const workspaceId = await currentWorkspaceId();
-  const existing = await prisma.brainDumpItem.findFirst({ where: { id, workspaceId } });
+  const existing = await prisma.brainDumpItem.findFirst({
+    where: { id, workspaceId },
+  });
   if (!existing) return;
   await prisma.brainDumpItem.updateMany({
     where: { id, workspaceId },

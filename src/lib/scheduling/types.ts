@@ -14,7 +14,8 @@ export const SchedulingMethod = {
   Ics: "ics",
   GoogleTasks: "google",
 } as const;
-export type SchedulingMethod = (typeof SchedulingMethod)[keyof typeof SchedulingMethod];
+export type SchedulingMethod =
+  (typeof SchedulingMethod)[keyof typeof SchedulingMethod];
 
 /** Owner Google connection status; null for guests (mirrors today's
  *  `owner ? googleStatus : null`). */
@@ -48,8 +49,18 @@ export type ScheduleFailReason =
  * `{scheduled, listTitle}` intact rather than forcing a lossy common shape.
  */
 export type ScheduleResult =
-  | { ok: true; via: typeof SchedulingMethod.Ics; ics: string; icsFilename: string }
-  | { ok: true; via: typeof SchedulingMethod.GoogleTasks; scheduled: number; listTitle: string }
+  | {
+      ok: true;
+      via: typeof SchedulingMethod.Ics;
+      ics: string;
+      icsFilename: string;
+    }
+  | {
+      ok: true;
+      via: typeof SchedulingMethod.GoogleTasks;
+      scheduled: number;
+      listTitle: string;
+    }
   | { ok: false; reason: ScheduleFailReason; message?: string };
 
 /** Provider id surfaced to the UI/telemetry — distinct from the stored
@@ -65,5 +76,9 @@ export interface SchedulingProvider {
   isAvailable(ctx: SchedulingContext): boolean;
   /** Stamp the marker + award once (via the shared helper), then perform the
    *  provider-specific side effect. */
-  schedule(taskId: string, ctx: SchedulingContext, opts?: ScheduleOpts): Promise<ScheduleResult>;
+  schedule(
+    taskId: string,
+    ctx: SchedulingContext,
+    opts?: ScheduleOpts,
+  ): Promise<ScheduleResult>;
 }

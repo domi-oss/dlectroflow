@@ -184,9 +184,13 @@ export async function updateFocusTimerSettings(input: {
   const workspaceId = await currentWorkspaceId();
   const styles = Object.values(FocusTimerStyle) as string[];
   const focusTimerStyle =
-    input.timerStyle && styles.includes(input.timerStyle) ? input.timerStyle : null;
+    input.timerStyle && styles.includes(input.timerStyle)
+      ? input.timerStyle
+      : null;
   const sounds = Object.values(FocusSound) as string[];
-  const focusSound = sounds.includes(input.sound) ? input.sound : FocusSound.Off;
+  const focusSound = sounds.includes(input.sound)
+    ? input.sound
+    : FocusSound.Off;
   const data = {
     focusTimerStyle,
     focusMinimalMode: Boolean(input.minimalMode),
@@ -228,9 +232,9 @@ export async function updateAppearanceSettings(input: {
   completeTickColor: string;
 }) {
   const workspaceId = await currentWorkspaceId();
-  const completeTickColor = (Object.values(CompleteTickColor) as string[]).includes(
-    input.completeTickColor,
-  )
+  const completeTickColor = (
+    Object.values(CompleteTickColor) as string[]
+  ).includes(input.completeTickColor)
     ? input.completeTickColor
     : CompleteTickColor.Green;
   const data = {

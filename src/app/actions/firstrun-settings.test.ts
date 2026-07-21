@@ -11,18 +11,20 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(() => {
-  const prismaMock = {
-    settings: {
-      upsert: vi.fn().mockResolvedValue({}),
-    },
-  };
-  return {
-    prismaMock,
-    revalidatePathMock: vi.fn(),
-    currentWorkspaceIdMock: vi.fn().mockResolvedValue("owner"),
-  };
-});
+const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
+  () => {
+    const prismaMock = {
+      settings: {
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+    };
+    return {
+      prismaMock,
+      revalidatePathMock: vi.fn(),
+      currentWorkspaceIdMock: vi.fn().mockResolvedValue("owner"),
+    };
+  },
+);
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/lib/db", () => ({ prisma: prismaMock }));
 vi.mock("@/lib/workspace", () => ({
@@ -47,7 +49,9 @@ describe("dismissWelcome", () => {
     expect(call.create.workspaceId).toBe("owner");
     expect(call.create.welcomeDismissedAt).toBeInstanceOf(Date);
     expect(call.update.welcomeDismissedAt).toBeInstanceOf(Date);
-    expect(call.update.welcomeDismissedAt.getTime()).toBeGreaterThanOrEqual(before);
+    expect(call.update.welcomeDismissedAt.getTime()).toBeGreaterThanOrEqual(
+      before,
+    );
   });
 
   it("scopes to a different workspace when called from a guest sandbox", async () => {
@@ -75,7 +79,10 @@ describe("updateFirstRunPreview", () => {
     expect(prismaMock.settings.upsert).toHaveBeenCalledTimes(1);
     const call = prismaMock.settings.upsert.mock.calls[0][0];
     expect(call.where).toEqual({ workspaceId: "owner" });
-    expect(call.create).toMatchObject({ workspaceId: "owner", firstRunPreview: true });
+    expect(call.create).toMatchObject({
+      workspaceId: "owner",
+      firstRunPreview: true,
+    });
     expect(call.update).toEqual({ firstRunPreview: true });
   });
 

@@ -1,4 +1,8 @@
-type IcsStep = { text: string; estMinutes: number; subtaskEmoji?: string | null };
+type IcsStep = {
+  text: string;
+  estMinutes: number;
+  subtaskEmoji?: string | null;
+};
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
@@ -14,7 +18,11 @@ function floating(d: Date): string {
   );
 }
 function esc(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
+  return s
+    .replace(/\\/g, "\\\\")
+    .replace(/;/g, "\\;")
+    .replace(/,/g, "\\,")
+    .replace(/\n/g, "\\n");
 }
 function nextTopOfHour(from = new Date()): Date {
   const d = new Date(from);

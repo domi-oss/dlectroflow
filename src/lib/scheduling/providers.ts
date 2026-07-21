@@ -24,7 +24,11 @@ export const icsProvider: SchedulingProvider = {
   labelKey: "action.addToCalendar",
   // Universal, zero-OAuth baseline (#12 §4): guests, owner, self-hosters — all.
   isAvailable: () => true,
-  async schedule(taskId: string, _ctx: SchedulingContext, opts?: ScheduleOpts): Promise<ScheduleResult> {
+  async schedule(
+    taskId: string,
+    _ctx: SchedulingContext,
+    opts?: ScheduleOpts,
+  ): Promise<ScheduleResult> {
     // Preserve the exact single-arg call for stepless-default scheduling — no
     // trailing `undefined` opts, so call-site behavior/tests stay identical.
     const res =
@@ -32,7 +36,12 @@ export const icsProvider: SchedulingProvider = {
         ? await scheduleViaIcs(taskId, { durationMin: opts.durationMin })
         : await scheduleViaIcs(taskId);
     return res.ok
-      ? { ok: true, via: SchedulingMethod.Ics, ics: res.ics, icsFilename: res.icsFilename }
+      ? {
+          ok: true,
+          via: SchedulingMethod.Ics,
+          ics: res.ics,
+          icsFilename: res.icsFilename,
+        }
       : { ok: false, reason: res.reason, message: res.message };
   },
 };
@@ -51,27 +60,44 @@ export const googleTasksProvider: SchedulingProvider = {
   // isn't needed today — both are declared with a `_` prefix so the interface
   // contract is satisfied explicitly and the omission is intentional, not silent
   // (matches icsProvider, which does consume `opts`).
-  async schedule(taskId: string, _ctx: SchedulingContext, _opts?: ScheduleOpts): Promise<ScheduleResult> {
+  async schedule(
+    taskId: string,
+    _ctx: SchedulingContext,
+    _opts?: ScheduleOpts,
+  ): Promise<ScheduleResult> {
     const res = await pushStepsToGoogleTasks(taskId);
     return res.ok
-      ? { ok: true, via: SchedulingMethod.GoogleTasks, scheduled: res.scheduled, listTitle: res.listTitle }
+      ? {
+          ok: true,
+          via: SchedulingMethod.GoogleTasks,
+          scheduled: res.scheduled,
+          listTitle: res.listTitle,
+        }
       : { ok: false, reason: res.reason, message: res.message };
   },
 };
 
 /** Static registry — two entries, not a plugin system. */
-export const schedulingProviders: Record<SchedulingProviderId, SchedulingProvider> = {
+export const schedulingProviders: Record<
+  SchedulingProviderId,
+  SchedulingProvider
+> = {
   ics: icsProvider,
   googleTasks: googleTasksProvider,
 };
 
 /** The single "which methods can this workspace use?" answer. */
-export function availableProviders(ctx: SchedulingContext): SchedulingProvider[] {
+export function availableProviders(
+  ctx: SchedulingContext,
+): SchedulingProvider[] {
   return Object.values(schedulingProviders).filter((p) => p.isAvailable(ctx));
 }
 
 /** Convenience predicate for a single provider against a context. */
-export function isProviderAvailable(provider: SchedulingProvider, ctx: SchedulingContext): boolean {
+export function isProviderAvailable(
+  provider: SchedulingProvider,
+  ctx: SchedulingContext,
+): boolean {
   return provider.isAvailable(ctx);
 }
 
@@ -90,6 +116,8 @@ export function isProviderAvailable(provider: SchedulingProvider, ctx: Schedulin
  * client call sites previously each expressed as `effectiveGoogle ? … : ics` /
  * `google ? … : ics` / `!isGuest`.
  */
-export function leadSchedulingMethod(google: GoogleConnStatus | null): SchedulingProviderId {
+export function leadSchedulingMethod(
+  google: GoogleConnStatus | null,
+): SchedulingProviderId {
   return google != null ? "googleTasks" : "ics";
 }

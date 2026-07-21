@@ -13,7 +13,9 @@ describe("assertReviewEnv", () => {
   });
 
   it("passes for a GitLab review environment name (review/<iid>)", () => {
-    expect(() => assertReviewEnv({ CI_ENVIRONMENT_NAME: "review/42" })).not.toThrow();
+    expect(() =>
+      assertReviewEnv({ CI_ENVIRONMENT_NAME: "review/42" }),
+    ).not.toThrow();
   });
 
   it("refuses when no review signal is present (empty env)", () => {
@@ -36,7 +38,10 @@ describe("assertReviewEnv", () => {
       assertReviewEnv({ SEED_REVIEW_APP: "1", APP_ENV: "staging" }),
     ).toThrow(/non-review environment/i);
     expect(() =>
-      assertReviewEnv({ SEED_REVIEW_APP: "1", CI_ENVIRONMENT_NAME: "staging/7" }),
+      assertReviewEnv({
+        SEED_REVIEW_APP: "1",
+        CI_ENVIRONMENT_NAME: "staging/7",
+      }),
     ).toThrow(/non-review environment/i);
   });
 
@@ -48,7 +53,10 @@ describe("assertReviewEnv", () => {
 
   it("hard-refuses a GitLab production environment name", () => {
     expect(() =>
-      assertReviewEnv({ SEED_REVIEW_APP: "1", CI_ENVIRONMENT_NAME: "production" }),
+      assertReviewEnv({
+        SEED_REVIEW_APP: "1",
+        CI_ENVIRONMENT_NAME: "production",
+      }),
     ).toThrow(/production/i);
   });
 });

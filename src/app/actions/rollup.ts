@@ -20,8 +20,7 @@ import { isGuestWorkspace } from "@/lib/constants";
 export type TriggerResult = {
   rollup: Rollup;
   email:
-    | { attempted: false }
-    | { attempted: true; ok: boolean; reason?: string };
+    { attempted: false } | { attempted: true; ok: boolean; reason?: string };
 };
 
 /**
@@ -71,7 +70,11 @@ export async function triggerRollup(opts?: {
       // once-per-day guard so the button can be re-demoed on stage.
       const result = await deliver();
       if (result.ok) await markRollupEmailed(workspaceId, rollup.date);
-      email = { attempted: true, ok: result.ok, reason: result.ok ? undefined : result.reason };
+      email = {
+        attempted: true,
+        ok: result.ok,
+        reason: result.ok ? undefined : result.reason,
+      };
     } else {
       // Auto/client-triggered path: atomically claim the once-per-day send so
       // two overlapping triggers can't both email the owner (#18). Only the
@@ -94,7 +97,11 @@ export async function triggerRollup(opts?: {
           throw err;
         }
         if (!result.ok) await releaseRollupEmailClaim(workspaceId, rollup.date);
-        email = { attempted: true, ok: result.ok, reason: result.ok ? undefined : result.reason };
+        email = {
+          attempted: true,
+          ok: result.ok,
+          reason: result.ok ? undefined : result.reason,
+        };
       }
     }
   }

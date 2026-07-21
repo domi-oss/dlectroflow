@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { bucketItems, bucketOfItem, libraryBuckets, type Item } from "@/components/inbox/bucket";
+import {
+  bucketItems,
+  bucketOfItem,
+  libraryBuckets,
+  type Item,
+} from "@/components/inbox/bucket";
 import { BrainDumpStatus, TaskStatus } from "@/lib/constants";
 
 const NOW = new Date("2026-07-08T12:00:00Z").getTime();
@@ -61,7 +66,11 @@ describe("bucketItems", () => {
       item({ id: "oldest", createdAt: new Date(NOW - 5_000) }),
     ];
     const { needsReview } = bucketItems(items, NOW);
-    expect(needsReview.map((i) => i.id)).toEqual(["freshened", "newest", "oldest"]);
+    expect(needsReview.map((i) => i.id)).toEqual([
+      "freshened",
+      "newest",
+      "oldest",
+    ]);
   });
 
   it("savedLater = inbox items snoozed into the future only", () => {
@@ -157,8 +166,16 @@ describe("bucketItems", () => {
 describe("completed bucket", () => {
   it("collects completed items, newest first, capped at 10, excluded elsewhere", () => {
     const items = [
-      item({ id: "a", status: BrainDumpStatus.Triaged, completedAt: new Date(NOW - 5_000) }),
-      item({ id: "b", status: BrainDumpStatus.Triaged, completedAt: new Date(NOW - 1_000) }),
+      item({
+        id: "a",
+        status: BrainDumpStatus.Triaged,
+        completedAt: new Date(NOW - 5_000),
+      }),
+      item({
+        id: "b",
+        status: BrainDumpStatus.Triaged,
+        completedAt: new Date(NOW - 1_000),
+      }),
       item({ id: "todo", status: BrainDumpStatus.Triaged }),
     ];
     const { completed, singleTask } = bucketItems(items, NOW);
@@ -168,7 +185,11 @@ describe("completed bucket", () => {
 
   it("caps completed at 10 most recent", () => {
     const items = Array.from({ length: 14 }, (_, n) =>
-      item({ id: `c${n}`, status: BrainDumpStatus.Triaged, completedAt: new Date(NOW - n * 1000) }),
+      item({
+        id: `c${n}`,
+        status: BrainDumpStatus.Triaged,
+        completedAt: new Date(NOW - n * 1000),
+      }),
     );
     const { completed } = bucketItems(items, NOW);
     expect(completed).toHaveLength(10);
@@ -176,10 +197,19 @@ describe("completed bucket", () => {
   });
 
   it("completedTodayCount counts only items completed since local midnight", () => {
-    const midnight = new Date(NOW); midnight.setHours(0, 0, 0, 0);
+    const midnight = new Date(NOW);
+    midnight.setHours(0, 0, 0, 0);
     const items = [
-      item({ id: "today", status: BrainDumpStatus.Triaged, completedAt: new Date(midnight.getTime() + 1000) }),
-      item({ id: "yesterday", status: BrainDumpStatus.Triaged, completedAt: new Date(midnight.getTime() - 1000) }),
+      item({
+        id: "today",
+        status: BrainDumpStatus.Triaged,
+        completedAt: new Date(midnight.getTime() + 1000),
+      }),
+      item({
+        id: "yesterday",
+        status: BrainDumpStatus.Triaged,
+        completedAt: new Date(midnight.getTime() - 1000),
+      }),
     ];
     const { completedTodayCount } = bucketItems(items, NOW);
     expect(completedTodayCount).toBe(1);
@@ -190,7 +220,13 @@ describe("libraryBuckets (Library hub tabs)", () => {
   it("plated/sorted/pantry mirror the Inbox singleTask/multiStep/savedLater buckets", () => {
     const items = [
       item({ id: "single", status: BrainDumpStatus.Triaged, stepsTotal: 0 }),
-      item({ id: "partial", status: BrainDumpStatus.Triaged, taskId: "t", stepsTotal: 3, stepsDone: 1 }),
+      item({
+        id: "partial",
+        status: BrainDumpStatus.Triaged,
+        taskId: "t",
+        stepsTotal: 3,
+        stepsDone: 1,
+      }),
       item({ id: "saved", snoozedUntil: new Date(NOW + 60_000) }),
     ];
     const lib = libraryBuckets(items, NOW);
@@ -201,7 +237,13 @@ describe("libraryBuckets (Library hub tabs)", () => {
 
   it("Done: a task graduates when ALL steps are done", () => {
     const items = [
-      item({ id: "allDone", status: BrainDumpStatus.Triaged, taskId: "t", stepsTotal: 4, stepsDone: 4 }),
+      item({
+        id: "allDone",
+        status: BrainDumpStatus.Triaged,
+        taskId: "t",
+        stepsTotal: 4,
+        stepsDone: 4,
+      }),
     ];
     const lib = libraryBuckets(items, NOW);
     expect(lib.done.map((i) => i.id)).toEqual(["allDone"]);
@@ -211,7 +253,13 @@ describe("libraryBuckets (Library hub tabs)", () => {
 
   it("Done: a partially-done task does NOT graduate (stays in Multi-step)", () => {
     const items = [
-      item({ id: "partial", status: BrainDumpStatus.Triaged, taskId: "t", stepsTotal: 4, stepsDone: 2 }),
+      item({
+        id: "partial",
+        status: BrainDumpStatus.Triaged,
+        taskId: "t",
+        stepsTotal: 4,
+        stepsDone: 2,
+      }),
     ];
     const lib = libraryBuckets(items, NOW);
     expect(lib.done).toEqual([]);
@@ -229,7 +277,12 @@ describe("libraryBuckets (Library hub tabs)", () => {
 
   it("Done also collects explicitly-completed items (e.g. a finished single to-do)", () => {
     const items = [
-      item({ id: "todoDone", status: BrainDumpStatus.Triaged, stepsTotal: 0, completedAt: new Date(NOW) }),
+      item({
+        id: "todoDone",
+        status: BrainDumpStatus.Triaged,
+        stepsTotal: 0,
+        completedAt: new Date(NOW),
+      }),
     ];
     const lib = libraryBuckets(items, NOW);
     expect(lib.done.map((i) => i.id)).toEqual(["todoDone"]);
@@ -239,7 +292,11 @@ describe("libraryBuckets (Library hub tabs)", () => {
 
   it("Done is newest-first and NOT capped at 10 (unlike the Inbox preview)", () => {
     const items = Array.from({ length: 14 }, (_, n) =>
-      item({ id: `d${n}`, status: BrainDumpStatus.Triaged, completedAt: new Date(NOW - n * 1000) }),
+      item({
+        id: `d${n}`,
+        status: BrainDumpStatus.Triaged,
+        completedAt: new Date(NOW - n * 1000),
+      }),
     );
     const lib = libraryBuckets(items, NOW);
     expect(lib.done).toHaveLength(14);
@@ -250,23 +307,70 @@ describe("libraryBuckets (Library hub tabs)", () => {
 describe("bucketOfItem", () => {
   it("classifies completed, saved, review, single-task and multi-step", () => {
     const now = NOW;
-    expect(bucketOfItem(item({ id: "completed", status: "triaged", completedAt: new Date(now) }), now)).toBe("completed");
-    expect(bucketOfItem(item({ id: "saved", status: "inbox", snoozedUntil: new Date(now + 60_000) }), now)).toBe("savedLater");
-    expect(bucketOfItem(item({ id: "review", status: "inbox" }), now)).toBe("needsReview");
-    expect(bucketOfItem(item({ id: "single", status: "triaged", stepsTotal: 0 }), now)).toBe("singleTask");
-    expect(bucketOfItem(item({ id: "multi", status: "triaged", stepsTotal: 3, stepsDone: 1 }), now)).toBe("multiStep");
+    expect(
+      bucketOfItem(
+        item({
+          id: "completed",
+          status: "triaged",
+          completedAt: new Date(now),
+        }),
+        now,
+      ),
+    ).toBe("completed");
+    expect(
+      bucketOfItem(
+        item({
+          id: "saved",
+          status: "inbox",
+          snoozedUntil: new Date(now + 60_000),
+        }),
+        now,
+      ),
+    ).toBe("savedLater");
+    expect(bucketOfItem(item({ id: "review", status: "inbox" }), now)).toBe(
+      "needsReview",
+    );
+    expect(
+      bucketOfItem(
+        item({ id: "single", status: "triaged", stepsTotal: 0 }),
+        now,
+      ),
+    ).toBe("singleTask");
+    expect(
+      bucketOfItem(
+        item({ id: "multi", status: "triaged", stepsTotal: 3, stepsDone: 1 }),
+        now,
+      ),
+    ).toBe("multiStep");
   });
 
   it("falls back to needsReview for states outside every bucket rule", () => {
     // Fully done but not stamped completedAt — e.g. a task finished before the
     // completedAt migration, or a race between task.status and the stamp.
     expect(
-      bucketOfItem(item({ id: "doneNoStamp", status: "triaged", taskStatus: TaskStatus.Done }), NOW),
+      bucketOfItem(
+        item({
+          id: "doneNoStamp",
+          status: "triaged",
+          taskStatus: TaskStatus.Done,
+        }),
+        NOW,
+      ),
     ).toBe("needsReview");
     expect(
-      bucketOfItem(item({ id: "allStepsDone", status: "triaged", stepsTotal: 2, stepsDone: 2 }), NOW),
+      bucketOfItem(
+        item({
+          id: "allStepsDone",
+          status: "triaged",
+          stepsTotal: 2,
+          stepsDone: 2,
+        }),
+        NOW,
+      ),
     ).toBe("needsReview");
     // An unknown status string shouldn't crash the board either.
-    expect(bucketOfItem(item({ id: "weird", status: "archived" }), NOW)).toBe("needsReview");
+    expect(bucketOfItem(item({ id: "weird", status: "archived" }), NOW)).toBe(
+      "needsReview",
+    );
   });
 });

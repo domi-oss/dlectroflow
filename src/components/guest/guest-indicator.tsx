@@ -48,7 +48,11 @@ export function GuestIndicator({
       <div className="border-b bg-amber-500/10 px-4 py-2 text-sm text-amber-800">
         <div className="mx-auto flex max-w-3xl items-start justify-between gap-3">
           <p>{BANNER}</p>
-          <button onClick={dismiss} aria-label="Dismiss" className="shrink-0 font-medium">
+          <button
+            onClick={dismiss}
+            aria-label="Dismiss"
+            className="shrink-0 font-medium"
+          >
             ✕
           </button>
         </div>

@@ -2,7 +2,10 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { RoundupCard, type RoundupSettings } from "@/components/dashboard/roundup-card";
+import {
+  RoundupCard,
+  type RoundupSettings,
+} from "@/components/dashboard/roundup-card";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
@@ -12,7 +15,9 @@ const triggerRollup = vi.fn().mockResolvedValue({
   rollup: null,
   email: { attempted: false },
 });
-vi.mock("@/app/actions/rollup", () => ({ triggerRollup: () => triggerRollup() }));
+vi.mock("@/app/actions/rollup", () => ({
+  triggerRollup: () => triggerRollup(),
+}));
 vi.mock("@/app/actions/settings", () => ({
   updateRoundupSettings: vi.fn().mockResolvedValue(undefined),
 }));
@@ -68,7 +73,11 @@ describe("RoundupCard notifyRoundup gating", () => {
   it("skips the browser notification when notifyRoundup is false", async () => {
     const user = userEvent.setup();
     render(
-      <RoundupCard initialRollup={null} settings={settings(false)} emailConfigured={false} />,
+      <RoundupCard
+        initialRollup={null}
+        settings={settings(false)}
+        emailConfigured={false}
+      />,
     );
     await user.click(screen.getByRole("button", { name: /trigger now/i }));
     await waitFor(() => expect(triggerRollup).toHaveBeenCalled());
@@ -78,7 +87,11 @@ describe("RoundupCard notifyRoundup gating", () => {
   it("fires the browser notification when notifyRoundup is true (permission granted)", async () => {
     const user = userEvent.setup();
     render(
-      <RoundupCard initialRollup={null} settings={settings(true)} emailConfigured={false} />,
+      <RoundupCard
+        initialRollup={null}
+        settings={settings(true)}
+        emailConfigured={false}
+      />,
     );
     await user.click(screen.getByRole("button", { name: /trigger now/i }));
     await waitFor(() => expect(showReminder).toHaveBeenCalledTimes(1));

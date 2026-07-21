@@ -27,7 +27,12 @@ export default async function FocusPage({
       orderBy: { order: "asc" },
     }),
     prisma.step.findFirst({
-      where: { taskId: step.taskId, done: false, order: { gt: step.order }, task: { workspaceId } },
+      where: {
+        taskId: step.taskId,
+        done: false,
+        order: { gt: step.order },
+        task: { workspaceId },
+      },
       orderBy: { order: "asc" },
     }),
   ]);
@@ -55,7 +60,15 @@ export default async function FocusPage({
       parentEmoji={step.task.parentEmoji}
       streak={dashboard.currentStreak}
       focusMinToday={dashboard.focusMinToday}
-      nextStep={nextStep ? { id: nextStep.id, text: nextStep.text, subtaskEmoji: nextStep.subtaskEmoji } : null}
+      nextStep={
+        nextStep
+          ? {
+              id: nextStep.id,
+              text: nextStep.text,
+              subtaskEmoji: nextStep.subtaskEmoji,
+            }
+          : null
+      }
       isSingleTask={step.total <= 1}
       addTimeIncrementMin={settings.addTimeIncrementMin}
       settings={{

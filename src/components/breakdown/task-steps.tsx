@@ -4,7 +4,11 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ejectStepToInbox } from "@/app/actions/breakdown";
-import { completeStep, renameStep, updateStepEstimate } from "@/app/actions/focus";
+import {
+  completeStep,
+  renameStep,
+  updateStepEstimate,
+} from "@/app/actions/focus";
 import { CompleteButton } from "@/components/inbox/complete-button";
 import { RowActions } from "@/components/inbox/row-actions";
 import { useVoice } from "@/components/voice-provider";
@@ -127,11 +131,15 @@ export function TaskSteps({
               <span className="text-muted-foreground w-8 text-xs tabular-nums">
                 {s.order}/{s.total}
               </span>
-              <span className={cn("text-muted-foreground flex-1", COMPLETE_TEXT)}>
+              <span
+                className={cn("text-muted-foreground flex-1", COMPLETE_TEXT)}
+              >
                 {s.subtaskEmoji ? `${s.subtaskEmoji} ` : ""}
                 {s.text}
               </span>
-              <span className="text-muted-foreground text-xs">{s.estMinutes}m</span>
+              <span className="text-muted-foreground text-xs">
+                {s.estMinutes}m
+              </span>
               <DonePill voice={voice} />
             </li>
           );
@@ -139,7 +147,10 @@ export function TaskSteps({
 
         const editingTitle = editTitleId === s.id;
         const editingEst = editEstId === s.id;
-        const focusLabel = t(s.resumable ? "step.resumeFocus" : "step.startFocus", voice);
+        const focusLabel = t(
+          s.resumable ? "step.resumeFocus" : "step.startFocus",
+          voice,
+        );
         const focusMenuLabel = t(
           s.resumable ? "step.resumeFocusTimer" : "step.startFocusTimer",
           voice,
@@ -187,7 +198,9 @@ export function TaskSteps({
                   onCancel={() => setEditEstId(null)}
                 />
               ) : (
-                <span className="text-muted-foreground shrink-0 text-xs">{s.estMinutes}m</span>
+                <span className="text-muted-foreground shrink-0 text-xs">
+                  {s.estMinutes}m
+                </span>
               )}
             </div>
             {/* Action line — shared v6 RowActions: Complete + Start/Resume Focus
@@ -201,7 +214,11 @@ export function TaskSteps({
                 >
                   {focusLabel}
                 </Link>,
-                <CompleteButton key="complete" voice={voice} onClick={() => complete(s.id)} />,
+                <CompleteButton
+                  key="complete"
+                  voice={voice}
+                  onClick={() => complete(s.id)}
+                />,
               ]}
               menu={[
                 <Link
@@ -316,7 +333,8 @@ function StepEstimateInput({
           // Empty / non-positive input → cancel, don't save. `Number("")` is 0
           // and passes isFinite, which would otherwise be clamped to 1 (Duo review).
           const n = Number(value);
-          if (value.trim() === "" || !Number.isFinite(n) || n < 1 || n > 480) onCancel();
+          if (value.trim() === "" || !Number.isFinite(n) || n < 1 || n > 480)
+            onCancel();
           else onSave(n);
         }
         if (e.key === "Escape") onCancel();

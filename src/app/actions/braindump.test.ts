@@ -8,19 +8,21 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(() => {
-  const prismaMock = {
-    brainDumpItem: {
-      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-    },
-    settings: {
-      upsert: vi.fn().mockResolvedValue({}),
-    },
-  };
-  const revalidatePathMock = vi.fn();
-  const currentWorkspaceIdMock = vi.fn().mockResolvedValue("owner");
-  return { prismaMock, revalidatePathMock, currentWorkspaceIdMock };
-});
+const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
+  () => {
+    const prismaMock = {
+      brainDumpItem: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      settings: {
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+    };
+    const revalidatePathMock = vi.fn();
+    const currentWorkspaceIdMock = vi.fn().mockResolvedValue("owner");
+    return { prismaMock, revalidatePathMock, currentWorkspaceIdMock };
+  },
+);
 
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 
@@ -97,8 +99,16 @@ describe("settings.ts › updateAgingSettings (per-tier hours)", () => {
     expect(prismaMock.settings.upsert).toHaveBeenCalledTimes(1);
     const call = prismaMock.settings.upsert.mock.calls[0][0];
     expect(call.where).toEqual({ workspaceId: "owner" });
-    expect(call.create).toMatchObject({ agingHours: 5, overdueHours: 9, wayOverdueHours: 13 });
-    expect(call.update).toMatchObject({ agingHours: 5, overdueHours: 9, wayOverdueHours: 13 });
+    expect(call.create).toMatchObject({
+      agingHours: 5,
+      overdueHours: 9,
+      wayOverdueHours: 13,
+    });
+    expect(call.update).toMatchObject({
+      agingHours: 5,
+      overdueHours: 9,
+      wayOverdueHours: 13,
+    });
   });
 
   it("clamps zero/negative hours to 1", async () => {

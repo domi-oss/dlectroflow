@@ -5,8 +5,14 @@ import { useRouter } from "next/navigation";
 import { pushStepsToGoogleTasks } from "@/app/actions/google-schedule";
 import { scheduleViaIcs } from "@/app/actions/ics-schedule";
 import { downloadIcs } from "@/lib/download-ics";
-import { ScheduleControl, type ScheduleControlProps } from "@/components/inbox/row-actions";
-import { scheduleState, SCHEDULE_ERROR_MESSAGES } from "@/components/inbox/inbox-view";
+import {
+  ScheduleControl,
+  type ScheduleControlProps,
+} from "@/components/inbox/row-actions";
+import {
+  scheduleState,
+  SCHEDULE_ERROR_MESSAGES,
+} from "@/components/inbox/inbox-view";
 import { leadSchedulingMethod } from "@/lib/scheduling/providers";
 import type { GoogleConnStatus } from "@/lib/scheduling/types";
 import { t, type Voice } from "@/lib/strings";
@@ -60,46 +66,58 @@ export function TaskSchedule({
   // type — it is always non-null when the seam picks googleTasks.
   const schedule: ScheduleControlProps =
     leadSchedulingMethod(effectiveGoogle) === "googleTasks" && effectiveGoogle
-    ? {
-        state: scheduleState(effectiveGoogle, "ready_steps"),
-        onScheduleSteps: () => {
-          setError(null);
-          startTransition(async () => {
-            const res = await pushStepsToGoogleTasks(taskId);
-            if (res.ok) {
-              router.refresh();
-              return;
-            }
-            if (res.reason === "reconnect_required") {
-              setReconnectRequired(true);
-              return;
-            }
-            setError(res.message ?? SCHEDULE_ERROR_MESSAGES[res.reason] ?? "Scheduling failed.");
-          });
-        },
-        pending,
-      }
-    : {
-        state: "ics_ready_steps",
-        onScheduleIcs: () => {
-          setError(null);
-          startTransition(async () => {
-            const res = await scheduleViaIcs(taskId);
-            if (res.ok) {
-              downloadIcs(res.ics, res.icsFilename);
-              router.refresh();
-              return;
-            }
-            setError(res.message ?? SCHEDULE_ERROR_MESSAGES[res.reason] ?? "Couldn't build the calendar file.");
-          });
-        },
-        pending,
-      };
+      ? {
+          state: scheduleState(effectiveGoogle, "ready_steps"),
+          onScheduleSteps: () => {
+            setError(null);
+            startTransition(async () => {
+              const res = await pushStepsToGoogleTasks(taskId);
+              if (res.ok) {
+                router.refresh();
+                return;
+              }
+              if (res.reason === "reconnect_required") {
+                setReconnectRequired(true);
+                return;
+              }
+              setError(
+                res.message ??
+                  SCHEDULE_ERROR_MESSAGES[res.reason] ??
+                  "Scheduling failed.",
+              );
+            });
+          },
+          pending,
+        }
+      : {
+          state: "ics_ready_steps",
+          onScheduleIcs: () => {
+            setError(null);
+            startTransition(async () => {
+              const res = await scheduleViaIcs(taskId);
+              if (res.ok) {
+                downloadIcs(res.ics, res.icsFilename);
+                router.refresh();
+                return;
+              }
+              setError(
+                res.message ??
+                  SCHEDULE_ERROR_MESSAGES[res.reason] ??
+                  "Couldn't build the calendar file.",
+              );
+            });
+          },
+          pending,
+        };
 
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
       <span
-        className={scheduledAt != null ? "font-medium text-emerald-600" : "text-muted-foreground"}
+        className={
+          scheduledAt != null
+            ? "font-medium text-emerald-600"
+            : "text-muted-foreground"
+        }
         title={scheduledAt != null ? "Scheduled" : undefined}
       >
         {t(scheduledAt != null ? "task.scheduled" : "task.notScheduled", voice)}

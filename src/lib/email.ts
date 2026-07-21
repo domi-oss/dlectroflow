@@ -10,8 +10,7 @@ export function emailConfigured(): boolean {
 const DEFAULT_FROM = "dlectroflow <onboarding@resend.dev>";
 
 export type EmailResult =
-  | { ok: true }
-  | { ok: false; reason: "disabled" | "no-recipient" | "error" };
+  { ok: true } | { ok: false; reason: "disabled" | "no-recipient" | "error" };
 
 /**
  * Send the round-up email. No-ops (without throwing) when Resend isn't
@@ -61,7 +60,9 @@ export function roundupEmailHtml(opts: {
      </td>`;
   const narrativeHtml = opts.narrative
     .split(/\n{2,}/)
-    .map((p) => `<p style="margin:0 0 12px;line-height:1.6">${escapeHtml(p)}</p>`)
+    .map(
+      (p) => `<p style="margin:0 0 12px;line-height:1.6">${escapeHtml(p)}</p>`,
+    )
     .join("");
   return `<div style="font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;max-width:520px;margin:0 auto;color:#1c1917">
     <h1 style="font-size:20px;margin:0 0 4px">🌇 Your day, wrapped</h1>
@@ -79,8 +80,5 @@ export function roundupEmailHtml(opts: {
 }
 
 function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

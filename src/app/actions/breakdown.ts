@@ -19,7 +19,9 @@ import { currentWorkspaceId } from "@/lib/workspace";
  */
 export async function startBreakdown(itemId: string): Promise<string | null> {
   const workspaceId = await currentWorkspaceId();
-  const item = await prisma.brainDumpItem.findFirst({ where: { id: itemId, workspaceId } });
+  const item = await prisma.brainDumpItem.findFirst({
+    where: { id: itemId, workspaceId },
+  });
   if (!item) return null;
   if (item.taskId) return item.taskId;
 
@@ -49,7 +51,12 @@ export async function createTask(title: string): Promise<string | null> {
   const trimmed = title.trim();
   if (!trimmed) return null;
   const task = await prisma.task.create({
-    data: { title: trimmed, source: TaskSource.Manual, status: TaskStatus.Active, workspaceId },
+    data: {
+      title: trimmed,
+      source: TaskSource.Manual,
+      status: TaskStatus.Active,
+      workspaceId,
+    },
   });
   return task.id;
 }
@@ -110,7 +117,9 @@ export async function confirmBreakdown(taskId: string, proposal: Proposal) {
   const total = steps.length;
   if (total === 0) return;
 
-  const existingTask = await prisma.task.findFirst({ where: { id: taskId, workspaceId } });
+  const existingTask = await prisma.task.findFirst({
+    where: { id: taskId, workspaceId },
+  });
   if (!existingTask) return;
 
   await prisma.$transaction([

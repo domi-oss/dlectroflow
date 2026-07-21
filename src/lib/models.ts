@@ -33,5 +33,9 @@ export function breakdownParamsFor(model: string): {
   output_config?: { effort: "low" };
 } {
   if (model === "claude-haiku-4-5") return { model };
-  return { model, thinking: { type: "adaptive" }, output_config: { effort: "low" } };
+  return {
+    model,
+    thinking: { type: "adaptive" },
+    output_config: { effort: "low" },
+  };
 }

@@ -10,8 +10,7 @@ export const GUEST_COOKIE = "df_guest";
 export const GUEST_WS_HEADER = "x-guest-ws";
 
 export type SessionPayload =
-  | { kind: "owner"; sub: string }
-  | { kind: "guest"; wsId: string };
+  { kind: "owner"; sub: string } | { kind: "guest"; wsId: string };
 
 // The single HMAC alg we sign with and the ONLY one we accept on verify. Pinning
 // it (issue #21 P5 batch B) stops an attacker downgrading a forged token to a

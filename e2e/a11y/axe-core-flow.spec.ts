@@ -29,7 +29,9 @@ test.describe("accessibility: core-flow routes (axe)", () => {
   ] as const;
 
   for (const route of STATIC_ROUTES) {
-    test(`no new serious/critical violations: ${route.name} (${route.path})`, async ({ page }) => {
+    test(`no new serious/critical violations: ${route.name} (${route.path})`, async ({
+      page,
+    }) => {
       await page.goto(route.path);
       await waitForShell(page);
       await scanA11y(page, route.path);
@@ -63,13 +65,17 @@ test.describe("accessibility: core-flow routes (axe)", () => {
     const taskPath = new URL(page.url()).pathname;
     await page.goto(`${taskPath}?edit=1&manual=1`);
     await waitForShell(page);
-    await expect(page.getByRole("textbox", { name: "Step text" })).toBeVisible();
+    await expect(
+      page.getByRole("textbox", { name: "Step text" }),
+    ).toBeVisible();
     await scanA11y(page, "/tasks/[taskId]");
   });
 
   // focus timer. Triage a fresh item into a single to-do, then "▶ Start Focus"
   // lazily creates its one step and navigates to /focus/[stepId] (the timer).
-  test("no new serious/critical violations: focus timer (/focus/[stepId])", async ({ page }) => {
+  test("no new serious/critical violations: focus timer (/focus/[stepId])", async ({
+    page,
+  }) => {
     const label = `A11y focus ${Date.now()}`;
     await page.goto("/inbox");
     await captureItem(page, label);

@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { disconnectMock, workspaceMock, revalidatePathMock } = vi.hoisted(() => ({
-  disconnectMock: vi.fn(),
-  workspaceMock: vi.fn(),
-  revalidatePathMock: vi.fn(),
-}));
+const { disconnectMock, workspaceMock, revalidatePathMock } = vi.hoisted(
+  () => ({
+    disconnectMock: vi.fn(),
+    workspaceMock: vi.fn(),
+    revalidatePathMock: vi.fn(),
+  }),
+);
 
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/lib/db", () => ({ prisma: {} }));

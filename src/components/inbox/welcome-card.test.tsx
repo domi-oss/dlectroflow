@@ -22,7 +22,9 @@ afterEach(cleanup);
 describe("WelcomeCard", () => {
   it("opens with the greeting in the body (👋); the separate title heading is dropped", () => {
     render(<WelcomeCard voice="plain" />);
-    const body = screen.getByText(/Welcome to dlectroflow, you are in the inbox/);
+    const body = screen.getByText(
+      /Welcome to dlectroflow, you are in the inbox/,
+    );
     expect(body).toBeInTheDocument();
     expect(body.textContent).toContain("👋");
     // No standalone <h2> title any more — the greeting lives in the body.

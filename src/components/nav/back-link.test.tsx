@@ -36,7 +36,9 @@ describe("BackLink", () => {
 
   it("keeps the '← Back' label in playful voice too (label no longer varies)", () => {
     render(<BackLink from="library" voice="playful" />);
-    expect(screen.getByRole("link").textContent?.replace(/\s+/g, " ").trim()).toBe("← Back");
+    expect(
+      screen.getByRole("link").textContent?.replace(/\s+/g, " ").trim(),
+    ).toBe("← Back");
   });
 
   it("defaults the DESTINATION to the inbox when `from` is absent", () => {

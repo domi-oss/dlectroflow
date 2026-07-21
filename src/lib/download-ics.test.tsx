@@ -8,8 +8,10 @@ describe("downloadIcs", () => {
   it("creates a blob URL and clicks an anchor with the given filename, then revokes", () => {
     const createURL = vi.fn(() => "blob:xyz");
     const revokeURL = vi.fn();
-    (URL as unknown as { createObjectURL: unknown }).createObjectURL = createURL;
-    (URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL = revokeURL;
+    (URL as unknown as { createObjectURL: unknown }).createObjectURL =
+      createURL;
+    (URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL =
+      revokeURL;
     let downloadedName = "";
     const clickSpy = vi
       .spyOn(HTMLAnchorElement.prototype, "click")

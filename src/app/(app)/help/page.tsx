@@ -39,25 +39,26 @@ export default async function HelpPage({
         <p className="text-sm">The core loop is five moves:</p>
         <ol className="ml-5 list-decimal space-y-1 text-sm">
           <li>
-            <strong>Brain dump</strong> anything into the inbox — no fields, just
-            type and press Enter (or <kbd>/</kbd> to jump to the capture bar).
+            <strong>Brain dump</strong> anything into the inbox — no fields,
+            just type and press Enter (or <kbd>/</kbd> to jump to the capture
+            bar).
           </li>
           <li>
             <strong>Review</strong> each item under <em>Needs review</em>: break
-            it into steps, add it as a single to-do, save it for later, or delete
-            it.
+            it into steps, add it as a single to-do, save it for later, or
+            delete it.
           </li>
           <li>
-            <strong>Break down</strong> big things into small, concrete steps with
-            an AI assist — then tweak the list until it feels right.
+            <strong>Break down</strong> big things into small, concrete steps
+            with an AI assist — then tweak the list until it feels right.
           </li>
           <li>
-            <strong>Focus</strong> one step at a time with the timer, or just tick
-            steps off directly.
+            <strong>Focus</strong> one step at a time with the timer, or just
+            tick steps off directly.
           </li>
           <li>
-            <strong>Complete</strong> work to move it into the Completed bucket and
-            earn points toward your streak.
+            <strong>Complete</strong> work to move it into the Completed bucket
+            and earn points toward your streak.
           </li>
         </ol>
       </section>
@@ -67,12 +68,16 @@ export default async function HelpPage({
         <p className="text-sm">
           Items in <em>Needs review</em> show a freshness pill that ages over
           time: <strong>Recent</strong> → <strong>Aging</strong> →{" "}
-          <strong>Overdue</strong> → <strong>Way overdue</strong>. After a while an
-          item asks &ldquo;still needed?&rdquo; — choose <strong>Still need it</strong>{" "}
-          to reset its clock or <strong>Dismiss</strong> to stop the nudge. Use{" "}
-          <strong>Save for later</strong> to pause freshness on something you are
-          not ready for. You can tune the tier thresholds on the{" "}
-          <Link href="/settings?from=help" className="underline">Settings</Link> page.
+          <strong>Overdue</strong> → <strong>Way overdue</strong>. After a while
+          an item asks &ldquo;still needed?&rdquo; — choose{" "}
+          <strong>Still need it</strong> to reset its clock or{" "}
+          <strong>Dismiss</strong> to stop the nudge. Use{" "}
+          <strong>Save for later</strong> to pause freshness on something you
+          are not ready for. You can tune the tier thresholds on the{" "}
+          <Link href="/settings?from=help" className="underline">
+            Settings
+          </Link>{" "}
+          page.
         </p>
       </section>
 
@@ -81,11 +86,12 @@ export default async function HelpPage({
         <p className="text-sm">
           When you break a task down, Claude proposes small steps. In the editor
           you can: ask for <strong>Fewer steps</strong> (consolidate) or{" "}
-          <strong>More steps</strong> (split further), <strong>Add a step</strong>{" "}
-          manually, drag the grip handle to <strong>reorder</strong>, remove a
-          step, or <strong>send a step back to review</strong> as its own bigger
-          task. Type free-form guidance in the &ldquo;Tell Claude how to
-          adjust&rdquo; box anytime.
+          <strong>More steps</strong> (split further),{" "}
+          <strong>Add a step</strong> manually, drag the grip handle to{" "}
+          <strong>reorder</strong>, remove a step, or{" "}
+          <strong>send a step back to review</strong> as its own bigger task.
+          Type free-form guidance in the &ldquo;Tell Claude how to adjust&rdquo;
+          box anytime.
         </p>
         <p className="text-sm">
           Not every step needs the timer — on a task you can hit{" "}
@@ -97,8 +103,12 @@ export default async function HelpPage({
         <h2 className="text-lg font-semibold">Voice &amp; settings</h2>
         <p className="text-sm">
           Switch between the calm <strong>Plain</strong> voice and the playful
-          snack-themed voice, set your freshness thresholds, and manage reminders
-          on the <Link href="/settings?from=help" className="underline">Settings</Link> page.
+          snack-themed voice, set your freshness thresholds, and manage
+          reminders on the{" "}
+          <Link href="/settings?from=help" className="underline">
+            Settings
+          </Link>{" "}
+          page.
         </p>
       </section>
 
@@ -106,8 +116,8 @@ export default async function HelpPage({
         <h2 className="text-lg font-semibold">Guests &amp; AI limits</h2>
         <p className="text-sm">
           Signed-in guests can try the full flow with a daily cap on AI
-          breakdowns; when the cap is reached (or the AI hiccups) you still get a
-          hand-built starter plan you can edit. The workspace owner has higher
+          breakdowns; when the cap is reached (or the AI hiccups) you still get
+          a hand-built starter plan you can edit. The workspace owner has higher
           limits and can pick the breakdown model.
         </p>
       </section>

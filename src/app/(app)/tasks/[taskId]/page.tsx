@@ -33,7 +33,11 @@ export default async function TaskPage({
           // Resumable = has an unfinished focus session (started, never ended).
           // Batched by Prisma into one query, so not a per-step N+1.
           include: {
-            focusSessions: { where: { endedAt: null }, select: { id: true }, take: 1 },
+            focusSessions: {
+              where: { endedAt: null },
+              select: { id: true },
+              take: 1,
+            },
           },
         },
       },

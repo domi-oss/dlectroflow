@@ -10,9 +10,13 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("next/link", () => ({
-  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
-    <a href={href}>{children}</a>
-  ),
+  default: ({
+    children,
+    href,
+  }: {
+    children: React.ReactNode;
+    href: string;
+  }) => <a href={href}>{children}</a>,
 }));
 
 vi.mock("@/components/voice-provider", () => ({ useVoice: () => "plain" }));
@@ -31,7 +35,9 @@ const { scheduleViaIcsMock, downloadIcsMock } = vi.hoisted(() => ({
   scheduleViaIcsMock: vi.fn(),
   downloadIcsMock: vi.fn(),
 }));
-vi.mock("@/app/actions/ics-schedule", () => ({ scheduleViaIcs: scheduleViaIcsMock }));
+vi.mock("@/app/actions/ics-schedule", () => ({
+  scheduleViaIcs: scheduleViaIcsMock,
+}));
 vi.mock("@/lib/download-ics", () => ({ downloadIcs: downloadIcsMock }));
 
 const proposal: Proposal = {
@@ -114,7 +120,9 @@ describe("BreakdownChat — manual step editing", () => {
 
   it("each step row has an emoji picker trigger", () => {
     renderChat();
-    expect(screen.getAllByRole("button", { name: /choose emoji/i })).toHaveLength(2);
+    expect(
+      screen.getAllByRole("button", { name: /choose emoji/i }),
+    ).toHaveLength(2);
   });
 
   it("'Remove step' removes the last step", async () => {
@@ -132,7 +140,9 @@ describe("BreakdownChat — manual step editing", () => {
     const user = userEvent.setup();
     renderChat();
     // Voice-aware per-step eject control (plain voice → "Back to inbox").
-    await user.click(screen.getAllByRole("button", { name: "Back to inbox" })[0]);
+    await user.click(
+      screen.getAllByRole("button", { name: "Back to inbox" })[0],
+    );
     expect(createBrainDumpItem).toHaveBeenCalledWith("First step");
     expect(screen.getAllByLabelText("Step text")).toHaveLength(1);
     expect(screen.getByLabelText("Step text")).toHaveValue("Second step");

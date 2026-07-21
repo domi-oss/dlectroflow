@@ -49,13 +49,19 @@ describe("awardBadge — P2002-safe, once-only", () => {
 
   it("concurrent award race: create throws P2002 → returns false (never throws)", async () => {
     prismaMock.badge.findUnique.mockResolvedValue(null);
-    prismaMock.badge.create.mockRejectedValue(new FakeP2002("Unique constraint failed"));
+    prismaMock.badge.create.mockRejectedValue(
+      new FakeP2002("Unique constraint failed"),
+    );
     await expect(awardBadge("ws", BadgeKey.Streak5)).resolves.toBe(false);
   });
 
   it("non-P2002 create error → rethrows", async () => {
     prismaMock.badge.findUnique.mockResolvedValue(null);
-    prismaMock.badge.create.mockRejectedValue(new FakeOtherError("connection lost"));
-    await expect(awardBadge("ws", BadgeKey.Streak5)).rejects.toMatchObject({ code: "P1001" });
+    prismaMock.badge.create.mockRejectedValue(
+      new FakeOtherError("connection lost"),
+    );
+    await expect(awardBadge("ws", BadgeKey.Streak5)).rejects.toMatchObject({
+      code: "P1001",
+    });
   });
 });

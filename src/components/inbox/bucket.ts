@@ -27,7 +27,15 @@ export type Item = {
   scheduledAt: Date | null;
   /** Single-task time estimate in minutes; null → display default of 5. */
   estMinutes: number | null;
-  steps: { id: string; order: number; text: string; done: boolean; estMinutes: number; subtaskEmoji: string | null; resumable: boolean }[];
+  steps: {
+    id: string;
+    order: number;
+    text: string;
+    done: boolean;
+    estMinutes: number;
+    subtaskEmoji: string | null;
+    resumable: boolean;
+  }[];
 };
 
 export type Buckets = {
@@ -68,7 +76,9 @@ const toMs = (d: Date | string): number =>
  * so a freshened item both shows a "recent" pill AND sorts to the top.
  */
 const freshnessKey = (i: Item): number =>
-  i.freshenedAt ? Math.max(toMs(i.createdAt), toMs(i.freshenedAt)) : toMs(i.createdAt);
+  i.freshenedAt
+    ? Math.max(toMs(i.createdAt), toMs(i.freshenedAt))
+    : toMs(i.createdAt);
 
 /** Design decision 3: a to-do is fully done when the task is done OR every step is done. */
 function isFullyDone(i: Item): boolean {
@@ -97,25 +107,44 @@ export function bucketItems(items: Item[], now: number = Date.now()): Buckets {
     // outranks an item captured more recently.
     .sort((a, b) => freshnessKey(b) - freshnessKey(a));
 
-  const savedLater = items.filter((i) => isInbox(i) && isSavedForLater(i) && !isCompleted(i));
+  const savedLater = items.filter(
+    (i) => isInbox(i) && isSavedForLater(i) && !isCompleted(i),
+  );
 
   const triaged = items.filter(
-    (i) => i.status === BrainDumpStatus.Triaged && !isFullyDone(i) && !isCompleted(i),
+    (i) =>
+      i.status === BrainDumpStatus.Triaged &&
+      !isFullyDone(i) &&
+      !isCompleted(i),
   );
   // A one-step task IS a single to-do (its step exists so ▶ Focus has a
   // target); only 2+ steps make it multi-step.
-  const awaitsBreakdown = (i: Item) => i.stepsTotal === 0 && i.breakdownRequestedAt != null;
-  const singleTask = triaged.filter((i) => i.stepsTotal <= 1 && !awaitsBreakdown(i));
-  const multiStep = triaged.filter((i) => i.stepsTotal > 1 || awaitsBreakdown(i));
+  const awaitsBreakdown = (i: Item) =>
+    i.stepsTotal === 0 && i.breakdownRequestedAt != null;
+  const singleTask = triaged.filter(
+    (i) => i.stepsTotal <= 1 && !awaitsBreakdown(i),
+  );
+  const multiStep = triaged.filter(
+    (i) => i.stepsTotal > 1 || awaitsBreakdown(i),
+  );
 
   const completedAll = items
     .filter(isCompleted)
     .sort((a, b) => toMs(b.completedAt!) - toMs(a.completedAt!));
   const completed = completedAll.slice(0, 10);
   const dayStart = startOfDayMs(now);
-  const completedTodayCount = completedAll.filter((i) => toMs(i.completedAt!) >= dayStart).length;
+  const completedTodayCount = completedAll.filter(
+    (i) => toMs(i.completedAt!) >= dayStart,
+  ).length;
 
-  return { needsReview, singleTask, multiStep, savedLater, completed, completedTodayCount };
+  return {
+    needsReview,
+    singleTask,
+    multiStep,
+    savedLater,
+    completed,
+    completedTodayCount,
+  };
 }
 
 /** The four tabs of the Library ("Everything") hub (#8 Phase 3). */
@@ -169,10 +198,13 @@ export function libraryBuckets(
 export function bucketOfItem(i: Item, now: number = Date.now()): BucketId {
   if (isCompleted(i)) return "completed";
   if (i.status === BrainDumpStatus.Inbox) {
-    return i.snoozedUntil != null && toMs(i.snoozedUntil) > now ? "savedLater" : "needsReview";
+    return i.snoozedUntil != null && toMs(i.snoozedUntil) > now
+      ? "savedLater"
+      : "needsReview";
   }
   if (i.status === BrainDumpStatus.Triaged && !isFullyDone(i)) {
-    const awaitsBreakdown = i.stepsTotal === 0 && i.breakdownRequestedAt != null;
+    const awaitsBreakdown =
+      i.stepsTotal === 0 && i.breakdownRequestedAt != null;
     return i.stepsTotal > 1 || awaitsBreakdown ? "multiStep" : "singleTask";
   }
   // Fully-done-but-not-stamped or any other state: treat as review (safe default).

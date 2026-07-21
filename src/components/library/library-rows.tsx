@@ -149,7 +149,10 @@ export function LibraryRows({
   const deleteControl = (
     id: string,
     key: string,
-    { fullWidth = false, icon = false }: { fullWidth?: boolean; icon?: boolean } = {},
+    {
+      fullWidth = false,
+      icon = false,
+    }: { fullWidth?: boolean; icon?: boolean } = {},
   ) =>
     confirmDeleteId === id ? (
       <span key={key} className="flex items-center gap-2">
@@ -229,7 +232,10 @@ export function LibraryRows({
           return (
             <li
               key={item.id}
-              className={cn("rounded-lg border px-4 py-3 text-sm", checked && "ring-primary ring-2")}
+              className={cn(
+                "rounded-lg border px-4 py-3 text-sm",
+                checked && "ring-primary ring-2",
+              )}
             >
               <div className="flex items-center gap-3">
                 {selecting && (
@@ -243,10 +249,17 @@ export function LibraryRows({
                 {tab === "plated" && <RowNumber n={i + 1} />}
                 <span className="min-w-0 flex-1 break-words">{item.text}</span>
                 {tab === "plated" ? (
-                  <AgeLabel item={item} now={now} voice={voice} settings={settings} />
+                  <AgeLabel
+                    item={item}
+                    now={now}
+                    voice={voice}
+                    settings={settings}
+                  />
                 ) : (
                   <span className="text-muted-foreground shrink-0 text-xs">
-                    {item.snoozedUntil ? `${t("lib.wakes", voice)} ${formatWake(item.snoozedUntil)}` : null}
+                    {item.snoozedUntil
+                      ? `${t("lib.wakes", voice)} ${formatWake(item.snoozedUntil)}`
+                      : null}
                   </span>
                 )}
                 {tab === "plated" && (

@@ -14,7 +14,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "dlectroflow",
-  description: "An ADHD helper: capture, clarify, schedule, focus, and get rewarded.",
+  description:
+    "An ADHD helper: capture, clarify, schedule, focus, and get rewarded.",
 };
 
 export default function RootLayout({

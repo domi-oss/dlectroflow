@@ -55,7 +55,10 @@ export function SaveIndicator({
     );
   if (status === "saved")
     return (
-      <span className="text-xs text-green-600 dark:text-green-400" role="status">
+      <span
+        className="text-xs text-green-600 dark:text-green-400"
+        role="status"
+      >
         {t("settings.saved", voice)}
       </span>
     );

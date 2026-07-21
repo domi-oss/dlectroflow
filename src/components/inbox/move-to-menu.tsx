@@ -6,7 +6,13 @@ import { t, type Voice, type StringKey } from "@/lib/strings";
 import { cn, touchTarget } from "@/lib/utils";
 
 // Menu order + the section string each bucket shows as its label.
-const BUCKET_ORDER: BucketId[] = ["needsReview", "multiStep", "singleTask", "savedLater", "completed"];
+const BUCKET_ORDER: BucketId[] = [
+  "needsReview",
+  "multiStep",
+  "singleTask",
+  "savedLater",
+  "completed",
+];
 const BUCKET_LABEL: Record<BucketId, StringKey> = {
   needsReview: "section.needsReview",
   multiStep: "section.multiStep",
@@ -44,7 +50,8 @@ export function MoveToMenu({
       if (e.key === "Escape") setOpen(false);
     };
     const onPointerDown = (e: Event) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      if (rootRef.current && !rootRef.current.contains(e.target as Node))
+        setOpen(false);
     };
     document.addEventListener("keydown", onKeyDown);
     document.addEventListener("pointerdown", onPointerDown);

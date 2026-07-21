@@ -49,7 +49,9 @@ describe("StatusPill", () => {
     // Word label is real text (perceivable without colour).
     expect(screen.getByText(/Overdue/)).toBeInTheDocument();
     // The coloured dot is decorative only.
-    expect(container.querySelector('[aria-hidden="true"]')).toHaveTextContent("🟠");
+    expect(container.querySelector('[aria-hidden="true"]')).toHaveTextContent(
+      "🟠",
+    );
   });
 
   it("a11y: uses AA-tuned per-theme colour tokens (-700 light / dark:-400), not a fixed low-contrast hex", () => {

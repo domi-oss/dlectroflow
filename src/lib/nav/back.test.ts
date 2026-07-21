@@ -15,13 +15,17 @@ describe("resolveBackTarget", () => {
   });
 
   it("resolves a whitelisted origin to its destination href", () => {
-    expect(resolveBackTarget("library")).toEqual({ href: "/library?tab=sorted" });
+    expect(resolveBackTarget("library")).toEqual({
+      href: "/library?tab=sorted",
+    });
     expect(resolveBackTarget("settings")).toEqual(BACK_TARGETS.settings);
     expect(resolveBackTarget("help")).toEqual(BACK_TARGETS.help);
   });
 
   it("falls back to the inbox for an unknown value (no open redirect)", () => {
-    expect(resolveBackTarget("https://evil.example.com")).toEqual(DEFAULT_BACK_TARGET);
+    expect(resolveBackTarget("https://evil.example.com")).toEqual(
+      DEFAULT_BACK_TARGET,
+    );
     expect(resolveBackTarget("/etc/passwd")).toEqual(DEFAULT_BACK_TARGET);
   });
 
@@ -35,7 +39,9 @@ describe("resolveBackTarget", () => {
 describe("withFrom", () => {
   it("appends a whitelisted origin, choosing ? or & correctly", () => {
     expect(withFrom("/tasks/t1", "library")).toBe("/tasks/t1?from=library");
-    expect(withFrom("/tasks/t1?edit=1", "library")).toBe("/tasks/t1?edit=1&from=library");
+    expect(withFrom("/tasks/t1?edit=1", "library")).toBe(
+      "/tasks/t1?edit=1&from=library",
+    );
   });
 
   it("drops unknown/absent/hostile origins rather than reflecting them", () => {

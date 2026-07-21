@@ -43,18 +43,90 @@ const REGISTRY: ReadonlyArray<{
   values: Readonly<Record<string, string>>;
   nullable: boolean;
 }> = [
-  { constraint: "Workspace_kind_check", table: "Workspace", column: "kind", values: WorkspaceKind, nullable: false },
-  { constraint: "BrainDumpItem_status_check", table: "BrainDumpItem", column: "status", values: BrainDumpStatus, nullable: false },
-  { constraint: "Task_status_check", table: "Task", column: "status", values: TaskStatus, nullable: false },
-  { constraint: "Task_source_check", table: "Task", column: "source", values: TaskSource, nullable: false },
-  { constraint: "BreakdownTurn_role_check", table: "BreakdownTurn", column: "role", values: TurnRole, nullable: false },
-  { constraint: "FocusSession_outcome_check", table: "FocusSession", column: "outcome", values: FocusOutcome, nullable: true },
-  { constraint: "RewardEvent_type_check", table: "RewardEvent", column: "type", values: RewardType, nullable: false },
-  { constraint: "DailySpark_source_check", table: "DailySpark", column: "source", values: SparkSource, nullable: false },
-  { constraint: "Badge_key_check", table: "Badge", column: "key", values: BadgeKey, nullable: false },
-  { constraint: "Settings_focusTimerStyle_check", table: "Settings", column: "focusTimerStyle", values: FocusTimerStyle, nullable: true },
-  { constraint: "Settings_focusSound_check", table: "Settings", column: "focusSound", values: FocusSound, nullable: false },
-  { constraint: "Settings_completeTickColor_check", table: "Settings", column: "completeTickColor", values: CompleteTickColor, nullable: false },
+  {
+    constraint: "Workspace_kind_check",
+    table: "Workspace",
+    column: "kind",
+    values: WorkspaceKind,
+    nullable: false,
+  },
+  {
+    constraint: "BrainDumpItem_status_check",
+    table: "BrainDumpItem",
+    column: "status",
+    values: BrainDumpStatus,
+    nullable: false,
+  },
+  {
+    constraint: "Task_status_check",
+    table: "Task",
+    column: "status",
+    values: TaskStatus,
+    nullable: false,
+  },
+  {
+    constraint: "Task_source_check",
+    table: "Task",
+    column: "source",
+    values: TaskSource,
+    nullable: false,
+  },
+  {
+    constraint: "BreakdownTurn_role_check",
+    table: "BreakdownTurn",
+    column: "role",
+    values: TurnRole,
+    nullable: false,
+  },
+  {
+    constraint: "FocusSession_outcome_check",
+    table: "FocusSession",
+    column: "outcome",
+    values: FocusOutcome,
+    nullable: true,
+  },
+  {
+    constraint: "RewardEvent_type_check",
+    table: "RewardEvent",
+    column: "type",
+    values: RewardType,
+    nullable: false,
+  },
+  {
+    constraint: "DailySpark_source_check",
+    table: "DailySpark",
+    column: "source",
+    values: SparkSource,
+    nullable: false,
+  },
+  {
+    constraint: "Badge_key_check",
+    table: "Badge",
+    column: "key",
+    values: BadgeKey,
+    nullable: false,
+  },
+  {
+    constraint: "Settings_focusTimerStyle_check",
+    table: "Settings",
+    column: "focusTimerStyle",
+    values: FocusTimerStyle,
+    nullable: true,
+  },
+  {
+    constraint: "Settings_focusSound_check",
+    table: "Settings",
+    column: "focusSound",
+    values: FocusSound,
+    nullable: false,
+  },
+  {
+    constraint: "Settings_completeTickColor_check",
+    table: "Settings",
+    column: "completeTickColor",
+    values: CompleteTickColor,
+    nullable: false,
+  },
 ];
 
 // The schema the client is connected to (Prisma's `?schema=` param, default
@@ -100,7 +172,9 @@ afterAll(async () => {
 describe("enum CHECK constraints ↔ constants.ts are in sync", () => {
   it("has exactly the managed CHECK constraints (no missing, no strays)", () => {
     const managedNames = new Set(REGISTRY.map((r) => r.constraint));
-    const applied = [...checks.keys()].filter((n) => managedNames.has(n)).sort();
+    const applied = [...checks.keys()]
+      .filter((n) => managedNames.has(n))
+      .sort();
     const expected = REGISTRY.map((r) => r.constraint).sort();
     // Equality in BOTH directions: a missing constraint (someone forgot the
     // migration) and a stray/renamed one (drift the test doesn't know about)
@@ -112,7 +186,10 @@ describe("enum CHECK constraints ↔ constants.ts are in sync", () => {
     "$constraint ($table.$column) matches its constants.ts value set exactly",
     ({ constraint, values, nullable }) => {
       const def = checks.get(constraint);
-      expect(def, `constraint ${constraint} is not applied to the DB`).toBeDefined();
+      expect(
+        def,
+        `constraint ${constraint} is not applied to the DB`,
+      ).toBeDefined();
 
       const constrained = literalsFromDef(def as string);
       const expected = new Set(Object.values(values));

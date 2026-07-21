@@ -14,21 +14,48 @@ describe("AppMenu", () => {
   it("lists the destinations (incl. Help) and excludes Task Breakdown", async () => {
     render(<AppMenu voice="plain" />);
     await userEvent.click(screen.getByRole("button", { name: /menu/i }));
-    expect(screen.getByRole("link", { name: /Inbox/ })).toHaveAttribute("href", "/inbox");
-    expect(screen.getByRole("link", { name: /Focus Timer/ })).toHaveAttribute("href", "/focus");
+    expect(screen.getByRole("link", { name: /Inbox/ })).toHaveAttribute(
+      "href",
+      "/inbox",
+    );
+    expect(screen.getByRole("link", { name: /Focus Timer/ })).toHaveAttribute(
+      "href",
+      "/focus",
+    );
     // Dashboard was renamed to "Activity" (label only — the /dashboard route is unchanged).
-    expect(screen.getByRole("link", { name: /Activity/ })).toHaveAttribute("href", "/dashboard");
-    expect(screen.getByRole("link", { name: /Library/ })).toHaveAttribute("href", "/library");
-    expect(screen.getByRole("link", { name: /Settings/ })).toHaveAttribute("href", "/settings");
-    expect(screen.getByRole("link", { name: /Help/ })).toHaveAttribute("href", "/help");
-    expect(screen.queryByText(/Task Breakdown|Break into steps/)).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Activity/ })).toHaveAttribute(
+      "href",
+      "/dashboard",
+    );
+    expect(screen.getByRole("link", { name: /Library/ })).toHaveAttribute(
+      "href",
+      "/library",
+    );
+    expect(screen.getByRole("link", { name: /Settings/ })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    expect(screen.getByRole("link", { name: /Help/ })).toHaveAttribute(
+      "href",
+      "/help",
+    );
+    expect(
+      screen.queryByText(/Task Breakdown|Break into steps/),
+    ).not.toBeInTheDocument();
   });
 
   it("orders Library before Activity in the menu", async () => {
     render(<AppMenu voice="plain" />);
     await userEvent.click(screen.getByRole("button", { name: /menu/i }));
     const labels = screen.getAllByRole("link").map((el) => el.textContent);
-    expect(labels).toEqual(["Inbox", "Focus Timer", "Library", "Activity", "Settings", "Help"]);
+    expect(labels).toEqual([
+      "Inbox",
+      "Focus Timer",
+      "Library",
+      "Activity",
+      "Settings",
+      "Help",
+    ]);
   });
 
   it("closes the menu when Escape is pressed", async () => {
@@ -38,7 +65,9 @@ describe("AppMenu", () => {
     await user.click(button);
     expect(screen.getByRole("link", { name: /Inbox/ })).toBeInTheDocument();
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("link", { name: /Inbox/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /Inbox/ }),
+    ).not.toBeInTheDocument();
     expect(button).toHaveAttribute("aria-expanded", "false");
   });
 });

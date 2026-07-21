@@ -44,8 +44,12 @@ export type PurgeClient = {
 
 /** Delete a guest workspace. All workspace-scoped rows cascade via their
  * workspaceId FKs (Step/BreakdownTurn cascade transitively through Task). */
-export async function purgeWorkspace(db: PurgeClient, id: string): Promise<void> {
-  if (id === OWNER_WORKSPACE_ID) throw new Error("refusing to purge the owner workspace");
+export async function purgeWorkspace(
+  db: PurgeClient,
+  id: string,
+): Promise<void> {
+  if (id === OWNER_WORKSPACE_ID)
+    throw new Error("refusing to purge the owner workspace");
   await db.workspace.delete({ where: { id } });
 }
 
@@ -69,7 +73,11 @@ export async function purgeExpiredGuests(db: PurgeClient): Promise<number> {
       // purgeExpiredGuests return 0 and ends the drain loop early — is silent.
       // The row is simply retried on the next scheduled run.
       console.error(
-        JSON.stringify({ tag: "purge_skip", workspaceId: w.id, error: String(err) }),
+        JSON.stringify({
+          tag: "purge_skip",
+          workspaceId: w.id,
+          error: String(err),
+        }),
       );
     }
   }
@@ -125,7 +133,9 @@ if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
     .catch((e) => {
       // Structured error line so a failed run is greppable alongside the
       // success path's "scheduled_purge" tag (same shape as purge_skip).
-      console.error(JSON.stringify({ tag: "scheduled_purge_error", error: String(e) }));
+      console.error(
+        JSON.stringify({ tag: "scheduled_purge_error", error: String(e) }),
+      );
       process.exit(1);
     });
 }

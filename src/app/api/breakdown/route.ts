@@ -11,7 +11,11 @@ import {
 import { isOwnerRequest, currentWorkspaceId } from "@/lib/workspace";
 import { getSettings } from "@/lib/settings-read";
 import { resolveBreakdownModel, breakdownParamsFor } from "@/lib/models";
-import { clientIpHash, consumeGuestBreakdown, refundGuestBreakdown } from "@/lib/guest-quota";
+import {
+  clientIpHash,
+  consumeGuestBreakdown,
+  refundGuestBreakdown,
+} from "@/lib/guest-quota";
 import { recordAnthropicFailure } from "@/lib/observability";
 import { OWNER_WORKSPACE_ID } from "@/lib/constants";
 
@@ -82,10 +86,13 @@ export async function POST(req: Request): Promise<Response> {
   try {
     rawBody = await req.text();
   } catch {
-    return new Response(JSON.stringify({ error: "Failed to read request body" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ error: "Failed to read request body" }),
+      {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
   }
 
   if (rawBody.length > MAX_BODY_CHARS) {
@@ -132,7 +139,10 @@ export async function POST(req: Request): Promise<Response> {
 
   // Resolve model (owner setting → env → default; guest → haiku).
   const settings = owner ? await getSettings(OWNER_WORKSPACE_ID) : null;
-  const model = resolveBreakdownModel({ isOwner: owner, ownerSetting: settings?.breakdownModel ?? null });
+  const model = resolveBreakdownModel({
+    isOwner: owner,
+    ownerSetting: settings?.breakdownModel ?? null,
+  });
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
@@ -142,7 +152,11 @@ export async function POST(req: Request): Promise<Response> {
 
       // Blocked guest → non-silent canned fallback, NO Claude call.
       if (blockedReason) {
-        send({ type: "fallback", reason: blockedReason, data: localBreakdown(body.title) });
+        send({
+          type: "fallback",
+          reason: blockedReason,
+          data: localBreakdown(body.title),
+        });
         send({ type: "done" });
         controller.close();
         return;
@@ -175,7 +189,11 @@ export async function POST(req: Request): Promise<Response> {
           await refundGuestBreakdown(guestIpHash);
         }
         // Canned fallback rather than a dead end.
-        send({ type: "fallback", reason: "error", data: localBreakdown(body.title) });
+        send({
+          type: "fallback",
+          reason: "error",
+          data: localBreakdown(body.title),
+        });
         send({ type: "done" });
       } finally {
         controller.close();

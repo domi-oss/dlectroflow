@@ -27,7 +27,9 @@ const UPDATE_BASELINE = process.env.A11Y_UPDATE_BASELINE === "1";
 
 // Types are derived straight from AxeBuilder.analyze() so we don't depend on the
 // exact shape of axe-core's exported types.
-type AxeResults = Awaited<ReturnType<InstanceType<typeof AxeBuilder>["analyze"]>>;
+type AxeResults = Awaited<
+  ReturnType<InstanceType<typeof AxeBuilder>["analyze"]>
+>;
 type Violation = AxeResults["violations"][number];
 type ViolationNode = Violation["nodes"][number];
 type Baseline = Record<string, string[]>;
@@ -83,7 +85,9 @@ function report(violations: Violation[], allowed: Set<string>): string {
     for (const node of v.nodes) {
       const fp = nodeFingerprint(v.id, node);
       if (allowed.has(fp)) continue;
-      lines.push(`  [${v.impact}] ${v.id} — ${v.help}\n    at: ${fp}\n    ${v.helpUrl}`);
+      lines.push(
+        `  [${v.impact}] ${v.id} — ${v.help}\n    at: ${fp}\n    ${v.helpUrl}`,
+      );
     }
   }
   return lines.join("\n");

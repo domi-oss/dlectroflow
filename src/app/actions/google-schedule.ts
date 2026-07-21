@@ -11,11 +11,7 @@ import {
   getGoogleStatus,
   disconnectGoogle,
 } from "@/lib/google";
-import {
-  OWNER_WORKSPACE_ID,
-  TaskSource,
-  TaskStatus,
-} from "@/lib/constants";
+import { OWNER_WORKSPACE_ID, TaskSource, TaskStatus } from "@/lib/constants";
 import { currentWorkspaceId } from "@/lib/workspace";
 import { awardFirstSchedule } from "@/lib/scheduling/award";
 import { SchedulingMethod } from "@/lib/scheduling/types";
@@ -68,14 +64,18 @@ export async function pushStepsToGoogleTasks(
   const token = await getValidAccessToken();
   if (!token) {
     const status = await getGoogleStatus();
-    return { ok: false, reason: status.needsReconnect ? "reconnect_required" : "not_connected" };
+    return {
+      ok: false,
+      reason: status.needsReconnect ? "reconnect_required" : "not_connected",
+    };
   }
 
   const task = await prisma.task.findFirst({
     where: { id: taskId, workspaceId },
     include: { steps: { orderBy: { order: "asc" } } },
   });
-  if (!task || task.steps.length === 0) return { ok: false, reason: "no_steps" };
+  if (!task || task.steps.length === 0)
+    return { ok: false, reason: "no_steps" };
 
   try {
     const list = await findReclaimList(token);
@@ -103,7 +103,9 @@ export async function pushStepsToGoogleTasks(
       );
       const created = await createGoogleTask(token, list.id, { title });
       // Guard step ownership before update
-      const stepCheck = await prisma.step.findFirst({ where: { id: s.id, task: { workspaceId } } });
+      const stepCheck = await prisma.step.findFirst({
+        where: { id: s.id, task: { workspaceId } },
+      });
       if (stepCheck) {
         await prisma.step.update({
           where: { id: s.id },
@@ -121,7 +123,10 @@ export async function pushStepsToGoogleTasks(
     if (task.scheduledAt == null) {
       await prisma.task.update({
         where: { id: task.id },
-        data: { scheduledAt: new Date(), scheduledVia: SchedulingMethod.GoogleTasks },
+        data: {
+          scheduledAt: new Date(),
+          scheduledVia: SchedulingMethod.GoogleTasks,
+        },
       });
       // Pass the captured pre-write state (false inside this guard, but robust to
       // the guard being removed) rather than a hardcoded literal — matches
@@ -173,14 +178,21 @@ export async function scheduleSingleTask(
   // rather than trust caller input.
   const minutes = Math.round(estMinutes);
   if (!Number.isFinite(minutes) || minutes < 1 || minutes > 480) {
-    return { ok: false, reason: "error", message: "Duration must be 1-480 minutes" };
+    return {
+      ok: false,
+      reason: "error",
+      message: "Duration must be 1-480 minutes",
+    };
   }
 
   if (!googleConfigured()) return { ok: false, reason: "not_configured" };
   const token = await getValidAccessToken();
   if (!token) {
     const status = await getGoogleStatus();
-    return { ok: false, reason: status.needsReconnect ? "reconnect_required" : "not_connected" };
+    return {
+      ok: false,
+      reason: status.needsReconnect ? "reconnect_required" : "not_connected",
+    };
   }
 
   const item = await prisma.brainDumpItem.findFirst({
@@ -212,7 +224,10 @@ export async function scheduleSingleTask(
           workspaceId,
         },
       });
-      await tx.brainDumpItem.update({ where: { id: item.id }, data: { taskId: task.id } });
+      await tx.brainDumpItem.update({
+        where: { id: item.id },
+        data: { taskId: task.id },
+      });
       return task.id;
     });
     // Invalidate the cache now that the item has a linked Task, regardless of
@@ -236,7 +251,12 @@ export async function scheduleSingleTask(
         // Stamp the provider-agnostic marker on the first schedule (any method).
         // Folded into this same update (rather than a second one) — which is why
         // the shared reward helper stays marker-agnostic (it awards, callers stamp).
-        ...(alreadyScheduled ? {} : { scheduledAt: new Date(), scheduledVia: SchedulingMethod.GoogleTasks }),
+        ...(alreadyScheduled
+          ? {}
+          : {
+              scheduledAt: new Date(),
+              scheduledVia: SchedulingMethod.GoogleTasks,
+            }),
       },
     });
 

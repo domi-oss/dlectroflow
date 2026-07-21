@@ -9,9 +9,15 @@ import {
   updateVoice,
 } from "@/app/actions/settings";
 import type { AgingSettings } from "@/lib/aging";
-import { OWNER_BREAKDOWN_ALLOWLIST, OWNER_BREAKDOWN_MODEL_DEFAULT } from "@/lib/constants";
+import {
+  OWNER_BREAKDOWN_ALLOWLIST,
+  OWNER_BREAKDOWN_MODEL_DEFAULT,
+} from "@/lib/constants";
 import { t, type Voice } from "@/lib/strings";
-import { useSaveStatus, SaveIndicator } from "@/components/settings/use-save-status";
+import {
+  useSaveStatus,
+  SaveIndicator,
+} from "@/components/settings/use-save-status";
 
 const FABLE_LINES = [
   "Our most capable model. Also $50/M tokens. To split 'clean the kitchen' into 3 steps? We love you, but no.",
@@ -58,19 +64,35 @@ export function SettingsPanel({
     settings.wayOverdueHours,
   );
 
-  const [model, setModel] = useState<string>(breakdownModel ?? OWNER_BREAKDOWN_MODEL_DEFAULT);
-  const [fable] = useState(() => FABLE_LINES[Math.floor(Math.random() * FABLE_LINES.length)]);
+  const [model, setModel] = useState<string>(
+    breakdownModel ?? OWNER_BREAKDOWN_MODEL_DEFAULT,
+  );
+  const [fable] = useState(
+    () => FABLE_LINES[Math.floor(Math.random() * FABLE_LINES.length)],
+  );
   const [currentVoice, setCurrentVoice] = useState<Voice>(voice);
 
   // ── Auto-save for the freshness/aging numeric inputs (debounced). ──────────
   // The Save button is gone; each change schedules a debounced write. A failed
   // write surfaces a non-blocking error and leaves every input editable.
   const { status, markSaving, markSaved, markError } = useSaveStatus();
-  const valuesRef = useRef({ minutes, demo, agingHours, overdueHours, wayOverdueHours });
+  const valuesRef = useRef({
+    minutes,
+    demo,
+    agingHours,
+    overdueHours,
+    wayOverdueHours,
+  });
   // Keep the ref current for the debounced flush (reads the latest values when
   // it eventually fires) without touching the ref during render.
   useEffect(() => {
-    valuesRef.current = { minutes, demo, agingHours, overdueHours, wayOverdueHours };
+    valuesRef.current = {
+      minutes,
+      demo,
+      agingHours,
+      overdueHours,
+      wayOverdueHours,
+    };
   });
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
@@ -141,82 +163,82 @@ export function SettingsPanel({
           <SaveIndicator status={status} voice={voice} />
         </h2>
         <div className="flex flex-wrap items-end gap-4">
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-xs">
-            Aging threshold (minutes)
-          </span>
-          <input
-            type="number"
-            min={1}
-            value={minutes}
-            onChange={(e) => {
-              setMinutes(Number(e.target.value));
-              scheduleAgingSave();
-            }}
-            className="border-input w-32 rounded-md border px-2 py-1"
-          />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-xs">
-            Demo override (seconds, blank = off)
-          </span>
-          <input
-            type="number"
-            min={1}
-            value={demo}
-            placeholder="e.g. 10"
-            onChange={(e) => {
-              setDemo(e.target.value);
-              scheduleAgingSave();
-            }}
-            className="border-input w-40 rounded-md border px-2 py-1"
-          />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-xs">
-            {t("freshness.aging", voice)} (hours)
-          </span>
-          <input
-            type="number"
-            min={1}
-            value={agingHours}
-            onChange={(e) => {
-              setAgingHours(Number(e.target.value));
-              scheduleAgingSave();
-            }}
-            className="border-input w-32 rounded-md border px-2 py-1"
-          />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-xs">
-            {t("freshness.overdue", voice)} (hours)
-          </span>
-          <input
-            type="number"
-            min={1}
-            value={overdueHours}
-            onChange={(e) => {
-              setOverdueHours(Number(e.target.value));
-              scheduleAgingSave();
-            }}
-            className="border-input w-32 rounded-md border px-2 py-1"
-          />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-muted-foreground text-xs">
-            {t("freshness.wayOverdue", voice)} (hours)
-          </span>
-          <input
-            type="number"
-            min={1}
-            value={wayOverdueHours}
-            onChange={(e) => {
-              setWayOverdueHours(Number(e.target.value));
-              scheduleAgingSave();
-            }}
-            className="border-input w-32 rounded-md border px-2 py-1"
-          />
-        </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-muted-foreground text-xs">
+              Aging threshold (minutes)
+            </span>
+            <input
+              type="number"
+              min={1}
+              value={minutes}
+              onChange={(e) => {
+                setMinutes(Number(e.target.value));
+                scheduleAgingSave();
+              }}
+              className="border-input w-32 rounded-md border px-2 py-1"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-muted-foreground text-xs">
+              Demo override (seconds, blank = off)
+            </span>
+            <input
+              type="number"
+              min={1}
+              value={demo}
+              placeholder="e.g. 10"
+              onChange={(e) => {
+                setDemo(e.target.value);
+                scheduleAgingSave();
+              }}
+              className="border-input w-40 rounded-md border px-2 py-1"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-muted-foreground text-xs">
+              {t("freshness.aging", voice)} (hours)
+            </span>
+            <input
+              type="number"
+              min={1}
+              value={agingHours}
+              onChange={(e) => {
+                setAgingHours(Number(e.target.value));
+                scheduleAgingSave();
+              }}
+              className="border-input w-32 rounded-md border px-2 py-1"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-muted-foreground text-xs">
+              {t("freshness.overdue", voice)} (hours)
+            </span>
+            <input
+              type="number"
+              min={1}
+              value={overdueHours}
+              onChange={(e) => {
+                setOverdueHours(Number(e.target.value));
+                scheduleAgingSave();
+              }}
+              className="border-input w-32 rounded-md border px-2 py-1"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-muted-foreground text-xs">
+              {t("freshness.wayOverdue", voice)} (hours)
+            </span>
+            <input
+              type="number"
+              min={1}
+              value={wayOverdueHours}
+              onChange={(e) => {
+                setWayOverdueHours(Number(e.target.value));
+                scheduleAgingSave();
+              }}
+              className="border-input w-32 rounded-md border px-2 py-1"
+            />
+          </label>
         </div>
         <p className="text-muted-foreground text-xs">
           Changes save automatically. The demo override makes items age in
@@ -226,7 +248,11 @@ export function SettingsPanel({
 
       <section className="space-y-2 border-t pt-4">
         <h2 className="font-semibold">Voice</h2>
-        <div className="inline-flex rounded-md border" role="group" aria-label="Voice preference">
+        <div
+          className="inline-flex rounded-md border"
+          role="group"
+          aria-label="Voice preference"
+        >
           {(["plain", "playful"] as const).map((v) => (
             <button
               key={v}
@@ -262,7 +288,10 @@ export function SettingsPanel({
                 {MODEL_LABELS[m]}
               </label>
             ))}
-            <label className="flex items-center gap-2 text-sm opacity-50" title={fable}>
+            <label
+              className="flex items-center gap-2 text-sm opacity-50"
+              title={fable}
+            >
               <input type="radio" name="breakdown-model" disabled />
               🔒 Fable 5 — {fable}
             </label>

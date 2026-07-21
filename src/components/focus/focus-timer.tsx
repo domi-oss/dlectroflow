@@ -13,7 +13,10 @@ import {
 import { dismissFocusTimerTip } from "@/app/actions/settings";
 import { Celebration } from "@/components/focus/celebration";
 import { TimerVisual } from "@/components/focus/timer-visual";
-import { FocusStepTracker, type TrackerStep } from "@/components/focus/focus-step-tracker";
+import {
+  FocusStepTracker,
+  type TrackerStep,
+} from "@/components/focus/focus-step-tracker";
 import { TimerCustomizationHint } from "@/components/focus/timer-customization-hint";
 import { resolveTimerStyle } from "@/lib/focus-timer-style";
 import { applyTimeDelta, netAddedMin } from "@/lib/focus-timer-clock";
@@ -38,7 +41,14 @@ const DONE_MESSAGES = [
   "Done and dusted. Proud of you.",
 ];
 
-type Phase = "setup" | "running" | "paused" | "timeup" | "reestimate" | "done" | "requeued";
+type Phase =
+  | "setup"
+  | "running"
+  | "paused"
+  | "timeup"
+  | "reestimate"
+  | "done"
+  | "requeued";
 
 type StepInfo = {
   id: string;
@@ -58,7 +68,11 @@ export type TimerSettings = {
   sound: string;
 };
 
-export type NextStepPeek = { id: string; text: string; subtaskEmoji: string | null };
+export type NextStepPeek = {
+  id: string;
+  text: string;
+  subtaskEmoji: string | null;
+};
 
 export function FocusTimer({
   step,
@@ -105,7 +119,9 @@ export function FocusTimer({
   const [result, setResult] = useState<CompleteResult | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [tipVisible, setTipVisible] = useState(!tipDismissed);
-  const doneMsgRef = useRef(DONE_MESSAGES[Math.floor(Math.random() * DONE_MESSAGES.length)]);
+  const doneMsgRef = useRef(
+    DONE_MESSAGES[Math.floor(Math.random() * DONE_MESSAGES.length)],
+  );
 
   // Device-effect handles (created on Start inside the user gesture).
   const alarmRef = useRef<Alarm | null>(null);
@@ -243,7 +259,9 @@ export function FocusTimer({
   const running = phase === "running";
   const showContext = !isSingleTask && !(settings.minimalMode && running);
   const showCorner = !(settings.minimalMode && running);
-  const remainingInTask = steps.filter((s) => !s.done).reduce((n, s) => n + s.estMinutes, 0);
+  const remainingInTask = steps
+    .filter((s) => !s.done)
+    .reduce((n, s) => n + s.estMinutes, 0);
 
   // Single-task focus uses the auto-created ensureFocusStep step, whose text
   // equals the task title — so rendering both the task-context line AND the step
@@ -306,7 +324,10 @@ export function FocusTimer({
           ) : (
             <p className="text-sm">That was the last step of this task. 🏁</p>
           )}
-          <Link href="/focus" className="text-muted-foreground text-sm hover:underline">
+          <Link
+            href="/focus"
+            className="text-muted-foreground text-sm hover:underline"
+          >
             {t("action.back", voice)}
           </Link>
         </div>
@@ -319,8 +340,12 @@ export function FocusTimer({
       <div className="space-y-4 text-center">
         {stepHeading}
         <div className="text-5xl">🌱</div>
-        <p className="text-lg font-medium">No worries — bumped to {newEst} min.</p>
-        <p className="text-muted-foreground text-sm">It&apos;s back on your list with a kinder estimate.</p>
+        <p className="text-lg font-medium">
+          No worries — bumped to {newEst} min.
+        </p>
+        <p className="text-muted-foreground text-sm">
+          It&apos;s back on your list with a kinder estimate.
+        </p>
         <Link
           href="/focus"
           className="bg-primary text-primary-foreground inline-block rounded-md px-4 py-2 font-medium"
@@ -352,13 +377,15 @@ export function FocusTimer({
         )}
       </div>
 
-      {tipVisible && <TimerCustomizationHint voice={voice} onDismiss={dismissTip} />}
+      {tipVisible && (
+        <TimerCustomizationHint voice={voice} onDismiss={dismissTip} />
+      )}
 
       {showContext && (
         <div className="space-y-2">
           <p className="text-muted-foreground text-xs tabular-nums">
-            {t("step.counter", voice)} {step.order} of {step.total} · ~{remainingInTask}m{" "}
-            {t("focus.timer.leftInTask", voice)}
+            {t("step.counter", voice)} {step.order} of {step.total} · ~
+            {remainingInTask}m {t("focus.timer.leftInTask", voice)}
           </p>
           <FocusStepTracker
             steps={steps}
@@ -424,10 +451,14 @@ export function FocusTimer({
             {t("focus.timer.completeStep", voice)}
           </button>
           <button
-            onClick={() => setPhase((p) => (p === "running" ? "paused" : "running"))}
+            onClick={() =>
+              setPhase((p) => (p === "running" ? "paused" : "running"))
+            }
             className="hover:bg-accent inline-flex min-h-[44px] items-center rounded-md border px-4"
           >
-            {phase === "running" ? t("focus.pause", voice) : t("focus.resume", voice)}
+            {phase === "running"
+              ? t("focus.pause", voice)
+              : t("focus.resume", voice)}
           </button>
           <button
             onClick={() => changeTime(-inc)}
@@ -475,16 +506,22 @@ export function FocusTimer({
 
       {phase === "reestimate" && (
         <div className="space-y-3 text-center">
-          <p className="font-medium">No problem. Here&apos;s a kinder estimate:</p>
+          <p className="font-medium">
+            No problem. Here&apos;s a kinder estimate:
+          </p>
           {pending ? (
-            <p className="text-muted-foreground text-sm">Claude is re-estimating…</p>
+            <p className="text-muted-foreground text-sm">
+              Claude is re-estimating…
+            </p>
           ) : (
             <div className="flex items-center justify-center gap-2">
               <input
                 type="number"
                 min={1}
                 value={newEst}
-                onChange={(e) => setNewEst(Math.max(1, Number(e.target.value) || 1))}
+                onChange={(e) =>
+                  setNewEst(Math.max(1, Number(e.target.value) || 1))
+                }
                 className="border-input w-24 rounded-md border px-2 py-1 text-right"
               />
               <span className="text-muted-foreground text-sm">min</span>
@@ -504,7 +541,8 @@ export function FocusTimer({
           done/requeued end screens (which return early above). */}
       {showContext && nextStep && (
         <p className="text-muted-foreground text-center text-xs">
-          {t("focus.hero.next", voice)} {nextStep.subtaskEmoji ? `${nextStep.subtaskEmoji} ` : ""}
+          {t("focus.hero.next", voice)}{" "}
+          {nextStep.subtaskEmoji ? `${nextStep.subtaskEmoji} ` : ""}
           {nextStep.text}
         </p>
       )}

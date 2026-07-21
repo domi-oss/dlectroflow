@@ -8,9 +8,13 @@ const push = vi.fn();
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, refresh }) }));
 vi.mock("next/link", () => ({
-  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
-    <a href={href}>{children}</a>
-  ),
+  default: ({
+    children,
+    href,
+  }: {
+    children: React.ReactNode;
+    href: string;
+  }) => <a href={href}>{children}</a>,
 }));
 vi.mock("@/app/actions/breakdown", () => ({
   ejectStepToInbox: vi.fn(),
@@ -22,17 +26,48 @@ vi.mock("@/app/actions/focus", () => ({
 }));
 
 import { ejectStepToInbox } from "@/app/actions/breakdown";
-import { completeStep, renameStep, updateStepEstimate } from "@/app/actions/focus";
+import {
+  completeStep,
+  renameStep,
+  updateStepEstimate,
+} from "@/app/actions/focus";
 
 function steps(overrides: Partial<ReturnType<typeof baseStep>>[] = []) {
   const base = [
-    { id: "s1", order: 1, total: 2, text: "First", subtaskEmoji: "🌱", estMinutes: 10, done: false, resumable: false },
-    { id: "s2", order: 2, total: 2, text: "Second", subtaskEmoji: "🚀", estMinutes: 15, done: false, resumable: false },
+    {
+      id: "s1",
+      order: 1,
+      total: 2,
+      text: "First",
+      subtaskEmoji: "🌱",
+      estMinutes: 10,
+      done: false,
+      resumable: false,
+    },
+    {
+      id: "s2",
+      order: 2,
+      total: 2,
+      text: "Second",
+      subtaskEmoji: "🚀",
+      estMinutes: 15,
+      done: false,
+      resumable: false,
+    },
   ];
   return base.map((s, i) => ({ ...s, ...(overrides[i] ?? {}) }));
 }
 function baseStep() {
-  return { id: "s1", order: 1, total: 2, text: "First", subtaskEmoji: "🌱", estMinutes: 10, done: false, resumable: false };
+  return {
+    id: "s1",
+    order: 1,
+    total: 2,
+    text: "First",
+    subtaskEmoji: "🌱",
+    estMinutes: 10,
+    done: false,
+    resumable: false,
+  };
 }
 
 const openMenu = async (user: ReturnType<typeof userEvent.setup>, index = 0) =>
@@ -49,7 +84,9 @@ describe("TaskSteps — row layout mirrors the inbox ItemRow", () => {
     // Inline Start Focus CTA on each row.
     expect(screen.getAllByText("▶ Start Focus")).toHaveLength(2);
     // 🔽 dropdown trigger on each row.
-    expect(screen.getAllByRole("button", { name: "All options" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "All options" })).toHaveLength(
+      2,
+    );
     // The old ↗ send-to-review icon is gone.
     expect(screen.queryByTitle("Send to review")).not.toBeInTheDocument();
   });
@@ -67,7 +104,9 @@ describe("TaskSteps — row layout mirrors the inbox ItemRow", () => {
 
   it("uses Resume labels for a resumable step (inline + dropdown)", async () => {
     const user = userEvent.setup();
-    render(<TaskSteps taskId="t1" steps={[{ ...baseStep(), resumable: true }]} />);
+    render(
+      <TaskSteps taskId="t1" steps={[{ ...baseStep(), resumable: true }]} />,
+    );
     expect(screen.getByText("▶ Resume Focus")).toBeInTheDocument();
     expect(screen.queryByText("▶ Start Focus")).not.toBeInTheDocument();
     await openMenu(user);
@@ -77,7 +116,10 @@ describe("TaskSteps — row layout mirrors the inbox ItemRow", () => {
 
   it("Start Focus points at /focus/[stepId]", () => {
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
-    expect(screen.getByText("▶ Start Focus").closest("a")).toHaveAttribute("href", "/focus/s1");
+    expect(screen.getByText("▶ Start Focus").closest("a")).toHaveAttribute(
+      "href",
+      "/focus/s1",
+    );
   });
 });
 
@@ -87,15 +129,21 @@ describe("TaskSteps — done steps", () => {
     const title = screen.getByText(/First/);
     // Done step uses the app-wide completion treatment (Design D), not a
     // hard-coded line-through / green.
-    expect(title.className).toContain("[text-decoration-line:var(--complete-decoration)]");
+    expect(title.className).toContain(
+      "[text-decoration-line:var(--complete-decoration)]",
+    );
     // The done marker is the shared app-wide DonePill ("✓ done"), tick colour
     // from --tick-color — the same pill the Library "done" view uses.
     const pill = screen.getByText(/✓\s*done/i);
     expect(pill.className).toContain("text-[color:var(--tick-color)]");
     expect(pill.className).toContain("rounded-full");
-    expect(screen.queryByRole("button", { name: "Complete" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Complete" }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText("▶ Start Focus")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "All options" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "All options" }),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -118,7 +166,10 @@ describe("TaskSteps — complete step", () => {
 
 describe("TaskSteps — send back to review (dropdown)", () => {
   it("extracts a step and refreshes when steps remain", async () => {
-    (ejectStepToInbox as ReturnType<typeof vi.fn>).mockResolvedValue({ taskId: "t1", remaining: 1 });
+    (ejectStepToInbox as ReturnType<typeof vi.fn>).mockResolvedValue({
+      taskId: "t1",
+      remaining: 1,
+    });
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={steps()} />);
 
@@ -130,24 +181,34 @@ describe("TaskSteps — send back to review (dropdown)", () => {
   });
 
   it("shows the empty-task chooser when the last step is extracted", async () => {
-    (ejectStepToInbox as ReturnType<typeof vi.fn>).mockResolvedValue({ taskId: "t1", remaining: 0 });
+    (ejectStepToInbox as ReturnType<typeof vi.fn>).mockResolvedValue({
+      taskId: "t1",
+      remaining: 0,
+    });
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
 
     await openMenu(user);
     await user.click(screen.getByText("Send back to review"));
-    expect(await screen.findByRole("button", { name: /Re-plan with AI/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: /Re-plan with AI/i }),
+    ).toBeInTheDocument();
     expect(refresh).not.toHaveBeenCalled();
   });
 
   it("chooser routes: AI editor, manual editor, keep-as-todo", async () => {
-    (ejectStepToInbox as ReturnType<typeof vi.fn>).mockResolvedValue({ taskId: "t1", remaining: 0 });
+    (ejectStepToInbox as ReturnType<typeof vi.fn>).mockResolvedValue({
+      taskId: "t1",
+      remaining: 0,
+    });
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
     await openMenu(user);
     await user.click(screen.getByText("Send back to review"));
 
-    await user.click(await screen.findByRole("button", { name: /Re-plan with AI/i }));
+    await user.click(
+      await screen.findByRole("button", { name: /Re-plan with AI/i }),
+    );
     expect(push).toHaveBeenCalledWith("/tasks/t1");
     await user.click(screen.getByRole("button", { name: /Re-plan manually/i }));
     expect(push).toHaveBeenCalledWith("/tasks/t1?edit=1&manual=1");
@@ -205,7 +266,9 @@ describe("TaskSteps — inline editors", () => {
     await user.clear(input);
     await user.keyboard("{Enter}");
     expect(updateStepEstimate).not.toHaveBeenCalled();
-    expect(screen.queryByLabelText("Edit time estimate")).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("Edit time estimate"),
+    ).not.toBeInTheDocument();
   });
 
   it("Edit time estimate: a value over 480 + Enter cancels, not saved (Duo review)", async () => {

@@ -14,23 +14,25 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(() => {
-  const prismaMock = {
-    brainDumpItem: {
-      findMany: vi.fn(),
-      findFirst: vi.fn(),
-      update: vi.fn().mockResolvedValue({}),
-      delete: vi.fn().mockResolvedValue({}),
-    },
-    step: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
-    task: { update: vi.fn().mockResolvedValue({}) },
-  };
-  return {
-    prismaMock,
-    revalidatePathMock: vi.fn(),
-    currentWorkspaceIdMock: vi.fn().mockResolvedValue("ws1"),
-  };
-});
+const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
+  () => {
+    const prismaMock = {
+      brainDumpItem: {
+        findMany: vi.fn(),
+        findFirst: vi.fn(),
+        update: vi.fn().mockResolvedValue({}),
+        delete: vi.fn().mockResolvedValue({}),
+      },
+      step: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      task: { update: vi.fn().mockResolvedValue({}) },
+    };
+    return {
+      prismaMock,
+      revalidatePathMock: vi.fn(),
+      currentWorkspaceIdMock: vi.fn().mockResolvedValue("ws1"),
+    };
+  },
+);
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/lib/db", () => ({ prisma: prismaMock }));
 vi.mock("@/lib/workspace", () => ({
@@ -59,7 +61,10 @@ beforeEach(() => {
 
 describe("bulkBrainDumpAction", () => {
   it("filters ids to the caller's workspace before acting (IDOR guard) and returns the owned count", async () => {
-    prismaMock.brainDumpItem.findMany.mockResolvedValueOnce([{ id: "a" }, { id: "b" }]); // "c" not owned
+    prismaMock.brainDumpItem.findMany.mockResolvedValueOnce([
+      { id: "a" },
+      { id: "b" },
+    ]); // "c" not owned
     const { bulkBrainDumpAction } = await import("./braindump");
 
     const res = await bulkBrainDumpAction(["a", "b", "c"], "delete");
@@ -69,9 +74,15 @@ describe("bulkBrainDumpAction", () => {
       select: { id: true },
     });
     expect(prismaMock.brainDumpItem.delete).toHaveBeenCalledTimes(2);
-    expect(prismaMock.brainDumpItem.delete).toHaveBeenCalledWith({ where: { id: "a" } });
-    expect(prismaMock.brainDumpItem.delete).toHaveBeenCalledWith({ where: { id: "b" } });
-    expect(prismaMock.brainDumpItem.delete).not.toHaveBeenCalledWith({ where: { id: "c" } });
+    expect(prismaMock.brainDumpItem.delete).toHaveBeenCalledWith({
+      where: { id: "a" },
+    });
+    expect(prismaMock.brainDumpItem.delete).toHaveBeenCalledWith({
+      where: { id: "b" },
+    });
+    expect(prismaMock.brainDumpItem.delete).not.toHaveBeenCalledWith({
+      where: { id: "c" },
+    });
     expect(res).toEqual({ count: 2 });
   });
 
@@ -88,7 +99,9 @@ describe("bulkBrainDumpAction", () => {
     expect(call.data.status).toBe("inbox");
     expect(call.data.snoozedUntil).toBeInstanceOf(Date);
     // 60-minute snooze: future timestamp at least ~59 minutes out.
-    expect(call.data.snoozedUntil.getTime()).toBeGreaterThan(before + 59 * 60_000);
+    expect(call.data.snoozedUntil.getTime()).toBeGreaterThan(
+      before + 59 * 60_000,
+    );
     expect(res).toEqual({ count: 1 });
   });
 

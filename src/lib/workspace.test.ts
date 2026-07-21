@@ -48,6 +48,8 @@ describe("resolveWorkspaceId", () => {
 
   it("falls through to guest when the owner cookie is invalid/tampered", async () => {
     const guest = await signGuestSession("g-2", SECRET, 3600);
-    expect(await resolveWorkspaceId({ owner: "bad.token.here", guest })).toBe("g-2");
+    expect(await resolveWorkspaceId({ owner: "bad.token.here", guest })).toBe(
+      "g-2",
+    );
   });
 });

@@ -25,7 +25,10 @@ export function applyTimeDelta(
   clock: { totalSec: number; remainingSec: number },
   deltaSec: number,
 ): { totalSec: number; remainingSec: number } {
-  const newRemaining = Math.max(MIN_REMAINING_SEC, clock.remainingSec + deltaSec);
+  const newRemaining = Math.max(
+    MIN_REMAINING_SEC,
+    clock.remainingSec + deltaSec,
+  );
   const applied = newRemaining - clock.remainingSec;
   return { totalSec: clock.totalSec + applied, remainingSec: newRemaining };
 }

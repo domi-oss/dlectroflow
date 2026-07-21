@@ -18,7 +18,9 @@ export default async function LoginPage({
           That account isn&apos;t the owner of this instance.
         </p>
       ) : error ? (
-        <p className="text-sm text-red-500">Sign-in failed. Please try again.</p>
+        <p className="text-sm text-red-500">
+          Sign-in failed. Please try again.
+        </p>
       ) : null}
       <a
         href="/api/auth/gitlab/start"

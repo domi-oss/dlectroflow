@@ -26,4 +26,5 @@ export const COMPLETE_TICK = "text-[color:var(--tick-color)]";
 
 /** Finished-text decoration — resolves from --complete-decoration
  * (line-through | none). Replaces hard-coded `line-through` at every site. */
-export const COMPLETE_TEXT = "[text-decoration-line:var(--complete-decoration)]";
+export const COMPLETE_TEXT =
+  "[text-decoration-line:var(--complete-decoration)]";

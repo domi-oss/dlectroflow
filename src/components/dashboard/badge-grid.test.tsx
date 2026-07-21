@@ -32,7 +32,9 @@ describe("BadgeGrid", () => {
     expect(earned).toHaveAttribute("data-earned", "true");
     expect(earned.textContent).not.toContain("🔒");
 
-    const locked = screen.getByLabelText("Beat your best streak — Not earned yet");
+    const locked = screen.getByLabelText(
+      "Beat your best streak — Not earned yet",
+    );
     expect(locked).toHaveAttribute("data-earned", "false");
     expect(locked.textContent).toContain("🔒");
   });

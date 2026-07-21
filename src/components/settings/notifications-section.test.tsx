@@ -64,7 +64,9 @@ describe("NotificationsSection", () => {
     const user = userEvent.setup();
     render(<NotificationsSection {...base} />);
     await user.click(screen.getByLabelText("Daily review nudge"));
-    await waitFor(() => expect(requestNotificationPermission).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(requestNotificationPermission).toHaveBeenCalled(),
+    );
     expect(updateNotificationSettings).toHaveBeenCalledWith({
       notifyRoundup: true,
       notifyAging: true,

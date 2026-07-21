@@ -17,7 +17,9 @@ function Readout({
 }) {
   return (
     <div className="flex flex-col items-center">
-      <span className="text-5xl font-semibold tabular-nums">{mmss(remainingSec)}</span>
+      <span className="text-5xl font-semibold tabular-nums">
+        {mmss(remainingSec)}
+      </span>
       <span className="text-muted-foreground text-xs tabular-nums">
         {t("focus.timer.of", voice)} {Math.round(totalSec / 60)}m
       </span>
@@ -48,11 +50,16 @@ export function TimerVisual({
 }) {
   const fraction = timerFraction(remainingSec, totalSec);
   const timeup = phase === "timeup";
-  const readout = <Readout remainingSec={remainingSec} totalSec={totalSec} voice={voice} />;
+  const readout = (
+    <Readout remainingSec={remainingSec} totalSec={totalSec} voice={voice} />
+  );
 
   if (style === "digits") {
     return (
-      <div data-testid="timer-visual-digits" className="flex justify-center py-10">
+      <div
+        data-testid="timer-visual-digits"
+        className="flex justify-center py-10"
+      >
         {readout}
       </div>
     );
@@ -82,7 +89,10 @@ export function TimerVisual({
 
   if (style === "mug") {
     return (
-      <div data-testid="timer-visual-mug" className="flex flex-col items-center gap-3">
+      <div
+        data-testid="timer-visual-mug"
+        className="flex flex-col items-center gap-3"
+      >
         <div className="relative h-40 w-32 overflow-hidden rounded-b-3xl rounded-t-md border-4">
           <div
             className={`absolute inset-x-0 bottom-0 ${
@@ -104,7 +114,14 @@ export function TimerVisual({
     <div data-testid="timer-visual-ring" className="flex justify-center">
       <div className="relative h-64 w-64">
         <svg viewBox="0 0 240 240" className="h-full w-full -rotate-90">
-          <circle cx="120" cy="120" r={R} fill="none" className="stroke-secondary" strokeWidth="12" />
+          <circle
+            cx="120"
+            cy="120"
+            r={R}
+            fill="none"
+            className="stroke-secondary"
+            strokeWidth="12"
+          />
           <circle
             cx="120"
             cy="120"
@@ -115,10 +132,16 @@ export function TimerVisual({
             strokeLinecap="round"
             strokeDasharray={C}
             strokeDashoffset={C * (1 - fraction)}
-            style={reducedMotion ? undefined : { transition: "stroke-dashoffset 1s linear" }}
+            style={
+              reducedMotion
+                ? undefined
+                : { transition: "stroke-dashoffset 1s linear" }
+            }
           />
         </svg>
-        <div className="absolute inset-0 flex items-center justify-center">{readout}</div>
+        <div className="absolute inset-0 flex items-center justify-center">
+          {readout}
+        </div>
       </div>
     </div>
   );

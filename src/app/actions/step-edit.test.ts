@@ -6,16 +6,18 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(() => {
-  const prismaMock = {
-    step: { findFirst: vi.fn(), update: vi.fn().mockResolvedValue({}) },
-  };
-  return {
-    prismaMock,
-    revalidatePathMock: vi.fn(),
-    currentWorkspaceIdMock: vi.fn().mockResolvedValue("owner"),
-  };
-});
+const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
+  () => {
+    const prismaMock = {
+      step: { findFirst: vi.fn(), update: vi.fn().mockResolvedValue({}) },
+    };
+    return {
+      prismaMock,
+      revalidatePathMock: vi.fn(),
+      currentWorkspaceIdMock: vi.fn().mockResolvedValue("owner"),
+    };
+  },
+);
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/lib/db", () => ({ prisma: prismaMock }));
 vi.mock("@/lib/workspace", () => ({
@@ -41,7 +43,11 @@ beforeEach(() => {
 
 describe("renameStep", () => {
   it("updates Step.text (trimmed) + revalidates, workspace-scoped", async () => {
-    prismaMock.step.findFirst.mockResolvedValueOnce({ id: "s1", taskId: "t1", text: "old" });
+    prismaMock.step.findFirst.mockResolvedValueOnce({
+      id: "s1",
+      taskId: "t1",
+      text: "old",
+    });
     const { renameStep } = await import("./focus");
     await renameStep("s1", "  new title  ");
     expect(prismaMock.step.findFirst.mock.calls[0][0].where).toEqual({
@@ -64,14 +70,22 @@ describe("renameStep", () => {
   });
 
   it("no-ops on an empty/whitespace title", async () => {
-    prismaMock.step.findFirst.mockResolvedValueOnce({ id: "s1", taskId: "t1", text: "old" });
+    prismaMock.step.findFirst.mockResolvedValueOnce({
+      id: "s1",
+      taskId: "t1",
+      text: "old",
+    });
     const { renameStep } = await import("./focus");
     await renameStep("s1", "   ");
     expect(prismaMock.step.update).not.toHaveBeenCalled();
   });
 
   it("no-ops when the trimmed title is unchanged", async () => {
-    prismaMock.step.findFirst.mockResolvedValueOnce({ id: "s1", taskId: "t1", text: "same" });
+    prismaMock.step.findFirst.mockResolvedValueOnce({
+      id: "s1",
+      taskId: "t1",
+      text: "same",
+    });
     const { renameStep } = await import("./focus");
     await renameStep("s1", "  same  ");
     expect(prismaMock.step.update).not.toHaveBeenCalled();
@@ -80,7 +94,11 @@ describe("renameStep", () => {
 
 describe("updateStepEstimate", () => {
   it("rounds + updates Step.estMinutes + revalidates, workspace-scoped", async () => {
-    prismaMock.step.findFirst.mockResolvedValueOnce({ id: "s1", taskId: "t1", estMinutes: 10 });
+    prismaMock.step.findFirst.mockResolvedValueOnce({
+      id: "s1",
+      taskId: "t1",
+      estMinutes: 10,
+    });
     const { updateStepEstimate } = await import("./focus");
     await updateStepEstimate("s1", 24.6);
     expect(prismaMock.step.findFirst.mock.calls[0][0].where).toEqual({
@@ -103,7 +121,11 @@ describe("updateStepEstimate", () => {
   });
 
   it("clamps values above 480 down to 480", async () => {
-    prismaMock.step.findFirst.mockResolvedValueOnce({ id: "s1", taskId: "t1", estMinutes: 10 });
+    prismaMock.step.findFirst.mockResolvedValueOnce({
+      id: "s1",
+      taskId: "t1",
+      estMinutes: 10,
+    });
     const { updateStepEstimate } = await import("./focus");
     await updateStepEstimate("s1", 999);
     expect(prismaMock.step.update).toHaveBeenCalledWith({
@@ -113,7 +135,11 @@ describe("updateStepEstimate", () => {
   });
 
   it("clamps values below 1 up to 1", async () => {
-    prismaMock.step.findFirst.mockResolvedValueOnce({ id: "s1", taskId: "t1", estMinutes: 10 });
+    prismaMock.step.findFirst.mockResolvedValueOnce({
+      id: "s1",
+      taskId: "t1",
+      estMinutes: 10,
+    });
     const { updateStepEstimate } = await import("./focus");
     await updateStepEstimate("s1", 0);
     expect(prismaMock.step.update).toHaveBeenCalledWith({

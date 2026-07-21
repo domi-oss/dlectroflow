@@ -10,7 +10,15 @@ import { TaskSteps } from "@/components/breakdown/task-steps";
 import { bulkBrainDumpAction } from "@/app/actions/braindump";
 import { useSelectMode } from "./use-select-mode";
 import { SelectActionBar } from "./select-action-bar";
-import { RowNumber, NextStepLine, ProgressBar, AgeLabel, EstimatePill, rowEmoji, remainingMinutes } from "./library-row-meta";
+import {
+  RowNumber,
+  NextStepLine,
+  ProgressBar,
+  AgeLabel,
+  EstimatePill,
+  rowEmoji,
+  remainingMinutes,
+} from "./library-row-meta";
 
 /**
  * Multi-step tab of the Library hub: each row is a broken-down to-do that
@@ -35,11 +43,21 @@ import { RowNumber, NextStepLine, ProgressBar, AgeLabel, EstimatePill, rowEmoji,
  * hidden entirely in select mode. "Select" stays on the right.
  */
 export function LibraryMultistep({
-  items, voice, now, settings,
-}: { items: Item[]; voice: Voice; now: number; settings: AgingSettings }) {
+  items,
+  voice,
+  now,
+  settings,
+}: {
+  items: Item[];
+  voice: Voice;
+  now: number;
+  settings: AgingSettings;
+}) {
   const router = useRouter();
   // Default open = latest (bucket is createdAt desc → first row).
-  const [expandedId, setExpandedId] = useState<string | null>(items[0]?.id ?? null);
+  const [expandedId, setExpandedId] = useState<string | null>(
+    items[0]?.id ?? null,
+  );
   const sel = useSelectMode();
   const [pending, startTransition] = useTransition();
   const ids = items.map((i) => i.id);
@@ -77,22 +95,33 @@ export function LibraryMultistep({
           <button
             type="button"
             className="hover:bg-accent rounded-md border px-2.5 py-1"
-            onClick={() => setExpandedId(expandedItem ? null : (items[0]?.id ?? null))}
+            onClick={() =>
+              setExpandedId(expandedItem ? null : (items[0]?.id ?? null))
+            }
           >
             {t(expandedItem ? "lib.collapseAll" : "lib.expandAll", voice)}
           </button>
         </div>
         {sel.selecting ? (
           <div className="flex gap-2 text-sm">
-            <button className="hover:bg-accent rounded-md border px-2.5 py-1" onClick={() => sel.selectAll(ids)}>
+            <button
+              className="hover:bg-accent rounded-md border px-2.5 py-1"
+              onClick={() => sel.selectAll(ids)}
+            >
               {t("lib.selectAll", voice)}
             </button>
-            <button className="text-muted-foreground rounded-md border px-2.5 py-1" onClick={sel.exit}>
+            <button
+              className="text-muted-foreground rounded-md border px-2.5 py-1"
+              onClick={sel.exit}
+            >
               {t("action.cancel", voice)}
             </button>
           </div>
         ) : (
-          <button className="hover:bg-accent rounded-md border px-2.5 py-1 text-sm" onClick={sel.enter}>
+          <button
+            className="hover:bg-accent rounded-md border px-2.5 py-1 text-sm"
+            onClick={sel.enter}
+          >
             {t("lib.select", voice)}
           </button>
         )}
@@ -104,7 +133,13 @@ export function LibraryMultistep({
           const checked = sel.selected.has(item.id);
           const emoji = voice === "playful" ? rowEmoji(item) : null;
           return (
-            <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", checked && "ring-primary ring-2")}>
+            <li
+              key={item.id}
+              className={cn(
+                "rounded-lg border px-4 py-3 text-sm",
+                checked && "ring-primary ring-2",
+              )}
+            >
               <div className="flex items-start gap-3">
                 {sel.selecting && (
                   <input
@@ -116,27 +151,54 @@ export function LibraryMultistep({
                   />
                 )}
                 <RowNumber n={i + 1} />
-                {emoji && <span aria-hidden className="text-base">{emoji}</span>}
+                {emoji && (
+                  <span aria-hidden className="text-base">
+                    {emoji}
+                  </span>
+                )}
                 <div className="min-w-0 flex-1">
                   <button
                     type="button"
                     className="block w-full text-left font-medium break-words"
                     aria-expanded={sel.selecting ? undefined : expanded}
-                    aria-controls={expanded && item.taskId ? `lib-steps-${item.id}` : undefined}
-                    onClick={() => (sel.selecting ? sel.toggle(item.id) : setExpandedId(expanded ? null : item.id))}
+                    aria-controls={
+                      expanded && item.taskId
+                        ? `lib-steps-${item.id}`
+                        : undefined
+                    }
+                    onClick={() =>
+                      sel.selecting
+                        ? sel.toggle(item.id)
+                        : setExpandedId(expanded ? null : item.id)
+                    }
                   >
                     {item.text}
                   </button>
                   {!expanded && <NextStepLine item={item} voice={voice} />}
                   {!expanded && <ProgressBar item={item} />}
-                  {!expanded && <div className="mt-1"><AgeLabel item={item} now={now} voice={voice} settings={settings} /></div>}
+                  {!expanded && (
+                    <div className="mt-1">
+                      <AgeLabel
+                        item={item}
+                        now={now}
+                        voice={voice}
+                        settings={settings}
+                      />
+                    </div>
+                  )}
                 </div>
                 {!expanded && (
                   <span className="text-muted-foreground shrink-0 rounded-full border px-2 py-0.5 text-xs">
-                    {item.stepsDone}/{item.stepsTotal} {t("progress.done", voice)}
+                    {item.stepsDone}/{item.stepsTotal}{" "}
+                    {t("progress.done", voice)}
                   </span>
                 )}
-                {!expanded && <EstimatePill minutes={remainingMinutes(item)} voice={voice} />}
+                {!expanded && (
+                  <EstimatePill
+                    minutes={remainingMinutes(item)}
+                    voice={voice}
+                  />
+                )}
               </div>
 
               {expanded && item.taskId && (
@@ -145,8 +207,14 @@ export function LibraryMultistep({
                     taskId={item.taskId}
                     voice={voice}
                     steps={item.steps.map((s) => ({
-                      id: s.id, order: s.order, total: item.stepsTotal, text: s.text,
-                      subtaskEmoji: s.subtaskEmoji, estMinutes: s.estMinutes, done: s.done, resumable: s.resumable,
+                      id: s.id,
+                      order: s.order,
+                      total: item.stepsTotal,
+                      text: s.text,
+                      subtaskEmoji: s.subtaskEmoji,
+                      estMinutes: s.estMinutes,
+                      done: s.done,
+                      resumable: s.resumable,
                     }))}
                   />
                 </div>
