@@ -18,7 +18,11 @@ set -eu
 
 PROD_URL="${PROD_URL:-https://dlectroflow.dlectronique.dev}"
 API="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}"
-AUTH="PRIVATE-TOKEN: ${GL_TOKEN}"
+# `${GL_TOKEN:-}` (not `${GL_TOKEN}`) so an entirely-unset token doesn't trip
+# `set -u` — that's the "no setup yet" case, where the API reads 401 and degrade
+# to `?` and the IID guard below skips posting (preview mode). A *bad* token with
+# the issue iid set still fails loudly at the POST (curl -f), as intended.
+AUTH="PRIVATE-TOKEN: ${GL_TOKEN:-}"
 SINCE="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)"
 DATE="$(date -u +%Y-%m-%d)"
 
