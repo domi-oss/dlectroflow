@@ -10,12 +10,21 @@ import { cn, touchTarget } from "@/lib/utils";
  * step's Complete affordance is visually identical to an inbox row's. Takes the
  * resolved `voice` (label via `t("action.complete", voice)`) + an `onClick`.
  */
-export function CompleteButton({ voice, onClick }: { voice: Voice; onClick: () => void }) {
+export function CompleteButton({
+  voice,
+  onClick,
+}: {
+  voice: Voice;
+  onClick: () => void;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={cn("hover:bg-accent rounded-md border px-2.5 py-1", touchTarget)}
+      className={cn(
+        "hover:bg-accent rounded-md border px-2.5 py-1",
+        touchTarget,
+      )}
     >
       {t("action.complete", voice)}
     </button>

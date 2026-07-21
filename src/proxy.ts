@@ -63,7 +63,11 @@ export async function proxy(req: NextRequest) {
     // so the IDOR defense (verify the token, never trust a raw id) is unchanged.
     wsId = process.env.REVIEW_DEMO_WS || crypto.randomUUID();
     // One canonical guest signer (shares SESSION_ALG; no inline alg to drift).
-    guestToken = await signGuestSession(wsId, sessionSecret, guestTtlHours * 3600);
+    guestToken = await signGuestSession(
+      wsId,
+      sessionSecret,
+      guestTtlHours * 3600,
+    );
   }
 
   // Security: forward the signed JWT, not the raw wsId. The workspace resolver

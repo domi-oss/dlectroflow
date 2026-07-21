@@ -20,7 +20,9 @@ vi.mock("@/app/actions/focus", () => ({
 import { ensureFocusStep, completeItem } from "@/app/actions/braindump";
 import { completeStep } from "@/app/actions/focus";
 
-const multi = (o: Partial<FocusableStep> & { stepId: string }): FocusableStep => ({
+const multi = (
+  o: Partial<FocusableStep> & { stepId: string },
+): FocusableStep => ({
   stepText: o.stepId,
   subtaskEmoji: null,
   estMinutes: 15,
@@ -42,7 +44,12 @@ afterEach(cleanup);
 describe("SingleTaskLane", () => {
   it("▶ Start ensures the focus step then routes to the timer", async () => {
     const user = userEvent.setup();
-    render(<SingleTaskLane voice="plain" items={[{ itemId: "i1", text: "Buy milk", estMinutes: 8 }]} />);
+    render(
+      <SingleTaskLane
+        voice="plain"
+        items={[{ itemId: "i1", text: "Buy milk", estMinutes: 8 }]}
+      />,
+    );
     await user.click(screen.getByRole("button", { name: /start/i }));
     expect(ensureFocusStep).toHaveBeenCalledWith("i1");
     expect(push).toHaveBeenCalledWith("/focus/step-77");
@@ -50,7 +57,12 @@ describe("SingleTaskLane", () => {
 
   it("inline ✓ optimistically removes the row, completeItem + refresh", async () => {
     const user = userEvent.setup();
-    render(<SingleTaskLane voice="plain" items={[{ itemId: "i1", text: "Buy milk", estMinutes: 8 }]} />);
+    render(
+      <SingleTaskLane
+        voice="plain"
+        items={[{ itemId: "i1", text: "Buy milk", estMinutes: 8 }]}
+      />,
+    );
     await user.click(screen.getByRole("button", { name: /complete/i }));
     expect(screen.queryByText("Buy milk")).not.toBeInTheDocument(); // optimistic
     expect(completeItem).toHaveBeenCalledWith("i1");
@@ -63,7 +75,16 @@ describe("MultiStepLane", () => {
     render(
       <MultiStepLane
         voice="plain"
-        items={[multi({ stepId: "m1", stepText: "Draft intro", taskTitle: "Report", stepsDone: 1, stepsTotal: 3, estMinutes: 20 })]}
+        items={[
+          multi({
+            stepId: "m1",
+            stepText: "Draft intro",
+            taskTitle: "Report",
+            stepsDone: 1,
+            stepsTotal: 3,
+            estMinutes: 20,
+          }),
+        ]}
       />,
     );
     expect(screen.getByText("Report")).toBeInTheDocument();
@@ -82,7 +103,12 @@ describe("MultiStepLane", () => {
 
   it("inline ✓ completes the shown next step (completeStep) + refresh, optimistic remove", async () => {
     const user = userEvent.setup();
-    render(<MultiStepLane voice="plain" items={[multi({ stepId: "m1", stepText: "Draft intro" })]} />);
+    render(
+      <MultiStepLane
+        voice="plain"
+        items={[multi({ stepId: "m1", stepText: "Draft intro" })]}
+      />,
+    );
     await user.click(screen.getByRole("button", { name: /complete/i }));
     expect(screen.queryByText(/Draft intro/)).not.toBeInTheDocument();
     expect(completeStep).toHaveBeenCalledWith("m1");

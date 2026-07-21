@@ -9,5 +9,8 @@ import { anthropicFailureCount } from "@/lib/observability";
 export const dynamic = "force-dynamic";
 
 export async function GET(): Promise<NextResponse> {
-  return NextResponse.json({ status: "alive", anthropicFailures: anthropicFailureCount() });
+  return NextResponse.json({
+    status: "alive",
+    anthropicFailures: anthropicFailureCount(),
+  });
 }

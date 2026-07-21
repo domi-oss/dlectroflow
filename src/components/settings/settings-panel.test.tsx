@@ -18,7 +18,10 @@ vi.mock("@/app/actions/settings", () => ({
   updateFirstRunPreview: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { updateAgingSettings, updateFirstRunPreview } from "@/app/actions/settings";
+import {
+  updateAgingSettings,
+  updateFirstRunPreview,
+} from "@/app/actions/settings";
 
 afterEach(cleanup);
 beforeEach(() => vi.clearAllMocks());

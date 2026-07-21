@@ -52,7 +52,10 @@ export async function GET(req: Request): Promise<Response> {
   const { ownerAllowlist, sessionSecret } = authConfig();
   if (!isOwner(identity, ownerAllowlist)) return fail("not_authorized");
 
-  const session = await signOwnerSession({ kind: "owner", sub: identity }, sessionSecret);
+  const session = await signOwnerSession(
+    { kind: "owner", sub: identity },
+    sessionSecret,
+  );
   const res = NextResponse.redirect(`${origin}/inbox`);
   res.cookies.set(OWNER_COOKIE, session, {
     httpOnly: true,

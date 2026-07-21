@@ -2,7 +2,11 @@ import Link from "next/link";
 import { prisma, getSettings } from "@/lib/db";
 import { currentWorkspaceId } from "@/lib/workspace";
 import { BrainDumpStatus } from "@/lib/constants";
-import { libraryBuckets, type Item, type LibraryBuckets } from "@/components/inbox/bucket";
+import {
+  libraryBuckets,
+  type Item,
+  type LibraryBuckets,
+} from "@/components/inbox/bucket";
 import { t, type StringKey, type Voice } from "@/lib/strings";
 import { cn } from "@/lib/utils";
 import { DonePill } from "@/components/completion/done-pill";
@@ -17,10 +21,30 @@ export const dynamic = "force-dynamic";
 // `?tab=` value the Inbox "see all →" deep-links already point at
 // (plated / pantry / sorted / done); `bucket` names the LibraryBuckets field.
 const TABS = [
-  { param: "plated", bucket: "singleTask", labelKey: "lib.tab.singleTask", hintKey: "lib.plated.hint" },
-  { param: "sorted", bucket: "multiStep", labelKey: "lib.tab.multiStep", hintKey: "lib.sorted.hint" },
-  { param: "pantry", bucket: "savedLater", labelKey: "section.savedLater", hintKey: "lib.pantry.hint" },
-  { param: "done", bucket: "done", labelKey: "nav.done", hintKey: "lib.done.hint" },
+  {
+    param: "plated",
+    bucket: "singleTask",
+    labelKey: "lib.tab.singleTask",
+    hintKey: "lib.plated.hint",
+  },
+  {
+    param: "sorted",
+    bucket: "multiStep",
+    labelKey: "lib.tab.multiStep",
+    hintKey: "lib.sorted.hint",
+  },
+  {
+    param: "pantry",
+    bucket: "savedLater",
+    labelKey: "section.savedLater",
+    hintKey: "lib.pantry.hint",
+  },
+  {
+    param: "done",
+    bucket: "done",
+    labelKey: "nav.done",
+    hintKey: "lib.done.hint",
+  },
 ] as const satisfies ReadonlyArray<{
   param: string;
   bucket: keyof LibraryBuckets;
@@ -56,7 +80,11 @@ export default async function LibraryPage({
               // (started, never ended). Mirrors inbox/page.tsx — batched by
               // Prisma into one query per relation, not a per-step N+1.
               include: {
-                focusSessions: { where: { endedAt: null }, select: { id: true }, take: 1 },
+                focusSessions: {
+                  where: { endedAt: null },
+                  select: { id: true },
+                  take: 1,
+                },
               },
             },
           },
@@ -109,7 +137,9 @@ export default async function LibraryPage({
 
       <div>
         <h1 className="text-xl font-semibold">{t("nav.everything", voice)}</h1>
-        <p className="text-muted-foreground mt-1 text-sm">{t("lib.intro", voice)}</p>
+        <p className="text-muted-foreground mt-1 text-sm">
+          {t("lib.intro", voice)}
+        </p>
       </div>
 
       {/* Tabs — Links that set ?tab=, so each tab is deep-linkable (the Inbox's
@@ -157,16 +187,32 @@ export default async function LibraryPage({
         ) : active === "plated" || active === "pantry" ? (
           // In-flight rows are interactive: Start focusing / Complete / Delete,
           // reusing the Inbox's action wiring (see LibraryRows).
-          <LibraryRows items={rows} tab={active} voice={voice} now={now} settings={agingSettings} />
+          <LibraryRows
+            items={rows}
+            tab={active}
+            voice={voice}
+            now={now}
+            settings={agingSettings}
+          />
         ) : active === "sorted" ? (
           // Multi-step rows inline-expand into their full step breakdown —
           // the whole hub, not just /tasks/[id], can drive focus/complete.
-          <LibraryMultistep items={rows} voice={voice} now={now} settings={agingSettings} />
+          <LibraryMultistep
+            items={rows}
+            voice={voice}
+            now={now}
+            settings={agingSettings}
+          />
         ) : (
           // Done is a closure view — the whole row reopens the breakdown.
           <ul className="space-y-2">
             {rows.map((item) => (
-              <LibraryRow key={item.id} item={item} tab={active} voice={voice} />
+              <LibraryRow
+                key={item.id}
+                item={item}
+                tab={active}
+                voice={voice}
+              />
             ))}
           </ul>
         )}
@@ -192,12 +238,20 @@ function LibraryRow({
     <span className="min-w-0 flex-1 break-words">
       {item.text}
       {tab === "done" && item.stepsTotal === 0 && (
-        <span className="text-muted-foreground text-xs"> · {t("lib.aToDo", voice)}</span>
+        <span className="text-muted-foreground text-xs">
+          {" "}
+          · {t("lib.aToDo", voice)}
+        </span>
       )}
     </span>
   );
   const body = (
-    <div className={cn("flex items-center justify-between gap-3", tab === "done" && "opacity-70")}>
+    <div
+      className={cn(
+        "flex items-center justify-between gap-3",
+        tab === "done" && "opacity-70",
+      )}
+    >
       {title}
       <ProgressPill item={item} voice={voice} />
     </div>
@@ -218,12 +272,8 @@ function LibraryRow({
 }
 
 /** Step-progress pill for the Done closure view. */
-function ProgressPill({
-  item,
-  voice,
-}: {
-  item: Item;
-  voice: Voice;
-}) {
-  return <DonePill voice={voice} done={item.stepsDone} total={item.stepsTotal} />;
+function ProgressPill({ item, voice }: { item: Item; voice: Voice }) {
+  return (
+    <DonePill voice={voice} done={item.stepsDone} total={item.stepsTotal} />
+  );
 }

@@ -51,7 +51,10 @@ export function resolveBackTarget(from: string | null | undefined): BackTarget {
  * this producing side too: only known origins are propagated (unknown values
  * are dropped rather than reflected), and the value is URL-encoded.
  */
-export function withFrom(href: string, from: string | null | undefined): string {
+export function withFrom(
+  href: string,
+  from: string | null | undefined,
+): string {
   if (!from || !Object.hasOwn(BACK_TARGETS, from)) return href;
   const sep = href.includes("?") ? "&" : "?";
   return `${href}${sep}from=${encodeURIComponent(from)}`;

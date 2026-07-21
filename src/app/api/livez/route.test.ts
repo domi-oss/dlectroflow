@@ -7,7 +7,10 @@ vi.mock("@/lib/db", () => {
 });
 
 import { GET } from "./route";
-import { _resetAnthropicFailuresForTest, recordAnthropicFailure } from "@/lib/observability";
+import {
+  _resetAnthropicFailuresForTest,
+  recordAnthropicFailure,
+} from "@/lib/observability";
 
 describe("GET /api/livez", () => {
   beforeEach(() => _resetAnthropicFailuresForTest());

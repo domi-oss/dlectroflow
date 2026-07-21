@@ -30,7 +30,8 @@ describe("token-cipher", () => {
 
   it("rejects a tampered payload (auth-tag failure)", () => {
     const out = encryptToken("tamper-me");
-    const flipped = out.slice(0, -2) + (out.endsWith("A") ? "B" : "A") + out.slice(-1);
+    const flipped =
+      out.slice(0, -2) + (out.endsWith("A") ? "B" : "A") + out.slice(-1);
     expect(() => decryptToken(flipped)).toThrow();
   });
 

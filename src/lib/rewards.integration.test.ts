@@ -53,16 +53,28 @@ describe("touchStreakOnCompletion — concurrency safety (#21 P5.3)", () => {
 
     await prisma.streak.upsert({
       where: { workspaceId: WS },
-      create: { id: WS, workspaceId: WS, current: 3, lastActiveWorkday: ymd(yesterday) },
+      create: {
+        id: WS,
+        workspaceId: WS,
+        current: 3,
+        lastActiveWorkday: ymd(yesterday),
+      },
       update: { current: 3, lastActiveWorkday: ymd(yesterday) },
     });
 
-    await Promise.all([touchStreakOnCompletion(WS), touchStreakOnCompletion(WS)]);
+    await Promise.all([
+      touchStreakOnCompletion(WS),
+      touchStreakOnCompletion(WS),
+    ]);
 
-    const streak = await prisma.streak.findUnique({ where: { workspaceId: WS } });
+    const streak = await prisma.streak.findUnique({
+      where: { workspaceId: WS },
+    });
     expect(streak?.current).toBe(4); // advanced once, not twice
     expect(streak?.lastActiveWorkday).toBe(ymd(now));
-    const records = await prisma.streakRecord.count({ where: { workspaceId: WS } });
+    const records = await prisma.streakRecord.count({
+      where: { workspaceId: WS },
+    });
     expect(records).toBe(0); // continue path files nothing
   });
 
@@ -73,16 +85,28 @@ describe("touchStreakOnCompletion — concurrency safety (#21 P5.3)", () => {
 
     await prisma.streak.upsert({
       where: { workspaceId: WS },
-      create: { id: WS, workspaceId: WS, current: 3, lastActiveWorkday: ymd(threeAgo) },
+      create: {
+        id: WS,
+        workspaceId: WS,
+        current: 3,
+        lastActiveWorkday: ymd(threeAgo),
+      },
       update: { current: 3, lastActiveWorkday: ymd(threeAgo) },
     });
 
-    await Promise.all([touchStreakOnCompletion(WS), touchStreakOnCompletion(WS)]);
+    await Promise.all([
+      touchStreakOnCompletion(WS),
+      touchStreakOnCompletion(WS),
+    ]);
 
-    const streak = await prisma.streak.findUnique({ where: { workspaceId: WS } });
+    const streak = await prisma.streak.findUnique({
+      where: { workspaceId: WS },
+    });
     expect(streak?.current).toBe(1); // reset to 1
     expect(streak?.lastActiveWorkday).toBe(ymd(now));
-    const records = await prisma.streakRecord.findMany({ where: { workspaceId: WS } });
+    const records = await prisma.streakRecord.findMany({
+      where: { workspaceId: WS },
+    });
     expect(records).toHaveLength(1); // exactly one ended streak filed
     expect(records[0].length).toBe(3);
   });

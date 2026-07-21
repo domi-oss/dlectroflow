@@ -4,7 +4,8 @@ export function notificationsSupported(): boolean {
   return typeof window !== "undefined" && "Notification" in window;
 }
 
-export function notificationPermission(): NotificationPermission | "unsupported" {
+export function notificationPermission():
+  NotificationPermission | "unsupported" {
   if (!notificationsSupported()) return "unsupported";
   return Notification.permission;
 }
@@ -14,7 +15,9 @@ export function notificationPermission(): NotificationPermission | "unsupported"
 // own permission requests; React reads the value via useSyncExternalStore.
 const permissionListeners = new Set<() => void>();
 
-export function subscribeNotificationPermission(listener: () => void): () => void {
+export function subscribeNotificationPermission(
+  listener: () => void,
+): () => void {
   permissionListeners.add(listener);
   return () => {
     permissionListeners.delete(listener);
@@ -45,7 +48,8 @@ export async function registerServiceWorker(): Promise<ServiceWorkerRegistration
  * survives tab focus changes); falls back to a plain Notification.
  */
 export async function showReminder(title: string, body: string) {
-  if (!notificationsSupported() || Notification.permission !== "granted") return;
+  if (!notificationsSupported() || Notification.permission !== "granted")
+    return;
   const options: NotificationOptions = {
     body,
     icon: "/favicon.ico",

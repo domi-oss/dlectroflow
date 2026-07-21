@@ -5,7 +5,9 @@ import userEvent from "@testing-library/user-event";
 import { AppearanceSection } from "@/components/settings/appearance-section";
 
 const refresh = vi.fn();
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), refresh }) }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), refresh }),
+}));
 vi.mock("@/app/actions/settings", () => ({
   updateAppearanceSettings: vi.fn().mockResolvedValue(undefined),
 }));
@@ -14,7 +16,11 @@ import { updateAppearanceSettings } from "@/app/actions/settings";
 afterEach(cleanup);
 beforeEach(() => vi.clearAllMocks());
 
-const base = { completeStrikethrough: true, completeTickColor: "green", voice: "plain" as const };
+const base = {
+  completeStrikethrough: true,
+  completeTickColor: "green",
+  voice: "plain" as const,
+};
 
 describe("AppearanceSection", () => {
   it("seeds the strike toggle + tick-colour radios from props", () => {
@@ -46,14 +52,20 @@ describe("AppearanceSection", () => {
         completeTickColor: "black",
       }),
     );
-    expect(screen.getByTestId("completion-preview")).toHaveAttribute("data-tick", "black");
+    expect(screen.getByTestId("completion-preview")).toHaveAttribute(
+      "data-tick",
+      "black",
+    );
   });
 
   it("the preview reflects strike off before the server round-trip", async () => {
     const user = userEvent.setup();
     render(<AppearanceSection {...base} />);
     await user.click(screen.getByLabelText(/strike through completed/i));
-    expect(screen.getByTestId("completion-preview")).toHaveAttribute("data-complete-strike", "off");
+    expect(screen.getByTestId("completion-preview")).toHaveAttribute(
+      "data-complete-strike",
+      "off",
+    );
   });
 
   it("the preview ✓ carries a text accessible name (status not colour-only)", () => {
@@ -71,7 +83,9 @@ describe("AppearanceSection", () => {
   });
 
   it("surfaces an error alert (controls stay editable) when a save fails", async () => {
-    vi.mocked(updateAppearanceSettings).mockRejectedValueOnce(new Error("save failed"));
+    vi.mocked(updateAppearanceSettings).mockRejectedValueOnce(
+      new Error("save failed"),
+    );
     const user = userEvent.setup();
     render(<AppearanceSection {...base} />);
     await user.click(screen.getByLabelText(/strike through completed/i));

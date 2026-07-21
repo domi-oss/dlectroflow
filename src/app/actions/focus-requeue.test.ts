@@ -9,7 +9,10 @@ const { prismaMock, currentWorkspaceIdMock } = vi.hoisted(() => {
     step: { findFirst: vi.fn(), update: vi.fn().mockResolvedValue({}) },
     task: { findFirst: vi.fn() },
   };
-  return { prismaMock, currentWorkspaceIdMock: vi.fn().mockResolvedValue("owner") };
+  return {
+    prismaMock,
+    currentWorkspaceIdMock: vi.fn().mockResolvedValue("owner"),
+  };
 });
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -56,32 +59,52 @@ function lastUpdateHistory(): number[] {
 beforeEach(() => {
   vi.clearAllMocks();
   prismaMock.step.update.mockResolvedValue({});
-  prismaMock.step.findFirst.mockResolvedValue({ id: "s1", task: { workspaceId: "owner" } });
-  prismaMock.focusSession.findFirst.mockResolvedValue({ id: "sess", workspaceId: "owner" });
+  prismaMock.step.findFirst.mockResolvedValue({
+    id: "s1",
+    task: { workspaceId: "owner" },
+  });
+  prismaMock.focusSession.findFirst.mockResolvedValue({
+    id: "sess",
+    workspaceId: "owner",
+  });
 });
 
 describe("requeueFocus — estimateHistory JSON guard", () => {
   it("malformed estimateHistory → requeues without throwing, writes a valid history", async () => {
-    prismaMock.focusSession.update.mockResolvedValue({ step: stepWith("{not valid json") });
+    prismaMock.focusSession.update.mockResolvedValue({
+      step: stepWith("{not valid json"),
+    });
     const { requeueFocus } = await import("./focus");
     await expect(
       requeueFocus("sess", { durationMin: 25, addedMin: 0, newEstMinutes: 30 }),
     ).resolves.toEqual({ ok: true });
     expect(lastUpdateHistory()).toEqual([20]); // corrupt → [] then push estMinutes
-    expect(prismaMock.step.update.mock.calls.at(-1)![0].data.estMinutes).toBe(30);
+    expect(prismaMock.step.update.mock.calls.at(-1)![0].data.estMinutes).toBe(
+      30,
+    );
   });
 
   it("valid estimateHistory → appends the current estimate", async () => {
-    prismaMock.focusSession.update.mockResolvedValue({ step: stepWith("[10,15]") });
+    prismaMock.focusSession.update.mockResolvedValue({
+      step: stepWith("[10,15]"),
+    });
     const { requeueFocus } = await import("./focus");
-    await requeueFocus("sess", { durationMin: 25, addedMin: 0, newEstMinutes: 30 });
+    await requeueFocus("sess", {
+      durationMin: 25,
+      addedMin: 0,
+      newEstMinutes: 30,
+    });
     expect(lastUpdateHistory()).toEqual([10, 15, 20]);
   });
 
   it("valid JSON that isn't an array → falls back to []", async () => {
     prismaMock.focusSession.update.mockResolvedValue({ step: stepWith("42") });
     const { requeueFocus } = await import("./focus");
-    await requeueFocus("sess", { durationMin: 25, addedMin: 0, newEstMinutes: 30 });
+    await requeueFocus("sess", {
+      durationMin: 25,
+      addedMin: 0,
+      newEstMinutes: 30,
+    });
     expect(lastUpdateHistory()).toEqual([20]);
   });
 });

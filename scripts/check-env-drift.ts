@@ -63,13 +63,18 @@ function main(): void {
   try {
     envExampleContents = readFileSync(ENV_EXAMPLE_PATH, "utf8");
   } catch {
-    console.error(`env-drift check FAILED — could not read ${ENV_EXAMPLE_PATH}`);
+    console.error(
+      `env-drift check FAILED — could not read ${ENV_EXAMPLE_PATH}`,
+    );
     console.error("Make sure .env.example exists at the project root.");
     process.exitCode = 1;
     return;
   }
   const documentedKeys = extractDocumentedEnvKeys(envExampleContents);
-  const { missingFromExample, unusedInExample } = computeEnvDrift(usedKeys, documentedKeys);
+  const { missingFromExample, unusedInExample } = computeEnvDrift(
+    usedKeys,
+    documentedKeys,
+  );
 
   if (missingFromExample.length === 0 && unusedInExample.length === 0) {
     console.log(
@@ -78,7 +83,9 @@ function main(): void {
     return;
   }
 
-  console.error("env-drift check FAILED — .env.example is out of sync with src/:\n");
+  console.error(
+    "env-drift check FAILED — .env.example is out of sync with src/:\n",
+  );
   if (missingFromExample.length > 0) {
     console.error("  Read in src/ but missing from .env.example:");
     for (const key of missingFromExample) console.error(`    - ${key}`);

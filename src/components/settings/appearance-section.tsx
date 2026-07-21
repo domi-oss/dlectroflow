@@ -11,7 +11,10 @@ import {
 } from "@/lib/completion-style";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { t, type Voice } from "@/lib/strings";
-import { useSaveStatus, SaveIndicator } from "@/components/settings/use-save-status";
+import {
+  useSaveStatus,
+  SaveIndicator,
+} from "@/components/settings/use-save-status";
 import { cn } from "@/lib/utils";
 
 type AppearancePrefs = {
@@ -57,35 +60,50 @@ export function AppearanceSection({
   return (
     <section className="space-y-3">
       <div className="flex items-center gap-3">
-        <h2 className="text-lg font-semibold">{t("appearance.heading", voice)}</h2>
+        <h2 className="text-lg font-semibold">
+          {t("appearance.heading", voice)}
+        </h2>
         <SaveIndicator status={status} voice={voice} />
       </div>
 
       {/* Theme (moved here so Appearance is a single group). */}
       <div className="space-y-1">
-        <span className="text-muted-foreground text-xs">{t("appearance.theme", voice)}</span>
+        <span className="text-muted-foreground text-xs">
+          {t("appearance.theme", voice)}
+        </span>
         <div>
           {/* Theme persists client-side (localStorage) instantly; flash the
               shared indicator so it gives the same "Saved" feedback as the
               completion controls below. */}
-          <ThemeToggle onPersist={() => { markSaving(); markSaved(); }} />
+          <ThemeToggle
+            onPersist={() => {
+              markSaving();
+              markSaved();
+            }}
+          />
         </div>
       </div>
 
       {/* App-wide completion style (Design D). */}
-      <p className="text-muted-foreground text-sm">{t("appearance.completionIntro", voice)}</p>
+      <p className="text-muted-foreground text-sm">
+        {t("appearance.completionIntro", voice)}
+      </p>
 
       <label className="flex items-center gap-2 font-medium">
         <input
           type="checkbox"
           checked={prefs.completeStrikethrough}
-          onChange={(e) => persist({ ...prefs, completeStrikethrough: e.target.checked })}
+          onChange={(e) =>
+            persist({ ...prefs, completeStrikethrough: e.target.checked })
+          }
         />
         {t("appearance.strike", voice)}
       </label>
 
       <fieldset className="space-y-1">
-        <legend className="text-muted-foreground text-xs">{t("appearance.tick", voice)}</legend>
+        <legend className="text-muted-foreground text-xs">
+          {t("appearance.tick", voice)}
+        </legend>
         {(Object.values(CompleteTickColor) as string[]).map((c) => (
           <label key={c} className="flex items-center gap-2 text-sm">
             <input
@@ -95,7 +113,12 @@ export function AppearanceSection({
               checked={prefs.completeTickColor === c}
               onChange={() => persist({ ...prefs, completeTickColor: c })}
             />
-            {t(c === CompleteTickColor.Black ? "appearance.tickBlack" : "appearance.tickGreen", voice)}
+            {t(
+              c === CompleteTickColor.Black
+                ? "appearance.tickBlack"
+                : "appearance.tickGreen",
+              voice,
+            )}
           </label>
         ))}
       </fieldset>
@@ -108,8 +131,12 @@ export function AppearanceSection({
         data-testid="completion-preview"
         className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm"
       >
-        <span className={cn("flex-1", COMPLETE_TEXT)}>{t("appearance.previewText", voice)}</span>
-        <span className={COMPLETE_TICK} aria-label="done" title="done">✓</span>
+        <span className={cn("flex-1", COMPLETE_TEXT)}>
+          {t("appearance.previewText", voice)}
+        </span>
+        <span className={COMPLETE_TICK} aria-label="done" title="done">
+          ✓
+        </span>
       </div>
     </section>
   );

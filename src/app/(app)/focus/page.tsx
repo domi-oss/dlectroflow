@@ -2,7 +2,11 @@ import { prisma, getSettings } from "@/lib/db";
 import { currentWorkspaceId } from "@/lib/workspace";
 import { TaskStatus, BrainDumpStatus } from "@/lib/constants";
 import { libraryBuckets, type Item } from "@/components/inbox/bucket";
-import { focusLauncherData, type FocusTask, type SingleFocusable } from "@/lib/focus-launcher";
+import {
+  focusLauncherData,
+  type FocusTask,
+  type SingleFocusable,
+} from "@/lib/focus-launcher";
 import { getDashboardData } from "@/lib/rewards";
 import { FocusLauncher } from "@/components/focus/focus-launcher";
 import { type Voice } from "@/lib/strings";
@@ -52,7 +56,11 @@ export default async function FocusLauncherPage() {
             steps: {
               orderBy: { order: "asc" },
               include: {
-                focusSessions: { where: { endedAt: null }, select: { id: true }, take: 1 },
+                focusSessions: {
+                  where: { endedAt: null },
+                  select: { id: true },
+                  take: 1,
+                },
               },
             },
           },
@@ -101,7 +109,10 @@ export default async function FocusLauncherPage() {
 
   // The single-task ("plated") bucket → SingleFocusable rows. `?? 5` mirrors
   // library-row-meta's singleTaskEstimate (null estimate → a 5-min default).
-  const singleTasks: SingleFocusable[] = libraryBuckets(items, now).singleTask.map((i) => ({
+  const singleTasks: SingleFocusable[] = libraryBuckets(
+    items,
+    now,
+  ).singleTask.map((i) => ({
     itemId: i.id,
     text: i.text,
     estMinutes: i.estMinutes ?? 5,

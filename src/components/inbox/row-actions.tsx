@@ -8,7 +8,13 @@ const DURATION_PRESETS = [15, 30, 60] as const;
 const MAX_CUSTOM_MINUTES = 480;
 
 export type ScheduleControlProps = {
-  state: "ready_steps" | "needs_duration" | "connect" | "reconnect" | "ics_ready_steps" | "ics_needs_duration";
+  state:
+    | "ready_steps"
+    | "needs_duration"
+    | "connect"
+    | "reconnect"
+    | "ics_ready_steps"
+    | "ics_needs_duration";
   onScheduleSteps?: () => void;
   onScheduleSingle?: (minutes: number) => void;
   /** ICS "Add to calendar" handler — called with the chosen minutes for a
@@ -49,7 +55,8 @@ export function ScheduleControl({
   const rootRef = useRef<HTMLSpanElement>(null);
   const isMenu = variant === "menu";
   const isIcs = state === "ics_ready_steps" || state === "ics_needs_duration";
-  const needsDuration = state === "needs_duration" || state === "ics_needs_duration";
+  const needsDuration =
+    state === "needs_duration" || state === "ics_needs_duration";
 
   useEffect(() => {
     if (!open) return;
@@ -57,7 +64,8 @@ export function ScheduleControl({
       if (e.key === "Escape") setOpen(false);
     };
     const onPointerDown = (e: Event) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      if (rootRef.current && !rootRef.current.contains(e.target as Node))
+        setOpen(false);
     };
     document.addEventListener("keydown", onKeyDown);
     document.addEventListener("pointerdown", onPointerDown);
@@ -93,7 +101,9 @@ export function ScheduleControl({
   const customMinutes = Number(custom);
   const customOutOfRange =
     custom !== "" &&
-    (!Number.isFinite(customMinutes) || customMinutes < 1 || customMinutes > MAX_CUSTOM_MINUTES);
+    (!Number.isFinite(customMinutes) ||
+      customMinutes < 1 ||
+      customMinutes > MAX_CUSTOM_MINUTES);
 
   const fireCustom = () => {
     if (custom === "" || customOutOfRange) return;
@@ -107,8 +117,12 @@ export function ScheduleControl({
     <span ref={rootRef} className={isMenu ? "flex flex-col" : "relative"}>
       <button
         type="button"
-        aria-label={isMenu ? undefined : isIcs ? "Add to calendar (.ics)" : "Schedule"}
-        title={isMenu ? undefined : isIcs ? "Add to calendar (.ics)" : "Schedule"}
+        aria-label={
+          isMenu ? undefined : isIcs ? "Add to calendar (.ics)" : "Schedule"
+        }
+        title={
+          isMenu ? undefined : isIcs ? "Add to calendar (.ics)" : "Schedule"
+        }
         aria-haspopup={needsDuration ? "dialog" : undefined}
         aria-expanded={needsDuration ? open : undefined}
         disabled={pending}
@@ -140,7 +154,10 @@ export function ScheduleControl({
                 key={minutes}
                 type="button"
                 disabled={pending}
-                className={cn("rounded-md px-2.5 py-1 font-medium disabled:opacity-50", touchTarget)}
+                className={cn(
+                  "rounded-md px-2.5 py-1 font-medium disabled:opacity-50",
+                  touchTarget,
+                )}
                 onClick={() => {
                   setOpen(false);
                   if (isIcs) onScheduleIcs?.(minutes);
@@ -165,14 +182,19 @@ export function ScheduleControl({
             <button
               type="button"
               disabled={pending || custom === "" || customOutOfRange}
-              className={cn("rounded-md px-2.5 py-1 font-medium disabled:opacity-50", touchTarget)}
+              className={cn(
+                "rounded-md px-2.5 py-1 font-medium disabled:opacity-50",
+                touchTarget,
+              )}
               onClick={fireCustom}
             >
               Go
             </button>
           </span>
           {customOutOfRange && (
-            <span className="text-destructive">Enter 1–{MAX_CUSTOM_MINUTES} minutes</span>
+            <span className="text-destructive">
+              Enter 1–{MAX_CUSTOM_MINUTES} minutes
+            </span>
           )}
         </span>
       )}
@@ -217,7 +239,8 @@ export function RowActions({
       if (e.key === "Escape") setMenuOpen(false);
     };
     const onPointerDown = (e: Event) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+      if (menuRef.current && !menuRef.current.contains(e.target as Node))
+        setMenuOpen(false);
     };
     document.addEventListener("keydown", onKeyDown);
     document.addEventListener("pointerdown", onPointerDown);

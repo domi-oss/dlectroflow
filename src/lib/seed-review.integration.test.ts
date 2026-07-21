@@ -28,9 +28,13 @@ describe("seedReviewApp (idempotent review-app seed)", () => {
   it("creates demo content that spans the inbox buckets and is safe to re-run", async () => {
     await seedReviewApp(prisma, WS);
 
-    const items1 = await prisma.brainDumpItem.count({ where: { workspaceId: WS } });
+    const items1 = await prisma.brainDumpItem.count({
+      where: { workspaceId: WS },
+    });
     const tasks1 = await prisma.task.count({ where: { workspaceId: WS } });
-    const steps1 = await prisma.step.count({ where: { task: { workspaceId: WS } } });
+    const steps1 = await prisma.step.count({
+      where: { task: { workspaceId: WS } },
+    });
 
     expect(items1).toBeGreaterThan(0);
     expect(tasks1).toBeGreaterThan(0);
@@ -50,9 +54,13 @@ describe("seedReviewApp (idempotent review-app seed)", () => {
 
     // Second run must not duplicate anything.
     await seedReviewApp(prisma, WS);
-    const items2 = await prisma.brainDumpItem.count({ where: { workspaceId: WS } });
+    const items2 = await prisma.brainDumpItem.count({
+      where: { workspaceId: WS },
+    });
     const tasks2 = await prisma.task.count({ where: { workspaceId: WS } });
-    const steps2 = await prisma.step.count({ where: { task: { workspaceId: WS } } });
+    const steps2 = await prisma.step.count({
+      where: { task: { workspaceId: WS } },
+    });
 
     expect(items2).toBe(items1);
     expect(tasks2).toBe(tasks1);

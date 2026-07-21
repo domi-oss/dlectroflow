@@ -18,21 +18,37 @@ describe("dropPlan", () => {
 
   it("applies the target action for a cross-bucket move", () => {
     expect(dropPlan("needsReview", "singleTask")).toEqual({
-      kind: "apply", target: "singleTask", action: "triage", reopenFirst: false,
+      kind: "apply",
+      target: "singleTask",
+      action: "triage",
+      reopenFirst: false,
     });
     expect(dropPlan("singleTask", "completed")).toEqual({
-      kind: "apply", target: "completed", action: "complete", reopenFirst: false,
+      kind: "apply",
+      target: "completed",
+      action: "complete",
+      reopenFirst: false,
     });
   });
 
   it("reopens first when the source is completed", () => {
-    expect(dropPlan("completed", "singleTask")).toMatchObject({ kind: "apply", reopenFirst: true, action: "triage" });
+    expect(dropPlan("completed", "singleTask")).toMatchObject({
+      kind: "apply",
+      reopenFirst: true,
+      action: "triage",
+    });
   });
 
   it("multi-step target moves immediately via requestBreakdown (no blocking prompt)", () => {
     expect(dropPlan("needsReview", "multiStep")).toEqual({
-      kind: "apply", target: "multiStep", action: "requestBreakdown", reopenFirst: false,
+      kind: "apply",
+      target: "multiStep",
+      action: "requestBreakdown",
+      reopenFirst: false,
     });
-    expect(dropPlan("completed", "multiStep")).toMatchObject({ reopenFirst: true, action: "requestBreakdown" });
+    expect(dropPlan("completed", "multiStep")).toMatchObject({
+      reopenFirst: true,
+      action: "requestBreakdown",
+    });
   });
 });

@@ -5,7 +5,15 @@ import userEvent from "@testing-library/user-event";
 import { TimerCustomizationHint } from "@/components/focus/timer-customization-hint";
 
 vi.mock("next/link", () => ({
-  default: ({ children, href, onClick }: { children: React.ReactNode; href: string; onClick?: () => void }) => (
+  default: ({
+    children,
+    href,
+    onClick,
+  }: {
+    children: React.ReactNode;
+    href: string;
+    onClick?: () => void;
+  }) => (
     <a href={href} onClick={onClick}>
       {children}
     </a>
@@ -18,7 +26,9 @@ describe("TimerCustomizationHint", () => {
   it("shows the customization copy and links to /settings", () => {
     render(<TimerCustomizationHint voice="plain" onDismiss={() => {}} />);
     expect(screen.getByText(/make this timer yours/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /open settings/i })).toHaveAttribute("href", "/settings");
+    expect(
+      screen.getByRole("link", { name: /open settings/i }),
+    ).toHaveAttribute("href", "/settings");
   });
 
   it("the ✕ button dismisses (has a text accessible name)", async () => {

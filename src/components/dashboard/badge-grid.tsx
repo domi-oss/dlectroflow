@@ -22,7 +22,13 @@ const BADGE_STRING_KEY: Record<BadgeKey, StringKey> = {
  * (a 🔒 glyph + reduced opacity + an aria-label / title) per the COGA
  * accessibility baseline.
  */
-export function BadgeGrid({ voice, earned }: { voice: Voice; earned: string[] }) {
+export function BadgeGrid({
+  voice,
+  earned,
+}: {
+  voice: Voice;
+  earned: string[];
+}) {
   const earnedSet = new Set(earned);
   return (
     <section className="rounded-xl border p-4">

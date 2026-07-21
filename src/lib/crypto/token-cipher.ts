@@ -47,7 +47,9 @@ export function decryptToken(stored: string): string {
   const ct = buf.subarray(IV_BYTES + TAG_BYTES);
   const decipher = crypto.createDecipheriv("aes-256-gcm", getKey(), iv);
   decipher.setAuthTag(tag);
-  return Buffer.concat([decipher.update(ct), decipher.final()]).toString("utf8");
+  return Buffer.concat([decipher.update(ct), decipher.final()]).toString(
+    "utf8",
+  );
 }
 
 export function encryptNullable(v: string | null | undefined): string | null {

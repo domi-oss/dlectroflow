@@ -8,18 +8,26 @@ export function nextStepText(item: Item): string | null {
   return item.steps.find((s) => !s.done)?.text ?? null;
 }
 export function remainingMinutes(item: Item): number {
-  return item.steps.filter((s) => !s.done).reduce((n, s) => n + (s.estMinutes || 0), 0);
+  return item.steps
+    .filter((s) => !s.done)
+    .reduce((n, s) => n + (s.estMinutes || 0), 0);
 }
 export function singleTaskEstimate(item: Item): number {
   return item.estMinutes ?? 5;
 }
 export function rowEmoji(item: Item): string | null {
-  return (item.steps.find((s) => !s.done) ?? item.steps[0])?.subtaskEmoji ?? null;
+  return (
+    (item.steps.find((s) => !s.done) ?? item.steps[0])?.subtaskEmoji ?? null
+  );
 }
 
 /** Subtle tabular row index, e.g. "2." */
 export function RowNumber({ n }: { n: number }) {
-  return <span className="text-muted-foreground min-w-[1.25rem] text-right text-xs tabular-nums">{n}.</span>;
+  return (
+    <span className="text-muted-foreground min-w-[1.25rem] text-right text-xs tabular-nums">
+      {n}.
+    </span>
+  );
 }
 
 /** "Next: <step>" preview (multi-step only). */
@@ -45,18 +53,40 @@ export function ProgressBar({ item }: { item: Item }) {
 }
 
 /** "added Xh ago" with an amber accent once the item is aging. */
-export function AgeLabel({ item, now, voice, settings }: { item: Item; now: number; voice: Voice; settings: AgingSettings }) {
+export function AgeLabel({
+  item,
+  now,
+  voice,
+  settings,
+}: {
+  item: Item;
+  now: number;
+  voice: Voice;
+  settings: AgingSettings;
+}) {
   const aging = isAging(item.createdAt, settings);
   return (
-    <span className={cn("text-xs", aging ? "text-amber-600" : "text-muted-foreground")}>
-      {t("lib.added", voice)} {formatAgo(now - new Date(item.createdAt).getTime())}
+    <span
+      className={cn(
+        "text-xs",
+        aging ? "text-amber-600" : "text-muted-foreground",
+      )}
+    >
+      {t("lib.added", voice)}{" "}
+      {formatAgo(now - new Date(item.createdAt).getTime())}
     </span>
   );
 }
 
 /** Right-aligned "min left" estimate pill (multi-step rows only — single-task
  * rows use the editable `EstimateEditor` in library-rows.tsx instead). */
-export function EstimatePill({ minutes, voice }: { minutes: number; voice: Voice }) {
+export function EstimatePill({
+  minutes,
+  voice,
+}: {
+  minutes: number;
+  voice: Voice;
+}) {
   if (minutes <= 0) return null;
   return (
     <span className="text-muted-foreground shrink-0 rounded-full border px-2 py-0.5 text-xs">

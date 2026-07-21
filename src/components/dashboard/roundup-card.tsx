@@ -159,9 +159,13 @@ export function RoundupCard({
             <span>⏱️ {rollup.focusMin} focus mins</span>
             <span>🎯 {rollup.sessions} sessions</span>
             <span>⭐ {rollup.points} points</span>
-            {rollup.streakDay > 0 && <span>🔥 {rollup.streakDay}-day streak</span>}
+            {rollup.streakDay > 0 && (
+              <span>🔥 {rollup.streakDay}-day streak</span>
+            )}
           </div>
-          <p className="text-sm text-muted-foreground italic">✨ {rollup.spark}</p>
+          <p className="text-sm text-muted-foreground italic">
+            ✨ {rollup.spark}
+          </p>
           <Link
             href="/inbox"
             className="inline-block text-sm font-medium text-amber-700 hover:underline dark:text-amber-400"
@@ -191,7 +195,10 @@ export function RoundupCard({
         </button>
       )}
 
-      <RoundupSettingsPanel settings={settings} emailConfigured={emailConfigured} />
+      <RoundupSettingsPanel
+        settings={settings}
+        emailConfigured={emailConfigured}
+      />
     </section>
   );
 }

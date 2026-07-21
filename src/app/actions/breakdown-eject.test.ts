@@ -5,25 +5,29 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(() => {
-  const prismaMock = {
-    step: {
-      findFirst: vi.fn(),
-      delete: vi.fn().mockResolvedValue({}),
-      findMany: vi.fn(),
-      update: vi.fn().mockImplementation((args) => Promise.resolve(args)),
-    },
-    brainDumpItem: {
-      create: vi.fn().mockResolvedValue({ id: "new-item" }),
-    },
-    $transaction: vi.fn((ops: unknown[]) => Promise.all(ops as Promise<unknown>[])),
-  };
-  return {
-    prismaMock,
-    revalidatePathMock: vi.fn(),
-    currentWorkspaceIdMock: vi.fn().mockResolvedValue("owner"),
-  };
-});
+const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
+  () => {
+    const prismaMock = {
+      step: {
+        findFirst: vi.fn(),
+        delete: vi.fn().mockResolvedValue({}),
+        findMany: vi.fn(),
+        update: vi.fn().mockImplementation((args) => Promise.resolve(args)),
+      },
+      brainDumpItem: {
+        create: vi.fn().mockResolvedValue({ id: "new-item" }),
+      },
+      $transaction: vi.fn((ops: unknown[]) =>
+        Promise.all(ops as Promise<unknown>[]),
+      ),
+    };
+    return {
+      prismaMock,
+      revalidatePathMock: vi.fn(),
+      currentWorkspaceIdMock: vi.fn().mockResolvedValue("owner"),
+    };
+  },
+);
 
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/lib/db", () => ({ prisma: prismaMock }));
@@ -67,18 +71,22 @@ describe("breakdown.ts › ejectStepToInbox", () => {
     const { ejectStepToInbox } = await import("./breakdown");
     await ejectStepToInbox("s2");
     expect(prismaMock.brainDumpItem.create).toHaveBeenCalledTimes(1);
-    expect(prismaMock.brainDumpItem.create.mock.calls[0][0].data).toMatchObject({
-      text: "book the venue",
-      workspaceId: "owner",
-      status: "inbox",
-    });
+    expect(prismaMock.brainDumpItem.create.mock.calls[0][0].data).toMatchObject(
+      {
+        text: "book the venue",
+        workspaceId: "owner",
+        status: "inbox",
+      },
+    );
   });
 
   it("deletes the step and renumbers the remaining ones contiguously", async () => {
     const { ejectStepToInbox } = await import("./breakdown");
     const res = await ejectStepToInbox("s2");
 
-    expect(prismaMock.step.delete).toHaveBeenCalledWith({ where: { id: "s2" } });
+    expect(prismaMock.step.delete).toHaveBeenCalledWith({
+      where: { id: "s2" },
+    });
     // s1 → order 1/total 2, s3 → order 2/total 2
     const updates = prismaMock.step.update.mock.calls.map((c) => c[0]);
     expect(updates).toEqual([

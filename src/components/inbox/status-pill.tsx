@@ -28,7 +28,10 @@ export function StatusPill({
   const label = t(`freshness.${tier}`, voice);
   return (
     <span
-      className={cn("inline-flex shrink-0 items-center gap-1 text-xs font-medium", color)}
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 text-xs font-medium",
+        color,
+      )}
     >
       <span aria-hidden="true">{dot}</span>
       {label}

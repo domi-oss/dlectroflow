@@ -4,7 +4,10 @@ const { logRewardMock, awardBadgeMock } = vi.hoisted(() => ({
   logRewardMock: vi.fn(),
   awardBadgeMock: vi.fn(),
 }));
-vi.mock("@/lib/rewards", () => ({ logReward: logRewardMock, awardBadge: awardBadgeMock }));
+vi.mock("@/lib/rewards", () => ({
+  logReward: logRewardMock,
+  awardBadge: awardBadgeMock,
+}));
 
 import { awardFirstSchedule } from "./award";
 import { RewardType, BadgeKey } from "@/lib/constants";

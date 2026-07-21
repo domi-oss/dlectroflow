@@ -38,12 +38,19 @@ export default async function DashboardPage({
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label={t("stat.pointsToday", voice)} value={data.todayPoints} accent="text-amber-600" />
+        <Stat
+          label={t("stat.pointsToday", voice)}
+          value={data.todayPoints}
+          accent="text-amber-600"
+        />
         <Stat
           label={t("stat.currentStreak", voice)}
           value={`${data.currentStreak}${data.currentStreak > 0 && voice === "playful" ? " 🔥" : ""}`}
         />
-        <Stat label={t("stat.focusMinsToday", voice)} value={data.focusMinToday} />
+        <Stat
+          label={t("stat.focusMinsToday", voice)}
+          value={data.focusMinToday}
+        />
         <Stat label={t("stat.stepsToday", voice)} value={data.stepsDoneToday} />
       </div>
 
@@ -61,10 +68,13 @@ export default async function DashboardPage({
 
       {/* Best streaks */}
       <section className="rounded-xl border p-4">
-        <h2 className="mb-2 text-sm font-semibold">{t("heading.bestStreaks", voice)}</h2>
+        <h2 className="mb-2 text-sm font-semibold">
+          {t("heading.bestStreaks", voice)}
+        </h2>
         {data.topStreaks.length === 0 ? (
           <p className="text-muted-foreground text-sm">
-            No completed streaks yet — finish a step on a working day to start one.
+            No completed streaks yet — finish a step on a working day to start
+            one.
           </p>
         ) : (
           <ul className="space-y-1 text-sm">

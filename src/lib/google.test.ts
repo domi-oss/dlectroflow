@@ -101,7 +101,12 @@ describe("invalid_grant handling", () => {
     expect(await getValidAccessToken()).toBeNull();
     expect(prismaMock.googleAuth.update).toHaveBeenCalledWith({
       where: { id: "singleton" },
-      data: { accessToken: null, refreshToken: null, expiresAt: null, needsReconnect: true },
+      data: {
+        accessToken: null,
+        refreshToken: null,
+        expiresAt: null,
+        needsReconnect: true,
+      },
     });
   });
 
@@ -167,8 +172,10 @@ describe("disconnectGoogle", () => {
     const { encryptToken } = await import("@/lib/crypto/token-cipher");
     prismaMock.googleAuth.upsert.mockResolvedValue({
       id: "singleton",
-      accessToken: encryptToken("at"), refreshToken: encryptToken("rt"),
-      expiresAt: null, needsReconnect: false,
+      accessToken: encryptToken("at"),
+      refreshToken: encryptToken("rt"),
+      expiresAt: null,
+      needsReconnect: false,
     });
     const fetchMock = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("fetch", fetchMock);
@@ -186,8 +193,10 @@ describe("disconnectGoogle", () => {
     const { encryptToken } = await import("@/lib/crypto/token-cipher");
     prismaMock.googleAuth.upsert.mockResolvedValue({
       id: "singleton",
-      accessToken: encryptToken("at"), refreshToken: null,
-      expiresAt: null, needsReconnect: false,
+      accessToken: encryptToken("at"),
+      refreshToken: null,
+      expiresAt: null,
+      needsReconnect: false,
     });
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net down")));
     const { disconnectGoogle } = await import("./google");
@@ -197,8 +206,11 @@ describe("disconnectGoogle", () => {
 
   it("is a no-op-safe delete when nothing is stored", async () => {
     prismaMock.googleAuth.upsert.mockResolvedValue({
-      id: "singleton", accessToken: null, refreshToken: null,
-      expiresAt: null, needsReconnect: false,
+      id: "singleton",
+      accessToken: null,
+      refreshToken: null,
+      expiresAt: null,
+      needsReconnect: false,
     });
     vi.stubGlobal("fetch", vi.fn());
     const { disconnectGoogle } = await import("./google");

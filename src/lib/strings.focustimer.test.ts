@@ -12,7 +12,9 @@ describe("focus-timer redesign strings (MR ②)", () => {
   it("the first-run hint resolves in both voices", () => {
     expect(t("focus.tip.body", "plain")).toMatch(/make this timer yours/i);
     expect(t("focus.tip.cta", "plain")).toBe("Open settings →");
-    expect(t("focus.tip.body", "playful")).not.toBe(t("focus.tip.body", "plain"));
+    expect(t("focus.tip.body", "playful")).not.toBe(
+      t("focus.tip.body", "plain"),
+    );
   });
 
   it("settings labels resolve; the heading gets a playful emoji anchor only in playful", () => {

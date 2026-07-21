@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { cn, touchTarget } from "@/lib/utils";
@@ -43,16 +49,29 @@ import {
   renameItem,
 } from "@/app/actions/braindump";
 import { startBreakdown } from "@/app/actions/breakdown";
-import { pushStepsToGoogleTasks, scheduleSingleTask } from "@/app/actions/google-schedule";
+import {
+  pushStepsToGoogleTasks,
+  scheduleSingleTask,
+} from "@/app/actions/google-schedule";
 import { scheduleViaIcs } from "@/app/actions/ics-schedule";
 import { downloadIcs } from "@/lib/download-ics";
 import type { GoogleConnStatus } from "@/lib/scheduling/types";
 import { StatusPill } from "@/components/inbox/status-pill";
 import { TaskSteps } from "@/components/breakdown/task-steps";
-import { bucketItems, bucketOfItem, isBucketId, type Item, type BucketId } from "@/components/inbox/bucket";
+import {
+  bucketItems,
+  bucketOfItem,
+  isBucketId,
+  type Item,
+  type BucketId,
+} from "@/components/inbox/bucket";
 import { dropPlan } from "@/components/inbox/move-dispatch";
 import { MoveToMenu } from "@/components/inbox/move-to-menu";
-import { RowActions, ScheduleControl, type ScheduleControlProps } from "@/components/inbox/row-actions";
+import {
+  RowActions,
+  ScheduleControl,
+  type ScheduleControlProps,
+} from "@/components/inbox/row-actions";
 import { CompleteButton } from "@/components/inbox/complete-button";
 import { WelcomeCard } from "@/components/inbox/welcome-card";
 import { SubHeader, SEE_ALL } from "@/components/inbox/sub-header";
@@ -101,7 +120,8 @@ export function scheduleState(
 // Exported for reuse by <TaskSchedule> (#8 follow-up) — same single source
 // of truth as `scheduleState` above.
 export const SCHEDULE_ERROR_MESSAGES: Record<string, string> = {
-  not_configured: "Google isn't configured (set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).",
+  not_configured:
+    "Google isn't configured (set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).",
   not_connected: "Google Tasks isn't connected.",
   no_reclaim_list: "Couldn't find your Reclaim-synced Google Tasks list.",
   no_steps: "No steps to send.",
@@ -111,8 +131,13 @@ export const SCHEDULE_ERROR_MESSAGES: Record<string, string> = {
 /** ICS states carry the "Add to calendar" label; Google states carry "Schedule". */
 const isIcsState = (s: ScheduleControlProps["state"]) =>
   s === "ics_ready_steps" || s === "ics_needs_duration";
-const scheduleMenuLabel = (s: ScheduleControlProps["state"], voice: Voice): string =>
-  isIcsState(s) ? t("action.addToCalendar", voice) : t("action.schedule", voice);
+const scheduleMenuLabel = (
+  s: ScheduleControlProps["state"],
+  voice: Voice,
+): string =>
+  isIcsState(s)
+    ? t("action.addToCalendar", voice)
+    : t("action.schedule", voice);
 
 export function InboxView({
   initialItems,
@@ -206,8 +231,14 @@ export function InboxView({
     void requestNotificationPermission();
   };
 
-  const { needsReview, singleTask, multiStep, savedLater, completed, completedTodayCount } =
-    bucketItems(initialItems, now);
+  const {
+    needsReview,
+    singleTask,
+    multiStep,
+    savedLater,
+    completed,
+    completedTodayCount,
+  } = bucketItems(initialItems, now);
 
   const untriagedCount = needsReview.length;
   const agingCount = needsReview.filter((i) =>
@@ -249,7 +280,9 @@ export function InboxView({
   // Per-row 📅 error text (cleared on the row's next attempt); reconnect_required
   // is a workspace-wide condition, so it swaps every row's control to the
   // Reconnect link rather than just showing an error message on one row.
-  const [scheduleErrors, setScheduleErrors] = useState<Record<string, string>>({});
+  const [scheduleErrors, setScheduleErrors] = useState<Record<string, string>>(
+    {},
+  );
   const [reconnectRequired, setReconnectRequired] = useState(false);
   // Already null for guests (owner-gated at the server boundary), so this directly
   // encodes whether these rows lead with Google (owner) or ICS (guest). The
@@ -260,7 +293,9 @@ export function InboxView({
 
   const runSchedule = (
     itemId: string,
-    fn: () => Promise<{ ok: true } | { ok: false; reason: string; message?: string }>,
+    fn: () => Promise<
+      { ok: true } | { ok: false; reason: string; message?: string }
+    >,
   ) =>
     startTransition(async () => {
       setScheduleErrors((prev) => {
@@ -287,7 +322,10 @@ export function InboxView({
         // Prefer the action's own message — e.g. pushStepsToGoogleTasks's
         // no_reclaim_list failure lists the available lists, which is more
         // useful than the generic dictionary copy for the same reason.
-        [itemId]: res.message ?? SCHEDULE_ERROR_MESSAGES[res.reason] ?? "Scheduling failed.",
+        [itemId]:
+          res.message ??
+          SCHEDULE_ERROR_MESSAGES[res.reason] ??
+          "Scheduling failed.",
       }));
     });
 
@@ -316,7 +354,10 @@ export function InboxView({
       }
       setScheduleErrors((prev) => ({
         ...prev,
-        [itemId]: res.message ?? SCHEDULE_ERROR_MESSAGES[res.reason] ?? "Couldn't build the calendar file.",
+        [itemId]:
+          res.message ??
+          SCHEDULE_ERROR_MESSAGES[res.reason] ??
+          "Couldn't build the calendar file.",
       }));
     });
 
@@ -328,7 +369,10 @@ export function InboxView({
       const tid = item.taskId; // guard, mirroring the multi-step Google wiring
       if (!tid) return;
       runScheduleIcs(item.id, () =>
-        scheduleViaIcs(tid, minutes != null ? { durationMin: minutes } : undefined),
+        scheduleViaIcs(
+          tid,
+          minutes != null ? { durationMin: minutes } : undefined,
+        ),
       );
     },
     pending,
@@ -364,7 +408,10 @@ export function InboxView({
       type="button"
       aria-label={`Edit ${item.text}`}
       onClick={() => setEditingId(item.id)}
-      className={cn("text-muted-foreground hover:text-foreground shrink-0 px-1 text-xs", touchTarget)}
+      className={cn(
+        "text-muted-foreground hover:text-foreground shrink-0 px-1 text-xs",
+        touchTarget,
+      )}
     >
       ✏️
     </button>
@@ -403,7 +450,9 @@ export function InboxView({
   // a 5px threshold (imperceptible, and stops stray clicks becoming drags).
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 250, tolerance: 5 },
+    }),
     useSensor(KeyboardSensor),
   );
   const itemsById = new Map(initialItems.map((i) => [i.id, i]));
@@ -417,11 +466,21 @@ export function InboxView({
     run(async () => {
       if (plan.reopenFirst) await reopenItem(itemId, undefined);
       switch (plan.action) {
-        case "moveToReview":      await moveToReview(itemId); break;
-        case "triage":            await triageBrainDumpItem(itemId); break;
-        case "requestBreakdown":  await requestBreakdown(itemId); break;
-        case "snooze":            await snoozeBrainDumpItem(itemId, 60); break;
-        case "complete":          await completeItem(itemId); break;
+        case "moveToReview":
+          await moveToReview(itemId);
+          break;
+        case "triage":
+          await triageBrainDumpItem(itemId);
+          break;
+        case "requestBreakdown":
+          await requestBreakdown(itemId);
+          break;
+        case "snooze":
+          await snoozeBrainDumpItem(itemId, 60);
+          break;
+        case "complete":
+          await completeItem(itemId);
+          break;
       }
     });
   };
@@ -430,13 +489,19 @@ export function InboxView({
   // rows compare their id against activeDragId to dim themselves (dnd-kit does
   // NOT hide the source automatically). Cleared on drop/cancel.
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
-  const handleDragStart = (e: DragStartEvent) => setActiveDragId(String(e.active.id));
+  const handleDragStart = (e: DragStartEvent) =>
+    setActiveDragId(String(e.active.id));
   const handleDragEnd = (e: DragEndEvent) => {
     setActiveDragId(null);
-    const move = dragEndToMove(String(e.active.id), e.over ? String(e.over.id) : null);
+    const move = dragEndToMove(
+      String(e.active.id),
+      e.over ? String(e.over.id) : null,
+    );
     if (move) moveItemToBucket(move.itemId, move.target);
   };
-  const activeDragItem = activeDragId ? (itemsById.get(activeDragId) ?? null) : null;
+  const activeDragItem = activeDragId
+    ? (itemsById.get(activeDragId) ?? null)
+    : null;
 
   const submit = () => {
     const value = text.trim();
@@ -466,7 +531,10 @@ export function InboxView({
   const deleteControl = (
     itemId: string,
     key: string,
-    { fullWidth = false, icon = false }: { fullWidth?: boolean; icon?: boolean } = {},
+    {
+      fullWidth = false,
+      icon = false,
+    }: { fullWidth?: boolean; icon?: boolean } = {},
   ) =>
     confirmDeleteId === itemId ? (
       <span key={key} className="flex items-center gap-2">
@@ -491,7 +559,10 @@ export function InboxView({
         key={key}
         aria-label={t("action.delete", voice)}
         title={t("action.delete", voice)}
-        className={cn("text-muted-foreground hover:text-destructive rounded-md px-2.5 py-1", touchTarget)}
+        className={cn(
+          "text-muted-foreground hover:text-destructive rounded-md px-2.5 py-1",
+          touchTarget,
+        )}
         onClick={() => requestDelete(itemId)}
       >
         🗑
@@ -518,7 +589,8 @@ export function InboxView({
           className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-50 px-4 py-2 text-sm dark:bg-amber-950/20"
         >
           <span className="flex-1">
-            {t("focus.pausedBanner", voice)} <strong>&ldquo;{resumeStep.text}&rdquo;</strong>
+            {t("focus.pausedBanner", voice)}{" "}
+            <strong>&ldquo;{resumeStep.text}&rdquo;</strong>
           </span>
           <Link
             href={`/focus/${resumeStep.id}`}
@@ -571,7 +643,12 @@ export function InboxView({
         )}
       </div>
 
-      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragCancel={() => setActiveDragId(null)} onDragEnd={handleDragEnd}>
+      <DndContext
+        sensors={sensors}
+        onDragStart={handleDragStart}
+        onDragCancel={() => setActiveDragId(null)}
+        onDragEnd={handleDragEnd}
+      >
         {/* Needs review */}
         <section>
           <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
@@ -597,7 +674,9 @@ export function InboxView({
                     ? {
                         state: scheduleState(effectiveGoogle, "needs_duration"),
                         onScheduleSingle: (minutes: number) =>
-                          runSchedule(item.id, () => scheduleSingleTask(item.id, minutes)),
+                          runSchedule(item.id, () =>
+                            scheduleSingleTask(item.id, minutes),
+                          ),
                         pending,
                       }
                     : icsProps(item);
@@ -611,8 +690,12 @@ export function InboxView({
                       now={now}
                       onBreakdown={() => breakdown(item.id)}
                       onKeep={() => run(() => keepAsTask(item.id))}
-                      onSaveForLater={() => moveItemToBucket(item.id, "savedLater")}
-                      onSnooze={() => run(() => snoozeBrainDumpItem(item.id, 60))}
+                      onSaveForLater={() =>
+                        moveItemToBucket(item.id, "savedLater")
+                      }
+                      onSnooze={() =>
+                        run(() => snoozeBrainDumpItem(item.id, 60))
+                      }
                       onComplete={() => run(() => completeItem(item.id))}
                       confirmingDelete={confirmDeleteId === item.id}
                       onRequestDelete={() => requestDelete(item.id)}
@@ -653,7 +736,9 @@ export function InboxView({
                       dragGrip={<DragGrip id={item.id} label={item.text} />}
                       editButton={pencil(item)}
                       editMenuItem={editMenuItem(item)}
-                      titleEditor={editingId === item.id ? titleEditor(item) : undefined}
+                      titleEditor={
+                        editingId === item.id ? titleEditor(item) : undefined
+                      }
                     />
                   );
                 })}
@@ -668,7 +753,12 @@ export function InboxView({
 
           {/* Multi-step */}
           <div>
-            <SubHeader label={t("section.multiStep", voice)} count={multiStep.length} seeAllHref={SEE_ALL.multiStep} voice={voice} />
+            <SubHeader
+              label={t("section.multiStep", voice)}
+              count={multiStep.length}
+              seeAllHref={SEE_ALL.multiStep}
+              voice={voice}
+            />
             <DroppableBucket id="multiStep">
               {multiStep.length === 0 ? (
                 <EmptyBucket voice={voice} />
@@ -683,27 +773,45 @@ export function InboxView({
                     // No steps yet → nothing to push, so 📅 offers the same
                     // duration popover a single-task row uses. Rows with
                     // steps push them straight to Google Tasks on tap.
-                    const schedule: ScheduleControlProps | null = !effectiveGoogle
-                      ? icsProps(item)
-                      : awaitingBreakdown
-                        ? {
-                            state: scheduleState(effectiveGoogle, "needs_duration"),
-                            onScheduleSingle: (minutes: number) =>
-                              runSchedule(item.id, () => scheduleSingleTask(item.id, minutes)),
-                            pending,
-                          }
-                        : {
-                            state: scheduleState(effectiveGoogle, "ready_steps"),
-                            onScheduleSteps: () => {
-                              // Guard taskId instead of asserting it — a data
-                              // inconsistency should no-op, not POST undefined (Duo review).
-                              const tid = item.taskId;
-                              if (tid) runSchedule(item.id, () => pushStepsToGoogleTasks(tid));
-                            },
-                            pending,
-                          };
+                    const schedule: ScheduleControlProps | null =
+                      !effectiveGoogle
+                        ? icsProps(item)
+                        : awaitingBreakdown
+                          ? {
+                              state: scheduleState(
+                                effectiveGoogle,
+                                "needs_duration",
+                              ),
+                              onScheduleSingle: (minutes: number) =>
+                                runSchedule(item.id, () =>
+                                  scheduleSingleTask(item.id, minutes),
+                                ),
+                              pending,
+                            }
+                          : {
+                              state: scheduleState(
+                                effectiveGoogle,
+                                "ready_steps",
+                              ),
+                              onScheduleSteps: () => {
+                                // Guard taskId instead of asserting it — a data
+                                // inconsistency should no-op, not POST undefined (Duo review).
+                                const tid = item.taskId;
+                                if (tid)
+                                  runSchedule(item.id, () =>
+                                    pushStepsToGoogleTasks(tid),
+                                  );
+                              },
+                              pending,
+                            };
                     return (
-                      <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", item.id === activeDragId && "opacity-40")}>
+                      <li
+                        key={item.id}
+                        className={cn(
+                          "rounded-lg border px-4 py-3 text-sm",
+                          item.id === activeDragId && "opacity-40",
+                        )}
+                      >
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
                         {/* Tapping anywhere on the title line toggles the inline
                             step list (a step-bearing row); the title button keeps
@@ -712,7 +820,9 @@ export function InboxView({
                         <div
                           className={cn(
                             "flex items-start gap-3",
-                            !awaitingBreakdown && editingId !== item.id && "cursor-pointer",
+                            !awaitingBreakdown &&
+                              editingId !== item.id &&
+                              "cursor-pointer",
                           )}
                           onClick={
                             !awaitingBreakdown && editingId !== item.id
@@ -740,12 +850,15 @@ export function InboxView({
                               >
                                 {item.text}
                               </button>{" "}
-                              <span onClick={(e) => e.stopPropagation()}>{pencil(item)}</span>
+                              <span onClick={(e) => e.stopPropagation()}>
+                                {pencil(item)}
+                              </span>
                             </span>
                           )}
                           {editingId !== item.id && !awaitingBreakdown && (
                             <span className="text-muted-foreground shrink-0 text-xs">
-                              {item.stepsTotal} steps · {item.stepsDone} {t("progress.done", voice)}
+                              {item.stepsTotal} steps · {item.stepsDone}{" "}
+                              {t("progress.done", voice)}
                             </span>
                           )}
                         </div>
@@ -774,7 +887,13 @@ export function InboxView({
                                   >
                                     ▶ Start Focus
                                   </button>,
-                                  <CompleteButton key="complete" voice={voice} onClick={() => run(() => completeItem(item.id))} />,
+                                  <CompleteButton
+                                    key="complete"
+                                    voice={voice}
+                                    onClick={() =>
+                                      run(() => completeItem(item.id))
+                                    }
+                                  />,
                                 ]
                           }
                           move={
@@ -783,7 +902,9 @@ export function InboxView({
                               compact
                               currentBucket={bucketOfItem(item, now)}
                               voice={voice}
-                              onMove={(target) => moveItemToBucket(item.id, target)}
+                              onMove={(target) =>
+                                moveItemToBucket(item.id, target)
+                              }
                             />
                           }
                           schedule={schedule}
@@ -793,7 +914,9 @@ export function InboxView({
                               key="move"
                               currentBucket={bucketOfItem(item, now)}
                               voice={voice}
-                              onMove={(target) => moveItemToBucket(item.id, target)}
+                              onMove={(target) =>
+                                moveItemToBucket(item.id, target)
+                              }
                             />,
                             // Rows with steps: view the broken-down list (inline
                             // expand) + jump to the task page to focus a step —
@@ -803,7 +926,9 @@ export function InboxView({
                                 key="view-list-m"
                                 type="button"
                                 className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                onClick={() => setExpandedId(expanded ? null : item.id)}
+                                onClick={() =>
+                                  setExpandedId(expanded ? null : item.id)
+                                }
                               >
                                 View multi-step task list
                               </button>
@@ -816,7 +941,10 @@ export function InboxView({
                                 // Guard rather than assert: a multi-step row's Task always
                                 // exists by construction, but a data inconsistency must not
                                 // navigate to `/tasks/null` (Duo review).
-                                onClick={() => item.taskId && router.push(`/tasks/${item.taskId}`)}
+                                onClick={() =>
+                                  item.taskId &&
+                                  router.push(`/tasks/${item.taskId}`)
+                                }
                               >
                                 Start visual focus timer
                               </button>
@@ -857,11 +985,15 @@ export function InboxView({
                               />
                             ) : null,
                             editMenuItem(item),
-                            deleteControl(item.id, "delete-m", { fullWidth: true }),
+                            deleteControl(item.id, "delete-m", {
+                              fullWidth: true,
+                            }),
                           ]}
                         />
                         {scheduleErrors[item.id] && (
-                          <p className="text-destructive mt-1 text-xs">{scheduleErrors[item.id]}</p>
+                          <p className="text-destructive mt-1 text-xs">
+                            {scheduleErrors[item.id]}
+                          </p>
                         )}
                         {expanded && item.taskId && (
                           <div className="mt-2">
@@ -891,23 +1023,40 @@ export function InboxView({
 
           {/* Single-task */}
           <div>
-            <SubHeader label={t("section.singleTask", voice)} count={singleTask.length} seeAllHref={SEE_ALL.singleTask} voice={voice} />
+            <SubHeader
+              label={t("section.singleTask", voice)}
+              count={singleTask.length}
+              seeAllHref={SEE_ALL.singleTask}
+              voice={voice}
+            />
             <DroppableBucket id="singleTask">
               {singleTask.length === 0 ? (
                 <EmptyBucket voice={voice} />
               ) : (
                 <ul className={cn("space-y-2", pending && "opacity-70")}>
                   {singleTask.map((item) => {
-                    const schedule: ScheduleControlProps | null = effectiveGoogle
-                      ? {
-                          state: scheduleState(effectiveGoogle, "needs_duration"),
-                          onScheduleSingle: (minutes: number) =>
-                            runSchedule(item.id, () => scheduleSingleTask(item.id, minutes)),
-                          pending,
-                        }
-                      : icsProps(item);
+                    const schedule: ScheduleControlProps | null =
+                      effectiveGoogle
+                        ? {
+                            state: scheduleState(
+                              effectiveGoogle,
+                              "needs_duration",
+                            ),
+                            onScheduleSingle: (minutes: number) =>
+                              runSchedule(item.id, () =>
+                                scheduleSingleTask(item.id, minutes),
+                              ),
+                            pending,
+                          }
+                        : icsProps(item);
                     return (
-                      <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", item.id === activeDragId && "opacity-40")}>
+                      <li
+                        key={item.id}
+                        className={cn(
+                          "rounded-lg border px-4 py-3 text-sm",
+                          item.id === activeDragId && "opacity-40",
+                        )}
+                      >
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
                         <div className="flex items-start gap-3">
                           <DragGrip id={item.id} label={item.text} />
@@ -920,7 +1069,10 @@ export function InboxView({
                           )}
                           {editingId !== item.id && (
                             <span className="text-muted-foreground shrink-0 text-xs">
-                              captured {formatAgo(now - new Date(item.createdAt).getTime())}
+                              captured{" "}
+                              {formatAgo(
+                                now - new Date(item.createdAt).getTime(),
+                              )}
                             </span>
                           )}
                         </div>
@@ -935,7 +1087,11 @@ export function InboxView({
                             >
                               ▶ Start Focus
                             </button>,
-                            <CompleteButton key="complete" voice={voice} onClick={() => run(() => completeItem(item.id))} />,
+                            <CompleteButton
+                              key="complete"
+                              voice={voice}
+                              onClick={() => run(() => completeItem(item.id))}
+                            />,
                           ]}
                           move={
                             <MoveToMenu
@@ -943,7 +1099,9 @@ export function InboxView({
                               compact
                               currentBucket={bucketOfItem(item, now)}
                               voice={voice}
-                              onMove={(target) => moveItemToBucket(item.id, target)}
+                              onMove={(target) =>
+                                moveItemToBucket(item.id, target)
+                              }
                             />
                           }
                           schedule={schedule}
@@ -953,7 +1111,9 @@ export function InboxView({
                               key="move"
                               currentBucket={bucketOfItem(item, now)}
                               voice={voice}
-                              onMove={(target) => moveItemToBucket(item.id, target)}
+                              onMove={(target) =>
+                                moveItemToBucket(item.id, target)
+                              }
                             />,
                             <button
                               key="focus-m"
@@ -988,11 +1148,15 @@ export function InboxView({
                               />
                             ) : null,
                             editMenuItem(item),
-                            deleteControl(item.id, "delete-m", { fullWidth: true }),
+                            deleteControl(item.id, "delete-m", {
+                              fullWidth: true,
+                            }),
                           ]}
                         />
                         {scheduleErrors[item.id] && (
-                          <p className="text-destructive mt-1 text-xs">{scheduleErrors[item.id]}</p>
+                          <p className="text-destructive mt-1 text-xs">
+                            {scheduleErrors[item.id]}
+                          </p>
                         )}
                       </li>
                     );
@@ -1004,7 +1168,12 @@ export function InboxView({
 
           {/* Saved for later */}
           <div>
-            <SubHeader label={t("section.savedLater", voice)} count={savedLater.length} seeAllHref={SEE_ALL.savedLater} voice={voice} />
+            <SubHeader
+              label={t("section.savedLater", voice)}
+              count={savedLater.length}
+              seeAllHref={SEE_ALL.savedLater}
+              voice={voice}
+            />
             <DroppableBucket id="savedLater">
               {savedLater.length === 0 ? (
                 <EmptyBucket voice={voice} />
@@ -1016,7 +1185,15 @@ export function InboxView({
                        Idle rows are dimmed; a row under review looks active. */
                     const optionsOpen = savedOptionsId === item.id;
                     return (
-                      <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", item.id === activeDragId ? "opacity-40" : !optionsOpen && "opacity-70")}>
+                      <li
+                        key={item.id}
+                        className={cn(
+                          "rounded-lg border px-4 py-3 text-sm",
+                          item.id === activeDragId
+                            ? "opacity-40"
+                            : !optionsOpen && "opacity-70",
+                        )}
+                      >
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
                         <div className="flex items-start gap-3">
                           <DragGrip id={item.id} label={item.text} />
@@ -1027,7 +1204,11 @@ export function InboxView({
                               <button
                                 type="button"
                                 aria-expanded={optionsOpen}
-                                onClick={() => setSavedOptionsId(optionsOpen ? null : item.id)}
+                                onClick={() =>
+                                  setSavedOptionsId(
+                                    optionsOpen ? null : item.id,
+                                  )
+                                }
                                 className="break-words text-left hover:underline"
                               >
                                 {item.text}
@@ -1067,7 +1248,11 @@ export function InboxView({
                               >
                                 {t("action.saveShort", voice)}
                               </button>,
-                              <CompleteButton key="complete" voice={voice} onClick={() => run(() => completeItem(item.id))} />,
+                              <CompleteButton
+                                key="complete"
+                                voice={voice}
+                                onClick={() => run(() => completeItem(item.id))}
+                              />,
                             ]}
                             move={
                               <MoveToMenu
@@ -1075,16 +1260,22 @@ export function InboxView({
                                 compact
                                 currentBucket={bucketOfItem(item, now)}
                                 voice={voice}
-                                onMove={(target) => moveItemToBucket(item.id, target)}
+                                onMove={(target) =>
+                                  moveItemToBucket(item.id, target)
+                                }
                               />
                             }
-                            del={deleteControl(item.id, "delete-saved", { icon: true })}
+                            del={deleteControl(item.id, "delete-saved", {
+                              icon: true,
+                            })}
                             menu={[
                               <MoveToMenu
                                 key="move"
                                 currentBucket={bucketOfItem(item, now)}
                                 voice={voice}
-                                onMove={(target) => moveItemToBucket(item.id, target)}
+                                onMove={(target) =>
+                                  moveItemToBucket(item.id, target)
+                                }
                               />,
                               <button
                                 key="breakdown-m"
@@ -1118,7 +1309,9 @@ export function InboxView({
                                 {t("action.completeFull", voice)}
                               </button>,
                               editMenuItem(item),
-                              deleteControl(item.id, "delete-saved-m", { fullWidth: true }),
+                              deleteControl(item.id, "delete-saved-m", {
+                                fullWidth: true,
+                              }),
                             ]}
                           />
                         ) : (
@@ -1138,7 +1331,9 @@ export function InboxView({
                               compact
                               currentBucket={bucketOfItem(item, now)}
                               voice={voice}
-                              onMove={(target) => moveItemToBucket(item.id, target)}
+                              onMove={(target) =>
+                                moveItemToBucket(item.id, target)
+                              }
                             />
                           </div>
                         )}
@@ -1157,7 +1352,10 @@ export function InboxView({
               <span className="bg-secondary text-secondary-foreground rounded-full px-2 py-0.5 text-xs">
                 {t("section.completedToday", voice)}: {completedTodayCount}
               </span>
-              <a href="/library?tab=done" className="text-muted-foreground hover:text-foreground ml-auto text-xs font-normal">
+              <a
+                href="/library?tab=done"
+                className="text-muted-foreground hover:text-foreground ml-auto text-xs font-normal"
+              >
                 {t("link.seeAll", voice)}
               </a>
             </h2>
@@ -1172,7 +1370,13 @@ export function InboxView({
                        simpler reopens whole, as before. */
                     const pickingSteps = reopenPickerId === item.id;
                     return (
-                      <li key={item.id} className={cn("rounded-lg border px-4 py-3 text-sm", item.id === activeDragId && "opacity-40")}>
+                      <li
+                        key={item.id}
+                        className={cn(
+                          "rounded-lg border px-4 py-3 text-sm",
+                          item.id === activeDragId && "opacity-40",
+                        )}
+                      >
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
                         <div className="flex items-start gap-3">
                           <DragGrip id={item.id} label={item.text} />
@@ -1180,11 +1384,16 @@ export function InboxView({
                             titleEditor(item)
                           ) : (
                             <span className="min-w-0 flex-1 break-words">
-                              <span className={COMPLETE_TEXT}>{item.text}</span> {pencil(item)}
+                              <span className={COMPLETE_TEXT}>{item.text}</span>{" "}
+                              {pencil(item)}
                             </span>
                           )}
                           {editingId !== item.id && (
-                            <DonePill voice={voice} done={item.stepsDone} total={item.stepsTotal} />
+                            <DonePill
+                              voice={voice}
+                              done={item.stepsDone}
+                              total={item.stepsTotal}
+                            />
                           )}
                         </div>
                         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
@@ -1193,7 +1402,9 @@ export function InboxView({
                             className="hover:bg-accent rounded-md border px-2.5 py-1"
                             onClick={() =>
                               item.stepsTotal > 1
-                                ? setReopenPickerId(pickingSteps ? null : item.id)
+                                ? setReopenPickerId(
+                                    pickingSteps ? null : item.id,
+                                  )
                                 : run(() => reopenItem(item.id, undefined))
                             }
                           >
@@ -1204,7 +1415,9 @@ export function InboxView({
                             compact
                             currentBucket={bucketOfItem(item, now)}
                             voice={voice}
-                            onMove={(target) => moveItemToBucket(item.id, target)}
+                            onMove={(target) =>
+                              moveItemToBucket(item.id, target)
+                            }
                           />
                         </div>
                         {pickingSteps && (
@@ -1316,9 +1529,15 @@ function ReopenStepPicker({
                 onChange={() => toggle(s.id)}
               />
               {/* Unticked = stays done, so it keeps the completed strikethrough. */}
-              <span className={cn(!checked.has(s.id) && `${COMPLETE_TEXT} opacity-70`)}>
+              <span
+                className={cn(
+                  !checked.has(s.id) && `${COMPLETE_TEXT} opacity-70`,
+                )}
+              >
                 {/* Emoji is decoration; keep it out of the accessible name. */}
-                {s.subtaskEmoji && <span aria-hidden="true">{s.subtaskEmoji} </span>}
+                {s.subtaskEmoji && (
+                  <span aria-hidden="true">{s.subtaskEmoji} </span>
+                )}
                 {s.text}
               </span>
             </label>
@@ -1355,10 +1574,20 @@ function ReopenStepPicker({
 
 /** Drop zone wrapper around a bucket's body — used by both the To-Do buckets
  * and the Needs-review region so drag has a target everywhere the menu does. */
-function DroppableBucket({ id, children }: { id: BucketId; children: React.ReactNode }) {
+function DroppableBucket({
+  id,
+  children,
+}: {
+  id: BucketId;
+  children: React.ReactNode;
+}) {
   const { setNodeRef, isOver } = useDroppable({ id });
   return (
-    <div ref={setNodeRef} data-bucket={id} className={cn("rounded-lg", isOver && "ring-primary ring-2")}>
+    <div
+      ref={setNodeRef}
+      data-bucket={id}
+      className={cn("rounded-lg", isOver && "ring-primary ring-2")}
+    >
       {children}
     </div>
   );
@@ -1467,7 +1696,10 @@ function ItemRow({
   );
   // v5: 🗑 delete appears twice — once inline in the end cluster, once as a
   // duplicate ▾-menu entry — both driven by the same confirmingDelete state.
-  const deleteControl = (key: string, { fullWidth = false, icon = false } = {}) =>
+  const deleteControl = (
+    key: string,
+    { fullWidth = false, icon = false } = {},
+  ) =>
     confirmingDelete ? (
       <span key={key} className="flex items-center gap-2">
         <button
@@ -1507,7 +1739,9 @@ function ItemRow({
       </button>
     );
   return (
-    <li className={cn("rounded-lg border px-4 py-3", isDragging && "opacity-40")}>
+    <li
+      className={cn("rounded-lg border px-4 py-3", isDragging && "opacity-40")}
+    >
       <div className="flex items-start gap-3">
         {dragGrip}
         <div className="min-w-0 flex-1 space-y-1">
@@ -1526,20 +1760,30 @@ function ItemRow({
       {showStillNeededPrompt && (
         <div
           className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-xs"
-          style={{ backgroundColor: "#fff5f5", borderColor: "#c0392b", color: "#c0392b" }}
+          style={{
+            backgroundColor: "#fff5f5",
+            borderColor: "#c0392b",
+            color: "#c0392b",
+          }}
         >
           <span>{t("prompt.stillNeeded", voice)}</span>
           <span className="flex shrink-0 items-center gap-2">
             <button
               onClick={onFreshen}
-              className={cn("rounded-md border px-2 py-1 font-medium", touchTarget)}
+              className={cn(
+                "rounded-md border px-2 py-1 font-medium",
+                touchTarget,
+              )}
               style={{ borderColor: "#c0392b", color: "#c0392b" }}
             >
               {t("action.stillNeeded", voice)}
             </button>
             <button
               onClick={onDismissPrompt}
-              className={cn("rounded-md border px-2 py-1 font-medium", touchTarget)}
+              className={cn(
+                "rounded-md border px-2 py-1 font-medium",
+                touchTarget,
+              )}
               style={{ borderColor: "#c0392b", color: "#c0392b" }}
             >
               {t("action.dismiss", voice)}
@@ -1630,16 +1874,31 @@ function ItemRow({
           deleteControl("delete-m", { fullWidth: true }),
         ]}
       />
-      {scheduleError && <p className="text-destructive mt-1 text-xs">{scheduleError}</p>}
+      {scheduleError && (
+        <p className="text-destructive mt-1 text-xs">{scheduleError}</p>
+      )}
     </li>
   );
 }
 
-function AgeLabel({ createdAt, aging, now }: { createdAt: Date; aging: boolean; now: number }) {
+function AgeLabel({
+  createdAt,
+  aging,
+  now,
+}: {
+  createdAt: Date;
+  aging: boolean;
+  now: number;
+}) {
   const ms = now - new Date(createdAt).getTime();
   const label = formatAgo(ms);
   return (
-    <p className={cn("text-xs", aging ? "text-amber-600" : "text-muted-foreground")}>
+    <p
+      className={cn(
+        "text-xs",
+        aging ? "text-amber-600" : "text-muted-foreground",
+      )}
+    >
       captured {label}
     </p>
   );

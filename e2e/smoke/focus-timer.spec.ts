@@ -29,13 +29,18 @@ test("focus timer starts and pauses", async ({ page }) => {
 
   // Redesigned timer: a consistent ← Back returns to the focus launcher (no
   // server call — the session stays open/resumable).
-  await expect(page.getByRole("link", { name: /back/i })).toHaveAttribute("href", "/focus");
+  await expect(page.getByRole("link", { name: /back/i })).toHaveAttribute(
+    "href",
+    "/focus",
+  );
 
   await page.getByRole("button", { name: "▶ Start focusing" }).click();
 
   // Complete-step + Pause/Resume are the on-page controls now; the old
   // "Pause for now" control + the gaveup screen were removed in the redesign.
-  await expect(page.getByRole("button", { name: /complete step/i })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /complete step/i }),
+  ).toBeVisible();
 
   await page.getByRole("button", { name: "⏸️ Pause", exact: true }).click();
   // The ring/countdown are animated and time-dependent — assert only the

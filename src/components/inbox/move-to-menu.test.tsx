@@ -8,43 +8,77 @@ afterEach(cleanup);
 
 describe("MoveToMenu", () => {
   it("opens and lists the other buckets, excluding the current one", async () => {
-    render(<MoveToMenu currentBucket="singleTask" voice="plain" onMove={vi.fn()} />);
+    render(
+      <MoveToMenu currentBucket="singleTask" voice="plain" onMove={vi.fn()} />,
+    );
     await userEvent.click(screen.getByRole("button", { name: "Move to…" }));
-    expect(screen.getByRole("menuitem", { name: /Needs review/ })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /Multi-step/ })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /Saved for later/ })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /Completed/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: /Needs review/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: /Multi-step/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: /Saved for later/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: /Completed/ }),
+    ).toBeInTheDocument();
     // current bucket is excluded
-    expect(screen.queryByRole("menuitem", { name: /Single-task/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", { name: /Single-task/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("calls onMove with the chosen bucket id", async () => {
     const onMove = vi.fn();
-    render(<MoveToMenu currentBucket="singleTask" voice="plain" onMove={onMove} />);
+    render(
+      <MoveToMenu currentBucket="singleTask" voice="plain" onMove={onMove} />,
+    );
     await userEvent.click(screen.getByRole("button", { name: "Move to…" }));
     await userEvent.click(screen.getByRole("menuitem", { name: /Completed/ }));
     expect(onMove).toHaveBeenCalledWith("completed");
   });
 
   it("compact variant renders a 📥 icon trigger labeled 'Move to' (no 'Move to…' text) and still opens the bucket list", async () => {
-    render(<MoveToMenu compact currentBucket="singleTask" voice="plain" onMove={vi.fn()} />);
-    expect(screen.queryByRole("button", { name: "Move to…" })).not.toBeInTheDocument();
+    render(
+      <MoveToMenu
+        compact
+        currentBucket="singleTask"
+        voice="plain"
+        onMove={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Move to…" }),
+    ).not.toBeInTheDocument();
     const trigger = screen.getByRole("button", { name: "Move to" });
     expect(trigger).toHaveTextContent("📥");
     await userEvent.click(trigger);
-    expect(screen.getByRole("menuitem", { name: /Needs review/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: /Needs review/ }),
+    ).toBeInTheDocument();
   });
 
   it("compact variant calls onMove with the chosen bucket id", async () => {
     const onMove = vi.fn();
-    render(<MoveToMenu compact currentBucket="singleTask" voice="plain" onMove={onMove} />);
+    render(
+      <MoveToMenu
+        compact
+        currentBucket="singleTask"
+        voice="plain"
+        onMove={onMove}
+      />,
+    );
     await userEvent.click(screen.getByRole("button", { name: "Move to" }));
     await userEvent.click(screen.getByRole("menuitem", { name: /Completed/ }));
     expect(onMove).toHaveBeenCalledWith("completed");
   });
 
   it("Escape closes the open menu", async () => {
-    render(<MoveToMenu currentBucket="singleTask" voice="plain" onMove={vi.fn()} />);
+    render(
+      <MoveToMenu currentBucket="singleTask" voice="plain" onMove={vi.fn()} />,
+    );
     await userEvent.click(screen.getByRole("button", { name: "Move to…" }));
     expect(screen.getByRole("menu")).toBeInTheDocument();
     await userEvent.keyboard("{Escape}");

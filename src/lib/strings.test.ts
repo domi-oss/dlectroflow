@@ -6,14 +6,23 @@ describe("STRINGS map completeness", () => {
   it("every key has a non-empty plain string", () => {
     for (const key of Object.keys(STRINGS) as StringKey[]) {
       expect(STRINGS[key].plain, `key "${key}" plain is empty`).toBeTruthy();
-      expect(STRINGS[key].plain.length, `key "${key}" plain is empty string`).toBeGreaterThan(0);
+      expect(
+        STRINGS[key].plain.length,
+        `key "${key}" plain is empty string`,
+      ).toBeGreaterThan(0);
     }
   });
 
   it("every key has a non-empty playful string", () => {
     for (const key of Object.keys(STRINGS) as StringKey[]) {
-      expect(STRINGS[key].playful, `key "${key}" playful is empty`).toBeTruthy();
-      expect(STRINGS[key].playful.length, `key "${key}" playful is empty string`).toBeGreaterThan(0);
+      expect(
+        STRINGS[key].playful,
+        `key "${key}" playful is empty`,
+      ).toBeTruthy();
+      expect(
+        STRINGS[key].playful.length,
+        `key "${key}" playful is empty string`,
+      ).toBeGreaterThan(0);
     }
   });
 });
@@ -30,85 +39,85 @@ describe("every awarded BadgeKey has a STRINGS label", () => {
 
 describe("t() function", () => {
   const cases: Array<[StringKey, Voice, string]> = [
-    ["stat.pointsToday",    "plain",   "Points today"],
-    ["stat.pointsToday",    "playful", "Crumbs today"],
-    ["stat.currentStreak",  "plain",   "Current streak"],
-    ["stat.currentStreak",  "playful", "On a roll"],
-    ["stat.focusMinsToday", "plain",   "Focus mins today"],
+    ["stat.pointsToday", "plain", "Points today"],
+    ["stat.pointsToday", "playful", "Crumbs today"],
+    ["stat.currentStreak", "plain", "Current streak"],
+    ["stat.currentStreak", "playful", "On a roll"],
+    ["stat.focusMinsToday", "plain", "Focus mins today"],
     ["stat.focusMinsToday", "playful", "Time at the table"],
-    ["stat.stepsToday",     "plain",   "Steps today"],
-    ["stat.stepsToday",     "playful", "Bites today"],
-    ["action.breakdown",    "plain",   "Break into steps"],
-    ["action.breakdown",    "playful", "🍿 Snack-size it"],
-    ["action.complete",     "plain",   "Complete"],
-    ["action.reopen",       "plain",   "Reopen"],
-    ["nav.everything",      "plain",   "Library"],
-    ["nav.everything",      "playful", "🍱 Larder"],
-    ["nav.inbox",           "plain",   "Inbox"],
-    ["nav.inbox",           "playful", "🧠 Inbox"],
-    ["nav.dashboard",       "plain",   "Activity"],
-    ["nav.dashboard",       "playful", "🎉 Activity"],
-    ["section.singleTask",  "plain",   "Single-task to-dos"],
-    ["section.singleTask",  "playful", "😋 Quick bites"],
-    ["section.completed",   "plain",   "Completed"],
+    ["stat.stepsToday", "plain", "Steps today"],
+    ["stat.stepsToday", "playful", "Bites today"],
+    ["action.breakdown", "plain", "Break into steps"],
+    ["action.breakdown", "playful", "🍿 Snack-size it"],
+    ["action.complete", "plain", "Complete"],
+    ["action.reopen", "plain", "Reopen"],
+    ["nav.everything", "plain", "Library"],
+    ["nav.everything", "playful", "🍱 Larder"],
+    ["nav.inbox", "plain", "Inbox"],
+    ["nav.inbox", "playful", "🧠 Inbox"],
+    ["nav.dashboard", "plain", "Activity"],
+    ["nav.dashboard", "playful", "🎉 Activity"],
+    ["section.singleTask", "plain", "Single-task to-dos"],
+    ["section.singleTask", "playful", "😋 Quick bites"],
+    ["section.completed", "plain", "Completed"],
     ["section.completedToday", "plain", "Completed today"],
-    ["heading.bestStreaks",  "plain",   "Best streaks"],
-    ["heading.bestStreaks",  "playful", "🏆 Best streaks"],
-    ["badge.first_breakdown","plain",   "First breakdown"],
-    ["badge.first_breakdown","playful", "🍰 First Slice"],
-    ["badge.streak_5",       "plain",   "Full work week"],
-    ["badge.streak_5",       "playful", "🔥 Full Week"],
-    ["badge.inbox_zero",     "plain",   "Inbox zero"],
-    ["badge.comeback",       "plain",   "Comeback"],
-    ["badge.ten_steps_day",  "plain",   "10 steps in a day"],
-    ["badge.beat_best_streak","plain",  "Beat your best streak"],
-    ["bucket.empty",      "plain",   "Nothing here yet"],
-    ["action.moveTo",     "plain",   "Move to…"],
-    ["prompt.breakNow",   "plain",   "Break into steps now?"],
-    ["action.reviewNow",  "plain",   "Review now"],
-    ["action.reviewNow",  "playful", "🥫 Review now"],
+    ["heading.bestStreaks", "plain", "Best streaks"],
+    ["heading.bestStreaks", "playful", "🏆 Best streaks"],
+    ["badge.first_breakdown", "plain", "First breakdown"],
+    ["badge.first_breakdown", "playful", "🍰 First Slice"],
+    ["badge.streak_5", "plain", "Full work week"],
+    ["badge.streak_5", "playful", "🔥 Full Week"],
+    ["badge.inbox_zero", "plain", "Inbox zero"],
+    ["badge.comeback", "plain", "Comeback"],
+    ["badge.ten_steps_day", "plain", "10 steps in a day"],
+    ["badge.beat_best_streak", "plain", "Beat your best streak"],
+    ["bucket.empty", "plain", "Nothing here yet"],
+    ["action.moveTo", "plain", "Move to…"],
+    ["prompt.breakNow", "plain", "Break into steps now?"],
+    ["action.reviewNow", "plain", "Review now"],
+    ["action.reviewNow", "playful", "🥫 Review now"],
     // v6 dropdown full-labels + short button
     ["action.breakdownFull", "plain", "Break into smaller steps"],
-    ["action.addTodoFull",   "plain", "Add as single task to do"],
-    ["action.saveShort",     "plain", "Save"],
-    ["action.completeFull",  "plain", "Mark as completed"],
-    ["action.editTitle",     "plain", "Edit task title"],
-    ["action.schedule",      "plain", "Schedule"],
+    ["action.addTodoFull", "plain", "Add as single task to do"],
+    ["action.saveShort", "plain", "Save"],
+    ["action.completeFull", "plain", "Mark as completed"],
+    ["action.editTitle", "plain", "Edit task title"],
+    ["action.schedule", "plain", "Schedule"],
     // #25 step-row labels — voice-aware (plain literal, playful food-themed)
-    ["step.startFocus",       "plain",   "▶ Start Focus"],
-    ["step.startFocus",       "playful", "▶ Start Focus"],
-    ["step.resumeFocus",      "plain",   "▶ Resume Focus"],
-    ["step.resumeFocus",      "playful", "▶ Resume Focus"],
-    ["step.startFocusTimer",  "plain",   "Start focus timer"],
-    ["step.resumeFocusTimer", "plain",   "Resume focus timer"],
+    ["step.startFocus", "plain", "▶ Start Focus"],
+    ["step.startFocus", "playful", "▶ Start Focus"],
+    ["step.resumeFocus", "plain", "▶ Resume Focus"],
+    ["step.resumeFocus", "playful", "▶ Resume Focus"],
+    ["step.startFocusTimer", "plain", "Start focus timer"],
+    ["step.resumeFocusTimer", "plain", "Resume focus timer"],
     ["step.resumeFocusTimer", "playful", "🍴 Resume focus timer"],
-    ["step.complete",         "plain",   "Complete step"],
-    ["step.complete",         "playful", "✅ Complete step"],
-    ["step.editEstimate",     "plain",   "Edit time estimate"],
-    ["step.editTitle",        "plain",   "Edit step title"],
-    ["step.sendToReview",     "plain",   "Send back to review"],
-    ["step.sendToReview",     "playful", "🥫 Send back to review"],
+    ["step.complete", "plain", "Complete step"],
+    ["step.complete", "playful", "✅ Complete step"],
+    ["step.editEstimate", "plain", "Edit time estimate"],
+    ["step.editTitle", "plain", "Edit step title"],
+    ["step.sendToReview", "plain", "Send back to review"],
+    ["step.sendToReview", "playful", "🥫 Send back to review"],
     // welcome-card (#8) — inline links are voice-aware: Library (plain) vs
     // Larder (playful); the Focus Timer + Help section labels are shared.
-    ["welcome.libraryLink",   "plain",   "Library"],
-    ["welcome.libraryLink",   "playful", "Larder"],
-    ["welcome.focusLink",     "plain",   "Focus Timer"],
-    ["welcome.helpLink",      "plain",   "Help section"],
+    ["welcome.libraryLink", "plain", "Library"],
+    ["welcome.libraryLink", "playful", "Larder"],
+    ["welcome.focusLink", "plain", "Focus Timer"],
+    ["welcome.helpLink", "plain", "Help section"],
     // Phase 6 — notifications + auto-save
-    ["settings.saved",        "plain",   "Saved ✓"],
-    ["settings.saved",        "playful", "Saved ✓"],
-    ["notify.heading",        "plain",   "Notifications"],
-    ["notify.heading",        "playful", "🔔 Notifications"],
-    ["notify.roundup",        "plain",   "End-of-day round-up"],
-    ["notify.roundup",        "playful", "🌇 End-of-day round-up"],
-    ["notify.aging",          "plain",   "Aging reminders"],
-    ["notify.aging",          "playful", "🍞 Aging reminders"],
-    ["notify.dailyReview",    "plain",   "Daily review nudge"],
-    ["notify.dailyReview",    "playful", "🌙 Daily review nudge"],
-    ["notify.nudgeTime",      "plain",   "Nudge time"],
-    ["notify.nudgeTitle",     "plain",   "Time for your daily review"],
-    ["notify.enable",         "plain",   "Enable desktop notifications"],
-    ["notify.enable",         "playful", "🔔 Enable desktop notifications"],
+    ["settings.saved", "plain", "Saved ✓"],
+    ["settings.saved", "playful", "Saved ✓"],
+    ["notify.heading", "plain", "Notifications"],
+    ["notify.heading", "playful", "🔔 Notifications"],
+    ["notify.roundup", "plain", "End-of-day round-up"],
+    ["notify.roundup", "playful", "🌇 End-of-day round-up"],
+    ["notify.aging", "plain", "Aging reminders"],
+    ["notify.aging", "playful", "🍞 Aging reminders"],
+    ["notify.dailyReview", "plain", "Daily review nudge"],
+    ["notify.dailyReview", "playful", "🌙 Daily review nudge"],
+    ["notify.nudgeTime", "plain", "Nudge time"],
+    ["notify.nudgeTitle", "plain", "Time for your daily review"],
+    ["notify.enable", "plain", "Enable desktop notifications"],
+    ["notify.enable", "playful", "🔔 Enable desktop notifications"],
   ];
 
   for (const [key, voice, expected] of cases) {
@@ -155,10 +164,14 @@ describe("Task 4 — nav/menu/prompt/confirm keys (plain vs playful)", () => {
 
   // prompt.stillNeeded
   it('t("prompt.stillNeeded", "plain") → "This has been sitting a while — still needed?"', () => {
-    expect(t("prompt.stillNeeded", "plain")).toBe("This has been sitting a while — still needed?");
+    expect(t("prompt.stillNeeded", "plain")).toBe(
+      "This has been sitting a while — still needed?",
+    );
   });
   it('t("prompt.stillNeeded", "playful") → "🕐 This snack\'s been sitting a while — still want it?"', () => {
-    expect(t("prompt.stillNeeded", "playful")).toBe("🕐 This snack's been sitting a while — still want it?");
+    expect(t("prompt.stillNeeded", "playful")).toBe(
+      "🕐 This snack's been sitting a while — still want it?",
+    );
   });
 
   // action.dismiss
@@ -222,7 +235,9 @@ describe("Task 4 — nav/menu/prompt/confirm keys (plain vs playful)", () => {
     expect(t("inbox.zero", "plain")).toBe("Inbox zero. Nothing to review.");
   });
   it('t("inbox.zero", "playful") → "🎉 Inbox zero! Nothing to review."', () => {
-    expect(t("inbox.zero", "playful")).toBe("🎉 Inbox zero! Nothing to review.");
+    expect(t("inbox.zero", "playful")).toBe(
+      "🎉 Inbox zero! Nothing to review.",
+    );
   });
 });
 
@@ -279,7 +294,9 @@ describe("Task 2 — inbox/focus/breakdown keys (plain vs playful)", () => {
     expect(t("focus.timesUp", "plain")).toBe("Time's up — did you finish?");
   });
   it('t("focus.timesUp", "playful") → "⏰ Time\'s up — did you finish?"', () => {
-    expect(t("focus.timesUp", "playful")).toBe("⏰ Time's up — did you finish?");
+    expect(t("focus.timesUp", "playful")).toBe(
+      "⏰ Time's up — did you finish?",
+    );
   });
   it('t("focus.yesDone", "plain") → "✅ Yes, done!"', () => {
     expect(t("focus.yesDone", "plain")).toBe("✅ Yes, done!");
@@ -356,7 +373,17 @@ describe("library strings", () => {
     expect(t("nav.everything", "playful")).toBe("🍱 Larder");
   });
   it("has the new bulk/meta keys in both voices", () => {
-    for (const k of ["lib.select","lib.selectAll","lib.selected","lib.openTask","lib.deleteConfirm","lib.next","lib.minLeft","lib.min","lib.editEstimate"] as const) {
+    for (const k of [
+      "lib.select",
+      "lib.selectAll",
+      "lib.selected",
+      "lib.openTask",
+      "lib.deleteConfirm",
+      "lib.next",
+      "lib.minLeft",
+      "lib.min",
+      "lib.editEstimate",
+    ] as const) {
       expect(t(k, "plain")).toBeTruthy();
       expect(t(k, "playful")).toBeTruthy();
     }
@@ -367,7 +394,8 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
   // Allowed functional glyphs in plain voice: status dots, ✅, ▶/⏸/➕/➖, 🗑️, 🔒, ⚠️
   const FUNCTIONAL_GLYPHS = /[✅▶⏸️➕➖🗑🔒⚠🟢🟡🟠🔴]/gu;
   // Matches any decorative emoji (strips functional glyphs first)
-  const hasEmoji = (s: string) => /\p{Emoji_Presentation}/u.test(s.replace(FUNCTIONAL_GLYPHS, ""));
+  const hasEmoji = (s: string) =>
+    /\p{Emoji_Presentation}/u.test(s.replace(FUNCTIONAL_GLYPHS, ""));
 
   const plainOnlyKeys: StringKey[] = [
     "nav.inbox",

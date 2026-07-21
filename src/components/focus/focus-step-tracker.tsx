@@ -71,15 +71,23 @@ export function FocusStepTracker({
         <ol className="space-y-1 text-sm">
           {steps.map((s) => {
             const state = stateOf(s, currentStepId);
-            const glyph = state === "done" ? "✓" : state === "current" ? "●" : "○";
+            const glyph =
+              state === "done" ? "✓" : state === "current" ? "●" : "○";
             return (
               <li key={s.id} className="flex items-center gap-2">
                 <span aria-hidden="true">{glyph}</span>
-                <span className={cn("min-w-0 flex-1 break-words", state === "current" && "font-semibold")}>
+                <span
+                  className={cn(
+                    "min-w-0 flex-1 break-words",
+                    state === "current" && "font-semibold",
+                  )}
+                >
                   {s.subtaskEmoji ? `${s.subtaskEmoji} ` : ""}
                   {s.text}
                 </span>
-                <span className="text-muted-foreground shrink-0 text-xs tabular-nums">{s.estMinutes}m</span>
+                <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+                  {s.estMinutes}m
+                </span>
               </li>
             );
           })}

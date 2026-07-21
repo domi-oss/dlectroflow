@@ -52,7 +52,9 @@ async function generateQuote(): Promise<{ quote: string; source: string }> {
   return { quote: randomFallback(), source: SparkSource.Fallback };
 }
 
-async function quoteFor(workspaceId: string): Promise<{ quote: string; source: string }> {
+async function quoteFor(
+  workspaceId: string,
+): Promise<{ quote: string; source: string }> {
   if (isGuestWorkspace(workspaceId)) {
     return { quote: randomFallback(), source: SparkSource.Fallback };
   }

@@ -39,7 +39,10 @@ vi.mock("@/lib/db", () => ({
     step: { findFirst: stepFindFirstMock, update: stepUpdateMock },
   },
 }));
-vi.mock("@/lib/rewards", () => ({ logReward: logRewardMock, awardBadge: awardBadgeMock }));
+vi.mock("@/lib/rewards", () => ({
+  logReward: logRewardMock,
+  awardBadge: awardBadgeMock,
+}));
 vi.mock("@/lib/google", () => ({
   getValidAccessToken: tokenMock,
   googleConfigured: configuredMock,
@@ -59,7 +62,9 @@ const baseTask = (over: Record<string, unknown> = {}) => ({
   title: "T",
   parentEmoji: "🚀",
   scheduledAt: null,
-  steps: [{ id: "s1", order: 1, text: "a", estMinutes: 10, subtaskEmoji: null }],
+  steps: [
+    { id: "s1", order: 1, text: "a", estMinutes: 10, subtaskEmoji: null },
+  ],
   ...over,
 });
 
@@ -88,8 +93,14 @@ describe("pushStepsToGoogleTasks — provider-agnostic marker + reward-once", ()
         data: expect.objectContaining({ scheduledVia: "google" }),
       }),
     );
-    expect(logRewardMock).toHaveBeenCalledWith(OWNER_WORKSPACE_ID, RewardType.Scheduled);
-    expect(awardBadgeMock).toHaveBeenCalledWith(OWNER_WORKSPACE_ID, BadgeKey.FirstSchedule);
+    expect(logRewardMock).toHaveBeenCalledWith(
+      OWNER_WORKSPACE_ID,
+      RewardType.Scheduled,
+    );
+    expect(awardBadgeMock).toHaveBeenCalledWith(
+      OWNER_WORKSPACE_ID,
+      BadgeKey.FirstSchedule,
+    );
   });
 
   it("does not re-award when the task is already scheduled (idempotent)", async () => {
@@ -109,6 +120,9 @@ describe("pushStepsToGoogleTasks — provider-agnostic marker + reward-once", ()
     const res = await pushStepsToGoogleTasks("task-1");
     expect(res.ok).toBe(true);
     // allSettled: a logReward failure must NOT skip the idempotent awardBadge.
-    expect(awardBadgeMock).toHaveBeenCalledWith(OWNER_WORKSPACE_ID, BadgeKey.FirstSchedule);
+    expect(awardBadgeMock).toHaveBeenCalledWith(
+      OWNER_WORKSPACE_ID,
+      BadgeKey.FirstSchedule,
+    );
   });
 });

@@ -4,16 +4,22 @@ import { render, screen, cleanup, within } from "@testing-library/react";
 import LibraryPage from "./page";
 
 // Hoisted so the vi.mock factory (which runs before imports) can close over them.
-const { findMany, getSettingsMock, currentWorkspaceIdMock } = vi.hoisted(() => ({
-  findMany: vi.fn(),
-  getSettingsMock: vi.fn(),
-  currentWorkspaceIdMock: vi.fn(),
-}));
+const { findMany, getSettingsMock, currentWorkspaceIdMock } = vi.hoisted(
+  () => ({
+    findMany: vi.fn(),
+    getSettingsMock: vi.fn(),
+    currentWorkspaceIdMock: vi.fn(),
+  }),
+);
 
 vi.mock("next/link", () => ({
-  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
-    <a href={href}>{children}</a>
-  ),
+  default: ({
+    children,
+    href,
+  }: {
+    children: React.ReactNode;
+    href: string;
+  }) => <a href={href}>{children}</a>,
 }));
 vi.mock("@/lib/db", () => ({
   prisma: { brainDumpItem: { findMany } },
@@ -37,7 +43,9 @@ vi.mock("@/app/actions/braindump", () => ({
 // <TaskSteps>, which pulls in its own server actions (breakdown/focus) — stub
 // it like the sibling component test does; we only need it to mount.
 vi.mock("@/components/breakdown/task-steps", () => ({
-  TaskSteps: ({ taskId }: { taskId: string }) => <div data-testid="task-steps">{taskId}</div>,
+  TaskSteps: ({ taskId }: { taskId: string }) => (
+    <div data-testid="task-steps">{taskId}</div>
+  ),
 }));
 
 const DAY = 86_400_000;
@@ -93,23 +101,40 @@ const FIXTURE = [
   // plated (Single-task): triaged, no steps
   raw({ id: "Reply to Sam's email", text: "Reply to Sam's email" }),
   // pantry (Saved for later): inbox, snoozed into the future
-  raw({ id: "Book dentist", text: "Book dentist", status: "inbox", snoozedUntil: new Date(Date.now() + DAY) }),
+  raw({
+    id: "Book dentist",
+    text: "Book dentist",
+    status: "inbox",
+    snoozedUntil: new Date(Date.now() + DAY),
+  }),
   // sorted (Multi-step): partial progress, not scheduled → stays in Multi-step
   raw({
     id: "Plan the offsite",
     text: "Plan the offsite",
     taskId: "t-sorted",
-    task: { status: "active", scheduledAt: null, steps: [step(true, 0), step(false, 1), step(false, 2)] },
+    task: {
+      status: "active",
+      scheduledAt: null,
+      steps: [step(true, 0), step(false, 1), step(false, 2)],
+    },
   }),
   // done (graduated): all steps done → graduates out of Multi-step into Done
   raw({
     id: "Sort the tax docs",
     text: "Sort the tax docs",
     taskId: "t-done",
-    task: { status: "active", scheduledAt: new Date(), steps: [step(true, 0), step(true, 1)] },
+    task: {
+      status: "active",
+      scheduledAt: new Date(),
+      steps: [step(true, 0), step(true, 1)],
+    },
   }),
   // done (completed to-do): explicitly completed single item, no steps
-  raw({ id: "Reply to recruiter", text: "Reply to recruiter", completedAt: new Date() }),
+  raw({
+    id: "Reply to recruiter",
+    text: "Reply to recruiter",
+    completedAt: new Date(),
+  }),
 ];
 
 beforeEach(() => {
@@ -123,7 +148,9 @@ afterEach(() => {
 });
 
 const renderTab = async (tab?: string) =>
-  render(await LibraryPage({ searchParams: Promise.resolve(tab ? { tab } : {}) }));
+  render(
+    await LibraryPage({ searchParams: Promise.resolve(tab ? { tab } : {}) }),
+  );
 
 describe("LibraryPage — tabs render their correct set", () => {
   it("Single-task (plated) lists only single-task to-dos", async () => {

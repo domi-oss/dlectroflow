@@ -4,7 +4,13 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { getAnthropic, BREAKDOWN_MODEL } from "@/lib/anthropic";
 import { getValidAccessToken, patchGoogleTask } from "@/lib/google";
-import { BadgeKey, FocusOutcome, RewardType, TaskStatus, isGuestWorkspace } from "@/lib/constants";
+import {
+  BadgeKey,
+  FocusOutcome,
+  RewardType,
+  TaskStatus,
+  isGuestWorkspace,
+} from "@/lib/constants";
 import { awardBadge, logReward, rewardStepDone } from "@/lib/rewards";
 import { currentWorkspaceId } from "@/lib/workspace";
 
@@ -14,7 +20,9 @@ export async function beginFocus(
   plannedMin: number,
 ): Promise<string | null> {
   const workspaceId = await currentWorkspaceId();
-  const step = await prisma.step.findFirst({ where: { id: stepId, task: { workspaceId } } });
+  const step = await prisma.step.findFirst({
+    where: { id: stepId, task: { workspaceId } },
+  });
   if (!step) return null;
   const session = await prisma.focusSession.create({
     data: {
@@ -50,7 +58,10 @@ async function closeSession(
 
 /** Mark a task and its linked inbox item(s) completed, and award the task-complete reward+badge. */
 async function markTaskCompleted(workspaceId: string, taskId: string) {
-  await prisma.task.update({ where: { id: taskId }, data: { status: TaskStatus.Done } });
+  await prisma.task.update({
+    where: { id: taskId },
+    data: { status: TaskStatus.Done },
+  });
   await prisma.brainDumpItem.updateMany({
     where: { taskId, workspaceId },
     data: { completedAt: new Date() },
@@ -98,7 +109,9 @@ export async function completeStep(stepId: string) {
  */
 export async function renameStep(stepId: string, title: string) {
   const workspaceId = await currentWorkspaceId();
-  const step = await prisma.step.findFirst({ where: { id: stepId, task: { workspaceId } } });
+  const step = await prisma.step.findFirst({
+    where: { id: stepId, task: { workspaceId } },
+  });
   if (!step) return;
   const trimmed = title.trim();
   if (!trimmed || trimmed === step.text) return;
@@ -114,7 +127,9 @@ export async function renameStep(stepId: string, title: string) {
  */
 export async function updateStepEstimate(stepId: string, minutes: number) {
   const workspaceId = await currentWorkspaceId();
-  const step = await prisma.step.findFirst({ where: { id: stepId, task: { workspaceId } } });
+  const step = await prisma.step.findFirst({
+    where: { id: stepId, task: { workspaceId } },
+  });
   if (!step) return;
   const estMinutes = Math.min(480, Math.max(1, Math.round(minutes)));
 
@@ -139,7 +154,9 @@ export async function completeFocus(
 ): Promise<CompleteResult> {
   const workspaceId = await currentWorkspaceId();
   // Verify session ownership before closing
-  const sessionCheck = await prisma.focusSession.findFirst({ where: { id: sessionId, workspaceId } });
+  const sessionCheck = await prisma.focusSession.findFirst({
+    where: { id: sessionId, workspaceId },
+  });
   if (!sessionCheck) {
     return {
       ok: false,
@@ -172,7 +189,9 @@ export async function completeFocus(
   const googleSynced = await completeGoogleTaskForStep(step);
 
   // Guard step ownership before update
-  const stepCheck = await prisma.step.findFirst({ where: { id: step.id, task: { workspaceId } } });
+  const stepCheck = await prisma.step.findFirst({
+    where: { id: step.id, task: { workspaceId } },
+  });
   if (stepCheck) {
     await prisma.step.update({ where: { id: step.id }, data: { done: true } });
   }
@@ -182,7 +201,12 @@ export async function completeFocus(
   await logReward(workspaceId, RewardType.SessionFinished);
 
   const next = await prisma.step.findFirst({
-    where: { taskId: step.taskId, done: false, order: { gt: step.order }, task: { workspaceId } },
+    where: {
+      taskId: step.taskId,
+      done: false,
+      order: { gt: step.order },
+      task: { workspaceId },
+    },
     orderBy: { order: "asc" },
   });
 
@@ -212,9 +236,17 @@ export async function giveUpFocus(
   opts: { durationMin: number; addedMin: number },
 ) {
   const workspaceId = await currentWorkspaceId();
-  const sessionCheck = await prisma.focusSession.findFirst({ where: { id: sessionId, workspaceId } });
+  const sessionCheck = await prisma.focusSession.findFirst({
+    where: { id: sessionId, workspaceId },
+  });
   if (!sessionCheck) return { ok: false };
-  await closeSession(sessionId, workspaceId, FocusOutcome.GaveUp, opts.durationMin, opts.addedMin);
+  await closeSession(
+    sessionId,
+    workspaceId,
+    FocusOutcome.GaveUp,
+    opts.durationMin,
+    opts.addedMin,
+  );
   return { ok: true };
 }
 
@@ -224,7 +256,9 @@ export async function requeueFocus(
   opts: { durationMin: number; addedMin: number; newEstMinutes: number },
 ) {
   const workspaceId = await currentWorkspaceId();
-  const sessionCheck = await prisma.focusSession.findFirst({ where: { id: sessionId, workspaceId } });
+  const sessionCheck = await prisma.focusSession.findFirst({
+    where: { id: sessionId, workspaceId },
+  });
   if (!sessionCheck) return { ok: false };
 
   const session = await closeSession(
@@ -238,7 +272,9 @@ export async function requeueFocus(
   if (!step) return { ok: false };
 
   // Guard step ownership before update
-  const stepCheck = await prisma.step.findFirst({ where: { id: step.id, task: { workspaceId } } });
+  const stepCheck = await prisma.step.findFirst({
+    where: { id: step.id, task: { workspaceId } },
+  });
   if (!stepCheck) return { ok: false };
 
   // Guard the stored history: corrupt/malformed JSON (or a non-array value)
@@ -264,7 +300,9 @@ export async function requeueFocus(
   if (step.googleTaskId && step.googleTaskListId) {
     const token = await getValidAccessToken();
     if (token) {
-      const task = await prisma.task.findFirst({ where: { id: step.taskId, workspaceId } });
+      const task = await prisma.task.findFirst({
+        where: { id: step.taskId, workspaceId },
+      });
       const emoji = task?.parentEmoji ? `${task.parentEmoji} ` : "";
       const sub = step.subtaskEmoji ? `${step.subtaskEmoji} ` : "";
       const title = `${emoji}${task?.title ?? ""}: ${step.order} of ${step.total} ${sub}${step.text} (duration:${newEst}m)`;
@@ -281,7 +319,9 @@ export async function requeueFocus(
 /** Ask Claude for a fresh, kinder estimate when a step wasn't finished in time. */
 export async function proposeNewEstimate(stepId: string): Promise<number> {
   const workspaceId = await currentWorkspaceId();
-  const step = await prisma.step.findFirst({ where: { id: stepId, task: { workspaceId } } });
+  const step = await prisma.step.findFirst({
+    where: { id: stepId, task: { workspaceId } },
+  });
   if (!step) return 15;
   if (isGuestWorkspace(workspaceId)) return step.estMinutes + 10;
   try {

@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  cleanup,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { LibraryRows } from "@/components/library/library-rows";
 import type { Item } from "@/components/inbox/bucket";
@@ -72,17 +78,35 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
   it("Start focusing ensures a step, then navigates to the focus timer", async () => {
     vi.mocked(ensureFocusStep).mockResolvedValue("step-9");
     const user = userEvent.setup();
-    render(<LibraryRows items={[makeItem({ id: "plated-1" })]} tab="plated" voice="plain" now={NOW} settings={settings} />);
+    render(
+      <LibraryRows
+        items={[makeItem({ id: "plated-1" })]}
+        tab="plated"
+        voice="plain"
+        now={NOW}
+        settings={settings}
+      />,
+    );
 
     await user.click(screen.getByRole("button", { name: "Start focusing" }));
 
-    await waitFor(() => expect(ensureFocusStep).toHaveBeenCalledWith("plated-1"));
+    await waitFor(() =>
+      expect(ensureFocusStep).toHaveBeenCalledWith("plated-1"),
+    );
     expect(push).toHaveBeenCalledWith("/focus/step-9");
   });
 
   it("Complete marks the item done and refreshes", async () => {
     const user = userEvent.setup();
-    render(<LibraryRows items={[makeItem({ id: "plated-1" })]} tab="plated" voice="plain" now={NOW} settings={settings} />);
+    render(
+      <LibraryRows
+        items={[makeItem({ id: "plated-1" })]}
+        tab="plated"
+        voice="plain"
+        now={NOW}
+        settings={settings}
+      />,
+    );
 
     await user.click(screen.getByRole("button", { name: "Complete" }));
 
@@ -92,7 +116,15 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
 
   it("Delete is a two-step confirm (first tap arms, second tap deletes)", async () => {
     const user = userEvent.setup();
-    render(<LibraryRows items={[makeItem({ id: "plated-1" })]} tab="plated" voice="plain" now={NOW} settings={settings} />);
+    render(
+      <LibraryRows
+        items={[makeItem({ id: "plated-1" })]}
+        tab="plated"
+        voice="plain"
+        now={NOW}
+        settings={settings}
+      />,
+    );
 
     // First tap: arms the confirm — nothing deleted yet, Cancel now visible.
     await user.click(screen.getByRole("button", { name: "Delete" }));
@@ -101,12 +133,22 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
 
     // Second tap on the confirming Delete actually deletes.
     await user.click(screen.getByRole("button", { name: "Delete" }));
-    await waitFor(() => expect(deleteBrainDumpItem).toHaveBeenCalledWith("plated-1"));
+    await waitFor(() =>
+      expect(deleteBrainDumpItem).toHaveBeenCalledWith("plated-1"),
+    );
   });
 
   it("Cancel aborts the delete without calling the action", async () => {
     const user = userEvent.setup();
-    render(<LibraryRows items={[makeItem({ id: "plated-1" })]} tab="plated" voice="plain" now={NOW} settings={settings} />);
+    render(
+      <LibraryRows
+        items={[makeItem({ id: "plated-1" })]}
+        tab="plated"
+        voice="plain"
+        now={NOW}
+        settings={settings}
+      />,
+    );
 
     await user.click(screen.getByRole("button", { name: "Delete" }));
     await user.click(screen.getByRole("button", { name: "Cancel" }));
@@ -120,7 +162,13 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
     const user = userEvent.setup();
     render(
       <LibraryRows
-        items={[makeItem({ id: "pantry-1", status: "inbox", snoozedUntil: new Date(Date.now() + 86_400_000) })]}
+        items={[
+          makeItem({
+            id: "pantry-1",
+            status: "inbox",
+            snoozedUntil: new Date(Date.now() + 86_400_000),
+          }),
+        ]}
         tab="pantry"
         voice="plain"
         now={NOW}
@@ -128,7 +176,9 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Start focusing" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Start focusing" }),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Complete" }));
     await waitFor(() => expect(completeItem).toHaveBeenCalledWith("pantry-1"));
   });
@@ -136,7 +186,13 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
   it("pantry rows show no Select button, meta, or estimate pill (unchanged behavior)", () => {
     render(
       <LibraryRows
-        items={[makeItem({ id: "pantry-1", status: "inbox", snoozedUntil: new Date(Date.now() + 86_400_000) })]}
+        items={[
+          makeItem({
+            id: "pantry-1",
+            status: "inbox",
+            snoozedUntil: new Date(Date.now() + 86_400_000),
+          }),
+        ]}
         tab="pantry"
         voice="plain"
         now={NOW}
@@ -217,6 +273,8 @@ describe("LibraryRows (plated) — meta, editable estimate, select mode", () => 
     fireEvent.click(screen.getByRole("checkbox", { name: /todo a/i }));
     fireEvent.click(screen.getByRole("button", { name: /^complete$/i }));
 
-    await waitFor(() => expect(bulkBrainDumpAction).toHaveBeenCalledWith(["a"], "complete"));
+    await waitFor(() =>
+      expect(bulkBrainDumpAction).toHaveBeenCalledWith(["a"], "complete"),
+    );
   });
 });

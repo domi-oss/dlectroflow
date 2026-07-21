@@ -1,8 +1,8 @@
-import { clsx, type ClassValue } from "clsx"
-import { twMerge } from "tailwind-merge"
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
 
 export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs))
+  return twMerge(clsx(inputs));
 }
 
 /**
@@ -11,4 +11,5 @@ export function cn(...inputs: ClassValue[]) {
  * meet the touch-target minimum while keeping their visual padding; the flex
  * centering keeps the glyph/label centred inside the expanded box.
  */
-export const touchTarget = "inline-flex items-center justify-center min-h-11 min-w-11"
+export const touchTarget =
+  "inline-flex items-center justify-center min-h-11 min-w-11";

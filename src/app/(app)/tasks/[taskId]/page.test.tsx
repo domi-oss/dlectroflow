@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  cleanup,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react";
 import TaskPage from "./page";
 
 // Hoisted so the vi.mock factories (which run before imports) can close over them.
@@ -27,9 +33,13 @@ const {
 }));
 
 vi.mock("next/link", () => ({
-  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
-    <a href={href}>{children}</a>
-  ),
+  default: ({
+    children,
+    href,
+  }: {
+    children: React.ReactNode;
+    href: string;
+  }) => <a href={href}>{children}</a>,
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: refreshMock }),
@@ -56,7 +66,9 @@ vi.mock("@/components/breakdown/breakdown-chat", () => ({
   BreakdownChat: () => <div data-testid="breakdown-chat" />,
 }));
 vi.mock("@/components/breakdown/task-steps", () => ({
-  TaskSteps: ({ taskId }: { taskId: string }) => <div data-testid="task-steps">{taskId}</div>,
+  TaskSteps: ({ taskId }: { taskId: string }) => (
+    <div data-testid="task-steps">{taskId}</div>
+  ),
 }));
 // <TaskSchedule> is NOT stubbed — its wiring (owner/guest, scheduled indicator)
 // is exactly what Fix 2 needs covered — but its own server-action imports are.
@@ -104,7 +116,11 @@ beforeEach(() => {
   getSettingsMock.mockResolvedValue({ voice: "plain" });
   currentWorkspaceIdMock.mockResolvedValue("owner");
   isOwnerRequestMock.mockResolvedValue(true);
-  getGoogleStatusMock.mockResolvedValue({ configured: true, connected: true, needsReconnect: false });
+  getGoogleStatusMock.mockResolvedValue({
+    configured: true,
+    connected: true,
+    needsReconnect: false,
+  });
 });
 afterEach(() => {
   cleanup();
@@ -158,24 +174,38 @@ describe("TaskPage — Refine breakdown / Schedule split (#8 follow-up, Fix 2)",
   });
 
   it("renders a SEPARATE Schedule control (owner + Google connected → 📅 pushes steps to Google Tasks)", async () => {
-    pushStepsToGoogleTasksMock.mockResolvedValue({ ok: true, scheduled: 2, listTitle: "Reclaim" });
+    pushStepsToGoogleTasksMock.mockResolvedValue({
+      ok: true,
+      scheduled: 2,
+      listTitle: "Reclaim",
+    });
     await renderPage();
     const scheduleButton = screen.getByRole("button", { name: /schedule/i });
     fireEvent.click(scheduleButton);
-    await waitFor(() => expect(pushStepsToGoogleTasksMock).toHaveBeenCalledWith("t1"));
+    await waitFor(() =>
+      expect(pushStepsToGoogleTasksMock).toHaveBeenCalledWith("t1"),
+    );
   });
 
   it("guest workspaces get the ICS 'Add to calendar' control, never a live Google one", async () => {
     isOwnerRequestMock.mockResolvedValue(false);
     await renderPage();
-    expect(screen.getByRole("button", { name: /add to calendar/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /add to calendar/i }),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^schedule$/i })).toBeNull();
   });
 
   it("owner without a finished Google connection gets Connect Google, not a live 📅", async () => {
-    getGoogleStatusMock.mockResolvedValue({ configured: false, connected: false, needsReconnect: false });
+    getGoogleStatusMock.mockResolvedValue({
+      configured: false,
+      connected: false,
+      needsReconnect: false,
+    });
     await renderPage();
-    expect(screen.getByRole("link", { name: /connect google/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /connect google/i }),
+    ).toBeInTheDocument();
   });
 });
 

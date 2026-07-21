@@ -8,19 +8,28 @@ import {
 describe("completionRootAttrs", () => {
   it("maps the defaults (strike on + green)", () => {
     expect(
-      completionRootAttrs({ completeStrikethrough: true, completeTickColor: "green" }),
+      completionRootAttrs({
+        completeStrikethrough: true,
+        completeTickColor: "green",
+      }),
     ).toEqual({ "data-complete-strike": "on", "data-tick": "green" });
   });
 
   it("maps strike off + black", () => {
     expect(
-      completionRootAttrs({ completeStrikethrough: false, completeTickColor: "black" }),
+      completionRootAttrs({
+        completeStrikethrough: false,
+        completeTickColor: "black",
+      }),
     ).toEqual({ "data-complete-strike": "off", "data-tick": "black" });
   });
 
   it("falls back to green for any unknown tick colour", () => {
     expect(
-      completionRootAttrs({ completeStrikethrough: true, completeTickColor: "purple" }),
+      completionRootAttrs({
+        completeStrikethrough: true,
+        completeTickColor: "purple",
+      }),
     ).toMatchObject({ "data-tick": "green" });
   });
 });

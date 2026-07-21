@@ -8,34 +8,38 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(() => {
-  const prismaMock = {
-    brainDumpItem: {
-      create: vi.fn().mockResolvedValue({ id: "item-1" }),
-      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-    },
-    task: {
-      findFirst: vi.fn().mockResolvedValue({ id: "t1" }),
-      update: vi.fn().mockResolvedValue({}),
-    },
-    step: {
-      findFirst: vi.fn(),
-      update: vi.fn().mockResolvedValue({}),
-      deleteMany: vi.fn().mockResolvedValue({}),
-      createMany: vi.fn().mockResolvedValue({}),
-    },
-    focusSession: { create: vi.fn().mockResolvedValue({ id: "sess" }) },
-    $transaction: vi.fn(),
-  };
-  prismaMock.$transaction.mockImplementation((arg: unknown) =>
-    typeof arg === "function" ? (arg as (tx: unknown) => unknown)(prismaMock) : Promise.all(arg as Promise<unknown>[]),
-  );
-  return {
-    prismaMock,
-    revalidatePathMock: vi.fn(),
-    currentWorkspaceIdMock: vi.fn().mockResolvedValue("owner"),
-  };
-});
+const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
+  () => {
+    const prismaMock = {
+      brainDumpItem: {
+        create: vi.fn().mockResolvedValue({ id: "item-1" }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      task: {
+        findFirst: vi.fn().mockResolvedValue({ id: "t1" }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      step: {
+        findFirst: vi.fn(),
+        update: vi.fn().mockResolvedValue({}),
+        deleteMany: vi.fn().mockResolvedValue({}),
+        createMany: vi.fn().mockResolvedValue({}),
+      },
+      focusSession: { create: vi.fn().mockResolvedValue({ id: "sess" }) },
+      $transaction: vi.fn(),
+    };
+    prismaMock.$transaction.mockImplementation((arg: unknown) =>
+      typeof arg === "function"
+        ? (arg as (tx: unknown) => unknown)(prismaMock)
+        : Promise.all(arg as Promise<unknown>[]),
+    );
+    return {
+      prismaMock,
+      revalidatePathMock: vi.fn(),
+      currentWorkspaceIdMock: vi.fn().mockResolvedValue("owner"),
+    };
+  },
+);
 
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/lib/db", () => ({ prisma: prismaMock }));
@@ -58,7 +62,11 @@ vi.mock("@/lib/rewards", () => ({
   maybeAwardTenStepsDay: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { touchStreakOnEngagement, awardBadge, rewardStepDone } from "@/lib/rewards";
+import {
+  touchStreakOnEngagement,
+  awardBadge,
+  rewardStepDone,
+} from "@/lib/rewards";
 import { BadgeKey } from "@/lib/constants";
 
 beforeEach(() => {
@@ -85,7 +93,10 @@ describe("streak engagement — the three qualifying actions", () => {
 
   it("breakdown-confirm (confirmBreakdown) advances the streak", async () => {
     const { confirmBreakdown } = await import("./breakdown");
-    await confirmBreakdown("t1", { parentEmoji: "🚀", steps: [{ text: "step one", estMinutes: 10, subtaskEmoji: "📝" }] });
+    await confirmBreakdown("t1", {
+      parentEmoji: "🚀",
+      steps: [{ text: "step one", estMinutes: 10, subtaskEmoji: "📝" }],
+    });
     expect(touchStreakOnEngagement).toHaveBeenCalledWith("owner");
   });
 
@@ -94,7 +105,13 @@ describe("streak engagement — the three qualifying actions", () => {
       id: "s1",
       taskId: "t1",
       done: false,
-      task: { id: "t1", steps: [{ id: "s1", done: false }, { id: "s2", done: false }] },
+      task: {
+        id: "t1",
+        steps: [
+          { id: "s1", done: false },
+          { id: "s2", done: false },
+        ],
+      },
     });
     const { completeStep } = await import("./focus");
     await completeStep("s1");
@@ -105,7 +122,10 @@ describe("streak engagement — the three qualifying actions", () => {
 describe("action-triggered badges", () => {
   it("confirmBreakdown awards FirstBreakdown", async () => {
     const { confirmBreakdown } = await import("./breakdown");
-    await confirmBreakdown("t1", { parentEmoji: "🚀", steps: [{ text: "step one", estMinutes: 10, subtaskEmoji: "📝" }] });
+    await confirmBreakdown("t1", {
+      parentEmoji: "🚀",
+      steps: [{ text: "step one", estMinutes: 10, subtaskEmoji: "📝" }],
+    });
     expect(awardBadge).toHaveBeenCalledWith("owner", BadgeKey.FirstBreakdown);
   });
 
@@ -114,9 +134,9 @@ describe("action-triggered badges", () => {
     const { beginFocus } = await import("./focus");
     await beginFocus("s1", 25);
     await beginFocus("s1", 25);
-    const focusCalls = (awardBadge as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
-      (c) => c[1] === BadgeKey.FirstFocus,
-    );
+    const focusCalls = (
+      awardBadge as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls.filter((c) => c[1] === BadgeKey.FirstFocus);
     expect(focusCalls).toHaveLength(2);
     expect(focusCalls[0]).toEqual(["owner", BadgeKey.FirstFocus]);
   });

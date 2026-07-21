@@ -10,7 +10,8 @@ const bootGuardEnv = {
   GITLAB_OAUTH_CLIENT_ID: "e2e-client-id",
   GITLAB_OAUTH_CLIENT_SECRET: "e2e-client-secret",
   GUEST_IP_HASH_SALT: "e2e-guest-ip-hash-salt-000",
-  TOKEN_ENC_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  TOKEN_ENC_KEY:
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 };
 
 export default defineConfig({
@@ -21,7 +22,9 @@ export default defineConfig({
   workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : [["list"]],
+  reporter: process.env.CI
+    ? [["list"], ["html", { open: "never" }]]
+    : [["list"]],
   use: {
     baseURL: BASE_URL,
     storageState: STORAGE_STATE,

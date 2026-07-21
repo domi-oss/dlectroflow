@@ -36,7 +36,10 @@ describe("extractUsedEnvKeys", () => {
         PUBLIC_ORIGIN,
       } = process.env;
     `;
-    expect(extractUsedEnvKeys(src).sort()).toEqual(["NODE_ENV", "PUBLIC_ORIGIN"]);
+    expect(extractUsedEnvKeys(src).sort()).toEqual([
+      "NODE_ENV",
+      "PUBLIC_ORIGIN",
+    ]);
   });
 
   it("dedupes repeated reads of the same key", () => {

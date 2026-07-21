@@ -24,7 +24,8 @@ export function isAging(createdAt: Date | string, s: AgingSettings): boolean {
 
 export type FreshnessTier = "recent" | "aging" | "overdue" | "wayOverdue";
 
-const toMs = (d: Date | string): number => (typeof d === "string" ? new Date(d) : d).getTime();
+const toMs = (d: Date | string): number =>
+  (typeof d === "string" ? new Date(d) : d).getTime();
 
 /** age = now − max(createdAt, freshenedAt). freshenedAt resets the clock non-destructively. */
 export function freshnessAgeMs(
@@ -32,12 +33,18 @@ export function freshnessAgeMs(
   freshenedAt: Date | string | null,
   now: number = Date.now(),
 ): number {
-  const base = freshenedAt ? Math.max(toMs(createdAt), toMs(freshenedAt)) : toMs(createdAt);
+  const base = freshenedAt
+    ? Math.max(toMs(createdAt), toMs(freshenedAt))
+    : toMs(createdAt);
   return now - base;
 }
 
 /** Tier boundaries in ms. Demo override (seconds) wins and scales ×1/×2/×3. */
-function tierBoundsMs(s: AgingSettings): { aging: number; overdue: number; wayOverdue: number } {
+function tierBoundsMs(s: AgingSettings): {
+  aging: number;
+  overdue: number;
+  wayOverdue: number;
+} {
   if (s.demoOverrideSeconds != null && s.demoOverrideSeconds > 0) {
     const o = s.demoOverrideSeconds * 1000;
     return { aging: o, overdue: 2 * o, wayOverdue: 3 * o };
@@ -65,7 +72,8 @@ export function freshnessTier(
 
 /** 24h "still needed?" boundary: 24h normally, 4× override seconds in demo mode. */
 function promptBoundaryMs(s: AgingSettings): number {
-  if (s.demoOverrideSeconds != null && s.demoOverrideSeconds > 0) return 4 * s.demoOverrideSeconds * 1000;
+  if (s.demoOverrideSeconds != null && s.demoOverrideSeconds > 0)
+    return 4 * s.demoOverrideSeconds * 1000;
   return 24 * 3600_000;
 }
 

@@ -13,29 +13,43 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { prismaMock, txMock, getSettingsMock, getStreakMock } = vi.hoisted(() => {
-  const txMock = {
-    $queryRaw: vi.fn().mockResolvedValue([]),
-    streak: { findUnique: vi.fn(), update: vi.fn().mockResolvedValue({}) },
-    streakRecord: { create: vi.fn().mockResolvedValue({}) },
-  };
-  const prismaMock = {
-    badge: { findUnique: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({}) },
-    streakRecord: { aggregate: vi.fn().mockResolvedValue({ _max: { length: null } }) },
-    rewardEvent: { create: vi.fn().mockResolvedValue({}), count: vi.fn().mockResolvedValue(0) },
-    brainDumpItem: { count: vi.fn().mockResolvedValue(0) },
-    $transaction: vi.fn(),
-  };
-  prismaMock.$transaction.mockImplementation((arg: unknown) =>
-    typeof arg === "function" ? (arg as (tx: unknown) => unknown)(txMock) : Promise.all(arg as Promise<unknown>[]),
-  );
-  return {
-    prismaMock,
-    txMock,
-    getSettingsMock: vi.fn().mockResolvedValue({ workingDays: "1,2,3,4,5,6,7" }),
-    getStreakMock: vi.fn().mockResolvedValue({}),
-  };
-});
+const { prismaMock, txMock, getSettingsMock, getStreakMock } = vi.hoisted(
+  () => {
+    const txMock = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      streak: { findUnique: vi.fn(), update: vi.fn().mockResolvedValue({}) },
+      streakRecord: { create: vi.fn().mockResolvedValue({}) },
+    };
+    const prismaMock = {
+      badge: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({}),
+      },
+      streakRecord: {
+        aggregate: vi.fn().mockResolvedValue({ _max: { length: null } }),
+      },
+      rewardEvent: {
+        create: vi.fn().mockResolvedValue({}),
+        count: vi.fn().mockResolvedValue(0),
+      },
+      brainDumpItem: { count: vi.fn().mockResolvedValue(0) },
+      $transaction: vi.fn(),
+    };
+    prismaMock.$transaction.mockImplementation((arg: unknown) =>
+      typeof arg === "function"
+        ? (arg as (tx: unknown) => unknown)(txMock)
+        : Promise.all(arg as Promise<unknown>[]),
+    );
+    return {
+      prismaMock,
+      txMock,
+      getSettingsMock: vi
+        .fn()
+        .mockResolvedValue({ workingDays: "1,2,3,4,5,6,7" }),
+      getStreakMock: vi.fn().mockResolvedValue({}),
+    };
+  },
+);
 
 vi.mock("@/lib/db", () => ({
   prisma: prismaMock,
@@ -45,7 +59,11 @@ vi.mock("@/lib/db", () => ({
     !!e && typeof e === "object" && (e as { code?: string }).code === "P2002",
 }));
 
-import { touchStreakOnEngagement, rewardStepDone, maybeAwardInboxZero } from "./rewards";
+import {
+  touchStreakOnEngagement,
+  rewardStepDone,
+  maybeAwardInboxZero,
+} from "./rewards";
 
 function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
@@ -59,7 +77,9 @@ const daysAgo = (n: number) => {
 };
 
 function createdBadgeKeys(): string[] {
-  return prismaMock.badge.create.mock.calls.map((c) => (c[0] as { data: { key: string } }).data.key);
+  return prismaMock.badge.create.mock.calls.map(
+    (c) => (c[0] as { data: { key: string } }).data.key,
+  );
 }
 
 beforeEach(() => {
@@ -68,14 +88,19 @@ beforeEach(() => {
   getStreakMock.mockResolvedValue({});
   prismaMock.badge.findUnique.mockResolvedValue(null);
   prismaMock.badge.create.mockResolvedValue({});
-  prismaMock.streakRecord.aggregate.mockResolvedValue({ _max: { length: null } });
+  prismaMock.streakRecord.aggregate.mockResolvedValue({
+    _max: { length: null },
+  });
   prismaMock.rewardEvent.count.mockResolvedValue(0);
   prismaMock.brainDumpItem.count.mockResolvedValue(0);
 });
 
 describe("touchStreakOnEngagement — once per working day", () => {
   it("advances the streak once when the previous working day was active", async () => {
-    txMock.streak.findUnique.mockResolvedValue({ current: 3, lastActiveWorkday: daysAgo(1) });
+    txMock.streak.findUnique.mockResolvedValue({
+      current: 3,
+      lastActiveWorkday: daysAgo(1),
+    });
     const res = await touchStreakOnEngagement("ws");
     expect(res).toEqual({ current: 4, freshStart: false, continued: true });
     expect(txMock.streak.update).toHaveBeenCalledTimes(1);
@@ -86,7 +111,10 @@ describe("touchStreakOnEngagement — once per working day", () => {
   });
 
   it("does NOT advance twice the same day (already active today)", async () => {
-    txMock.streak.findUnique.mockResolvedValue({ current: 4, lastActiveWorkday: ymd(new Date()) });
+    txMock.streak.findUnique.mockResolvedValue({
+      current: 4,
+      lastActiveWorkday: ymd(new Date()),
+    });
     const res = await touchStreakOnEngagement("ws");
     expect(res).toEqual({ current: 4, freshStart: false, continued: false });
     expect(txMock.streak.update).not.toHaveBeenCalled();
@@ -106,14 +134,22 @@ describe("touchStreakOnEngagement — once per working day", () => {
   });
 
   it("awards Full work week (streak_5) when the streak reaches 5", async () => {
-    txMock.streak.findUnique.mockResolvedValue({ current: 4, lastActiveWorkday: daysAgo(1) });
+    txMock.streak.findUnique.mockResolvedValue({
+      current: 4,
+      lastActiveWorkday: daysAgo(1),
+    });
     await touchStreakOnEngagement("ws");
     expect(createdBadgeKeys()).toContain("streak_5");
   });
 
   it("awards Comeback on a fresh start after a gap (prior streak had ended)", async () => {
-    txMock.streak.findUnique.mockResolvedValue({ current: 3, lastActiveWorkday: daysAgo(3) });
-    prismaMock.streakRecord.aggregate.mockResolvedValue({ _max: { length: 3 } });
+    txMock.streak.findUnique.mockResolvedValue({
+      current: 3,
+      lastActiveWorkday: daysAgo(3),
+    });
+    prismaMock.streakRecord.aggregate.mockResolvedValue({
+      _max: { length: 3 },
+    });
     const res = await touchStreakOnEngagement("ws");
     expect(res).toEqual({ current: 1, freshStart: true, continued: false });
     expect(txMock.streakRecord.create).toHaveBeenCalledTimes(1); // ended streak filed
@@ -122,21 +158,32 @@ describe("touchStreakOnEngagement — once per working day", () => {
   });
 
   it("does NOT award Comeback on a normal first-ever engagement (no prior streak)", async () => {
-    txMock.streak.findUnique.mockResolvedValue({ current: 0, lastActiveWorkday: null });
+    txMock.streak.findUnique.mockResolvedValue({
+      current: 0,
+      lastActiveWorkday: null,
+    });
     const res = await touchStreakOnEngagement("ws");
     expect(res).toEqual({ current: 1, freshStart: false, continued: false });
     expect(createdBadgeKeys()).not.toContain("comeback");
   });
 
   it("awards Beat best streak when the current run passes the recorded best", async () => {
-    txMock.streak.findUnique.mockResolvedValue({ current: 3, lastActiveWorkday: daysAgo(1) });
-    prismaMock.streakRecord.aggregate.mockResolvedValue({ _max: { length: 2 } });
+    txMock.streak.findUnique.mockResolvedValue({
+      current: 3,
+      lastActiveWorkday: daysAgo(1),
+    });
+    prismaMock.streakRecord.aggregate.mockResolvedValue({
+      _max: { length: 2 },
+    });
     await touchStreakOnEngagement("ws");
     expect(createdBadgeKeys()).toContain("beat_best_streak");
   });
 
   it("is idempotent for streak badges (already held → no duplicate create)", async () => {
-    txMock.streak.findUnique.mockResolvedValue({ current: 4, lastActiveWorkday: daysAgo(1) });
+    txMock.streak.findUnique.mockResolvedValue({
+      current: 4,
+      lastActiveWorkday: daysAgo(1),
+    });
     prismaMock.badge.findUnique.mockResolvedValue({ id: "b1" }); // already earned
     await touchStreakOnEngagement("ws");
     expect(prismaMock.badge.create).not.toHaveBeenCalled();
@@ -145,10 +192,15 @@ describe("touchStreakOnEngagement — once per working day", () => {
 
 describe("rewardStepDone — completion routes through the engagement streak", () => {
   it("logs step_done and advances the streak via the shared engagement fn", async () => {
-    txMock.streak.findUnique.mockResolvedValue({ current: 2, lastActiveWorkday: daysAgo(1) });
+    txMock.streak.findUnique.mockResolvedValue({
+      current: 2,
+      lastActiveWorkday: daysAgo(1),
+    });
     const res = await rewardStepDone("ws");
     expect(prismaMock.rewardEvent.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ type: "step_done" }) }),
+      expect.objectContaining({
+        data: expect.objectContaining({ type: "step_done" }),
+      }),
     );
     expect(txMock.streak.update).toHaveBeenCalledTimes(1);
     expect(res).toEqual({ current: 3, freshStart: false, continued: true });

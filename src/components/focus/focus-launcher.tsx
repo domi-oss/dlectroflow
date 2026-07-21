@@ -26,7 +26,8 @@ export function FocusLauncher({
   voice: Voice;
 }) {
   const { resumeHero, singleTasks, multiStep, meta } = data;
-  const isEmpty = !resumeHero && singleTasks.length === 0 && multiStep.length === 0;
+  const isEmpty =
+    !resumeHero && singleTasks.length === 0 && multiStep.length === 0;
 
   return (
     <div className="space-y-4">
@@ -46,11 +47,18 @@ export function FocusLauncher({
         href="/dashboard"
         className="text-muted-foreground hover:text-foreground inline-flex min-h-[44px] flex-wrap items-center gap-x-1.5 text-sm"
       >
-        <span className="tabular-nums">{focusMinToday}m {t("focus.meta.focusedToday", voice)}</span>
+        <span className="tabular-nums">
+          {focusMinToday}m {t("focus.meta.focusedToday", voice)}
+        </span>
         <span aria-hidden="true">·</span>
-        <span className="tabular-nums">🔥 {currentStreak}{t("focus.meta.dayStreak", voice)}</span>
+        <span className="tabular-nums">
+          🔥 {currentStreak}
+          {t("focus.meta.dayStreak", voice)}
+        </span>
         <span aria-hidden="true">·</span>
-        <span className="tabular-nums">~{meta.minutesToClear}m {t("focus.meta.toClear", voice)}</span>
+        <span className="tabular-nums">
+          ~{meta.minutesToClear}m {t("focus.meta.toClear", voice)}
+        </span>
       </Link>
 
       {/* 4. Resume hero (amber) — only when a paused multi-step step exists. */}
@@ -58,15 +66,20 @@ export function FocusLauncher({
         <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-50 p-4 dark:bg-amber-950/20">
           <div className="flex items-center gap-2 text-xs">
             {/* Status glyph + text, not colour-only. */}
-            <span className="font-medium text-amber-800 dark:text-amber-300">{t("focus.paused", voice)}</span>
-            <span className="text-muted-foreground">{resumeHero.taskTitle}</span>
+            <span className="font-medium text-amber-800 dark:text-amber-300">
+              {t("focus.paused", voice)}
+            </span>
+            <span className="text-muted-foreground">
+              {resumeHero.taskTitle}
+            </span>
           </div>
           <p className="text-base font-semibold">
             {resumeHero.subtaskEmoji ? `${resumeHero.subtaskEmoji} ` : ""}
             {resumeHero.stepText}
           </p>
           <p className="text-muted-foreground text-xs tabular-nums">
-            {t("step.counter", voice)} {resumeHero.stepIndex}/{resumeHero.stepsTotal}
+            {t("step.counter", voice)} {resumeHero.stepIndex}/
+            {resumeHero.stepsTotal}
             {resumeHero.estMinutes > 0
               ? ` · ~${resumeHero.estMinutes}m ${t("focus.hero.left", voice)}`
               : ""}
@@ -81,12 +94,15 @@ export function FocusLauncher({
             {/* motion-safe → reduced-motion users get an instant fill. */}
             <div
               className="h-full rounded-full bg-amber-500 motion-safe:transition-[width]"
-              style={{ width: `${(resumeHero.stepsDone / resumeHero.stepsTotal) * 100}%` }}
+              style={{
+                width: `${(resumeHero.stepsDone / resumeHero.stepsTotal) * 100}%`,
+              }}
             />
           </div>
           {resumeHero.nextStepText && (
             <p className="text-muted-foreground text-xs">
-              {t("focus.hero.next", voice)} {resumeHero.nextStepEmoji ? `${resumeHero.nextStepEmoji} ` : ""}
+              {t("focus.hero.next", voice)}{" "}
+              {resumeHero.nextStepEmoji ? `${resumeHero.nextStepEmoji} ` : ""}
               {resumeHero.nextStepText}
             </p>
           )}
@@ -103,7 +119,12 @@ export function FocusLauncher({
       {!isEmpty && (
         <div className="space-y-4">
           <div>
-            <SubHeader label={t("section.singleTask", voice)} count={singleTasks.length} seeAllHref={SEE_ALL.singleTask} voice={voice} />
+            <SubHeader
+              label={t("section.singleTask", voice)}
+              count={singleTasks.length}
+              seeAllHref={SEE_ALL.singleTask}
+              voice={voice}
+            />
             {singleTasks.length === 0 ? (
               <p className="text-muted-foreground rounded-lg border border-dashed px-4 py-4 text-center text-xs">
                 {t("bucket.empty", voice)}
@@ -113,7 +134,12 @@ export function FocusLauncher({
             )}
           </div>
           <div>
-            <SubHeader label={t("section.multiStep", voice)} count={multiStep.length} seeAllHref={SEE_ALL.multiStep} voice={voice} />
+            <SubHeader
+              label={t("section.multiStep", voice)}
+              count={multiStep.length}
+              seeAllHref={SEE_ALL.multiStep}
+              voice={voice}
+            />
             {multiStep.length === 0 ? (
               <p className="text-muted-foreground rounded-lg border border-dashed px-4 py-4 text-center text-xs">
                 {t("bucket.empty", voice)}
@@ -133,8 +159,13 @@ export function FocusLauncher({
       )}
       {isEmpty && !clearedToday && (
         <div className="space-y-3 rounded-lg border border-dashed p-6 text-center">
-          <p className="text-muted-foreground text-sm">{t("focus.launcher.empty", voice)}</p>
-          <Link href="/inbox" className="inline-flex min-h-[44px] items-center justify-center text-sm underline">
+          <p className="text-muted-foreground text-sm">
+            {t("focus.launcher.empty", voice)}
+          </p>
+          <Link
+            href="/inbox"
+            className="inline-flex min-h-[44px] items-center justify-center text-sm underline"
+          >
             {t("nav.inbox", voice)}
           </Link>
         </div>

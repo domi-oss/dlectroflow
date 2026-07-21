@@ -11,18 +11,20 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(() => {
-  const prismaMock = {
-    settings: {
-      upsert: vi.fn().mockResolvedValue({}),
-    },
-  };
-  return {
-    prismaMock,
-    revalidatePathMock: vi.fn(),
-    currentWorkspaceIdMock: vi.fn().mockResolvedValue("owner"),
-  };
-});
+const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
+  () => {
+    const prismaMock = {
+      settings: {
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+    };
+    return {
+      prismaMock,
+      revalidatePathMock: vi.fn(),
+      currentWorkspaceIdMock: vi.fn().mockResolvedValue("owner"),
+    };
+  },
+);
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/lib/db", () => ({ prisma: prismaMock }));
 vi.mock("@/lib/workspace", () => ({

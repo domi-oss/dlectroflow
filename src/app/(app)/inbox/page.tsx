@@ -30,7 +30,11 @@ export default async function InboxPage({
               // (started, never ended). Batched by Prisma into one query per
               // relation, so this is not a per-step N+1.
               include: {
-                focusSessions: { where: { endedAt: null }, select: { id: true }, take: 1 },
+                focusSessions: {
+                  where: { endedAt: null },
+                  select: { id: true },
+                  take: 1,
+                },
               },
             },
           },
@@ -58,15 +62,16 @@ export default async function InboxPage({
     completedAt: item.completedAt,
     scheduledAt: task?.scheduledAt ?? null,
     estMinutes: item.estMinutes,
-    steps: task?.steps.map((s) => ({
-      id: s.id,
-      order: s.order,
-      text: s.text,
-      done: s.done,
-      estMinutes: s.estMinutes,
-      subtaskEmoji: s.subtaskEmoji,
-      resumable: s.focusSessions.length > 0,
-    })) ?? [],
+    steps:
+      task?.steps.map((s) => ({
+        id: s.id,
+        order: s.order,
+        text: s.text,
+        done: s.done,
+        estMinutes: s.estMinutes,
+        subtaskEmoji: s.subtaskEmoji,
+        resumable: s.focusSessions.length > 0,
+      })) ?? [],
   }));
 
   // Phase 5 (#8): the demo/first-run preview override shows the Inbox as a

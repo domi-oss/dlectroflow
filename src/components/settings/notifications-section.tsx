@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore, useTransition } from "react";
+import {
+  useEffect,
+  useState,
+  useSyncExternalStore,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import { updateNotificationSettings } from "@/app/actions/settings";
 import {
@@ -10,7 +15,10 @@ import {
   subscribeNotificationPermission,
 } from "@/lib/notifications";
 import { t, type Voice } from "@/lib/strings";
-import { useSaveStatus, SaveIndicator } from "@/components/settings/use-save-status";
+import {
+  useSaveStatus,
+  SaveIndicator,
+} from "@/components/settings/use-save-status";
 
 type Prefs = {
   notifyRoundup: boolean;
@@ -92,7 +100,9 @@ export function NotificationsSection({
         <h2 className="text-lg font-semibold">{t("notify.heading", voice)}</h2>
         <SaveIndicator status={status} voice={voice} />
       </div>
-      <p className="text-muted-foreground text-sm">{t("notify.intro", voice)}</p>
+      <p className="text-muted-foreground text-sm">
+        {t("notify.intro", voice)}
+      </p>
 
       {permission === "default" && (
         <button
@@ -104,7 +114,9 @@ export function NotificationsSection({
         </button>
       )}
       {permission === "denied" && (
-        <p className="text-muted-foreground text-xs">{t("notify.blocked", voice)}</p>
+        <p className="text-muted-foreground text-xs">
+          {t("notify.blocked", voice)}
+        </p>
       )}
 
       <div className="space-y-4">

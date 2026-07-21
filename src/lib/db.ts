@@ -16,7 +16,9 @@ if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
 /** True when the error is a Prisma unique-constraint violation (P2002). */
 export function isUniqueViolation(e: unknown): boolean {
-  return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002";
+  return (
+    e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002"
+  );
 }
 
 /**
@@ -37,7 +39,9 @@ export async function getSettings(workspaceId: string) {
     });
   } catch (e) {
     if (isUniqueViolation(e)) {
-      const existing = await prisma.settings.findUnique({ where: { workspaceId } });
+      const existing = await prisma.settings.findUnique({
+        where: { workspaceId },
+      });
       if (existing) return existing;
     }
     throw e;
@@ -54,7 +58,9 @@ export async function getStreak(workspaceId: string) {
     });
   } catch (e) {
     if (isUniqueViolation(e)) {
-      const existing = await prisma.streak.findUnique({ where: { workspaceId } });
+      const existing = await prisma.streak.findUnique({
+        where: { workspaceId },
+      });
       if (existing) return existing;
     }
     throw e;

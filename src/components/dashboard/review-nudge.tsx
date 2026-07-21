@@ -59,7 +59,10 @@ export function ReviewNudge({
       }
       firedRef.current = true;
       localStorage.setItem(dayKey, "1");
-      void showReminder(t("notify.nudgeTitle", voice), t("notify.nudgeBody", voice));
+      void showReminder(
+        t("notify.nudgeTitle", voice),
+        t("notify.nudgeBody", voice),
+      );
     };
 
     tick();

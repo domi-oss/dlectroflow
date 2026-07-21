@@ -6,10 +6,46 @@ import { useEffect, useRef, useState } from "react";
 // plus common general-purpose glyphs. Enough to pick something fitting without
 // pulling in a heavyweight emoji-picker library.
 const EMOJIS = [
-  "🎯", "✅", "📝", "📌", "🔍", "🧹", "🧰", "📞", "✉️", "📅",
-  "💡", "🚀", "🌱", "🔥", "⭐", "🎉", "🧠", "💪", "⏱️", "🔔",
-  "🍽️", "🍿", "🥫", "🍞", "🥖", "☕", "🧽", "🛒", "💰", "📦",
-  "🏠", "🚗", "✈️", "🎨", "🎵", "📚", "💻", "🩺", "🐾", "•",
+  "🎯",
+  "✅",
+  "📝",
+  "📌",
+  "🔍",
+  "🧹",
+  "🧰",
+  "📞",
+  "✉️",
+  "📅",
+  "💡",
+  "🚀",
+  "🌱",
+  "🔥",
+  "⭐",
+  "🎉",
+  "🧠",
+  "💪",
+  "⏱️",
+  "🔔",
+  "🍽️",
+  "🍿",
+  "🥫",
+  "🍞",
+  "🥖",
+  "☕",
+  "🧽",
+  "🛒",
+  "💰",
+  "📦",
+  "🏠",
+  "🚗",
+  "✈️",
+  "🎨",
+  "🎵",
+  "📚",
+  "💻",
+  "🩺",
+  "🐾",
+  "•",
 ] as const;
 
 /**
@@ -30,7 +66,8 @@ export function EmojiPicker({
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);

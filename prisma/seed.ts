@@ -36,7 +36,9 @@ function hasReviewSignal(env: SeedEnv): boolean {
 function isProductionEnv(env: SeedEnv): boolean {
   // NOTE: NODE_ENV is deliberately NOT consulted — the review app image boots
   // with NODE_ENV=production too, so it can't distinguish review from prod.
-  return env.APP_ENV === "production" || env.CI_ENVIRONMENT_NAME === "production";
+  return (
+    env.APP_ENV === "production" || env.CI_ENVIRONMENT_NAME === "production"
+  );
 }
 
 // Allowlist: an environment marker is acceptable only when it's a review value
@@ -45,7 +47,9 @@ function appEnvAllowed(env: SeedEnv): boolean {
   return !env.APP_ENV || env.APP_ENV === "review";
 }
 function ciEnvAllowed(env: SeedEnv): boolean {
-  return !env.CI_ENVIRONMENT_NAME || env.CI_ENVIRONMENT_NAME.startsWith("review/");
+  return (
+    !env.CI_ENVIRONMENT_NAME || env.CI_ENVIRONMENT_NAME.startsWith("review/")
+  );
 }
 
 /**
@@ -124,13 +128,41 @@ export async function seedReviewApp(
       parentEmoji: "📊",
       workspaceId,
     },
-    update: { title: "Prepare the quarterly presentation", status: "active", workspaceId },
+    update: {
+      title: "Prepare the quarterly presentation",
+      status: "active",
+      workspaceId,
+    },
   });
 
-  const steps: { suffix: string; order: number; text: string; emoji: string; min: number }[] = [
-    { suffix: "step-1", order: 1, text: "Pull last quarter's numbers", emoji: "🔢", min: 20 },
-    { suffix: "step-2", order: 2, text: "Draft the three key slides", emoji: "🖊️", min: 30 },
-    { suffix: "step-3", order: 3, text: "Rehearse the walkthrough", emoji: "🎤", min: 15 },
+  const steps: {
+    suffix: string;
+    order: number;
+    text: string;
+    emoji: string;
+    min: number;
+  }[] = [
+    {
+      suffix: "step-1",
+      order: 1,
+      text: "Pull last quarter's numbers",
+      emoji: "🔢",
+      min: 20,
+    },
+    {
+      suffix: "step-2",
+      order: 2,
+      text: "Draft the three key slides",
+      emoji: "🖊️",
+      min: 30,
+    },
+    {
+      suffix: "step-3",
+      order: 3,
+      text: "Rehearse the walkthrough",
+      emoji: "🎤",
+      min: 15,
+    },
   ];
   for (const s of steps) {
     await db.step.upsert({
@@ -145,7 +177,12 @@ export async function seedReviewApp(
         subtaskEmoji: s.emoji,
         done: false,
       },
-      update: { text: s.text, order: s.order, total: steps.length, estMinutes: s.min },
+      update: {
+        text: s.text,
+        order: s.order,
+        total: steps.length,
+        estMinutes: s.min,
+      },
     });
   }
 
@@ -175,7 +212,12 @@ export async function seedReviewApp(
       subtaskEmoji: "🪴",
       done: false,
     },
-    update: { text: "Water the office plants", order: 1, total: 1, estMinutes: 10 },
+    update: {
+      text: "Water the office plants",
+      order: 1,
+      total: 1,
+      estMinutes: 10,
+    },
   });
 
   // ── Brain-dump items across the buckets ────────────────────────────────────
@@ -188,9 +230,21 @@ export async function seedReviewApp(
     triagedAt?: Date;
   }[] = [
     // Needs review (fresh inbox captures)
-    { suffix: "bdi-inbox-1", text: "Buy groceries for the week", status: "inbox" },
-    { suffix: "bdi-inbox-2", text: "Reply to the landlord about the lease", status: "inbox" },
-    { suffix: "bdi-inbox-3", text: "Book the dentist appointment", status: "inbox" },
+    {
+      suffix: "bdi-inbox-1",
+      text: "Buy groceries for the week",
+      status: "inbox",
+    },
+    {
+      suffix: "bdi-inbox-2",
+      text: "Reply to the landlord about the lease",
+      status: "inbox",
+    },
+    {
+      suffix: "bdi-inbox-3",
+      text: "Book the dentist appointment",
+      status: "inbox",
+    },
     // Triaged → linked to the demo tasks above
     {
       suffix: "bdi-multi",
@@ -247,7 +301,9 @@ async function main(): Promise<void> {
   const prisma = new PrismaClient();
   try {
     await seedReviewApp(prisma, workspaceId);
-    console.log(`[seed] review demo content ready in workspace "${workspaceId}"`);
+    console.log(
+      `[seed] review demo content ready in workspace "${workspaceId}"`,
+    );
   } catch (err) {
     console.error(`[seed] review seed skipped (non-fatal):`, err);
   } finally {

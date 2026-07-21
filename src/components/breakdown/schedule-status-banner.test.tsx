@@ -8,13 +8,17 @@ afterEach(cleanup);
 describe("ScheduleStatusBanner — reflects ground-truth scheduling state", () => {
   it("shows the scheduled banner when the task is persisted-scheduled", () => {
     render(<ScheduleStatusBanner scheduled voice="plain" />);
-    expect(screen.getByText(/scheduled — these steps are on your calendar/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/scheduled — these steps are on your calendar/i),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/not scheduled yet/i)).toBeNull();
   });
 
   it("shows the not-scheduled banner when the task has never been scheduled", () => {
     render(<ScheduleStatusBanner scheduled={false} voice="plain" />);
-    expect(screen.getByText(/not scheduled yet — connect a calendar/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/not scheduled yet — connect a calendar/i),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/these steps are on your calendar/i)).toBeNull();
   });
 

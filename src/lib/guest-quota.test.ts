@@ -20,7 +20,12 @@ class FakeP2002 extends Error {
   code = "P2002";
 }
 
-import { clientIpHash, consumeGuestBreakdown, peekGuestAllowance, refundGuestBreakdown } from "./guest-quota";
+import {
+  clientIpHash,
+  consumeGuestBreakdown,
+  peekGuestAllowance,
+  refundGuestBreakdown,
+} from "./guest-quota";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -44,15 +49,21 @@ describe("clientIpHash", () => {
   });
   it("ignores a spoofed left-most XFF entry (uses the trusted right-most hop)", () => {
     // A client forging the left-most segment must not change the quota key.
-    const spoofed = clientIpHash(new Headers({ "x-forwarded-for": "6.6.6.6, 5.6.7.8" }));
+    const spoofed = clientIpHash(
+      new Headers({ "x-forwarded-for": "6.6.6.6, 5.6.7.8" }),
+    );
     const real = clientIpHash(new Headers({ "x-forwarded-for": "5.6.7.8" }));
     expect(spoofed).toBe(real);
     // ...and it is NOT the attacker-controlled left-most value.
-    const attackerControlled = clientIpHash(new Headers({ "x-forwarded-for": "6.6.6.6" }));
+    const attackerControlled = clientIpHash(
+      new Headers({ "x-forwarded-for": "6.6.6.6" }),
+    );
     expect(spoofed).not.toBe(attackerControlled);
   });
   it("tolerates surrounding whitespace / trailing empty segments", () => {
-    const a = clientIpHash(new Headers({ "x-forwarded-for": " 1.1.1.1 , 5.6.7.8 , " }));
+    const a = clientIpHash(
+      new Headers({ "x-forwarded-for": " 1.1.1.1 , 5.6.7.8 , " }),
+    );
     const b = clientIpHash(new Headers({ "x-forwarded-for": "5.6.7.8" }));
     expect(a).toBe(b);
   });
@@ -71,12 +82,18 @@ describe("consumeGuestBreakdown", () => {
     db.guestDailyActivity.count.mockResolvedValue(3);
     db.guestDailyActivity.create.mockResolvedValue({});
     // pre-check read (active window, under quota)
-    db.guestAiUsage.findUnique.mockResolvedValueOnce({ count: 1, windowStartedAt: new Date() });
+    db.guestAiUsage.findUnique.mockResolvedValueOnce({
+      count: 1,
+      windowStartedAt: new Date(),
+    });
     db.guestAiUsage.updateMany
       .mockResolvedValueOnce({ count: 0 }) // reset: window not expired → 0
       .mockResolvedValueOnce({ count: 1 }); // guarded increment applied
     // remaining re-read after increment
-    db.guestAiUsage.findUnique.mockResolvedValueOnce({ count: 2, windowStartedAt: new Date() });
+    db.guestAiUsage.findUnique.mockResolvedValueOnce({
+      count: 2,
+      windowStartedAt: new Date(),
+    });
     const r = await consumeGuestBreakdown("iphash");
     expect(r.allowed).toBe(true);
     expect(r.remaining).toBe(3); // 5 - 2
@@ -84,7 +101,10 @@ describe("consumeGuestBreakdown", () => {
     expect(db.guestAiUsage.create).not.toHaveBeenCalled();
   });
   it("blocks with reason=quota when the per-IP window is exhausted (no metered write)", async () => {
-    db.guestAiUsage.findUnique.mockResolvedValue({ count: 5, windowStartedAt: new Date() });
+    db.guestAiUsage.findUnique.mockResolvedValue({
+      count: 5,
+      windowStartedAt: new Date(),
+    });
     const r = await consumeGuestBreakdown("iphash");
     expect(r.allowed).toBe(false);
     expect(r.reason).toBe("quota");
@@ -95,7 +115,10 @@ describe("consumeGuestBreakdown", () => {
   it("blocks a NEW guest with reason=global_cap when the day is full", async () => {
     db.guestDailyActivity.findUnique.mockResolvedValue(null); // not counted today
     db.guestDailyActivity.count.mockResolvedValue(10); // cap reached
-    db.guestAiUsage.findUnique.mockResolvedValue({ count: 0, windowStartedAt: new Date() });
+    db.guestAiUsage.findUnique.mockResolvedValue({
+      count: 0,
+      windowStartedAt: new Date(),
+    });
     const r = await consumeGuestBreakdown("iphash");
     expect(r.allowed).toBe(false);
     expect(r.reason).toBe("global_cap");
@@ -103,8 +126,14 @@ describe("consumeGuestBreakdown", () => {
   });
   it("window-expiry reset: allows when window is older than 24h and resets count", async () => {
     const expiredStart = new Date(Date.now() - 25 * 3600_000);
-    db.guestAiUsage.findUnique.mockResolvedValue({ count: 5, windowStartedAt: expiredStart });
-    db.guestDailyActivity.findUnique.mockResolvedValue({ day: "x", ipHash: "iphash" }); // already counted today
+    db.guestAiUsage.findUnique.mockResolvedValue({
+      count: 5,
+      windowStartedAt: expiredStart,
+    });
+    db.guestDailyActivity.findUnique.mockResolvedValue({
+      day: "x",
+      ipHash: "iphash",
+    }); // already counted today
     db.guestAiUsage.updateMany.mockResolvedValueOnce({ count: 1 }); // reset matched the expired row
     const r = await consumeGuestBreakdown("iphash");
     expect(r.allowed).toBe(true);
@@ -146,7 +175,10 @@ describe("consumeGuestBreakdown", () => {
   });
   it("exhausted active window (race): guard sees the row → blocks quota, no wasteful create", async () => {
     // pre-check passes (4 < 5) but the last slot is taken before we increment.
-    db.guestDailyActivity.findUnique.mockResolvedValue({ day: "x", ipHash: "iphash" }); // counted today
+    db.guestDailyActivity.findUnique.mockResolvedValue({
+      day: "x",
+      ipHash: "iphash",
+    }); // counted today
     db.guestAiUsage.findUnique
       .mockResolvedValueOnce({ count: 4, windowStartedAt: new Date() }) // pre-check: 4 < 5
       .mockResolvedValueOnce({ count: 5, windowStartedAt: new Date() }); // step-3 guard: now full
@@ -174,7 +206,11 @@ describe("peekGuestAllowance", () => {
 
 describe("refundGuestBreakdown", () => {
   it("decrements count when row exists with count > 0", async () => {
-    db.guestAiUsage.findUnique.mockResolvedValue({ ipHash: "iphash", count: 3, windowStartedAt: new Date() });
+    db.guestAiUsage.findUnique.mockResolvedValue({
+      ipHash: "iphash",
+      count: 3,
+      windowStartedAt: new Date(),
+    });
     db.guestAiUsage.update.mockResolvedValue({});
     await refundGuestBreakdown("iphash");
     expect(db.guestAiUsage.update).toHaveBeenCalledWith({
@@ -188,7 +224,11 @@ describe("refundGuestBreakdown", () => {
     expect(db.guestAiUsage.update).not.toHaveBeenCalled();
   });
   it("does NOT call update when count is 0", async () => {
-    db.guestAiUsage.findUnique.mockResolvedValue({ ipHash: "iphash", count: 0, windowStartedAt: new Date() });
+    db.guestAiUsage.findUnique.mockResolvedValue({
+      ipHash: "iphash",
+      count: 0,
+      windowStartedAt: new Date(),
+    });
     await refundGuestBreakdown("iphash");
     expect(db.guestAiUsage.update).not.toHaveBeenCalled();
   });

@@ -29,7 +29,10 @@ describe("buildTaskIcs", () => {
     expect(ics).toContain("DTEND:20260708T094500");
   });
   it("escapes commas in summaries", () => {
-    const s = buildTaskIcs({ title: "A, B", steps: [{ text: "x, y", estMinutes: 5 }] });
+    const s = buildTaskIcs({
+      title: "A, B",
+      steps: [{ text: "x, y", estMinutes: 5 }],
+    });
     expect(s).toContain("x\\, y");
   });
   it("no-steps task with fallbackDurationMin emits exactly one VEVENT titled with the task title", () => {
@@ -53,7 +56,9 @@ describe("buildTaskIcs", () => {
 
 describe("icsFilename", () => {
   it("slugifies the title and prefixes dlectroflow-", () => {
-    expect(icsFilename("Ship the thing")).toBe("dlectroflow-Ship-the-thing.ics");
+    expect(icsFilename("Ship the thing")).toBe(
+      "dlectroflow-Ship-the-thing.ics",
+    );
   });
   it("falls back to 'task' for an empty title", () => {
     expect(icsFilename("")).toBe("dlectroflow-task.ics");

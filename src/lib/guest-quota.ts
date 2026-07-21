@@ -28,10 +28,18 @@ export function clientIpHash(headers: Headers): string | null {
   const ip = clientIp(headers);
   if (!ip) return null;
   const salt = process.env.GUEST_IP_HASH_SALT ?? "";
-  if (!salt && process.env.NODE_ENV !== "test" && process.env.NODE_ENV !== "production") {
-    console.warn("[guest-quota] GUEST_IP_HASH_SALT is not set — IP hashing provides no privacy");
+  if (
+    !salt &&
+    process.env.NODE_ENV !== "test" &&
+    process.env.NODE_ENV !== "production"
+  ) {
+    console.warn(
+      "[guest-quota] GUEST_IP_HASH_SALT is not set — IP hashing provides no privacy",
+    );
   }
-  return createHash("sha256").update(salt + ip).digest("hex");
+  return createHash("sha256")
+    .update(salt + ip)
+    .digest("hex");
 }
 
 /**
@@ -42,7 +50,10 @@ export function clientIpHash(headers: Headers): string | null {
 function clientIp(headers: Headers): string | null {
   const xff = headers.get("x-forwarded-for");
   if (xff) {
-    const hops = xff.split(",").map((s) => s.trim()).filter(Boolean);
+    const hops = xff
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
     if (hops.length) return hops[hops.length - 1];
   }
   return headers.get("x-real-ip")?.trim() || null;
@@ -59,11 +70,14 @@ export type AllowanceResult = {
 };
 
 /** Read-only remaining allowance for the chip (does not consume). */
-export async function peekGuestAllowance(ipHash: string): Promise<{ remaining: number }> {
+export async function peekGuestAllowance(
+  ipHash: string,
+): Promise<{ remaining: number }> {
   const { quota, windowHours } = guestQuotaConfig();
   const row = await prisma.guestAiUsage.findUnique({ where: { ipHash } });
   if (!row) return { remaining: quota };
-  const expired = Date.now() - row.windowStartedAt.getTime() >= windowHours * 3600_000;
+  const expired =
+    Date.now() - row.windowStartedAt.getTime() >= windowHours * 3600_000;
   const used = expired ? 0 : row.count;
   return { remaining: Math.max(0, quota - used) };
 }
@@ -79,7 +93,9 @@ export async function peekGuestAllowance(ipHash: string): Promise<{ remaining: n
  * a TOCTOU: N concurrent callers could each read `used < quota` then all
  * increment, overshooting the quota. See `meterConsume` below.
  */
-export async function consumeGuestBreakdown(ipHash: string): Promise<AllowanceResult> {
+export async function consumeGuestBreakdown(
+  ipHash: string,
+): Promise<AllowanceResult> {
   const { quota, windowHours, globalCap } = guestQuotaConfig();
   const now = new Date();
   const windowThreshold = new Date(now.getTime() - windowHours * 3600_000);
@@ -99,7 +115,8 @@ export async function consumeGuestBreakdown(ipHash: string): Promise<AllowanceRe
   });
   if (!countedToday) {
     const distinct = await prisma.guestDailyActivity.count({ where: { day } });
-    if (distinct >= globalCap) return { allowed: false, remaining: quota - used, reason: "global_cap" };
+    if (distinct >= globalCap)
+      return { allowed: false, remaining: quota - used, reason: "global_cap" };
     try {
       await prisma.guestDailyActivity.create({ data: { day, ipHash } });
     } catch (e) {
@@ -129,16 +146,24 @@ async function meterConsume(
     where: { ipHash, windowStartedAt: { lte: windowThreshold } },
     data: { count: 1, windowStartedAt: now },
   });
-  if (reset.count > 0) return { allowed: true, remaining: Math.max(0, quota - 1) };
+  if (reset.count > 0)
+    return { allowed: true, remaining: Math.max(0, quota - 1) };
 
   // 2) Guarded increment inside an active window. The `count < quota` guard is
   //    re-checked on the locked row, so at most `quota` increments ever apply.
   const inc = await prisma.guestAiUsage.updateMany({
-    where: { ipHash, count: { lt: quota }, windowStartedAt: { gt: windowThreshold } },
+    where: {
+      ipHash,
+      count: { lt: quota },
+      windowStartedAt: { gt: windowThreshold },
+    },
     data: { count: { increment: 1 } },
   });
   if (inc.count > 0) {
-    return { allowed: true, remaining: await remainingInWindow(ipHash, quota, windowThreshold) };
+    return {
+      allowed: true,
+      remaining: await remainingInWindow(ipHash, quota, windowThreshold),
+    };
   }
 
   // 3) Nothing was incremented: the row is either absent (first use) or the
@@ -148,7 +173,9 @@ async function meterConsume(
   const existing = await prisma.guestAiUsage.findUnique({ where: { ipHash } });
   if (!existing) {
     try {
-      await prisma.guestAiUsage.create({ data: { ipHash, count: 1, windowStartedAt: now } });
+      await prisma.guestAiUsage.create({
+        data: { ipHash, count: 1, windowStartedAt: now },
+      });
       return { allowed: true, remaining: Math.max(0, quota - 1) };
     } catch (e) {
       if (!isUniqueViolation(e)) throw e;
@@ -159,17 +186,28 @@ async function meterConsume(
   // Row exists (present all along, or created concurrently): increment while the
   // active window still has room, else it is genuinely exhausted.
   const retry = await prisma.guestAiUsage.updateMany({
-    where: { ipHash, count: { lt: quota }, windowStartedAt: { gt: windowThreshold } },
+    where: {
+      ipHash,
+      count: { lt: quota },
+      windowStartedAt: { gt: windowThreshold },
+    },
     data: { count: { increment: 1 } },
   });
   if (retry.count > 0) {
-    return { allowed: true, remaining: await remainingInWindow(ipHash, quota, windowThreshold) };
+    return {
+      allowed: true,
+      remaining: await remainingInWindow(ipHash, quota, windowThreshold),
+    };
   }
   return { allowed: false, remaining: 0, reason: "quota" };
 }
 
 /** Best-effort remaining after a consume (informational; may read a lower value under load). */
-async function remainingInWindow(ipHash: string, quota: number, windowThreshold: Date): Promise<number> {
+async function remainingInWindow(
+  ipHash: string,
+  quota: number,
+  windowThreshold: Date,
+): Promise<number> {
   const row = await prisma.guestAiUsage.findUnique({ where: { ipHash } });
   if (!row) return quota;
   const used = row.windowStartedAt <= windowThreshold ? 0 : row.count;
@@ -180,6 +218,9 @@ async function remainingInWindow(ipHash: string, quota: number, windowThreshold:
 export async function refundGuestBreakdown(ipHash: string): Promise<void> {
   const row = await prisma.guestAiUsage.findUnique({ where: { ipHash } });
   if (row && row.count > 0) {
-    await prisma.guestAiUsage.update({ where: { ipHash }, data: { count: { decrement: 1 } } });
+    await prisma.guestAiUsage.update({
+      where: { ipHash },
+      data: { count: { decrement: 1 } },
+    });
   }
 }

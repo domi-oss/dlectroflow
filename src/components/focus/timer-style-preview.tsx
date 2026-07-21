@@ -15,7 +15,11 @@ export function TimerStylePreview({ style }: { style: FocusTimerStyle }) {
 
   if (style === "digits") {
     return (
-      <span data-testid="timer-style-preview-digits" aria-hidden="true" className={box}>
+      <span
+        data-testid="timer-style-preview-digits"
+        aria-hidden="true"
+        className={box}
+      >
         <span className="text-foreground rounded border border-current px-1 text-[10px] font-semibold leading-none tabular-nums">
           0:00
         </span>
@@ -25,7 +29,11 @@ export function TimerStylePreview({ style }: { style: FocusTimerStyle }) {
 
   if (style === "bar") {
     return (
-      <span data-testid="timer-style-preview-bar" aria-hidden="true" className={box}>
+      <span
+        data-testid="timer-style-preview-bar"
+        aria-hidden="true"
+        className={box}
+      >
         <span className="bg-secondary h-2 w-8 overflow-hidden rounded-full">
           <span className="bg-primary block h-full w-2/3 rounded-full" />
         </span>
@@ -35,7 +43,11 @@ export function TimerStylePreview({ style }: { style: FocusTimerStyle }) {
 
   if (style === "mug") {
     return (
-      <span data-testid="timer-style-preview-mug" aria-hidden="true" className={box}>
+      <span
+        data-testid="timer-style-preview-mug"
+        aria-hidden="true"
+        className={box}
+      >
         <span className="relative flex h-6 w-5 items-end overflow-hidden rounded-b-lg rounded-t-sm border-2 border-current">
           <span className="bg-primary/70 block h-3/5 w-full" />
         </span>
@@ -48,9 +60,24 @@ export function TimerStylePreview({ style }: { style: FocusTimerStyle }) {
   const r = 9;
   const c = 2 * Math.PI * r;
   return (
-    <span data-testid="timer-style-preview-ring" aria-hidden="true" className={box}>
-      <svg viewBox="0 0 24 24" role="presentation" className="h-6 w-6 -rotate-90">
-        <circle cx="12" cy="12" r={r} fill="none" className="stroke-secondary" strokeWidth="3" />
+    <span
+      data-testid="timer-style-preview-ring"
+      aria-hidden="true"
+      className={box}
+    >
+      <svg
+        viewBox="0 0 24 24"
+        role="presentation"
+        className="h-6 w-6 -rotate-90"
+      >
+        <circle
+          cx="12"
+          cy="12"
+          r={r}
+          fill="none"
+          className="stroke-secondary"
+          strokeWidth="3"
+        />
         <circle
           cx="12"
           cy="12"

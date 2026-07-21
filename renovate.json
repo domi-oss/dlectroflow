@@ -6,10 +6,7 @@
     ":semanticCommits"
   ],
   "timezone": "Europe/London",
-  "labels": [
-    "dependencies",
-    "renovate"
-  ],
+  "labels": ["dependencies", "renovate"],
   "prConcurrentLimit": 5,
   "prHourlyLimit": 0,
   "platformAutomerge": true,
@@ -17,9 +14,7 @@
     {
       "customType": "regex",
       "description": "Track the pinned image refs in the Helm chart values.yaml (postgres server — which the backup dumpImage also inherits — and the backup upload image google/cloud-sdk). These are single-string `name:tag@digest` values, not the repository/tag shape the built-in helm-values manager parses, so an annotated regex manager is used instead. Add a `# renovate: datasource=docker depName=<image> [versioning=docker]` line directly above any new image field to bring it under tracking (#15).",
-      "managerFilePatterns": [
-        "/^charts/dlectroflow/values\\.yaml$/"
-      ],
+      "managerFilePatterns": ["/^charts/dlectroflow/values\\.yaml$/"],
       "matchStrings": [
         "#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)(?:\\s+versioning=(?<versioning>\\S+))?\\s+\\w+:\\s*\\S+?:(?<currentValue>[^@\\s\"']+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?"
       ],
@@ -29,49 +24,28 @@
   "packageRules": [
     {
       "description": "Automerge patch/minor/digest/pin once the MR pipeline passes. The pipeline runs all scanners as REQUIRED jobs on MRs (they must execute), and new Critical/High findings are blocked by the Scan Result Policy (issue #2, task 4.2) \u2014 enable that policy before turning the Renovate schedule on. Majors always need manual review + Duo.",
-      "matchUpdateTypes": [
-        "minor",
-        "patch",
-        "digest",
-        "pin"
-      ],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
       "automerge": true
     },
     {
       "description": "Group and label the Docker/CI base-image (node:22-alpine) bumps together.",
-      "matchManagers": [
-        "dockerfile",
-        "gitlabci"
-      ],
-      "matchPackageNames": [
-        "node"
-      ],
+      "matchManagers": ["dockerfile", "gitlabci"],
+      "matchPackageNames": ["node"],
       "groupName": "node base image",
-      "labels": [
-        "dependencies",
-        "docker",
-        "base-image"
-      ]
+      "labels": ["dependencies", "docker", "base-image"]
     },
     {
       "description": "Defer ESLint 10 (#21/!51): no released eslint-plugin-react supports it (latest 7.37.5 peers eslint ^3||...||^9.7, pinned via eslint-config-next). Lift this line once the Next plugin chain ships ESLint-10 support - Renovate will re-propose the major automatically.",
-      "matchPackageNames": [
-        "eslint"
-      ],
+      "matchPackageNames": ["eslint"],
       "allowedVersions": "<10"
     },
     {
       "description": "Defer TypeScript 7 (!68): TS 7 is the Go-native compiler; @typescript-eslint 8.62.1 peers typescript >=4.8.4 <6.1.0 (via eslint-config-next), so typescript-estree crashes at module load and lint/build fail. The <6.1 ceiling matches that peer range and still lets Renovate propose TS 6.0.x (the JS-based sibling release). This cap also applies to vulnerabilityAlerts MRs (Renovate does not auto-bypass allowedVersions for security fixes) - accepted trade-off: typescript is a devDependency (never in the runtime bundle), TS itself rarely carries CVEs, and a TS-7-only fix would crash this same lint toolchain regardless, so the real remediation is lifting this defer. Lift this line once the typescript-eslint chain ships TS-7 support - Renovate will re-propose the major automatically.",
-      "matchPackageNames": [
-        "typescript"
-      ],
+      "matchPackageNames": ["typescript"],
       "allowedVersions": "<6.1"
     }
   ],
   "vulnerabilityAlerts": {
-    "labels": [
-      "dependencies",
-      "security"
-    ]
+    "labels": ["dependencies", "security"]
   }
 }

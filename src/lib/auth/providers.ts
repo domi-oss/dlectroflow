@@ -50,7 +50,8 @@ const gitlabProvider: AuthProvider = {
         code_verifier: codeVerifier,
       }),
     });
-    if (!res.ok) throw new Error(`GitLab token exchange failed (${res.status})`);
+    if (!res.ok)
+      throw new Error(`GitLab token exchange failed (${res.status})`);
     const data = (await res.json()) as { access_token: string };
     return data.access_token;
   },

@@ -8,18 +8,35 @@ afterEach(cleanup);
 const styles = ["ring", "digits", "bar", "mug"] as const;
 
 describe("TimerVisual", () => {
-  it.each(styles)("renders the %s style with the mm:ss + 'of Nm' readout (never colour-only)", (style) => {
-    render(
-      <TimerVisual style={style} remainingSec={125} totalSec={600} phase="running" reducedMotion={false} voice="plain" />,
-    );
-    const root = screen.getByTestId(`timer-visual-${style}`);
-    expect(within(root).getByText("2:05")).toBeInTheDocument();
-    expect(within(root).getByText(/of 10m/)).toBeInTheDocument();
-  });
+  it.each(styles)(
+    "renders the %s style with the mm:ss + 'of Nm' readout (never colour-only)",
+    (style) => {
+      render(
+        <TimerVisual
+          style={style}
+          remainingSec={125}
+          totalSec={600}
+          phase="running"
+          reducedMotion={false}
+          voice="plain"
+        />,
+      );
+      const root = screen.getByTestId(`timer-visual-${style}`);
+      expect(within(root).getByText("2:05")).toBeInTheDocument();
+      expect(within(root).getByText(/of 10m/)).toBeInTheDocument();
+    },
+  );
 
   it("bar style exposes a progressbar with numeric min/now/max", () => {
     render(
-      <TimerVisual style="bar" remainingSec={300} totalSec={600} phase="running" reducedMotion={false} voice="plain" />,
+      <TimerVisual
+        style="bar"
+        remainingSec={300}
+        totalSec={600}
+        phase="running"
+        reducedMotion={false}
+        voice="plain"
+      />,
     );
     const bar = screen.getByRole("progressbar");
     expect(bar).toHaveAttribute("aria-valuemin", "0");
@@ -29,7 +46,14 @@ describe("TimerVisual", () => {
 
   it("drops the animated transition under reduced motion (mug)", () => {
     const { container } = render(
-      <TimerVisual style="mug" remainingSec={300} totalSec={600} phase="running" reducedMotion={true} voice="plain" />,
+      <TimerVisual
+        style="mug"
+        remainingSec={300}
+        totalSec={600}
+        phase="running"
+        reducedMotion={true}
+        voice="plain"
+      />,
     );
     expect(container.innerHTML).not.toMatch(/transition-\[height\]/);
   });

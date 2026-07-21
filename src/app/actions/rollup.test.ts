@@ -97,7 +97,10 @@ describe("triggerRollup email gating", () => {
 
     expect(sendRoundupEmailMock).toHaveBeenCalledTimes(1);
     // The once-per-day guard depends on the emailed marker being written.
-    expect(markRollupEmailedMock).toHaveBeenCalledWith("owner", rollupFixture.date);
+    expect(markRollupEmailedMock).toHaveBeenCalledWith(
+      "owner",
+      rollupFixture.date,
+    );
     expect(res.email).toEqual({ attempted: true, ok: true, reason: undefined });
   });
 });
@@ -144,7 +147,10 @@ describe("triggerRollup duplicate-send race (#18)", () => {
     const res = await triggerRollup({ force: false, sendEmail: true });
 
     expect(res.email).toEqual({ attempted: true, ok: false, reason: "error" });
-    expect(releaseRollupEmailClaimMock).toHaveBeenCalledWith("owner", rollupFixture.date);
+    expect(releaseRollupEmailClaimMock).toHaveBeenCalledWith(
+      "owner",
+      rollupFixture.date,
+    );
     // A failed send must not leave the day marked as emailed.
     expect(markRollupEmailedMock).not.toHaveBeenCalled();
   });
@@ -159,8 +165,13 @@ describe("triggerRollup duplicate-send race (#18)", () => {
 
     const { triggerRollup } = await import("./rollup");
 
-    await expect(triggerRollup({ force: false, sendEmail: true })).rejects.toThrow(boom);
-    expect(releaseRollupEmailClaimMock).toHaveBeenCalledWith("owner", rollupFixture.date);
+    await expect(
+      triggerRollup({ force: false, sendEmail: true }),
+    ).rejects.toThrow(boom);
+    expect(releaseRollupEmailClaimMock).toHaveBeenCalledWith(
+      "owner",
+      rollupFixture.date,
+    );
     expect(markRollupEmailedMock).not.toHaveBeenCalled();
   });
 
@@ -171,7 +182,10 @@ describe("triggerRollup duplicate-send race (#18)", () => {
     expect(sendRoundupEmailMock).toHaveBeenCalledTimes(1);
     // Force is the demo override: it marks-emailed directly, never via a claim.
     expect(claimRollupEmailMock).not.toHaveBeenCalled();
-    expect(markRollupEmailedMock).toHaveBeenCalledWith("owner", rollupFixture.date);
+    expect(markRollupEmailedMock).toHaveBeenCalledWith(
+      "owner",
+      rollupFixture.date,
+    );
     expect(res.email).toEqual({ attempted: true, ok: true, reason: undefined });
   });
 });

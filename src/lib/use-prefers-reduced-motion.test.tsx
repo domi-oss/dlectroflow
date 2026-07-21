@@ -22,7 +22,9 @@ function mockMatchMedia(initial: boolean) {
     dispatchEvent: () => true,
     onchange: null,
   };
-  window.matchMedia = vi.fn().mockReturnValue(mql) as unknown as typeof window.matchMedia;
+  window.matchMedia = vi
+    .fn()
+    .mockReturnValue(mql) as unknown as typeof window.matchMedia;
   return {
     fire(next: boolean) {
       matches = next;

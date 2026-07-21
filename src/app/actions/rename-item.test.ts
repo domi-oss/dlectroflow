@@ -8,22 +8,24 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(() => {
-  const prismaMock = {
-    brainDumpItem: {
-      findFirst: vi.fn(),
-      update: vi.fn().mockResolvedValue({}),
-    },
-    task: {
-      update: vi.fn().mockResolvedValue({}),
-    },
-  };
-  return {
-    prismaMock,
-    revalidatePathMock: vi.fn(),
-    currentWorkspaceIdMock: vi.fn().mockResolvedValue("owner"),
-  };
-});
+const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
+  () => {
+    const prismaMock = {
+      brainDumpItem: {
+        findFirst: vi.fn(),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      task: {
+        update: vi.fn().mockResolvedValue({}),
+      },
+    };
+    return {
+      prismaMock,
+      revalidatePathMock: vi.fn(),
+      currentWorkspaceIdMock: vi.fn().mockResolvedValue("owner"),
+    };
+  },
+);
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/lib/db", () => ({ prisma: prismaMock }));
 vi.mock("@/lib/workspace", () => ({
@@ -60,7 +62,10 @@ describe("renameItem", () => {
   });
 
   it("renames the item (trimmed) and revalidates /inbox", async () => {
-    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({ id: "i1", taskId: null });
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i1",
+      taskId: null,
+    });
     const { renameItem } = await import("./braindump");
     await renameItem("i1", "  new name  ");
     expect(prismaMock.brainDumpItem.update).toHaveBeenCalledWith({
@@ -72,7 +77,10 @@ describe("renameItem", () => {
   });
 
   it("keeps a linked task's title in sync and revalidates its page", async () => {
-    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({ id: "i1", taskId: "t1" });
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i1",
+      taskId: "t1",
+    });
     const { renameItem } = await import("./braindump");
     await renameItem("i1", "new name");
     expect(prismaMock.task.update).toHaveBeenCalledWith({
