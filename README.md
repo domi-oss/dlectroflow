@@ -233,6 +233,26 @@ owner workspace across repeated runs — assertions stay correct regardless sinc
 each run's items are scoped by a unique timestamped label, and CI is unaffected
 because it runs against an ephemeral, per-job Postgres service.
 
+### Accessibility gate (axe)
+
+`e2e/a11y/axe-core-flow.spec.ts` runs [`@axe-core/playwright`](https://github.com/dequelabs/axe-core-npm)
+over the core flow (inbox/capture → clarify → schedule → focus → reward) and
+fails on **new serious/critical** WCAG 2.0/2.1 A+AA violations (contrast, labels,
+roles, name/role/value). It rides the same `e2e_test` CI job as the smoke suite,
+so it is already a blocking gate before the image build.
+
+Pre-existing serious/critical violations are allow-listed in
+`e2e/a11y/axe-baseline.json` (keyed by route, one `ruleId::selector` fingerprint
+per node) so the gate starts green and only regressions fail. After fixing a
+violation, or to intentionally accept a reviewed pre-existing one, regenerate the
+baseline:
+
+```bash
+A11Y_UPDATE_BASELINE=1 npm run test:e2e -- e2e/a11y
+```
+
+Commit the resulting `axe-baseline.json` diff.
+
 ---
 
 ## 🐳 Deploy

@@ -1,0 +1,13 @@
+{
+  "/dashboard": [
+    "color-contrast::span[data-badge=\"beat_best_streak\"]",
+    "color-contrast::span[data-badge=\"comeback\"]",
+    "color-contrast::span[data-badge=\"first_breakdown\"]",
+    "color-contrast::span[data-badge=\"first_focus\"]",
+    "color-contrast::span[data-badge=\"first_schedule\"]",
+    "color-contrast::span[data-badge=\"inbox_zero\"]",
+    "color-contrast::span[data-badge=\"streak_5\"]",
+    "color-contrast::span[data-badge=\"task_complete\"]",
+    "color-contrast::span[data-badge=\"ten_steps_day\"]"
+  ]
+}
