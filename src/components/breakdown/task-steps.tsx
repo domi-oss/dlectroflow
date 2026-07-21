@@ -10,7 +10,8 @@ import { RowActions } from "@/components/inbox/row-actions";
 import { useVoice } from "@/components/voice-provider";
 import { t, type Voice } from "@/lib/strings";
 import { cn } from "@/lib/utils";
-import { COMPLETE_TICK, COMPLETE_TEXT } from "@/lib/completion-style";
+import { COMPLETE_TEXT } from "@/lib/completion-style";
+import { DonePill } from "@/components/completion/done-pill";
 
 export type TaskStepRow = {
   id: string;
@@ -131,9 +132,7 @@ export function TaskSteps({
                 {s.text}
               </span>
               <span className="text-muted-foreground text-xs">{s.estMinutes}m</span>
-              <span className={COMPLETE_TICK} title="done" aria-label="done">
-                ✓
-              </span>
+              <DonePill voice={voice} />
             </li>
           );
         }

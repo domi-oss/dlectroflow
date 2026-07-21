@@ -15,11 +15,12 @@ export function ThemeToggle({ onPersist }: { onPersist?: () => void }) {
     document.documentElement.classList.toggle("dark", next);
     try {
       localStorage.setItem("df-theme", next ? "dark" : "light");
+      // Only flag "saved" on a successful persist — if storage throws (e.g.
+      // private mode) the preference didn't persist, so don't show "Saved ✓".
+      // The parent (Appearance section) uses this to drive its shared save
+      // indicator, so the theme control matches the other Appearance settings.
+      onPersist?.();
     } catch {}
-    // Let a parent (e.g. the Appearance section) reflect the persisted change in
-    // its shared save indicator, so the theme control gives the same feedback as
-    // the other Appearance settings.
-    onPersist?.();
   };
 
   return (

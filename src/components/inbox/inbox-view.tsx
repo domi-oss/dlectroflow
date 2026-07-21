@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { cn, touchTarget } from "@/lib/utils";
 import { COMPLETE_TEXT } from "@/lib/completion-style";
+import { DonePill } from "@/components/completion/done-pill";
 import {
   DndContext,
   MouseSensor,
@@ -1181,6 +1182,9 @@ export function InboxView({
                             <span className="min-w-0 flex-1 break-words">
                               <span className={COMPLETE_TEXT}>{item.text}</span> {pencil(item)}
                             </span>
+                          )}
+                          {editingId !== item.id && (
+                            <DonePill voice={voice} done={item.stepsDone} total={item.stepsTotal} />
                           )}
                         </div>
                         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
