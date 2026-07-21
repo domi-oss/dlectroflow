@@ -245,16 +245,30 @@ export function FocusTimer({
   const showCorner = !(settings.minimalMode && running);
   const remainingInTask = steps.filter((s) => !s.done).reduce((n, s) => n + s.estMinutes, 0);
 
+  // Single-task focus uses the auto-created ensureFocusStep step, whose text
+  // equals the task title — so rendering both the task-context line AND the step
+  // heading would show the same title twice. Collapse to one primary heading (the
+  // task title). Multi-step keeps the hierarchy: task title as context + the
+  // active step as the h1.
   const stepHeading = (
     <div className="min-w-0">
-      <p className="text-muted-foreground truncate text-sm font-semibold">
-        {parentEmoji ? `${parentEmoji} ` : ""}
-        {taskTitle}
-      </p>
-      <h1 className="text-xl font-bold">
-        {step.subtaskEmoji ? `${step.subtaskEmoji} ` : ""}
-        {step.text}
-      </h1>
+      {isSingleTask ? (
+        <h1 className="text-xl font-bold">
+          {parentEmoji ? `${parentEmoji} ` : ""}
+          {taskTitle}
+        </h1>
+      ) : (
+        <>
+          <p className="text-muted-foreground truncate text-sm font-semibold">
+            {parentEmoji ? `${parentEmoji} ` : ""}
+            {taskTitle}
+          </p>
+          <h1 className="text-xl font-bold">
+            {step.subtaskEmoji ? `${step.subtaskEmoji} ` : ""}
+            {step.text}
+          </h1>
+        </>
+      )}
     </div>
   );
 

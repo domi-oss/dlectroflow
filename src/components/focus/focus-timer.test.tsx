@@ -90,6 +90,35 @@ describe("FocusTimer — header, back, hierarchy", () => {
     expect(screen.getByText("Write report").className).toMatch(/text-sm/);
   });
 
+  it("single-task focus shows the task title ONCE (no duplicate step-title line)", () => {
+    // Single-task = the auto-created ensureFocusStep step, so step.text === taskTitle.
+    render(
+      <FocusTimer
+        {...base({
+          isSingleTask: true,
+          taskTitle: "Call the bank",
+          step: { id: "s1", text: "Call the bank", estMinutes: 10, subtaskEmoji: null, order: 1, total: 1, done: false },
+          steps: [{ id: "s1", text: "Call the bank", done: false, estMinutes: 10, subtaskEmoji: null }],
+          nextStep: null,
+        })}
+      />,
+    );
+    // The title must render exactly once (not task-context <p> AND step <h1>).
+    expect(screen.getAllByText("Call the bank")).toHaveLength(1);
+    // …and it stays the primary accessible heading.
+    const heading = screen.getByRole("heading", { name: /call the bank/i });
+    expect(heading.tagName).toBe("H1");
+    expect(heading.className).toMatch(/text-xl/);
+  });
+
+  it("multi-step focus keeps the task title + active-step hierarchy", () => {
+    render(<FocusTimer {...base()} />); // isSingleTask: false
+    // Task title as smaller context…
+    expect(screen.getByText("Write report").className).toMatch(/text-sm/);
+    // …and the active step as the primary heading.
+    expect(screen.getByRole("heading", { name: /draft intro/i }).className).toMatch(/text-xl/);
+  });
+
   it("shows the corner streak + minutes today", () => {
     render(<FocusTimer {...base()} />);
     expect(screen.getByText(/🔥4/)).toBeInTheDocument();
