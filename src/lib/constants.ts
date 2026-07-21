@@ -138,3 +138,14 @@ export const FocusSound = {
   LofiCalm: "lofi_calm",
 } as const;
 export type FocusSound = (typeof FocusSound)[keyof typeof FocusSound];
+
+// ── MR ③ — app-wide completion style (Appearance settings) ─────────────────
+// completeTickColor is a String column guarded by a Postgres CHECK constraint
+// (Settings_completeTickColor_check). This object is the single source of truth
+// for the allowed set; the CHECK migration + enum-constraint-sync test mirror it.
+export const CompleteTickColor = {
+  Green: "green",
+  Black: "black",
+} as const;
+export type CompleteTickColor =
+  (typeof CompleteTickColor)[keyof typeof CompleteTickColor];

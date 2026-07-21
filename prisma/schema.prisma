@@ -79,6 +79,10 @@ model Settings {
   focusAlarmEnabled        Boolean   @default(true)
   focusSound               String    @default("off") // off | lofi_calm
   focusTimerTipDismissedAt DateTime?
+  // MR ③ — app-wide completion style (Appearance). completeTickColor mirrors
+  // CompleteTickColor in src/lib/constants.ts + Settings_completeTickColor_check.
+  completeStrikethrough Boolean  @default(true)
+  completeTickColor     String   @default("green") // green | black
   updatedAt             DateTime @updatedAt
   workspaceId           String   @unique
   workspace             Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
