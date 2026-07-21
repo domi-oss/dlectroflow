@@ -503,6 +503,14 @@ export const STRINGS = {
     plain: "Not scheduled yet",
     playful: "Not scheduled yet",
   },
+  // ── Scheduled-event focus deep-link note (S6, #39) — embedded in the .ics
+  // VEVENT DESCRIPTION and the Google Task notes so tapping the scheduled item
+  // drops the user straight into /focus. ▶ is a functional glyph (allowed in
+  // plain); 🍽️ is the playful "at the table" flavour used across focus copy.
+  "schedule.focusNote": {
+    plain: "▶ Open the focus timer for this:",
+    playful: "🍽️ Open the focus timer for this:",
+  },
   // Task working-view header eyebrow (!83 top redesign) — a small structural
   // label so the open-task view reads as distinct from the Library hub at a
   // glance. Structural chrome, not a flavour opportunity, so it's kept

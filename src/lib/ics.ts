@@ -38,7 +38,10 @@ export function buildTaskIcs(input: {
   steps: IcsStep[];
   start?: Date;
   fallbackDurationMin?: number;
+  /** Optional note (e.g. focus deep-link, #39) added as each VEVENT's DESCRIPTION. */
+  description?: string;
 }): string {
+  const description = input.description?.trim() || null;
   const start = input.start ?? nextTopOfHour();
   let cursor = new Date(start);
   const lines: string[] = [
@@ -59,6 +62,7 @@ export function buildTaskIcs(input: {
       `DTSTART:${floating(cursor)}`,
       `DTEND:${floating(end)}`,
       `SUMMARY:${esc(summary)}`,
+      ...(description ? [`DESCRIPTION:${esc(description)}`] : []),
       "END:VEVENT",
     );
     cursor = end;
@@ -74,6 +78,7 @@ export function buildTaskIcs(input: {
       `DTSTART:${floating(start)}`,
       `DTEND:${floating(end)}`,
       `SUMMARY:${esc(summary)}`,
+      ...(description ? [`DESCRIPTION:${esc(description)}`] : []),
       "END:VEVENT",
     );
   }

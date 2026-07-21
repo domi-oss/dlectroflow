@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/db";
+import { prisma, getSettings } from "@/lib/db";
 import {
   getValidAccessToken,
   googleConfigured,
@@ -15,6 +15,9 @@ import { OWNER_WORKSPACE_ID, TaskSource, TaskStatus } from "@/lib/constants";
 import { currentWorkspaceId } from "@/lib/workspace";
 import { awardFirstSchedule } from "@/lib/scheduling/award";
 import { SchedulingMethod } from "@/lib/scheduling/types";
+import { buildScheduleNote } from "@/lib/scheduling/note";
+import { publicOrigin } from "@/lib/origin";
+import type { Voice } from "@/lib/strings";
 
 export type GoogleScheduleResult =
   | { ok: true; scheduled: number; listTitle: string }
@@ -90,6 +93,18 @@ export async function pushStepsToGoogleTasks(
 
     const parentEmoji = task.parentEmoji ?? "🗂️";
     const total = task.steps.length;
+
+    // Focus deep-link note (#39): voice-aware prompt + absolute URL into /focus for
+    // this task's first step. Attached to each Google Task's notes so tapping the
+    // Reclaim-synced task drops the user straight into focusing.
+    const settings = await getSettings(workspaceId);
+    const voice: Voice = settings.voice === "playful" ? "playful" : "plain";
+    const notes = buildScheduleNote({
+      origin: publicOrigin(),
+      voice,
+      stepId: task.steps[0]?.id ?? null,
+    });
+
     let scheduled = 0;
     for (const s of task.steps) {
       const title = reclaimTitle(
@@ -101,7 +116,7 @@ export async function pushStepsToGoogleTasks(
         s.text,
         s.estMinutes,
       );
-      const created = await createGoogleTask(token, list.id, { title });
+      const created = await createGoogleTask(token, list.id, { title, notes });
       // Guard step ownership before update
       const stepCheck = await prisma.step.findFirst({
         where: { id: s.id, task: { workspaceId } },

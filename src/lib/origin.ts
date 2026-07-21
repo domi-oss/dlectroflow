@@ -26,3 +26,18 @@ export function requestOrigin(req: Request): string {
   const host = h.get("x-forwarded-host") ?? h.get("host") ?? url.host;
   return `${proto}://${host}`;
 }
+
+/**
+ * External origin without a request — for server actions that embed an absolute,
+ * *persisted* URL (e.g. a focus deep-link written into a scheduled .ics / Google
+ * Task, #39). PUBLIC_ORIGIN is the right source here (stable, not request-derived);
+ * in production it's required, and locally we fall back to the dev server origin.
+ */
+export function publicOrigin(): string {
+  const configured = process.env.PUBLIC_ORIGIN?.trim();
+  if (configured) return configured.replace(/\/+$/, "");
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("PUBLIC_ORIGIN must be set in production.");
+  }
+  return "http://localhost:3000";
+}

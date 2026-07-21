@@ -1,11 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/db";
+import { prisma, getSettings } from "@/lib/db";
 import { buildTaskIcs, icsFilename } from "@/lib/ics";
 import { currentWorkspaceId } from "@/lib/workspace";
 import { awardFirstSchedule } from "@/lib/scheduling/award";
 import { SchedulingMethod } from "@/lib/scheduling/types";
+import { buildScheduleNote } from "@/lib/scheduling/note";
+import { publicOrigin } from "@/lib/origin";
+import type { Voice } from "@/lib/strings";
 
 const DEFAULT_ICS_DURATION_MIN = 25;
 
@@ -39,6 +42,17 @@ export async function scheduleViaIcs(
     ? Math.min(480, Math.max(1, raw))
     : DEFAULT_ICS_DURATION_MIN;
 
+  // Focus deep-link note (#39): voice-aware prompt + absolute URL into /focus for
+  // this task's first step (else the launcher). Embedded in every VEVENT so tapping
+  // the calendar event drops the user straight into focusing.
+  const settings = await getSettings(workspaceId);
+  const voice: Voice = settings.voice === "playful" ? "playful" : "plain";
+  const description = buildScheduleNote({
+    origin: publicOrigin(),
+    voice,
+    stepId: task.steps[0]?.id ?? null,
+  });
+
   const ics = buildTaskIcs({
     title: task.title,
     parentEmoji: task.parentEmoji,
@@ -48,6 +62,7 @@ export async function scheduleViaIcs(
       subtaskEmoji: s.subtaskEmoji,
     })),
     fallbackDurationMin: durationMin,
+    description,
   });
 
   // Mark + reward once (idempotent on scheduledAt). Re-downloads skip both.
