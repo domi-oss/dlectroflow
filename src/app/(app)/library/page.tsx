@@ -5,6 +5,7 @@ import { BrainDumpStatus } from "@/lib/constants";
 import { libraryBuckets, type Item, type LibraryBuckets } from "@/components/inbox/bucket";
 import { t, type StringKey, type Voice } from "@/lib/strings";
 import { cn } from "@/lib/utils";
+import { COMPLETE_TICK } from "@/lib/completion-style";
 import { LibraryRows } from "@/components/library/library-rows";
 import { LibraryMultistep } from "@/components/library/library-multistep";
 import { BackLink } from "@/components/nav/back-link";
@@ -225,10 +226,15 @@ function ProgressPill({
   voice: Voice;
 }) {
   return (
-    <span className="shrink-0 rounded-full border border-green-700 px-2 py-0.5 text-xs text-green-700">
+    <span
+      className={cn(
+        "shrink-0 rounded-full border border-[color:var(--tick-color)] px-2 py-0.5 text-xs",
+        COMPLETE_TICK,
+      )}
+    >
       {item.stepsTotal > 0
-        ? `✅ ${item.stepsDone}/${item.stepsTotal} ${t("progress.done", voice)}`
-        : `✅ ${t("progress.done", voice)}`}
+        ? `✓ ${item.stepsDone}/${item.stepsTotal} ${t("progress.done", voice)}`
+        : `✓ ${t("progress.done", voice)}`}
     </span>
   );
 }

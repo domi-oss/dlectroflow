@@ -10,6 +10,7 @@ import { RowActions } from "@/components/inbox/row-actions";
 import { useVoice } from "@/components/voice-provider";
 import { t, type Voice } from "@/lib/strings";
 import { cn } from "@/lib/utils";
+import { COMPLETE_TICK, COMPLETE_TEXT } from "@/lib/completion-style";
 
 export type TaskStepRow = {
   id: string;
@@ -125,12 +126,12 @@ export function TaskSteps({
               <span className="text-muted-foreground w-8 text-xs tabular-nums">
                 {s.order}/{s.total}
               </span>
-              <span className="text-muted-foreground flex-1 line-through">
+              <span className={cn("text-muted-foreground flex-1", COMPLETE_TEXT)}>
                 {s.subtaskEmoji ? `${s.subtaskEmoji} ` : ""}
                 {s.text}
               </span>
               <span className="text-muted-foreground text-xs">{s.estMinutes}m</span>
-              <span className="text-green-600" title="done" aria-label="done">
+              <span className={COMPLETE_TICK} title="done" aria-label="done">
                 ✓
               </span>
             </li>
