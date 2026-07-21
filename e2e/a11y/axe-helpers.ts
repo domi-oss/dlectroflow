@@ -35,8 +35,17 @@ type Baseline = Record<string, string[]>;
 function loadBaseline(): Baseline {
   try {
     return JSON.parse(fs.readFileSync(BASELINE_PATH, "utf8")) as Baseline;
-  } catch {
-    return {};
+  } catch (err) {
+    // A missing baseline is expected on the very first run — start empty.
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return {};
+    // Any other error (e.g. a SyntaxError from invalid JSON or leftover merge
+    // conflict markers) must NOT be swallowed: silently returning {} would make
+    // every baselined violation look "new" and fail the gate with a misleading
+    // message. Re-throw with a diagnostic that points at the real cause.
+    throw new Error(
+      `Failed to parse axe baseline at ${BASELINE_PATH}: ${(err as Error).message}\n` +
+        "Check for merge conflict markers or invalid JSON.",
+    );
   }
 }
 
