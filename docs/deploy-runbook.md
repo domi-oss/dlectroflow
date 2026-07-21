@@ -26,10 +26,22 @@ helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
 helm repo update
 helm install ingress-nginx ingress-nginx/ingress-nginx \
   --namespace ingress-nginx --create-namespace \
-  --set controller.service.loadBalancerIP=35.246.93.255
+  --set controller.service.loadBalancerIP=35.246.93.255 \
+  --set controller.service.externalTrafficPolicy=Local \
+  --set controller.replicaCount=2 \
+  --set controller.podDisruptionBudget.enabled=true \
+  --set controller.podDisruptionBudget.minAvailable=1
 ```
 
 > **Verify the IP bound:** `kubectl -n ingress-nginx get svc ingress-nginx-controller -w` until `EXTERNAL-IP` shows `35.246.93.255`. GKE honors `loadBalancerIP` only when the reserved address is a **regional external** address in the cluster's region (`europe-west2`) — confirm with `gcloud compute addresses describe dlectroflow-ingress --region=europe-west2`. If GKE provisions a different IP, delete the Service so Helm can recreate it, and re-check the address is regional (not global).
+
+> **Preserve the real client IP (`externalTrafficPolicy: Local`) — required for the per-IP guest quota (#28).** The app keys its guest AI quota (and ingress rate-limiting) on the client IP from the right-most `X-Forwarded-For` hop / `X-Real-IP` (`src/lib/guest-quota.ts`, !76). That is only trustworthy if the real client IP reaches ingress-nginx un-SNAT'd. With the GKE default `externalTrafficPolicy: Cluster`, kube-proxy SNATs external traffic to a **node IP**, so every guest collapses onto a handful of node IPs and the quota can't tell clients apart. `Local` stops the SNAT so the L4 passthrough NLB's preserved source IP reaches nginx. Keep ingress-nginx `use-forwarded-headers` at its default `false`. **No app change is needed.**
+>
+> **HA first — blast radius:** under `Local` the NLB drops traffic to any node without a Ready ingress-nginx pod. A single controller replica = one healthy backend node, so a pod move / node event is a brief full outage — hence `replicaCount=2` + PDB above. (The !34 HA safeguards cover the **app**, not this controller.) Roll out on a review app first.
+>
+> **Existing cluster (no reinstall):** `helm upgrade ingress-nginx ingress-nginx/ingress-nginx -n ingress-nginx --reuse-values --set controller.service.externalTrafficPolicy=Local --set controller.replicaCount=2 --set controller.podDisruptionBudget.enabled=true --set controller.podDisruptionBudget.minAvailable=1`
+>
+> **Validate (#28):** from two distinct client IPs, confirm distinct `clientIpHash` / quota counters — exhaust the quota from one IP, confirm the other is unaffected.
 
 ## 4. Install cert-manager + Let's Encrypt ClusterIssuer
 ```bash
