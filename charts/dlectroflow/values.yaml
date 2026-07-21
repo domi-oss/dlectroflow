@@ -48,11 +48,13 @@ postgres:
   storageSize: 8Gi
   # Pin the postgres MINOR (not the floating `16` tag) + a matching digest so
   # nodes can't drift across minors under pullPolicy: IfNotPresent. Digest is
-  # authoritative for the pull; the human-readable minor is kept in sync with it
-  # (verified against docker.io/library/postgres:16.10). In-major (16.x -> 16.y)
-  # bumps are binary-compatible and need no dump/restore. NOTE (follow-up): no
-  # Renovate manager tracks values.yaml image tags yet — see the "Pin/track
-  # values.yaml image tags via Renovate" item in #15.
+  # authoritative for the pull; the human-readable minor is kept in sync with it.
+  # In-major (16.x -> 16.y) bumps are binary-compatible and need no dump/restore;
+  # a cross-major bump (17.x) needs a dump/restore and so is deliberately NOT
+  # auto-merged (majors always get a manual-review MR). Now tracked by the
+  # customManager in renovate.json via the "# renovate:" annotation below, which
+  # bumps this tag+digest — and the backup dumpImage that defaults to it. (#15)
+  # renovate: datasource=docker depName=postgres versioning=docker
   image: postgres:16.14@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20
 
 tls:
@@ -109,7 +111,10 @@ backup:
   gcsBucket: ""                  # bucket name, no gs:// prefix
   gcpServiceAccount: ""          # GSA email bound via Workload Identity
   serviceAccountName: dlectroflow-backup
-  dumpImage: ""                        # defaults to postgres.image (keeps pg_dump matched to the server major); override only for a different version
+  dumpImage: ""                        # defaults to postgres.image (keeps pg_dump matched to the server major, and inherits its Renovate tracking); override only for a different version
+  # `slim` is a rolling tag, so Renovate tracks the DIGEST here (the customManager
+  # in renovate.json bumps it as google/cloud-sdk:slim is rebuilt). (#15)
+  # renovate: datasource=docker depName=google/cloud-sdk
   uploadImage: google/cloud-sdk:slim@sha256:85419a311666821eb3a195d86753cb9bf253c0b869492fdaf632bd2f983d0d83
 
 # Daily purge of expired guest workspaces + stale guest counters (#21; prod
