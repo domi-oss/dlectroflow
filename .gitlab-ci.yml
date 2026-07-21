@@ -201,6 +201,11 @@ test_app:
     # Errors fail the gate; the react-hooks compiler-era rules are warn-level
     # pending the #23 burn-down, so their findings stay visible but don't block.
     - npm run lint
+    # #32: fail the gate on unformatted code. Config in prettier.config.mjs
+    # (double quotes, semicolons, 2-space, trailing-comma:all, 80 cols — the
+    # style the tree already follows); scope carved by .prettierignore (app code
+    # + JSON/CSS, not docs/infra YAML). Cheap static check, reuses this npm ci.
+    - npm run format:check
     # #30: keeps .env.example honest — fails on a process.env read in src/
     # that isn't documented, or a documented key nothing reads any more (see
     # src/lib/env-drift.ts for the diff logic + intentional-exception allowlist).

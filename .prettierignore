@@ -1,0 +1,46 @@
+# What the format gate (issue #32) does NOT touch. The gate formats application
+# code + JSON/CSS/clean YAML. Everything below is machine-generated, infra config
+# with hand-maintained alignment, or prose whose existing convention Prettier
+# would fight — none should be mechanically reformatted.
+
+# Dependencies (Prettier auto-ignores node_modules, but keep it explicit)
+node_modules/
+
+# Build / compile output
+.next/
+out/
+build/
+dist/
+# CI build staging (build_app stages standalone output here for Kaniko)
+ci-dist/
+coverage/
+
+# Generated files
+next-env.d.ts
+# Generated SQL migrations
+prisma/migrations/
+
+# Lockfiles (never hand- or tool-format)
+package-lock.json
+
+# Static assets served as-is
+public/
+
+# Claude Code local state + background-agent git worktrees (never committed)
+.claude/
+
+# Documentation: Prettier's markdown table-padding fights the repo's compact
+# `|---|---|` tables and flips emphasis markers (*x* -> _x_). Leave prose to
+# authors. `*.md` matches at any depth (README, SECURITY, AGENTS, docs/**, ...);
+# docs/ also covers the wireframe .html artifact.
+*.md
+docs/
+
+# Infra YAML with its own conventions, not app code:
+#  - charts/ Helm templates embed Go templating ({{ ... }}) that Prettier's YAML
+#    parser rejects outright (would break `--check`); values.yaml uses aligned
+#    inline comments Prettier would collapse.
+#  - .gitlab-ci.yml relies on hand-aligned inline comments and multi-line script
+#    continuations Prettier would rewrite (162-line churn on the pipeline file).
+charts/
+.gitlab-ci.yml
