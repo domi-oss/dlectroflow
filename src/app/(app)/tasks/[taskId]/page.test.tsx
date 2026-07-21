@@ -112,34 +112,39 @@ afterEach(() => {
 });
 
 describe("TaskPage — back link (#8 follow-up, Fix 1)", () => {
-  it("defaults to '← Back to inbox' → /inbox when `from` is absent", async () => {
+  it("defaults the '← Back' link → /inbox when `from` is absent", async () => {
     await renderPage();
-    const link = screen.getByRole("link", { name: /back to inbox/i });
+    const link = screen.getByRole("link", { name: /back/i });
+    expect(link).toHaveTextContent("← Back");
     expect(link).toHaveAttribute("href", "/inbox");
   });
 
-  it("`?from=library` renders '← Back to Library' → /library?tab=sorted", async () => {
+  it("`?from=library` sends the '← Back' link → /library?tab=sorted", async () => {
     await renderPage({ from: "library" });
-    const link = screen.getByRole("link", { name: /back to library/i });
+    const link = screen.getByRole("link", { name: /back/i });
+    // Label is a simple "← Back"; only the destination reflects the origin.
+    expect(link).toHaveTextContent("← Back");
     expect(link).toHaveAttribute("href", "/library?tab=sorted");
   });
 
   it("an unknown `from` value falls back to /inbox rather than reflecting it into a path (no open redirect)", async () => {
     await renderPage({ from: "https://evil.example.com" });
-    const link = screen.getByRole("link", { name: /back to inbox/i });
+    const link = screen.getByRole("link", { name: /back/i });
     expect(link).toHaveAttribute("href", "/inbox");
   });
 
   it("`?from=__proto__` (an inherited Object.prototype key, not an own key of BACK_TARGETS) falls back to /inbox instead of crashing", async () => {
     await renderPage({ from: "__proto__" });
-    const link = screen.getByRole("link", { name: /back to inbox/i });
+    const link = screen.getByRole("link", { name: /back/i });
     expect(link).toHaveAttribute("href", "/inbox");
   });
 
-  it("is voice-aware: playful voice renders the playful back-to-inbox copy", async () => {
+  it("keeps the simple '← Back' label in playful voice (destination still /inbox)", async () => {
     getSettingsMock.mockResolvedValue({ voice: "playful" });
     await renderPage();
-    expect(screen.getByRole("link", { name: /back to inbox/i })).toHaveTextContent("🍳 Back to inbox");
+    const link = screen.getByRole("link", { name: /back/i });
+    expect(link).toHaveTextContent("← Back");
+    expect(link).toHaveAttribute("href", "/inbox");
   });
 });
 
@@ -195,7 +200,7 @@ describe("TaskPage — top redesign (!83): breadcrumb + distinct header + refine
 
   it("orders the page top-to-bottom: back breadcrumb → header (title + meta) → refine/schedule row → step list", async () => {
     await renderPage();
-    const back = screen.getByRole("link", { name: /back to inbox/i });
+    const back = screen.getByRole("link", { name: /back/i });
     const heading = screen.getByRole("heading", { name: /plan the offsite/i });
     const refine = screen.getByRole("link", { name: /refine breakdown/i });
     const steps = screen.getByTestId("task-steps");
@@ -212,7 +217,7 @@ describe("TaskPage — top redesign (!83): breadcrumb + distinct header + refine
   it("the back breadcrumb is the first link on the page — no more isolated bottom instance", async () => {
     const { container } = await renderPage();
     const links = container.querySelectorAll("a");
-    expect(links[0]).toHaveTextContent(/back to inbox/i);
+    expect(links[0]).toHaveTextContent(/^← Back$/);
   });
 });
 

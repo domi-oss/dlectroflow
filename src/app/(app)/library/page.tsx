@@ -7,6 +7,7 @@ import { t, type StringKey, type Voice } from "@/lib/strings";
 import { cn } from "@/lib/utils";
 import { LibraryRows } from "@/components/library/library-rows";
 import { LibraryMultistep } from "@/components/library/library-multistep";
+import { BackLink } from "@/components/nav/back-link";
 
 // DB-backed, always fresh (mirrors the Inbox — reads live workspace data).
 export const dynamic = "force-dynamic";
@@ -35,10 +36,10 @@ function isTabParam(v: string | undefined): v is TabParam {
 export default async function LibraryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; from?: string }>;
 }) {
   const workspaceId = await currentWorkspaceId();
-  const [settings, { tab }, rawItems] = await Promise.all([
+  const [settings, { tab, from }, rawItems] = await Promise.all([
     getSettings(workspaceId),
     searchParams,
     // Workspace-scoped: only this workspace's items are ever read (owner + guests).
@@ -103,12 +104,7 @@ export default async function LibraryPage({
 
   return (
     <div className="space-y-4">
-      <Link
-        href="/inbox"
-        className="text-muted-foreground hover:text-foreground inline-flex items-center text-sm"
-      >
-        {t("action.back", voice)}
-      </Link>
+      <BackLink from={from} voice={voice} />
 
       <div>
         <h1 className="text-xl font-semibold">{t("nav.everything", voice)}</h1>

@@ -6,26 +6,13 @@ import { BreakdownChat } from "@/components/breakdown/breakdown-chat";
 import { TaskSteps } from "@/components/breakdown/task-steps";
 import { TaskSchedule } from "@/components/breakdown/task-schedule";
 import { getGoogleStatus } from "@/lib/google";
-import { t, type StringKey, type Voice } from "@/lib/strings";
+import { t, type Voice } from "@/lib/strings";
+import { BackLink } from "@/components/nav/back-link";
+import { withFrom } from "@/lib/nav/back";
 import type { SchedulingContext } from "@/lib/scheduling/types";
 import type { Proposal } from "@/lib/breakdown";
 
 export const dynamic = "force-dynamic";
-
-// Whitelisted `from` origins → the task page's back-link destination + label
-// (#8 follow-up — the Library "Open task" link used to strand users on
-// /inbox). Deliberately a closed map: an unknown/absent `from` always falls
-// back to /inbox rather than reflecting the query value into a path, so this
-// can never become an open redirect.
-const BACK_TARGETS: Record<string, { href: string; labelKey: StringKey }> = {
-  // Library's Multi-step ("sorted") tab is the only place that currently
-  // deep-links in with `?from=`, so this is the only non-default entry.
-  library: { href: "/library?tab=sorted", labelKey: "action.backToLibrary" },
-};
-const DEFAULT_BACK_TARGET: { href: string; labelKey: StringKey } = {
-  href: "/inbox",
-  labelKey: "action.backToInbox",
-};
 
 export default async function TaskPage({
   params,
@@ -68,12 +55,6 @@ export default async function TaskPage({
   };
 
   const voice: Voice = settings.voice === "playful" ? "playful" : "plain";
-  // `Object.hasOwn` (not just truthiness of the lookup) matters here: BACK_TARGETS
-  // is a plain object, so `from` values like "__proto__" / "constructor" /
-  // "toString" resolve to inherited Object.prototype members — truthy, but
-  // missing `.href` / `.labelKey`, which would otherwise 500 the page below.
-  const backTarget =
-    from && Object.hasOwn(BACK_TARGETS, from) ? BACK_TARGETS[from] : DEFAULT_BACK_TARGET;
 
   const hasSteps = task.steps.length > 0;
   const editing = edit === "1" || !hasSteps;
@@ -102,6 +83,7 @@ export default async function TaskPage({
         google={google}
         isGuest={!ctx.isOwner}
         scheduled={task.scheduledAt != null}
+        from={from}
       />
     );
   }
@@ -114,14 +96,10 @@ export default async function TaskPage({
     <div className="space-y-5">
       {/* Origin-aware back breadcrumb, promoted to the top of the page (!83
           top redesign) — it used to sit isolated at the bottom, far from the
-          actions it relates to. `backTarget` is resolved above from the
-          whitelist-guarded `from` query param; label + href are unchanged. */}
-      <Link
-        href={backTarget.href}
-        className="text-muted-foreground hover:text-foreground inline-flex items-center text-sm"
-      >
-        ← {t(backTarget.labelKey, voice)}
-      </Link>
+          actions it relates to. The shared <BackLink> resolves the
+          whitelist-guarded `from` (defaults to /inbox; → /library?tab=sorted
+          when opened from the Library). */}
+      <BackLink from={from} voice={voice} />
 
       {/* Distinct task-view header (!83 top redesign, owner: "Both") — a
           bordered card + small "Task" eyebrow so this open-task view reads as
@@ -161,7 +139,7 @@ export default async function TaskPage({
             row, same behavior, only its position changed. */}
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <Link
-            href={`/tasks/${task.id}?edit=1`}
+            href={withFrom(`/tasks/${task.id}?edit=1`, from)}
             className="hover:bg-accent rounded-md border px-2.5 py-1"
           >
             Refine breakdown

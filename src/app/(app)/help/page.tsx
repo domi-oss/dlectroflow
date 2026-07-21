@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { getSettings } from "@/lib/db";
 import { currentWorkspaceId } from "@/lib/workspace";
-import { t, type Voice } from "@/lib/strings";
+import { BackLink } from "@/components/nav/back-link";
+import { type Voice } from "@/lib/strings";
 
 // DB-backed only for the voice preference; content is static.
 export const dynamic = "force-dynamic";
@@ -11,9 +12,16 @@ export const dynamic = "force-dynamic";
  * voice — this page is meta). Written as self-contained sections so the same
  * content can seed a public GitLab Pages site later.
  */
-export default async function HelpPage() {
+export default async function HelpPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string }>;
+}) {
   const workspaceId = await currentWorkspaceId();
-  const settings = await getSettings(workspaceId);
+  const [settings, { from }] = await Promise.all([
+    getSettings(workspaceId),
+    searchParams,
+  ]);
   const voice: Voice = settings.voice === "playful" ? "playful" : "plain";
 
   return (
@@ -64,7 +72,7 @@ export default async function HelpPage() {
           to reset its clock or <strong>Dismiss</strong> to stop the nudge. Use{" "}
           <strong>Save for later</strong> to pause freshness on something you are
           not ready for. You can tune the tier thresholds on the{" "}
-          <Link href="/settings" className="underline">Settings</Link> page.
+          <Link href="/settings?from=help" className="underline">Settings</Link> page.
         </p>
       </section>
 
@@ -90,7 +98,7 @@ export default async function HelpPage() {
         <p className="text-sm">
           Switch between the calm <strong>Plain</strong> voice and the playful
           snack-themed voice, set your freshness thresholds, and manage reminders
-          on the <Link href="/settings" className="underline">Settings</Link> page.
+          on the <Link href="/settings?from=help" className="underline">Settings</Link> page.
         </p>
       </section>
 
@@ -105,9 +113,7 @@ export default async function HelpPage() {
       </section>
 
       <footer>
-        <Link href="/inbox" className="text-sm underline">
-          {t("action.backToInbox", voice)}
-        </Link>
+        <BackLink from={from} voice={voice} />
       </footer>
     </div>
   );

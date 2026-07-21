@@ -341,14 +341,6 @@ describe("Task 2 — inbox/focus/breakdown keys (plain vs playful)", () => {
     expect(t("action.backToInbox", "playful")).toBe("🍳 Back to inbox");
   });
 
-  // action.backToLibrary (task page back-link, #8 follow-up)
-  it('t("action.backToLibrary", "plain") → "Back to Library"', () => {
-    expect(t("action.backToLibrary", "plain")).toBe("Back to Library");
-  });
-  it('t("action.backToLibrary", "playful") → "🍱 Back to the Larder"', () => {
-    expect(t("action.backToLibrary", "playful")).toBe("🍱 Back to the Larder");
-  });
-
   // task.scheduled / task.notScheduled (task page schedule indicator, #8 follow-up)
   it('t("task.scheduled", "plain") → "Scheduled ✓"', () => {
     expect(t("task.scheduled", "plain")).toBe("Scheduled ✓");
@@ -482,7 +474,6 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "lib.min",
     "lib.editEstimate",
     // Task working-view schedule indicator (#8 follow-up) — plain is literal.
-    "action.backToLibrary",
     "task.scheduled",
     "task.notScheduled",
   ];

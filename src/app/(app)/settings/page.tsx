@@ -6,13 +6,19 @@ import { SettingsPanel } from "@/components/settings/settings-panel";
 import { NotificationsSection } from "@/components/settings/notifications-section";
 import { FocusTimerSection } from "@/components/settings/focus-timer-section";
 import { IntegrationsPanel } from "@/components/settings/integrations-panel";
+import { BackLink } from "@/components/nav/back-link";
 import { t, type Voice } from "@/lib/strings";
 
 // DB-backed, always fresh.
 export const dynamic = "force-dynamic";
 
-export default async function SettingsPage() {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string }>;
+}) {
   const workspaceId = await currentWorkspaceId();
+  const { from } = await searchParams;
   const [settings, owner] = await Promise.all([
     getSettings(workspaceId),
     isOwnerRequest(),
@@ -57,12 +63,10 @@ export default async function SettingsPage() {
       </div>
       {owner && google && <IntegrationsPanel google={google} />}
       <div className="flex gap-4 text-sm">
-        <Link href="/help" className="underline">
+        <Link href="/help?from=settings" className="underline">
           {t("nav.help", voice)} &amp; docs
         </Link>
-        <Link href="/inbox" className="underline">
-          {t("action.backToInbox", voice)}
-        </Link>
+        <BackLink from={from} voice={voice} />
       </div>
     </div>
   );
