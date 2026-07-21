@@ -68,7 +68,7 @@ export function AppearanceSection({
           {/* Theme persists client-side (localStorage) instantly; flash the
               shared indicator so it gives the same "Saved" feedback as the
               completion controls below. */}
-          <ThemeToggle onPersist={markSaved} />
+          <ThemeToggle onPersist={() => { markSaving(); markSaved(); }} />
         </div>
       </div>
 
@@ -91,6 +91,7 @@ export function AppearanceSection({
             <input
               type="radio"
               name="complete-tick-color"
+              value={c}
               checked={prefs.completeTickColor === c}
               onChange={() => persist({ ...prefs, completeTickColor: c })}
             />

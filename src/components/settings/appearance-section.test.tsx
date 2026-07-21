@@ -69,4 +69,15 @@ describe("AppearanceSection", () => {
     await user.click(screen.getByRole("button", { name: /mode/i }));
     expect(await screen.findByRole("status")).toBeInTheDocument();
   });
+
+  it("surfaces an error alert (controls stay editable) when a save fails", async () => {
+    vi.mocked(updateAppearanceSettings).mockRejectedValueOnce(new Error("save failed"));
+    const user = userEvent.setup();
+    render(<AppearanceSection {...base} />);
+    await user.click(screen.getByLabelText(/strike through completed/i));
+    // persist()'s catch → markError() → SaveIndicator renders role="alert".
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    // The failed save leaves the control interactive for a retry.
+    expect(screen.getByLabelText(/strike through completed/i)).toBeEnabled();
+  });
 });
