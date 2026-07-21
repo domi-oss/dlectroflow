@@ -6,13 +6,29 @@ image:
 env: production        # review | production
 host: dlectroflow.dlectronique.dev
 replicas: 2            # review apps pinned to 1 via CI (no HA need on spot)
-spot: false            # true for review apps
+spot: false            # true for review apps (nodeSelector onto gke-spot nodes)
+
+# Add the GKE spot taint toleration (cloud.google.com/gke-spot=true:NoSchedule)
+# to the app + postgres pods. Needed ONLY on GKE STANDARD, where spot node pools
+# carry that taint and an un-tolerated pod stays Pending. LEAVE OFF on GKE
+# Autopilot — this repo's deploy target — where the control plane AUTO-INJECTS
+# this toleration for any pod that nodeSelects gke-spot, so setting it here is
+# redundant. Only rendered together with `spot: true`. (#15)
+spotToleration: false
 
 # Review apps only (#25): the shared demo workspace that gets pre-seeded
 # (prisma/seed.ts) and that the proxy seats every guest into, so reviewers land
 # on populated content. Only rendered when env=review; never used in production.
 reviewDemoWorkspaceId: review-demo
 
+# Per-container CPU/memory. These are the REQUESTS (the guaranteed floor). The
+# MEMORY limit is always pinned to the request (memory is incompressible — an
+# unbounded container can OOM the node). The CPU limit is handled by the
+# dlectroflow.resources helper (_helpers.tpl): it is DROPPED in production so the
+# Next.js app + Prisma migrate initContainer aren't throttled to their request
+# when the node has spare CPU (that throttling also slowed `helm --wait` /
+# deploy_review), and KEPT in review, where the namespace ResourceQuota
+# (resourcequota.yaml) makes limits.cpu mandatory on every container. (#15)
 resources:
   app:
     cpu: 500m

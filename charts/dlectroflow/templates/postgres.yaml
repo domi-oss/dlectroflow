@@ -32,6 +32,15 @@ spec:
       {{- if .Values.spot }}
       nodeSelector:
         cloud.google.com/gke-spot: "true"
+      {{- if .Values.spotToleration }}
+      # GKE STANDARD only — Autopilot injects this toleration automatically for
+      # any pod that nodeSelects gke-spot, so it stays OFF there (see values.yaml).
+      tolerations:
+        - key: cloud.google.com/gke-spot
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      {{- end }}
       {{- end }}
       securityContext:
         runAsNonRoot: true
@@ -89,12 +98,7 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 6
           resources:
-            requests:
-              cpu: {{ .Values.resources.postgres.cpu }}
-              memory: {{ .Values.resources.postgres.memory }}
-            limits:
-              cpu: {{ .Values.resources.postgres.cpu }}
-              memory: {{ .Values.resources.postgres.memory }}
+            {{- include "dlectroflow.resources" (dict "cpu" .Values.resources.postgres.cpu "memory" .Values.resources.postgres.memory "env" .Values.env) | nindent 12 }}
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
