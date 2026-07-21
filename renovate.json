@@ -13,6 +13,19 @@
   "prConcurrentLimit": 5,
   "prHourlyLimit": 0,
   "platformAutomerge": true,
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Track the pinned image refs in the Helm chart values.yaml (postgres server — which the backup dumpImage also inherits — and the backup upload image google/cloud-sdk). These are single-string `name:tag@digest` values, not the repository/tag shape the built-in helm-values manager parses, so an annotated regex manager is used instead. Add a `# renovate: datasource=docker depName=<image> [versioning=docker]` line directly above any new image field to bring it under tracking (#15).",
+      "managerFilePatterns": [
+        "/^charts/dlectroflow/values\\.yaml$/"
+      ],
+      "matchStrings": [
+        "#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)(?:\\s+versioning=(?<versioning>\\S+))?\\s+\\w+:\\s*\\S+?:(?<currentValue>[^@\\s\"']+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?"
+      ],
+      "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}docker{{/if}}"
+    }
+  ],
   "packageRules": [
     {
       "description": "Automerge patch/minor/digest/pin once the MR pipeline passes. The pipeline runs all scanners as REQUIRED jobs on MRs (they must execute), and new Critical/High findings are blocked by the Scan Result Policy (issue #2, task 4.2) \u2014 enable that policy before turning the Renovate schedule on. Majors always need manual review + Duo.",

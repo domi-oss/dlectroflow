@@ -25,6 +25,15 @@ spec:
       {{- if .Values.spot }}
       nodeSelector:
         cloud.google.com/gke-spot: "true"
+      {{- if .Values.spotToleration }}
+      # GKE STANDARD only — Autopilot injects this toleration automatically for
+      # any pod that nodeSelects gke-spot, so it stays OFF there (see values.yaml).
+      tolerations:
+        - key: cloud.google.com/gke-spot
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      {{- end }}
       {{- end }}
       # Soft spread: bias replicas onto different nodes so a single node
       # failure can't take out every pod at once (the PDB only covers
@@ -56,16 +65,27 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-          # initContainers need explicit limits: the review-only ResourceQuota
-          # sets limits.cpu/limits.memory, which makes them required on every
-          # container (initContainers included) or the pod is rejected.
+          # Resources via the shared helper: keeps a CPU limit in review (the
+          # ResourceQuota requires limits.cpu on every container, initContainers
+          # included, or the pod is rejected) and drops it in prod to avoid
+          # throttling. Memory limit is always set. (#15)
           resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
-            limits:
-              cpu: 50m
-              memory: 64Mi
+            {{- include "dlectroflow.resources" (dict "cpu" "50m" "memory" "64Mi" "env" .Values.env) | nindent 12 }}
+        # DB migrations run here, per-pod, before the app container starts.
+        # KNOWN RACE (#15, tracked as #18/#20): with replicas>1 or during a
+        # rolling update, more than one `migrate` initContainer can run at once.
+        # Prisma `migrate deploy` takes a Postgres advisory lock so they
+        # SERIALIZE rather than corrupt state — the exposure is only that a
+        # second pod could crash-loop on lock-wait if a migration is very slow
+        # (this app's migrations are small, so the window is tiny). Deliberately
+        # NOT converted to a Helm pre-install/pre-upgrade hook Job in this MR:
+        # that changes the migration EXECUTION MODEL (release fails if the hook
+        # fails; hook-delete-policy + secret/pull-secret/securityContext all have
+        # to be reproduced; the review-only `seed` init ordering shifts) and
+        # can't be validated here without a live cluster — exactly the kind of
+        # change that could worsen the latent race it means to fix. Tradeoff and
+        # a concrete conversion plan (+ prerequisite: cluster validation) are
+        # documented against #18/#20; deferred there rather than half-done.
         - name: migrate
           image: "{{ .Values.image.repository }}:{{ required "image.tag must be set (CI passes $CI_COMMIT_SHA)" .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -83,12 +103,7 @@ spec:
           # Reuses the app image; size it like the app so the review
           # ResourceQuota (limits required) is satisfied and Prisma has headroom.
           resources:
-            requests:
-              cpu: {{ .Values.resources.app.cpu }}
-              memory: {{ .Values.resources.app.memory }}
-            limits:
-              cpu: {{ .Values.resources.app.cpu }}
-              memory: {{ .Values.resources.app.memory }}
+            {{- include "dlectroflow.resources" (dict "cpu" .Values.resources.app.cpu "memory" .Values.resources.app.memory "env" .Values.env) | nindent 12 }}
         {{- if eq .Values.env "review" }}
         # Review apps ONLY (#25): seed a small demo data set so the review app
         # has content across the inbox buckets instead of an empty sandbox. Runs
@@ -122,12 +137,7 @@ spec:
             capabilities:
               drop: ["ALL"]
           resources:
-            requests:
-              cpu: {{ .Values.resources.app.cpu }}
-              memory: {{ .Values.resources.app.memory }}
-            limits:
-              cpu: {{ .Values.resources.app.cpu }}
-              memory: {{ .Values.resources.app.memory }}
+            {{- include "dlectroflow.resources" (dict "cpu" .Values.resources.app.cpu "memory" .Values.resources.app.memory "env" .Values.env) | nindent 12 }}
         {{- end }}
       containers:
         - name: app
@@ -175,12 +185,7 @@ spec:
             initialDelaySeconds: 15
             periodSeconds: 20
           resources:
-            requests:
-              cpu: {{ .Values.resources.app.cpu }}
-              memory: {{ .Values.resources.app.memory }}
-            limits:
-              cpu: {{ .Values.resources.app.cpu }}
-              memory: {{ .Values.resources.app.memory }}
+            {{- include "dlectroflow.resources" (dict "cpu" .Values.resources.app.cpu "memory" .Values.resources.app.memory "env" .Values.env) | nindent 12 }}
           # Writable scratch required under readOnlyRootFilesystem (above).
           volumeMounts:
             - name: tmp
