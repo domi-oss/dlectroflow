@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { confirmBreakdown } from "@/app/actions/breakdown";
 import { createBrainDumpItem } from "@/app/actions/braindump";
@@ -12,6 +11,7 @@ import type { Feedback, Proposal, StreamEvent } from "@/lib/breakdown";
 import { reorder, blankStep } from "@/lib/breakdown";
 import { EmojiPicker } from "@/components/breakdown/emoji-picker";
 import { ScheduleStatusBanner } from "@/components/breakdown/schedule-status-banner";
+import { BackToInbox } from "@/components/nav/back-to-inbox";
 import { leadSchedulingMethod } from "@/lib/scheduling/providers";
 import type { GoogleConnStatus } from "@/lib/scheduling/types";
 import { cn } from "@/lib/utils";
@@ -351,12 +351,7 @@ export function BreakdownChat({
           >
             {t("action.startFocus", voice)}
           </a>
-          <Link
-            href="/inbox"
-            className="text-muted-foreground text-sm hover:underline"
-          >
-            ← {t("action.backToInbox", voice)}
-          </Link>
+          <BackToInbox voice={voice} />
         </div>
       </div>
     );
@@ -369,9 +364,7 @@ export function BreakdownChat({
           {proposal?.parentEmoji ? `${proposal.parentEmoji} ` : "✂️ "}
           {title}
         </h1>
-        <Link href="/inbox" className="text-muted-foreground text-sm hover:underline">
-          ← inbox
-        </Link>
+        <BackToInbox voice={voice} />
       </div>
 
       {/* Conversation */}

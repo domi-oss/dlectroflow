@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { getDashboardData } from "@/lib/rewards";
 import { getTodaySpark } from "@/lib/spark";
 import { getTodayRollup } from "@/lib/rollup";
@@ -8,6 +7,7 @@ import { emailConfigured } from "@/lib/email";
 import { SparkCard } from "@/components/dashboard/spark-card";
 import { RoundupCard } from "@/components/dashboard/roundup-card";
 import { BadgeGrid } from "@/components/dashboard/badge-grid";
+import { BackToInbox } from "@/components/nav/back-to-inbox";
 import { t, type Voice } from "@/lib/strings";
 
 export const dynamic = "force-dynamic";
@@ -83,9 +83,7 @@ export default async function DashboardPage() {
         {t("stat.totalPoints", voice)}: {data.totalPoints}
       </p>
 
-      <Link href="/inbox" className="text-muted-foreground inline-block text-sm hover:underline">
-        ← inbox
-      </Link>
+      <BackToInbox voice={voice} />
     </div>
   );
 }

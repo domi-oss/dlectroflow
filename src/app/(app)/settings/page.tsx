@@ -5,6 +5,7 @@ import { getGoogleStatus } from "@/lib/google";
 import { SettingsPanel } from "@/components/settings/settings-panel";
 import { NotificationsSection } from "@/components/settings/notifications-section";
 import { IntegrationsPanel } from "@/components/settings/integrations-panel";
+import { BackToInbox } from "@/components/nav/back-to-inbox";
 import { t, type Voice } from "@/lib/strings";
 
 // DB-backed, always fresh.
@@ -49,9 +50,7 @@ export default async function SettingsPage() {
         <Link href="/help" className="underline">
           {t("nav.help", voice)} &amp; docs
         </Link>
-        <Link href="/inbox" className="underline">
-          {t("action.backToInbox", voice)}
-        </Link>
+        <BackToInbox voice={voice} />
       </div>
     </div>
   );

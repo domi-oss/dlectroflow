@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { getSettings } from "@/lib/db";
 import { currentWorkspaceId } from "@/lib/workspace";
-import { t, type Voice } from "@/lib/strings";
+import { BackToInbox } from "@/components/nav/back-to-inbox";
+import { type Voice } from "@/lib/strings";
 
 // DB-backed only for the voice preference; content is static.
 export const dynamic = "force-dynamic";
@@ -105,9 +106,7 @@ export default async function HelpPage() {
       </section>
 
       <footer>
-        <Link href="/inbox" className="text-sm underline">
-          {t("action.backToInbox", voice)}
-        </Link>
+        <BackToInbox voice={voice} />
       </footer>
     </div>
   );

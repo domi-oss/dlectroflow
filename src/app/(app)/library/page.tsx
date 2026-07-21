@@ -7,6 +7,7 @@ import { t, type StringKey, type Voice } from "@/lib/strings";
 import { cn } from "@/lib/utils";
 import { LibraryRows } from "@/components/library/library-rows";
 import { LibraryMultistep } from "@/components/library/library-multistep";
+import { BackToInbox } from "@/components/nav/back-to-inbox";
 
 // DB-backed, always fresh (mirrors the Inbox — reads live workspace data).
 export const dynamic = "force-dynamic";
@@ -103,12 +104,7 @@ export default async function LibraryPage({
 
   return (
     <div className="space-y-4">
-      <Link
-        href="/inbox"
-        className="text-muted-foreground hover:text-foreground inline-flex items-center text-sm"
-      >
-        {t("action.back", voice)}
-      </Link>
+      <BackToInbox voice={voice} />
 
       <div>
         <h1 className="text-xl font-semibold">{t("nav.everything", voice)}</h1>
