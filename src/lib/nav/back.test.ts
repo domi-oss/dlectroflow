@@ -12,14 +12,10 @@ describe("resolveBackTarget", () => {
     expect(resolveBackTarget(null)).toEqual(DEFAULT_BACK_TARGET);
     expect(resolveBackTarget("")).toEqual(DEFAULT_BACK_TARGET);
     expect(DEFAULT_BACK_TARGET.href).toBe("/inbox");
-    expect(DEFAULT_BACK_TARGET.labelKey).toBe("action.backToInbox");
   });
 
-  it("resolves a whitelisted origin to its target", () => {
-    expect(resolveBackTarget("library")).toEqual({
-      href: "/library?tab=sorted",
-      labelKey: "action.backToLibrary",
-    });
+  it("resolves a whitelisted origin to its destination href", () => {
+    expect(resolveBackTarget("library")).toEqual({ href: "/library?tab=sorted" });
     expect(resolveBackTarget("settings")).toEqual(BACK_TARGETS.settings);
     expect(resolveBackTarget("help")).toEqual(BACK_TARGETS.help);
   });

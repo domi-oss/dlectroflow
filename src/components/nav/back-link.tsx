@@ -4,9 +4,10 @@ import { resolveBackTarget } from "@/lib/nav/back";
 
 /**
  * The one canonical, origin-aware "back" link. It reads the page's `?from=`
- * origin (resolved against the whitelist in @/lib/nav/back), then renders a
- * leading ← affordance + the matching voice-aware label ("Back to inbox" /
- * "Back to Library" / "Back to Settings" / …) with a single shared className.
+ * origin (resolved against the whitelist in @/lib/nav/back) to pick the
+ * DESTINATION, then renders a single, destination-agnostic label — "← Back"
+ * (from `action.back`) — with one shared className. So the link returns the
+ * user to where they came from, but always simply reads "← Back".
  * Absent/unknown/hostile origins fall back to the inbox (no open redirect).
  *
  * This replaces the old per-page recipes (hardcoded lowercase "← inbox" that
@@ -37,7 +38,8 @@ export function BackLink({
       href={target.href}
       className="text-muted-foreground inline-block text-sm hover:underline"
     >
-      ← {t(target.labelKey, voice)}
+      {/* `action.back` already carries the leading ← ("← Back"). */}
+      {t("action.back", voice)}
     </Link>
   );
 }

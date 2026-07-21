@@ -45,9 +45,11 @@ describe("HelpPage", () => {
     expect(hrefs).toContain("/inbox");
   });
 
-  it("is origin-aware: ?from=settings makes the back link return to Settings", async () => {
+  it("is origin-aware: ?from=settings sends the '← Back' link to Settings", async () => {
     render(await HelpPage({ searchParams: Promise.resolve({ from: "settings" }) }));
-    const back = screen.getByRole("link", { name: /back to settings/i });
+    // Label is a simple "← Back"; only the destination reflects the origin.
+    const back = screen.getByRole("link", { name: /back/i });
+    expect(back).toHaveTextContent("← Back");
     expect(back).toHaveAttribute("href", "/settings");
   });
 });

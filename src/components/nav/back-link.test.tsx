@@ -24,33 +24,41 @@ vi.mock("next/link", () => ({
 afterEach(cleanup);
 
 describe("BackLink", () => {
-  it("defaults to the inbox with the ← affordance when `from` is absent", () => {
+  // The visible label is a single, destination-agnostic "← Back" for EVERY
+  // origin (only the destination href varies).
+  it("always reads '← Back' — no per-origin label, and never the destination name", () => {
     render(<BackLink voice="plain" />);
     const link = screen.getByRole("link");
-    expect(link).toHaveAttribute("href", "/inbox");
     expect(link).toHaveTextContent("←");
-    expect(link).toHaveTextContent("Back to inbox");
+    expect(link.textContent?.replace(/\s+/g, " ").trim()).toBe("← Back");
+    expect(link).not.toHaveTextContent(/inbox|Library|Settings|Help/i);
   });
 
-  it("is voice-aware: playful voice renders the playful inbox copy", () => {
-    render(<BackLink voice="playful" />);
-    expect(screen.getByRole("link")).toHaveTextContent("🍳 Back to inbox");
+  it("keeps the '← Back' label in playful voice too (label no longer varies)", () => {
+    render(<BackLink from="library" voice="playful" />);
+    expect(screen.getByRole("link").textContent?.replace(/\s+/g, " ").trim()).toBe("← Back");
   });
 
-  it("resolves a whitelisted origin (library) to its target + label", () => {
-    render(<BackLink from="library" voice="plain" />);
-    const link = screen.getByRole("link");
+  it("defaults the DESTINATION to the inbox when `from` is absent", () => {
+    render(<BackLink voice="plain" />);
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/inbox");
+  });
+
+  it("resolves whitelisted origins to their DESTINATION (label stays '← Back')", () => {
+    const { rerender } = render(<BackLink from="library" voice="plain" />);
+    let link = screen.getByRole("link");
     expect(link).toHaveAttribute("href", "/library?tab=sorted");
-    expect(link).toHaveTextContent("Back to Library");
-  });
+    expect(link).toHaveTextContent("← Back");
 
-  it("resolves settings and help origins", () => {
-    const { rerender } = render(<BackLink from="settings" voice="plain" />);
-    expect(screen.getByRole("link")).toHaveAttribute("href", "/settings");
-    expect(screen.getByRole("link")).toHaveTextContent("Back to Settings");
+    rerender(<BackLink from="settings" voice="plain" />);
+    link = screen.getByRole("link");
+    expect(link).toHaveAttribute("href", "/settings");
+    expect(link).toHaveTextContent("← Back");
+
     rerender(<BackLink from="help" voice="plain" />);
-    expect(screen.getByRole("link")).toHaveAttribute("href", "/help");
-    expect(screen.getByRole("link")).toHaveTextContent("Back to Help");
+    link = screen.getByRole("link");
+    expect(link).toHaveAttribute("href", "/help");
+    expect(link).toHaveTextContent("← Back");
   });
 
   it("falls back to the inbox for an unknown/hostile origin (no open redirect)", () => {
