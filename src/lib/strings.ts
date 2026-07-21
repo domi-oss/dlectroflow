@@ -314,6 +314,17 @@ export const STRINGS = {
   // glance. Structural chrome, not a flavour opportunity, so it's kept
   // identical across voices (same call as task.scheduled/notScheduled above).
   "task.eyebrow":        { plain: "Task",              playful: "Task" },
+
+  // ── MR ③ — Appearance (theme + app-wide completion style) ──────────────────
+  // ✓ is a functional glyph (allowed in plain).
+  "appearance.heading":         { plain: "Appearance",  playful: "🎨 Appearance" },
+  "appearance.theme":           { plain: "Theme",       playful: "Theme" },
+  "appearance.completionIntro": { plain: "How finished to-dos and steps look across the app.", playful: "How your checked-off bites look across the app." },
+  "appearance.strike":          { plain: "Strike through completed", playful: "Strike through completed" },
+  "appearance.tick":            { plain: "Tick colour",  playful: "Tick colour" },
+  "appearance.tickGreen":       { plain: "Green",        playful: "Green" },
+  "appearance.tickBlack":       { plain: "Black",        playful: "Black" },
+  "appearance.previewText":     { plain: "Done to-do",   playful: "Done to-do" },
 } as const;
 
 export type StringKey = keyof typeof STRINGS;

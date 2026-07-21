@@ -5,6 +5,7 @@ import { BrainDumpStatus } from "@/lib/constants";
 import { libraryBuckets, type Item, type LibraryBuckets } from "@/components/inbox/bucket";
 import { t, type StringKey, type Voice } from "@/lib/strings";
 import { cn } from "@/lib/utils";
+import { DonePill } from "@/components/completion/done-pill";
 import { LibraryRows } from "@/components/library/library-rows";
 import { LibraryMultistep } from "@/components/library/library-multistep";
 import { BackLink } from "@/components/nav/back-link";
@@ -224,11 +225,5 @@ function ProgressPill({
   item: Item;
   voice: Voice;
 }) {
-  return (
-    <span className="shrink-0 rounded-full border border-green-700 px-2 py-0.5 text-xs text-green-700">
-      {item.stepsTotal > 0
-        ? `✅ ${item.stepsDone}/${item.stepsTotal} ${t("progress.done", voice)}`
-        : `✅ ${t("progress.done", voice)}`}
-    </span>
-  );
+  return <DonePill voice={voice} done={item.stepsDone} total={item.stepsTotal} />;
 }

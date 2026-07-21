@@ -12,6 +12,7 @@ import {
   WorkspaceKind,
   FocusTimerStyle,
   FocusSound,
+  CompleteTickColor,
 } from "@/lib/constants";
 
 // #38 — keep the DB CHECK constraints (see the
@@ -53,6 +54,7 @@ const REGISTRY: ReadonlyArray<{
   { constraint: "Badge_key_check", table: "Badge", column: "key", values: BadgeKey, nullable: false },
   { constraint: "Settings_focusTimerStyle_check", table: "Settings", column: "focusTimerStyle", values: FocusTimerStyle, nullable: true },
   { constraint: "Settings_focusSound_check", table: "Settings", column: "focusSound", values: FocusSound, nullable: false },
+  { constraint: "Settings_completeTickColor_check", table: "Settings", column: "completeTickColor", values: CompleteTickColor, nullable: false },
 ];
 
 // The schema the client is connected to (Prisma's `?schema=` param, default

@@ -9,7 +9,6 @@ import {
   updateVoice,
 } from "@/app/actions/settings";
 import type { AgingSettings } from "@/lib/aging";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { OWNER_BREAKDOWN_ALLOWLIST, OWNER_BREAKDOWN_MODEL_DEFAULT } from "@/lib/constants";
 import { t, type Voice } from "@/lib/strings";
 import { useSaveStatus, SaveIndicator } from "@/components/settings/use-save-status";
@@ -245,11 +244,6 @@ export function SettingsPanel({
             </button>
           ))}
         </div>
-      </section>
-
-      <section className="space-y-2 border-t pt-4">
-        <h2 className="font-semibold">Appearance</h2>
-        <ThemeToggle />
       </section>
 
       {isOwner && (

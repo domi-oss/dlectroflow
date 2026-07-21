@@ -4,6 +4,7 @@ import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
 import { getGoogleStatus } from "@/lib/google";
 import { SettingsPanel } from "@/components/settings/settings-panel";
 import { NotificationsSection } from "@/components/settings/notifications-section";
+import { AppearanceSection } from "@/components/settings/appearance-section";
 import { FocusTimerSection } from "@/components/settings/focus-timer-section";
 import { IntegrationsPanel } from "@/components/settings/integrations-panel";
 import { BackLink } from "@/components/nav/back-link";
@@ -42,6 +43,13 @@ export default async function SettingsPage({
         breakdownModel={settings.breakdownModel ?? null}
         voice={voice}
       />
+      <div className="border-t pt-4">
+        <AppearanceSection
+          completeStrikethrough={settings.completeStrikethrough}
+          completeTickColor={settings.completeTickColor}
+          voice={voice}
+        />
+      </div>
       <div className="border-t pt-4">
         <NotificationsSection
           notifyRoundup={settings.notifyRoundup}

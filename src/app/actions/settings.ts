@@ -8,6 +8,7 @@ import {
   isGuestWorkspace,
   FocusTimerStyle,
   FocusSound,
+  CompleteTickColor,
 } from "@/lib/constants";
 import { isValidHHmm } from "@/lib/daily-review-nudge";
 
@@ -212,4 +213,34 @@ export async function dismissFocusTimerTip() {
     create: { id: workspaceId, workspaceId, focusTimerTipDismissedAt: now },
     update: { focusTimerTipDismissedAt: now },
   });
+}
+
+/**
+ * MR ③ — app-wide completion style (Appearance). Workspace-scoped personalisation
+ * (guests keep their own values; no owner gate). completeTickColor is
+ * allowlist-validated against CompleteTickColor — anything else falls back to
+ * green, matching the Settings_completeTickColor_check CHECK constraint so a
+ * bad value can never reach the DB. Revalidates the whole layout because the
+ * completion treatment is applied app-wide in (app)/layout.tsx (like voice).
+ */
+export async function updateAppearanceSettings(input: {
+  completeStrikethrough: boolean;
+  completeTickColor: string;
+}) {
+  const workspaceId = await currentWorkspaceId();
+  const completeTickColor = (Object.values(CompleteTickColor) as string[]).includes(
+    input.completeTickColor,
+  )
+    ? input.completeTickColor
+    : CompleteTickColor.Green;
+  const data = {
+    completeStrikethrough: Boolean(input.completeStrikethrough),
+    completeTickColor,
+  };
+  await prisma.settings.upsert({
+    where: { workspaceId },
+    create: { id: workspaceId, workspaceId, ...data },
+    update: data,
+  });
+  revalidatePath("/", "layout");
 }

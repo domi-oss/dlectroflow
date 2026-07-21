@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, useSyncExternalStore, useTransition } from
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { cn, touchTarget } from "@/lib/utils";
+import { COMPLETE_TEXT } from "@/lib/completion-style";
+import { DonePill } from "@/components/completion/done-pill";
 import {
   DndContext,
   MouseSensor,
@@ -1178,8 +1180,11 @@ export function InboxView({
                             titleEditor(item)
                           ) : (
                             <span className="min-w-0 flex-1 break-words">
-                              <span className="line-through">{item.text}</span> {pencil(item)}
+                              <span className={COMPLETE_TEXT}>{item.text}</span> {pencil(item)}
                             </span>
+                          )}
+                          {editingId !== item.id && (
+                            <DonePill voice={voice} done={item.stepsDone} total={item.stepsTotal} />
                           )}
                         </div>
                         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
@@ -1311,7 +1316,7 @@ function ReopenStepPicker({
                 onChange={() => toggle(s.id)}
               />
               {/* Unticked = stays done, so it keeps the completed strikethrough. */}
-              <span className={cn(!checked.has(s.id) && "line-through opacity-70")}>
+              <span className={cn(!checked.has(s.id) && `${COMPLETE_TEXT} opacity-70`)}>
                 {/* Emoji is decoration; keep it out of the accessible name. */}
                 {s.subtaskEmoji && <span aria-hidden="true">{s.subtaskEmoji} </span>}
                 {s.text}

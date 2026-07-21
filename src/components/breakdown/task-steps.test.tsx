@@ -85,8 +85,14 @@ describe("TaskSteps — done steps", () => {
   it("shows the done state (strikethrough + ✓) and omits the action line", () => {
     render(<TaskSteps taskId="t1" steps={[{ ...baseStep(), done: true }]} />);
     const title = screen.getByText(/First/);
-    expect(title.className).toContain("line-through");
-    expect(screen.getByText("✓")).toBeInTheDocument();
+    // Done step uses the app-wide completion treatment (Design D), not a
+    // hard-coded line-through / green.
+    expect(title.className).toContain("[text-decoration-line:var(--complete-decoration)]");
+    // The done marker is the shared app-wide DonePill ("✓ done"), tick colour
+    // from --tick-color — the same pill the Library "done" view uses.
+    const pill = screen.getByText(/✓\s*done/i);
+    expect(pill.className).toContain("text-[color:var(--tick-color)]");
+    expect(pill.className).toContain("rounded-full");
     expect(screen.queryByRole("button", { name: "Complete" })).not.toBeInTheDocument();
     expect(screen.queryByText("▶ Start Focus")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "All options" })).not.toBeInTheDocument();

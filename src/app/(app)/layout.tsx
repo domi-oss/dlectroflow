@@ -7,6 +7,7 @@ import { GuestIndicator } from "@/components/guest/guest-indicator";
 import { VoiceProvider } from "@/components/voice-provider";
 import { ReviewNudge } from "@/components/dashboard/review-nudge";
 import { AppMenu } from "@/components/nav/app-menu";
+import { completionRootAttrs } from "@/lib/completion-style";
 import { type Voice } from "@/lib/strings";
 
 export default async function AppLayout({
@@ -34,7 +35,7 @@ export default async function AppLayout({
   const voice: Voice = settings.voice === "playful" ? "playful" : "plain";
 
   return (
-    <div className="flex min-h-full flex-col">
+    <div className="flex min-h-full flex-col" {...completionRootAttrs(settings)}>
       {guest && (
         <GuestIndicator remaining={guest.remaining} quota={guest.quota} expiresAt={guest.expiresAt} />
       )}
