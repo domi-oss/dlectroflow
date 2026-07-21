@@ -117,6 +117,31 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* MR ③ — app-wide completion style (Design D). The Appearance settings are
+ * applied once on the app-shell wrapper as data-* attributes (see
+ * (app)/layout.tsx); these rules resolve them into the two custom properties
+ * every completion render site consumes (COMPLETE_TICK / COMPLETE_TEXT in
+ * src/lib/completion-style.ts). Both tick colours meet WCAG-AA in light + dark:
+ * `black` maps to --foreground (near-black on light, near-white on dark);
+ * `green` uses a 700-weight in light and a 400-weight in dark (the repo's proven
+ * text-green-700 / dark:text-green-400 pairing, as OKLCH). */
+:root {
+  --complete-decoration: line-through;
+  --tick-color: oklch(0.527 0.154 150.069); /* ~green-700 */
+}
+[data-complete-strike="off"] {
+  --complete-decoration: none;
+}
+[data-tick="green"] {
+  --tick-color: oklch(0.527 0.154 150.069); /* ~green-700, AA on light */
+}
+[data-tick="black"] {
+  --tick-color: var(--foreground);
+}
+.dark [data-tick="green"] {
+  --tick-color: oklch(0.792 0.209 151.711); /* ~green-400, AA on dark */
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
