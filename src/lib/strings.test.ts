@@ -349,6 +349,20 @@ describe("Task 2 — inbox/focus/breakdown keys (plain vs playful)", () => {
     expect(t("action.backToLibrary", "playful")).toBe("🍱 Back to the Larder");
   });
 
+  // action.backToSettings / action.backToHelp (origin-aware back link, !106)
+  it('t("action.backToSettings", "plain") → "Back to Settings"', () => {
+    expect(t("action.backToSettings", "plain")).toBe("Back to Settings");
+  });
+  it('t("action.backToSettings", "playful") → "⚙️ Back to Settings"', () => {
+    expect(t("action.backToSettings", "playful")).toBe("⚙️ Back to Settings");
+  });
+  it('t("action.backToHelp", "plain") → "Back to Help"', () => {
+    expect(t("action.backToHelp", "plain")).toBe("Back to Help");
+  });
+  it('t("action.backToHelp", "playful") → "🆘 Back to Help"', () => {
+    expect(t("action.backToHelp", "playful")).toBe("🆘 Back to Help");
+  });
+
   // task.scheduled / task.notScheduled (task page schedule indicator, #8 follow-up)
   it('t("task.scheduled", "plain") → "Scheduled ✓"', () => {
     expect(t("task.scheduled", "plain")).toBe("Scheduled ✓");

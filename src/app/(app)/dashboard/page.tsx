@@ -7,15 +7,20 @@ import { emailConfigured } from "@/lib/email";
 import { SparkCard } from "@/components/dashboard/spark-card";
 import { RoundupCard } from "@/components/dashboard/roundup-card";
 import { BadgeGrid } from "@/components/dashboard/badge-grid";
-import { BackToInbox } from "@/components/nav/back-to-inbox";
+import { BackLink } from "@/components/nav/back-link";
 import { t, type Voice } from "@/lib/strings";
 
 export const dynamic = "force-dynamic";
 
 const MEDALS = ["🥇", "🥈", "🥉"];
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string }>;
+}) {
   const workspaceId = await currentWorkspaceId();
+  const { from } = await searchParams;
   const [data, spark, rollup, settings] = await Promise.all([
     getDashboardData(workspaceId),
     getTodaySpark(workspaceId),
@@ -83,7 +88,7 @@ export default async function DashboardPage() {
         {t("stat.totalPoints", voice)}: {data.totalPoints}
       </p>
 
-      <BackToInbox voice={voice} />
+      <BackLink from={from} voice={voice} />
     </div>
   );
 }

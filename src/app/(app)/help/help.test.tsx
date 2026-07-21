@@ -19,7 +19,7 @@ afterEach(cleanup);
 
 describe("HelpPage", () => {
   it("renders the getting-started guide sections", async () => {
-    render(await HelpPage());
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
     expect(
       screen.getByRole("heading", { name: /Help & getting started/i }),
     ).toBeInTheDocument();
@@ -36,10 +36,18 @@ describe("HelpPage", () => {
     }
   });
 
-  it("links back to settings and inbox", async () => {
-    render(await HelpPage());
+  it("links to settings (carrying ?from=help) and defaults its back link to the inbox", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
     const hrefs = screen.getAllByRole("link").map((a) => a.getAttribute("href"));
-    expect(hrefs).toContain("/settings");
+    // Settings deep-links carry the origin so Settings can offer "Back to Help".
+    expect(hrefs).toContain("/settings?from=help");
+    // With no `?from=`, the shared back link falls back to the inbox.
     expect(hrefs).toContain("/inbox");
+  });
+
+  it("is origin-aware: ?from=settings makes the back link return to Settings", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({ from: "settings" }) }));
+    const back = screen.getByRole("link", { name: /back to settings/i });
+    expect(back).toHaveAttribute("href", "/settings");
   });
 });

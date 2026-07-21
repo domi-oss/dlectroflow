@@ -11,7 +11,8 @@ import type { Feedback, Proposal, StreamEvent } from "@/lib/breakdown";
 import { reorder, blankStep } from "@/lib/breakdown";
 import { EmojiPicker } from "@/components/breakdown/emoji-picker";
 import { ScheduleStatusBanner } from "@/components/breakdown/schedule-status-banner";
-import { BackToInbox } from "@/components/nav/back-to-inbox";
+import { BackLink } from "@/components/nav/back-link";
+import { withFrom } from "@/lib/nav/back";
 import { leadSchedulingMethod } from "@/lib/scheduling/providers";
 import type { GoogleConnStatus } from "@/lib/scheduling/types";
 import { cn } from "@/lib/utils";
@@ -34,6 +35,7 @@ export function BreakdownChat({
   google,
   isGuest = false,
   scheduled = false,
+  from,
 }: {
   taskId: string;
   title: string;
@@ -44,6 +46,9 @@ export function BreakdownChat({
   isGuest?: boolean;
   /** Persisted ground truth: has this task ever been scheduled (task.scheduledAt)? */
   scheduled?: boolean;
+  /** Origin (`?from=`) this task was opened from, so the back links + the
+   * Start-focus navigation return the user to where they came from. */
+  from?: string;
 }) {
   const router = useRouter();
   const voice = useVoice();
@@ -346,12 +351,12 @@ export function BreakdownChat({
         <div className="flex items-center gap-4">
           {/* full navigation so the server renders the focusable steps view */}
           <a
-            href={`/tasks/${taskId}`}
+            href={withFrom(`/tasks/${taskId}`, from)}
             className="bg-primary text-primary-foreground inline-block rounded-md px-4 py-2 text-sm font-medium"
           >
             {t("action.startFocus", voice)}
           </a>
-          <BackToInbox voice={voice} />
+          <BackLink from={from} voice={voice} />
         </div>
       </div>
     );
@@ -364,7 +369,7 @@ export function BreakdownChat({
           {proposal?.parentEmoji ? `${proposal.parentEmoji} ` : "✂️ "}
           {title}
         </h1>
-        <BackToInbox voice={voice} />
+        <BackLink from={from} voice={voice} />
       </div>
 
       {/* Conversation */}
