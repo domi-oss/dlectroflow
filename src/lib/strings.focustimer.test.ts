@@ -1,0 +1,25 @@
+import { describe, it, expect } from "vitest";
+import { t } from "@/lib/strings";
+
+describe("focus-timer redesign strings (MR ②)", () => {
+  it("timer readout + controls resolve; plain stays free of decorative emoji", () => {
+    expect(t("focus.timer.completeStep", "plain")).toBe("✓ Complete step");
+    expect(t("focus.timer.of", "plain")).toBe("of");
+    expect(t("focus.timer.leftInTask", "plain")).toBe("left in task");
+    expect(t("focus.timer.steps", "plain")).toBe("steps");
+  });
+
+  it("the first-run hint resolves in both voices", () => {
+    expect(t("focus.tip.body", "plain")).toMatch(/make this timer yours/i);
+    expect(t("focus.tip.cta", "plain")).toBe("Open settings →");
+    expect(t("focus.tip.body", "playful")).not.toBe(t("focus.tip.body", "plain"));
+  });
+
+  it("settings labels resolve; the heading gets a playful emoji anchor only in playful", () => {
+    expect(t("focusSettings.heading", "plain")).toBe("Focus timer");
+    expect(t("focusSettings.heading", "playful")).toBe("⏱️ Focus timer");
+    expect(t("focusSettings.styleMug", "plain")).toBe("Mug");
+    expect(t("focusSettings.soundOff", "plain")).toBe("Off");
+    expect(t("focusSettings.soundLofiCalm", "plain")).toBe("Lo-fi (calm)");
+  });
+});

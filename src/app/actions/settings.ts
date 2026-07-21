@@ -3,7 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
-import { OWNER_BREAKDOWN_ALLOWLIST, isGuestWorkspace } from "@/lib/constants";
+import {
+  OWNER_BREAKDOWN_ALLOWLIST,
+  isGuestWorkspace,
+  FocusTimerStyle,
+  FocusSound,
+} from "@/lib/constants";
 import { isValidHHmm } from "@/lib/daily-review-nudge";
 
 export async function updateAgingSettings(input: {
@@ -157,4 +162,54 @@ export async function updateFirstRunPreview(enabled: boolean) {
     update: { firstRunPreview: Boolean(enabled) },
   });
   revalidatePath("/inbox");
+}
+
+/**
+ * MR ② — Focus timer preferences. Workspace-scoped personalisation (guests keep
+ * their own values; no owner gate). timerStyle + sound are allowlist-validated
+ * against FocusTimerStyle / FocusSound so a bad value can never reach the DB
+ * (mirrors the Settings_focusTimerStyle_check / Settings_focusSound_check
+ * constraints); an unknown style falls back to null (→ resolve by voice) and an
+ * unknown sound falls back to "off". The timer route is force-dynamic (reads
+ * settings fresh on load); we revalidate /settings so the section re-seeds.
+ */
+export async function updateFocusTimerSettings(input: {
+  timerStyle: string | null;
+  minimalMode: boolean;
+  keepAwake: boolean;
+  alarmEnabled: boolean;
+  sound: string;
+}) {
+  const workspaceId = await currentWorkspaceId();
+  const styles = Object.values(FocusTimerStyle) as string[];
+  const focusTimerStyle =
+    input.timerStyle && styles.includes(input.timerStyle) ? input.timerStyle : null;
+  const sounds = Object.values(FocusSound) as string[];
+  const focusSound = sounds.includes(input.sound) ? input.sound : FocusSound.Off;
+  const data = {
+    focusTimerStyle,
+    focusMinimalMode: Boolean(input.minimalMode),
+    focusKeepAwake: Boolean(input.keepAwake),
+    focusAlarmEnabled: Boolean(input.alarmEnabled),
+    focusSound,
+  };
+  await prisma.settings.upsert({
+    where: { workspaceId },
+    create: { id: workspaceId, workspaceId, ...data },
+    update: data,
+  });
+  revalidatePath("/settings");
+}
+
+/** MR ② — record that the workspace dismissed the one-time "make this timer
+ * yours" hint (via ✕ or by tapping through to settings). One-shot flag; the
+ * force-dynamic timer route won't show it again on the next load. */
+export async function dismissFocusTimerTip() {
+  const workspaceId = await currentWorkspaceId();
+  const now = new Date();
+  await prisma.settings.upsert({
+    where: { workspaceId },
+    create: { id: workspaceId, workspaceId, focusTimerTipDismissedAt: now },
+    update: { focusTimerTipDismissedAt: now },
+  });
 }

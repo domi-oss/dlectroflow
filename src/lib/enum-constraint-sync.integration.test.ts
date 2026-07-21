@@ -10,6 +10,8 @@ import {
   SparkSource,
   BadgeKey,
   WorkspaceKind,
+  FocusTimerStyle,
+  FocusSound,
 } from "@/lib/constants";
 
 // #38 — keep the DB CHECK constraints (see the
@@ -49,6 +51,8 @@ const REGISTRY: ReadonlyArray<{
   { constraint: "RewardEvent_type_check", table: "RewardEvent", column: "type", values: RewardType, nullable: false },
   { constraint: "DailySpark_source_check", table: "DailySpark", column: "source", values: SparkSource, nullable: false },
   { constraint: "Badge_key_check", table: "Badge", column: "key", values: BadgeKey, nullable: false },
+  { constraint: "Settings_focusTimerStyle_check", table: "Settings", column: "focusTimerStyle", values: FocusTimerStyle, nullable: true },
+  { constraint: "Settings_focusSound_check", table: "Settings", column: "focusSound", values: FocusSound, nullable: false },
 ];
 
 // The schema the client is connected to (Prisma's `?schema=` param, default

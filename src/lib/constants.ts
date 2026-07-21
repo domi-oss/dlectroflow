@@ -117,3 +117,24 @@ export type BreakdownModel = (typeof OWNER_BREAKDOWN_ALLOWLIST)[number];
 
 export const OWNER_BREAKDOWN_MODEL_DEFAULT = "claude-sonnet-4-6";
 export const GUEST_BREAKDOWN_MODEL_DEFAULT = "claude-haiku-4-5";
+
+// ── MR ② — Focus timer redesign (Focus-timer settings) ─────────────────────
+// focusTimerStyle + focusSound are String columns guarded by Postgres CHECK
+// constraints (Settings_focusTimerStyle_check / Settings_focusSound_check).
+// These objects are the single source of truth for the allowed sets; the CHECK
+// migration + enum-constraint-sync test mirror them. focusTimerStyle is nullable
+// (null → the timer resolves a style from the voice); focusSound defaults "off".
+export const FocusTimerStyle = {
+  Ring: "ring",
+  Digits: "digits",
+  Bar: "bar",
+  Mug: "mug",
+} as const;
+export type FocusTimerStyle =
+  (typeof FocusTimerStyle)[keyof typeof FocusTimerStyle];
+
+export const FocusSound = {
+  Off: "off",
+  LofiCalm: "lofi_calm",
+} as const;
+export type FocusSound = (typeof FocusSound)[keyof typeof FocusSound];
