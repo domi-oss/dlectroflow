@@ -232,6 +232,12 @@ test_app:
 # Debian-matched engine directly. Auth/session boot-guard env vars are supplied
 # by playwright.config.ts's webServer.env, so this job only needs the
 # Postgres/DB vars, same as test_app.
+#
+# #31: this job also runs the mechanical accessibility (axe) gate — the axe spec
+# is just another *.spec.ts under testDir (e2e/a11y/axe-core-flow.spec.ts), so
+# `npx playwright test` already picks it up. It fails on NEW serious/critical
+# WCAG violations vs. e2e/a11y/axe-baseline.json. No separate job needed: the
+# gate inherits e2e_test's Postgres service + build + build_image.needs blocking.
 e2e_test:
   stage: build
   image: mcr.microsoft.com/playwright:v1.61.1-noble@sha256:5b8f294aff9041b7191c34a4bab3ac270157a28774d4b0660e9743297b697e48
