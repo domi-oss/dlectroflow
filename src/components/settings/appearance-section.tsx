@@ -65,7 +65,10 @@ export function AppearanceSection({
       <div className="space-y-1">
         <span className="text-muted-foreground text-xs">{t("appearance.theme", voice)}</span>
         <div>
-          <ThemeToggle />
+          {/* Theme persists client-side (localStorage) instantly; flash the
+              shared indicator so it gives the same "Saved" feedback as the
+              completion controls below. */}
+          <ThemeToggle onPersist={markSaved} />
         </div>
       </div>
 

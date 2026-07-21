@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-export function ThemeToggle() {
+export function ThemeToggle({ onPersist }: { onPersist?: () => void }) {
   const [dark, setDark] = useState(false);
 
   useEffect(() => {
@@ -16,6 +16,10 @@ export function ThemeToggle() {
     try {
       localStorage.setItem("df-theme", next ? "dark" : "light");
     } catch {}
+    // Let a parent (e.g. the Appearance section) reflect the persisted change in
+    // its shared save indicator, so the theme control gives the same feedback as
+    // the other Appearance settings.
+    onPersist?.();
   };
 
   return (

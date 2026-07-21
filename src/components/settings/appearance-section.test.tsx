@@ -60,4 +60,13 @@ describe("AppearanceSection", () => {
     render(<AppearanceSection {...base} />);
     expect(screen.getByLabelText("done")).toHaveTextContent("✓");
   });
+
+  it("toggling the theme flashes the shared Appearance save indicator", async () => {
+    const user = userEvent.setup();
+    render(<AppearanceSection {...base} />);
+    // The indicator is idle (renders nothing) until a change is saved.
+    expect(screen.queryByRole("status")).toBeNull();
+    await user.click(screen.getByRole("button", { name: /mode/i }));
+    expect(await screen.findByRole("status")).toBeInTheDocument();
+  });
 });
