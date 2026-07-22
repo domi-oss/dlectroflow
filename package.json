@@ -25,7 +25,8 @@
     "node": ">=20.19.0"
   },
   "overrides": {
-    "postcss": "^8.5.16"
+    "postcss": "^8.5.16",
+    "sharp": "^0.35.3"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.0",
