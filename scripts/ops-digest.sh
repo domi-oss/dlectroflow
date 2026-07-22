@@ -14,7 +14,7 @@
 # NOT covered here (deliberate): Anthropic/GKE spend and error-log summaries need
 # billing creds + the Layer 3 observability store (#29). They stay manual weekly
 # glances until #29 lands — see the "Spend & error logs" section below.
-set -eu
+set -euo pipefail
 
 PROD_URL="${PROD_URL:-https://dlectroflow.dlectronique.dev}"
 API="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}"
@@ -42,11 +42,11 @@ esac
 
 # ── 2. CI health — failed main pipelines, last 7d ────────────────────────────
 failed_pipes="$(curl -s -H "$AUTH" "${API}/pipelines?ref=main&status=failed&updated_after=${SINCE}&per_page=100" \
-  | jq 'length' 2>/dev/null || echo '?')"
+  | jq -r 'length | if . == 100 then "100+" else . end' 2>/dev/null || echo '?')"
 
 # ── 3. Dependency upgrades — open Renovate MRs awaiting triage ────────────────
 renovate_mrs="$(curl -s -H "$AUTH" "${API}/merge_requests?state=opened&per_page=100" \
-  | jq '[.[] | select(.source_branch | startswith("renovate/"))] | length' 2>/dev/null || echo '?')"
+  | jq -r '[.[] | select(.source_branch | startswith("renovate/"))] | length | if . == 100 then "100+" else . end' 2>/dev/null || echo '?')"
 
 # ── 4. Security signal ───────────────────────────────────────────────────────
 # Vulnerability Report count (Ultimate). The REST vuln endpoint may be
@@ -54,9 +54,9 @@ renovate_mrs="$(curl -s -H "$AUTH" "${API}/merge_requests?state=opened&per_page=
 # UI + the Scan Result Policy. Open security-labelled issues is the reliable
 # secondary signal (Duo's security-assessment files those).
 vulns="$(curl -s -H "$AUTH" "${API}/vulnerabilities?per_page=100" \
-  | jq '[.[] | select(.state=="detected" or .state=="confirmed")] | length' 2>/dev/null || echo '?')"
+  | jq -r '[.[] | select(.state=="detected" or .state=="confirmed")] | length | if . == 100 then "100+" else . end' 2>/dev/null || echo '?')"
 sec_issues="$(curl -s -H "$AUTH" "${API}/issues?state=opened&labels=security&per_page=100" \
-  | jq 'length' 2>/dev/null || echo '?')"
+  | jq -r 'length | if . == 100 then "100+" else . end' 2>/dev/null || echo '?')"
 
 # ── 5. Digest body ───────────────────────────────────────────────────────────
 BODY="$(cat <<EOF
@@ -87,7 +87,7 @@ EOF
 
 # ── 6. Post as a note on the standing digest issue ───────────────────────────
 if [ -n "${OPS_DIGEST_ISSUE_IID:-}" ]; then
-  curl -s -f -X POST -H "$AUTH" --data-urlencode "body=${BODY}" \
+  curl -sS -f -X POST -H "$AUTH" --data-urlencode "body=${BODY}" \
     "${API}/issues/${OPS_DIGEST_ISSUE_IID}/notes" > /dev/null
   echo "Posted digest to issue #${OPS_DIGEST_ISSUE_IID}"
 else
