@@ -19,6 +19,64 @@ operators upgrading a self-hosted instance don't get surprised.
 > Shipped to production but not yet tagged. At cut time this becomes
 > `## [X.Y.Z] - <date>` and a fresh empty `## [Unreleased]` is added above it.
 
+## [0.2.0] - 2026-07-22
+
+Generalizing the scheduling stack for open-source (epic #29) and closing the loop
+from *scheduled* → *focusing*, plus a CI/quality-gate build-out, Helm hardening,
+and dependency/data-integrity security fixes.
+
+### ⚠️ Upgrade notes (optional — no breaking changes, no new required env vars)
+
+- **Preserve real client IP for the guest quota (#28):** the fix is a cluster-side
+  ingress-nginx change (`controller.service.externalTrafficPolicy=Local` + ≥2
+  controller replicas + a PDB via `controller.minAvailable`), not a chart change —
+  apply it per `docs/deploy-runbook.md`. Until then the per-IP guest quota can be
+  bypassed via node-IP SNAT collapse.
+- **Weekly ops digest (#33):** posts only once the `OPS_DIGEST_ISSUE_IID` and
+  `GL_TOKEN` (Reporter + `api`) CI variables are set; until then it runs a harmless
+  preview and never fails the schedule.
+
+### Added
+
+- **Focus deep-link in scheduled events (#39):** a scheduled task's `.ics` events
+  and Google Tasks now carry a short voice-aware note plus an absolute deep-link
+  straight into the `/focus` timer.
+- **/focus redesign (#41):** a step-picker launcher (resume hero + lanes), a
+  redesigned timer with four styles (ring / digits / bar / mug) + previews and an
+  optional completion alarm chime, and an app-wide completion-style Appearance
+  setting (strikethrough + tick colour, WCAG-AA).
+- **Scheduling-provider seam (#34):** `{ics, googleTasks}` behind one interface
+  with a shared schedule + reward path — the foundation for generalized scheduling.
+- **Weekly ops digest (#33):** a scheduled pipeline posts prod health, failed-CI,
+  security, and dependency-upgrade signals to a standing tracking issue.
+- **Playwright E2E smoke suite (#37):** browser tests across the core flows, wired
+  as a blocking merge gate.
+- **CI quality gates:** Prettier + `prettier --check` formatting (#32), a mechanical
+  accessibility (axe) check on core routes (#31), and an `.env.example` drift check
+  that fails on missing/extra keys (#30).
+
+### Changed
+
+- **Dropped Reclaim (#36):** removed the Reclaim client/model/routes; scheduling now
+  flows entirely through the provider seam.
+- **Helm chart hardening (#15):** opt-in spot-instance toleration, a CPU-limit
+  throttling fix, and Renovate tracking for `values.yaml` image tags.
+
+### Fixed
+
+- Flaky roundup-card notification that fired twice and produced false CI failures
+  (#42).
+
+### Security
+
+- **`sharp` → 0.35.3** via a `package.json` override, remediating inherited libvips
+  vulnerabilities CVE-2026-33327 / -33328 / -35590 / -35591 (#47). Transitive via
+  Next.js image optimization; low exploitability (no untrusted-image surface).
+- **DB-level CHECK constraints** on status/role columns (pseudo-enums) enforcing
+  data integrity at the database (#38).
+- **Real client-IP preservation at the ingress (#28)** so the per-IP guest quota
+  can't be bypassed (see upgrade notes).
+
 ## [0.1.0] - 2026-07-19
 
 The wireframe → product build (#8): a Plain/Playful voice layer, inbox
@@ -130,6 +188,7 @@ Baseline — first tracked release of the shipped app.
 - GKE Autopilot deployment with valid TLS, per-MR review apps, and the full
   GitLab security-scanner suite.
 
-[Unreleased]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.1.0...main
+[Unreleased]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.2.0...main
+[0.2.0]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.1.0...v0.2.0
 [0.1.0]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.0.1...v0.1.0
 [0.0.1]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/releases/v0.0.1
