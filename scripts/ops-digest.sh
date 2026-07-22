@@ -1,5 +1,9 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # scripts/ops-digest.sh — weekly ops digest (issue #33, automates the #16 checklist).
+# Requires bash (not POSIX sh): `set -o pipefail` below is a bash/ksh extension,
+# and it's load-bearing — without it a failing `curl` pipes empty output into `jq`,
+# which exits 0 and yields a blank count instead of the `?` fallback. The CI job
+# installs bash and invokes `bash scripts/ops-digest.sh` (see .gitlab-ci.yml).
 #
 # Runs from the ops_digest CI job on the "Weekly base-image rescan" schedule.
 # Read-only against production; write-only to ONE tracking issue. Assembles a
@@ -45,15 +49,25 @@ failed_pipes="$(curl -s -H "$AUTH" "${API}/pipelines?ref=main&status=failed&upda
   | jq -r 'length | if . == 100 then "100+" else . end' 2>/dev/null || echo '?')"
 
 # ── 3. Dependency upgrades — open Renovate MRs awaiting triage ────────────────
+# The API has no source-branch filter, so we fetch open MRs and filter for
+# `renovate/` client-side. If the fetched page is full (100 open MRs), Renovate
+# MRs could sit beyond page 1 → suffix the count with `+` to flag the undercount
+# rather than silently understating it.
 renovate_mrs="$(curl -s -H "$AUTH" "${API}/merge_requests?state=opened&per_page=100" \
-  | jq -r '[.[] | select(.source_branch | startswith("renovate/"))] | length | if . == 100 then "100+" else . end' 2>/dev/null || echo '?')"
+  | jq -r '([.[] | select(.source_branch | startswith("renovate/"))] | length) as $r
+           | if length == 100 then "\($r)+" else "\($r)" end' 2>/dev/null || echo '?')"
 
 # ── 4. Security signal ───────────────────────────────────────────────────────
 # Vulnerability Report count (Ultimate). The REST vuln endpoint may be
 # unavailable → shows '?'; the authoritative source is the Vulnerability Report
 # UI + the Scan Result Policy. Open security-labelled issues is the reliable
 # secondary signal (Duo's security-assessment files those).
-vulns="$(curl -s -H "$AUTH" "${API}/vulnerabilities?per_page=100" \
+# Filter by state SERVER-SIDE (`state[]=detected&state[]=confirmed`) so the 100
+# page cap bounds ACTIVE vulns only — otherwise a project with >100 total vulns
+# (mostly dismissed) could push the active ones off page 1 and silently
+# undercount. The client-side select stays as a belt-and-suspenders in case the
+# param is ignored; `100+` then honestly means ≥100 active.
+vulns="$(curl -s -H "$AUTH" "${API}/vulnerabilities?state[]=detected&state[]=confirmed&per_page=100" \
   | jq -r '[.[] | select(.state=="detected" or .state=="confirmed")] | length | if . == 100 then "100+" else . end' 2>/dev/null || echo '?')"
 sec_issues="$(curl -s -H "$AUTH" "${API}/issues?state=opened&labels=security&per_page=100" \
   | jq -r 'length | if . == 100 then "100+" else . end' 2>/dev/null || echo '?')"
