@@ -36,13 +36,20 @@ helm install ingress-nginx ingress-nginx/ingress-nginx \
 
 > **Preserve the real client IP (`externalTrafficPolicy: Local`) — required for the per-IP guest quota (#28).** The app keys its guest AI quota (and ingress rate-limiting) on the client IP from the right-most `X-Forwarded-For` hop / `X-Real-IP` (`src/lib/guest-quota.ts`, !76). That is only trustworthy if the real client IP reaches ingress-nginx un-SNAT'd. With the GKE default `externalTrafficPolicy: Cluster`, kube-proxy SNATs external traffic to a **node IP**, so every guest collapses onto a handful of node IPs and the quota can't tell clients apart. `Local` stops the SNAT so the L4 passthrough NLB's preserved source IP reaches nginx. Keep ingress-nginx `use-forwarded-headers` at its default `false`. **No app change is needed.**
 >
-> **HA first — blast radius:** under `Local` the NLB drops traffic to any node without a Ready ingress-nginx pod. A single controller replica = one healthy backend node, so a pod move / node event is a brief full outage — hence `replicaCount=2`. The ingress-nginx chart **auto-creates the `PodDisruptionBudget` whenever `replicaCount > 1`** (there is no `podDisruptionBudget.enabled` / `pdb.create` value — the PDB is implicit); `controller.minAvailable=1` above sizes it so one controller pod keeps serving through voluntary disruptions. (The !34 HA safeguards cover the **app**, not this controller.) Roll out on a review app first.
+> **HA first — blast radius:** under `Local` the NLB drops traffic to any node without a Ready ingress-nginx pod. A single controller replica = one healthy backend node, so a pod move / node event is a brief full outage — hence `replicaCount=2`. The ingress-nginx chart creates the `PodDisruptionBudget` when **`controller.minAvailable` (or `controller.maxUnavailable`) is set** — *not* from `replicaCount` alone, and there is no `podDisruptionBudget.enabled` / `pdb.create` value. So `controller.minAvailable=1` is what actually creates the PDB (sized so one controller pod keeps serving through voluntary disruptions), and `replicaCount=2` gives it two pods to protect. (The !34 HA safeguards cover the **app**, not this controller.) Roll out on a review app first.
 >
 > **Validate (#28):** from two distinct client IPs, confirm distinct `clientIpHash` / quota counters — exhaust the quota from one IP, confirm the other is unaffected.
 
 **Existing cluster (no reinstall):** re-apply the same settings as an upgrade. `--reuse-values` preserves the pinned `loadBalancerIP` from the install above; the explicit `controller.config.use-forwarded-headers=false` is required because `--reuse-values` would otherwise silently keep a stale `true` a prior operator may have set — and a `true` value lets nginx trust client-supplied `X-Forwarded-For`, which would let a guest spoof the per-IP quota. It **must** stay `false`.
 ```bash
+# --version: pin to your CURRENTLY-INSTALLED chart (find it with `helm list -n ingress-nginx`,
+#   CHART column → ingress-nginx-<X.Y.Z>) so a stale repo cache can't pull a different chart.
+# --atomic --timeout: wait for the new controller pods to become Ready and auto-roll-back on
+#   failure — important here because externalTrafficPolicy=Local drops traffic to any node
+#   without a Ready controller pod, so a half-finished rollout is a partial outage.
 helm upgrade ingress-nginx ingress-nginx/ingress-nginx -n ingress-nginx --reuse-values \
+  --version <installed-chart-version> \
+  --atomic --timeout 10m \
   --set controller.service.externalTrafficPolicy=Local \
   --set controller.replicaCount=2 \
   --set controller.minAvailable=1 \
