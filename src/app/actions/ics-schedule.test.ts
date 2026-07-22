@@ -7,6 +7,7 @@ const {
   taskUpdateMock,
   logRewardMock,
   awardBadgeMock,
+  getSettingsMock,
 } = vi.hoisted(() => ({
   workspaceMock: vi.fn(),
   revalidatePathMock: vi.fn(),
@@ -14,11 +15,13 @@ const {
   taskUpdateMock: vi.fn(),
   logRewardMock: vi.fn(),
   awardBadgeMock: vi.fn(),
+  getSettingsMock: vi.fn(),
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/lib/db", () => ({
   prisma: { task: { findFirst: taskFindFirstMock, update: taskUpdateMock } },
+  getSettings: getSettingsMock,
 }));
 vi.mock("@/lib/rewards", () => ({
   logReward: logRewardMock,
@@ -34,6 +37,7 @@ beforeEach(() => {
   logRewardMock.mockResolvedValue(undefined);
   awardBadgeMock.mockResolvedValue(undefined);
   taskUpdateMock.mockResolvedValue({});
+  getSettingsMock.mockResolvedValue({ voice: "plain" });
 });
 
 const stepTask = (over: Record<string, unknown> = {}) => ({
@@ -114,6 +118,41 @@ describe("scheduleViaIcs", () => {
     );
     expect(logRewardMock).not.toHaveBeenCalled();
     expect(taskUpdateMock).not.toHaveBeenCalled();
+  });
+
+  it("embeds a voice-aware focus deep-link note pointing at the first step (#39)", async () => {
+    workspaceMock.mockResolvedValue("owner");
+    getSettingsMock.mockResolvedValue({ voice: "playful" });
+    process.env.PUBLIC_ORIGIN = "https://app.example";
+    taskFindFirstMock.mockResolvedValue(
+      stepTask({
+        steps: [
+          { id: "step-A", text: "Plan", estMinutes: 15 },
+          { id: "step-B", text: "Build", estMinutes: 20 },
+        ],
+      }),
+    );
+    const res = await scheduleViaIcs("task-1");
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.ics).toContain("DESCRIPTION:");
+      expect(res.ics).toContain("https://app.example/focus/step-A");
+      expect(res.ics).toContain("🍽️"); // playful voice resolved from settings
+    }
+    delete process.env.PUBLIC_ORIGIN;
+  });
+
+  it("stepless task deep-links to the /focus launcher (no step id available)", async () => {
+    workspaceMock.mockResolvedValue("owner");
+    process.env.PUBLIC_ORIGIN = "https://app.example";
+    taskFindFirstMock.mockResolvedValue(stepTask({ steps: [] }));
+    const res = await scheduleViaIcs("task-1", { durationMin: 30 });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.ics).toContain("https://app.example/focus");
+      expect(res.ics).not.toContain("/focus/");
+    }
+    delete process.env.PUBLIC_ORIGIN;
   });
 
   it("a reward failure does not fail scheduling (returns the .ics anyway)", async () => {

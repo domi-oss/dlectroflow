@@ -15,6 +15,7 @@ const {
   stepUpdateMock,
   logRewardMock,
   awardBadgeMock,
+  getSettingsMock,
 } = vi.hoisted(() => ({
   workspaceMock: vi.fn(),
   revalidatePathMock: vi.fn(),
@@ -30,6 +31,7 @@ const {
   stepUpdateMock: vi.fn(),
   logRewardMock: vi.fn(),
   awardBadgeMock: vi.fn(),
+  getSettingsMock: vi.fn(),
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
@@ -38,6 +40,7 @@ vi.mock("@/lib/db", () => ({
     task: { findFirst: taskFindFirstMock, update: taskUpdateMock },
     step: { findFirst: stepFindFirstMock, update: stepUpdateMock },
   },
+  getSettings: getSettingsMock,
 }));
 vi.mock("@/lib/rewards", () => ({
   logReward: logRewardMock,
@@ -80,6 +83,7 @@ beforeEach(() => {
   findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
   createGoogleTaskMock.mockResolvedValue({ id: "g1" });
   workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
+  getSettingsMock.mockResolvedValue({ voice: "plain" });
 });
 
 describe("pushStepsToGoogleTasks — provider-agnostic marker + reward-once", () => {
@@ -101,6 +105,27 @@ describe("pushStepsToGoogleTasks — provider-agnostic marker + reward-once", ()
       OWNER_WORKSPACE_ID,
       BadgeKey.FirstSchedule,
     );
+  });
+
+  it("attaches a voice-aware focus deep-link note (first step) to each Google Task (#39)", async () => {
+    process.env.PUBLIC_ORIGIN = "https://app.example";
+    getSettingsMock.mockResolvedValue({ voice: "playful" });
+    taskFindFirstMock.mockResolvedValue(
+      baseTask({
+        steps: [
+          { id: "s1", order: 1, text: "a", estMinutes: 10, subtaskEmoji: null },
+          { id: "s2", order: 2, text: "b", estMinutes: 10, subtaskEmoji: null },
+        ],
+      }),
+    );
+    await pushStepsToGoogleTasks("task-1");
+    // Every created task carries the note; the deep-link targets the FIRST step.
+    for (const call of createGoogleTaskMock.mock.calls) {
+      const input = call[2];
+      expect(input.notes).toContain("https://app.example/focus/s1");
+      expect(input.notes).toContain("🍽️");
+    }
+    delete process.env.PUBLIC_ORIGIN;
   });
 
   it("does not re-award when the task is already scheduled (idempotent)", async () => {
