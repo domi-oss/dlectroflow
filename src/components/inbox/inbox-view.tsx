@@ -560,7 +560,9 @@ export function InboxView({
         aria-label={t("action.delete", voice)}
         title={t("action.delete", voice)}
         className={cn(
-          "text-muted-foreground hover:text-destructive rounded-md px-2.5 py-1",
+          // End-cluster icon — ghost hover + a slightly bigger glyph, same
+          // treatment as 📅/▾/📥 (owner: mobile icons read too tiny).
+          "text-muted-foreground hover:bg-accent hover:text-destructive rounded-md px-2 py-1 text-sm",
           touchTarget,
         )}
         onClick={() => requestDelete(itemId)}
@@ -637,7 +639,10 @@ export function InboxView({
           No fields required. Press Enter to capture instantly.
         </p>
         {justCaptured && (
-          <p role="status" className="px-1 text-xs text-emerald-600">
+          <p
+            role="status"
+            className="text-emerald-700 dark:text-emerald-400 px-1 text-xs"
+          >
             {t("capture.confirm", voice)}
           </p>
         )}
@@ -871,7 +876,7 @@ export function InboxView({
                                     key="break-now"
                                     type="button"
                                     onClick={() => breakdown(item.id)}
-                                    className="bg-destructive rounded-md px-2.5 py-1 font-medium text-white hover:opacity-90"
+                                    className="bg-destructive text-destructive-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90"
                                   >
                                     {t("prompt.breakNow", voice)}
                                   </button>,
@@ -1233,14 +1238,14 @@ export function InboxView({
                               </button>,
                               <button
                                 key="keep"
-                                className="hover:bg-accent rounded-md border px-2.5 py-1"
+                                className="hover:bg-accent rounded-md px-2.5 py-1 font-medium"
                                 onClick={() => run(() => keepAsTask(item.id))}
                               >
                                 {t("action.addTodo", voice)}
                               </button>,
                               <button
                                 key="save"
-                                className="hover:bg-accent rounded-md border px-2.5 py-1"
+                                className="hover:bg-accent rounded-md px-2.5 py-1 font-medium"
                                 onClick={() => {
                                   setSavedOptionsId(null);
                                   run(() => snoozeBrainDumpItem(item.id, 60));
@@ -1399,7 +1404,7 @@ export function InboxView({
                         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                           <button
                             type="button"
-                            className="hover:bg-accent rounded-md border px-2.5 py-1"
+                            className="hover:bg-accent rounded-md px-2.5 py-1 font-medium"
                             onClick={() =>
                               item.stepsTotal > 1
                                 ? setReopenPickerId(
@@ -1721,7 +1726,13 @@ function ItemRow({
         key={key}
         aria-label={t("action.delete", voice)}
         title={t("action.delete", voice)}
-        className="text-muted-foreground hover:text-destructive rounded-md px-2.5 py-1"
+        className={cn(
+          // End-cluster icon — ghost hover + a slightly bigger glyph, same
+          // treatment as 📅/▾/📥 (owner: mobile icons read too tiny). Also
+          // picks up the ≥44px touchTarget this variant was missing.
+          "text-muted-foreground hover:bg-accent hover:text-destructive rounded-md px-2 py-1 text-sm",
+          touchTarget,
+        )}
         onClick={onRequestDelete}
       >
         🗑
@@ -1803,14 +1814,14 @@ function ItemRow({
           <button
             key="keep"
             onClick={onKeep}
-            className="hover:bg-accent rounded-md border px-2.5 py-1"
+            className="hover:bg-accent rounded-md px-2.5 py-1 font-medium"
           >
             {t("action.addTodo", voice)}
           </button>,
           <button
             key="save-for-later"
             onClick={onSaveForLater}
-            className="hover:bg-accent rounded-md border px-2.5 py-1"
+            className="hover:bg-accent rounded-md px-2.5 py-1 font-medium"
           >
             {t("action.saveShort", voice)}
           </button>,

@@ -44,7 +44,8 @@ const securityHeaders = [
       // TODO: migrate to nonce-based CSP when Next.js nonce support stabilises.
       "script-src 'self' 'unsafe-inline'",
       "style-src 'self' 'unsafe-inline'",
-      // Geist font is loaded from Google Fonts via next/font (self-hosted at build).
+      // Typefaces (Figtree, Atkinson Hyperlegible, Geist Mono, OpenDyslexic)
+      // are self-hosted at build time via next/font — no third-party requests.
       "font-src 'self' data:",
       "img-src 'self' data: blob:",
       // External APIs this app calls server-side (proxied) or client-side (OAuth).

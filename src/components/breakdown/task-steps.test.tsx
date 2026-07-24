@@ -80,7 +80,9 @@ describe("TaskSteps — row layout mirrors the inbox ItemRow", () => {
   it("each not-done row renders Complete + Start Focus + the 🔽 dropdown trigger", () => {
     render(<TaskSteps taskId="t1" steps={steps()} />);
     // Shared CompleteButton (plain voice → "Complete") on each row.
-    expect(screen.getAllByRole("button", { name: "Complete" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "✓ Complete" })).toHaveLength(
+      2,
+    );
     // Inline Start Focus CTA on each row.
     expect(screen.getAllByText("▶ Start Focus")).toHaveLength(2);
     // 🔽 dropdown trigger on each row.
@@ -138,7 +140,7 @@ describe("TaskSteps — done steps", () => {
     expect(pill.className).toContain("text-[color:var(--tick-color)]");
     expect(pill.className).toContain("rounded-full");
     expect(
-      screen.queryByRole("button", { name: "Complete" }),
+      screen.queryByRole("button", { name: "✓ Complete" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText("▶ Start Focus")).not.toBeInTheDocument();
     expect(
@@ -151,7 +153,7 @@ describe("TaskSteps — complete step", () => {
   it("the inline Complete button calls completeStep", async () => {
     const user = userEvent.setup();
     render(<TaskSteps taskId="t1" steps={steps()} />);
-    await user.click(screen.getAllByRole("button", { name: "Complete" })[0]);
+    await user.click(screen.getAllByRole("button", { name: "✓ Complete" })[0]);
     expect(completeStep).toHaveBeenCalledWith("s1");
   });
 

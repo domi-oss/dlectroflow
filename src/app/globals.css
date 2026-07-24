@@ -7,9 +7,17 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
+  --font-sans: var(--font-figtree);
   --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-heading: var(--font-figtree);
+  --color-brand-purple: oklch(0.617 0.213 299.719);
+  --color-brand-magenta: oklch(0.638 0.206 349.502); /* non-text fills only */
+  --color-brand-pink: oklch(
+    0.7 0.2 349.799
+  ); /* == --chart-3 / dark --primary */
+  --gradient-brand: linear-gradient(100deg, #9b5cf0, #e0479e);
+  --shadow-glow: 0 8px 22px -8px rgba(224, 71, 158, 0.55);
+  --shadow-glow-dark: 0 0 34px -4px rgba(224, 71, 158, 0.6);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -27,6 +35,7 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -49,30 +58,36 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --background: oklch(0.98 0.009 341.799);
+  --foreground: oklch(0.238 0.035 310.741);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.238 0.035 310.741);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
+  --popover-foreground: oklch(0.238 0.035 310.741);
+  --primary: oklch(0.55 0.194 349.551); /* AA text magenta, 5.42:1 */
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.953 0.021 306.839);
+  --secondary-foreground: oklch(0.368 0.102 302.439);
+  --muted: oklch(0.957 0.011 339.337);
+  --muted-foreground: oklch(
+    0.519 0.029 313.794
+  ); /* darkened from mockup #8a7a88 for AA on --card */
+  --accent: oklch(0.951 0.023 342.936);
+  --accent-foreground: oklch(0.436 0.154 349.457);
+  --destructive: oklch(0.543 0.174 29.697); /* warm red, keep semantic */
+  /* White text on --destructive is AA in light (5.44:1) — see the .dark
+   * override below for why dark mode needs a different pairing (#40 phase 1). */
+  --destructive-foreground: oklch(1 0 0);
+  --border: oklch(0.922 0.026 339.395);
+  --input: oklch(0.922 0.026 339.395);
+  --ring: oklch(0.55 0.194 349.551);
+  --radius: 0.85rem; /* friendlier, up from 0.625rem */
+  /* chart-1..5: derive from brand — magenta, purple, pink, amber, teal */
+  --chart-1: oklch(0.638 0.206 349.502);
+  --chart-2: oklch(0.617 0.213 299.719);
+  --chart-3: oklch(0.7 0.2 349.799);
+  --chart-4: oklch(0.779 0.145 71.592);
+  --chart-5: oklch(0.707 0.095 195.214);
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
@@ -84,24 +99,34 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
+  --background: oklch(0.153 0.021 292.869);
+  --foreground: oklch(0.908 0.026 313.953);
+  --card: oklch(0.197 0.034 296.691);
+  --card-foreground: oklch(0.908 0.026 313.953);
+  --popover: oklch(0.197 0.034 296.691);
+  --popover-foreground: oklch(0.908 0.026 313.953);
+  --primary: oklch(0.7 0.2 349.799); /* brighter pink for dark bg */
+  --primary-foreground: oklch(0.188 0.025 333.121);
+  --secondary: oklch(0.243 0.048 301.351);
+  --secondary-foreground: oklch(0.908 0.026 313.953);
+  --muted: oklch(0.236 0.039 299.536);
+  --muted-foreground: oklch(0.763 0.037 309.652);
+  --accent: oklch(0.259 0.064 302.551);
+  --accent-foreground: oklch(0.912 0.037 339.741);
+  --destructive: oklch(0.647 0.163 28.634);
+  /* AA fix (#40 phase 1): white text on this bg is only 3.52:1 (fails
+   * AA-normal 4.5:1) — used by the two interaction-gated destructive CTAs
+   * (src/components/inbox/inbox-view.tsx "Break into steps now?" and
+   * src/components/settings/integrations-panel.tsx "Yes, disconnect"), a
+   * pre-existing issue predating this refresh. --background gives 5.58:1
+   * against --destructive and reads as near-black, so use it as the
+   * foreground instead of white. --destructive itself is untouched, so its
+   * *text* usage (error copy on --card/--background) keeps its existing
+   * 5.2:1+ AA contrast. */
+  --destructive-foreground: oklch(0.153 0.021 292.869);
+  --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --ring: oklch(0.764 0.145 301.496);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -123,17 +148,30 @@
  * every completion render site consumes (COMPLETE_TICK / COMPLETE_TEXT in
  * src/lib/completion-style.ts). Both tick colours meet WCAG-AA in light + dark:
  * `black` maps to --foreground (near-black on light, near-white on dark);
- * `green` uses a 700-weight in light and a 400-weight in dark (the repo's proven
- * text-green-700 / dark:text-green-400 pairing, as OKLCH). */
+ * `green` uses a darkened weight in light and a 400-weight in dark (the
+ * repo's proven text-green-700 / dark:text-green-400 pairing, as OKLCH).
+ *
+ * The light-mode green was originally ~green-700 (oklch(0.527 0.154
+ * 150.069)), AA on its own (4.65:1 on the new #40-phase-1 --background). But
+ * the Completed-today list renders at `opacity-80` (a deliberate dimming
+ * style), and that composited-with-background color only hit 3.37:1 against
+ * the new, slightly warmer/darker --background — a violation attributable to
+ * the palette refresh, caught by e2e/a11y-contrast.spec.ts. Darkened to
+ * ~green-800 (oklch(0.4 0.154 150.069), same hue/chroma) so the *opacity-80
+ * composite* clears AA (4.89:1); plain (non-dimmed) usage is now 7.78:1. */
 :root {
   --complete-decoration: line-through;
-  --tick-color: oklch(0.527 0.154 150.069); /* ~green-700 */
+  --tick-color: oklch(
+    0.4 0.154 150.069
+  ); /* ~green-800, AA incl. opacity-80 dim */
 }
 [data-complete-strike="off"] {
   --complete-decoration: none;
 }
 [data-tick="green"] {
-  --tick-color: oklch(0.527 0.154 150.069); /* ~green-700, AA on light */
+  --tick-color: oklch(
+    0.4 0.154 150.069
+  ); /* ~green-800, AA incl. opacity-80 dim */
 }
 [data-tick="black"] {
   --tick-color: var(--foreground);

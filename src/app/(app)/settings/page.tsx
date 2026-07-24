@@ -29,6 +29,8 @@ export default async function SettingsPage({
 
   return (
     <div className="space-y-4">
+      <BackLink from={from} voice={voice} />
+
       <h1 className="text-xl font-semibold">{t("nav.settings", voice)}</h1>
       <SettingsPanel
         settings={{
@@ -74,7 +76,6 @@ export default async function SettingsPage({
         <Link href="/help?from=settings" className="underline">
           {t("nav.help", voice)} &amp; docs
         </Link>
-        <BackLink from={from} voice={voice} />
       </div>
     </div>
   );

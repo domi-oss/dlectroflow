@@ -108,7 +108,7 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Complete" }));
+    await user.click(screen.getByRole("button", { name: "✓ Complete" }));
 
     await waitFor(() => expect(completeItem).toHaveBeenCalledWith("plated-1"));
     expect(refresh).toHaveBeenCalled();
@@ -179,7 +179,7 @@ describe("LibraryRows — per-row actions (reuses Inbox wiring)", () => {
     expect(
       screen.getByRole("button", { name: "Start focusing" }),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Complete" }));
+    await user.click(screen.getByRole("button", { name: "✓ Complete" }));
     await waitFor(() => expect(completeItem).toHaveBeenCalledWith("pantry-1"));
   });
 
@@ -271,7 +271,7 @@ describe("LibraryRows (plated) — meta, editable estimate, select mode", () => 
 
     fireEvent.click(screen.getByRole("button", { name: /^select$/i }));
     fireEvent.click(screen.getByRole("checkbox", { name: /todo a/i }));
-    fireEvent.click(screen.getByRole("button", { name: /^complete$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^✓ complete$/i }));
 
     await waitFor(() =>
       expect(bulkBrainDumpAction).toHaveBeenCalledWith(["a"], "complete"),

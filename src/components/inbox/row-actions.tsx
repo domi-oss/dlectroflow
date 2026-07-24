@@ -89,7 +89,7 @@ export function ScheduleControl({
         className={cn(
           isMenu
             ? "hover:bg-accent w-full rounded-md px-2.5 py-1 text-left font-medium"
-            : "rounded-md px-2.5 py-1 font-medium",
+            : "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
           !isMenu && touchTarget,
         )}
       >
@@ -134,7 +134,10 @@ export function ScheduleControl({
         className={cn(
           isMenu
             ? "hover:bg-accent w-full rounded-md px-2.5 py-1 text-left font-medium disabled:opacity-50"
-            : "rounded-md px-2.5 py-1 font-medium disabled:opacity-50",
+            : // End-cluster icon: ghost hover (matches Complete/▾) + a slightly
+              // bigger glyph than the surrounding text-xs row (owner: mobile
+              // icons read too tiny) — the label stays `font-medium` text-xs.
+              "hover:bg-accent rounded-md px-2 py-1 text-sm font-medium disabled:opacity-50",
           !isMenu && touchTarget,
         )}
       >
@@ -155,7 +158,7 @@ export function ScheduleControl({
                 type="button"
                 disabled={pending}
                 className={cn(
-                  "rounded-md px-2.5 py-1 font-medium disabled:opacity-50",
+                  "hover:bg-accent rounded-md px-2.5 py-1 font-medium disabled:opacity-50",
                   touchTarget,
                 )}
                 onClick={() => {
@@ -183,7 +186,7 @@ export function ScheduleControl({
               type="button"
               disabled={pending || custom === "" || customOutOfRange}
               className={cn(
-                "rounded-md px-2.5 py-1 font-medium disabled:opacity-50",
+                "hover:bg-accent rounded-md px-2.5 py-1 font-medium disabled:opacity-50",
                 touchTarget,
               )}
               onClick={fireCustom}
@@ -261,28 +264,39 @@ export function RowActions({
         </span>
       )}
       {inline}
-      <span className="flex-1" />
-      {move}
-      {schedule && <ScheduleControl {...schedule} />}
-      {/* Visible gap so 📅 Schedule and 🗑 Delete don't sit flush — avoids misclicks. */}
-      {del && <span aria-hidden="true" className="w-3" />}
-      {del}
-      <span ref={menuRef} className="relative">
-        <button
-          type="button"
-          aria-label="All options"
-          aria-haspopup="true"
-          aria-expanded={menuOpen}
-          onClick={() => setMenuOpen((o) => !o)}
-          className={cn("rounded-md px-2.5 py-1 font-medium", touchTarget)}
-        >
-          🔽
-        </button>
-        {menuOpen && (
-          <span className="bg-background absolute right-0 z-10 mt-1 flex min-w-40 flex-col gap-1 rounded-md border p-1 shadow-md">
-            {menu}
-          </span>
-        )}
+      {/* End cluster (📥 move / 📅 schedule / 🗑 delete / ▾ overflow) is ONE
+          `flex-nowrap` unit, pinned right via `ml-auto` instead of a `flex-1`
+          spacer. On a narrow row the whole group wraps to its own line
+          together — it never splits mid-cluster, which used to leave the ▾
+          trigger stranded alone with its `absolute right-0` popover
+          mis-anchored (owner: mobile screenshot). `shrink-0` keeps every
+          control at its full ≥44px touch target instead of being squeezed. */}
+      <span className="ml-auto flex shrink-0 flex-nowrap items-center gap-1">
+        {move}
+        {schedule && <ScheduleControl {...schedule} />}
+        {/* Visible gap so 📅 Schedule and 🗑 Delete don't sit flush — avoids misclicks. */}
+        {del && <span aria-hidden="true" className="w-3" />}
+        {del}
+        <span ref={menuRef} className="relative">
+          <button
+            type="button"
+            aria-label="All options"
+            aria-haspopup="true"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((o) => !o)}
+            className={cn(
+              "hover:bg-accent rounded-md px-2 py-1 text-sm font-medium",
+              touchTarget,
+            )}
+          >
+            🔽
+          </button>
+          {menuOpen && (
+            <span className="bg-background absolute right-0 z-10 mt-1 flex min-w-40 flex-col gap-1 rounded-md border p-1 shadow-md">
+              {menu}
+            </span>
+          )}
+        </span>
       </span>
     </div>
   );

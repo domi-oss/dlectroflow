@@ -89,7 +89,7 @@ export function IntegrationsPanel({ google }: { google: GoogleStatus }) {
               <button
                 type="button"
                 disabled={pending}
-                className="bg-destructive rounded-md px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+                className="bg-destructive text-destructive-foreground rounded-md px-3 py-2 text-sm font-medium disabled:opacity-50"
                 onClick={() =>
                   startTransition(async () => {
                     await disconnectGoogleTasks();

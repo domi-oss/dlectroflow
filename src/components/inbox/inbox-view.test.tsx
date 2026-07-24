@@ -205,6 +205,29 @@ describe("InboxView — capture confirm", () => {
     expect(createBrainDumpItem).toHaveBeenCalledWith("buy milk");
   });
 
+  // #40 phase 1: --background moved from a near-white gray to a warm-tinted
+  // #fdf6fa, dropping plain emerald-600 to 3.43:1 (fails AA-normal 4.5:1).
+  // Mirrors the same AA-tuned per-theme emerald pairing already used by
+  // row-actions.test.tsx's "Scheduled ✓" indicator.
+  it("a11y: 'captured ✓' uses AA-tuned per-theme emerald (not the sub-AA emerald-600)", async () => {
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        initialItems={[]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const input = screen.getByPlaceholderText(/Brain dump/i);
+    await user.type(input, "buy milk{enter}");
+
+    const el = await screen.findByText("captured ✓");
+    expect(el.className).toContain("text-emerald-700");
+    expect(el.className).toContain("dark:text-emerald-400");
+    expect(el.className).not.toContain("text-emerald-600");
+  });
+
   it("clears the captured indicator after ~1.5s", async () => {
     vi.useFakeTimers();
     render(
@@ -390,7 +413,7 @@ describe("InboxView — complete + completed bucket", () => {
       />,
     );
     const row = screen.getByText("do it").closest("li")!;
-    await user.click(within(row).getByRole("button", { name: "Complete" }));
+    await user.click(within(row).getByRole("button", { name: "✓ Complete" }));
     expect(completeItem).toHaveBeenCalledWith("n1");
   });
 
@@ -408,7 +431,7 @@ describe("InboxView — complete + completed bucket", () => {
       />,
     );
     const row = screen.getByText("single todo").closest("li")!;
-    await user.click(within(row).getByRole("button", { name: "Complete" }));
+    await user.click(within(row).getByRole("button", { name: "✓ Complete" }));
     expect(completeItem).toHaveBeenCalledWith("st1");
   });
 
@@ -424,7 +447,7 @@ describe("InboxView — complete + completed bucket", () => {
       />,
     );
     const row = screen.getByText("plan trip").closest("li")!;
-    await user.click(within(row).getByRole("button", { name: "Complete" }));
+    await user.click(within(row).getByRole("button", { name: "✓ Complete" }));
     expect(completeItem).toHaveBeenCalledWith("m1");
   });
 
@@ -771,7 +794,7 @@ describe("InboxView — multi-step row primary CTA (v6 fix)", () => {
       within(row).getByRole("button", { name: "▶ Start Focus" }),
     ).toBeInTheDocument();
     expect(
-      within(row).getByRole("button", { name: "Complete" }),
+      within(row).getByRole("button", { name: "✓ Complete" }),
     ).toBeInTheDocument();
     await user.click(
       within(row).getByRole("button", { name: "▶ Start Focus" }),
@@ -1232,7 +1255,7 @@ describe("InboxView — saved-for-later inline sorting options", () => {
       within(row).getByRole("button", { name: "Add to-do" }),
     ).toBeInTheDocument();
     expect(
-      within(row).getByRole("button", { name: "Complete" }),
+      within(row).getByRole("button", { name: "✓ Complete" }),
     ).toBeInTheDocument();
     expect(
       within(row).getByRole("button", { name: "Delete" }),
@@ -1264,7 +1287,7 @@ describe("InboxView — saved-for-later inline sorting options", () => {
       /Break into steps/,
       "Add to-do",
       "Save",
-      "Complete",
+      "✓ Complete",
       "Move to",
       "Delete",
     ]) {
@@ -1824,7 +1847,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
       within(row).getByRole("button", { name: "Save" }),
     ).toBeInTheDocument();
     expect(
-      within(row).getByRole("button", { name: "Complete" }),
+      within(row).getByRole("button", { name: "✓ Complete" }),
     ).toBeInTheDocument();
     // The full "Save for later" is the dropdown mirror, not an inline button.
     expect(

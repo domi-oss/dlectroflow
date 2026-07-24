@@ -38,7 +38,11 @@ export const STRINGS = {
   "action.stillNeeded": { plain: "Still need it", playful: "Still want it" },
   "action.delete": { plain: "Delete", playful: "Delete" },
   "action.cancel": { plain: "Cancel", playful: "Cancel" },
-  "action.complete": { plain: "Complete", playful: "✅ Complete" },
+  // Single canonical "✓ complete" label — deliberately IDENTICAL across voices
+  // (like "focus.timer.completeStep" below) so the inbox row, task-step, and
+  // focus-lane Complete affordances render as the exact same button everywhere
+  // instead of drifting between a bare word and a bare glyph (owner report).
+  "action.complete": { plain: "✓ Complete", playful: "✓ Complete" },
   "action.reopen": { plain: "Reopen", playful: "Reopen" },
   "action.reopenSelected": {
     plain: "Reopen selected",
