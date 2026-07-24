@@ -13,8 +13,20 @@
  *
  * a11y: as a decorative logo it is exempt from non-text contrast, but the white
  * bolt on the brand tile still clears 3:1 in both themes regardless.
+ *
+ * `gradientId` MUST be unique per instance whenever more than one BrandMark can
+ * render on the same page — SVG def ids are document-global, and a shared id is
+ * invalid HTML that can make the fill resolve to the wrong <defs>. Guest users
+ * already show two at once (header + guest indicator), so every call site passes
+ * its own id. (A prop rather than `useId()` keeps this a pure Server Component.)
  */
-export function BrandMark({ className }: { className?: string }) {
+export function BrandMark({
+  className,
+  gradientId = "df-brand-mark-gradient",
+}: {
+  className?: string;
+  gradientId?: string;
+}) {
   return (
     <svg
       viewBox="0 0 32 32"
@@ -23,7 +35,7 @@ export function BrandMark({ className }: { className?: string }) {
       className={className}
     >
       <defs>
-        <linearGradient id="df-brand-mark-gradient" x1="0" y1="0" x2="1" y2="1">
+        <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stopColor="#9b5cf0" />
           <stop offset="100%" stopColor="#e0479e" />
         </linearGradient>
@@ -34,7 +46,7 @@ export function BrandMark({ className }: { className?: string }) {
         width="30"
         height="30"
         rx="8"
-        fill="url(#df-brand-mark-gradient)"
+        fill={`url(#${gradientId})`}
       />
       {/* Lightning bolt = momentum / flow. */}
       <path

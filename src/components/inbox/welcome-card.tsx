@@ -40,7 +40,10 @@ export function WelcomeCard({ voice }: { voice: Voice }) {
       {/* First-run brand moment (#40 Phase 3.5): the app-icon mark + a subtle
           gradient accent hairline — warm and encouraging, not overstimulating. */}
       <div className="mb-3 flex items-center gap-2">
-        <BrandMark className="h-7 w-7 shrink-0" />
+        <BrandMark
+          className="h-7 w-7 shrink-0"
+          gradientId="df-brand-mark-welcome"
+        />
         <span
           aria-hidden="true"
           className="h-1 w-16 rounded-full [background-image:var(--gradient-brand)]"
