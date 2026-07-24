@@ -19,15 +19,20 @@ import { updateAppearanceSettings } from "@/app/actions/settings";
 beforeEach(() => vi.clearAllMocks());
 
 describe("updateAppearanceSettings", () => {
-  it("persists a boolean strike + an allowlisted tick colour", async () => {
+  it("persists a boolean strike + an allowlisted tick colour + typeface", async () => {
     await updateAppearanceSettings({
       completeStrikethrough: false,
       completeTickColor: "black",
+      typeface: "opendyslexic",
     });
     expect(upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { workspaceId: "ws-1" },
-        update: { completeStrikethrough: false, completeTickColor: "black" },
+        update: {
+          completeStrikethrough: false,
+          completeTickColor: "black",
+          typeface: "opendyslexic",
+        },
       }),
     );
   });
@@ -36,10 +41,40 @@ describe("updateAppearanceSettings", () => {
     await updateAppearanceSettings({
       completeStrikethrough: true,
       completeTickColor: "purple",
+      typeface: "atkinson",
     });
     expect(upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        update: { completeStrikethrough: true, completeTickColor: "green" },
+        update: {
+          completeStrikethrough: true,
+          completeTickColor: "green",
+          typeface: "atkinson",
+        },
+      }),
+    );
+  });
+
+  it("coerces an out-of-set typeface back to figtree (mirrors the CHECK)", async () => {
+    await updateAppearanceSettings({
+      completeStrikethrough: true,
+      completeTickColor: "green",
+      typeface: "comic-sans",
+    });
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ typeface: "figtree" }),
+      }),
+    );
+  });
+
+  it("defaults typeface to figtree when omitted", async () => {
+    await updateAppearanceSettings({
+      completeStrikethrough: true,
+      completeTickColor: "green",
+    });
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ typeface: "figtree" }),
       }),
     );
   });

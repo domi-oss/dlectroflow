@@ -537,6 +537,33 @@ export const STRINGS = {
   "appearance.tickGreen": { plain: "Green", playful: "Green" },
   "appearance.tickBlack": { plain: "Black", playful: "Black" },
   "appearance.previewText": { plain: "Done to-do", playful: "Done to-do" },
+
+  // ── #40 — Appearance typeface picker (a11y). The intro carries the
+  // accessibility note in both voices; option labels stay as the font names. ──
+  "appearance.typeface": { plain: "Typeface", playful: "Typeface" },
+  "appearance.typefaceIntro": {
+    plain:
+      "The font used across the app. Atkinson Hyperlegible and OpenDyslexic are designed to make reading easier for low-vision and dyslexic readers.",
+    playful:
+      "Pick the font that reads best for you — Atkinson Hyperlegible and OpenDyslexic are built to help with low-vision and dyslexia.",
+  },
+  "appearance.typefaceFigtree": {
+    plain: "Figtree (default)",
+    playful: "Figtree (default)",
+  },
+  "appearance.typefaceAtkinson": {
+    plain: "Atkinson Hyperlegible",
+    playful: "Atkinson Hyperlegible",
+  },
+  "appearance.typefaceOpenDyslexic": {
+    plain: "OpenDyslexic",
+    playful: "OpenDyslexic",
+  },
+  "appearance.typefaceSystem": { plain: "System", playful: "System" },
+  "appearance.typefacePreview": {
+    plain: "The quick brown fox jumps over the lazy dog.",
+    playful: "The quick brown fox jumps over the lazy dog.",
+  },
 } as const;
 
 export type StringKey = keyof typeof STRINGS;

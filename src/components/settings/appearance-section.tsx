@@ -3,14 +3,15 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { updateAppearanceSettings } from "@/app/actions/settings";
-import { CompleteTickColor } from "@/lib/constants";
+import { CompleteTickColor, Typeface } from "@/lib/constants";
 import {
   completionRootAttrs,
   COMPLETE_TICK,
   COMPLETE_TEXT,
 } from "@/lib/completion-style";
+import { typefaceRootAttrs } from "@/lib/typeface";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { t, type Voice } from "@/lib/strings";
+import { t, type StringKey, type Voice } from "@/lib/strings";
 import {
   useSaveStatus,
   SaveIndicator,
@@ -20,6 +21,15 @@ import { cn } from "@/lib/utils";
 type AppearancePrefs = {
   completeStrikethrough: boolean;
   completeTickColor: string;
+  typeface: string;
+};
+
+/** Radio labels for each typeface (both voices resolve via t()). */
+const TYPEFACE_LABEL: Record<Typeface, StringKey> = {
+  [Typeface.Figtree]: "appearance.typefaceFigtree",
+  [Typeface.Atkinson]: "appearance.typefaceAtkinson",
+  [Typeface.OpenDyslexic]: "appearance.typefaceOpenDyslexic",
+  [Typeface.System]: "appearance.typefaceSystem",
 };
 
 /**
@@ -33,6 +43,7 @@ type AppearancePrefs = {
 export function AppearanceSection({
   completeStrikethrough,
   completeTickColor,
+  typeface,
   voice,
 }: AppearancePrefs & { voice: Voice }) {
   const router = useRouter();
@@ -41,6 +52,7 @@ export function AppearanceSection({
   const [prefs, setPrefs] = useState<AppearancePrefs>({
     completeStrikethrough,
     completeTickColor,
+    typeface,
   });
 
   const persist = (next: AppearancePrefs) => {
@@ -138,6 +150,42 @@ export function AppearanceSection({
           ✓
         </span>
       </div>
+
+      {/* Typeface picker (#40, a11y). A labelled radiogroup (fieldset + legend);
+          the intro names the dyslexia/low-vision aids in both voices. Persists
+          via the same optimistic persist() as the completion controls. */}
+      <fieldset className="space-y-1" aria-describedby="typeface-help">
+        <legend className="text-muted-foreground text-xs">
+          {t("appearance.typeface", voice)}
+        </legend>
+        <p id="typeface-help" className="text-muted-foreground text-sm">
+          {t("appearance.typefaceIntro", voice)}
+        </p>
+        {(Object.values(Typeface) as Typeface[]).map((f) => (
+          <label key={f} className="flex items-center gap-2 text-sm">
+            <input
+              type="radio"
+              name="typeface"
+              value={f}
+              checked={prefs.typeface === f}
+              onChange={() => persist({ ...prefs, typeface: f })}
+            />
+            {t(TYPEFACE_LABEL[f], voice)}
+          </label>
+        ))}
+      </fieldset>
+
+      {/* Live preview — scoped to the pending typeface via data-font (same
+          pattern as the completion preview), so the sample re-renders in the
+          chosen face instantly, before the server round-trip re-paints the
+          shell. globals.css [data-font] re-keys --font-sans off the attribute. */}
+      <p
+        {...typefaceRootAttrs(prefs)}
+        data-testid="typeface-preview"
+        className="rounded-lg border px-3 py-2 text-base"
+      >
+        {t("appearance.typefacePreview", voice)}
+      </p>
     </section>
   );
 }

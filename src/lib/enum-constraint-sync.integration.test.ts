@@ -13,6 +13,7 @@ import {
   FocusTimerStyle,
   FocusSound,
   CompleteTickColor,
+  Typeface,
 } from "@/lib/constants";
 
 // #38 — keep the DB CHECK constraints (see the
@@ -125,6 +126,13 @@ const REGISTRY: ReadonlyArray<{
     table: "Settings",
     column: "completeTickColor",
     values: CompleteTickColor,
+    nullable: false,
+  },
+  {
+    constraint: "Settings_typeface_check",
+    table: "Settings",
+    column: "typeface",
+    values: Typeface,
     nullable: false,
   },
 ];

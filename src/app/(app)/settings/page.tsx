@@ -49,6 +49,7 @@ export default async function SettingsPage({
         <AppearanceSection
           completeStrikethrough={settings.completeStrikethrough}
           completeTickColor={settings.completeTickColor}
+          typeface={settings.typeface}
           voice={voice}
         />
       </div>

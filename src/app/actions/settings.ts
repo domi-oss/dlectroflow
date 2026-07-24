@@ -9,6 +9,7 @@ import {
   FocusTimerStyle,
   FocusSound,
   CompleteTickColor,
+  Typeface,
 } from "@/lib/constants";
 import { isValidHHmm } from "@/lib/daily-review-nudge";
 
@@ -220,16 +221,19 @@ export async function dismissFocusTimerTip() {
 }
 
 /**
- * MR ③ — app-wide completion style (Appearance). Workspace-scoped personalisation
- * (guests keep their own values; no owner gate). completeTickColor is
- * allowlist-validated against CompleteTickColor — anything else falls back to
- * green, matching the Settings_completeTickColor_check CHECK constraint so a
- * bad value can never reach the DB. Revalidates the whole layout because the
- * completion treatment is applied app-wide in (app)/layout.tsx (like voice).
+ * MR ③ / #40 — app-wide Appearance prefs. Workspace-scoped personalisation
+ * (guests keep their own values; no owner gate). completeTickColor and typeface
+ * are both allowlist-validated against CompleteTickColor / Typeface — anything
+ * else falls back to green / figtree respectively, matching the
+ * Settings_completeTickColor_check / Settings_typeface_check CHECK constraints so
+ * a bad value can never reach the DB. typeface is optional here (an omitted
+ * value defaults to figtree). Revalidates the whole layout because both
+ * treatments are applied app-wide in (app)/layout.tsx (like voice).
  */
 export async function updateAppearanceSettings(input: {
   completeStrikethrough: boolean;
   completeTickColor: string;
+  typeface?: string;
 }) {
   const workspaceId = await currentWorkspaceId();
   const completeTickColor = (
@@ -237,9 +241,15 @@ export async function updateAppearanceSettings(input: {
   ).includes(input.completeTickColor)
     ? input.completeTickColor
     : CompleteTickColor.Green;
+  const typeface = (Object.values(Typeface) as string[]).includes(
+    input.typeface ?? "",
+  )
+    ? (input.typeface as string)
+    : Typeface.Figtree;
   const data = {
     completeStrikethrough: Boolean(input.completeStrikethrough),
     completeTickColor,
+    typeface,
   };
   await prisma.settings.upsert({
     where: { workspaceId },

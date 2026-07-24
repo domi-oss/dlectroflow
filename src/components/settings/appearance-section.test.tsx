@@ -14,11 +14,29 @@ vi.mock("@/app/actions/settings", () => ({
 import { updateAppearanceSettings } from "@/app/actions/settings";
 
 afterEach(cleanup);
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  // This jsdom build doesn't provide window.localStorage; the ThemeToggle
+  // persists the theme there and only flashes the shared save indicator on a
+  // successful write. Provide a Map-backed stub (same idiom as
+  // roundup-card.test.tsx) so the theme-toggle path is exercised.
+  const store = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => {
+      store.set(k, v);
+    },
+    removeItem: (k: string) => {
+      store.delete(k);
+    },
+    clear: () => store.clear(),
+  });
+});
 
 const base = {
   completeStrikethrough: true,
   completeTickColor: "green",
+  typeface: "figtree",
   voice: "plain" as const,
 };
 
@@ -38,6 +56,7 @@ describe("AppearanceSection", () => {
       expect(updateAppearanceSettings).toHaveBeenCalledWith({
         completeStrikethrough: false,
         completeTickColor: "green",
+        typeface: "figtree",
       }),
     );
   });
@@ -50,6 +69,7 @@ describe("AppearanceSection", () => {
       expect(updateAppearanceSettings).toHaveBeenCalledWith({
         completeStrikethrough: true,
         completeTickColor: "black",
+        typeface: "figtree",
       }),
     );
     expect(screen.getByTestId("completion-preview")).toHaveAttribute(
@@ -71,6 +91,44 @@ describe("AppearanceSection", () => {
   it("the preview ✓ carries a text accessible name (status not colour-only)", () => {
     render(<AppearanceSection {...base} />);
     expect(screen.getByLabelText("done")).toHaveTextContent("✓");
+  });
+
+  it("seeds the typeface radios from props (figtree checked)", () => {
+    render(<AppearanceSection {...base} />);
+    expect(screen.getByLabelText(/figtree/i)).toBeChecked();
+    expect(screen.getByLabelText("OpenDyslexic")).not.toBeChecked();
+  });
+
+  it("choosing OpenDyslexic auto-saves + repaints the live preview via data-font", async () => {
+    const user = userEvent.setup();
+    render(<AppearanceSection {...base} />);
+    await user.click(screen.getByLabelText("OpenDyslexic"));
+    await waitFor(() =>
+      expect(updateAppearanceSettings).toHaveBeenCalledWith({
+        completeStrikethrough: true,
+        completeTickColor: "green",
+        typeface: "opendyslexic",
+      }),
+    );
+    expect(screen.getByTestId("typeface-preview")).toHaveAttribute(
+      "data-font",
+      "opendyslexic",
+    );
+  });
+
+  it("the typeface picker is a labelled radiogroup (fieldset + legend)", () => {
+    render(<AppearanceSection {...base} />);
+    // Native <fieldset> exposes role="group"; its <legend> names it.
+    expect(
+      screen.getByRole("group", { name: /typeface/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("names OpenDyslexic/Atkinson as dyslexia/low-vision aids", () => {
+    render(<AppearanceSection {...base} />);
+    expect(
+      screen.getByText(/dyslexi|low-vision/i, { selector: "p" }),
+    ).toBeInTheDocument();
   });
 
   it("toggling the theme flashes the shared Appearance save indicator", async () => {
