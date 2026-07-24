@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BrandMark } from "@/components/brand/brand-mark";
 
 const BANNER =
   "👋 You're in guest mode — a private sandbox just for this browser session. You get 5 AI-powered task breakdowns per session (on a speedy model), plus the focus timer, rewards, and one-click calendar export — all yours. Live integrations (Google Tasks) are owner-only for now. Self-hosted option and BYOK coming soon.";
@@ -48,8 +47,6 @@ export function GuestIndicator({
     return (
       <div className="border-b bg-amber-500/10 px-4 py-2 text-sm text-amber-800">
         <div className="mx-auto flex max-w-3xl items-start gap-3">
-          {/* First-run brand moment (#40 Phase 3.5) — decorative app mark. */}
-          <BrandMark className="mt-0.5 h-6 w-6 shrink-0" />
           <p className="flex-1">{BANNER}</p>
           <button
             onClick={dismiss}
