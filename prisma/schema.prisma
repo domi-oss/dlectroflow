@@ -83,6 +83,9 @@ model Settings {
   // CompleteTickColor in src/lib/constants.ts + Settings_completeTickColor_check.
   completeStrikethrough Boolean  @default(true)
   completeTickColor     String   @default("green") // green | black
+  // #40 — user-selected UI typeface (a11y). Mirrors Typeface in
+  // src/lib/constants.ts + Settings_typeface_check.
+  typeface              String   @default("figtree") // figtree | atkinson | opendyslexic | system
   updatedAt             DateTime @updatedAt
   workspaceId           String   @unique
   workspace             Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
