@@ -149,3 +149,18 @@ export const CompleteTickColor = {
 } as const;
 export type CompleteTickColor =
   (typeof CompleteTickColor)[keyof typeof CompleteTickColor];
+
+// ── #40 — user-selected UI typeface (Appearance, a11y) ─────────────────────
+// typeface is a String column guarded by a Postgres CHECK constraint
+// (Settings_typeface_check). This object is the single source of truth for the
+// allowed set; the CHECK migration + enum-constraint-sync test mirror it. An
+// out-of-set value degrades to Figtree (the app default) at both the resolver
+// (typefaceRootAttrs) and the server-action upsert. Atkinson Hyperlegible and
+// OpenDyslexic are legibility/dyslexia aids; System uses the native font stack.
+export const Typeface = {
+  Figtree: "figtree",
+  Atkinson: "atkinson",
+  OpenDyslexic: "opendyslexic",
+  System: "system",
+} as const;
+export type Typeface = (typeof Typeface)[keyof typeof Typeface];
