@@ -69,10 +69,7 @@ export default async function AppLayout({
           >
             {/* #13/#40 — app-icon brand mark; decorative (aria-hidden) so the
                 link's accessible name stays "dlectroflow". */}
-            <BrandMark
-              className="h-6 w-6 shrink-0"
-              gradientId="df-brand-mark-header"
-            />
+            <BrandMark className="h-6 w-6 shrink-0" />
             dlectroflow
           </Link>
           <div className="text-muted-foreground flex items-center gap-4 text-sm">

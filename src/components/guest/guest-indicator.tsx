@@ -49,10 +49,7 @@ export function GuestIndicator({
       <div className="border-b bg-amber-500/10 px-4 py-2 text-sm text-amber-800">
         <div className="mx-auto flex max-w-3xl items-start gap-3">
           {/* First-run brand moment (#40 Phase 3.5) — decorative app mark. */}
-          <BrandMark
-            className="mt-0.5 h-6 w-6 shrink-0"
-            gradientId="df-brand-mark-guest"
-          />
+          <BrandMark className="mt-0.5 h-6 w-6 shrink-0" />
           <p className="flex-1">{BANNER}</p>
           <button
             onClick={dismiss}
