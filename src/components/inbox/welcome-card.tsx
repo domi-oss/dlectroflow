@@ -5,11 +5,13 @@ import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { dismissWelcome, updateVoice } from "@/app/actions/settings";
 import { t, type Voice } from "@/lib/strings";
+import { BrandMark } from "@/components/brand/brand-mark";
 
 // Inline links sit inside the welcome sentences — underline so they read as
-// links in running prose (not colour-only).
+// links in running prose (not colour-only). Brand-coloured via --primary (AA
+// text magenta on the card) for the first-run brand moment (#40 Phase 3.5).
 const welcomeLinkClass =
-  "text-green-800 underline underline-offset-2 hover:text-green-900 dark:text-green-300";
+  "text-primary underline underline-offset-2 hover:opacity-80";
 
 /** Phase 5 (#8) — first-run welcome card shown above the capture box until
  * the workspace dismisses it. Lets a brand-new user pick their voice, learn
@@ -33,8 +35,17 @@ export function WelcomeCard({ voice }: { voice: Voice }) {
   return (
     <section
       aria-label="Welcome"
-      className="rounded-xl border border-green-700/40 bg-green-50 p-4 dark:bg-green-950/20"
+      className="border-primary/20 bg-card rounded-xl border p-4"
     >
+      {/* First-run brand moment (#40 Phase 3.5): the app-icon mark + a subtle
+          gradient accent hairline — warm and encouraging, not overstimulating. */}
+      <div className="mb-3 flex items-center gap-2">
+        <BrandMark className="h-7 w-7 shrink-0" />
+        <span
+          aria-hidden="true"
+          className="h-1 w-16 rounded-full [background-image:var(--gradient-brand)]"
+        />
+      </div>
       {/* Body copy with the Focus Timer / Library / Help links embedded INLINE
        * in the sentences (owner direction). The 👋 greeting opens the body — the
        * separate title heading was dropped. Composed from welcome.* fragments so
