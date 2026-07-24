@@ -46,8 +46,8 @@ export function GuestIndicator({
   if (!dismissed) {
     return (
       <div className="border-b bg-amber-500/10 px-4 py-2 text-sm text-amber-800">
-        <div className="mx-auto flex max-w-3xl items-start justify-between gap-3">
-          <p>{BANNER}</p>
+        <div className="mx-auto flex max-w-3xl items-start gap-3">
+          <p className="flex-1">{BANNER}</p>
           <button
             onClick={dismiss}
             aria-label="Dismiss"

@@ -27,7 +27,7 @@ export function ThemeToggle({ onPersist }: { onPersist?: () => void }) {
     <button
       type="button"
       onClick={toggle}
-      className="hover:bg-accent rounded-md border px-3 py-1.5 text-sm"
+      className="hover:bg-accent hover:border-primary/40 rounded-md border px-3 py-1.5 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       aria-pressed={dark}
     >
       {dark ? "☀️ Light mode" : "🌙 Dark mode"}

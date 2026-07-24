@@ -36,7 +36,7 @@ export function BackLink({
   return (
     <Link
       href={target.href}
-      className="text-muted-foreground inline-block text-sm hover:underline"
+      className="text-muted-foreground inline-block rounded text-sm outline-none hover:text-primary hover:underline focus-visible:text-primary focus-visible:ring-2 focus-visible:ring-ring"
     >
       {/* `action.back` already carries the leading ← ("← Back"). */}
       {t("action.back", voice)}

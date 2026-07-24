@@ -5,13 +5,20 @@ import { FocusLauncher } from "@/components/focus/focus-launcher";
 import type { LauncherData, FocusableStep } from "@/lib/focus-launcher";
 
 vi.mock("next/link", () => ({
+  // Forward className so brand-CTA / hit-target class assertions can observe it.
   default: ({
     children,
     href,
+    className,
   }: {
     children: React.ReactNode;
     href: string;
-  }) => <a href={href}>{children}</a>,
+    className?: string;
+  }) => (
+    <a href={href} className={className}>
+      {children}
+    </a>
+  ),
 }));
 // Render the lanes as light stand-ins — their interactivity is covered by
 // focus-lanes.test.tsx; here we assert the shell's own structure.
@@ -146,10 +153,15 @@ describe("FocusLauncher shell", () => {
       "aria-valuenow",
       "1",
     );
-    expect(screen.getByRole("link", { name: /resume focus/i })).toHaveAttribute(
-      "href",
-      "/focus/h1",
+    const resume = screen.getByRole("link", { name: /resume focus/i });
+    expect(resume).toHaveAttribute("href", "/focus/h1");
+    // #40 Phase 3.3 — the primary focus CTA carries the brand gradient variant
+    // (gradient fill + >=18.6px bold label) and keeps its >=44px hit target.
+    expect(resume.className).toContain(
+      "[background-image:var(--gradient-brand)]",
     );
+    expect(resume.className).toContain("font-bold");
+    expect(resume.className).toContain("min-h-[44px]");
   });
 
   it("shows the new-user empty state (Inbox card) when nothing is focusable and nothing was cleared", () => {

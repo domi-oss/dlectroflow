@@ -656,7 +656,7 @@ export function InboxView({
       >
         {/* Needs review */}
         <section>
-          <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
+          <h2 className="text-primary mb-2 flex items-center gap-2 text-sm font-semibold">
             {t("section.needsReview", voice)}
             {untriagedCount > 0 && (
               <span className="bg-secondary text-secondary-foreground rounded-full px-2 py-0.5 text-xs">
@@ -754,7 +754,9 @@ export function InboxView({
 
         {/* To-Do board — four always-visible buckets (Phase B) */}
         <section className="space-y-4">
-          <h2 className="text-sm font-semibold">{t("section.toDo", voice)}</h2>
+          <h2 className="text-primary text-sm font-semibold">
+            {t("section.toDo", voice)}
+          </h2>
 
           {/* Multi-step */}
           <div>
@@ -1352,7 +1354,7 @@ export function InboxView({
 
           {/* Completed */}
           <div>
-            <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold">
+            <h2 className="text-primary mb-2 flex items-center gap-2 text-sm font-semibold">
               {t("section.completed", voice)}
               <span className="bg-secondary text-secondary-foreground rounded-full px-2 py-0.5 text-xs">
                 {t("section.completedToday", voice)}: {completedTodayCount}

@@ -11,6 +11,7 @@ import { GuestIndicator } from "@/components/guest/guest-indicator";
 import { VoiceProvider } from "@/components/voice-provider";
 import { ReviewNudge } from "@/components/dashboard/review-nudge";
 import { AppMenu } from "@/components/nav/app-menu";
+import { BrandMark } from "@/components/brand/brand-mark";
 import { completionRootAttrs } from "@/lib/completion-style";
 import { typefaceRootAttrs } from "@/lib/typeface";
 import { type Voice } from "@/lib/strings";
@@ -62,7 +63,13 @@ export default async function AppLayout({
       )}
       <header className="border-b">
         <div className="mx-auto flex w-full max-w-3xl items-center justify-between px-4 py-3">
-          <Link href="/inbox" className="text-lg font-semibold tracking-tight">
+          <Link
+            href="/inbox"
+            className="flex items-center gap-2 text-lg font-semibold tracking-tight"
+          >
+            {/* #13/#40 — app-icon brand mark; decorative (aria-hidden) so the
+                link's accessible name stays "dlectroflow". */}
+            <BrandMark className="h-6 w-6 shrink-0" />
             dlectroflow
           </Link>
           <div className="text-muted-foreground flex items-center gap-4 text-sm">
