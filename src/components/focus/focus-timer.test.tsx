@@ -132,7 +132,9 @@ describe("FocusTimer — header, back, hierarchy", () => {
   it("the setup 'Start focusing' CTA uses the brand gradient (hero neon signature)", () => {
     render(<FocusTimer {...base()} />);
     const startBtn = screen.getByRole("button", { name: /start focusing/i });
-    expect(startBtn.className).toContain("[background-image:var(--gradient-brand)]");
+    expect(startBtn.className).toContain(
+      "[background-image:var(--gradient-brand)]",
+    );
     expect(startBtn.className).toContain("font-bold");
   });
 

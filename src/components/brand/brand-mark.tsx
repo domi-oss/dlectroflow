@@ -23,13 +23,7 @@ export function BrandMark({ className }: { className?: string }) {
       className={className}
     >
       <defs>
-        <linearGradient
-          id="df-brand-mark-gradient"
-          x1="0"
-          y1="0"
-          x2="1"
-          y2="1"
-        >
+        <linearGradient id="df-brand-mark-gradient" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stopColor="#9b5cf0" />
           <stop offset="100%" stopColor="#e0479e" />
         </linearGradient>

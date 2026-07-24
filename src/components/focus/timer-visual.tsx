@@ -9,8 +9,7 @@ type VisualPhase = "setup" | "running" | "paused" | "timeup";
  * sits on in BOTH themes, so the neon gradient + glow read as a focused,
  * dopamine-forward moment (spec §6.1). Reserved for the running/paused hero — not
  * general chrome. */
-const NEON_FIELD =
-  "bg-[#0c0a14] shadow-[var(--shadow-glow-dark)]";
+const NEON_FIELD = "bg-[#0c0a14] shadow-[var(--shadow-glow-dark)]";
 
 type ReadoutTone = "default" | "light" | "gradient";
 

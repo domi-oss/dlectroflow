@@ -157,7 +157,9 @@ describe("FocusLauncher shell", () => {
     expect(resume).toHaveAttribute("href", "/focus/h1");
     // #40 Phase 3.3 — the primary focus CTA carries the brand gradient variant
     // (gradient fill + >=18.6px bold label) and keeps its >=44px hit target.
-    expect(resume.className).toContain("[background-image:var(--gradient-brand)]");
+    expect(resume.className).toContain(
+      "[background-image:var(--gradient-brand)]",
+    );
     expect(resume.className).toContain("font-bold");
     expect(resume.className).toContain("min-h-[44px]");
   });
