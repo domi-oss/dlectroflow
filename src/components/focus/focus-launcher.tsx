@@ -3,6 +3,8 @@ import { t, type Voice } from "@/lib/strings";
 import type { LauncherData } from "@/lib/focus-launcher";
 import { SubHeader, SEE_ALL } from "@/components/inbox/sub-header";
 import { SingleTaskLane, MultiStepLane } from "@/components/focus/focus-lanes";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 /**
  * The /focus launcher shell: ← Back, title, a glanceable meta line into the
@@ -106,9 +108,16 @@ export function FocusLauncher({
               {resumeHero.nextStepText}
             </p>
           )}
+          {/* #40 Phase 3.3 — the launcher's primary "start/resume focus" CTA
+              earns the brand gradient (Button variant="brand" styling on the
+              routing Link): gradient fill, >=18.6px bold label, visible focus
+              ring. The amber card around it still signals "paused". */}
           <Link
             href={`/focus/${resumeHero.stepId}`}
-            className="inline-flex min-h-[44px] items-center rounded-md bg-amber-500 px-4 font-medium text-amber-950 hover:opacity-90"
+            className={cn(
+              buttonVariants({ variant: "brand" }),
+              "min-h-[44px] rounded-md px-4",
+            )}
           >
             {t("focus.hero.resume", voice)}
           </Link>
