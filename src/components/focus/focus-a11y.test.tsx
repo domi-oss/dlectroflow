@@ -109,8 +109,8 @@ describe("launcher a11y sweep", () => {
     expect(screen.getByRole("button", { name: /start/i }).className).toMatch(
       /min-h-\[44px\]/,
     );
-    const done = screen.getByRole("button", { name: /complete/i }); // aria-label, not colour
-    expect(done.className).toMatch(/min-h-\[44px\]/);
-    expect(done.className).toMatch(/min-w-\[44px\]/);
+    const done = screen.getByRole("button", { name: /complete/i }); // text accessible name, not colour
+    expect(done.className).toMatch(/min-h-11/);
+    expect(done.className).toMatch(/min-w-11/);
   });
 });

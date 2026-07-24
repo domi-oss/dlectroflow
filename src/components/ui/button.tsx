@@ -18,6 +18,15 @@ const buttonVariants = cva(
         destructive:
           "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
         link: "text-primary underline-offset-4 hover:underline",
+        // Hero CTA gradient (Task 0.2's --gradient-brand / --shadow-glow). The
+        // gradient's lighter end (~#e0479e ≈ 3.77:1 vs white) fails WCAG AA
+        // for normal text (4.5:1) but meets the large-text 3:1 allowance once
+        // the label is ≥18.66px bold — text-xl (20px) font-bold clears that
+        // "large text" threshold, so the gradient then meets AA. Do not
+        // shrink below text-xl or drop font-bold; final confirmation is
+        // Phase 1's axe contrast gate.
+        brand:
+          "text-white [background-image:var(--gradient-brand)] shadow-[var(--shadow-glow)] text-xl font-bold hover:brightness-105 focus-visible:ring-2 focus-visible:ring-[var(--ring)]",
       },
       size: {
         default:

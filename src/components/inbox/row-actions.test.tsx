@@ -46,6 +46,30 @@ describe("RowActions", () => {
     expect(names).toEqual(["First", "Schedule", "Delete", "All options"]);
   });
 
+  it("mobile-wrap fix: the end cluster (move/schedule/delete/▾) shares one flex-nowrap ancestor so it wraps as a unit, never splitting the ▾ trigger off alone (owner mobile-screenshot bug)", () => {
+    render(
+      <RowActions
+        inline={[<button key="a">First</button>]}
+        move={<button key="mv">Move</button>}
+        schedule={{ state: "ready_steps", onScheduleSteps: vi.fn() }}
+        del={<button key="d">Delete</button>}
+        menu={[]}
+      />,
+    );
+    const moveBtn = screen.getByRole("button", { name: "Move" });
+    const scheduleBtn = screen.getByRole("button", { name: /schedule/i });
+    const deleteBtn = screen.getByRole("button", { name: "Delete" });
+    const menuBtn = screen.getByRole("button", { name: "All options" });
+    // Nearest common ancestor of the first and last end-cluster controls must
+    // be the same nowrap group — i.e. move's parent chain includes the exact
+    // element that also contains the ▾ trigger.
+    const nowrapGroup = moveBtn.closest(".flex-nowrap");
+    expect(nowrapGroup).not.toBeNull();
+    expect(nowrapGroup).toContainElement(scheduleBtn);
+    expect(nowrapGroup).toContainElement(deleteBtn);
+    expect(nowrapGroup).toContainElement(menuBtn);
+  });
+
   it("del is omitted from the end cluster when not provided", () => {
     render(<RowActions inline={[]} schedule={null} menu={[]} />);
     expect(screen.queryByRole("button", { name: /delete/i })).toBeNull();
@@ -400,6 +424,30 @@ describe("a11y: touch targets ≥ 44px on icon/pill controls", () => {
     expect(hasMinTarget(screen.getByRole("button", { name: /go/i }))).toBe(
       true,
     );
+  });
+});
+
+describe("shape consistency: 📅 + ▾ carry the same ghost hover as Complete/Add-to-do (Duo shape fix)", () => {
+  it("📅 schedule icon (ready_steps) is a borderless, hover-accent ghost control — same treatment as CompleteButton", () => {
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{ state: "ready_steps", onScheduleSteps: vi.fn() }}
+      />,
+    );
+    const btn = screen.getByRole("button", { name: /schedule/i });
+    expect(btn.className).toContain("hover:bg-accent");
+    expect(btn.className).toContain("rounded-md");
+    expect(btn.className).not.toMatch(/\bborder\b/);
+  });
+
+  it("▾ All-options trigger is a borderless, hover-accent ghost control", () => {
+    render(<RowActions inline={[]} menu={[]} schedule={null} />);
+    const btn = screen.getByRole("button", { name: "All options" });
+    expect(btn.className).toContain("hover:bg-accent");
+    expect(btn.className).toContain("rounded-md");
+    expect(btn.className).not.toMatch(/\bborder\b/);
   });
 });
 

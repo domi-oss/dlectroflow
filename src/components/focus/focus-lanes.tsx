@@ -7,28 +7,7 @@ import { ensureFocusStep, completeItem } from "@/app/actions/braindump";
 import { completeStep } from "@/app/actions/focus";
 import { t, type Voice } from "@/lib/strings";
 import type { SingleFocusable, FocusableStep } from "@/lib/focus-launcher";
-
-/** ≥44px inline ✓ quick-complete — glyph + text accessible name (a11y: status
- * not colour-only). */
-function QuickComplete({
-  voice,
-  onClick,
-}: {
-  voice: Voice;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={t("action.complete", voice)}
-      title={t("action.complete", voice)}
-      onClick={onClick}
-      className="hover:bg-accent inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md border"
-    >
-      ✓
-    </button>
-  );
-}
+import { CompleteButton } from "@/components/inbox/complete-button";
 
 /** Single-task to-dos lane: ▶ Start (ensureFocusStep → route) + optimistic ✓. */
 export function SingleTaskLane({
@@ -77,7 +56,7 @@ export function SingleTaskLane({
           >
             {t("focus.lane.start", voice)}
           </button>
-          <QuickComplete voice={voice} onClick={() => complete(s.itemId)} />
+          <CompleteButton voice={voice} onClick={() => complete(s.itemId)} />
         </li>
       ))}
     </ul>
@@ -134,7 +113,7 @@ export function MultiStepLane({
             >
               {t("focus.lane.open", voice)}
             </button>
-            <QuickComplete voice={voice} onClick={() => complete(e.stepId)} />
+            <CompleteButton voice={voice} onClick={() => complete(e.stepId)} />
           </div>
         </li>
       ))}

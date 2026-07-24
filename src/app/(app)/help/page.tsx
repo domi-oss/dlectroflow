@@ -26,6 +26,8 @@ export default async function HelpPage({
 
   return (
     <div className="space-y-8">
+      <BackLink from={from} voice={voice} />
+
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold">Help &amp; getting started</h1>
         <p className="text-muted-foreground text-sm">
@@ -121,10 +123,6 @@ export default async function HelpPage({
           limits and can pick the breakdown model.
         </p>
       </section>
-
-      <footer>
-        <BackLink from={from} voice={voice} />
-      </footer>
     </div>
   );
 }

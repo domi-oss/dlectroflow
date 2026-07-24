@@ -72,7 +72,10 @@ export function MoveToMenu({
         onClick={() => setOpen((o) => !o)}
         className={cn(
           compact
-            ? "text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1 font-medium"
+            ? // End-cluster icon (owner: mobile screenshot) — same ghost hover
+              // + slightly bigger glyph as the row's other icon controls (📅/▾
+              // in row-actions.tsx) instead of a bare, hover-less glyph.
+              "text-muted-foreground hover:bg-accent hover:text-foreground rounded-md px-2 py-1 text-sm font-medium"
             : "text-muted-foreground hover:text-foreground rounded-md border px-2 py-1 text-xs",
           compact && touchTarget,
         )}

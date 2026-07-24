@@ -32,6 +32,8 @@ export default async function DashboardPage({
 
   return (
     <div className="space-y-5">
+      <BackLink from={from} voice={voice} />
+
       <h1 className="text-2xl font-semibold">{t("nav.dashboard", voice)}</h1>
 
       <SparkCard initial={spark.quote} />
@@ -97,8 +99,6 @@ export default async function DashboardPage({
       <p className="text-muted-foreground text-xs">
         {t("stat.totalPoints", voice)}: {data.totalPoints}
       </p>
-
-      <BackLink from={from} voice={voice} />
     </div>
   );
 }
