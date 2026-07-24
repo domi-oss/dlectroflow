@@ -22,7 +22,9 @@ export function SubHeader({
 }) {
   return (
     <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
-      <span>{label}</span>
+      {/* #40 Phase 3.4 — section labels carry the brand colour (AA text
+          magenta, --primary). The count badge + see-all keep their own tones. */}
+      <span className="text-primary">{label}</span>
       <span className="bg-secondary text-secondary-foreground rounded-full px-2 py-0.5 text-xs">
         {count}
       </span>
