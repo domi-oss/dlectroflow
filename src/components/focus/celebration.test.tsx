@@ -40,4 +40,24 @@ describe("Celebration — respects prefers-reduced-motion", () => {
     expect(container).toBeEmptyDOMElement();
     expect(container.querySelectorAll("span").length).toBe(0);
   });
+
+  // #40 Phase 3.2 — the brand gradient dopamine flash.
+  it("shows the neon gradient flash when motion is allowed", () => {
+    mockReduceMotion(false);
+    const { container } = render(<Celebration />);
+    const flash = container.querySelector('[data-testid="celebration-flash"]');
+    expect(flash).not.toBeNull();
+    expect(flash!.className).toContain("var(--color-brand-magenta)");
+    // The flash is a <div>, so it does not inflate the 16 emoji particle count.
+    const wrapper = container.querySelector("[aria-hidden]");
+    expect(wrapper!.querySelectorAll("span").length).toBe(16);
+  });
+
+  it("shows NO gradient flash under reduce-motion", () => {
+    mockReduceMotion(true);
+    const { container } = render(<Celebration />);
+    expect(
+      container.querySelector('[data-testid="celebration-flash"]'),
+    ).toBeNull();
+  });
 });
