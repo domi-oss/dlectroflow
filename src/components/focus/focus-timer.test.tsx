@@ -129,6 +129,13 @@ describe("FocusTimer — header, back, hierarchy", () => {
     );
   });
 
+  it("the setup 'Start focusing' CTA uses the brand gradient (hero neon signature)", () => {
+    render(<FocusTimer {...base()} />);
+    const startBtn = screen.getByRole("button", { name: /start focusing/i });
+    expect(startBtn.className).toContain("[background-image:var(--gradient-brand)]");
+    expect(startBtn.className).toContain("font-bold");
+  });
+
   it("the active step text is larger (text-xl) than the task title (text-sm)", () => {
     render(<FocusTimer {...base()} />);
     const stepHeading = screen.getByRole("heading", { name: /draft intro/i });

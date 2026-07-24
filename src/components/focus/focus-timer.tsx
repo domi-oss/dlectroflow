@@ -13,6 +13,7 @@ import {
 import { dismissFocusTimerTip } from "@/app/actions/settings";
 import { Celebration } from "@/components/focus/celebration";
 import { TimerVisual } from "@/components/focus/timer-visual";
+import { Button } from "@/components/ui/button";
 import {
   FocusStepTracker,
   type TrackerStep,
@@ -431,13 +432,17 @@ export function FocusTimer({
             />
             min
           </label>
-          <button
+          {/* #40 Phase 3.1 — the single CTA that launches the neon focus
+              session earns the brand gradient (hero moment). variant="brand"
+              carries the ≥18.6px-bold label + visible focus ring. */}
+          <Button
+            variant="brand"
             onClick={start}
             disabled={pending}
-            className="bg-primary text-primary-foreground rounded-full px-8 py-3 text-lg font-medium disabled:opacity-50"
+            className="h-auto min-h-[52px] rounded-full px-8 py-3"
           >
             {t("focus.startTimer", voice)}
-          </button>
+          </Button>
         </div>
       )}
 
