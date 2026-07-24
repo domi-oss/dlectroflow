@@ -12,6 +12,7 @@ import { VoiceProvider } from "@/components/voice-provider";
 import { ReviewNudge } from "@/components/dashboard/review-nudge";
 import { AppMenu } from "@/components/nav/app-menu";
 import { completionRootAttrs } from "@/lib/completion-style";
+import { typefaceRootAttrs } from "@/lib/typeface";
 import { type Voice } from "@/lib/strings";
 
 export default async function AppLayout({
@@ -50,6 +51,7 @@ export default async function AppLayout({
     <div
       className="flex min-h-full flex-col"
       {...completionRootAttrs(settings)}
+      {...typefaceRootAttrs(settings)}
     >
       {guest && (
         <GuestIndicator

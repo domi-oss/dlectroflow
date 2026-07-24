@@ -180,6 +180,33 @@
   --tick-color: oklch(0.792 0.209 151.711); /* ~green-400, AA on dark */
 }
 
+/* #40 — user-selected UI typeface (a11y). typefaceRootAttrs sets data-font on
+ * the app shell; these rules re-key --font-sans / --font-heading off it so the
+ * whole subtree re-renders in the chosen face. figtree is the @theme default,
+ * so it needs no override. The face variables come from next/font in the root
+ * layout; "system" uses the native stack (no download).
+ *
+ * font-family is inherited as a *resolved* value, so overriding --font-sans on
+ * a mid-tree node has no effect unless that node re-declares font-family off the
+ * (now-overridden) variable — this rule does exactly that for the shell wrapper
+ * and the Settings live-preview, so descendants inherit the chosen face. */
+[data-font] {
+  font-family: var(--font-sans);
+}
+[data-font="atkinson"] {
+  --font-sans: var(--font-atkinson);
+  --font-heading: var(--font-atkinson);
+}
+[data-font="opendyslexic"] {
+  --font-sans: var(--font-opendyslexic);
+  --font-heading: var(--font-opendyslexic);
+}
+[data-font="system"] {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-heading:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
