@@ -74,13 +74,16 @@ export default async function SettingsPage({
       </div>
       {owner && google ? (
         <IntegrationsPanel google={google} />
-      ) : (
+      ) : !owner ? (
         // #11 — guests see the integrations section as a read-only owner-only
         // shell (no owner status fetched or shown).
         <div className="border-t pt-4">
           <IntegrationsPanel google={null} readOnly voice={voice} />
         </div>
-      )}
+      ) : // Owner but no status object (shouldn't happen; getGoogleStatus always
+      // returns one) — render nothing, matching the pre-#11 behaviour rather
+      // than showing an owner the guest shell.
+      null}
       <div className="flex gap-4 text-sm">
         <Link href="/help?from=settings" className="underline">
           {t("nav.help", voice)} &amp; docs

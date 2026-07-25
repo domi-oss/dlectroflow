@@ -53,7 +53,9 @@ export function IntegrationsPanel({
   // Guest view: a disabled shell so guests can see the integration EXISTS,
   // labelled owner-only. Deliberately renders no real connection status and no
   // connect/disconnect affordances — nothing about the owner's account leaks.
-  if (readOnly || !google) {
+  // Gated on the explicit `readOnly` flag alone (not `!google`) so a future
+  // caller can't accidentally get the guest UI by passing a null status.
+  if (readOnly) {
     return (
       <section className="space-y-3">
         <h2 className="flex items-center gap-2 text-lg font-semibold">
@@ -81,6 +83,10 @@ export function IntegrationsPanel({
       </section>
     );
   }
+
+  // Owner path: a real status object is required. If it's somehow missing,
+  // render nothing rather than silently falling back to the guest shell.
+  if (!google) return null;
 
   const d = googleDescriptor(google);
   const pillClass =
