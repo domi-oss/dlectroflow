@@ -54,3 +54,23 @@ describe("IntegrationsPanel — Google card", () => {
     expect(disconnectMock).toHaveBeenCalledOnce();
   });
 });
+
+describe("IntegrationsPanel — guest read-only shell (#11)", () => {
+  it("shows the integration exists + an owner-only label, with no actions", () => {
+    render(<IntegrationsPanel google={null} readOnly voice="plain" />);
+    // The integration is named so guests see what exists…
+    expect(screen.getByText("Google Tasks")).toBeInTheDocument();
+    // …flagged owner-only (text, not colour alone)…
+    expect(screen.getAllByText(/owner-only/i).length).toBeGreaterThan(0);
+    // …and no interactive affordances.
+    expect(screen.queryByRole("link", { name: /connect/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /disconnect/i })).toBeNull();
+  });
+
+  it("never leaks the owner's real connection status to guests", () => {
+    render(<IntegrationsPanel google={null} readOnly voice="plain" />);
+    expect(screen.queryByText(/^connected$/i)).toBeNull();
+    expect(screen.queryByText(/not connected/i)).toBeNull();
+    expect(screen.queryByText(/reconnect needed/i)).toBeNull();
+  });
+});

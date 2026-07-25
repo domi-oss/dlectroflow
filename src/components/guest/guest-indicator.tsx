@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { t, type Voice } from "@/lib/strings";
 
 const BANNER =
   "👋 You're in guest mode — a private sandbox just for this browser session. You get 5 AI-powered task breakdowns per session (on a speedy model), plus the focus timer, rewards, and one-click calendar export — all yours. Live integrations (Google Tasks) are owner-only for now. Self-hosted option and BYOK coming soon.";
@@ -26,10 +28,12 @@ export function GuestIndicator({
   remaining,
   quota,
   expiresAt,
+  voice,
 }: {
   remaining: number;
   quota: number;
   expiresAt: string;
+  voice: Voice;
 }) {
   const [dismissed, setDismissed] = useState(true); // start collapsed to avoid flash
   const left = useCountdown(expiresAt);
@@ -47,7 +51,16 @@ export function GuestIndicator({
     return (
       <div className="border-b bg-amber-500/10 px-4 py-2 text-sm text-amber-800">
         <div className="mx-auto flex max-w-3xl items-start gap-3">
-          <p className="flex-1">{BANNER}</p>
+          <div className="flex-1 space-y-1">
+            <p>{BANNER}</p>
+            {/* #11 — onboarding nudge to the in-app /help docs (voice-aware). */}
+            <p>
+              <span className="font-medium">{t("guest.newHere", voice)}</span>{" "}
+              <Link href="/help" className="font-medium underline">
+                {t("guest.helpCta", voice)}
+              </Link>
+            </p>
+          </div>
           <button
             onClick={dismiss}
             aria-label="Dismiss"
