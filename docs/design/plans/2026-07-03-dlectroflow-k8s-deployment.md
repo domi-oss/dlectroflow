@@ -8,7 +8,7 @@
 
 **Tech Stack:** Next.js 16.2 (standalone output), Prisma 6 + PostgreSQL 16, Docker/kaniko, Helm 3, Kubernetes (GKE Autopilot), ingress-nginx, cert-manager, GitLab CI/CD + agent + Secrets Manager.
 
-**Spec:** `docs/superpowers/specs/2026-07-03-dlectroflow-k8s-deployment-design.md`
+**Spec:** `docs/design/specs/2026-07-03-dlectroflow-k8s-deployment-design.md`
 
 ## Global Constraints
 

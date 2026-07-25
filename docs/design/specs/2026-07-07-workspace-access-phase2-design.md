@@ -3,7 +3,7 @@
 **Date:** 2026-07-07
 **Status:** Approved (design) — pending spec review before implementation planning
 **Repo:** `gl-demo-ultimate-dtop/dlectroflow` (id 84020916)
-**Builds on:** `docs/superpowers/specs/2026-07-06-workspace-access-design.md` (Phase 1, shipped in MR !18)
+**Builds on:** `docs/design/specs/2026-07-06-workspace-access-design.md` (Phase 1, shipped in MR !18)
 
 ## Problem
 

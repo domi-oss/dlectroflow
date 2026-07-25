@@ -27,7 +27,7 @@
 
 ### Stacking on MR ③ (feat/focus-completion-mr3) — coordination
 
-MR ③ (`docs/superpowers/plans/2026-07-20-focus-completion-style-mr3.md`) rebases **onto this branch**. Both MRs append to shared files; MR ③'s plan already documents the reconciliation, but note here what ② lands so ③ re-stamps cleanly:
+MR ③ (`docs/design/plans/2026-07-20-focus-completion-style-mr3.md`) rebases **onto this branch**. Both MRs append to shared files; MR ③'s plan already documents the reconciliation, but note here what ② lands so ③ re-stamps cleanly:
 
 - **Migration ordering:** ②'s migration is `20260720110000_settings_focus_timer` (Focus-timer columns + CHECKs). ③'s is `20260720120000_settings_completion_style`. ②'s timestamp is strictly **earlier**, so `migrate deploy` applies ② then ③ with no re-stamp needed. If ③'s branch history ever lands a later ② timestamp, ③ re-stamps its own dir to stay greater.
 - **`src/lib/constants.ts`:** ② adds `FocusTimerStyle` + `FocusSound`; ③ adds `CompleteTickColor`. Adjacent additions — union, no conflict.
