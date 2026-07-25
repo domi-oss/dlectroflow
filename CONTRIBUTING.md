@@ -41,10 +41,11 @@ or Google connection needed to run it locally.
 Run the same gates CI runs (all must be green):
 
 ```bash
-npm run test           # vitest unit suite (jsdom / RTL)
+npm run test           # vitest unit + integration (jsdom + Postgres — run `npm run setup` first)
 npm run test:e2e       # Playwright smoke + axe accessibility gate
 npm run lint           # eslint
 npm run format:check   # prettier
+npm run check:env      # env-var drift — .env.example must list every process.env read
 npx tsc --noEmit       # typecheck
 ```
 
