@@ -95,8 +95,14 @@ EOF
 >   --set 'crds.enabled=true' \
 >   --set 'global.leaderElection.namespace=cert-manager' \
 >   --set "hostAliases[0].ip=$INGRESS_CLUSTERIP" \
->   --set 'hostAliases[0].hostnames[0]=dlectroflow.dev'
+>   --set 'hostAliases[0].hostnames[0]=dlectroflow.dev' \
+>   --set 'hostAliases[0].hostnames[1]=dlectroflow.dlectronique.dev'
 > ```
+>
+> List **every** host the ingress terminates TLS for — during the domain
+> migration (#54) that's both the canonical `dlectroflow.dev` **and** the legacy
+> `dlectroflow.dlectronique.dev`, otherwise the legacy `dlectroflow-legacy-tls`
+> cert's HTTP-01 self-check times out and never issues.
 > Public DNS is untouched, so Let's Encrypt still validates over the internet. (Review apps on dynamic `*.sslip.io` hosts are left on the ingress default self-signed cert — ephemeral previews, and the per-MR host would need its own alias.)
 
 ## 5. Install + register the GitLab agent

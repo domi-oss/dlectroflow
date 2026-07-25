@@ -458,7 +458,7 @@ deploy_production:
         --set env=production --set postgres.persistent=true
         --set-string image.tag="main-$CI_COMMIT_SHORT_SHA"
         --set-string host="dlectroflow.dev"
-        --set "legacyHosts[0]=dlectroflow.dlectronique.dev"
+        --set-string "legacyHosts[0]=dlectroflow.dlectronique.dev"
         --set-string secrets.postgresPassword="$POSTGRES_PASSWORD"
         --set-string secrets.anthropicApiKey="$ANTHROPIC_API_KEY"
         --set-string secrets.googleClientId="$GOOGLE_CLIENT_ID"
