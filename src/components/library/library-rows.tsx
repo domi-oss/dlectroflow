@@ -247,7 +247,11 @@ export function LibraryRows({
                   />
                 )}
                 {tab === "plated" && <RowNumber n={i + 1} />}
-                <span className="min-w-0 flex-1 break-words">{item.text}</span>
+                {/* #51: the title is the dominant row text; the row meta
+                    (age / estimate / wake) recedes to text-xs muted. */}
+                <span className="min-w-0 flex-1 text-base font-semibold break-words">
+                  {item.text}
+                </span>
                 {tab === "plated" ? (
                   <AgeLabel
                     item={item}

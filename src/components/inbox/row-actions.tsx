@@ -222,6 +222,7 @@ export function RowActions({
   del,
   menu,
   scheduled = false,
+  className,
 }: {
   inline: ReactNode[];
   /** v6: 📥 Move-to icon, first in the end cluster (omitted when not provided). */
@@ -232,6 +233,10 @@ export function RowActions({
   /** Renders a "Scheduled ✓" indicator when the row's task has a scheduledAt
    *  marker (any method). */
   scheduled?: boolean;
+  /** Extra classes on the action line's root — inbox buckets pass a left inset
+   * (`pl-9`) so the action row lines up under the title text, past the drag-grip
+   * gutter, instead of sitting flush at the card edge. */
+  className?: string;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLSpanElement>(null);
@@ -254,7 +259,12 @@ export function RowActions({
   }, [menuOpen]);
 
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+    <div
+      className={cn(
+        "mt-2 flex flex-wrap items-center gap-2 text-xs",
+        className,
+      )}
+    >
       {scheduled && (
         <span
           className="text-emerald-700 dark:text-emerald-400 font-medium"
