@@ -51,30 +51,49 @@ async function scanColorContrast(page: Page) {
 // libraryBuckets) directly in the owner workspace so the active pill renders a
 // 2-digit count and axe actually evaluates its contrast. Seeding via Prisma
 // (not the capture UI) keeps it deterministic and fast; items are marked and
-// deleted after each scan so the DB stays clean for other specs.
+// deleted after each scan so the DB stays clean for other specs. The marker is
+// scoped per theme so each variant owns its own slice of seeded rows — the
+// suite runs serially today (playwright.config.ts: workers 1, fullyParallel
+// false) so there is no cross-variant race, but a per-theme marker keeps the
+// helpers correct if that ever changes (one variant's cleanup can never delete
+// another's data).
 const SEED_MARKER = "a11y-lib-pill";
 const OWNER_WS = "owner"; // OWNER_WORKSPACE_ID (src/lib/constants.ts)
 
-async function seedPlatedItems(count: number): Promise<PrismaClient> {
+async function seedPlatedItems(
+  count: number,
+  marker: string,
+): Promise<PrismaClient> {
   const prisma = new PrismaClient();
-  await prisma.workspace.upsert({
-    where: { id: OWNER_WS },
-    create: { id: OWNER_WS, kind: "owner" },
-    update: {},
-  });
-  await prisma.brainDumpItem.createMany({
-    data: Array.from({ length: count }, (_, i) => ({
-      text: `${SEED_MARKER} ${i}`,
-      status: "triaged", // BrainDumpStatus.Triaged → singleTask/plated bucket
-      workspaceId: OWNER_WS,
-    })),
-  });
+  // Own the client's lifecycle on the seed path too: if either write throws,
+  // the caller never receives `prisma` (so its try/finally never disconnects),
+  // which would leak the connection. Disconnect-then-rethrow here instead.
+  try {
+    await prisma.workspace.upsert({
+      where: { id: OWNER_WS },
+      create: { id: OWNER_WS, kind: "owner" },
+      update: {},
+    });
+    await prisma.brainDumpItem.createMany({
+      data: Array.from({ length: count }, (_, i) => ({
+        text: `${marker} ${i}`,
+        status: "triaged", // BrainDumpStatus.Triaged → singleTask/plated bucket
+        workspaceId: OWNER_WS,
+      })),
+    });
+  } catch (err) {
+    await prisma.$disconnect();
+    throw err;
+  }
   return prisma;
 }
 
-async function cleanupSeed(prisma: PrismaClient): Promise<void> {
+async function cleanupSeed(
+  prisma: PrismaClient,
+  marker: string,
+): Promise<void> {
   await prisma.brainDumpItem.deleteMany({
-    where: { text: { startsWith: SEED_MARKER } },
+    where: { text: { startsWith: marker } },
   });
   await prisma.$disconnect();
 }
@@ -128,7 +147,8 @@ for (const theme of THEMES) {
     test(`zero color-contrast violations: library hub active tab-count pill (${theme})`, async ({
       page,
     }) => {
-      const prisma = await seedPlatedItems(12);
+      const marker = `${SEED_MARKER}-${theme}`;
+      const prisma = await seedPlatedItems(12, marker);
       try {
         // Default hub tab is "Single-task" (plated) — now holding the 12 seeded
         // items, so its active count chip renders "12" (2 digits).
@@ -143,7 +163,7 @@ for (const theme of THEMES) {
         await expect(activePill).toHaveText(/^\d{2,}$/);
         expectNoContrastViolations(await scanColorContrast(page));
       } finally {
-        await cleanupSeed(prisma);
+        await cleanupSeed(prisma, marker);
       }
     });
 
