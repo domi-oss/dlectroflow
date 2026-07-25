@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
+import type { ReactNode } from "react";
 import AppLayout from "./layout";
 import { isOwnerRequest } from "@/lib/workspace";
 
@@ -11,7 +12,7 @@ vi.mock("next/link", () => ({
     children,
     href,
   }: {
-    children: React.ReactNode;
+    children: ReactNode;
     href: string;
   }) => <a href={href}>{children}</a>,
 }));
