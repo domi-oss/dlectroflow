@@ -148,7 +148,7 @@ ingress `X-Forwarded-Proto` header and Task 3's `requestOrigin`.
 
 ## 9. Deploy
 - Open an MR → `deploy_review` publishes to `https://mr-<IID>.YOUR-STATIC-IP.sslip.io` (see the MR "View app" button).
-  > **sslip.io host format:** use the **dash-separated** IP (`YOUR-STATIC-IP`), not dotted (`YOUR_STATIC_IP`). A dotted quad *after* a hyphenated prefix like `mr-1.` makes sslip.io misparse the IP (e.g. `mr-1.YOUR_STATIC_IP.sslip.io` resolves to a bogus `1.35.246.93`). The dash form resolves correctly.
+  > **sslip.io host format:** use the **dash-separated** IP form (e.g. `mr-<IID>.203-0-113-5.sslip.io` for an ingress IP of `203.0.113.5`), **not** the dotted form. A dotted quad *after* a hyphenated prefix like `mr-1.` makes sslip.io misparse the address (it reads the leading `1` as part of the IP); the dash form resolves correctly. (`203.0.113.5` is a documentation placeholder — substitute your reserved ingress IP.)
 - Merge to `main` → `deploy_production` publishes to `https://dlectroflow.dlectronique.dev`.
 
 ## 10. Cost guardrails
