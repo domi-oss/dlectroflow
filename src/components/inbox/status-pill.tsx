@@ -41,7 +41,8 @@ export function StatusPill({
     <span
       className={cn(
         "inline-flex shrink-0 items-center gap-1 text-xs",
-        size === "meta" ? "text-muted-foreground" : cn("font-medium", color),
+        size === "meta" ? "text-muted-foreground" : "font-medium",
+        size !== "meta" && color,
       )}
     >
       <span aria-hidden="true">{dot}</span>

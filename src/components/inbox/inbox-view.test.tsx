@@ -368,8 +368,9 @@ describe("InboxView — 24h still-needed prompt", () => {
 
 describe("InboxView — row hierarchy (#50/#51/#52)", () => {
   // #51 — the title is the dominant text in its row (larger + heavier), so it
-  // no longer fades into the small metadata size.
-  it("#51: the task title is the dominant row text (text-base font-semibold)", () => {
+  // no longer fades into the small metadata size. Owner design revision bumped
+  // the inbox row title another step to text-lg.
+  it("#51: the task title is the dominant row text (text-lg font-semibold)", () => {
     render(
       <InboxView
         initialItems={[makeItem({ id: "h1", text: "buy oat milk" })]}
@@ -379,10 +380,27 @@ describe("InboxView — row hierarchy (#50/#51/#52)", () => {
       />,
     );
     const title = screen.getByText("buy oat milk");
-    expect(title.className).toMatch(/text-base/);
+    expect(title.className).toMatch(/text-lg/);
     expect(title.className).toMatch(/font-semibold/);
     // …and the metadata (captured-ago) recedes to text-xs.
     expect(screen.getByText(/captured/).className).toMatch(/text-xs/);
+  });
+
+  // Owner design revision: the drag grip was tucked into a narrower gutter
+  // (44px square → 28px wide) so the title sits closer to the left edge. The
+  // grip keeps a full 44px height and stays ≥ the WCAG-AA 24px minimum width.
+  it("design revision: the drag grip stays an adequate hit target (≥24px wide, 44px tall)", () => {
+    render(
+      <InboxView
+        initialItems={[makeItem({ id: "g1", text: "grip row" })]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const grip = screen.getByRole("button", { name: "Drag grip row" });
+    expect(grip.className).toContain("min-h-11"); // 44px tall
+    expect(grip.className).toContain("w-7"); // 28px wide (≥ WCAG-AA 24px min)
   });
 
   // #52 — the age/status pill moves off the title line down to the metadata

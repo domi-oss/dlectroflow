@@ -826,7 +826,7 @@ export function InboxView({
                             propagation so editing doesn't also toggle. */}
                         <div
                           className={cn(
-                            "flex items-start gap-3",
+                            "flex items-start gap-2",
                             !awaitingBreakdown &&
                               editingId !== item.id &&
                               "cursor-pointer",
@@ -842,7 +842,7 @@ export function InboxView({
                             titleEditor(item)
                           ) : awaitingBreakdown ? (
                             <span className="min-w-0 flex-1 break-words">
-                              <span className="text-base font-semibold">
+                              <span className="text-lg font-semibold">
                                 {item.text}
                               </span>{" "}
                               {pencil(item)}
@@ -856,7 +856,7 @@ export function InboxView({
                                   e.stopPropagation();
                                   setExpandedId(expanded ? null : item.id);
                                 }}
-                                className="text-base font-semibold break-words text-left hover:underline"
+                                className="text-lg font-semibold break-words text-left hover:underline"
                               >
                                 {item.text}
                               </button>{" "}
@@ -873,6 +873,7 @@ export function InboxView({
                           )}
                         </div>
                         <RowActions
+                          className="pl-9"
                           scheduled={item.scheduledAt != null}
                           inline={
                             awaitingBreakdown
@@ -1068,13 +1069,13 @@ export function InboxView({
                         )}
                       >
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
-                        <div className="flex items-start gap-3">
+                        <div className="flex items-start gap-2">
                           <DragGrip id={item.id} label={item.text} />
                           {editingId === item.id ? (
                             titleEditor(item)
                           ) : (
                             <span className="min-w-0 flex-1 break-words">
-                              <span className="text-base font-semibold">
+                              <span className="text-lg font-semibold">
                                 {item.text}
                               </span>{" "}
                               {pencil(item)}
@@ -1090,6 +1091,7 @@ export function InboxView({
                           )}
                         </div>
                         <RowActions
+                          className="pl-9"
                           scheduled={item.scheduledAt != null}
                           inline={[
                             <button
@@ -1208,7 +1210,7 @@ export function InboxView({
                         )}
                       >
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
-                        <div className="flex items-start gap-3">
+                        <div className="flex items-start gap-2">
                           <DragGrip id={item.id} label={item.text} />
                           {editingId === item.id ? (
                             titleEditor(item)
@@ -1222,7 +1224,7 @@ export function InboxView({
                                     optionsOpen ? null : item.id,
                                   )
                                 }
-                                className="text-base font-semibold break-words text-left hover:underline"
+                                className="text-lg font-semibold break-words text-left hover:underline"
                               >
                                 {item.text}
                               </button>{" "}
@@ -1236,6 +1238,7 @@ export function InboxView({
                             to sleep. */}
                         {optionsOpen ? (
                           <RowActions
+                            className="pl-9"
                             inline={[
                               <button
                                 key="breakdown"
@@ -1328,7 +1331,7 @@ export function InboxView({
                             ]}
                           />
                         ) : (
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                          <div className="mt-2 flex flex-wrap items-center gap-2 pl-9 text-xs">
                             {/* Wakes the item for review IN the bucket — same
                                 toggle as pressing the row title. */}
                             <button
@@ -1391,7 +1394,7 @@ export function InboxView({
                         )}
                       >
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
-                        <div className="flex items-start gap-3">
+                        <div className="flex items-start gap-2">
                           <DragGrip id={item.id} label={item.text} />
                           {editingId === item.id ? (
                             titleEditor(item)
@@ -1399,7 +1402,7 @@ export function InboxView({
                             <span className="min-w-0 flex-1 break-words">
                               <span
                                 className={cn(
-                                  "text-base font-semibold",
+                                  "text-lg font-semibold",
                                   COMPLETE_TEXT,
                                 )}
                               >
@@ -1416,7 +1419,7 @@ export function InboxView({
                             />
                           )}
                         </div>
-                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                        <div className="mt-2 flex flex-wrap items-center gap-2 pl-9 text-xs">
                           <button
                             type="button"
                             className="hover:bg-accent rounded-md px-2.5 py-1 font-medium"
@@ -1623,10 +1626,10 @@ function DragGrip({ id, label }: { id: string; label: string }) {
       {...attributes}
       {...listeners}
       aria-label={`Drag ${label}`}
-      className={cn(
-        "text-muted-foreground hover:text-foreground touch-none shrink-0 cursor-grab px-1 text-xs",
-        touchTarget,
-      )}
+      // Narrow gutter (28px wide × 44px tall) so the title tucks in to the left
+      // instead of floating past a full 44px-square grip. 28px keeps the target
+      // width ≥ the WCAG-AA 24px minimum (2.5.8); full 44px height preserved.
+      className="text-muted-foreground hover:text-foreground inline-flex min-h-11 w-7 shrink-0 cursor-grab touch-none items-center justify-center text-xs"
     >
       ⠿
     </button>
@@ -1768,7 +1771,7 @@ function ItemRow({
     <li
       className={cn("rounded-lg border px-4 py-3", isDragging && "opacity-40")}
     >
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-2">
         {dragGrip}
         <div className="min-w-0 flex-1 space-y-1">
           {/* #51: the title is the dominant text — larger + heavier than the
@@ -1776,7 +1779,7 @@ function ItemRow({
           <div className="flex items-center gap-2">
             {titleEditor ?? (
               <>
-                <span className="text-base font-semibold break-words">
+                <span className="text-lg font-semibold break-words">
                   {item.text}
                 </span>
                 {editButton}
@@ -1792,128 +1795,134 @@ function ItemRow({
             </span>
             <AgeLabel createdAt={item.createdAt} aging={aging} now={now} />
           </div>
-        </div>
-      </div>
-      {/* #50: right-sized to a quiet inline nudge that stays subordinate to the
+          {/* #50: right-sized to a quiet inline nudge that stays subordinate to the
           title — no loud bordered / hardcoded-hex box. Still-need-it / Dismiss
           keep ≥44px hit targets (touchTarget) and full keyboard access, and the
-          tokens adapt to dark mode (the old inline hex did not). */}
-      {showStillNeededPrompt && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 pl-1 text-xs">
-          <span className="text-muted-foreground">
-            {t("prompt.stillNeeded", voice)}
-          </span>
-          <span className="flex shrink-0 items-center gap-1">
-            <button
-              onClick={onFreshen}
-              className={cn(
-                "text-foreground rounded-md px-2 font-medium hover:underline",
-                touchTarget,
-              )}
-            >
-              {t("action.stillNeeded", voice)}
-            </button>
-            <span aria-hidden="true" className="text-muted-foreground">
-              ·
-            </span>
-            <button
-              onClick={onDismissPrompt}
-              className={cn(
-                "text-muted-foreground hover:text-foreground rounded-md px-2",
-                touchTarget,
-              )}
-            >
-              {t("action.dismiss", voice)}
-            </button>
-          </span>
+          tokens adapt to dark mode (the old inline hex did not). Lives in the
+          content column (with the title/meta/actions) so the whole row reads as
+          one clean left-aligned column beside the drag gutter. */}
+          {showStillNeededPrompt && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 pl-1 text-xs">
+              <span className="text-muted-foreground">
+                {t("prompt.stillNeeded", voice)}
+              </span>
+              <span className="flex shrink-0 items-center gap-1">
+                <button
+                  onClick={onFreshen}
+                  className={cn(
+                    "text-foreground rounded-md px-2 font-medium hover:underline",
+                    touchTarget,
+                  )}
+                >
+                  {t("action.stillNeeded", voice)}
+                </button>
+                <span aria-hidden="true" className="text-muted-foreground">
+                  ·
+                </span>
+                <button
+                  onClick={onDismissPrompt}
+                  className={cn(
+                    "text-muted-foreground hover:text-foreground rounded-md px-2",
+                    touchTarget,
+                  )}
+                >
+                  {t("action.dismiss", voice)}
+                </button>
+              </span>
+            </div>
+          )}
+          <RowActions
+            inline={[
+              <button
+                key="breakdown"
+                onClick={onBreakdown}
+                className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
+              >
+                {t("action.breakdown", voice)} →
+              </button>,
+              <button
+                key="keep"
+                onClick={onKeep}
+                className="hover:bg-accent rounded-md px-2.5 py-1 font-medium"
+              >
+                {t("action.addTodo", voice)}
+              </button>,
+              <button
+                key="save-for-later"
+                onClick={onSaveForLater}
+                className="hover:bg-accent rounded-md px-2.5 py-1 font-medium"
+              >
+                {t("action.saveShort", voice)}
+              </button>,
+              <CompleteButton
+                key="complete"
+                voice={voice}
+                onClick={onComplete}
+              />,
+            ]}
+            move={moveIcon}
+            schedule={schedule}
+            scheduled={scheduled}
+            del={deleteControl("delete", { icon: true })}
+            menu={[
+              moveMenu,
+              <button
+                key="breakdown-m"
+                onClick={onBreakdown}
+                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+              >
+                {t("action.breakdownFull", voice)}
+              </button>,
+              <button
+                key="keep-m"
+                onClick={onKeep}
+                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+              >
+                {t("action.addTodoFull", voice)}
+              </button>,
+              <button
+                key="save-for-later-m"
+                onClick={onSaveForLater}
+                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+              >
+                {t("action.saveForLater", voice)}
+              </button>,
+              <button
+                key="complete-m"
+                onClick={onComplete}
+                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+              >
+                {t("action.completeFull", voice)}
+              </button>,
+              // "Snooze 1h" lives only here (▾ menu) — a SEPARATE action from
+              // "Save for later": snooze is the literal 1-hour timer
+              // (snoozeBrainDumpItem), Save for later is a direct move to the
+              // Saved bucket via the shared moveItemToBucket dispatcher.
+              <button
+                key="snooze-m"
+                onClick={onSnooze}
+                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+              >
+                Snooze 1h
+              </button>,
+              schedule ? (
+                <ScheduleControl
+                  key="schedule-m"
+                  {...schedule}
+                  variant="menu"
+                  label={scheduleMenuLabel(schedule.state, voice)}
+                />
+              ) : null,
+              icsMenu,
+              editMenuItem,
+              deleteControl("delete-m", { fullWidth: true }),
+            ]}
+          />
+          {scheduleError && (
+            <p className="text-destructive mt-1 text-xs">{scheduleError}</p>
+          )}
         </div>
-      )}
-      <RowActions
-        inline={[
-          <button
-            key="breakdown"
-            onClick={onBreakdown}
-            className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
-          >
-            {t("action.breakdown", voice)} →
-          </button>,
-          <button
-            key="keep"
-            onClick={onKeep}
-            className="hover:bg-accent rounded-md px-2.5 py-1 font-medium"
-          >
-            {t("action.addTodo", voice)}
-          </button>,
-          <button
-            key="save-for-later"
-            onClick={onSaveForLater}
-            className="hover:bg-accent rounded-md px-2.5 py-1 font-medium"
-          >
-            {t("action.saveShort", voice)}
-          </button>,
-          <CompleteButton key="complete" voice={voice} onClick={onComplete} />,
-        ]}
-        move={moveIcon}
-        schedule={schedule}
-        scheduled={scheduled}
-        del={deleteControl("delete", { icon: true })}
-        menu={[
-          moveMenu,
-          <button
-            key="breakdown-m"
-            onClick={onBreakdown}
-            className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-          >
-            {t("action.breakdownFull", voice)}
-          </button>,
-          <button
-            key="keep-m"
-            onClick={onKeep}
-            className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-          >
-            {t("action.addTodoFull", voice)}
-          </button>,
-          <button
-            key="save-for-later-m"
-            onClick={onSaveForLater}
-            className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-          >
-            {t("action.saveForLater", voice)}
-          </button>,
-          <button
-            key="complete-m"
-            onClick={onComplete}
-            className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-          >
-            {t("action.completeFull", voice)}
-          </button>,
-          // "Snooze 1h" lives only here (▾ menu) — a SEPARATE action from
-          // "Save for later": snooze is the literal 1-hour timer
-          // (snoozeBrainDumpItem), Save for later is a direct move to the
-          // Saved bucket via the shared moveItemToBucket dispatcher.
-          <button
-            key="snooze-m"
-            onClick={onSnooze}
-            className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-          >
-            Snooze 1h
-          </button>,
-          schedule ? (
-            <ScheduleControl
-              key="schedule-m"
-              {...schedule}
-              variant="menu"
-              label={scheduleMenuLabel(schedule.state, voice)}
-            />
-          ) : null,
-          icsMenu,
-          editMenuItem,
-          deleteControl("delete-m", { fullWidth: true }),
-        ]}
-      />
-      {scheduleError && (
-        <p className="text-destructive mt-1 text-xs">{scheduleError}</p>
-      )}
+      </div>
     </li>
   );
 }
