@@ -430,9 +430,65 @@ describe("InboxView — row hierarchy (#50/#51/#52)", () => {
     expect(titleLine).not.toContainElement(status);
   });
 
-  // #50 — the stale-reminder is right-sized to a quiet inline nudge instead of
-  // a loud bordered/hardcoded-hex box that outweighed the title.
-  it("#50: the stale-reminder is a quiet inline nudge (no heavy hardcoded box), keeping Still-need-it/Dismiss as adequate hit targets", () => {
+  // #57 a11y: the aging "captured x ago" label uses the AA-tuned per-theme
+  // amber pairing (matching status-pill's aging tier), not the flat
+  // `text-amber-600` that dropped to 3:1 on the #40 warm light background. This
+  // only renders once a row ages — surfaced by the axe scan of a stale row that
+  // now carries the #57 nudge (the gate otherwise scans only fresh items).
+  it("#57: an aging row's captured-ago label uses AA-tuned amber (not sub-AA text-amber-600)", () => {
+    render(
+      <InboxView
+        initialItems={[
+          makeItem({
+            id: "age1",
+            text: "aging thing",
+            createdAt: new Date(Date.now() - 100 * 3600_000), // aging
+          }),
+        ]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const captured = screen.getByText(/captured/);
+    expect(captured.className).toContain("text-amber-700");
+    expect(captured.className).toContain("dark:text-amber-400");
+    expect(captured.className).not.toContain("text-amber-600");
+  });
+
+  // #57 a11y: the NavBadge "· N aging 🟡" count shares the same flat-amber-600
+  // AA failure (2.77:1 on bg-secondary) as the captured-ago label — fixed to
+  // the same AA-tuned per-theme pairing. Also only visible with aging items.
+  it("#57: the NavBadge aging count uses AA-tuned amber (not sub-AA text-amber-600)", () => {
+    render(
+      <InboxView
+        initialItems={[
+          makeItem({
+            id: "age2",
+            text: "aging thing",
+            createdAt: new Date(Date.now() - 100 * 3600_000), // aging + untriaged
+          }),
+        ]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const agingCount = screen.getByText(/aging 🟡/);
+    // amber-800 in light here (the badge sits on the more saturated
+    // bg-secondary, where amber-700 is only 4.36:1); dark:amber-400 as elsewhere.
+    expect(agingCount.className).toContain("text-amber-800");
+    expect(agingCount.className).toContain("dark:text-amber-400");
+    expect(agingCount.className).not.toContain("text-amber-600");
+  });
+
+  // #57 (follow-up to #50) — the stale-reminder is now a tinted "notification
+  // chip": a compact rounded row with a soft aging/amber tint + subtle border
+  // and a clock icon, so it reads as a notification instead of the muted
+  // background-noise text #50 left behind. It must stay subordinate to the
+  // text-lg title (no heavy hardcoded-hex box — the #50 lesson) and keep
+  // Still-need-it / Dismiss as ≥44px keyboard-operable hit targets.
+  it("#57: the stale-reminder is a tinted amber notification chip (clock icon + readable text), still subordinate + keyboard-usable", () => {
     render(
       <InboxView
         initialItems={[
@@ -450,11 +506,25 @@ describe("InboxView — row hierarchy (#50/#51/#52)", () => {
     const prompt = screen.getByText(
       "This has been sitting a while — still needed?",
     );
-    const box = prompt.closest("div")!;
-    // The loud red box is gone: no bordered/padded box, no hardcoded hex.
-    expect(box.className).not.toContain("border");
-    expect(box.getAttribute("style") ?? "").not.toContain("#c0392b");
-    expect(box.getAttribute("style") ?? "").not.toContain("#fff5f5");
+    const chip = prompt.closest("div")!;
+    // Tinted notification chip: reuses the #40 aging/amber token family (the
+    // same bg/border/ink the resume-step banner + focus callouts use) in BOTH
+    // themes — no invented colors, and none of the old loud hardcoded hex.
+    expect(chip.className).toContain("bg-amber-50");
+    expect(chip.className).toContain("dark:bg-amber-950/20");
+    expect(chip.className).toContain("border-amber-500/40");
+    expect(chip.getAttribute("style") ?? "").not.toContain("#c0392b");
+    expect(chip.getAttribute("style") ?? "").not.toContain("#fff5f5");
+    // Readable, not muted-to-invisible (the #50 over-correction): the nudge
+    // carries the amber ink, not text-muted-foreground.
+    expect(chip.className).toContain("text-amber-800");
+    expect(chip.className).toContain("dark:text-amber-300");
+    expect(prompt.className).not.toContain("text-muted-foreground");
+    // A clock icon is the notification signal — decorative (aria-hidden), since
+    // the text already conveys the meaning (icon/colour is never the only cue).
+    const icon = chip.querySelector("svg");
+    expect(icon).not.toBeNull();
+    expect(icon).toHaveAttribute("aria-hidden", "true");
     // Actions stay keyboard-usable + adequately hit-targeted (≥44px). Scope to
     // the row — "Dismiss" also names the NavBadge ✕ at the top of the inbox.
     const row = prompt.closest("li")!;

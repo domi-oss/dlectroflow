@@ -9,6 +9,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { Clock } from "lucide-react";
 import { cn, touchTarget } from "@/lib/utils";
 import { COMPLETE_TEXT } from "@/lib/completion-style";
 import { DonePill } from "@/components/completion/done-pill";
@@ -1795,34 +1796,37 @@ function ItemRow({
             </span>
             <AgeLabel createdAt={item.createdAt} aging={aging} now={now} />
           </div>
-          {/* #50: right-sized to a quiet inline nudge that stays subordinate to the
-          title — no loud bordered / hardcoded-hex box. Still-need-it / Dismiss
-          keep ≥44px hit targets (touchTarget) and full keyboard access, and the
-          tokens adapt to dark mode (the old inline hex did not). Lives in the
-          content column (with the title/meta/actions) so the whole row reads as
-          one clean left-aligned column beside the drag gutter. */}
+          {/* #57 (follow-up to #50): a tinted "notification chip" — a compact
+          rounded row with a soft aging/amber tint + subtle border and a clock
+          icon, so the stale nudge reads as a notification instead of the muted
+          background-noise text #50 left behind. Reuses the #40 aging/amber
+          token family (the same bg/border/ink the resume-step banner + focus
+          callouts use), so it stays WCAG-AA in light AND dark with no invented
+          colours. Sits below the metadata line, above the action row, and stays
+          subordinate to the text-lg title (text-sm, compact padding — no heavy
+          box, the #50 lesson). Still-need-it / Dismiss keep ≥44px hit targets
+          (touchTarget) and full keyboard access; the "Still need it" handler is
+          unchanged (onFreshen → freshenItem), likewise Dismiss (dismissPrompt). */}
           {showStillNeededPrompt && (
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 pl-1 text-xs">
-              <span className="text-muted-foreground">
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-amber-500/40 bg-amber-50 px-2.5 py-1 text-sm text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
+              <Clock aria-hidden="true" className="h-4 w-4 shrink-0" />
+              <span className="min-w-0 flex-1">
                 {t("prompt.stillNeeded", voice)}
               </span>
               <span className="flex shrink-0 items-center gap-1">
                 <button
                   onClick={onFreshen}
                   className={cn(
-                    "text-foreground rounded-md px-2 font-medium hover:underline",
+                    "rounded-md border border-amber-500/40 px-2.5 font-medium hover:bg-amber-100 dark:hover:bg-amber-900/40",
                     touchTarget,
                   )}
                 >
                   {t("action.stillNeeded", voice)}
                 </button>
-                <span aria-hidden="true" className="text-muted-foreground">
-                  ·
-                </span>
                 <button
                   onClick={onDismissPrompt}
                   className={cn(
-                    "text-muted-foreground hover:text-foreground rounded-md px-2",
+                    "rounded-md px-2 font-medium hover:underline",
                     touchTarget,
                   )}
                 >
@@ -1942,7 +1946,12 @@ function AgeLabel({
     <p
       className={cn(
         "text-xs",
-        aging ? "text-amber-600" : "text-muted-foreground",
+        // AA-tuned per theme (WCAG 4.5:1 in BOTH light and dark), matching the
+        // aging freshness tier in status-pill.tsx. The old flat `text-amber-600`
+        // dropped to 3:1 on the #40 warm-tinted light background — a serious
+        // color-contrast failure that only surfaces once a row ages (the axe
+        // gate scans fresh items), exposed alongside the #57 stale nudge.
+        aging ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground",
       )}
     >
       captured {label}
@@ -1981,8 +1990,14 @@ function NavBadge({
     <div className="bg-secondary flex items-center justify-between rounded-lg px-3 py-2 text-sm">
       <span>
         <strong>{untriagedCount}</strong> need triage
+        {/* amber-800 (not -700) in light: this count sits on the more saturated
+            `bg-secondary` lavender, where -700 lands at 4.36:1 — just under
+            AA-normal. dark:-400 matches the aging tier elsewhere. */}
         {agingCount > 0 && (
-          <span className="text-amber-600"> · {agingCount} aging 🟡</span>
+          <span className="text-amber-800 dark:text-amber-400">
+            {" "}
+            · {agingCount} aging 🟡
+          </span>
         )}
       </span>
       <button
