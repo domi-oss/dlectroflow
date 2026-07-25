@@ -86,7 +86,7 @@ describe("ensureFocusStep", () => {
       },
     });
     expect(stepId).toBe("s-new");
-    expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 
   it("item with a task but no steps: creates only the step", async () => {

@@ -71,6 +71,22 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   output: "standalone",
 
+  // The inbox now renders at the bare root `/` (src/app/(app)/page.tsx). Keep
+  // the old `/inbox` URL working with a permanent redirect so OAuth callbacks,
+  // old bookmarks, and any external links still resolve. `permanent: true`
+  // emits a 308 (the method-preserving permanent redirect) and is cached by
+  // clients/search engines. Redirects run before the filesystem + proxy, so a
+  // browser hitting `/inbox` is sent to `/` before any page renders. (#58)
+  async redirects() {
+    return [
+      {
+        source: "/inbox",
+        destination: "/",
+        permanent: true,
+      },
+    ];
+  },
+
   // Attach security headers to every route.
   async headers() {
     return [

@@ -108,6 +108,6 @@ describe("breakdown.ts › ejectStepToInbox", () => {
     const { ejectStepToInbox } = await import("./breakdown");
     await ejectStepToInbox("s2");
     expect(revalidatePathMock).toHaveBeenCalledWith("/tasks/t1");
-    expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 });

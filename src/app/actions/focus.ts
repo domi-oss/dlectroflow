@@ -99,7 +99,7 @@ export async function completeStep(stepId: string) {
   if (stillOpen.length === 0) await markTaskCompleted(workspaceId, step.taskId);
 
   revalidatePath(`/tasks/${step.taskId}`);
-  revalidatePath("/inbox");
+  revalidatePath("/");
   revalidatePath("/dashboard");
 }
 
@@ -118,7 +118,7 @@ export async function renameStep(stepId: string, title: string) {
 
   await prisma.step.update({ where: { id: stepId }, data: { text: trimmed } });
   revalidatePath(`/tasks/${step.taskId}`);
-  revalidatePath("/inbox");
+  revalidatePath("/");
 }
 
 /**
@@ -135,7 +135,7 @@ export async function updateStepEstimate(stepId: string, minutes: number) {
 
   await prisma.step.update({ where: { id: stepId }, data: { estMinutes } });
   revalidatePath(`/tasks/${step.taskId}`);
-  revalidatePath("/inbox");
+  revalidatePath("/");
 }
 
 export type CompleteResult = {
@@ -215,7 +215,7 @@ export async function completeFocus(
   });
   if (openCount === 0) {
     await markTaskCompleted(workspaceId, step.taskId);
-    revalidatePath("/inbox");
+    revalidatePath("/");
   }
 
   revalidatePath(`/tasks/${step.taskId}`);

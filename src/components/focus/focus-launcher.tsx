@@ -33,9 +33,9 @@ export function FocusLauncher({
 
   return (
     <div className="space-y-4">
-      {/* 1. ← Back → /inbox (matches the Library page exactly). */}
+      {/* 1. ← Back → / (the inbox root; matches the Library page exactly). */}
       <Link
-        href="/inbox"
+        href="/"
         className="text-muted-foreground hover:text-foreground inline-flex min-h-[44px] items-center text-sm"
       >
         {t("action.back", voice)}
@@ -172,7 +172,7 @@ export function FocusLauncher({
             {t("focus.launcher.empty", voice)}
           </p>
           <Link
-            href="/inbox"
+            href="/"
             className="inline-flex min-h-[44px] items-center justify-center text-sm underline"
           >
             {t("nav.inbox", voice)}

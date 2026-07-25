@@ -66,7 +66,7 @@ export default async function AppLayout({
       <header className="border-b">
         <div className="mx-auto flex w-full max-w-3xl items-center justify-between px-4 py-3">
           <Link
-            href="/inbox"
+            href="/"
             className="flex items-center gap-2 text-lg font-semibold tracking-tight"
           >
             {/* #13/#40 — app-icon brand mark; decorative (aria-hidden) so the

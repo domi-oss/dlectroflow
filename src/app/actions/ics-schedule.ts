@@ -77,7 +77,7 @@ export async function scheduleViaIcs(
     // the guard being removed) rather than a hardcoded literal — matches
     // awardFirstSchedule's contract + scheduleSingleTask's pattern (#34).
     await awardFirstSchedule(workspaceId, task.scheduledAt != null);
-    revalidatePath("/inbox");
+    revalidatePath("/");
     revalidatePath(`/tasks/${taskId}`);
   }
 

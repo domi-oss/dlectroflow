@@ -59,7 +59,7 @@ describe("renameStep", () => {
       data: { text: "new title" },
     });
     expect(revalidatePathMock).toHaveBeenCalledWith("/tasks/t1");
-    expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 
   it("rejects when the step is not in the workspace (findFirst null)", async () => {
@@ -110,7 +110,7 @@ describe("updateStepEstimate", () => {
       data: { estMinutes: 25 },
     });
     expect(revalidatePathMock).toHaveBeenCalledWith("/tasks/t1");
-    expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 
   it("rejects when the step is not in the workspace (findFirst null)", async () => {

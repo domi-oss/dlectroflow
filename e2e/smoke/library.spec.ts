@@ -5,7 +5,7 @@ import { test, expect } from "@playwright/test";
 // /library. Scope the click to the "Main" nav landmark — the first-run welcome
 // card also renders a "Library" link, so a page-wide lookup is ambiguous.
 test("navigates to the Library hub from the nav menu", async ({ page }) => {
-  await page.goto("/inbox");
+  await page.goto("/");
 
   await page.getByRole("button", { name: "Menu" }).click();
   await page

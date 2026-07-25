@@ -134,7 +134,7 @@ describe("scheduleSingleTask", () => {
         }),
       }),
     );
-    expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 
   it("returns no_reclaim_list when no matching Google Tasks list exists", async () => {
@@ -321,7 +321,7 @@ describe("scheduleSingleTask", () => {
     expect(awardBadge).not.toHaveBeenCalled();
   });
 
-  it("revalidates /inbox after the lazy Task-create even when the Google push fails (Duo review)", async () => {
+  it("revalidates / after the lazy Task-create even when the Google push fails (Duo review)", async () => {
     workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
@@ -339,7 +339,7 @@ describe("scheduleSingleTask", () => {
     expect(res).toEqual({ ok: false, reason: "no_reclaim_list" });
     // The item is now linked to a new Task, so the inbox cache MUST be invalidated
     // regardless of the Google failure.
-    expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 
   it("still returns ok when a reward call fails — reward errors must not fail scheduling (Duo !77)", async () => {
@@ -368,6 +368,6 @@ describe("scheduleSingleTask", () => {
       BadgeKey.FirstSchedule,
     );
     expect(taskUpdateMock).toHaveBeenCalled();
-    expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 });

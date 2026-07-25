@@ -135,7 +135,7 @@ describe("completeItem", () => {
     expect(stepDoneCalls).toHaveLength(2);
     expect(logReward).toHaveBeenCalledWith("owner", "task_complete");
     expect(maybeAwardTenStepsDay).toHaveBeenCalledWith("owner");
-    expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 
   it("is workspace-scoped (findFirst gated on workspaceId)", async () => {

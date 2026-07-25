@@ -56,7 +56,7 @@ export async function GET(req: Request): Promise<Response> {
     { kind: "owner", sub: identity },
     sessionSecret,
   );
-  const res = NextResponse.redirect(`${origin}/inbox`);
+  const res = NextResponse.redirect(`${origin}/`);
   res.cookies.set(OWNER_COOKIE, session, {
     httpOnly: true,
     secure: origin.startsWith("https"),

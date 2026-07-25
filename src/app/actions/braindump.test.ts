@@ -50,10 +50,10 @@ describe("braindump.ts › freshenItem", () => {
     expect(call.data.freshenedAt).toBeInstanceOf(Date);
   });
 
-  it("revalidates /inbox", async () => {
+  it("revalidates /", async () => {
     const { freshenItem } = await import("./braindump");
     await freshenItem("item-1");
-    expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 });
 
@@ -73,10 +73,10 @@ describe("braindump.ts › dismissPrompt", () => {
     expect(call.data.promptDismissedAt).toBeInstanceOf(Date);
   });
 
-  it("revalidates /inbox", async () => {
+  it("revalidates /", async () => {
     const { dismissPrompt } = await import("./braindump");
     await dismissPrompt("item-2");
-    expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 });
 

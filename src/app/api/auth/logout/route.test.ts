@@ -22,7 +22,7 @@ describe("owner logout route", () => {
     expect((logout as Record<string, unknown>).GET).toBeUndefined();
   });
 
-  it("POST clears the owner cookie and redirects to /inbox", async () => {
+  it("POST clears the owner cookie and redirects to /", async () => {
     expect(typeof logout.POST).toBe("function");
     const res = (await logout.POST(
       new Request("https://dlectroflow.dlectronique.dev/api/auth/logout", {
@@ -33,7 +33,7 @@ describe("owner logout route", () => {
     // Redirect back into the app (303 → follow-up GET after the POST).
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe(
-      "https://dlectroflow.dlectronique.dev/inbox",
+      "https://dlectroflow.dlectronique.dev/",
     );
 
     // The owner cookie is expired/cleared.
@@ -70,7 +70,7 @@ describe("owner logout route", () => {
 
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe(
-      "https://dlectroflow.dlectronique.dev/inbox",
+      "https://dlectroflow.dlectronique.dev/",
     );
     expect(res.cookies.get(OWNER_COOKIE)?.value).toBe("");
   });

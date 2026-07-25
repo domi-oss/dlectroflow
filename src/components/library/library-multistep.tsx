@@ -75,8 +75,8 @@ export function LibraryMultistep({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm">
           {/* `?from=library` lets the task page's back link return here
-              (→ /library?tab=sorted) instead of always going to /inbox
-              (#8 follow-up — Library "Open task" back-button bug). Sits to the
+              (→ /library?tab=sorted) instead of always going to / (the inbox
+              root) (#8 follow-up — Library "Open task" back-button bug). Sits to the
               LEFT of the expand/collapse toggle; shown only while a row is
               expanded, hidden entirely in select mode (moved from the panel to
               the header in !83; positioned left of the toggle in its follow-up). */}

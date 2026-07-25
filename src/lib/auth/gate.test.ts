@@ -10,7 +10,7 @@ describe("gate paths", () => {
     expect(isPublicPath("/api/auth/gitlab/callback")).toBe(true);
   });
   it("app root is not public", () => {
-    expect(isPublicPath("/inbox")).toBe(false);
+    expect(isPublicPath("/")).toBe(false);
   });
   it("does not treat lookalike paths as public", () => {
     expect(isPublicPath("/loginhack")).toBe(false);
@@ -27,7 +27,7 @@ describe("gate paths", () => {
   it("the removed Reclaim oauth path is no longer owner-only (#36)", () => {
     expect(isOwnerOnlyPath("/api/reclaim/oauth/callback")).toBe(false);
   });
-  it("inbox is not owner-only", () => {
-    expect(isOwnerOnlyPath("/inbox")).toBe(false);
+  it("app root is not owner-only", () => {
+    expect(isOwnerOnlyPath("/")).toBe(false);
   });
 });

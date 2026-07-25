@@ -24,8 +24,9 @@ export async function POST(req: Request): Promise<Response> {
     return new NextResponse("Forbidden", { status: 403 });
   }
 
-  // 303 See Other so the browser follows up with a GET to /inbox after the POST.
-  const res = NextResponse.redirect(`${allowedOrigin}/inbox`, 303);
+  // 303 See Other so the browser follows up with a GET to / (the inbox root)
+  // after the POST.
+  const res = NextResponse.redirect(`${allowedOrigin}/`, 303);
   res.cookies.delete(OWNER_COOKIE);
   return res;
 }

@@ -215,7 +215,7 @@ describe("TaskSteps — send back to review (dropdown)", () => {
     await user.click(screen.getByRole("button", { name: /Re-plan manually/i }));
     expect(push).toHaveBeenCalledWith("/tasks/t1?edit=1&manual=1");
     await user.click(screen.getByRole("button", { name: /single to-do/i }));
-    expect(push).toHaveBeenCalledWith("/inbox");
+    expect(push).toHaveBeenCalledWith("/");
   });
 });
 

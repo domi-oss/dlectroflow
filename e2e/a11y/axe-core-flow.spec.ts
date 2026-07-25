@@ -22,7 +22,7 @@ test.describe("accessibility: core-flow routes (axe)", () => {
   // Statically-reachable core routes. inbox = capture, /focus = focus launcher,
   // /dashboard = reward; /library is the core navigation hub.
   const STATIC_ROUTES = [
-    { path: "/inbox", name: "inbox / capture" },
+    { path: "/", name: "inbox / capture" },
     { path: "/library", name: "library hub" },
     { path: "/focus", name: "focus launcher" },
     { path: "/dashboard", name: "reward / dashboard" },
@@ -53,7 +53,7 @@ test.describe("accessibility: core-flow routes (axe)", () => {
     page,
   }) => {
     const label = `A11y clarify ${Date.now()}`;
-    await page.goto("/inbox");
+    await page.goto("/");
     await captureItem(page, label);
 
     const row = needsReviewRow(page, label);
@@ -77,7 +77,7 @@ test.describe("accessibility: core-flow routes (axe)", () => {
     page,
   }) => {
     const label = `A11y focus ${Date.now()}`;
-    await page.goto("/inbox");
+    await page.goto("/");
     await captureItem(page, label);
 
     const row = needsReviewRow(page, label);

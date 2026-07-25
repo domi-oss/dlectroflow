@@ -122,7 +122,7 @@ for (const theme of THEMES) {
     });
 
     const STATIC_ROUTES = [
-      { path: "/inbox", name: "inbox / capture" },
+      { path: "/", name: "inbox / capture" },
       { path: "/settings", name: "settings" },
       { path: "/focus", name: "focus launcher" },
     ] as const;
@@ -183,7 +183,7 @@ for (const theme of THEMES) {
       page,
     }) => {
       const label = `A11y contrast destructive-cta ${theme} ${Date.now()}`;
-      await page.goto("/inbox");
+      await page.goto("/");
       await waitForShell(page);
       await captureItem(page, label);
 

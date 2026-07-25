@@ -11,7 +11,7 @@ describe("resolveBackTarget", () => {
     expect(resolveBackTarget(undefined)).toEqual(DEFAULT_BACK_TARGET);
     expect(resolveBackTarget(null)).toEqual(DEFAULT_BACK_TARGET);
     expect(resolveBackTarget("")).toEqual(DEFAULT_BACK_TARGET);
-    expect(DEFAULT_BACK_TARGET.href).toBe("/inbox");
+    expect(DEFAULT_BACK_TARGET.href).toBe("/");
   });
 
   it("resolves a whitelisted origin to its destination href", () => {
