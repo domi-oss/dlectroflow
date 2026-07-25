@@ -1,6 +1,6 @@
 // AES-256-GCM encryption for OAuth token columns. Pure (no Prisma/SDK imports).
 // Envelope: "v1:" + base64( iv(12) | authTag(16) | ciphertext ). See
-// docs/superpowers/specs/2026-07-13-token-encryption-design.md.
+// docs/design/specs/2026-07-13-token-encryption-design.md.
 import crypto from "node:crypto";
 
 const VERSION = "v1";
