@@ -583,6 +583,10 @@ export const STRINGS = {
     playful:
       "Live integrations hook into the owner's own accounts, so they're owner-only. Sign in as the owner to wire them up.",
   },
+  // Settings footer link → in-app /help docs. Dedicated key (not the shared
+  // nav.help label) so the footer reads "Help & Docs" — both words capitalised
+  // — without disturbing the nav-menu "Help" item or the "← Back" button.
+  "settings.helpDocs": { plain: "Help & Docs", playful: "🆘 Help & Docs" },
   // Guest sandbox onboarding link → in-app /help docs (#29). → is a functional
   // glyph (allowed in plain); 🆘 is playful-only flavour.
   "guest.newHere": { plain: "New here?", playful: "New here?" },
