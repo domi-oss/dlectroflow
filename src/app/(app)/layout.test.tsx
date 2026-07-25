@@ -8,13 +8,9 @@ import { isOwnerRequest } from "@/lib/workspace";
 // next/link → plain <a> (same idiom as help.test.tsx) so the header's links
 // resolve under vitest (no Next compiler).
 vi.mock("next/link", () => ({
-  default: ({
-    children,
-    href,
-  }: {
-    children: ReactNode;
-    href: string;
-  }) => <a href={href}>{children}</a>,
+  default: ({ children, href }: { children: ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
 }));
 
 vi.mock("next/headers", () => ({
