@@ -20,8 +20,7 @@ import { t } from "@/lib/strings";
  * fires ONE browser notification per day at/after `dailyReviewNudgeTime`,
  * guarded by a localStorage day-key. The service worker's `notificationclick`
  * handler focuses/opens the app at / (the inbox root). No server job: if the app
- * isn't open
- * at the time, it fires on the next open that day. Renders nothing.
+ * isn't open at the time, it fires on the next open that day. Renders nothing.
  */
 export function ReviewNudge({
   notifyDailyReview,
