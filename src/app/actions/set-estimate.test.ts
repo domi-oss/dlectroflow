@@ -76,10 +76,10 @@ describe("setItemEstimate", () => {
     expect(prismaMock.brainDumpItem.updateMany).not.toHaveBeenCalled();
   });
 
-  it("revalidates /inbox and /library", async () => {
+  it("revalidates / and /library", async () => {
     const { setItemEstimate } = await import("./braindump");
     await setItemEstimate("i1", 25);
-    expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
     expect(revalidatePathMock).toHaveBeenCalledWith("/library");
   });
 });

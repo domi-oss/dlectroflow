@@ -7,7 +7,7 @@ test("completing an item moves it to the Completed bucket", async ({
   page,
 }) => {
   const label = `E2E finish report ${Date.now()}`;
-  await page.goto("/inbox");
+  await page.goto("/");
 
   await captureItem(page, label);
 

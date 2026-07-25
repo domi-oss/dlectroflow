@@ -64,7 +64,7 @@ describe("moveToReview", () => {
     // taskId is NOT in the data payload → left intact
     const data = prismaMock.brainDumpItem.updateMany.mock.calls[0][0].data;
     expect("taskId" in data).toBe(false);
-    expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 
   it("is workspace-scoped (findFirst gated on workspaceId)", async () => {

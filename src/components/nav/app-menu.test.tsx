@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { AppMenu } from "@/components/nav/app-menu";
 
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/inbox",
+  usePathname: () => "/",
 }));
 
 afterEach(cleanup);
@@ -16,7 +16,7 @@ describe("AppMenu", () => {
     await userEvent.click(screen.getByRole("button", { name: /menu/i }));
     expect(screen.getByRole("link", { name: /Inbox/ })).toHaveAttribute(
       "href",
-      "/inbox",
+      "/",
     );
     expect(screen.getByRole("link", { name: /Focus Timer/ })).toHaveAttribute(
       "href",

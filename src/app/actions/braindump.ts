@@ -19,7 +19,7 @@ import {
 } from "@/lib/constants";
 import { currentWorkspaceId } from "@/lib/workspace";
 
-const INBOX_PATH = "/inbox";
+const INBOX_PATH = "/";
 
 export async function createBrainDumpItem(text: string) {
   const workspaceId = await currentWorkspaceId();

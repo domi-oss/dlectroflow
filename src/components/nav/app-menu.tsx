@@ -7,7 +7,7 @@ import { t, type Voice } from "@/lib/strings";
 import { cn } from "@/lib/utils";
 
 const DESTINATIONS = [
-  { key: "nav.inbox", href: "/inbox" },
+  { key: "nav.inbox", href: "/" },
   { key: "nav.focusTimer", href: "/focus" },
   { key: "nav.everything", href: "/library" },
   { key: "nav.dashboard", href: "/dashboard" },

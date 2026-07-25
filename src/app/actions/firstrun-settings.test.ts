@@ -64,10 +64,10 @@ describe("dismissWelcome", () => {
     expect(call.create.workspaceId).toBe("g_123");
   });
 
-  it("revalidates /inbox", async () => {
+  it("revalidates /", async () => {
     const { dismissWelcome } = await import("./settings");
     await dismissWelcome();
-    expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 });
 
@@ -94,9 +94,9 @@ describe("updateFirstRunPreview", () => {
     expect(call.update).toEqual({ firstRunPreview: false });
   });
 
-  it("revalidates /inbox", async () => {
+  it("revalidates /", async () => {
     const { updateFirstRunPreview } = await import("./settings");
     await updateFirstRunPreview(true);
-    expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 });

@@ -48,7 +48,7 @@ describe("HelpPage", () => {
     // Settings deep-links carry the origin so Settings can offer "Back to Help".
     expect(hrefs).toContain("/settings?from=help");
     // With no `?from=`, the shared back link falls back to the inbox.
-    expect(hrefs).toContain("/inbox");
+    expect(hrefs).toContain("/");
   });
 
   it("is origin-aware: ?from=settings sends the '← Back' link to Settings", async () => {

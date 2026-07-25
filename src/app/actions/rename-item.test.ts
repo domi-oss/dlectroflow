@@ -61,7 +61,7 @@ describe("renameItem", () => {
     expect(prismaMock.brainDumpItem.update).not.toHaveBeenCalled();
   });
 
-  it("renames the item (trimmed) and revalidates /inbox", async () => {
+  it("renames the item (trimmed) and revalidates /", async () => {
     prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
       id: "i1",
       taskId: null,
@@ -73,7 +73,7 @@ describe("renameItem", () => {
       data: { text: "new name" },
     });
     expect(prismaMock.task.update).not.toHaveBeenCalled();
-    expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 
   it("keeps a linked task's title in sync and revalidates its page", async () => {
@@ -88,6 +88,6 @@ describe("renameItem", () => {
       data: { title: "new name" },
     });
     expect(revalidatePathMock).toHaveBeenCalledWith("/tasks/t1");
-    expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 });

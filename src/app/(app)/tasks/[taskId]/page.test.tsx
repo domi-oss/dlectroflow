@@ -128,11 +128,11 @@ afterEach(() => {
 });
 
 describe("TaskPage — back link (#8 follow-up, Fix 1)", () => {
-  it("defaults the '← Back' link → /inbox when `from` is absent", async () => {
+  it("defaults the '← Back' link → / when `from` is absent", async () => {
     await renderPage();
     const link = screen.getByRole("link", { name: /back/i });
     expect(link).toHaveTextContent("← Back");
-    expect(link).toHaveAttribute("href", "/inbox");
+    expect(link).toHaveAttribute("href", "/");
   });
 
   it("`?from=library` sends the '← Back' link → /library?tab=sorted", async () => {
@@ -143,24 +143,24 @@ describe("TaskPage — back link (#8 follow-up, Fix 1)", () => {
     expect(link).toHaveAttribute("href", "/library?tab=sorted");
   });
 
-  it("an unknown `from` value falls back to /inbox rather than reflecting it into a path (no open redirect)", async () => {
+  it("an unknown `from` value falls back to / rather than reflecting it into a path (no open redirect)", async () => {
     await renderPage({ from: "https://evil.example.com" });
     const link = screen.getByRole("link", { name: /back/i });
-    expect(link).toHaveAttribute("href", "/inbox");
+    expect(link).toHaveAttribute("href", "/");
   });
 
-  it("`?from=__proto__` (an inherited Object.prototype key, not an own key of BACK_TARGETS) falls back to /inbox instead of crashing", async () => {
+  it("`?from=__proto__` (an inherited Object.prototype key, not an own key of BACK_TARGETS) falls back to / instead of crashing", async () => {
     await renderPage({ from: "__proto__" });
     const link = screen.getByRole("link", { name: /back/i });
-    expect(link).toHaveAttribute("href", "/inbox");
+    expect(link).toHaveAttribute("href", "/");
   });
 
-  it("keeps the simple '← Back' label in playful voice (destination still /inbox)", async () => {
+  it("keeps the simple '← Back' label in playful voice (destination still /)", async () => {
     getSettingsMock.mockResolvedValue({ voice: "playful" });
     await renderPage();
     const link = screen.getByRole("link", { name: /back/i });
     expect(link).toHaveTextContent("← Back");
-    expect(link).toHaveAttribute("href", "/inbox");
+    expect(link).toHaveAttribute("href", "/");
   });
 });
 

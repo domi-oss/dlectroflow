@@ -14,7 +14,7 @@ export async function GET(req: Request): Promise<Response> {
 
   if (!googleConfigured()) {
     return NextResponse.redirect(
-      `${origin}/inbox?google=error&reason=${encodeURIComponent(
+      `${origin}/?google=error&reason=${encodeURIComponent(
         "GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set",
       )}`,
     );

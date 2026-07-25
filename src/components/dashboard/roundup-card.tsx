@@ -167,7 +167,7 @@ export function RoundupCard({
             ✨ {rollup.spark}
           </p>
           <Link
-            href="/inbox"
+            href="/"
             className="inline-block text-sm font-medium text-amber-700 hover:underline dark:text-amber-400"
           >
             Plan tomorrow →

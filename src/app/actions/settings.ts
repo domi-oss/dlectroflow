@@ -54,7 +54,7 @@ export async function updateAgingSettings(input: {
       wayOverdueHours,
     },
   });
-  revalidatePath("/inbox");
+  revalidatePath("/");
 }
 
 /** Feature 3/9 — end-of-day round-up delivery settings. */
@@ -115,7 +115,7 @@ export async function updateNotificationSettings(input: {
   });
   revalidatePath("/settings");
   revalidatePath("/dashboard");
-  revalidatePath("/inbox");
+  revalidatePath("/");
 }
 
 /** Voice preference — workspace-scoped; validates to {"plain","playful"} only. */
@@ -140,7 +140,7 @@ export async function updateBreakdownModel(model: string) {
     create: { id: workspaceId, workspaceId, breakdownModel: model },
     update: { breakdownModel: model },
   });
-  revalidatePath("/inbox");
+  revalidatePath("/");
 }
 
 /** Phase 5 — persist that the workspace dismissed the first-run welcome card. */
@@ -151,7 +151,7 @@ export async function dismissWelcome() {
     create: { id: workspaceId, workspaceId, welcomeDismissedAt: new Date() },
     update: { welcomeDismissedAt: new Date() },
   });
-  revalidatePath("/inbox");
+  revalidatePath("/");
 }
 
 /** Phase 5 — Demo: First-run preview toggle (auto-saved). Forces the Inbox to
@@ -163,7 +163,7 @@ export async function updateFirstRunPreview(enabled: boolean) {
     create: { id: workspaceId, workspaceId, firstRunPreview: Boolean(enabled) },
     update: { firstRunPreview: Boolean(enabled) },
   });
-  revalidatePath("/inbox");
+  revalidatePath("/");
 }
 
 /**

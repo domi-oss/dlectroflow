@@ -41,7 +41,7 @@ export async function startBreakdown(itemId: string): Promise<string | null> {
       taskId: task.id,
     },
   });
-  revalidatePath("/inbox");
+  revalidatePath("/");
   return task.id;
 }
 
@@ -102,7 +102,7 @@ export async function ejectStepToInbox(
   }
 
   revalidatePath(`/tasks/${taskId}`);
-  revalidatePath("/inbox");
+  revalidatePath("/");
   return { taskId, remaining: total };
 }
 
@@ -150,5 +150,5 @@ export async function confirmBreakdown(taskId: string, proposal: Proposal) {
   await touchStreakOnEngagement(workspaceId);
 
   revalidatePath(`/tasks/${taskId}`);
-  revalidatePath("/inbox");
+  revalidatePath("/");
 }

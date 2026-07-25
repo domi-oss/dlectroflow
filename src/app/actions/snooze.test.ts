@@ -71,10 +71,10 @@ describe("snoozeBrainDumpItem", () => {
     expect(call.data.snoozedUntil.getTime()).toBeGreaterThan(before);
   });
 
-  it("revalidates /inbox", async () => {
+  it("revalidates /", async () => {
     prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({ id: "i1" });
     const { snoozeBrainDumpItem } = await import("./braindump");
     await snoozeBrainDumpItem("i1", 60);
-    expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 });

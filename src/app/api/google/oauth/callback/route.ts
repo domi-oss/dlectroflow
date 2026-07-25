@@ -18,7 +18,7 @@ export async function GET(req: Request): Promise<Response> {
 
   const fail = (reason: string) => {
     const res = NextResponse.redirect(
-      `${origin}/inbox?google=error&reason=${encodeURIComponent(reason)}`,
+      `${origin}/?google=error&reason=${encodeURIComponent(reason)}`,
     );
     res.cookies.delete("google_oauth_state");
     res.cookies.delete("google_pkce_verifier");
@@ -37,7 +37,7 @@ export async function GET(req: Request): Promise<Response> {
     return fail(err instanceof Error ? err.message : "token_exchange_failed");
   }
 
-  const res = NextResponse.redirect(`${origin}/inbox?google=connected`);
+  const res = NextResponse.redirect(`${origin}/?google=connected`);
   res.cookies.delete("google_oauth_state");
   res.cookies.delete("google_pkce_verifier");
   return res;

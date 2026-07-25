@@ -248,7 +248,7 @@ export async function scheduleSingleTask(
     // Invalidate the cache now that the item has a linked Task, regardless of
     // whether the Google Tasks push below succeeds — a later failure must not
     // leave the inbox serving stale data for the new task row (Duo review).
-    revalidatePath("/inbox");
+    revalidatePath("/");
   }
 
   try {
@@ -281,7 +281,7 @@ export async function scheduleSingleTask(
     // captured `alreadyScheduled` marker so re-scheduling never re-awards (#34).
     await awardFirstSchedule(workspaceId, alreadyScheduled);
 
-    revalidatePath("/inbox");
+    revalidatePath("/");
     return { ok: true };
   } catch (err) {
     return {

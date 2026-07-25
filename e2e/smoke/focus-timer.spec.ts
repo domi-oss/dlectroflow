@@ -6,7 +6,7 @@ import { captureItem, needsReviewRow } from "../helpers";
 // then pause it and assert the control toggles to Resume.
 test("focus timer starts and pauses", async ({ page }) => {
   const label = `E2E focus task ${Date.now()}`;
-  await page.goto("/inbox");
+  await page.goto("/");
 
   await captureItem(page, label);
 

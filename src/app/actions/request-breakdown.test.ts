@@ -70,7 +70,7 @@ describe("requestBreakdown", () => {
     expect(call.data.triagedAt).toBeInstanceOf(Date);
     expect(call.data.breakdownRequestedAt).toBeInstanceOf(Date);
     expect(call.data.snoozedUntil).toBeNull();
-    expect(revalidatePathMock).toHaveBeenCalledWith("/inbox");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 });
 

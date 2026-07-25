@@ -101,8 +101,8 @@ export default async function TaskPage({
       {/* Origin-aware back breadcrumb, promoted to the top of the page (!83
           top redesign) — it used to sit isolated at the bottom, far from the
           actions it relates to. The shared <BackLink> resolves the
-          whitelist-guarded `from` (defaults to /inbox; → /library?tab=sorted
-          when opened from the Library). */}
+          whitelist-guarded `from` (defaults to / — the inbox root;
+          → /library?tab=sorted when opened from the Library). */}
       <BackLink from={from} voice={voice} />
 
       {/* Distinct task-view header (!83 top redesign, owner: "Both") — a

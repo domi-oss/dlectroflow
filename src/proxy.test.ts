@@ -25,7 +25,7 @@ describe("proxy: guest session cookie Secure flag", () => {
       "https://dlectroflow.dlectronique.dev",
     );
     // Pod sees http:// behind the ingress.
-    const req = new NextRequest("http://pod.internal/inbox");
+    const req = new NextRequest("http://pod.internal/");
     const res = await proxy(req);
     const cookie = res.cookies.get(GUEST_COOKIE);
     expect(cookie?.value).toBeTruthy();
@@ -38,7 +38,7 @@ describe("proxy: guest session cookie Secure flag", () => {
 
   it("leaves the guest cookie non-Secure for an http origin (local dev)", async () => {
     vi.mocked(requestOrigin).mockReturnValue("http://localhost:3000");
-    const req = new NextRequest("http://localhost:3000/inbox");
+    const req = new NextRequest("http://localhost:3000/");
     const res = await proxy(req);
     const cookie = res.cookies.get(GUEST_COOKIE);
     expect(cookie?.value).toBeTruthy();

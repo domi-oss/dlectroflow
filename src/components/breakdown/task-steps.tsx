@@ -107,7 +107,7 @@ export function TaskSteps({
             Re-plan manually
           </button>
           <button
-            onClick={() => router.push("/inbox")}
+            onClick={() => router.push("/")}
             className="hover:bg-accent rounded-md border px-3 py-1.5"
           >
             Keep as single to-do

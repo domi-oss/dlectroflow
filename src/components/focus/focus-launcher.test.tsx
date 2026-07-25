@@ -72,7 +72,7 @@ const data = (over: Partial<LauncherData> = {}): LauncherData => ({
 afterEach(cleanup);
 
 describe("FocusLauncher shell", () => {
-  it("renders ← Back to /inbox, the title, and a meta line linking to /dashboard", () => {
+  it("renders ← Back to /, the title, and a meta line linking to /dashboard", () => {
     render(
       <FocusLauncher
         voice="plain"
@@ -87,7 +87,7 @@ describe("FocusLauncher shell", () => {
     );
     expect(screen.getByRole("link", { name: /back/i })).toHaveAttribute(
       "href",
-      "/inbox",
+      "/",
     );
     expect(
       screen.getByRole("heading", { name: /focus timer/i }),
@@ -177,7 +177,7 @@ describe("FocusLauncher shell", () => {
     expect(screen.getByText(/Nothing to focus yet/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /inbox/i })).toHaveAttribute(
       "href",
-      "/inbox",
+      "/",
     );
     expect(screen.queryByText("Single-task to-dos")).not.toBeInTheDocument();
   });

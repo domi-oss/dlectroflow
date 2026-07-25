@@ -43,7 +43,7 @@ describe("BackLink", () => {
 
   it("defaults the DESTINATION to the inbox when `from` is absent", () => {
     render(<BackLink voice="plain" />);
-    expect(screen.getByRole("link")).toHaveAttribute("href", "/inbox");
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/");
   });
 
   it("resolves whitelisted origins to their DESTINATION (label stays '← Back')", () => {
@@ -65,11 +65,11 @@ describe("BackLink", () => {
 
   it("falls back to the inbox for an unknown/hostile origin (no open redirect)", () => {
     render(<BackLink from="https://evil.example.com" voice="plain" />);
-    expect(screen.getByRole("link")).toHaveAttribute("href", "/inbox");
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/");
   });
 
   it("falls back to the inbox for an inherited prototype key (no crash)", () => {
     render(<BackLink from="__proto__" voice="plain" />);
-    expect(screen.getByRole("link")).toHaveAttribute("href", "/inbox");
+    expect(screen.getByRole("link")).toHaveAttribute("href", "/");
   });
 });

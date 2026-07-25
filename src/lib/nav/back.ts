@@ -29,7 +29,7 @@ export const BACK_TARGETS = {
 } as const satisfies Record<string, BackTarget>;
 
 export const DEFAULT_BACK_TARGET: BackTarget = {
-  href: "/inbox",
+  href: "/",
 };
 
 /** A known `?from=` origin key. */

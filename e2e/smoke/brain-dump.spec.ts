@@ -6,7 +6,7 @@ import { captureItem, needsReviewRow } from "../helpers";
 // "Add to-do" moves the item into the single-task bucket.
 test("brain-dump item triages into a single-task to-do", async ({ page }) => {
   const label = `E2E buy milk ${Date.now()}`;
-  await page.goto("/inbox");
+  await page.goto("/");
 
   await captureItem(page, label);
 
