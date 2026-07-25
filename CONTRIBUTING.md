@@ -48,6 +48,15 @@ npm run format:check   # prettier
 npx tsc --noEmit       # typecheck
 ```
 
+> **Heads-up on security scans.** The pipeline also runs blocking security
+> scanners on every MR — SAST, Advanced SAST, dependency scanning, secret
+> detection, and container scanning. Under the project's Scan Result Policy, a
+> **new Critical/High finding requires maintainer approval before merge**, so an
+> MR that pulls in a dependency with a known CVE (or trips a SAST rule) can be
+> blocked without prior warning from your local gates. If it happens, fix the
+> finding at the source (bump/replace the dependency, adjust the flagged code)
+> rather than waiting on an override.
+
 **What we look for** (this is a production app, held to a real bar):
 
 - **Tests first.** Follow TDD where you can — a failing test, then the code. New behavior needs coverage; bug fixes need a regression test.
@@ -68,7 +77,10 @@ npx tsc --noEmit       # typecheck
 
 - By contributing, you agree that your contributions are licensed under this
   project's license, **[AGPL-3.0](LICENSE)** (inbound = outbound). There is no
-  separate CLA.
+  separate CLA. Note AGPL-3.0's network-service clause: deploying a modified
+  version as a service over a network is itself a distribution event, so it
+  triggers the obligation to make your source available to those users — worth
+  knowing since this app is meant to be self-hosted.
 - Please **sign off your commits** (`git commit -s`) to certify you wrote the
   change and can submit it under that license — this is the
   [Developer Certificate of Origin](https://developercertificate.org/).
