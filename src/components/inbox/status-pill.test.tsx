@@ -62,4 +62,28 @@ describe("StatusPill", () => {
     // The pre-a11y hardcoded hex is gone.
     expect(pill?.getAttribute("style") ?? "").not.toContain("#2f7d32");
   });
+
+  // #52 — on the inbox metadata line the pill renders at meta size: small +
+  // muted (matching "captured x ago"), demoting urgency to secondary metadata.
+  it("size='meta': renders muted at meta size (text-xs, text-muted-foreground) — not the loud tier colour/weight", () => {
+    const { container } = render(
+      <StatusPill tier="wayOverdue" voice="plain" size="meta" />,
+    );
+    const pill = container.querySelector("span");
+    expect(pill?.className).toContain("text-xs");
+    expect(pill?.className).toContain("text-muted-foreground");
+    // Demoted: no loud tier colour, no medium weight.
+    expect(pill?.className).not.toContain("text-red-700");
+    expect(pill?.className).not.toContain("font-medium");
+  });
+
+  it("size='meta': still not colour-only — keeps the decorative dot glyph + the word label", () => {
+    const { container } = render(
+      <StatusPill tier="wayOverdue" voice="plain" size="meta" />,
+    );
+    expect(screen.getByText(/Way overdue/)).toBeInTheDocument();
+    expect(container.querySelector('[aria-hidden="true"]')).toHaveTextContent(
+      "🔴",
+    );
+  });
 });

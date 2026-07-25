@@ -159,7 +159,7 @@ export function LibraryMultistep({
                 <div className="min-w-0 flex-1">
                   <button
                     type="button"
-                    className="block w-full text-left font-medium break-words"
+                    className="block w-full text-left text-base font-semibold break-words"
                     aria-expanded={sel.selecting ? undefined : expanded}
                     aria-controls={
                       expanded && item.taskId

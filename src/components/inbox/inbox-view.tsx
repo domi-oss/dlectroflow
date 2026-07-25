@@ -842,7 +842,10 @@ export function InboxView({
                             titleEditor(item)
                           ) : awaitingBreakdown ? (
                             <span className="min-w-0 flex-1 break-words">
-                              {item.text} {pencil(item)}
+                              <span className="text-base font-semibold">
+                                {item.text}
+                              </span>{" "}
+                              {pencil(item)}
                             </span>
                           ) : (
                             <span className="min-w-0 flex-1 break-words">
@@ -853,7 +856,7 @@ export function InboxView({
                                   e.stopPropagation();
                                   setExpandedId(expanded ? null : item.id);
                                 }}
-                                className="break-words text-left hover:underline"
+                                className="text-base font-semibold break-words text-left hover:underline"
                               >
                                 {item.text}
                               </button>{" "}
@@ -1071,7 +1074,10 @@ export function InboxView({
                             titleEditor(item)
                           ) : (
                             <span className="min-w-0 flex-1 break-words">
-                              {item.text} {pencil(item)}
+                              <span className="text-base font-semibold">
+                                {item.text}
+                              </span>{" "}
+                              {pencil(item)}
                             </span>
                           )}
                           {editingId !== item.id && (
@@ -1216,7 +1222,7 @@ export function InboxView({
                                     optionsOpen ? null : item.id,
                                   )
                                 }
-                                className="break-words text-left hover:underline"
+                                className="text-base font-semibold break-words text-left hover:underline"
                               >
                                 {item.text}
                               </button>{" "}
@@ -1391,7 +1397,14 @@ export function InboxView({
                             titleEditor(item)
                           ) : (
                             <span className="min-w-0 flex-1 break-words">
-                              <span className={COMPLETE_TEXT}>{item.text}</span>{" "}
+                              <span
+                                className={cn(
+                                  "text-base font-semibold",
+                                  COMPLETE_TEXT,
+                                )}
+                              >
+                                {item.text}
+                              </span>{" "}
                               {pencil(item)}
                             </span>
                           )}
@@ -1758,46 +1771,57 @@ function ItemRow({
       <div className="flex items-start gap-3">
         {dragGrip}
         <div className="min-w-0 flex-1 space-y-1">
+          {/* #51: the title is the dominant text — larger + heavier than the
+              metadata line below it. */}
           <div className="flex items-center gap-2">
-            <StatusPill tier={tier} voice={voice} />
             {titleEditor ?? (
               <>
-                <span className="break-words">{item.text}</span>
+                <span className="text-base font-semibold break-words">
+                  {item.text}
+                </span>
                 {editButton}
               </>
             )}
           </div>
-          <AgeLabel createdAt={item.createdAt} aging={aging} now={now} />
+          {/* #52: the age/status pill is demoted off the title line down onto
+              the metadata line, left of "captured x ago", at meta size. */}
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+            <StatusPill tier={tier} voice={voice} size="meta" />
+            <span aria-hidden="true" className="text-muted-foreground text-xs">
+              ·
+            </span>
+            <AgeLabel createdAt={item.createdAt} aging={aging} now={now} />
+          </div>
         </div>
       </div>
+      {/* #50: right-sized to a quiet inline nudge that stays subordinate to the
+          title — no loud bordered / hardcoded-hex box. Still-need-it / Dismiss
+          keep ≥44px hit targets (touchTarget) and full keyboard access, and the
+          tokens adapt to dark mode (the old inline hex did not). */}
       {showStillNeededPrompt && (
-        <div
-          className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-xs"
-          style={{
-            backgroundColor: "#fff5f5",
-            borderColor: "#c0392b",
-            color: "#c0392b",
-          }}
-        >
-          <span>{t("prompt.stillNeeded", voice)}</span>
-          <span className="flex shrink-0 items-center gap-2">
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 pl-1 text-xs">
+          <span className="text-muted-foreground">
+            {t("prompt.stillNeeded", voice)}
+          </span>
+          <span className="flex shrink-0 items-center gap-1">
             <button
               onClick={onFreshen}
               className={cn(
-                "rounded-md border px-2 py-1 font-medium",
+                "text-foreground rounded-md px-2 font-medium hover:underline",
                 touchTarget,
               )}
-              style={{ borderColor: "#c0392b", color: "#c0392b" }}
             >
               {t("action.stillNeeded", voice)}
             </button>
+            <span aria-hidden="true" className="text-muted-foreground">
+              ·
+            </span>
             <button
               onClick={onDismissPrompt}
               className={cn(
-                "rounded-md border px-2 py-1 font-medium",
+                "text-muted-foreground hover:text-foreground rounded-md px-2",
                 touchTarget,
               )}
-              style={{ borderColor: "#c0392b", color: "#c0392b" }}
             >
               {t("action.dismiss", voice)}
             </button>

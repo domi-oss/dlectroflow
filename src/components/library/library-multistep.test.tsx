@@ -93,6 +93,22 @@ describe("LibraryMultistep", () => {
     );
     expect(screen.getByTestId("task-steps")).toHaveTextContent("Tnew");
   });
+  // #51 — the title is the dominant row text across the Library hub, matching
+  // the plated tab + the inbox rows (not just font-medium at the small row size).
+  it("#51: the row title is the dominant text (text-base font-semibold)", () => {
+    render(
+      <LibraryMultistep
+        items={items}
+        voice="plain"
+        now={Date.now()}
+        settings={settings}
+      />,
+    );
+    const title = screen.getByRole("button", { name: /task old/i });
+    expect(title.className).toMatch(/text-base/);
+    expect(title.className).toMatch(/font-semibold/);
+  });
+
   it("single-open: opening another row collapses the first", () => {
     render(
       <LibraryMultistep

@@ -255,6 +255,23 @@ describe("LibraryRows (plated) — meta, editable estimate, select mode", () => 
     expect(setItemEstimate).not.toHaveBeenCalled();
   });
 
+  // #51 — the title is the dominant row text (larger + heavier); metadata
+  // (age/estimate) recedes to text-xs, matching the inbox treatment.
+  it("#51: the task title is the dominant row text (text-base font-semibold)", () => {
+    render(
+      <LibraryRows
+        items={[makeItem({ id: "a", text: "todo a" })]}
+        tab="plated"
+        voice="plain"
+        now={NOW}
+        settings={settings}
+      />,
+    );
+    const title = screen.getByText("todo a");
+    expect(title.className).toMatch(/text-base/);
+    expect(title.className).toMatch(/font-semibold/);
+  });
+
   it("select mode → complete calls bulkBrainDumpAction with the ticked ids", async () => {
     render(
       <LibraryRows

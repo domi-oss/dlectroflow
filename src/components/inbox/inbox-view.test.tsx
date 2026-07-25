@@ -366,6 +366,89 @@ describe("InboxView — 24h still-needed prompt", () => {
   });
 });
 
+describe("InboxView — row hierarchy (#50/#51/#52)", () => {
+  // #51 — the title is the dominant text in its row (larger + heavier), so it
+  // no longer fades into the small metadata size.
+  it("#51: the task title is the dominant row text (text-base font-semibold)", () => {
+    render(
+      <InboxView
+        initialItems={[makeItem({ id: "h1", text: "buy oat milk" })]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const title = screen.getByText("buy oat milk");
+    expect(title.className).toMatch(/text-base/);
+    expect(title.className).toMatch(/font-semibold/);
+    // …and the metadata (captured-ago) recedes to text-xs.
+    expect(screen.getByText(/captured/).className).toMatch(/text-xs/);
+  });
+
+  // #52 — the age/status pill moves off the title line down to the metadata
+  // line, sitting alongside "captured x ago" (not competing with the title).
+  it("#52: the age/status pill sits on the metadata line with captured-ago, not on the title line", () => {
+    render(
+      <InboxView
+        initialItems={[
+          makeItem({
+            id: "h2",
+            text: "buy oat milk",
+            createdAt: new Date(Date.now() - 100 * 3600_000), // wayOverdue
+          }),
+        ]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const status = screen.getByText(/Way overdue/);
+    const captured = screen.getByText(/captured/);
+    // Pill + captured-ago share one metadata line.
+    const metaLine = status.closest("div")!;
+    expect(metaLine).toContainElement(captured);
+    // The pill is NOT on the title line.
+    const titleLine = screen.getByText("buy oat milk").closest("div")!;
+    expect(titleLine).not.toContainElement(status);
+  });
+
+  // #50 — the stale-reminder is right-sized to a quiet inline nudge instead of
+  // a loud bordered/hardcoded-hex box that outweighed the title.
+  it("#50: the stale-reminder is a quiet inline nudge (no heavy hardcoded box), keeping Still-need-it/Dismiss as adequate hit targets", () => {
+    render(
+      <InboxView
+        initialItems={[
+          makeItem({
+            id: "h3",
+            text: "old thing",
+            createdAt: new Date(Date.now() - 25 * 3600_000),
+          }),
+        ]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const prompt = screen.getByText(
+      "This has been sitting a while — still needed?",
+    );
+    const box = prompt.closest("div")!;
+    // The loud red box is gone: no bordered/padded box, no hardcoded hex.
+    expect(box.className).not.toContain("border");
+    expect(box.getAttribute("style") ?? "").not.toContain("#c0392b");
+    expect(box.getAttribute("style") ?? "").not.toContain("#fff5f5");
+    // Actions stay keyboard-usable + adequately hit-targeted (≥44px). Scope to
+    // the row — "Dismiss" also names the NavBadge ✕ at the top of the inbox.
+    const row = prompt.closest("li")!;
+    expect(
+      within(row).getByRole("button", { name: "Still need it" }),
+    ).toHaveClass("min-h-11");
+    expect(within(row).getByRole("button", { name: "Dismiss" })).toHaveClass(
+      "min-h-11",
+    );
+  });
+});
+
 describe("InboxView — inbox zero copy", () => {
   it("renders the voice-aware inbox.zero string with no items", () => {
     render(
