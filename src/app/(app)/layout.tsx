@@ -12,6 +12,7 @@ import { VoiceProvider } from "@/components/voice-provider";
 import { ReviewNudge } from "@/components/dashboard/review-nudge";
 import { AppMenu } from "@/components/nav/app-menu";
 import { BrandMark } from "@/components/brand/brand-mark";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { completionRootAttrs } from "@/lib/completion-style";
 import { typefaceRootAttrs } from "@/lib/typeface";
 import { type Voice } from "@/lib/strings";
@@ -74,6 +75,11 @@ export default async function AppLayout({
             dlectroflow
           </Link>
           <div className="text-muted-foreground flex items-center gap-4 text-sm">
+            {/* #49 — theme toggle lives in the header, immediately left of the
+                owner sign-in / sign-out action so it's always reachable (light
+                + dark). It's a self-contained client control; it renders the
+                same for guest and owner. */}
+            <ThemeToggle />
             {owner ? (
               // Logout is a state change → POST-only (CSRF-safe), so it's a
               // small form/button rather than a GET link. See #21 (P5 batch B).
