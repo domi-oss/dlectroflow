@@ -12,9 +12,7 @@ vi.mock("@/lib/origin");
 describe("owner logout route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(requestOrigin).mockReturnValue(
-      "https://dlectroflow.dlectronique.dev",
-    );
+    vi.mocked(requestOrigin).mockReturnValue("https://dlectroflow.dev");
   });
   afterEach(() => vi.restoreAllMocks());
 
@@ -25,16 +23,14 @@ describe("owner logout route", () => {
   it("POST clears the owner cookie and redirects to /", async () => {
     expect(typeof logout.POST).toBe("function");
     const res = (await logout.POST(
-      new Request("https://dlectroflow.dlectronique.dev/api/auth/logout", {
+      new Request("https://dlectroflow.dev/api/auth/logout", {
         method: "POST",
       }),
     )) as NextResponse;
 
     // Redirect back into the app (303 → follow-up GET after the POST).
     expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe(
-      "https://dlectroflow.dlectronique.dev/",
-    );
+    expect(res.headers.get("location")).toBe("https://dlectroflow.dev/");
 
     // The owner cookie is expired/cleared.
     const cleared = res.cookies.get(OWNER_COOKIE);
@@ -49,7 +45,7 @@ describe("owner logout route", () => {
   // Reject when an Origin header is present but does not match our origin.
   it("rejects a cross-origin POST with 403 and does NOT clear the cookie", async () => {
     const res = (await logout.POST(
-      new Request("https://dlectroflow.dlectronique.dev/api/auth/logout", {
+      new Request("https://dlectroflow.dev/api/auth/logout", {
         method: "POST",
         headers: { origin: "https://evil.example.com" },
       }),
@@ -62,22 +58,20 @@ describe("owner logout route", () => {
 
   it("allows a same-origin POST (matching Origin header) and clears the cookie", async () => {
     const res = (await logout.POST(
-      new Request("https://dlectroflow.dlectronique.dev/api/auth/logout", {
+      new Request("https://dlectroflow.dev/api/auth/logout", {
         method: "POST",
-        headers: { origin: "https://dlectroflow.dlectronique.dev" },
+        headers: { origin: "https://dlectroflow.dev" },
       }),
     )) as NextResponse;
 
     expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe(
-      "https://dlectroflow.dlectronique.dev/",
-    );
+    expect(res.headers.get("location")).toBe("https://dlectroflow.dev/");
     expect(res.cookies.get(OWNER_COOKIE)?.value).toBe("");
   });
 
   it("allows a POST with no Origin header (non-browser client)", async () => {
     const res = (await logout.POST(
-      new Request("https://dlectroflow.dlectronique.dev/api/auth/logout", {
+      new Request("https://dlectroflow.dev/api/auth/logout", {
         method: "POST",
       }),
     )) as NextResponse;

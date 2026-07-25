@@ -43,7 +43,7 @@ run on a schedule. The table below is what a **human** runs *on top* of that flo
 | **Pre-release / on-demand** | **Layer 3** before onboarding more users or when the data/scale shape changes (also unlocks the #16 weekly health/spend checks). **Layer 4** when the Dockerfile / CI / compose / Prisma flow changes. Full **Layer 2** before anything touching user data hits the live domain. |
 
 **Hard trigger:** run **Layer 2** before anything touching auth, tokens, or user-data
-isolation reaches `dlectroflow.dlectronique.dev`.
+isolation reaches `dlectroflow.dev`.
 
 **First pass (the app already has real users, so front-load by risk — not strictly 0→4):**
 cheap CI automations → **Layer 2** Prisma isolation → **Layer 0** on the core

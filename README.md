@@ -4,7 +4,7 @@
 
 An ADHD helper web app — **capture → clarify → schedule → focus → reward**.
 
-**🌐 Try it:** a hosted instance runs at [dlectroflow.dlectronique.dev](https://dlectroflow.dlectronique.dev) — kick the tyres as a guest, no signup.
+**🌐 Try it:** a hosted instance runs at [dlectroflow.dev](https://dlectroflow.dev) — kick the tyres as a guest, no signup.
 
 You brain-dump anything, Claude breaks the scary stuff into tiny do-able steps,
 those steps land in Google Tasks and get scheduled onto your real calendar (a
@@ -49,7 +49,7 @@ This is **in active development**. Being honest so you don't hit surprises:
 | 🎉 Rewards & streaks + dashboard | ✅ works |
 | 🌇 End-of-day round-up (in-app + desktop) | ✅ works |
 | ✉️ Round-up **email** (opt-in) | ✅ works when `RESEND_API_KEY` is set; cleanly disabled otherwise |
-| 🐳 Postgres + GitLab CI/CD | ✅ **live** — deployed to GKE Autopilot at **[dlectroflow.dlectronique.dev](https://dlectroflow.dlectronique.dev)** (valid TLS) via GitLab CI/CD; every MR gets a review app. Local Postgres via Docker Compose. |
+| 🐳 Postgres + GitLab CI/CD | ✅ **live** — deployed to GKE Autopilot at **[dlectroflow.dev](https://dlectroflow.dev)** (valid TLS) via GitLab CI/CD; every MR gets a review app. Local Postgres via Docker Compose. |
 
 If all you want right now is **capture → Claude breakdown**, that's fully working
 and genuinely useful.
@@ -263,7 +263,7 @@ Commit the resulting `axe-baseline.json` diff.
 The app deploys automatically via **GitLab CI/CD to GKE Autopilot** (europe-west2):
 
 - **Review apps** — every MR gets its own environment at `https://mr-<IID>.YOUR-STATIC-IP.sslip.io` (the MR shows a "View app" button). The namespace is deleted when the MR closes.
-- **Production** — merge to `main` deploys to **https://dlectroflow.dlectronique.dev**.
+- **Production** — merge to `main` deploys to **https://dlectroflow.dev**.
 
 For the full provisioning walkthrough (cluster, ingress-nginx, cert-manager, GitLab agent, secrets, DNS, OAuth), see **[docs/deploy-runbook.md](docs/deploy-runbook.md)**.
 

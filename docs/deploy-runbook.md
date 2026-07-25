@@ -1,6 +1,6 @@
 # dlectroflow — Deployment Runbook (GKE Autopilot + GitLab)
 
-All infra lives in GCP region **europe-west2**. Prod host **dlectroflow.dlectronique.dev**.
+All infra lives in GCP region **europe-west2**. Prod host **dlectroflow.dev**.
 
 ## 0. Prerequisites
 - `gcloud` authed to the target project; `kubectl`, `helm` installed.
@@ -95,7 +95,7 @@ EOF
 >   --set 'crds.enabled=true' \
 >   --set 'global.leaderElection.namespace=cert-manager' \
 >   --set "hostAliases[0].ip=$INGRESS_CLUSTERIP" \
->   --set 'hostAliases[0].hostnames[0]=dlectroflow.dlectronique.dev'
+>   --set 'hostAliases[0].hostnames[0]=dlectroflow.dev'
 > ```
 > Public DNS is untouched, so Let's Encrypt still validates over the internet. (Review apps on dynamic `*.sslip.io` hosts are left on the ingress default self-signed cert — ephemeral previews, and the per-MR host would need its own alias.)
 
@@ -134,22 +134,22 @@ Confirm these secrets exist with the listed scopes (all created except Resend):
 
 ## 8. Google OAuth redirect
 Add to the OAuth client's authorized redirect URIs (keep the local one too):
-- `https://dlectroflow.dlectronique.dev/api/google/oauth/callback`
+- `https://dlectroflow.dev/api/google/oauth/callback`
 - `http://localhost:3000/api/google/oauth/callback`
 
 After the production deploy, confirm the app builds an **https** redirect URI behind
 ingress (Task 3 handles the forwarded-proto derivation):
 ```bash
-curl -s -o /dev/null -D - "https://dlectroflow.dlectronique.dev/api/google/oauth/start" | grep -i '^location:'
+curl -s -o /dev/null -D - "https://dlectroflow.dev/api/google/oauth/start" | grep -i '^location:'
 ```
-The `Location:` URL's `redirect_uri=` must be `https%3A%2F%2Fdlectroflow.dlectronique.dev%2F…`.
+The `Location:` URL's `redirect_uri=` must be `https%3A%2F%2Fdlectroflow.dev%2F…`.
 If it shows `http%3A%2F%2F` or Google returns `redirect_uri_mismatch`, re-check the
 ingress `X-Forwarded-Proto` header and Task 3's `requestOrigin`.
 
 ## 9. Deploy
 - Open an MR → `deploy_review` publishes to `https://mr-<IID>.YOUR-STATIC-IP.sslip.io` (see the MR "View app" button).
   > **sslip.io host format:** use the **dash-separated** IP form (e.g. `mr-<IID>.203-0-113-5.sslip.io` for an ingress IP of `203.0.113.5`), **not** the dotted form. A dotted quad *after* a hyphenated prefix like `mr-1.` makes sslip.io misparse the address (it reads the leading `1` as part of the IP); the dash form resolves correctly. (`203.0.113.5` is a documentation placeholder — substitute your reserved ingress IP.)
-- Merge to `main` → `deploy_production` publishes to `https://dlectroflow.dlectronique.dev`.
+- Merge to `main` → `deploy_production` publishes to `https://dlectroflow.dev`.
 
 ## 10. Cost guardrails
 - Confirm the free Autopilot/zonal cluster credit on the billing account.
@@ -157,7 +157,7 @@ ingress `X-Forwarded-Proto` header and Task 3's `requestOrigin`.
 
 ## 11. Verify
 - `kubectl -n dlectroflow-prod get pods` → app + postgres Running.
-- `curl -I https://dlectroflow.dlectronique.dev` → 200 + valid TLS.
+- `curl -I https://dlectroflow.dev` → 200 + valid TLS.
 - Google "Connect" completes on the prod host.
 - Close the MR → review namespace is deleted.
 
@@ -316,7 +316,7 @@ credentials — the order below assumes the worst anyway.
 3. **Google tokens.** In [Google Account → Security → Third-party access],
    remove dlectroflow's grant (kills the refresh token server-side), then
    `DELETE FROM "GoogleAuth";` and reconnect via
-   `https://dlectroflow.dlectronique.dev/api/google/oauth/start`.
+   `https://dlectroflow.dev/api/google/oauth/start`.
 4. **Reclaim tokens** (only if a `ReclaimAuth` row exists — the write path is
    unused): revoke dlectroflow in Reclaim's connected-apps settings, then
    `DELETE FROM "ReclaimAuth";` — a fresh client re-registers on next connect.

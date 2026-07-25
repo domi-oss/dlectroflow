@@ -18,7 +18,7 @@ merge to `main` — all onto a **GKE Autopilot** cluster reached through the **G
 agent for Kubernetes**, with TLS, Postgres, and secrets sourced from **GitLab Secrets
 Manager (beta)**.
 
-Production URL: **https://dlectroflow.dlectronique.dev**
+Production URL: **https://dlectroflow.dev**
 
 ---
 
@@ -31,7 +31,7 @@ Production URL: **https://dlectroflow.dlectronique.dev**
 | Provisioning state | Nothing exists yet — we produce all artifacts **+ a runbook** the user runs |
 | Deploy model | **Review apps (per-MR, ephemeral) + production (on `main`)** |
 | Review-app hostnames | **sslip.io** (`mr-<IID>.YOUR_STATIC_IP.sslip.io`), zero DNS setup |
-| Production host | **`dlectroflow.dlectronique.dev`** (subdomain; apex left free) |
+| Production host | **`dlectroflow.dev`** (subdomain; apex left free) |
 | TLS | **Let's Encrypt HTTP-01** via cert-manager, per-host (no wildcard needed) |
 | Manifests | **Helm** chart, one chart rendered per environment |
 | Database | **Postgres everywhere.** Local via Docker Compose; in-cluster StatefulSet per env |
@@ -63,7 +63,7 @@ cluster credentials are stored in GitLab.
                         │                 ├─ app (same chart/image)
                         │                 ├─ Postgres StatefulSet (PVC 8Gi, persistent)
                         │                 └─ Secret (from Secrets Manager, prod scope)
-                        │                 host: dlectroflow.dlectronique.dev  (A record → IP)
+                        │                 host: dlectroflow.dev  (A record → IP)
 ```
 
 **Key properties**
@@ -82,7 +82,7 @@ cluster credentials are stored in GitLab.
 |---|---|---|
 | Trigger | MR pipeline | Merge to `main` |
 | Namespace | `dlectroflow-mr-<IID>` | `dlectroflow-prod` |
-| Host | `mr-<IID>.YOUR_STATIC_IP.sslip.io` | `dlectroflow.dlectronique.dev` |
+| Host | `mr-<IID>.YOUR_STATIC_IP.sslip.io` | `dlectroflow.dev` |
 | Postgres | StatefulSet, `emptyDir` (ephemeral) | StatefulSet, PVC 8Gi (persistent) |
 | Compute class | **Spot** | on-demand |
 | Lifecycle | `auto_stop_in: 2 days` + manual `stop_review` | long-lived |
@@ -200,8 +200,8 @@ Stages: `build → deploy`.
   `kubectl delete namespace`. `environment: { name: review/$CI_MERGE_REQUEST_IID,
   action: stop }`.
 - **`deploy_production`** — `rules: if $CI_COMMIT_BRANCH == "main"`. Namespace
-  `dlectroflow-prod`, host `dlectroflow.dlectronique.dev`, `postgres.persistent=true`,
-  on-demand. `environment: { name: production, url: https://dlectroflow.dlectronique.dev }`.
+  `dlectroflow-prod`, host `dlectroflow.dev`, `postgres.persistent=true`,
+  on-demand. `environment: { name: production, url: https://dlectroflow.dev }`.
 
 All deploy jobs select the agent context
 (`kubectl config use-context gl-demo-ultimate-dtop/dlectroflow:dlectroflow`) before
@@ -238,7 +238,7 @@ so values arrive as env vars and pass into `helm --set-string secrets.*`:
 deploy_production:
   environment:
     name: production
-    url: https://dlectroflow.dlectronique.dev
+    url: https://dlectroflow.dev
   secrets:
     ANTHROPIC_API_KEY:
       gitlab_secrets_manager: { name: ANTHROPIC_API_KEY, source: group/gl-demo-ultimate-dtop }
@@ -257,7 +257,7 @@ deploy_production:
     - helm upgrade --install dlectroflow charts/dlectroflow
         --namespace dlectroflow-prod --create-namespace
         --set-string image.tag="$CI_COMMIT_SHA"
-        --set-string host="dlectroflow.dlectronique.dev"
+        --set-string host="dlectroflow.dev"
         --set postgres.persistent=true
         --set-string secrets.anthropicApiKey="$ANTHROPIC_API_KEY"
         --set-string secrets.googleClientId="$GOOGLE_CLIENT_ID"
@@ -293,7 +293,7 @@ documents re-adding them.
   once nginx answers on :80 at the resolved host. Create DNS **before** expecting the
   cert.
 - **Google OAuth redirect URIs** on the OAuth client:
-  `https://dlectroflow.dlectronique.dev/api/google/oauth/callback` (prod) and
+  `https://dlectroflow.dev/api/google/oauth/callback` (prod) and
   `http://localhost:3000/api/google/oauth/callback` (local). No wildcard for review apps.
 
 ---
@@ -355,7 +355,7 @@ cluster credit is unused. Estimates — verify in the GCP pricing calculator.
 - **Review app:** opening an MR produces a running app at the sslip.io URL with valid
   TLS; the MR shows a "View app" button; Claude breakdown works; closing the MR tears
   the namespace down.
-- **Production:** merge to `main` deploys to `dlectroflow.dlectronique.dev` with valid
+- **Production:** merge to `main` deploys to `dlectroflow.dev` with valid
   TLS; DB persists across a redeploy; Google "Connect" completes on the prod host.
 - **Secrets:** no secret value appears in repo, logs, or job output; prod-scope secrets
   absent from review pipelines.

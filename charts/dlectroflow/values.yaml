@@ -4,7 +4,13 @@ image:
   pullPolicy: IfNotPresent
 
 env: production        # review | production
-host: dlectroflow.dlectronique.dev
+host: dlectroflow.dev
+# Old hostnames that should 301-redirect to `host`, each served on its own TLS
+# cert by templates/ingress-legacy-redirect.yaml. Empty by default (review apps
+# never redirect); production sets it via CI (--set legacyHosts[0]=...). Powers
+# the zero-downtime domain migration (#54): both domains resolve to the ingress,
+# the old one permanently redirects to the canonical host.
+legacyHosts: []
 replicas: 2            # review apps pinned to 1 via CI (no HA need on spot)
 spot: false            # true for review apps (nodeSelector onto gke-spot nodes)
 
