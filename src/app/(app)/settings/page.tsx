@@ -86,7 +86,7 @@ export default async function SettingsPage({
       null}
       <div className="flex gap-4 text-sm">
         <Link href="/help?from=settings" className="underline">
-          {t("nav.help", voice)} &amp; docs
+          {t("settings.helpDocs", voice)}
         </Link>
       </div>
     </div>

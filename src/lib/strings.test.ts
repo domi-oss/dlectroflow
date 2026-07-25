@@ -125,6 +125,9 @@ describe("t() function", () => {
     ["guest.newHere", "plain", "New here?"],
     ["guest.helpCta", "plain", "See the help & docs →"],
     ["guest.helpCta", "playful", "🆘 See the help & docs →"],
+    // Settings footer link — dedicated key, both words capitalised, space intact.
+    ["settings.helpDocs", "plain", "Help & Docs"],
+    ["settings.helpDocs", "playful", "🆘 Help & Docs"],
   ];
 
   for (const [key, voice, expected] of cases) {
@@ -516,6 +519,7 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "settings.ownerOnly",
     "settings.modelOwnerHint",
     "settings.integrationsOwnerHint",
+    "settings.helpDocs",
     "guest.newHere",
     "guest.helpCta",
   ];
