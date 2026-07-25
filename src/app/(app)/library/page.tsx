@@ -164,8 +164,16 @@ export default async function LibraryPage({
               <span
                 className={cn(
                   "rounded-full px-1.5 py-0.5 text-xs",
+                  // #48: on the active (magenta) tab the count chip must stay
+                  // WCAG-AA. The old translucent `bg-primary-foreground/20`
+                  // lightened the magenta toward the inherited white text
+                  // (3.90:1 light / 4.44:1 dark — both < AA 4.5:1). Reuse the
+                  // #40 brand tokens as a SOLID pairing instead — opaque
+                  // `bg-primary-foreground` with explicit `text-primary`
+                  // (5.41:1 light / 6.32:1 dark), mirroring the inactive chip's
+                  // solid `secondary` pairing. No new colors introduced.
                   isActive
-                    ? "bg-primary-foreground/20"
+                    ? "bg-primary-foreground text-primary"
                     : "bg-secondary text-secondary-foreground",
                 )}
               >

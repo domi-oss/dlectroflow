@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { PrismaClient } from "@prisma/client";
 import { captureItem, needsReviewRow } from "./helpers";
 
 // Dedicated color-contrast gate for the #40 visual-identity-refresh palette
@@ -41,6 +42,62 @@ async function scanColorContrast(page: Page) {
   return results.violations;
 }
 
+// #48 seeding. The Library hub's active tab-count chip only fails as an axe
+// *violation* once its count reaches two digits: axe skips single-character
+// text as "too short to determine if it is actual text content" (an
+// `incomplete` result, not a violation), so a fresh/empty hub — every count
+// "0" — can never catch this regression. We seed >=10 triaged, task-less
+// brain-dump items (which land in the default "Single-task"/plated tab, see
+// libraryBuckets) directly in the owner workspace so the active pill renders a
+// 2-digit count and axe actually evaluates its contrast. Seeding via Prisma
+// (not the capture UI) keeps it deterministic and fast; items are marked and
+// deleted after each scan so the DB stays clean for other specs. The marker is
+// scoped per theme so each variant owns its own slice of seeded rows — the
+// suite runs serially today (playwright.config.ts: workers 1, fullyParallel
+// false) so there is no cross-variant race, but a per-theme marker keeps the
+// helpers correct if that ever changes (one variant's cleanup can never delete
+// another's data).
+const SEED_MARKER = "a11y-lib-pill";
+const OWNER_WS = "owner"; // OWNER_WORKSPACE_ID (src/lib/constants.ts)
+
+async function seedPlatedItems(
+  count: number,
+  marker: string,
+): Promise<PrismaClient> {
+  const prisma = new PrismaClient();
+  // Own the client's lifecycle on the seed path too: if either write throws,
+  // the caller never receives `prisma` (so its try/finally never disconnects),
+  // which would leak the connection. Disconnect-then-rethrow here instead.
+  try {
+    await prisma.workspace.upsert({
+      where: { id: OWNER_WS },
+      create: { id: OWNER_WS, kind: "owner" },
+      update: {},
+    });
+    await prisma.brainDumpItem.createMany({
+      data: Array.from({ length: count }, (_, i) => ({
+        text: `${marker} ${i}`,
+        status: "triaged", // BrainDumpStatus.Triaged → singleTask/plated bucket
+        workspaceId: OWNER_WS,
+      })),
+    });
+  } catch (err) {
+    await prisma.$disconnect();
+    throw err;
+  }
+  return prisma;
+}
+
+async function cleanupSeed(
+  prisma: PrismaClient,
+  marker: string,
+): Promise<void> {
+  await prisma.brainDumpItem.deleteMany({
+    where: { text: { startsWith: marker } },
+  });
+  await prisma.$disconnect();
+}
+
 function expectNoContrastViolations(
   violations: Awaited<ReturnType<typeof scanColorContrast>>,
 ): void {
@@ -79,6 +136,36 @@ for (const theme of THEMES) {
         expectNoContrastViolations(await scanColorContrast(page));
       });
     }
+
+    // #48: the Library hub's active tab-count chip. It rendered white
+    // `text-primary-foreground` on a translucent `bg-primary-foreground/20`
+    // chip over the magenta active tab — the white overlay lightened the bg
+    // toward the text, dropping contrast to 3.90:1 (light) / 4.44:1 (dark),
+    // both below AA-normal 4.5:1. The fix uses an opaque `bg-primary-foreground`
+    // / `text-primary` pairing (5.41:1 / 6.32:1). Seed a 2-digit count so axe
+    // evaluates the pill as real text (see seedPlatedItems above), then scan.
+    test(`zero color-contrast violations: library hub active tab-count pill (${theme})`, async ({
+      page,
+    }) => {
+      const marker = `${SEED_MARKER}-${theme}`;
+      const prisma = await seedPlatedItems(12, marker);
+      try {
+        // Default hub tab is "Single-task" (plated) — now holding the 12 seeded
+        // items, so its active count chip renders "12" (2 digits).
+        await page.goto("/library");
+        await waitForShell(page);
+        const activePill = page.locator(
+          'nav[aria-label="Library tabs"] a[aria-current="page"] span.rounded-full',
+        );
+        // Guard the repro precondition: the active pill must show a >=2-digit
+        // count, or axe would skip it as "too short" and the scan would be a
+        // no-op that can't catch #48.
+        await expect(activePill).toHaveText(/^\d{2,}$/);
+        expectNoContrastViolations(await scanColorContrast(page));
+      } finally {
+        await cleanupSeed(prisma, marker);
+      }
+    });
 
     // The "Break into steps now?" CTA (bg-destructive + text-destructive-
     // foreground, src/components/inbox/inbox-view.tsx) only renders once an
