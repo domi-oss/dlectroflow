@@ -519,6 +519,7 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "settings.ownerOnly",
     "settings.modelOwnerHint",
     "settings.integrationsOwnerHint",
+    "settings.helpDocs",
     "guest.newHere",
     "guest.helpCta",
   ];
