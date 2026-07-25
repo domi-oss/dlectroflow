@@ -95,7 +95,6 @@ describe("SettingsPage footer help link", () => {
     // Exact text lock — guards against the "Help& docs" (dropped space) and
     // "Help & docs" (lowercase, from reusing the nav.help label) regressions.
     expect(link.textContent).toBe("Help & Docs");
-    expect(link.textContent).not.toContain("Help&");
   });
 
   it('renders "🆘 Help & Docs" in the playful voice', async () => {
