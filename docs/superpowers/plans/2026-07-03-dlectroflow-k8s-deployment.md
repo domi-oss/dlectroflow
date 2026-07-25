@@ -15,7 +15,7 @@
 - **Next.js 16.2** — past training cutoff; read `node_modules/next/dist/docs/` before changing Next config/behavior.
 - **Prisma 6** pinned (NOT 7). SQLite→Postgres is a provider swap only; keep `String` columns (no enums) — do NOT touch `src/lib/constants.ts` or app code.
 - **No secrets in the repo.** App reads `process.env`. Secrets live in GitLab Secrets Manager; injected at deploy time.
-- **Region:** `europe-west2`. **Static ingress IP:** `35.246.93.255` (reserved as `dlectroflow-ingress`). **Prod host:** `dlectroflow.dlectronique.dev`. **Group:** `gl-demo-ultimate-dtop`. **Agent name:** `dlectroflow`. **Registry image:** `registry.gitlab.com/gl-demo-ultimate-dtop/dlectroflow`.
+- **Region:** `europe-west2`. **Static ingress IP:** `YOUR_STATIC_IP` (reserved as `dlectroflow-ingress`). **Prod host:** `dlectroflow.dlectronique.dev`. **Group:** `gl-demo-ultimate-dtop`. **Agent name:** `dlectroflow`. **Registry image:** `registry.gitlab.com/gl-demo-ultimate-dtop/dlectroflow`.
 - **Resource requests (= limits on Autopilot):** app prod `500m`/`512Mi`; app review `250m`/`512Mi`; postgres prod `250m`/`512Mi` (PVC 8Gi); postgres review `250m`/`512Mi` (emptyDir). Review pods on Spot; production on-demand.
 - **Commit trailer (every commit):**
   ```
@@ -914,7 +914,7 @@ deploy_review:
         --namespace "dlectroflow-mr-$CI_MERGE_REQUEST_IID" --create-namespace
         --set env=review --set spot=true --set postgres.persistent=false
         --set-string image.tag="$CI_COMMIT_SHA"
-        --set-string host="mr-$CI_MERGE_REQUEST_IID.35.246.93.255.sslip.io"
+        --set-string host="mr-$CI_MERGE_REQUEST_IID.YOUR_STATIC_IP.sslip.io"
         --set-string secrets.postgresPassword="$POSTGRES_PASSWORD"
         --set-string secrets.anthropicApiKey="$ANTHROPIC_API_KEY"
         --set-string registry.username="$GITLAB_DEPLOY_TOKEN_USER"
@@ -923,7 +923,7 @@ deploy_review:
         --wait --timeout 5m
   environment:
     name: review/$CI_MERGE_REQUEST_IID
-    url: https://mr-$CI_MERGE_REQUEST_IID.35.246.93.255.sslip.io
+    url: https://mr-$CI_MERGE_REQUEST_IID.YOUR_STATIC_IP.sslip.io
     on_stop: stop_review
     auto_stop_in: 2 days
   rules:
@@ -1051,10 +1051,10 @@ gcloud container clusters create-auto dlectroflow --region europe-west2
 gcloud container clusters get-credentials dlectroflow --region europe-west2
 ```
 
-## 2. Static IP (already reserved: 35.246.93.255)
+## 2. Static IP (already reserved: YOUR_STATIC_IP)
 ```bash
 gcloud compute addresses describe dlectroflow-ingress --region europe-west2 --format='value(address)'
-# → 35.246.93.255
+# → YOUR_STATIC_IP
 ```
 
 ## 3. Install ingress-nginx pinned to the static IP
@@ -1063,7 +1063,7 @@ helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
 helm repo update
 helm install ingress-nginx ingress-nginx/ingress-nginx \
   --namespace ingress-nginx --create-namespace \
-  --set controller.service.loadBalancerIP=35.246.93.255
+  --set controller.service.loadBalancerIP=YOUR_STATIC_IP
 ```
 
 ## 4. Install cert-manager + Let's Encrypt ClusterIssuer
@@ -1117,7 +1117,7 @@ Confirm these secrets exist with the listed scopes (all created except Resend):
   image across restarts (the CI job token would expire).
 
 ## 7. Production DNS (done)
-`dlectroflow` A record → `35.246.93.255` in dlectronique.dev DNS.
+`dlectroflow` A record → `YOUR_STATIC_IP` in dlectronique.dev DNS.
 
 ## 8. Google OAuth redirect
 Add to the OAuth client's authorized redirect URIs (keep the local one too):
@@ -1134,7 +1134,7 @@ If it shows `http%3A%2F%2F` or Google returns `redirect_uri_mismatch`, re-check 
 ingress `X-Forwarded-Proto` header and Task 3's `requestOrigin`.
 
 ## 9. Deploy
-- Open an MR → `deploy_review` publishes to `https://mr-<IID>.35.246.93.255.sslip.io` (see the MR "View app" button).
+- Open an MR → `deploy_review` publishes to `https://mr-<IID>.YOUR_STATIC_IP.sslip.io` (see the MR "View app" button).
 - Merge to `main` → `deploy_production` publishes to `https://dlectroflow.dlectronique.dev`.
 
 ## 10. Cost guardrails

@@ -14,10 +14,10 @@ gcloud container clusters get-credentials dlectroflow --region europe-west2
 
 > **kubectl needs `gke-gcloud-auth-plugin`.** If `kubectl` errors with "gke-gcloud-auth-plugin … not found", install it (`gcloud components install gke-gcloud-auth-plugin`) and ensure the SDK bin dir is on PATH (Homebrew: `/opt/homebrew/share/google-cloud-sdk/bin`), and `export USE_GKE_GCLOUD_AUTH_PLUGIN=True`.
 
-## 2. Static IP (already reserved: 35.246.93.255)
+## 2. Static IP (already reserved: YOUR_STATIC_IP)
 ```bash
 gcloud compute addresses describe dlectroflow-ingress --region europe-west2 --format='value(address)'
-# → 35.246.93.255
+# → YOUR_STATIC_IP
 ```
 
 ## 3. Install ingress-nginx pinned to the static IP
@@ -26,13 +26,13 @@ helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
 helm repo update
 helm install ingress-nginx ingress-nginx/ingress-nginx \
   --namespace ingress-nginx --create-namespace \
-  --set controller.service.loadBalancerIP=35.246.93.255 \
+  --set controller.service.loadBalancerIP=YOUR_STATIC_IP \
   --set controller.service.externalTrafficPolicy=Local \
   --set controller.replicaCount=2 \
   --set controller.minAvailable=1
 ```
 
-> **Verify the IP bound:** `kubectl -n ingress-nginx get svc ingress-nginx-controller -w` until `EXTERNAL-IP` shows `35.246.93.255`. GKE honors `loadBalancerIP` only when the reserved address is a **regional external** address in the cluster's region (`europe-west2`) — confirm with `gcloud compute addresses describe dlectroflow-ingress --region=europe-west2`. If GKE provisions a different IP, delete the Service so Helm can recreate it, and re-check the address is regional (not global).
+> **Verify the IP bound:** `kubectl -n ingress-nginx get svc ingress-nginx-controller -w` until `EXTERNAL-IP` shows `YOUR_STATIC_IP`. GKE honors `loadBalancerIP` only when the reserved address is a **regional external** address in the cluster's region (`europe-west2`) — confirm with `gcloud compute addresses describe dlectroflow-ingress --region=europe-west2`. If GKE provisions a different IP, delete the Service so Helm can recreate it, and re-check the address is regional (not global).
 
 > **Preserve the real client IP (`externalTrafficPolicy: Local`) — required for the per-IP guest quota (#28).** The app keys its guest AI quota (and ingress rate-limiting) on the client IP from the right-most `X-Forwarded-For` hop / `X-Real-IP` (`src/lib/guest-quota.ts`, !76). That is only trustworthy if the real client IP reaches ingress-nginx un-SNAT'd. With the GKE default `externalTrafficPolicy: Cluster`, kube-proxy SNATs external traffic to a **node IP**, so every guest collapses onto a handful of node IPs and the quota can't tell clients apart. `Local` stops the SNAT so the L4 passthrough NLB's preserved source IP reaches nginx. Keep ingress-nginx `use-forwarded-headers` at its default `false`. **No app change is needed.**
 >
@@ -130,7 +130,7 @@ Confirm these secrets exist with the listed scopes (all created except Resend):
   image across restarts (the CI job token would expire).
 
 ## 7. Production DNS (done)
-`dlectroflow` A record → `35.246.93.255` in dlectronique.dev DNS.
+`dlectroflow` A record → `YOUR_STATIC_IP` in dlectronique.dev DNS.
 
 ## 8. Google OAuth redirect
 Add to the OAuth client's authorized redirect URIs (keep the local one too):
@@ -147,8 +147,8 @@ If it shows `http%3A%2F%2F` or Google returns `redirect_uri_mismatch`, re-check 
 ingress `X-Forwarded-Proto` header and Task 3's `requestOrigin`.
 
 ## 9. Deploy
-- Open an MR → `deploy_review` publishes to `https://mr-<IID>.35-246-93-255.sslip.io` (see the MR "View app" button).
-  > **sslip.io host format:** use the **dash-separated** IP (`35-246-93-255`), not dotted (`35.246.93.255`). A dotted quad *after* a hyphenated prefix like `mr-1.` makes sslip.io misparse the IP (e.g. `mr-1.35.246.93.255.sslip.io` resolves to a bogus `1.35.246.93`). The dash form resolves correctly.
+- Open an MR → `deploy_review` publishes to `https://mr-<IID>.YOUR-STATIC-IP.sslip.io` (see the MR "View app" button).
+  > **sslip.io host format:** use the **dash-separated** IP form (e.g. `mr-<IID>.203-0-113-5.sslip.io` for an ingress IP of `203.0.113.5`), **not** the dotted form. A dotted quad *after* a hyphenated prefix like `mr-1.` makes sslip.io misparse the address (it reads the leading `1` as part of the IP); the dash form resolves correctly. (`203.0.113.5` is a documentation placeholder — substitute your reserved ingress IP.)
 - Merge to `main` → `deploy_production` publishes to `https://dlectroflow.dlectronique.dev`.
 
 ## 10. Cost guardrails
@@ -167,9 +167,9 @@ The in-cluster Postgres is a single-replica StatefulSet on one PVC, so a logical
 backup is the recovery path (see #21). A daily CronJob dumps the DB to GCS.
 
 **Infra (one-time, already provisioned):**
-- Bucket `gs://dlectroflow-db-backups-dtop-1bf3a85b` (europe-west2, uniform access,
+- Bucket `gs://dlectroflow-db-backups-YOUR_GCP_PROJECT` (europe-west2, uniform access,
   public-access-prevention, **30-day lifecycle auto-delete**).
-- GCP service account `dlectroflow-backup@dtop-1bf3a85b.iam.gserviceaccount.com`
+- GCP service account `dlectroflow-backup@YOUR_GCP_PROJECT.iam.gserviceaccount.com`
   with `roles/storage.objectAdmin` **scoped to that bucket only**.
 - Workload Identity binding: KSA `dlectroflow-prod/dlectroflow-backup` → that GSA
   (keyless; no JSON key exists or is mounted).
@@ -185,7 +185,7 @@ volume, then the `google/cloud-sdk` container `gcloud storage cp`s it to
 ```
 kubectl -n dlectroflow-prod get cronjob dlectroflow-db-backup
 kubectl -n dlectroflow-prod get jobs -l app.kubernetes.io/name=dlectroflow --sort-by=.metadata.creationTimestamp | tail
-gcloud storage ls -l gs://dlectroflow-db-backups-dtop-1bf3a85b/pg/ | tail
+gcloud storage ls -l gs://dlectroflow-db-backups-YOUR_GCP_PROJECT/pg/ | tail
 ```
 
 **Run one on demand** (e.g. before a risky migration):
@@ -196,7 +196,7 @@ kubectl -n dlectroflow-prod create job --from=cronjob/dlectroflow-db-backup manu
 ### Restore (into a scratch DB first — never straight over prod)
 1. Pull the dump you want:
    ```
-   gcloud storage cp gs://dlectroflow-db-backups-dtop-1bf3a85b/pg/dlectroflow-<STAMP>.sql.gz /tmp/
+   gcloud storage cp gs://dlectroflow-db-backups-YOUR_GCP_PROJECT/pg/dlectroflow-<STAMP>.sql.gz /tmp/
    gunzip /tmp/dlectroflow-<STAMP>.sql.gz
    ```
 2. Port-forward prod Postgres and restore into a **scratch** database to inspect:
@@ -219,11 +219,11 @@ PVC's disk also gets a daily GCE snapshot at 03:00 UTC (offset from the 02:00 du
 14-day retention, snapshots survive disk deletion:
 ```
 gcloud compute resource-policies create snapshot-schedule dlectroflow-pg-daily \
-  --project dtop-1bf3a85b --region europe-west2 --max-retention-days 14 \
+  --project YOUR_GCP_PROJECT --region europe-west2 --max-retention-days 14 \
   --on-source-disk-delete keep-auto-snapshots --daily-schedule --start-time 03:00 \
   --storage-location europe-west2
 gcloud compute disks add-resource-policies <PVC_DISK> \
-  --project dtop-1bf3a85b --zone europe-west2-a --resource-policies dlectroflow-pg-daily
+  --project YOUR_GCP_PROJECT --zone europe-west2-a --resource-policies dlectroflow-pg-daily
 ```
 (`<PVC_DISK>` = `kubectl get pv $(kubectl -n dlectroflow-prod get pvc
 data-dlectroflow-postgres-0 -o jsonpath='{.spec.volumeName}') -o

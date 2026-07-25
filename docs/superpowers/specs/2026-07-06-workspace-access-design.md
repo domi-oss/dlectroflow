@@ -67,7 +67,7 @@ Every user-data row belongs to a **workspace**. Two kinds:
 - Config:
   - `AUTH_PROVIDER` (e.g. `gitlab`) — selects the provider.
   - `OWNER_ALLOWLIST` — comma-separated allowed identities (ids/emails).
-  - This instance: `AUTH_PROVIDER=gitlab`, `OWNER_ALLOWLIST=13595692`.
+  - This instance: `AUTH_PROVIDER=gitlab`, `OWNER_ALLOWLIST=1234567`.
 - Flow: `/login` → "Sign in with {provider}" → `/api/auth/{provider}/start`
   (authorize URL, PKCE + signed `state` cookie, minimal identity scope
   e.g. GitLab `read_user`) → `/api/auth/{provider}/callback` → fetch identity →
