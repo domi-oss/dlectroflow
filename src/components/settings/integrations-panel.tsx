@@ -2,12 +2,18 @@
 
 import { useState, useTransition } from "react";
 import { disconnectGoogleTasks } from "@/app/actions/google-schedule";
+import { t, type Voice } from "@/lib/strings";
 
 type GoogleStatus = {
   configured: boolean;
   connected: boolean;
   needsReconnect: boolean;
 };
+
+// Shared copy so the owner card and the guest read-only shell never drift.
+const GOOGLE_NAME = "Google Tasks";
+const GOOGLE_DESCRIPTION =
+  "Schedule steps and tasks into Google Tasks — a Reclaim-synced list is scheduled automatically.";
 
 /** Descriptor list = the extension point: future integrations add an entry here. */
 function googleDescriptor(g: GoogleStatus) {
@@ -20,9 +26,8 @@ function googleDescriptor(g: GoogleStatus) {
         : { label: "Not connected", tone: "muted" as const };
   return {
     id: "google",
-    name: "Google Tasks",
-    description:
-      "Schedule steps and tasks into Google Tasks — a Reclaim-synced list is scheduled automatically.",
+    name: GOOGLE_NAME,
+    description: GOOGLE_DESCRIPTION,
     pill,
     connectHref:
       g.configured && !g.connected ? "/api/google/oauth/start" : null,
@@ -31,9 +36,52 @@ function googleDescriptor(g: GoogleStatus) {
   };
 }
 
-export function IntegrationsPanel({ google }: { google: GoogleStatus }) {
+export function IntegrationsPanel({
+  google,
+  readOnly = false,
+  voice = "plain",
+}: {
+  /** Owner status. `null` in the guest read-only shell (no status is fetched). */
+  google: GoogleStatus | null;
+  /** #11 — guest read-only presentation: show the shell, never real status. */
+  readOnly?: boolean;
+  voice?: Voice;
+}) {
   const [confirming, setConfirming] = useState(false);
   const [pending, startTransition] = useTransition();
+
+  // Guest view: a disabled shell so guests can see the integration EXISTS,
+  // labelled owner-only. Deliberately renders no real connection status and no
+  // connect/disconnect affordances — nothing about the owner's account leaks.
+  if (readOnly || !google) {
+    return (
+      <section className="space-y-3">
+        <h2 className="flex items-center gap-2 text-lg font-semibold">
+          Integrations
+          <span className="border-input text-muted-foreground rounded-full border px-2 py-0.5 text-xs font-medium">
+            🔒 {t("settings.ownerOnly", voice)}
+          </span>
+        </h2>
+        <div className="rounded-lg border p-4 opacity-70">
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <p className="font-medium">{GOOGLE_NAME}</p>
+              <p className="text-muted-foreground text-sm">
+                {GOOGLE_DESCRIPTION}
+              </p>
+            </div>
+            <span className="bg-muted text-muted-foreground rounded-full px-2.5 py-0.5 text-xs font-medium">
+              {t("settings.ownerOnly", voice)}
+            </span>
+          </div>
+          <p className="text-muted-foreground mt-3 text-sm">
+            {t("settings.integrationsOwnerHint", voice)}
+          </p>
+        </div>
+      </section>
+    );
+  }
+
   const d = googleDescriptor(google);
   const pillClass =
     d.pill.tone === "ok"

@@ -59,6 +59,7 @@ export default async function AppLayout({
           remaining={guest.remaining}
           quota={guest.quota}
           expiresAt={guest.expiresAt}
+          voice={voice}
         />
       )}
       <header className="border-b">

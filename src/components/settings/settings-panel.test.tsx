@@ -20,6 +20,7 @@ vi.mock("@/app/actions/settings", () => ({
 
 import {
   updateAgingSettings,
+  updateBreakdownModel,
   updateFirstRunPreview,
 } from "@/app/actions/settings";
 
@@ -94,6 +95,94 @@ describe("SettingsPanel auto-save (Phase 6)", () => {
     expect(overdueInput).not.toBeDisabled();
     await user.type(overdueInput, "0"); // still accepts input
     expect(overdueInput).toHaveValue(90);
+  });
+});
+
+describe("SettingsPanel breakdown model — owner (interactive, #6)", () => {
+  it("renders the model radios enabled, with the owner's stored model checked", () => {
+    render(
+      <SettingsPanel
+        settings={settings}
+        isOwner
+        breakdownModel="claude-opus-4-8"
+        voice="plain"
+      />,
+    );
+    const opus = screen.getByLabelText(/Opus/);
+    expect(opus).toBeChecked();
+    expect(opus).toBeEnabled();
+    const haiku = screen.getByLabelText(/Haiku/);
+    expect(haiku).not.toBeChecked();
+    expect(haiku).toBeEnabled();
+    // No "owner-only" gray-out messaging for the owner.
+    expect(screen.queryByText(/owner-only/i)).toBeNull();
+  });
+
+  it("selecting a model persists it via updateBreakdownModel", async () => {
+    const user = userEvent.setup();
+    render(
+      <SettingsPanel
+        settings={settings}
+        isOwner
+        breakdownModel="claude-sonnet-4-6"
+        voice="plain"
+      />,
+    );
+    await user.click(screen.getByLabelText(/Haiku/));
+    expect(updateBreakdownModel).toHaveBeenCalledWith("claude-haiku-4-5");
+  });
+});
+
+describe("SettingsPanel breakdown model — guest (read-only, #11)", () => {
+  it("shows the picker so guests see what the app offers, but disabled + owner-only", () => {
+    render(
+      <SettingsPanel
+        settings={settings}
+        isOwner={false}
+        breakdownModel={null}
+        voice="plain"
+      />,
+    );
+    // The section is present (visible to guests).
+    expect(
+      screen.getByRole("radiogroup", { name: /breakdown model/i }),
+    ).toBeInTheDocument();
+    // Every real model option is announced but disabled (not colour-only:
+    // there is an explicit "owner-only" text label too).
+    for (const name of [/Haiku/, /Sonnet/, /Opus/]) {
+      expect(screen.getByLabelText(name)).toBeDisabled();
+    }
+    expect(screen.getAllByText(/owner-only/i).length).toBeGreaterThan(0);
+  });
+
+  it("never leaks the owner's chosen model — nothing is pre-selected for guests", () => {
+    // Even if a value is handed to the component, a guest must not see it
+    // reflected as the selected option.
+    render(
+      <SettingsPanel
+        settings={settings}
+        isOwner={false}
+        breakdownModel="claude-opus-4-8"
+        voice="plain"
+      />,
+    );
+    expect(screen.getByLabelText(/Opus/)).not.toBeChecked();
+    expect(screen.getByLabelText(/Haiku/)).not.toBeChecked();
+    expect(screen.getByLabelText(/Sonnet/)).not.toBeChecked();
+  });
+
+  it("cannot mutate the owner-only model (disabled → no write)", async () => {
+    const user = userEvent.setup();
+    render(
+      <SettingsPanel
+        settings={settings}
+        isOwner={false}
+        breakdownModel={null}
+        voice="plain"
+      />,
+    );
+    await user.click(screen.getByLabelText(/Sonnet/));
+    expect(updateBreakdownModel).not.toHaveBeenCalled();
   });
 });
 

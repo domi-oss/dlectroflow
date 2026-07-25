@@ -564,6 +564,32 @@ export const STRINGS = {
     plain: "The quick brown fox jumps over the lazy dog.",
     playful: "The quick brown fox jumps over the lazy dog.",
   },
+
+  // ── #11 — guest read-only settings + onboarding help ───────────────────────
+  // Guests see owner-only controls (AI breakdown model, integrations) as
+  // disabled shells so they can tell what the app offers, never the owner's
+  // actual values. The "owner-only" copy stays emoji-free in plain (🔒 is added
+  // in the markup as an allowed functional glyph, not baked into the string).
+  "settings.ownerOnly": { plain: "Owner-only", playful: "Owner-only" },
+  "settings.modelOwnerHint": {
+    plain:
+      "The workspace owner chooses which model powers AI breakdowns. Guests get a fast model automatically.",
+    playful:
+      "The workspace owner picks which model does the AI breakdowns. As a guest you get a speedy one, on the house.",
+  },
+  "settings.integrationsOwnerHint": {
+    plain:
+      "Live integrations connect to the owner's own accounts, so they're owner-only. Sign in as the owner to set them up.",
+    playful:
+      "Live integrations hook into the owner's own accounts, so they're owner-only. Sign in as the owner to wire them up.",
+  },
+  // Guest sandbox onboarding link → in-app /help docs (#29). → is a functional
+  // glyph (allowed in plain); 🆘 is playful-only flavour.
+  "guest.newHere": { plain: "New here?", playful: "New here?" },
+  "guest.helpCta": {
+    plain: "See the help & docs →",
+    playful: "🆘 See the help & docs →",
+  },
 } as const;
 
 export type StringKey = keyof typeof STRINGS;

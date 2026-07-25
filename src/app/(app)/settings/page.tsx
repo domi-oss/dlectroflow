@@ -72,7 +72,15 @@ export default async function SettingsPage({
           voice={voice}
         />
       </div>
-      {owner && google && <IntegrationsPanel google={google} />}
+      {owner && google ? (
+        <IntegrationsPanel google={google} />
+      ) : (
+        // #11 — guests see the integrations section as a read-only owner-only
+        // shell (no owner status fetched or shown).
+        <div className="border-t pt-4">
+          <IntegrationsPanel google={null} readOnly voice={voice} />
+        </div>
+      )}
       <div className="flex gap-4 text-sm">
         <Link href="/help?from=settings" className="underline">
           {t("nav.help", voice)} &amp; docs

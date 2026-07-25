@@ -272,32 +272,62 @@ export function SettingsPanel({
         </div>
       </section>
 
-      {isOwner && (
-        <section className="space-y-2 border-t pt-4">
-          <h2 className="font-semibold">Breakdown model</h2>
-          <div className="flex flex-col gap-1">
-            {OWNER_BREAKDOWN_ALLOWLIST.map((m) => (
-              <label key={m} className="flex items-center gap-2 text-sm">
-                <input
-                  type="radio"
-                  name="breakdown-model"
-                  checked={model === m}
-                  disabled={voicePending}
-                  onChange={() => saveModel(m)}
-                />
-                {MODEL_LABELS[m]}
-              </label>
-            ))}
+      {/* Breakdown model (#6). Shown to guests too (#11) but read-only: the
+          picker is an owner-only control, so guests see WHAT the app offers
+          without the owner's actual choice (never pre-selected for guests) and
+          without being able to change it. Server-side, updateBreakdownModel
+          already rejects non-owners — this is the matching UI. */}
+      <section className="space-y-2 border-t pt-4">
+        <h2 className="flex items-center gap-2 font-semibold">
+          Breakdown model
+          {!isOwner && (
+            <span className="border-input text-muted-foreground rounded-full border px-2 py-0.5 text-xs font-normal">
+              🔒 {t("settings.ownerOnly", voice)}
+            </span>
+          )}
+        </h2>
+        <div
+          className="flex flex-col gap-1"
+          role="radiogroup"
+          aria-label="Breakdown model"
+          aria-describedby={isOwner ? undefined : "breakdown-model-owner-hint"}
+        >
+          {OWNER_BREAKDOWN_ALLOWLIST.map((m) => (
             <label
-              className="flex items-center gap-2 text-sm opacity-50"
-              title={fable}
+              key={m}
+              className={
+                "flex items-center gap-2 text-sm" +
+                (isOwner ? "" : " opacity-50")
+              }
             >
-              <input type="radio" name="breakdown-model" disabled />
-              🔒 Fable 5 — {fable}
+              <input
+                type="radio"
+                name="breakdown-model"
+                // Guests never see the owner's stored choice reflected.
+                checked={isOwner && model === m}
+                disabled={!isOwner || voicePending}
+                onChange={() => saveModel(m)}
+              />
+              {MODEL_LABELS[m]}
             </label>
-          </div>
-        </section>
-      )}
+          ))}
+          <label
+            className="flex items-center gap-2 text-sm opacity-50"
+            title={fable}
+          >
+            <input type="radio" name="breakdown-model" disabled />
+            🔒 Fable 5 — {fable}
+          </label>
+        </div>
+        {!isOwner && (
+          <p
+            id="breakdown-model-owner-hint"
+            className="text-muted-foreground text-xs"
+          >
+            {t("settings.modelOwnerHint", voice)}
+          </p>
+        )}
+      </section>
 
       <section className="space-y-2 border-t pt-4">
         <h2 className="font-semibold">Demo</h2>

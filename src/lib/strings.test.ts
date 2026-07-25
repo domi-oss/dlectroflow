@@ -119,6 +119,12 @@ describe("t() function", () => {
     ["notify.nudgeTitle", "plain", "Time for your daily review"],
     ["notify.enable", "plain", "Enable desktop notifications"],
     ["notify.enable", "playful", "🔔 Enable desktop notifications"],
+    // #11 — guest read-only settings + onboarding help banner
+    ["settings.ownerOnly", "plain", "Owner-only"],
+    ["settings.ownerOnly", "playful", "Owner-only"],
+    ["guest.newHere", "plain", "New here?"],
+    ["guest.helpCta", "plain", "See the help & docs →"],
+    ["guest.helpCta", "playful", "🆘 See the help & docs →"],
   ];
 
   for (const [key, voice, expected] of cases) {
@@ -505,6 +511,13 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     // Task working-view schedule indicator (#8 follow-up) — plain is literal.
     "task.scheduled",
     "task.notScheduled",
+    // #11 — guest read-only settings + onboarding help (plain stays emoji-free;
+    // → is a functional glyph, allowed in plain).
+    "settings.ownerOnly",
+    "settings.modelOwnerHint",
+    "settings.integrationsOwnerHint",
+    "guest.newHere",
+    "guest.helpCta",
   ];
 
   for (const key of plainOnlyKeys) {
