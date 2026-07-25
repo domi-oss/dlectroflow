@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-24
 **Status:** Draft for review
-**Owner:** Domi (dtop@gitlab.com)
+**Owner:** Domi (you@example.com)
 
 ## 1. Goal
 

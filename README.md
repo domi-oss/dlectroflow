@@ -4,14 +4,16 @@
 
 An ADHD helper web app — **capture → clarify → schedule → focus → reward**.
 
-**🌐 Live demo:** [dlectroflow.dlectronique.dev](https://dlectroflow.dlectronique.dev)
+**🌐 Try it:** a hosted instance runs at [dlectroflow.dlectronique.dev](https://dlectroflow.dlectronique.dev) — kick the tyres as a guest, no signup.
 
 You brain-dump anything, Claude breaks the scary stuff into tiny do-able steps,
 those steps land in Google Tasks and get scheduled onto your real calendar (a
 Reclaim-synced list is scheduled automatically), you focus on one at a time, and
 you get a hit of dopamine for finishing. Come back tomorrow, repeat.
 
-Built as both a learning project and a polished live-demo app.
+**🏠 Built to self-host.** The hosted instance above is just a place to try it —
+dlectroflow is meant to be run as *your own* instance. See [Quick start](#-quick-start-local-5-minutes)
+to run it locally, or [Deploy](#-deploy) to host your own. (Also a learning project, built in the open.)
 
 ---
 
@@ -28,6 +30,7 @@ Built as both a learning project and a polished live-demo app.
 - [🧯 Troubleshooting](#-troubleshooting)
 - [🗺️ Tech stack](#️-tech-stack)
 - [🤝 Contributing](#-contributing)
+- [🧭 Roadmap](#-roadmap)
 - [🧠 A note for fellow neurodivergent nerds](#-a-note-for-fellow-neurodivergent-nerds)
 
 ---
@@ -259,7 +262,7 @@ Commit the resulting `axe-baseline.json` diff.
 
 The app deploys automatically via **GitLab CI/CD to GKE Autopilot** (europe-west2):
 
-- **Review apps** — every MR gets its own environment at `https://mr-<IID>.35-246-93-255.sslip.io` (the MR shows a "View app" button). The namespace is deleted when the MR closes.
+- **Review apps** — every MR gets its own environment at `https://mr-<IID>.YOUR-STATIC-IP.sslip.io` (the MR shows a "View app" button). The namespace is deleted when the MR closes.
 - **Production** — merge to `main` deploys to **https://dlectroflow.dlectronique.dev**.
 
 For the full provisioning walkthrough (cluster, ingress-nginx, cert-manager, GitLab agent, secrets, DNS, OAuth), see **[docs/deploy-runbook.md](docs/deploy-runbook.md)**.
@@ -323,6 +326,18 @@ gets its own review app so you (and reviewers) can click around the change live.
 
 ---
 
+## 🧭 Roadmap
+
+Development happens in the open, milestone by milestone:
+
+- **[Milestones](https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/milestones)** — what's shipping next.
+- **[Open issues](https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/issues)** — the full backlog.
+- **[Changelog](CHANGELOG.md)** — what's already shipped.
+
+Have an idea or hit a bug? [Open an issue](https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/issues/new) — including "this doc tripped me up."
+
+---
+
 ## 🧠 A note for fellow neurodivergent nerds
 
 This app is built the way it helps *me* think, and the setup is meant to respect that:
@@ -336,3 +351,12 @@ This app is built the way it helps *me* think, and the setup is meant to respect
 
 If a step here tripped you up, that's a bug in *the docs*, not in you — open an
 issue and I'll fix the instructions.
+
+---
+
+## 📄 License
+
+Licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
+In short: you're free to use, modify, and self-host it — but if you run a modified
+version as a network service, you must make your source (including your changes)
+available to its users.

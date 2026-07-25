@@ -8,16 +8,16 @@ afterEach(() => {
 
 describe("isOwner", () => {
   it("matches an allowlisted id", () => {
-    expect(isOwner("13595692", ["13595692"])).toBe(true);
+    expect(isOwner("1234567", ["1234567"])).toBe(true);
   });
   it("is case-insensitive and trims", () => {
     expect(isOwner("  Me@x.com ", ["me@x.com"])).toBe(true);
   });
   it("rejects a non-listed identity", () => {
-    expect(isOwner("999", ["13595692"])).toBe(false);
+    expect(isOwner("999", ["1234567"])).toBe(false);
   });
   it("rejects empty identity", () => {
-    expect(isOwner("", ["13595692"])).toBe(false);
+    expect(isOwner("", ["1234567"])).toBe(false);
   });
 });
 
@@ -52,7 +52,7 @@ describe("assertAuthConfig", () => {
     vi.stubEnv("AUTH_SESSION_SECRET", "a".repeat(32));
     vi.stubEnv("GITLAB_OAUTH_CLIENT_ID", "client-id");
     vi.stubEnv("GITLAB_OAUTH_CLIENT_SECRET", "client-secret");
-    vi.stubEnv("OWNER_ALLOWLIST", "13595692");
+    vi.stubEnv("OWNER_ALLOWLIST", "1234567");
     vi.stubEnv("GUEST_IP_HASH_SALT", "a".repeat(16));
     expect(() => assertAuthConfig()).not.toThrow();
   });

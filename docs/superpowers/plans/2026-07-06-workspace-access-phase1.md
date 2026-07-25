@@ -19,7 +19,7 @@
 - **Cookie options** (match existing google OAuth): `httpOnly:true, secure: origin.startsWith("https"), sameSite:"lax", path:"/"`.
 - **`/api/health` must return 200 unauthenticated** (k8s probe) — never gate it.
 - **Prod boot guard:** in `NODE_ENV=production`, missing owner-auth env (`AUTH_SESSION_SECRET`, provider client id/secret, `OWNER_ALLOWLIST`) must throw at startup.
-- **Config values (this instance):** `AUTH_PROVIDER=gitlab`, `OWNER_ALLOWLIST=13595692`.
+- **Config values (this instance):** `AUTH_PROVIDER=gitlab`, `OWNER_ALLOWLIST=1234567`.
 
 ---
 
@@ -117,10 +117,10 @@ const SECRET = "test-secret-at-least-32-bytes-long-xxxxx";
 
 describe("session cookie", () => {
   it("round-trips an owner payload", async () => {
-    const token = await signSession({ kind: "owner", sub: "13595692" }, SECRET);
+    const token = await signSession({ kind: "owner", sub: "1234567" }, SECRET);
     expect(await verifySession(token, SECRET)).toEqual({
       kind: "owner",
-      sub: "13595692",
+      sub: "1234567",
     });
   });
 
@@ -236,16 +236,16 @@ import { isOwner, getAuthProvider } from "./providers";
 
 describe("isOwner", () => {
   it("matches an allowlisted id", () => {
-    expect(isOwner("13595692", ["13595692"])).toBe(true);
+    expect(isOwner("1234567", ["1234567"])).toBe(true);
   });
   it("is case-insensitive and trims", () => {
     expect(isOwner("  Me@x.com ", ["me@x.com"])).toBe(true);
   });
   it("rejects a non-listed identity", () => {
-    expect(isOwner("999", ["13595692"])).toBe(false);
+    expect(isOwner("999", ["1234567"])).toBe(false);
   });
   it("rejects empty identity", () => {
-    expect(isOwner("", ["13595692"])).toBe(false);
+    expect(isOwner("", ["1234567"])).toBe(false);
   });
 });
 
@@ -1004,7 +1004,7 @@ export default async function LoginPage({
 
 - [ ] **Step 5: Manual verification (local)**
 
-Run: `npm run dev`, set `AUTH_PROVIDER=gitlab`, `OWNER_ALLOWLIST=13595692`, `AUTH_SESSION_SECRET`, `GITLAB_OAUTH_CLIENT_ID/SECRET` in `.env.local`, visit `http://localhost:3000/login`, complete GitLab OAuth.
+Run: `npm run dev`, set `AUTH_PROVIDER=gitlab`, `OWNER_ALLOWLIST=1234567`, `AUTH_SESSION_SECRET`, `GITLAB_OAUTH_CLIENT_ID/SECRET` in `.env.local`, visit `http://localhost:3000/login`, complete GitLab OAuth.
 Expected: redirects to `/inbox`; `df_owner` cookie present.
 
 - [ ] **Step 6: Commit**
@@ -1378,7 +1378,7 @@ git commit -m "test: cross-workspace data isolation + smoke checklist"
 
 Before the first prod deploy of this branch, add to GitLab Secrets Manager:
 `AUTH_SESSION_SECRET`, `GITLAB_OAUTH_CLIENT_ID`, `GITLAB_OAUTH_CLIENT_SECRET`,
-and set `AUTH_PROVIDER=gitlab`, `OWNER_ALLOWLIST=13595692`. Create a GitLab OAuth
+and set `AUTH_PROVIDER=gitlab`, `OWNER_ALLOWLIST=1234567`. Create a GitLab OAuth
 application (redirect `https://dlectroflow.dlectronique.dev/api/auth/gitlab/callback`,
 scope `read_user`). The prod boot guard (Task 11) will otherwise refuse to start —
 by design, so data is never served ungated. Run `prisma migrate deploy` (the

@@ -16,12 +16,12 @@ function key(secret: string): Uint8Array {
 describe("session cookie", () => {
   it("round-trips an owner payload", async () => {
     const token = await signOwnerSession(
-      { kind: "owner", sub: "13595692" },
+      { kind: "owner", sub: "1234567" },
       SECRET,
     );
     expect(await verifySession(token, SECRET)).toEqual({
       kind: "owner",
-      sub: "13595692",
+      sub: "1234567",
     });
   });
 
@@ -67,7 +67,7 @@ describe("session cookie", () => {
   // with the SAME secret but a different HMAC alg (HS512 here) would otherwise
   // verify — an alg-downgrade foothold. It must be rejected.
   it("rejects a same-secret token signed with a non-pinned HMAC alg (HS512)", async () => {
-    const token = await new SignJWT({ kind: "owner", sub: "13595692" })
+    const token = await new SignJWT({ kind: "owner", sub: "1234567" })
       .setProtectedHeader({ alg: "HS512" })
       .setIssuedAt()
       .setExpirationTime("30d")

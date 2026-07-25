@@ -30,13 +30,13 @@ Production URL: **https://dlectroflow.dlectronique.dev**
 | Cluster | **GKE Autopilot**, region **`europe-west2`** (London) |
 | Provisioning state | Nothing exists yet — we produce all artifacts **+ a runbook** the user runs |
 | Deploy model | **Review apps (per-MR, ephemeral) + production (on `main`)** |
-| Review-app hostnames | **sslip.io** (`mr-<IID>.35.246.93.255.sslip.io`), zero DNS setup |
+| Review-app hostnames | **sslip.io** (`mr-<IID>.YOUR_STATIC_IP.sslip.io`), zero DNS setup |
 | Production host | **`dlectroflow.dlectronique.dev`** (subdomain; apex left free) |
 | TLS | **Let's Encrypt HTTP-01** via cert-manager, per-host (no wildcard needed) |
 | Manifests | **Helm** chart, one chart rendered per environment |
 | Database | **Postgres everywhere.** Local via Docker Compose; in-cluster StatefulSet per env |
 | Secrets | **GitLab Secrets Manager (beta)**, group-scoped, environment-scoped |
-| Ingress LB IP | Reserved static IP **`35.246.93.255`** (`dlectroflow-ingress`, regional, `europe-west2`) |
+| Ingress LB IP | Reserved static IP **`YOUR_STATIC_IP`** (`dlectroflow-ingress`, regional, `europe-west2`) |
 
 ---
 
@@ -49,14 +49,14 @@ cluster credentials are stored in GitLab.
 
 ```
                         GKE Autopilot cluster (europe-west2)
-                        ingress-nginx @ 35.246.93.255  ·  cert-manager  ·  agentk
+                        ingress-nginx @ YOUR_STATIC_IP  ·  cert-manager  ·  agentk
                         │
  MR opened ──► deploy_review ──► namespace: dlectroflow-mr-<IID>
                         │          ├─ app Deployment + Service + Ingress
                         │          ├─ Postgres StatefulSet (emptyDir, ephemeral)
                         │          ├─ Secret (from Secrets Manager)
                         │          └─ ResourceQuota
-                        │          host: mr-<IID>.35.246.93.255.sslip.io  (HTTP-01 TLS)
+                        │          host: mr-<IID>.YOUR_STATIC_IP.sslip.io  (HTTP-01 TLS)
  MR closed/merged ─► stop_review ─► kubectl delete namespace  (full teardown)
 
  merge to main ──► deploy_production ──► namespace: dlectroflow-prod
@@ -82,7 +82,7 @@ cluster credentials are stored in GitLab.
 |---|---|---|
 | Trigger | MR pipeline | Merge to `main` |
 | Namespace | `dlectroflow-mr-<IID>` | `dlectroflow-prod` |
-| Host | `mr-<IID>.35.246.93.255.sslip.io` | `dlectroflow.dlectronique.dev` |
+| Host | `mr-<IID>.YOUR_STATIC_IP.sslip.io` | `dlectroflow.dlectronique.dev` |
 | Postgres | StatefulSet, `emptyDir` (ephemeral) | StatefulSet, PVC 8Gi (persistent) |
 | Compute class | **Spot** | on-demand |
 | Lifecycle | `auto_stop_in: 2 days` + manual `stop_review` | long-lived |
@@ -192,7 +192,7 @@ Stages: `build → deploy`.
   `$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA` to the GitLab Container Registry.
 - **`deploy_review`** — `rules: if $CI_PIPELINE_SOURCE == "merge_request_event"`.
   `helm upgrade --install` into `dlectroflow-mr-$CI_MERGE_REQUEST_IID`
-  (`--create-namespace`), host `mr-$CI_MERGE_REQUEST_IID.35.246.93.255.sslip.io`,
+  (`--create-namespace`), host `mr-$CI_MERGE_REQUEST_IID.YOUR_STATIC_IP.sslip.io`,
   `spot=true`, ephemeral Postgres.
   `environment: { name: review/$CI_MERGE_REQUEST_IID, url: https://…, on_stop:
   stop_review, auto_stop_in: 2 days }`.
@@ -279,16 +279,16 @@ documents re-adding them.
 
 ## 9. TLS / DNS / ingress
 
-- **Static IP** `35.246.93.255` (reserved: `dlectroflow-ingress`, regional,
+- **Static IP** `YOUR_STATIC_IP` (reserved: `dlectroflow-ingress`, regional,
   `europe-west2`). `ingress-nginx` installed with
-  `controller.service.loadBalancerIP=35.246.93.255`.
+  `controller.service.loadBalancerIP=YOUR_STATIC_IP`.
 - **cert-manager** + a `letsencrypt-prod` **ClusterIssuer** (HTTP-01 via the nginx
   class). Per-host certs issue automatically for both sslip.io review hosts and the prod
   host.
-- **Review hosts:** `mr-<IID>.35.246.93.255.sslip.io` — sslip.io resolves the embedded
+- **Review hosts:** `mr-<IID>.YOUR_STATIC_IP.sslip.io` — sslip.io resolves the embedded
   IP; zero DNS config.
 - **Production DNS** (`dlectronique.dev`): single **A record** `dlectroflow` →
-  `35.246.93.255` (TTL 300). Already created and resolving.
+  `YOUR_STATIC_IP` (TTL 300). Already created and resolving.
 - `.dev` is HSTS-preloaded → HTTPS mandatory; fine because cert-manager issues the cert
   once nginx answers on :80 at the resolved host. Create DNS **before** expecting the
   cert.
@@ -319,8 +319,8 @@ cluster credit is unused. Estimates — verify in the GCP pricing calculator.
 ## 11. Provisioning runbook (user-run; produced as `docs/`)
 
 1. Create GKE **Autopilot** cluster in `europe-west2`.
-2. Reserve static IP — **done** (`35.246.93.255`).
-3. Install **ingress-nginx** pinned to `35.246.93.255`.
+2. Reserve static IP — **done** (`YOUR_STATIC_IP`).
+3. Install **ingress-nginx** pinned to `YOUR_STATIC_IP`.
 4. Install **cert-manager** + `letsencrypt-prod` ClusterIssuer.
 5. Install/register the **GitLab agent** (`.gitlab/agents/dlectroflow/config.yaml` +
    `helm install` with the registration token).

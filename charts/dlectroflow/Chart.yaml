@@ -8,8 +8,7 @@ appVersion: "1.0.0"
 # 1.26; the -0 suffix lets GKE's prerelease version strings (e.g. 1.29.5-gke.x)
 # satisfy the constraint.
 kubeVersion: ">=1.26.0-0"
-icon: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/raw/main/domi-oss-group-logo.png
+icon: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/raw/main/public/brand-mark.png
 maintainers:
-  - name: dtop
-    email: dtop@gitlab.com
+  - name: dlectronique
     url: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow
