@@ -4,7 +4,7 @@
  * "double session" bug: re-entering a step used to call beginFocus again and
  * leave the original session open forever).
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { prismaMock, currentWorkspaceIdMock } = vi.hoisted(() => {
   const prismaMock = {
@@ -111,6 +111,19 @@ describe("pauseFocus", () => {
 });
 
 describe("resumeFocus — reuses the existing session (the double-session-bug fix)", () => {
+  // Duo review: `vi.setSystemTime` mocks `Date`/`new Date()` even without
+  // fake timers active (per this Vitest version's own typings), so the test
+  // below was correct — but relying on that undocumented-to-readers nuance
+  // is fragile, and a bare `vi.useRealTimers()` at the end of the test body
+  // would leak the mocked clock into later tests if an assertion above it
+  // ever threw. Make the fake-timer lifecycle explicit and unconditional.
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("clears pausedAt, accumulates the pause duration, and returns the frozen remaining time", async () => {
     const startedAt = new Date("2026-07-26T10:00:00Z");
     const pausedAt = new Date("2026-07-26T10:10:00Z"); // paused after 10 minutes
@@ -138,8 +151,6 @@ describe("resumeFocus — reuses the existing session (the double-session-bug fi
     expect(res.remainingSec).toBe(15 * 60); // 25m planned − 10m active = 15m left
     expect(res.totalSec).toBe(25 * 60);
     expect(res.plannedMin).toBe(25);
-
-    vi.useRealTimers();
   });
 
   it("fails closed on a session that isn't actually paused (nothing to resume)", async () => {

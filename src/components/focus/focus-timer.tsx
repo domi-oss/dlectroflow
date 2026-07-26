@@ -247,13 +247,24 @@ export function FocusTimer({
   // #27 — the in-session Pause/Resume toggle now persists real state instead
   // of only flipping local `phase`: pausing stamps the session (so leaving
   // the tab, reloading, or opening another device restores correctly);
-  // resuming reuses that same session (see resumeFocus). On a resume failure
-  // (e.g. the session was retired elsewhere) fail safe by staying in
-  // "running" rather than stranding the user on an inert Paused screen.
+  // resuming reuses that same session (see resumeFocus). Both directions
+  // await the server BEFORE committing the local phase transition — if the
+  // server disagrees (e.g. a concurrent request/another device already
+  // closed the session), we reconcile to what the server actually has
+  // rather than showing a phase it doesn't (Duo review) — same fail-safe
+  // shape either way: stay "running", the one state both sides always agree
+  // a live session is in.
   const togglePause = async () => {
     if (phase === "running") {
+      if (!sessionId) {
+        setPhase("paused");
+        return;
+      }
+      setPending(true);
+      const res = await pauseFocus(sessionId, { totalSec });
+      setPending(false);
+      if (!res.ok) return; // server disagrees — stay running, don't show a paused state it doesn't have
       setPhase("paused");
-      if (sessionId) await pauseFocus(sessionId, { totalSec });
       return;
     }
     if (phase !== "paused" || !sessionId) return;

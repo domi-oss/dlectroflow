@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, act } from "@testing-library/react";
+import { render, screen, cleanup, act, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FocusTimer } from "@/components/focus/focus-timer";
 import type { TrackerStep } from "@/components/focus/focus-step-tracker";
@@ -298,9 +298,13 @@ describe("FocusTimer — multi-step context + minimal mode", () => {
     render(<FocusTimer {...base()} />);
     await start(user);
     await user.click(screen.getByRole("button", { name: /pause/i }));
-    expect(screen.getByRole("button", { name: /steps/i })).toHaveAttribute(
-      "aria-expanded",
-      "true",
+    // #27 — pausing now awaits the server (pauseFocus) before the phase
+    // flips, so the aria-expanded update lands a tick after the click.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /steps/i })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      ),
     );
   });
 
@@ -488,6 +492,27 @@ describe("FocusTimer — true pause/resume persistence", () => {
     expect(
       screen.getByRole("button", { name: /^⏸️ pause$/i }),
     ).toBeInTheDocument();
+  });
+
+  // Duo review: pauseFocus's result wasn't checked — the UI showed "paused"
+  // even when the server rejected it (e.g. another device/concurrent request
+  // already closed the session). The server's answer must win.
+  it("a failed pause stays on the running controls instead of showing a paused state the server doesn't have", async () => {
+    (pauseFocus as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: false,
+    });
+    const user = userEvent.setup();
+    render(<FocusTimer {...base()} />);
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /pause/i }));
+    expect(pauseFocus).toHaveBeenCalledWith("session-1", { totalSec: 60 });
+    // Still showing the running controls (Pause button), not Resume.
+    expect(
+      screen.getByRole("button", { name: /^⏸️ pause$/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^▶ resume$/i }),
+    ).not.toBeInTheDocument();
   });
 });
 
