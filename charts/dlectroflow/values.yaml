@@ -5,11 +5,13 @@ image:
 
 env: production        # review | production
 host: dlectroflow.dev
-# Old hostnames that should 301-redirect to `host`, each served on its own TLS
-# cert by templates/ingress-legacy-redirect.yaml. Empty by default (review apps
-# never redirect); production sets it via CI (--set legacyHosts[0]=...). Powers
-# the zero-downtime domain migration (#54): both domains resolve to the ingress,
-# the old one permanently redirects to the canonical host.
+# Old hostnames that should 301-redirect to `host`. Empty by default (review
+# apps never redirect); production sets it via CI (--set legacyHosts[0]=...).
+# Powers the zero-downtime domain migration (#54): legacy hosts are added to the
+# PRIMARY ingress (multi-SAN TLS cert) and traffic is forwarded to the app pod,
+# which issues a path-preserving 301 via Next.js redirects() (next.config.ts).
+# NOTE: cert-manager's HTTP-01 self-check needs every legacy host in the
+# cert-manager hostAlias too (GKE hairpin quirk, see docs/deploy-runbook.md §4).
 legacyHosts: []
 replicas: 2            # review apps pinned to 1 via CI (no HA need on spot)
 spot: false            # true for review apps (nodeSelector onto gke-spot nodes)
