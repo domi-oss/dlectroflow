@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import { Pause, Play, SkipBack, SkipForward, Volume2 } from "lucide-react";
 import { t, type Voice } from "@/lib/strings";
 import type { FocusSoundControls } from "@/lib/use-focus-sound";
 
@@ -96,7 +97,7 @@ export function FocusSoundPlayer({
           className={btn}
           aria-label={t("focus.sound.prev", voice)}
         >
-          <span aria-hidden="true">⏮</span>
+          <SkipBack aria-hidden="true" className="h-5 w-5" />
         </button>
         <button
           type="button"
@@ -109,7 +110,11 @@ export function FocusSoundPlayer({
               : t("focus.sound.play", voice)
           }
         >
-          <span aria-hidden="true">{playing ? "⏸" : "▶"}</span>
+          {playing ? (
+            <Pause aria-hidden="true" className="h-5 w-5" />
+          ) : (
+            <Play aria-hidden="true" className="h-5 w-5" />
+          )}
         </button>
         <button
           type="button"
@@ -117,7 +122,7 @@ export function FocusSoundPlayer({
           className={btn}
           aria-label={t("focus.sound.next", voice)}
         >
-          <span aria-hidden="true">⏭</span>
+          <SkipForward aria-hidden="true" className="h-5 w-5" />
         </button>
         <div className="min-w-0 flex-1 leading-tight">
           <p className="text-muted-foreground text-[11px] uppercase tracking-wide">
@@ -140,7 +145,7 @@ export function FocusSoundPlayer({
             aria-expanded={volumeOpen}
             aria-controls={popoverId}
           >
-            <span aria-hidden="true">🔊</span>
+            <Volume2 aria-hidden="true" className="h-5 w-5" />
           </button>
           {volumeOpen && (
             <div
