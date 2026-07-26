@@ -1,41 +1,112 @@
-import { describe, it, expect } from "vitest";
-import { resolveBreakdownModel, breakdownParamsFor } from "./models";
+import { describe, it, expect, beforeEach } from "vitest";
+import {
+  resolveBreakdownModel,
+  breakdownParamsFor,
+  modelChoicesForProvider,
+} from "./models";
 
-describe("resolveBreakdownModel", () => {
-  it("guest always gets haiku regardless of owner setting", () => {
-    expect(
-      resolveBreakdownModel({
-        isOwner: false,
-        ownerSetting: "claude-opus-4-8",
-      }),
-    ).toBe("claude-haiku-4-5");
+beforeEach(() => {
+  delete process.env.LLM_PROVIDER;
+  delete process.env.LLM_MODEL;
+  delete process.env.LLM_OWNER_MODEL;
+  delete process.env.LLM_GUEST_MODEL;
+  delete process.env.OWNER_BREAKDOWN_MODEL;
+  delete process.env.GUEST_BREAKDOWN_MODEL;
+});
+
+describe("anthropic provider (default)", () => {
+  describe("resolveBreakdownModel", () => {
+    it("guest → haiku default, owner → sonnet default", () => {
+      expect(resolveBreakdownModel({ isOwner: false })).toBe(
+        "claude-haiku-4-5",
+      );
+      expect(resolveBreakdownModel({ isOwner: true })).toBe(
+        "claude-sonnet-4-6",
+      );
+    });
+    it("guest always gets haiku regardless of owner setting", () => {
+      expect(
+        resolveBreakdownModel({
+          isOwner: false,
+          ownerSetting: "claude-opus-4-8",
+        }),
+      ).toBe("claude-haiku-4-5");
+    });
+    it("owner uses a valid stored setting", () => {
+      expect(
+        resolveBreakdownModel({
+          isOwner: true,
+          ownerSetting: "claude-opus-4-8",
+        }),
+      ).toBe("claude-opus-4-8");
+    });
+    it("owner with no setting falls back to the default", () => {
+      expect(resolveBreakdownModel({ isOwner: true, ownerSetting: null })).toBe(
+        "claude-sonnet-4-6",
+      );
+    });
+    it("owner with an off-allowlist value (e.g. fable) falls back to default", () => {
+      expect(
+        resolveBreakdownModel({
+          isOwner: true,
+          ownerSetting: "claude-fable-5",
+        }),
+      ).toBe("claude-sonnet-4-6");
+    });
   });
-  it("owner uses a valid stored setting", () => {
-    expect(
-      resolveBreakdownModel({ isOwner: true, ownerSetting: "claude-opus-4-8" }),
-    ).toBe("claude-opus-4-8");
+
+  it("breakdownParamsFor returns hints (thinking/effort) for sonnet/opus, bare for haiku", () => {
+    expect(breakdownParamsFor("claude-haiku-4-5")).toEqual({
+      model: "claude-haiku-4-5",
+      hints: {},
+    });
+    expect(breakdownParamsFor("claude-opus-4-8")).toEqual({
+      model: "claude-opus-4-8",
+      hints: { thinking: true, effort: "low" },
+    });
+    expect(breakdownParamsFor("claude-sonnet-4-6")).toEqual({
+      model: "claude-sonnet-4-6",
+      hints: { thinking: true, effort: "low" },
+    });
   });
-  it("owner with no setting falls back to the default", () => {
-    expect(resolveBreakdownModel({ isOwner: true, ownerSetting: null })).toBe(
+
+  it("exposes the three-tier choice list", () => {
+    expect(modelChoicesForProvider()?.map((c) => c.id)).toEqual([
+      "claude-haiku-4-5",
       "claude-sonnet-4-6",
-    );
-  });
-  it("owner with an off-allowlist value (e.g. fable) falls back to default", () => {
-    expect(
-      resolveBreakdownModel({ isOwner: true, ownerSetting: "claude-fable-5" }),
-    ).toBe("claude-sonnet-4-6");
+      "claude-opus-4-8",
+    ]);
   });
 });
 
-describe("breakdownParamsFor", () => {
-  it("haiku gets no thinking and no effort", () => {
-    const p = breakdownParamsFor("claude-haiku-4-5");
-    expect(p.thinking).toBeUndefined();
-    expect(p.output_config).toBeUndefined();
+describe("openai-compatible provider", () => {
+  beforeEach(() => {
+    process.env.LLM_PROVIDER = "openai-compatible";
+    process.env.LLM_MODEL = "llama3.1:8b";
   });
-  it("sonnet/opus get adaptive thinking + low effort", () => {
-    const p = breakdownParamsFor("claude-sonnet-4-6");
-    expect(p.thinking).toEqual({ type: "adaptive" });
-    expect(p.output_config).toEqual({ effort: "low" });
+
+  it("owner + guest both resolve to LLM_MODEL when no split set", () => {
+    expect(resolveBreakdownModel({ isOwner: true })).toBe("llama3.1:8b");
+    expect(resolveBreakdownModel({ isOwner: false })).toBe("llama3.1:8b");
+  });
+
+  it("respects an explicit owner/guest split over LLM_MODEL", () => {
+    process.env.LLM_OWNER_MODEL = "llama3.1:70b";
+    process.env.LLM_GUEST_MODEL = "llama3.1:8b-instruct";
+    expect(resolveBreakdownModel({ isOwner: true })).toBe("llama3.1:70b");
+    expect(resolveBreakdownModel({ isOwner: false })).toBe(
+      "llama3.1:8b-instruct",
+    );
+  });
+
+  it("breakdownParamsFor never attaches anthropic-only hints", () => {
+    expect(breakdownParamsFor("llama3.1:8b")).toEqual({
+      model: "llama3.1:8b",
+      hints: {},
+    });
+  });
+
+  it("has no user-facing choice list (single configured model)", () => {
+    expect(modelChoicesForProvider()).toBeNull();
   });
 });

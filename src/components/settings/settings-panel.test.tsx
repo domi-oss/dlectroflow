@@ -36,12 +36,22 @@ const settings: AgingSettings & { firstRunPreview: boolean } = {
   firstRunPreview: false,
 };
 
+// The anthropic three-tier choice list, as `modelChoicesForProvider()` (#59)
+// returns it for the default provider. Passed explicitly since the picker is
+// now server-resolved and handed to the panel as a prop.
+const MODEL_CHOICES = [
+  { id: "claude-haiku-4-5", label: "Haiku 4.5 — fastest, cheapest" },
+  { id: "claude-sonnet-4-6", label: "Sonnet 4.6 — balanced (default)" },
+  { id: "claude-opus-4-8", label: "Opus 4.8 — deepest reasoning, slower" },
+];
+
 const renderPanel = (overrides?: Partial<AgingSettings>) =>
   render(
     <SettingsPanel
       settings={{ ...settings, ...overrides }}
       isOwner={false}
       breakdownModel={null}
+      modelChoices={MODEL_CHOICES}
       voice="plain"
       autoSaveDelayMs={20}
     />,
@@ -105,6 +115,7 @@ describe("SettingsPanel breakdown model — owner (interactive, #6)", () => {
         settings={settings}
         isOwner
         breakdownModel="claude-opus-4-8"
+        modelChoices={MODEL_CHOICES}
         voice="plain"
       />,
     );
@@ -125,11 +136,50 @@ describe("SettingsPanel breakdown model — owner (interactive, #6)", () => {
         settings={settings}
         isOwner
         breakdownModel="claude-sonnet-4-6"
+        modelChoices={MODEL_CHOICES}
         voice="plain"
       />,
     );
     await user.click(screen.getByLabelText(/Haiku/));
     expect(updateBreakdownModel).toHaveBeenCalledWith("claude-haiku-4-5");
+  });
+});
+
+describe("SettingsPanel breakdown model — no choice (openai-compatible, #59)", () => {
+  it("shows a read-only 'Using model' line instead of a picker when modelChoices is null", () => {
+    render(
+      <SettingsPanel
+        settings={settings}
+        isOwner
+        breakdownModel={null}
+        modelChoices={null}
+        activeModelName="llama3.1:8b"
+        voice="plain"
+      />,
+    );
+    expect(
+      screen.queryByRole("radiogroup", { name: /breakdown model/i }),
+    ).toBeNull();
+    expect(screen.getByText(/using model/i)).toHaveTextContent(
+      "Using model: llama3.1:8b",
+    );
+    // The anthropic-only decoy must not leak into a provider with no choice.
+    expect(screen.queryByText(/Fable/)).toBeNull();
+  });
+
+  it("falls back to 'unknown' if no active model name was resolved server-side", () => {
+    render(
+      <SettingsPanel
+        settings={settings}
+        isOwner={false}
+        breakdownModel={null}
+        modelChoices={null}
+        voice="plain"
+      />,
+    );
+    expect(screen.getByText(/using model/i)).toHaveTextContent(
+      "Using model: unknown",
+    );
   });
 });
 
@@ -140,6 +190,7 @@ describe("SettingsPanel breakdown model — guest (read-only, #11)", () => {
         settings={settings}
         isOwner={false}
         breakdownModel={null}
+        modelChoices={MODEL_CHOICES}
         voice="plain"
       />,
     );
@@ -163,6 +214,7 @@ describe("SettingsPanel breakdown model — guest (read-only, #11)", () => {
         settings={settings}
         isOwner={false}
         breakdownModel="claude-opus-4-8"
+        modelChoices={MODEL_CHOICES}
         voice="plain"
       />,
     );
@@ -178,6 +230,7 @@ describe("SettingsPanel breakdown model — guest (read-only, #11)", () => {
         settings={settings}
         isOwner={false}
         breakdownModel={null}
+        modelChoices={MODEL_CHOICES}
         voice="plain"
       />,
     );
@@ -194,6 +247,7 @@ describe("SettingsPanel demo: first-run preview toggle", () => {
         settings={settings}
         isOwner={false}
         breakdownModel={null}
+        modelChoices={MODEL_CHOICES}
         voice="plain"
       />,
     );

@@ -105,9 +105,12 @@ export const WorkspaceKind = {
 } as const;
 export type WorkspaceKind = (typeof WorkspaceKind)[keyof typeof WorkspaceKind];
 
-// ── Phase 2 — breakdown model selection ───────────────────────────────────
-// Owner-selectable models (validated server-side). claude-fable-5 is shown in
-// the UI but deliberately NOT allowlisted — it can never be selected/honored.
+// ── Phase 2 — breakdown model selection (anthropic provider) ────────────────
+// Owner-selectable models for the `anthropic` LLM_PROVIDER (validated
+// server-side). claude-fable-5 is shown in the UI but deliberately NOT
+// allowlisted — it can never be selected/honored. Other providers
+// (openai-compatible) use LLM_MODEL/LLM_OWNER_MODEL/LLM_GUEST_MODEL instead
+// and have no fixed allowlist — see src/lib/models.ts.
 export const OWNER_BREAKDOWN_ALLOWLIST = [
   "claude-haiku-4-5",
   "claude-sonnet-4-6",

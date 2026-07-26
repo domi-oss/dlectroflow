@@ -163,22 +163,23 @@ export async function POST(req: Request): Promise<Response> {
       }
 
       try {
-        const params = breakdownParamsFor(model); // { model, thinking?, output_config? }
         const llm = getLLM();
         for await (const ev of llm.stream({
-          model: params.model,
           system: SYSTEM,
           messages: [{ role: "user", content: buildUserPrompt(body) }],
           tools: [PROPOSE_TOOL],
           toolChoice: "propose_steps",
           maxTokens: 6000,
-          hints: { thinking: !!params.thinking, effort: params.output_config?.effort },
+          ...breakdownParamsFor(model),
         })) {
           if (ev.type === "text") {
             send({ type: "text", delta: ev.delta });
           } else if (ev.type === "final") {
             if (ev.result.toolCall?.name === "propose_steps") {
-              send({ type: "steps", data: ev.result.toolCall.input as unknown as Proposal });
+              send({
+                type: "steps",
+                data: ev.result.toolCall.input as unknown as Proposal,
+              });
             }
           }
         }
