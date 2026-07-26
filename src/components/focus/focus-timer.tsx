@@ -125,9 +125,31 @@ export function FocusTimer({
   const timerStyle = resolveTimerStyle(settings.timerStyle, voice);
 
   const [phase, setPhase] = useState<Phase>("setup");
-  const [plannedMin, setPlannedMin] = useState(step.estMinutes);
-  const [totalSec, setTotalSec] = useState(step.estMinutes * 60);
-  const [remainingSec, setRemainingSec] = useState(step.estMinutes * 60);
+  // #27 bugfix — when a paused session exists, seed the ring/Duration/
+  // remaining state from IT (the same values resumeExisting() applies on
+  // click), not from the step's static estMinutes. pauseFocus() bakes any
+  // mid-session +/-time taps into the session's own plannedMin without ever
+  // touching Step.estMinutes, so a 10m step paused after +5m twice persists
+  // a session with plannedMin=20 — seeding from estMinutes here made the
+  // ring/Duration show "10m" while the Resume button (reading
+  // existingSession.remainingSec) said "~15m left": two different numbers
+  // for what's supposed to be the same session. Note start() (the "Start
+  // fresh" handler) doesn't itself reset plannedMin — it submits whatever's
+  // currently in this state — so with a resumable session present, an
+  // unedited "Start fresh" now begins at the session's (possibly grown)
+  // plannedMin rather than the original estimate; that's consistent with
+  // what the Duration field visibly shows, and the fresh-start-with-no-
+  // session path (no existingSession) is unaffected, still seeding from
+  // step.estMinutes as before.
+  const [plannedMin, setPlannedMin] = useState(
+    existingSession?.plannedMin ?? step.estMinutes,
+  );
+  const [totalSec, setTotalSec] = useState(
+    existingSession?.totalSec ?? step.estMinutes * 60,
+  );
+  const [remainingSec, setRemainingSec] = useState(
+    existingSession?.remainingSec ?? step.estMinutes * 60,
+  );
   const elapsedRef = useRef(0);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);

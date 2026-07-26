@@ -548,9 +548,108 @@ describe("FocusTimer — setup screen: existing paused session (#27)", () => {
   it("Start fresh still calls beginFocus (server retires the stale session)", async () => {
     const user = userEvent.setup();
     render(<FocusTimer {...base({ existingSession: paused })} />);
+    // Bugfix (ring/Duration now seed from existingSession, not step.estMinutes,
+    // see the "bugfix" describe block below): the Duration field the user
+    // actually sees starts at the session's plannedMin (10), not the step's
+    // stale estimate (1) — so an unedited "Start fresh" click submits the
+    // value that's genuinely on screen.
     await user.click(screen.getByRole("button", { name: /start fresh/i }));
-    expect(beginFocus).toHaveBeenCalledWith("s2", 1);
+    expect(beginFocus).toHaveBeenCalledWith("s2", 10);
     expect(resumeFocus).not.toHaveBeenCalled();
+  });
+
+  // Bug fix (owner-reported, !139): pauseFocus() bakes mid-session +time taps
+  // into the SESSION's own plannedMin without ever touching Step.estMinutes —
+  // so a 10m step that got +5m tapped twice then paused persists a session
+  // with plannedMin=20/remaining~15m, while the ring/Duration used to seed
+  // from the stale step.estMinutes (10). Result: ring said "of 10m" while the
+  // Resume button (reading existingSession.remainingSec) said "~15m left" —
+  // two different numbers for what's supposed to be the same session. The
+  // ring/Duration/remaining must now seed from existingSession, matching
+  // exactly what resumeExisting() applies on click.
+  describe("bugfix: ring/Duration must agree with the Resume button's number", () => {
+    // A 10m step (step.estMinutes), +5m tapped twice while running (session
+    // totalSec grew to 20m), then paused with ~15m left of that 20m.
+    const grown = {
+      id: "sess-grown",
+      plannedMin: 20,
+      totalSec: 1200,
+      remainingSec: 15 * 60,
+    };
+
+    it("multi-step: seeds the ring/Duration from the session's plannedMin/remaining, not step.estMinutes", () => {
+      render(
+        <FocusTimer
+          {...base({
+            step: { ...base().step, estMinutes: 10 },
+            existingSession: grown,
+          })}
+        />,
+      );
+      // Duration field reads the SESSION's plannedMin (20) — not the step's
+      // stale estimate (10).
+      expect(screen.getByRole("spinbutton", { name: /duration/i })).toHaveValue(
+        20,
+      );
+      // The ring's remaining readout + "of Xm" total agree with the session.
+      expect(screen.getByText("15:00")).toBeInTheDocument();
+      expect(screen.getByText(/of 20m/)).toBeInTheDocument();
+      expect(screen.queryByText(/of 10m/)).not.toBeInTheDocument();
+      // …and now MATCHES the Resume button's own number — no more "ring says
+      // 10m, button says ~15m left" contradiction.
+      expect(
+        screen.getByRole("button", { name: /resume.*~15m.*left/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("single-task: same seeding fix applies (FocusTimer is shared — existingSession/pauseFocus are step-generic)", () => {
+      render(
+        <FocusTimer
+          {...base({
+            isSingleTask: true,
+            step: {
+              id: "s1",
+              text: "Call the bank",
+              estMinutes: 10,
+              subtaskEmoji: null,
+              order: 1,
+              total: 1,
+              done: false,
+            },
+            steps: [
+              {
+                id: "s1",
+                text: "Call the bank",
+                done: false,
+                estMinutes: 10,
+                subtaskEmoji: null,
+              },
+            ],
+            nextStep: null,
+            existingSession: grown,
+          })}
+        />,
+      );
+      expect(screen.getByRole("spinbutton", { name: /duration/i })).toHaveValue(
+        20,
+      );
+      expect(screen.getByText("15:00")).toBeInTheDocument();
+      expect(screen.getByText(/of 20m/)).toBeInTheDocument();
+      expect(screen.queryByText(/of 10m/)).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /resume.*~15m.*left/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("fresh start (no existing session) still seeds from step.estMinutes, unaffected", () => {
+      render(
+        <FocusTimer {...base({ step: { ...base().step, estMinutes: 10 } })} />,
+      );
+      expect(screen.getByRole("spinbutton", { name: /duration/i })).toHaveValue(
+        10,
+      );
+      expect(screen.getByText(/of 10m/)).toBeInTheDocument();
+    });
   });
 
   it("no existing session: the normal single Start CTA renders", () => {
