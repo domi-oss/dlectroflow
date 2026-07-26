@@ -19,6 +19,48 @@ operators upgrading a self-hosted instance don't get surprised.
 > Shipped to production but not yet tagged. At cut time this becomes
 > `## [X.Y.Z] - <date>` and a fresh empty `## [Unreleased]` is added above it.
 
+## [0.3.0] - 2026-07-26
+
+The **open-source launch**: dlectroflow is now public under AGPL-3.0, running on its
+own domain, with a visual-identity refresh and a batch of UX + accessibility polish.
+
+### Added
+
+- **Visual identity refresh** (#40): a real app icon / brand mark (favicon + in-app),
+  a Settings typeface picker, brand accents across nav, and hero-surface polish.
+- **Open-source project files**: `LICENSE` (**AGPL-3.0**), `CONTRIBUTING.md`,
+  `CODE_OF_CONDUCT.md`; README rewritten self-host-first with a live-demo pointer and
+  a Roadmap section.
+- **Guest read-only settings** (#11): guests see the owner settings UI, disabled, so
+  the app's capabilities are legible without exposing owner-only controls or values.
+- **Stale-reminder as a notification chip** (#57): the "still needed?" nudge is now a
+  compact, tinted, glanceable chip instead of muted background text.
+
+### Changed
+
+- **Primary domain is now `dlectroflow.dev`** (#54). The previous
+  `dlectroflow.dlectronique.dev` permanently redirects to it (path + query preserved).
+  Self-hosters set their own `host`; the app's origin is env-driven (`PUBLIC_ORIGIN`).
+- **Inbox row hierarchy** (#50/#51/#52): the task title is the dominant element, the
+  age/status pill moved down to the metadata line, and the stale banner no longer
+  outweighs the row.
+- **Inbox is served at the root `/`** (#58); `/inbox` permanently redirects to it.
+- **Dark-mode toggle moved into the app header** (#49).
+- Repo tidied for public consumption (internal design docs under `docs/design/`).
+
+### Fixed
+
+- `/library` tab-count pill failed WCAG-AA contrast once state accumulated (#48);
+  fixed and the axe accessibility gate now covers `/library`.
+- Aging label + nav aging-count contrast, and the "Help & Docs" footer spacing/casing.
+
+### Security
+
+- Bumped `brace-expansion` past **CVE-2026-14257** (High, DoS) (#55).
+- Hardened the repository for public release: full git-history secret scan (clean),
+  personal/infra fingerprint scrubbed from docs/config/CI, CI job logs made private,
+  per-feature project visibility locked down before going public.
+
 ## [0.2.0] - 2026-07-22
 
 Generalizing the scheduling stack for open-source (epic #29) and closing the loop
@@ -188,7 +230,8 @@ Baseline — first tracked release of the shipped app.
 - GKE Autopilot deployment with valid TLS, per-MR review apps, and the full
   GitLab security-scanner suite.
 
-[Unreleased]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.2.0...main
+[Unreleased]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.3.0...main
+[0.3.0]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.2.0...v0.3.0
 [0.2.0]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.1.0...v0.2.0
 [0.1.0]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.0.1...v0.1.0
 [0.0.1]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/releases/v0.0.1
