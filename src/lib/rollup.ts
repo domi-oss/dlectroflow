@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { getStreak } from "@/lib/db";
-import { getAnthropic, BREAKDOWN_MODEL } from "@/lib/anthropic";
+import { getLLM } from "@/lib/llm";
+import { BREAKDOWN_MODEL } from "@/lib/anthropic";
 import { FocusOutcome, TaskStatus, isGuestWorkspace } from "@/lib/constants";
 import { getTodaySpark } from "@/lib/spark";
 
@@ -125,11 +126,10 @@ async function generateNarrative(
   // Guests never call Claude — use the local narrative builder.
   if (!isGuestWorkspace(workspaceId)) {
     try {
-      const anthropic = getAnthropic();
-      const resp = await anthropic.messages.create({
+      const { text } = await getLLM().generate({
         model: BREAKDOWN_MODEL,
-        max_tokens: 400,
-        output_config: { effort: "low" },
+        maxTokens: 400,
+        hints: { effort: "low" },
         messages: [
           {
             role: "user",
@@ -156,12 +156,8 @@ If the day was quiet (little done), be especially kind — no pressure, tomorrow
           },
         ],
       });
-      const text = resp.content
-        .filter((b) => b.type === "text")
-        .map((b) => (b.type === "text" ? b.text : ""))
-        .join("")
-        .trim();
-      if (text) return text;
+      const clean = text.trim();
+      if (clean) return clean;
     } catch {
       // fall through to the local fallback
     }

@@ -1,61 +1,67 @@
 /**
- * Call-site guard tests: assert that guests NEVER trigger getAnthropic() in
- * the three Claude-calling paths (spark, rollup narrative, focus estimate).
+ * Call-site guard tests: assert that guests NEVER trigger getLLM().generate()
+ * in the three Claude-calling paths (spark, rollup narrative, focus estimate).
  *
- * Strategy: vi.mock("@/lib/anthropic") with a spy that throws on invocation so
- * any accidental guest call fails the test loudly. We then invoke each function
- * with a guest workspace id and assert the spy was never called. Owner paths
- * verify the spy *is* reached (even though it then throws / falls through).
+ * Strategy: vi.mock("@/lib/llm") with a `generate` spy that throws on
+ * invocation so any accidental guest call fails the test loudly. We then
+ * invoke each function with a guest workspace id and assert the spy was never
+ * called. Owner paths verify the spy *is* reached (even though it then throws
+ * / falls through).
+ *
+ * (Historical note: these guards originally targeted `getAnthropic()` from
+ * `@/lib/anthropic`. #59 migrated spark/rollup/focus onto the provider-agnostic
+ * `getLLM().generate()` seam — see task-4-report.md — so the mock moved with
+ * the call sites it guards; the invariant under test is unchanged.)
  *
  * Covered call sites:
- *   1. spark.ts › getTodaySpark      — guest skips getAnthropic via quoteFor guard
- *   2. rollup.ts › generateTodayRollup — guest skips getAnthropic via generateNarrative guard
- *   3. focus.ts › proposeNewEstimate  — guest skips getAnthropic via early-return guard
+ *   1. spark.ts › getTodaySpark      — guest skips getLLM() via quoteFor guard
+ *   2. rollup.ts › generateTodayRollup — guest skips getLLM() via generateNarrative guard
+ *   3. focus.ts › proposeNewEstimate  — guest skips getLLM() via early-return guard
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SparkSource } from "@/lib/constants";
 
 // ── vi.hoisted: create shared mock objects before vi.mock hoisting ──────────
-const { getAnthropicSpy, prismaMock, currentWorkspaceIdMock } = vi.hoisted(
-  () => {
-    const getAnthropicSpy = vi.fn(() => {
-      throw new Error("getAnthropic must NOT be called for guests");
-    });
+const { generateSpy, prismaMock, currentWorkspaceIdMock } = vi.hoisted(() => {
+  const generateSpy = vi.fn(() => {
+    throw new Error("getLLM().generate must NOT be called for guests");
+  });
 
-    // Shared prisma stub — individual tests update the sub-objects they need.
-    const prismaMock = {
-      dailySpark: {
-        findUnique: vi.fn(),
-        upsert: vi.fn(),
-      },
-      dayRollup: {
-        findUnique: vi.fn(),
-        upsert: vi.fn(),
-      },
-      focusSession: {
-        findMany: vi.fn(),
-      },
-      rewardEvent: {
-        aggregate: vi.fn(),
-        count: vi.fn(),
-      },
-      step: {
-        findMany: vi.fn(),
-        findFirst: vi.fn(),
-      },
-    };
+  // Shared prisma stub — individual tests update the sub-objects they need.
+  const prismaMock = {
+    dailySpark: {
+      findUnique: vi.fn(),
+      upsert: vi.fn(),
+    },
+    dayRollup: {
+      findUnique: vi.fn(),
+      upsert: vi.fn(),
+    },
+    focusSession: {
+      findMany: vi.fn(),
+    },
+    rewardEvent: {
+      aggregate: vi.fn(),
+      count: vi.fn(),
+    },
+    step: {
+      findMany: vi.fn(),
+      findFirst: vi.fn(),
+    },
+  };
 
-    const currentWorkspaceIdMock = vi.fn();
+  const currentWorkspaceIdMock = vi.fn();
 
-    return { getAnthropicSpy, prismaMock, currentWorkspaceIdMock };
-  },
-);
+  return { generateSpy, prismaMock, currentWorkspaceIdMock };
+});
 
 // ── Module mocks (hoisted automatically by vitest) ──────────────────────────
 vi.mock("@/lib/anthropic", () => ({
-  getAnthropic: getAnthropicSpy,
   BREAKDOWN_MODEL: "claude-opus-4-8",
+}));
+vi.mock("@/lib/llm", () => ({
+  getLLM: () => ({ generate: generateSpy }),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -104,15 +110,15 @@ describe("spark.ts › getTodaySpark", () => {
       }) => Promise.resolve(create),
     );
     // Reset spy to throwing behaviour (guards against false-positive owner tests)
-    getAnthropicSpy.mockImplementation(() => {
-      throw new Error("getAnthropic must NOT be called for guests");
+    generateSpy.mockImplementation(() => {
+      throw new Error("getLLM().generate must NOT be called for guests");
     });
   });
 
-  it("guest workspace: getAnthropic is never called", async () => {
+  it("guest workspace: getLLM().generate is never called", async () => {
     const { getTodaySpark } = await import("@/lib/spark");
     await getTodaySpark("guest-xyz");
-    expect(getAnthropicSpy).not.toHaveBeenCalled();
+    expect(generateSpy).not.toHaveBeenCalled();
   });
 
   it("guest workspace: returned source is Fallback", async () => {
@@ -122,12 +128,12 @@ describe("spark.ts › getTodaySpark", () => {
     expect(result.quote).toBeTruthy();
   });
 
-  it("owner workspace: getAnthropic IS called (no guard for owner)", async () => {
-    // For the owner, getAnthropic throws (no real key), so spark falls through
+  it("owner workspace: getLLM().generate IS called (no guard for owner)", async () => {
+    // For the owner, generate() throws (no real key), so spark falls through
     // to fallback — but the important thing is the spy was reached.
     const { getTodaySpark } = await import("@/lib/spark");
     await getTodaySpark("owner");
-    expect(getAnthropicSpy).toHaveBeenCalledTimes(1);
+    expect(generateSpy).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -152,26 +158,26 @@ describe("focus.ts › proposeNewEstimate", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prismaMock.step.findFirst.mockResolvedValue(STEP);
-    getAnthropicSpy.mockImplementation(() => {
-      throw new Error("getAnthropic must NOT be called for guests");
+    generateSpy.mockImplementation(() => {
+      throw new Error("getLLM().generate must NOT be called for guests");
     });
   });
 
-  it("guest workspace: getAnthropic is never called", async () => {
+  it("guest workspace: getLLM().generate is never called", async () => {
     currentWorkspaceIdMock.mockResolvedValue("guest-xyz");
     const { proposeNewEstimate } = await import("@/app/actions/focus");
     const result = await proposeNewEstimate("step-1");
-    expect(getAnthropicSpy).not.toHaveBeenCalled();
+    expect(generateSpy).not.toHaveBeenCalled();
     // Guest fallback: estMinutes + 10
     expect(result).toBe(STEP.estMinutes + 10);
   });
 
-  it("owner workspace: getAnthropic IS called (no guard for owner)", async () => {
+  it("owner workspace: getLLM().generate IS called (no guard for owner)", async () => {
     currentWorkspaceIdMock.mockResolvedValue("owner");
     const { proposeNewEstimate } = await import("@/app/actions/focus");
-    // getAnthropic throws → caught → returns estMinutes + 10 as fallback
+    // generate() throws → caught → returns estMinutes + 10 as fallback
     const result = await proposeNewEstimate("step-1");
-    expect(getAnthropicSpy).toHaveBeenCalledTimes(1);
+    expect(generateSpy).toHaveBeenCalledTimes(1);
     expect(result).toBe(STEP.estMinutes + 10);
   });
 });
@@ -218,30 +224,30 @@ describe("rollup.ts › generateTodayRollup (narrative guard)", () => {
       source: SparkSource.Fallback,
     });
 
-    getAnthropicSpy.mockImplementation(() => {
-      throw new Error("getAnthropic must NOT be called for guests");
+    generateSpy.mockImplementation(() => {
+      throw new Error("getLLM().generate must NOT be called for guests");
     });
   });
 
-  it("guest workspace: getAnthropic is never called during rollup narrative generation", async () => {
+  it("guest workspace: getLLM().generate is never called during rollup narrative generation", async () => {
     const { generateTodayRollup } = await import("@/lib/rollup");
     const rollup = await generateTodayRollup("guest-xyz");
 
-    expect(getAnthropicSpy).not.toHaveBeenCalled();
+    expect(generateSpy).not.toHaveBeenCalled();
     // The narrative should be present (from fallbackNarrative or the upsert stub)
     expect(rollup.narrative).toBeTruthy();
   });
 
-  it("owner workspace: getAnthropic IS called during narrative generation", async () => {
+  it("owner workspace: getLLM().generate IS called during narrative generation", async () => {
     prismaMock.dayRollup.upsert.mockResolvedValue({
       ...ROLLUP_ROW,
       workspaceId: "owner",
     });
 
     const { generateTodayRollup } = await import("@/lib/rollup");
-    // getAnthropic throws → caught → fallbackNarrative is used instead
+    // generate() throws → caught → fallbackNarrative is used instead
     await generateTodayRollup("owner");
 
-    expect(getAnthropicSpy).toHaveBeenCalledTimes(1);
+    expect(generateSpy).toHaveBeenCalledTimes(1);
   });
 });

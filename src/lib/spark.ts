@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
-import { getAnthropic, BREAKDOWN_MODEL } from "@/lib/anthropic";
+import { getLLM } from "@/lib/llm";
+import { BREAKDOWN_MODEL } from "@/lib/anthropic";
 import { SparkSource, isGuestWorkspace } from "@/lib/constants";
 
 const FALLBACK_SPARKS = [
@@ -26,11 +27,10 @@ function randomFallback(): string {
 
 async function generateQuote(): Promise<{ quote: string; source: string }> {
   try {
-    const anthropic = getAnthropic();
-    const resp = await anthropic.messages.create({
+    const { text } = await getLLM().generate({
       model: BREAKDOWN_MODEL,
-      max_tokens: 120,
-      output_config: { effort: "low" },
+      maxTokens: 120,
+      hints: { effort: "low" },
       messages: [
         {
           role: "user",
@@ -39,13 +39,8 @@ async function generateQuote(): Promise<{ quote: string; source: string }> {
         },
       ],
     });
-    const text = resp.content
-      .filter((b) => b.type === "text")
-      .map((b) => (b.type === "text" ? b.text : ""))
-      .join("")
-      .trim()
-      .replace(/^["']|["']$/g, "");
-    if (text) return { quote: text, source: SparkSource.AI };
+    const clean = text.trim().replace(/^["']|["']$/g, "");
+    if (clean) return { quote: clean, source: SparkSource.AI };
   } catch {
     // fall through to fallback
   }

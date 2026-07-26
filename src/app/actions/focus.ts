@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
-import { getAnthropic, BREAKDOWN_MODEL } from "@/lib/anthropic";
+import { getLLM } from "@/lib/llm";
+import { BREAKDOWN_MODEL } from "@/lib/anthropic";
 import { getValidAccessToken, patchGoogleTask } from "@/lib/google";
 import {
   BadgeKey,
@@ -325,11 +326,10 @@ export async function proposeNewEstimate(stepId: string): Promise<number> {
   if (!step) return 15;
   if (isGuestWorkspace(workspaceId)) return step.estMinutes + 10;
   try {
-    const anthropic = getAnthropic();
-    const resp = await anthropic.messages.create({
+    const { text } = await getLLM().generate({
       model: BREAKDOWN_MODEL,
-      max_tokens: 200,
-      output_config: { effort: "low" },
+      maxTokens: 200,
+      hints: { effort: "low" },
       messages: [
         {
           role: "user",
@@ -340,10 +340,6 @@ Suggest a realistic, kind new estimate (a bit more time, not punishing). Reply w
         },
       ],
     });
-    const text = resp.content
-      .filter((b) => b.type === "text")
-      .map((b) => (b.type === "text" ? b.text : ""))
-      .join("");
     const m = text.match(/\{[\s\S]*\}/);
     if (m) {
       const parsed = JSON.parse(m[0]) as { minutes?: number };
