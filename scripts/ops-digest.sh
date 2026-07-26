@@ -20,7 +20,7 @@
 # glances until #29 lands — see the "Spend & error logs" section below.
 set -euo pipefail
 
-PROD_URL="${PROD_URL:-https://dlectroflow.dlectronique.dev}"
+PROD_URL="${PROD_URL:-https://dlectroflow.dev}"
 API="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}"
 # `${GL_TOKEN:-}` (not `${GL_TOKEN}`) so an entirely-unset token doesn't trip
 # `set -u` — that's the "no setup yet" case, where the API reads 401 and degrade

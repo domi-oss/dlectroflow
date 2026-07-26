@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Take dlectroflow from a local SQLite app to a live GitLab-CI/CD deployment on GKE Autopilot, with per-MR review apps and a stable production environment at https://dlectroflow.dlectronique.dev.
+**Goal:** Take dlectroflow from a local SQLite app to a live GitLab-CI/CD deployment on GKE Autopilot, with per-MR review apps and a stable production environment at https://dlectroflow.dev.
 
 **Architecture:** One GKE Autopilot cluster reached through the GitLab agent (`agentk`). A single Helm chart renders each environment into its own namespace (app + in-namespace Postgres + Secret). CI builds one image per commit (kaniko → GitLab Container Registry) and deploys it: review apps on MR events (sslip.io hosts, ephemeral Postgres, Spot), production on `main` (real host, persistent Postgres). Secrets come from GitLab Secrets Manager; TLS from cert-manager (Let's Encrypt HTTP-01).
 
@@ -15,7 +15,7 @@
 - **Next.js 16.2** — past training cutoff; read `node_modules/next/dist/docs/` before changing Next config/behavior.
 - **Prisma 6** pinned (NOT 7). SQLite→Postgres is a provider swap only; keep `String` columns (no enums) — do NOT touch `src/lib/constants.ts` or app code.
 - **No secrets in the repo.** App reads `process.env`. Secrets live in GitLab Secrets Manager; injected at deploy time.
-- **Region:** `europe-west2`. **Static ingress IP:** `YOUR_STATIC_IP` (reserved as `dlectroflow-ingress`). **Prod host:** `dlectroflow.dlectronique.dev`. **Group:** `gl-demo-ultimate-dtop`. **Agent name:** `dlectroflow`. **Registry image:** `registry.gitlab.com/gl-demo-ultimate-dtop/dlectroflow`.
+- **Region:** `europe-west2`. **Static ingress IP:** `YOUR_STATIC_IP` (reserved as `dlectroflow-ingress`). **Prod host:** `dlectroflow.dev`. **Group:** `gl-demo-ultimate-dtop`. **Agent name:** `dlectroflow`. **Registry image:** `registry.gitlab.com/gl-demo-ultimate-dtop/dlectroflow`.
 - **Resource requests (= limits on Autopilot):** app prod `500m`/`512Mi`; app review `250m`/`512Mi`; postgres prod `250m`/`512Mi` (PVC 8Gi); postgres review `250m`/`512Mi` (emptyDir). Review pods on Spot; production on-demand.
 - **Commit trailer (every commit):**
   ```
@@ -215,7 +215,7 @@ EOF
 - Produces: `requestOrigin(req: Request): string` — the external origin honoring
   `x-forwarded-proto` / `x-forwarded-host` (TLS terminates at ingress-nginx, so the pod
   sees plain HTTP). Both Google OAuth routes use it, so redirect URIs are
-  `https://dlectroflow.dlectronique.dev/...` in production while still
+  `https://dlectroflow.dev/...` in production while still
   `http://localhost:3000` locally. No signature changes.
 
 - [ ] **Step 1: Create `src/lib/origin.ts`**
@@ -266,11 +266,11 @@ reflects `origin`, so this works whether or not `GOOGLE_CLIENT_ID` is set locall
 
 ```bash
 curl -s -o /dev/null -D - \
-  -H "x-forwarded-proto: https" -H "x-forwarded-host: dlectroflow.dlectronique.dev" \
+  -H "x-forwarded-proto: https" -H "x-forwarded-host: dlectroflow.dev" \
   "http://localhost:3000/api/google/oauth/start" | grep -i '^location:'
 ```
-Expected: the `Location:` URL is on `https://dlectroflow.dlectronique.dev` (either the
-Google authorize URL with an `https%3A%2F%2Fdlectroflow.dlectronique.dev%2F...`
+Expected: the `Location:` URL is on `https://dlectroflow.dev` (either the
+Google authorize URL with an `https%3A%2F%2Fdlectroflow.dev%2F...`
 `redirect_uri`, or the `/inbox?google=error` redirect on that https origin).
 
 - [ ] **Step 5: Verify local fallback (no forwarded headers)**
@@ -441,7 +441,7 @@ image:
   pullPolicy: IfNotPresent
 
 env: production        # review | production
-host: dlectroflow.dlectronique.dev
+host: dlectroflow.dev
 replicas: 1
 spot: false            # true for review apps
 
@@ -968,7 +968,7 @@ deploy_production:
         --namespace dlectroflow-prod --create-namespace
         --set env=production --set postgres.persistent=true
         --set-string image.tag="$CI_COMMIT_SHA"
-        --set-string host="dlectroflow.dlectronique.dev"
+        --set-string host="dlectroflow.dev"
         --set-string secrets.postgresPassword="$POSTGRES_PASSWORD"
         --set-string secrets.anthropicApiKey="$ANTHROPIC_API_KEY"
         --set-string secrets.googleClientId="$GOOGLE_CLIENT_ID"
@@ -978,7 +978,7 @@ deploy_production:
         --wait --timeout 5m
   environment:
     name: production
-    url: https://dlectroflow.dlectronique.dev
+    url: https://dlectroflow.dev
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
 ```
@@ -999,7 +999,7 @@ Expected: `YAML OK`; glab lint passes or is skipped.
 ```bash
 helm template dlectroflow charts/dlectroflow \
   --set env=production --set postgres.persistent=true \
-  --set-string image.tag=deadbeef --set-string host=dlectroflow.dlectronique.dev \
+  --set-string image.tag=deadbeef --set-string host=dlectroflow.dev \
   --set-string secrets.postgresPassword=pw --set-string secrets.anthropicApiKey=k \
   --set-string secrets.googleClientId=gid --set-string secrets.googleClientSecret=gsec \
   --set-string registry.username=depuser --set-string registry.password=deptok >/tmp/ci-prod.yaml
@@ -1039,7 +1039,7 @@ EOF
 ````markdown
 # dlectroflow — Deployment Runbook (GKE Autopilot + GitLab)
 
-All infra lives in GCP region **europe-west2**. Prod host **dlectroflow.dlectronique.dev**.
+All infra lives in GCP region **europe-west2**. Prod host **dlectroflow.dev**.
 
 ## 0. Prerequisites
 - `gcloud` authed to the target project; `kubectl`, `helm` installed.
@@ -1121,21 +1121,21 @@ Confirm these secrets exist with the listed scopes (all created except Resend):
 
 ## 8. Google OAuth redirect
 Add to the OAuth client's authorized redirect URIs (keep the local one too):
-- `https://dlectroflow.dlectronique.dev/api/google/oauth/callback`
+- `https://dlectroflow.dev/api/google/oauth/callback`
 - `http://localhost:3000/api/google/oauth/callback`
 
 After the production deploy, confirm the app builds an **https** redirect URI behind
 ingress (Task 3 handles the forwarded-proto derivation):
 ```bash
-curl -s -o /dev/null -D - "https://dlectroflow.dlectronique.dev/api/google/oauth/start" | grep -i '^location:'
+curl -s -o /dev/null -D - "https://dlectroflow.dev/api/google/oauth/start" | grep -i '^location:'
 ```
-The `Location:` URL's `redirect_uri=` must be `https%3A%2F%2Fdlectroflow.dlectronique.dev%2F…`.
+The `Location:` URL's `redirect_uri=` must be `https%3A%2F%2Fdlectroflow.dev%2F…`.
 If it shows `http%3A%2F%2F` or Google returns `redirect_uri_mismatch`, re-check the
 ingress `X-Forwarded-Proto` header and Task 3's `requestOrigin`.
 
 ## 9. Deploy
 - Open an MR → `deploy_review` publishes to `https://mr-<IID>.YOUR_STATIC_IP.sslip.io` (see the MR "View app" button).
-- Merge to `main` → `deploy_production` publishes to `https://dlectroflow.dlectronique.dev`.
+- Merge to `main` → `deploy_production` publishes to `https://dlectroflow.dev`.
 
 ## 10. Cost guardrails
 - Confirm the free Autopilot/zonal cluster credit on the billing account.
@@ -1143,7 +1143,7 @@ ingress `X-Forwarded-Proto` header and Task 3's `requestOrigin`.
 
 ## 11. Verify
 - `kubectl -n dlectroflow-prod get pods` → app + postgres Running.
-- `curl -I https://dlectroflow.dlectronique.dev` → 200 + valid TLS.
+- `curl -I https://dlectroflow.dev` → 200 + valid TLS.
 - Google "Connect" completes on the prod host.
 - Close the MR → review namespace is deleted.
 ````

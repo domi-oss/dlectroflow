@@ -1379,7 +1379,7 @@ git commit -m "test: cross-workspace data isolation + smoke checklist"
 Before the first prod deploy of this branch, add to GitLab Secrets Manager:
 `AUTH_SESSION_SECRET`, `GITLAB_OAUTH_CLIENT_ID`, `GITLAB_OAUTH_CLIENT_SECRET`,
 and set `AUTH_PROVIDER=gitlab`, `OWNER_ALLOWLIST=1234567`. Create a GitLab OAuth
-application (redirect `https://dlectroflow.dlectronique.dev/api/auth/gitlab/callback`,
+application (redirect `https://dlectroflow.dev/api/auth/gitlab/callback`,
 scope `read_user`). The prod boot guard (Task 11) will otherwise refuse to start —
 by design, so data is never served ungated. Run `prisma migrate deploy` (the
 existing migrate initContainer) to apply the backfill migration.

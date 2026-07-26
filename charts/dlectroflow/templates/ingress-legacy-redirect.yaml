@@ -1,0 +1,52 @@
+{{- if .Values.legacyHosts }}
+# ── Legacy-host 301 redirect (zero-downtime domain migration, #54) ────────────
+# Serves each old hostname on its own Let's Encrypt cert and permanently
+# redirects every request to the canonical host, preserving path + query.
+# Rendered ONLY when .Values.legacyHosts is set (production) — review apps, which
+# leave it empty, get no redirect ingress.
+#
+# The app itself is untouched: because requests to the old host never reach the
+# backend (nginx returns 301 first), and PUBLIC_ORIGIN pins the canonical origin,
+# the application only ever sees dlectroflow.dev.
+#
+# NOTE: cert-manager's HTTP-01 self-check needs the old host(s) in the
+# cert-manager hostAlias too (GKE hairpin quirk, see docs/deploy-runbook.md §4) —
+# otherwise the dlectroflow-legacy-tls cert won't issue.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dlectroflow-legacy-redirect
+  labels:
+    {{- include "dlectroflow.labels" . | nindent 4 }}
+  annotations:
+    cert-manager.io/cluster-issuer: {{ .Values.tls.clusterIssuer }}
+    # Terminate TLS on the old host, force HTTP→HTTPS, then 301 to the canonical
+    # host preserving the original path + query ($request_uri).
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/permanent-redirect: "https://{{ .Values.host }}$request_uri"
+    nginx.ingress.kubernetes.io/permanent-redirect-code: "301"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        {{- range .Values.legacyHosts }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: dlectroflow-legacy-tls
+  rules:
+    {{- range .Values.legacyHosts }}
+    # Backend is never actually reached (the redirect fires first) but a rule
+    # needs a valid path + service target to be admitted.
+    - host: {{ . | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dlectroflow
+                port:
+                  number: 80
+    {{- end }}
+{{- end }}

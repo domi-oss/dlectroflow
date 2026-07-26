@@ -11,13 +11,13 @@ describe("publicOrigin", () => {
   });
 
   it("returns PUBLIC_ORIGIN when set", () => {
-    process.env.PUBLIC_ORIGIN = "https://dlectroflow.dlectronique.dev";
-    expect(publicOrigin()).toBe("https://dlectroflow.dlectronique.dev");
+    process.env.PUBLIC_ORIGIN = "https://dlectroflow.dev";
+    expect(publicOrigin()).toBe("https://dlectroflow.dev");
   });
 
   it("strips trailing slashes from PUBLIC_ORIGIN", () => {
-    process.env.PUBLIC_ORIGIN = "https://dlectroflow.dlectronique.dev//";
-    expect(publicOrigin()).toBe("https://dlectroflow.dlectronique.dev");
+    process.env.PUBLIC_ORIGIN = "https://dlectroflow.dev//";
+    expect(publicOrigin()).toBe("https://dlectroflow.dev");
   });
 
   it("falls back to localhost in non-production when PUBLIC_ORIGIN is unset", () => {

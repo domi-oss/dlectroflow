@@ -1,7 +1,7 @@
 # Security Policy
 
 dlectroflow is a single-maintainer, agent-augmented project that runs live at
-https://dlectroflow.dlectronique.dev. This document defines how security issues
+https://dlectroflow.dev. This document defines how security issues
 are reported and handled, and where the line sits between automated and
 human-only remediation.
 

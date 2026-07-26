@@ -457,7 +457,8 @@ deploy_production:
         --namespace dlectroflow-prod --create-namespace
         --set env=production --set postgres.persistent=true
         --set-string image.tag="main-$CI_COMMIT_SHORT_SHA"
-        --set-string host="dlectroflow.dlectronique.dev"
+        --set-string host="dlectroflow.dev"
+        --set-string "legacyHosts[0]=dlectroflow.dlectronique.dev"
         --set-string secrets.postgresPassword="$POSTGRES_PASSWORD"
         --set-string secrets.anthropicApiKey="$ANTHROPIC_API_KEY"
         --set-string secrets.googleClientId="$GOOGLE_CLIENT_ID"
@@ -476,7 +477,7 @@ deploy_production:
         --atomic --timeout 10m
   environment:
     name: production
-    url: https://dlectroflow.dlectronique.dev
+    url: https://dlectroflow.dev
   rules:
     # Never deploy from a scheduled pipeline (the weekly rescan rebuilds + scans
     # only; base bumps reach prod via a Renovate MR merged to main → push pipeline).
@@ -539,7 +540,7 @@ ops_digest:
   needs: []
   interruptible: false
   variables:
-    PROD_URL: "https://dlectroflow.dlectronique.dev"
+    PROD_URL: "https://dlectroflow.dev"
   before_script:
     - apk add --no-cache curl jq coreutils bash
   script:

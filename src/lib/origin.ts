@@ -1,7 +1,7 @@
 /**
  * External origin of the request.
  *
- * In production PUBLIC_ORIGIN pins the origin (e.g. https://dlectroflow.dlectronique.dev),
+ * In production PUBLIC_ORIGIN pins the origin (e.g. https://dlectroflow.dev),
  * so OAuth redirect URIs can't be influenced by spoofed Host / X-Forwarded-* headers.
  * When PUBLIC_ORIGIN is unset (local dev), fall back to forwarded headers — behind
  * ingress-nginx TLS terminates at the ingress, so the pod would otherwise see http://.

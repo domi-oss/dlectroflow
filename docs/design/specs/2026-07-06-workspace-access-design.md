@@ -6,7 +6,7 @@
 
 ## Problem
 
-The production app (https://dlectroflow.dlectronique.dev) is open to the internet
+The production app (https://dlectroflow.dev) is open to the internet
 with a **persistent, shared** data layer. Anyone visiting can see and pollute the
 owner's Brain Dump inbox — which is meant to be a private "safe space". There is
 currently **no auth and no data scoping**: no `userId`/workspace on any model, no
@@ -137,7 +137,7 @@ New/confirmed environment configuration:
 - `AUTH_PROVIDER`, `OWNER_ALLOWLIST` — owner auth (config-driven).
 - `GITLAB_OAUTH_CLIENT_ID` / `GITLAB_OAUTH_CLIENT_SECRET` — GitLab OAuth
   application (redirect URIs: prod
-  `https://dlectroflow.dlectronique.dev/api/auth/gitlab/callback` + local
+  `https://dlectroflow.dev/api/auth/gitlab/callback` + local
   `http://localhost:3000/api/auth/gitlab/callback`, scope `read_user`).
 - `AUTH_SESSION_SECRET` — random 32+ bytes (cookie signing/encryption).
 - `GUEST_AI_DAILY_QUOTA=5`, `GUEST_AI_GLOBAL_DAILY_CAP=<n>`, `GUEST_TTL_HOURS=48`,
