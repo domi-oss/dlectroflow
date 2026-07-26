@@ -106,6 +106,16 @@ gemnasium-dependency_scanning:
   interruptible: true
   rules: *scanner_rules
 
+# #53 (dedupe secret detection): this template job (from the
+# Jobs/Secret-Detection.gitlab-ci.yml include above) is the single AUTHORITATIVE
+# secret scan — BLOCKING on MRs (allow_failure:false via *scanner_rules) and run
+# on main + tags. A second, NON-blocking policy-driven scan (`secret-detection-0`,
+# allow_failure:true) is injected by a Scan Execution Policy in the separate
+# security-policy project; it duplicates this one and is a flake source (it 502'd
+# on 2026-07-24). The dedup = remove THAT policy scan in the security-policy
+# project (owner/member action — it lives in another project, so it can't be
+# edited from this repo). Do NOT delete this include as the "fix": that would
+# leave only the non-blocking policy scan and drop the blocking gate.
 secret_detection:
   needs: []          # scans git history only — no build output required
   interruptible: true
@@ -292,15 +302,21 @@ e2e_test:
 build_image:
   stage: build_image
   interruptible: true  # superseded pipelines on the same ref cancel this job
+  # #53 (reparallelize): build_image only consumes build_app's compiled artifacts,
+  # not the test results, so it needs build_app ONLY and starts the moment those
+  # artifacts are ready (~90s) instead of idling ~50–120s behind test_app +
+  # e2e_test. The "no deploy from a red suite" gate moved DOWNSTREAM and is fully
+  # preserved: deploy_review now needs [build_image, test_app, e2e_test], and
+  # deploy_production stays stage-scheduled (no explicit needs) behind the whole
+  # build stage. Trade-off (accepted, #53): on MR/main the image can be pushed
+  # even when the suite is red — but such an image is never deployed (MR SHA tags
+  # are reaped by the cleanup policy; a red main-<sha> is kept but never rolled
+  # out). The one exception is a TAG pipeline, which PUBLISHES :vX.Y.Z + :latest
+  # (issue #12 §5): a flaky suite must never publish a release image, so the
+  # rules:needs override on the tag rule below re-adds the full test gate there.
   needs:
     - job: build_app
       artifacts: true
-    # Test gate: no image (and thus no review/prod deploy) from a red suite.
-    - job: test_app
-      artifacts: false
-    # E2E gate (#37): no image from a red Playwright smoke suite either.
-    - job: e2e_test
-      artifacts: false
   image:
     name: gcr.io/kaniko-project/executor:v1.24.0-debug@sha256:2562c4fe551399514277ffff7dcca9a3b1628c4ea38cb017d7286dc6ea52f4cd
     entrypoint: [""]
@@ -337,7 +353,18 @@ build_image:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == "main"'
     # Version tag: assemble + push the versioned release image and :latest.
+    # Release-gate guard (#53): rules:needs REPLACES the job-level needs when this
+    # rule matches, so re-add the full test gate here — a release image must never
+    # be published from a red suite (build_app is re-listed because rules:needs is
+    # a full replacement, not a merge).
     - if: '$CI_COMMIT_TAG'
+      needs:
+        - job: build_app
+          artifacts: true
+        - job: test_app
+          artifacts: false
+        - job: e2e_test
+          artifacts: false
 
 # ── Deploy ───────────────────────────────────────────────────────────────────
 .deploy_base:
@@ -351,11 +378,22 @@ build_image:
 
 deploy_review:
   extends: .deploy_base
-  # Deploy as soon as the image is pushed — the scanners are allow_failure: true
-  # and never gate the review deploy, so waiting on the test stage is pure delay.
-  # (deploy_production intentionally stays stage-scheduled so scan results land
-  # before a prod rollout.)
-  needs: ["build_image"]
+  # #53: the "no deploy from a red suite" gate now lives HERE — it moved off
+  # build_image (so the image build starts right after build_app), so deploy_review
+  # must need the test + e2e gates in addition to the image. The scanners are
+  # allow_failure: true and never gate the review deploy, so they stay OUT of needs
+  # (waiting on the test *stage* for them would be pure delay). deploy_production
+  # keeps the same gate via stage scheduling (no explicit needs) so scan results
+  # also land before a prod rollout.
+  # Explicit long form (matches the tag-rule override above): deploy_review
+  # consumes none of these jobs' artifacts — it deploys the pushed image via helm.
+  needs:
+    - job: build_image
+      artifacts: false
+    - job: test_app
+      artifacts: false
+    - job: e2e_test
+      artifacts: false
   # Serialize helm per review env: deploy jobs aren't interruptible, so a
   # quick follow-up push otherwise races the previous pipeline's still-running
   # helm op on the same release → "another operation is in progress" (hit on
