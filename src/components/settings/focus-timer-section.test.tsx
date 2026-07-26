@@ -148,7 +148,9 @@ describe("FocusTimerSection", () => {
   it("preview button toggles aria-pressed and drives the preview player", async () => {
     const user = userEvent.setup();
     render(<FocusTimerSection {...base} />);
-    const btn = screen.getByRole("button", { name: /^preview — aurora on mute/i });
+    const btn = screen.getByRole("button", {
+      name: /^preview — aurora on mute/i,
+    });
     expect(btn).toHaveAttribute("aria-pressed", "false");
     await user.click(btn);
     expect(audioPlay).toHaveBeenCalled();

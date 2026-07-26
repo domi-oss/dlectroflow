@@ -165,8 +165,13 @@ export function FocusTimer({
   const alarmRef = useRef<Alarm | null>(null);
   const wakeRef = useRef<WakeGuard | null>(null);
   // #43 — the shared lo-fi player (current track / play state / volume). Drives
-  // both the Start-gesture autoplay and the embedded mini-player below.
+  // both the Start-gesture autoplay and the embedded mini-player below. The
+  // returned object is a new literal each render (its reactive state changes),
+  // so we destructure the *stable* callbacks (each is useCallback-memoised inside
+  // the hook) to use in this component's effects/handlers — depending on the
+  // whole `sound` object would needlessly recreate memoised callbacks.
   const sound = useFocusSound(settings.sound);
+  const { play: playSound, stop: stopSound } = sound;
   const soundOff = settings.sound === FocusSound.Off;
 
   const inc = Math.max(1, addTimeIncrementMin || 5);
@@ -224,14 +229,14 @@ export function FocusTimer({
 
   // Cleanup on unmount — ← Back leaves the FocusSession OPEN (no server call),
   // so we only stop local effects here. (useFocusSound also stops its element on
-  // unmount; this is belt-and-braces.)
+  // unmount; this is belt-and-braces.) stopSound is a stable callback, so this
+  // runs once on mount and cleans up on unmount.
   useEffect(
     () => () => {
-      sound.stop();
+      stopSound();
       releaseWake();
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [stopSound],
   );
 
   const start = async () => {
@@ -241,7 +246,7 @@ export function FocusTimer({
     if (!id) return;
     // Prime device effects inside the user gesture (unlocks audio playback).
     if (settings.alarmEnabled) alarmRef.current = createAlarm();
-    if (!soundOff) sound.play();
+    if (!soundOff) playSound();
     setSessionId(id);
     setTotalSec(plannedMin * 60);
     setRemainingSec(plannedMin * 60);
@@ -322,11 +327,11 @@ export function FocusTimer({
     });
     setPending(false);
     setResult(res);
-    sound.stop();
+    stopSound();
     releaseWake();
     setPhase("done");
     router.refresh();
-  }, [sessionId, net, router, sound]);
+  }, [sessionId, net, router, stopSound]);
 
   const startReestimate = async () => {
     setPhase("reestimate");
@@ -345,7 +350,7 @@ export function FocusTimer({
       newEstMinutes: newEst,
     });
     setPending(false);
-    sound.stop();
+    stopSound();
     releaseWake();
     setPhase("requeued");
   };

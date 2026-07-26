@@ -32,7 +32,12 @@ export function FocusSoundPlayer({
       className="bg-card/50 space-y-2 rounded-lg border p-3"
     >
       <div className="flex items-center gap-2">
-        <button type="button" onClick={prev} className={btn} aria-label={t("focus.sound.prev", voice)}>
+        <button
+          type="button"
+          onClick={prev}
+          className={btn}
+          aria-label={t("focus.sound.prev", voice)}
+        >
           <span aria-hidden="true">⏮</span>
         </button>
         <button
@@ -41,12 +46,19 @@ export function FocusSoundPlayer({
           className={btn}
           aria-pressed={playing}
           aria-label={
-            playing ? t("focus.sound.pause", voice) : t("focus.sound.play", voice)
+            playing
+              ? t("focus.sound.pause", voice)
+              : t("focus.sound.play", voice)
           }
         >
           <span aria-hidden="true">{playing ? "⏸" : "▶"}</span>
         </button>
-        <button type="button" onClick={next} className={btn} aria-label={t("focus.sound.next", voice)}>
+        <button
+          type="button"
+          onClick={next}
+          className={btn}
+          aria-label={t("focus.sound.next", voice)}
+        >
           <span aria-hidden="true">⏭</span>
         </button>
         <div className="min-w-0 flex-1 leading-tight">

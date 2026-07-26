@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FOCUS_SOUND_TRACKS,
   createLoopPlayer,
@@ -129,17 +129,37 @@ export function useFocusSound(initialSound: string): FocusSoundControls {
     [],
   );
 
-  return {
-    track: tracks[index] ?? null,
-    playing,
-    volume,
-    hasTracks: tracks.length > 0,
-    play,
-    pause,
-    toggle,
-    next,
-    prev,
-    setVolume,
-    stop,
-  };
+  // Every callback above is useCallback-stable, so this API object only changes
+  // identity when the reactive state (track / playing / volume) actually changes
+  // — not on unrelated parent re-renders (e.g. the timer's per-second tick). That
+  // keeps the mini-player from re-rendering needlessly and lets consumers depend
+  // on individual callbacks without recreating their own memoised values.
+  return useMemo(
+    () => ({
+      track: tracks[index] ?? null,
+      playing,
+      volume,
+      hasTracks: tracks.length > 0,
+      play,
+      pause,
+      toggle,
+      next,
+      prev,
+      setVolume,
+      stop,
+    }),
+    [
+      tracks,
+      index,
+      playing,
+      volume,
+      play,
+      pause,
+      toggle,
+      next,
+      prev,
+      setVolume,
+      stop,
+    ],
+  );
 }

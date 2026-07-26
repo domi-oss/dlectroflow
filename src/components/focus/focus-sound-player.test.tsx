@@ -43,13 +43,17 @@ describe("FocusSoundPlayer", () => {
   it("play/pause button reflects state and calls toggle (keyboard-usable)", async () => {
     const user = userEvent.setup();
     const c = controls({ playing: false });
-    const { rerender } = render(<FocusSoundPlayer controls={c} voice="plain" />);
+    const { rerender } = render(
+      <FocusSoundPlayer controls={c} voice="plain" />,
+    );
     const playBtn = screen.getByRole("button", { name: /play focus sound/i });
     expect(playBtn).toHaveAttribute("aria-pressed", "false");
     await user.click(playBtn);
     expect(c.toggle).toHaveBeenCalled();
 
-    rerender(<FocusSoundPlayer controls={controls({ playing: true })} voice="plain" />);
+    rerender(
+      <FocusSoundPlayer controls={controls({ playing: true })} voice="plain" />,
+    );
     const pauseBtn = screen.getByRole("button", { name: /pause focus sound/i });
     expect(pauseBtn).toHaveAttribute("aria-pressed", "true");
   });
@@ -76,7 +80,11 @@ describe("FocusSoundPlayer", () => {
 
   it("every control button meets the ≥44px touch target", () => {
     render(<FocusSoundPlayer controls={controls()} voice="plain" />);
-    for (const name of [/previous track/i, /play focus sound/i, /next track/i]) {
+    for (const name of [
+      /previous track/i,
+      /play focus sound/i,
+      /next track/i,
+    ]) {
       const btn = screen.getByRole("button", { name });
       expect(btn.className).toMatch(/min-h-\[44px\]/);
       expect(btn.className).toMatch(/min-w-\[44px\]/);

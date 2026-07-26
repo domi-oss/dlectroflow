@@ -35,14 +35,17 @@ describe("focus-sounds — FOCUS_SOUND_SRC + track catalog", () => {
     expect(FOCUS_SOUND_SRC.off).toBeNull();
     expect(FOCUS_SOUND_SRC.lofi_calm).toBe("/audio/lofi/aurora-on-mute.mp3");
     // The dead silent placeholder must no longer be referenced.
-    expect(Object.values(FOCUS_SOUND_SRC)).not.toContain("/audio/lofi-calm.mp3");
+    expect(Object.values(FOCUS_SOUND_SRC)).not.toContain(
+      "/audio/lofi-calm.mp3",
+    );
   });
 
   it("has one curated track per non-off FocusSound value, all under /audio/lofi/", async () => {
-    const { FOCUS_SOUND_TRACKS, FOCUS_SOUND_SRC } = await import(
-      "@/lib/focus-sounds"
+    const { FOCUS_SOUND_TRACKS, FOCUS_SOUND_SRC } =
+      await import("@/lib/focus-sounds");
+    const nonOff = Object.values(FocusSound).filter(
+      (v) => v !== FocusSound.Off,
     );
-    const nonOff = Object.values(FocusSound).filter((v) => v !== FocusSound.Off);
     // Every non-off enum value is a real track, and vice-versa.
     expect(FOCUS_SOUND_TRACKS.map((t) => t.id).sort()).toEqual(
       [...nonOff].sort(),
@@ -62,9 +65,8 @@ describe("focus-sounds — FOCUS_SOUND_SRC + track catalog", () => {
 
 describe("focus-sounds — pure playlist helpers", () => {
   it("focusTrackById / focusTrackIndex resolve real tracks and reject off/unknown", async () => {
-    const { focusTrackById, focusTrackIndex, FOCUS_SOUND_TRACKS } = await import(
-      "@/lib/focus-sounds"
-    );
+    const { focusTrackById, focusTrackIndex, FOCUS_SOUND_TRACKS } =
+      await import("@/lib/focus-sounds");
     expect(focusTrackById(FocusSound.LofiCalm)?.id).toBe(FocusSound.LofiCalm);
     expect(focusTrackById("off")).toBeUndefined();
     expect(focusTrackById("nope")).toBeUndefined();

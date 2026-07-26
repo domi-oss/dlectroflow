@@ -12,9 +12,7 @@ const { createLoopPlayer, player } = vi.hoisted(() => {
     setVolume: vi.fn(),
     load: vi.fn(),
   };
-  const createLoopPlayer = vi.fn(
-    (_src: string, _opts?: { volume?: number }) => player,
-  );
+  const createLoopPlayer = vi.fn(() => player);
   return { createLoopPlayer, player };
 });
 

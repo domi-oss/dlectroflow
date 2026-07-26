@@ -324,11 +324,17 @@ export const STRINGS = {
       "Pick a lo-fi track to loop while you focus, or preview each one first. 🎧",
   },
   "focusSettings.preview": { plain: "Preview", playful: "Preview" },
-  "focusSettings.stopPreview": { plain: "Stop preview", playful: "Stop preview" },
+  "focusSettings.stopPreview": {
+    plain: "Stop preview",
+    playful: "Stop preview",
+  },
   // #43 — in-timer mini-player controls (aria labels + visible now-playing text).
   "focus.sound.region": { plain: "Focus sound", playful: "🎧 Focus sound" },
   "focus.sound.nowPlaying": { plain: "Now playing", playful: "Now playing" },
-  "focus.sound.play": { plain: "Play focus sound", playful: "Play focus sound" },
+  "focus.sound.play": {
+    plain: "Play focus sound",
+    playful: "Play focus sound",
+  },
   "focus.sound.pause": {
     plain: "Pause focus sound",
     playful: "Pause focus sound",
