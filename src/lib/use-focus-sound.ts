@@ -60,8 +60,11 @@ export function useFocusSound(initialSound: string): FocusSoundControls {
     setPlaying(p);
   };
 
-  // Create the player on first use (inside a gesture), else swap its source.
-  const ensure = useCallback(
+  // Create the audio element on first use (inside a gesture). It NEVER reloads an
+  // existing element — resuming after a pause must continue from its current
+  // position, so we only ever create here; swapping src is done via load() in
+  // goto() (an explicit track change), never on play().
+  const create = useCallback(
     (i: number): LoopPlayer | null => {
       const track = tracks[i];
       if (!track) return null;
@@ -69,8 +72,6 @@ export function useFocusSound(initialSound: string): FocusSoundControls {
         playerRef.current = createLoopPlayer(track.src, {
           volume: volumeRef.current,
         });
-      } else {
-        playerRef.current.load(track.src);
       }
       return playerRef.current;
     },
@@ -78,11 +79,12 @@ export function useFocusSound(initialSound: string): FocusSoundControls {
   );
 
   const play = useCallback(() => {
-    const p = ensure(indexRef.current);
+    // Resume/start the SAME element — no load(), no currentTime reset.
+    const p = create(indexRef.current);
     if (!p) return;
     p.play();
     setPlay(true);
-  }, [ensure]);
+  }, [create]);
 
   const pause = useCallback(() => {
     playerRef.current?.pause();
@@ -99,10 +101,12 @@ export function useFocusSound(initialSound: string): FocusSoundControls {
       if (tracks.length === 0) return;
       const wrapped = ((i % tracks.length) + tracks.length) % tracks.length;
       setIdx(wrapped);
-      // load() preserves the play/pause state: it resumes iff we were playing.
-      ensure(wrapped);
+      // Changing tracks: create the element if needed, then load() the new src
+      // (which resets position and resumes iff we were already playing).
+      const p = create(wrapped);
+      p?.load(tracks[wrapped].src);
     },
-    [ensure, tracks.length],
+    [create, tracks],
   );
 
   const next = useCallback(() => goto(indexRef.current + 1), [goto]);

@@ -144,6 +144,48 @@ describe("createLoopPlayer", () => {
     expect(captured[0].volume).toBe(1);
   });
 
+  it("play() after pause() resumes from the current position (no currentTime reset)", async () => {
+    const { createLoopPlayer } = await import("@/lib/focus-sounds");
+    const captured: FakeAudio[] = [];
+    vi.stubGlobal(
+      "Audio",
+      class extends FakeAudio {
+        constructor(src: string) {
+          super(src);
+          captured.push(this);
+        }
+      } as unknown as typeof Audio,
+    );
+    const p = createLoopPlayer("/audio/lofi/aurora-on-mute.mp3");
+    p.play();
+    // Simulate playback progress, then a timer-driven pause + resume.
+    captured[0].currentTime = 42;
+    p.pause();
+    expect(captured[0].currentTime).toBe(42);
+    p.play();
+    // Resume must NOT rewind — play() leaves currentTime untouched.
+    expect(captured[0].currentTime).toBe(42);
+  });
+
+  it("stop() rewinds to the start (session-end semantics)", async () => {
+    const { createLoopPlayer } = await import("@/lib/focus-sounds");
+    const captured: FakeAudio[] = [];
+    vi.stubGlobal(
+      "Audio",
+      class extends FakeAudio {
+        constructor(src: string) {
+          super(src);
+          captured.push(this);
+        }
+      } as unknown as typeof Audio,
+    );
+    const p = createLoopPlayer("/audio/lofi/aurora-on-mute.mp3");
+    p.play();
+    captured[0].currentTime = 30;
+    p.stop();
+    expect(captured[0].currentTime).toBe(0);
+  });
+
   it("load() swaps the source and resumes only when playing", async () => {
     const { createLoopPlayer } = await import("@/lib/focus-sounds");
     const captured: FakeAudio[] = [];

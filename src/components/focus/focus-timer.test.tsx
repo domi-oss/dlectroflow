@@ -92,9 +92,17 @@ vi.mock("@/lib/use-focus-sound", () => ({
   DEFAULT_FOCUS_VOLUME: 0.5,
 }));
 // The mini-player's own behaviour is covered in focus-sound-player.test.tsx;
-// stub it here so it doesn't add duplicate play/pause buttons to the timer DOM.
+// stub it here so its real play/pause labels don't collide with the timer's
+// controls. The stub forwards controls.toggle via a uniquely-named button so we
+// can assert the coupling is one-directional (mini-player → audio only).
 vi.mock("@/components/focus/focus-sound-player", () => ({
-  FocusSoundPlayer: () => <div data-testid="focus-sound-player" />,
+  FocusSoundPlayer: ({ controls }: { controls: { toggle: () => void } }) => (
+    <div data-testid="focus-sound-player">
+      <button type="button" onClick={() => controls.toggle()}>
+        mini sound toggle
+      </button>
+    </div>
+  ),
 }));
 
 import {
@@ -456,6 +464,39 @@ describe("FocusTimer — device effects behind the boundary", () => {
     soundControls.play.mockClear();
     await user.click(screen.getByRole("button", { name: /resume/i }));
     expect(soundControls.play).toHaveBeenCalled();
+  });
+
+  it("toggling the mini-player does NOT change the timer phase (one-directional)", async () => {
+    const user = userEvent.setup();
+    render(
+      <FocusTimer
+        {...base({
+          settings: {
+            timerStyle: null,
+            minimalMode: false,
+            keepAwake: false,
+            alarmEnabled: false,
+            sound: "lofi_calm",
+          },
+        })}
+      />,
+    );
+    await start(user);
+    // Running → the timer shows Pause (not Resume).
+    expect(screen.getByRole("button", { name: /pause/i })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /resume/i }),
+    ).not.toBeInTheDocument();
+    // Toggle the music from the mini-player.
+    await user.click(
+      screen.getByRole("button", { name: /mini sound toggle/i }),
+    );
+    expect(soundControls.toggle).toHaveBeenCalled();
+    // The timer phase is unchanged — still running (Pause shown, no Resume).
+    expect(screen.getByRole("button", { name: /pause/i })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /resume/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("hides the mini-player in minimal mode while running", async () => {
