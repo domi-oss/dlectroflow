@@ -10,7 +10,11 @@ import {
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { InboxView, dragEndToMove } from "@/components/inbox/inbox-view";
+import {
+  InboxView,
+  dragEndToMove,
+  DragGhostRow,
+} from "@/components/inbox/inbox-view";
 import type { Item } from "@/components/inbox/bucket";
 import type { AgingSettings } from "@/lib/aging";
 
@@ -1012,6 +1016,86 @@ describe("dragEndToMove (pure)", () => {
   });
   it("returns null when the drop target is not a bucket id", () => {
     expect(dragEndToMove("item-1", "some-other-droppable")).toBeNull();
+  });
+});
+
+describe("DragGhostRow — mobile drag preview (#62)", () => {
+  // Regression coverage note: the real bug is a *browser layout* bug —
+  // dnd-kit's DragOverlay sizes its wrapper to the measured rect of the
+  // draggable node (the 28×44 grip button, not the row), which jsdom can't
+  // reproduce since getBoundingClientRect always returns zeroes here. These
+  // assertions instead pin down the two things we CAN verify statically:
+  // the ghost renders the full row text (not just a fragment), and its
+  // markup never constrains itself to a fixed narrow width that would force
+  // character-by-character wrapping. Final confirmation that the on-screen
+  // ghost is no longer clipped needs a real mobile device (see MR).
+  it("renders the full item text, not truncated", () => {
+    render(
+      <DragGhostRow text="Test de UI-elementen in de checkout flow grondig" />,
+    );
+    expect(
+      screen.getByText("Test de UI-elementen in de checkout flow grondig"),
+    ).toBeInTheDocument();
+  });
+
+  it("lets the title wrap normally instead of being squeezed into a fixed narrow column", () => {
+    const { container } = render(<DragGhostRow text="A long dragged title" />);
+    const card = container.firstElementChild as HTMLElement;
+    // Must not carry a fixed/narrow width utility (e.g. the grip's own
+    // `w-7`) — that's exactly what crushed the title into a vertical pill.
+    expect(card.className).not.toMatch(/\bw-7\b/);
+    const title = screen.getByText("A long dragged title");
+    // `min-w-0 flex-1` lets the text span take the row's available width
+    // instead of shrinking to its content's minimum (one word/char per
+    // line); `break-words` allows wrapping only when genuinely needed.
+    expect(title.className).toMatch(/min-w-0/);
+    expect(title.className).toMatch(/flex-1/);
+    expect(title.className).toMatch(/break-words/);
+  });
+
+  it("InboxView's DragOverlay clears dnd-kit's rect-based width/height so it can't be clipped to the grip's box", async () => {
+    // dnd-kit only mounts DragOverlay's portal content once a drag is
+    // actually active, so drive a real (mouse) drag start through dnd-kit's
+    // own sensors rather than asserting on JSX we can't see from outside.
+    // Note: jsdom's getBoundingClientRect always returns zeroes, so this
+    // can't reproduce the *pixel* clipping itself — only that our explicit
+    // `style` override reaches the DOM instead of dnd-kit's computed
+    // `width: 0px; height: 0px` (which is what jsdom's zero-rect would
+    // otherwise render as, proving the override is wired through).
+    render(
+      <InboxView
+        initialItems={[makeItem({ id: "d1", text: "draggable row" })]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const grip = screen.getByRole("button", { name: "Drag draggable row" });
+    fireEvent.mouseDown(grip, { clientX: 0, clientY: 0, button: 0 });
+    fireEvent.mouseMove(document, { clientX: 0, clientY: 20 }); // > 5px activation distance
+
+    // Identify the ghost positively by the overlay it lives in (a fixed-position
+    // wrapper) rather than by the absence of an <li> — robust even if dnd-kit
+    // ever wraps its portal content in a list element (Duo review).
+    const ghost = screen
+      .getAllByText("draggable row")
+      .find((el) => el.closest('[style*="position: fixed"]'));
+    expect(ghost).toBeTruthy();
+    const overlayWrapper = ghost!.closest(
+      '[style*="position: fixed"]',
+    ) as HTMLElement | null;
+    expect(overlayWrapper).toBeTruthy();
+    expect(overlayWrapper!.style.width).toBe("auto");
+    expect(overlayWrapper!.style.height).toBe("auto");
+
+    fireEvent.mouseUp(document);
+    // dnd-kit defers removing its document-level `click`/`selectionchange`
+    // listeners by 50ms (AbstractPointerSensor.detach) to let the browser's
+    // native click-after-drag fire first. Wait it out so those listeners
+    // (added straight on the real `document`) don't leak into later tests
+    // and swallow their clicks. Use 120ms for comfortable headroom over the
+    // 50ms delay on a loaded CI runner (Duo review — 60ms was too tight).
+    await new Promise((resolve) => setTimeout(resolve, 120));
   });
 });
 

@@ -1476,14 +1476,19 @@ export function InboxView({
           </div>
         </section>
         {/* #26: floating copy of the dragged row — the whole card visibly follows
-            the finger/pointer during a drag, with a short settle animation on drop. */}
-        <DragOverlay dropAnimation={{ duration: 180, easing: "ease-out" }}>
-          {activeDragItem ? (
-            <div className="bg-background ring-primary/40 pointer-events-none scale-[1.02] rounded-lg border px-4 py-3 text-sm shadow-lg ring-2">
-              <span className="text-muted-foreground pr-2 text-xs">⠿</span>
-              {activeDragItem.text}
-            </div>
-          ) : null}
+            the finger/pointer during a drag, with a short settle animation on drop.
+            #62: dnd-kit's DragOverlay sizes its wrapper to the *draggable* node's
+            measured rect (see PositionedOverlay in @dnd-kit/core), and the
+            draggable ref lives on the 28×44 DragGrip button, not the row — so
+            without the `style` override below the overlay box is grip-sized and
+            the title text gets crushed into a vertical sliver on drop. Clearing
+            width/height here lets the ghost shrink-to-fit its own content
+            (capped to a sensible row width) instead of the grip's box. */}
+        <DragOverlay
+          dropAnimation={{ duration: 180, easing: "ease-out" }}
+          style={{ width: "auto", height: "auto" }}
+        >
+          {activeDragItem ? <DragGhostRow text={activeDragItem.text} /> : null}
         </DragOverlay>
       </DndContext>
     </div>
@@ -1646,6 +1651,26 @@ function DragGrip({ id, label }: { id: string; label: string }) {
     >
       ⠿
     </button>
+  );
+}
+
+/** Floating ghost rendered inside the `DragOverlay` while a row is being
+ * dragged (#26/#62). Deliberately its own component (rather than inline
+ * JSX) so it can be unit-tested in isolation from dnd-kit's drag lifecycle —
+ * jsdom can't reproduce the real-browser layout bug (#62) this guards
+ * against, but it can assert the markup never relies on a fixed narrow
+ * width and lets the title wrap normally instead of one-character-per-line. */
+export function DragGhostRow({ text }: { text: string }) {
+  return (
+    <div className="bg-background ring-primary/40 pointer-events-none flex w-[min(90vw,28rem)] scale-[1.02] items-start gap-2 rounded-lg border px-4 py-3 shadow-lg ring-2">
+      <span
+        aria-hidden="true"
+        className="text-muted-foreground inline-flex w-7 shrink-0 items-center justify-center text-xs"
+      >
+        ⠿
+      </span>
+      <span className="min-w-0 flex-1 text-sm break-words">{text}</span>
+    </div>
   );
 }
 

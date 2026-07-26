@@ -454,63 +454,76 @@ export function BreakdownChat({
                   setDragIndex(null);
                 }}
                 className={cn(
-                  "flex items-start gap-2 rounded-lg border px-3 py-2",
+                  // #63: cramming grip/emoji/text/minutes/actions onto one
+                  // fixed row left the text input with almost no width on
+                  // narrow viewports (and no `min-w-0`, so it couldn't shrink
+                  // at all — forcing the whole row to overflow). Stack the
+                  // primary (grip+order+emoji+text) and secondary
+                  // (minutes+actions) groups on mobile, and go back to a
+                  // single row at `sm:` — matching the mobile-first
+                  // breakpoint convention already used elsewhere (see
+                  // dashboard's `grid-cols-2 sm:grid-cols-4`).
+                  "flex flex-col gap-2 rounded-lg border px-3 py-2 sm:flex-row sm:items-start",
                   dragIndex === i && "opacity-50",
                 )}
               >
-                <span
-                  draggable
-                  onDragStart={() => setDragIndex(i)}
-                  onDragEnd={() => setDragIndex(null)}
-                  title="Drag to reorder"
-                  aria-label="Drag to reorder"
-                  className="text-muted-foreground hover:text-foreground cursor-grab pt-1.5 text-xs select-none active:cursor-grabbing"
-                >
-                  ⠿
-                </span>
-                <span className="text-muted-foreground pt-1.5 text-xs tabular-nums">
-                  {i + 1}/{proposal.steps.length}
-                </span>
-                <EmojiPicker
-                  value={s.subtaskEmoji}
-                  onSelect={(emoji) => updateStep(i, { subtaskEmoji: emoji })}
-                />
-                <input
-                  value={s.text}
-                  onChange={(e) => updateStep(i, { text: e.target.value })}
-                  className="border-input flex-1 rounded-md border px-2 py-1 text-sm"
-                  aria-label="Step text"
-                />
-                <div className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    min={1}
-                    value={s.estMinutes}
-                    onChange={(e) =>
-                      updateStep(i, { estMinutes: Number(e.target.value) })
-                    }
-                    className="border-input w-16 rounded-md border px-1 py-1 text-right text-sm"
-                    aria-label="Estimated minutes"
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <span
+                    draggable
+                    onDragStart={() => setDragIndex(i)}
+                    onDragEnd={() => setDragIndex(null)}
+                    title="Drag to reorder"
+                    aria-label="Drag to reorder"
+                    className="text-muted-foreground hover:text-foreground shrink-0 cursor-grab text-xs select-none active:cursor-grabbing"
+                  >
+                    ⠿
+                  </span>
+                  <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+                    {i + 1}/{proposal.steps.length}
+                  </span>
+                  <EmojiPicker
+                    value={s.subtaskEmoji}
+                    onSelect={(emoji) => updateStep(i, { subtaskEmoji: emoji })}
                   />
-                  <span className="text-muted-foreground text-xs">min</span>
+                  <input
+                    value={s.text}
+                    onChange={(e) => updateStep(i, { text: e.target.value })}
+                    className="border-input min-w-0 flex-1 rounded-md border px-2 py-1 text-sm"
+                    aria-label="Step text"
+                  />
                 </div>
-                <div className="flex flex-col items-stretch gap-1">
-                  <button
-                    title="Send back to the inbox as its own item to re-break-down"
-                    aria-label="Back to inbox"
-                    onClick={() => backToInbox(i)}
-                    className="text-muted-foreground hover:text-foreground hover:bg-accent rounded border px-1.5 py-0.5 text-xs whitespace-nowrap"
-                  >
-                    {t("action.backToInbox", voice)}
-                  </button>
-                  <button
-                    title="Remove this step"
-                    aria-label="Remove this step"
-                    onClick={() => removeStep(i)}
-                    className="text-muted-foreground hover:text-destructive rounded px-1 text-xs"
-                  >
-                    ✕
-                  </button>
+                <div className="flex items-center justify-between gap-2 sm:justify-start">
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min={1}
+                      value={s.estMinutes}
+                      onChange={(e) =>
+                        updateStep(i, { estMinutes: Number(e.target.value) })
+                      }
+                      className="border-input w-16 rounded-md border px-1 py-1 text-right text-sm"
+                      aria-label="Estimated minutes"
+                    />
+                    <span className="text-muted-foreground text-xs">min</span>
+                  </div>
+                  <div className="flex items-center gap-1 sm:flex-col sm:items-stretch">
+                    <button
+                      title="Send back to the inbox as its own item to re-break-down"
+                      aria-label="Back to inbox"
+                      onClick={() => backToInbox(i)}
+                      className="text-muted-foreground hover:text-foreground hover:bg-accent rounded border px-1.5 py-0.5 text-xs whitespace-nowrap"
+                    >
+                      {t("action.backToInbox", voice)}
+                    </button>
+                    <button
+                      title="Remove this step"
+                      aria-label="Remove this step"
+                      onClick={() => removeStep(i)}
+                      className="text-muted-foreground hover:text-destructive rounded px-1 text-xs"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </div>
               </li>
             ))}
