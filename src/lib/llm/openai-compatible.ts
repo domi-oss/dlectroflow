@@ -126,6 +126,46 @@ function structuredFallback(
   return { tool, req: { ...req, messages: msgs } };
 }
 
+const RESULT_SENTINEL = "<result>";
+
+/**
+ * Tool-less fallback streaming helper (Task 7 UX fix): given the full text
+ * accumulated so far and how much of it has already been forwarded to the
+ * client, return the next safe slice of conversational prose to emit.
+ *
+ * - While no `<result>` sentinel has appeared, withholds the last
+ *   `RESULT_SENTINEL.length - 1` characters — enough that a sentinel split
+ *   across chunk boundaries (e.g. "...text<res" + "ult>{...") is never
+ *   emitted as partial text before being recognized as the real thing.
+ * - Once the sentinel appears (case-insensitively, matching
+ *   `parseStructuredResult`), emits only the prose before it and returns
+ *   `sealed: true` — the caller must stop emitting for the rest of the
+ *   stream; the JSON block is buffered, never shown to the user.
+ */
+function nextSafeProseSlice(
+  accumulated: string,
+  emittedLen: number,
+): { delta: string; emittedLen: number; sealed: boolean } {
+  const idx = accumulated.toLowerCase().indexOf(RESULT_SENTINEL);
+  if (idx !== -1) {
+    const safeLen = Math.max(idx, emittedLen);
+    return {
+      delta: accumulated.slice(emittedLen, safeLen),
+      emittedLen: safeLen,
+      sealed: true,
+    };
+  }
+  const safeLen = Math.max(
+    emittedLen,
+    accumulated.length - (RESULT_SENTINEL.length - 1),
+  );
+  return {
+    delta: accumulated.slice(emittedLen, safeLen),
+    emittedLen: safeLen,
+    sealed: false,
+  };
+}
+
 type StreamChunk = {
   choices: Array<{
     delta?: {
@@ -204,21 +244,51 @@ export function createOpenAICompatibleProvider(): LLMProvider {
       });
       let text = "";
       const toolArgs: Record<number, { name: string; args: string }> = {};
+      // Tool-less fallback only: track how much prose has been safely
+      // forwarded to the client, and whether the `<result>` sentinel has
+      // been seen (once true, nothing more is ever emitted — see
+      // `nextSafeProseSlice`). The native-tool path below ignores both and
+      // keeps forwarding every delta verbatim, unchanged.
+      let emittedLen = 0;
+      let sealed = false;
       try {
         for await (const chunk of s) {
           const delta = chunk.choices[0]?.delta;
           if (delta?.content) {
             text += delta.content;
-            yield {
-              type: "text",
-              delta: delta.content,
-            } satisfies LLMStreamEvent;
+            if (fallback) {
+              if (!sealed) {
+                const next = nextSafeProseSlice(text, emittedLen);
+                emittedLen = next.emittedLen;
+                sealed = next.sealed;
+                if (next.delta) {
+                  yield {
+                    type: "text",
+                    delta: next.delta,
+                  } satisfies LLMStreamEvent;
+                }
+              }
+              // else: sentinel already seen — buffer silently, never emit.
+            } else {
+              yield {
+                type: "text",
+                delta: delta.content,
+              } satisfies LLMStreamEvent;
+            }
           }
           for (const tc of delta?.tool_calls ?? []) {
             const slot = (toolArgs[tc.index] ??= { name: "", args: "" });
             if (tc.function?.name) slot.name = tc.function.name;
             if (tc.function?.arguments) slot.args += tc.function.arguments;
           }
+        }
+        // Fallback path, no sentinel ever seen: flush the withheld tail
+        // (there is no JSON block to hide, so all of it is safe prose).
+        if (fallback && !sealed && emittedLen < text.length) {
+          yield {
+            type: "text",
+            delta: text.slice(emittedLen),
+          } satisfies LLMStreamEvent;
         }
       } catch (err) {
         throw toLLMError(err);

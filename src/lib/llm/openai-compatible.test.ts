@@ -353,6 +353,134 @@ describe("openai-compatible stream()", () => {
     });
   });
 
+  it("never emits the <result> sentinel or its JSON to the client (single chunk)", async () => {
+    process.env.LLM_SUPPORTS_TOOLS = "false";
+    create.mockResolvedValue(
+      chunks([
+        {
+          content:
+            'Here you go! <result>{"parentEmoji":"🗂️","steps":[]}</result>',
+        },
+      ]),
+    );
+    const p = createOpenAICompatibleProvider();
+    const events = [];
+    for await (const ev of p.stream({
+      model: "m",
+      messages: [{ role: "user", content: "x" }],
+      maxTokens: 10,
+      tools: [
+        {
+          name: "propose_steps",
+          description: "d",
+          inputSchema: { type: "object", required: ["parentEmoji", "steps"] },
+        },
+      ],
+      toolChoice: "propose_steps",
+    })) {
+      events.push(ev);
+    }
+    const textEvents = events.filter((e) => e.type === "text");
+    const joined = textEvents
+      .map((e) => (e.type === "text" ? e.delta : ""))
+      .join("");
+    expect(joined).toBe("Here you go! ");
+    expect(joined).not.toContain("<result>");
+    expect(joined).not.toContain("parentEmoji");
+    const final = events.at(-1);
+    expect(final).toEqual({
+      type: "final",
+      result: {
+        text: 'Here you go! <result>{"parentEmoji":"🗂️","steps":[]}</result>',
+        toolCall: {
+          name: "propose_steps",
+          input: { parentEmoji: "🗂️", steps: [] },
+        },
+      },
+    });
+  });
+
+  it("never emits the <result> sentinel when it arrives split across chunks, incl. a split mid-tag", async () => {
+    process.env.LLM_SUPPORTS_TOOLS = "false";
+    create.mockResolvedValue(
+      chunks([
+        { content: "Sure, here is the plan. " },
+        { content: "<res" }, // split mid-sentinel
+        { content: 'ult>{"parentEmoji":"🗂️",' },
+        { content: '"steps":[]}</result>' },
+      ]),
+    );
+    const p = createOpenAICompatibleProvider();
+    const events = [];
+    for await (const ev of p.stream({
+      model: "m",
+      messages: [{ role: "user", content: "x" }],
+      maxTokens: 10,
+      tools: [
+        {
+          name: "propose_steps",
+          description: "d",
+          inputSchema: { type: "object", required: ["parentEmoji", "steps"] },
+        },
+      ],
+      toolChoice: "propose_steps",
+    })) {
+      events.push(ev);
+    }
+    const textEvents = events.filter((e) => e.type === "text");
+    const joined = textEvents
+      .map((e) => (e.type === "text" ? e.delta : ""))
+      .join("");
+    expect(joined).toBe("Sure, here is the plan. ");
+    expect(joined).not.toContain("<res");
+    expect(joined).not.toContain("parentEmoji");
+    const final = events.at(-1);
+    expect(final).toEqual({
+      type: "final",
+      result: {
+        text: 'Sure, here is the plan. <result>{"parentEmoji":"🗂️","steps":[]}</result>',
+        toolCall: {
+          name: "propose_steps",
+          input: { parentEmoji: "🗂️", steps: [] },
+        },
+      },
+    });
+  });
+
+  it("flushes all prose at end when no <result> sentinel ever appears (tool-less, streamed)", async () => {
+    process.env.LLM_SUPPORTS_TOOLS = "false";
+    create.mockResolvedValue(
+      chunks([{ content: "just " }, { content: "talking, no block" }]),
+    );
+    const p = createOpenAICompatibleProvider();
+    const events = [];
+    for await (const ev of p.stream({
+      model: "m",
+      messages: [{ role: "user", content: "x" }],
+      maxTokens: 10,
+      tools: [
+        {
+          name: "propose_steps",
+          description: "d",
+          inputSchema: { type: "object", required: ["parentEmoji", "steps"] },
+        },
+      ],
+      toolChoice: "propose_steps",
+    })) {
+      events.push(ev);
+    }
+    const textEvents = events.filter((e) => e.type === "text");
+    const joined = textEvents
+      .map((e) => (e.type === "text" ? e.delta : ""))
+      .join("");
+    expect(joined).toBe("just talking, no block");
+    const final = events.at(-1);
+    expect(final).toEqual({
+      type: "final",
+      result: { text: "just talking, no block", toolCall: undefined },
+    });
+  });
+
   it("yields toolCall: undefined when the streamed text has no <result> block", async () => {
     process.env.LLM_SUPPORTS_TOOLS = "false";
     create.mockResolvedValue(chunks([{ content: "just talking, no block" }]));
