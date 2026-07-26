@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { getLLM } from "@/lib/llm";
-import { BREAKDOWN_MODEL } from "@/lib/anthropic";
+import { resolveUtilityModel } from "@/lib/models";
 import { SparkSource, isGuestWorkspace } from "@/lib/constants";
 
 const FALLBACK_SPARKS = [
@@ -28,7 +28,7 @@ function randomFallback(): string {
 async function generateQuote(): Promise<{ quote: string; source: string }> {
   try {
     const { text } = await getLLM().generate({
-      model: BREAKDOWN_MODEL,
+      model: resolveUtilityModel(),
       maxTokens: 120,
       hints: { effort: "low" },
       messages: [

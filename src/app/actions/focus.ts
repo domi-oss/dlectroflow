@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { getLLM } from "@/lib/llm";
-import { BREAKDOWN_MODEL } from "@/lib/anthropic";
+import { resolveUtilityModel } from "@/lib/models";
 import { getValidAccessToken, patchGoogleTask } from "@/lib/google";
 import {
   BadgeKey,
@@ -327,7 +327,7 @@ export async function proposeNewEstimate(stepId: string): Promise<number> {
   if (isGuestWorkspace(workspaceId)) return step.estMinutes + 10;
   try {
     const { text } = await getLLM().generate({
-      model: BREAKDOWN_MODEL,
+      model: resolveUtilityModel(),
       maxTokens: 200,
       hints: { effort: "low" },
       messages: [

@@ -24,7 +24,9 @@ vi.mock("@/lib/db", () => ({
   prisma: prismaMock,
   getStreak: getStreakMock,
 }));
-vi.mock("@/lib/anthropic", () => ({ BREAKDOWN_MODEL: "claude-opus-4-8" }));
+vi.mock("@/lib/models", () => ({
+  resolveUtilityModel: () => "claude-opus-4-8",
+}));
 vi.mock("@/lib/llm", () => ({ getLLM: () => ({ generate: generateMock }) }));
 
 const TODAY = new Date().toISOString().slice(0, 10);

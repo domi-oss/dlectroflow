@@ -11,7 +11,9 @@
  * (Historical note: these guards originally targeted `getAnthropic()` from
  * `@/lib/anthropic`. #59 migrated spark/rollup/focus onto the provider-agnostic
  * `getLLM().generate()` seam — see task-4-report.md — so the mock moved with
- * the call sites it guards; the invariant under test is unchanged.)
+ * the call sites it guards; the invariant under test is unchanged. Task 5b
+ * further moved the hardcoded `BREAKDOWN_MODEL` model id onto
+ * `resolveUtilityModel()` from `@/lib/models`, so the mock moved again.)
  *
  * Covered call sites:
  *   1. spark.ts › getTodaySpark      — guest skips getLLM() via quoteFor guard
@@ -57,8 +59,8 @@ const { generateSpy, prismaMock, currentWorkspaceIdMock } = vi.hoisted(() => {
 });
 
 // ── Module mocks (hoisted automatically by vitest) ──────────────────────────
-vi.mock("@/lib/anthropic", () => ({
-  BREAKDOWN_MODEL: "claude-opus-4-8",
+vi.mock("@/lib/models", () => ({
+  resolveUtilityModel: () => "claude-opus-4-8",
 }));
 vi.mock("@/lib/llm", () => ({
   getLLM: () => ({ generate: generateSpy }),

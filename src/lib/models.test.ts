@@ -3,6 +3,7 @@ import {
   resolveBreakdownModel,
   breakdownParamsFor,
   modelChoicesForProvider,
+  resolveUtilityModel,
 } from "./models";
 
 beforeEach(() => {
@@ -77,6 +78,10 @@ describe("anthropic provider (default)", () => {
       "claude-opus-4-8",
     ]);
   });
+
+  it("resolveUtilityModel always returns opus (BREAKDOWN_MODEL), matching pre-#59 spark/rollup/focus behavior", () => {
+    expect(resolveUtilityModel()).toBe("claude-opus-4-8");
+  });
 });
 
 describe("openai-compatible provider", () => {
@@ -108,5 +113,11 @@ describe("openai-compatible provider", () => {
 
   it("has no user-facing choice list (single configured model)", () => {
     expect(modelChoicesForProvider()).toBeNull();
+  });
+
+  it("resolveUtilityModel resolves the configured owner model, split over LLM_MODEL", () => {
+    expect(resolveUtilityModel()).toBe("llama3.1:8b");
+    process.env.LLM_OWNER_MODEL = "llama3.1:70b";
+    expect(resolveUtilityModel()).toBe("llama3.1:70b");
   });
 });

@@ -31,10 +31,6 @@ vi.mock("@/lib/google", () => ({
   getValidAccessToken: vi.fn().mockResolvedValue(null),
   patchGoogleTask: vi.fn(),
 }));
-vi.mock("@/lib/anthropic", () => ({
-  getAnthropic: vi.fn(),
-  BREAKDOWN_MODEL: "claude-opus-4-8",
-}));
 
 function stepWith(estimateHistory: string | null) {
   return {

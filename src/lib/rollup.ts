@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { getStreak } from "@/lib/db";
 import { getLLM } from "@/lib/llm";
-import { BREAKDOWN_MODEL } from "@/lib/anthropic";
+import { resolveUtilityModel } from "@/lib/models";
 import { FocusOutcome, TaskStatus, isGuestWorkspace } from "@/lib/constants";
 import { getTodaySpark } from "@/lib/spark";
 
@@ -127,7 +127,7 @@ async function generateNarrative(
   if (!isGuestWorkspace(workspaceId)) {
     try {
       const { text } = await getLLM().generate({
-        model: BREAKDOWN_MODEL,
+        model: resolveUtilityModel(),
         maxTokens: 400,
         hints: { effort: "low" },
         messages: [

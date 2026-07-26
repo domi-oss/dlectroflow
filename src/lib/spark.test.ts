@@ -19,7 +19,9 @@ const { generateMock, prismaMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/db", () => ({ prisma: prismaMock }));
-vi.mock("@/lib/anthropic", () => ({ BREAKDOWN_MODEL: "claude-opus-4-8" }));
+vi.mock("@/lib/models", () => ({
+  resolveUtilityModel: () => "claude-opus-4-8",
+}));
 vi.mock("@/lib/llm", () => ({ getLLM: () => ({ generate: generateMock }) }));
 
 beforeEach(() => {

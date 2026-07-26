@@ -1,4 +1,5 @@
 import type { LLMRequest } from "@/lib/llm/types";
+import { BREAKDOWN_MODEL } from "@/lib/anthropic";
 import {
   OWNER_BREAKDOWN_ALLOWLIST,
   OWNER_BREAKDOWN_MODEL_DEFAULT,
@@ -95,6 +96,20 @@ export function breakdownParamsFor(model: string): {
     return { model, hints: {} };
   }
   return { model, hints: anthropicHintsFor(model) };
+}
+
+/**
+ * Model for the owner-only utility calls (spark quote, day-rollup narrative,
+ * focus "kinder re-estimate" — guests never reach any of these). Unlike
+ * breakdown, there's no owner-configurable tier here: `anthropic` always uses
+ * `BREAKDOWN_MODEL` (Opus), matching pre-#59 behavior byte-for-byte; on
+ * `openai-compatible`, reuse the same owner-model resolution breakdown uses.
+ */
+export function resolveUtilityModel(): string {
+  if (activeProvider() === "openai-compatible") {
+    return resolveOpenAICompatibleModel({ isOwner: true });
+  }
+  return BREAKDOWN_MODEL;
 }
 
 /**

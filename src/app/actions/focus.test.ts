@@ -19,7 +19,9 @@ const { generateMock, prismaMock, currentWorkspaceIdMock } = vi.hoisted(
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/db", () => ({ prisma: prismaMock }));
-vi.mock("@/lib/anthropic", () => ({ BREAKDOWN_MODEL: "claude-opus-4-8" }));
+vi.mock("@/lib/models", () => ({
+  resolveUtilityModel: () => "claude-opus-4-8",
+}));
 vi.mock("@/lib/llm", () => ({ getLLM: () => ({ generate: generateMock }) }));
 vi.mock("@/lib/workspace", () => ({
   currentWorkspaceId: currentWorkspaceIdMock,
