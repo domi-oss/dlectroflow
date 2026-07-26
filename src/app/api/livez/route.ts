@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { anthropicFailureCount } from "@/lib/observability";
+import { llmFailureCount } from "@/lib/observability";
 
 // Process-only liveness (#21 P4): deliberately NO DB access. The liveness
 // probe used to hit /api/health (SELECT 1), so a Postgres blip killed every
@@ -9,8 +9,12 @@ import { anthropicFailureCount } from "@/lib/observability";
 export const dynamic = "force-dynamic";
 
 export async function GET(): Promise<NextResponse> {
+  const llmFailures = llmFailureCount();
   return NextResponse.json({
     status: "alive",
-    anthropicFailures: anthropicFailureCount(),
+    llmFailures,
+    // Deprecated alias, kept for one release while dashboards/alerts migrate
+    // off the Anthropic-only name (#59 generalized the LLM layer).
+    anthropicFailures: llmFailures,
   });
 }

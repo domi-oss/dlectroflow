@@ -16,7 +16,7 @@ import {
   consumeGuestBreakdown,
   refundGuestBreakdown,
 } from "@/lib/guest-quota";
-import { recordAnthropicFailure } from "@/lib/observability";
+import { recordLLMFailure } from "@/lib/observability";
 import { OWNER_WORKSPACE_ID } from "@/lib/constants";
 
 export const runtime = "nodejs";
@@ -144,6 +144,17 @@ export async function POST(req: Request): Promise<Response> {
     ownerSetting: settings?.breakdownModel ?? null,
   });
 
+  // The LLM call failed to produce a usable breakdown — either it threw, or
+  // it streamed to completion with no parsed tool call (tool-less/local
+  // models, a malformed response). Either way the guest didn't get a real AI
+  // breakdown, so refund the quota unit exactly as a blocked guest would
+  // never have spent it. No-op for the owner / already-blocked guests.
+  async function refundGuestOnLLMFailure(): Promise<void> {
+    if (isGuest && guestIpHash && !blockedReason) {
+      await refundGuestBreakdown(guestIpHash);
+    }
+  }
+
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -184,7 +195,9 @@ export async function POST(req: Request): Promise<Response> {
               // Tool-less/local models or a malformed response can complete
               // the stream with no parsed tool call (see #59 Task 7's
               // structured-output fallback). Never leave the user with a
-              // dead stream — degrade to the same canned plan as an error.
+              // dead stream — degrade to the same canned plan as an error,
+              // and refund a guest exactly as the thrown-error path below.
+              await refundGuestOnLLMFailure();
               send({
                 type: "fallback",
                 reason: "error",
@@ -197,11 +210,9 @@ export async function POST(req: Request): Promise<Response> {
       } catch (err) {
         // #21 P4: fallback mode must be visible — one structured log line +
         // the per-pod counter on /api/livez (was a silent bare catch).
-        recordAnthropicFailure("breakdown", err);
-        // Claude failed → refund the guest's quota so a transient error doesn't burn an allowance.
-        if (isGuest && guestIpHash && !blockedReason) {
-          await refundGuestBreakdown(guestIpHash);
-        }
+        recordLLMFailure(getLLM().id, "breakdown", err);
+        // The LLM call failed → refund the guest's quota so a transient error doesn't burn an allowance.
+        await refundGuestOnLLMFailure();
         // Canned fallback rather than a dead end.
         send({
           type: "fallback",

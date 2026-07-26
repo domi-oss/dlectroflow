@@ -24,7 +24,7 @@ const {
   clientIpHashMock,
   consumeGuestBreakdownMock,
   refundGuestBreakdownMock,
-  recordAnthropicFailureMock,
+  recordLLMFailureMock,
   streamImpl,
 } = vi.hoisted(() => {
   return {
@@ -34,7 +34,7 @@ const {
     clientIpHashMock: vi.fn(),
     consumeGuestBreakdownMock: vi.fn(),
     refundGuestBreakdownMock: vi.fn(),
-    recordAnthropicFailureMock: vi.fn(),
+    recordLLMFailureMock: vi.fn(),
     // Reassigned per-test to control what the fake provider's stream() does.
     streamImpl: { current: undefined as unknown },
   };
@@ -60,7 +60,7 @@ vi.mock("@/lib/guest-quota", () => ({
 }));
 
 vi.mock("@/lib/observability", () => ({
-  recordAnthropicFailure: recordAnthropicFailureMock,
+  recordLLMFailure: recordLLMFailureMock,
 }));
 
 vi.mock("@/lib/llm", () => ({
@@ -213,7 +213,8 @@ describe("POST /api/breakdown", () => {
       data: localBreakdown(REQUEST_BODY.title),
     });
     expect(events.at(-1)).toEqual({ type: "done" });
-    expect(recordAnthropicFailureMock).toHaveBeenCalledWith(
+    expect(recordLLMFailureMock).toHaveBeenCalledWith(
+      "anthropic",
       "breakdown",
       expect.any(Error),
     );
@@ -230,6 +231,35 @@ describe("POST /api/breakdown", () => {
     await POST(postRequest(REQUEST_BODY));
 
     expect(refundGuestBreakdownMock).toHaveBeenCalledWith("hash-1");
+  });
+
+  it("refunds the guest's quota on the soft-failure (no toolCall) path", async () => {
+    // Mirrors the thrown-error refund test above, but for the OTHER failure
+    // path: the stream finishes with no parsed tool call (tool-less/local
+    // model, malformed response — #59 Task 7's fallback) rather than
+    // throwing. The guest still didn't get a real AI breakdown, so the
+    // refund must fire here too (Task 7 review finding: this branch used to
+    // skip it, silently burning a guest's quota on a soft failure).
+    isOwnerRequestMock.mockResolvedValue(false);
+    currentWorkspaceIdMock.mockResolvedValue("guest-abc");
+    streamImpl.current = async function* () {
+      yield {
+        type: "final",
+        result: { text: "rambling, no structured block", toolCall: undefined },
+      };
+    };
+
+    const { POST } = await import("./route");
+    const { localBreakdown } = await import("@/lib/breakdown");
+    const res = await POST(postRequest(REQUEST_BODY));
+    const events = await readAllEvents(res);
+
+    expect(refundGuestBreakdownMock).toHaveBeenCalledWith("hash-1");
+    expect(events).toContainEqual({
+      type: "fallback",
+      reason: "error",
+      data: localBreakdown(REQUEST_BODY.title),
+    });
   });
 
   it("blocked guest gets a canned fallback with NO call to the LLM", async () => {

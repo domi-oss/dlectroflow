@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const create = vi.fn();
 vi.mock("openai", () => ({
@@ -103,6 +103,23 @@ describe("openai-compatible generate()", () => {
     ).rejects.toMatchObject({ kind: "network", retryable: true });
   });
 
+  it("throws a descriptive, non-retryable auth LLMError when LLM_BASE_URL is not set", async () => {
+    delete process.env.LLM_BASE_URL;
+    const p = createOpenAICompatibleProvider();
+    await expect(
+      p.generate({
+        model: "m",
+        messages: [{ role: "user", content: "x" }],
+        maxTokens: 10,
+      }),
+    ).rejects.toMatchObject({
+      kind: "auth",
+      retryable: false,
+      message: expect.stringContaining("LLM_BASE_URL"),
+    });
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("ignores tools when LLM_SUPPORTS_TOOLS=false (native path only)", async () => {
     process.env.LLM_SUPPORTS_TOOLS = "false";
     create.mockResolvedValue({
@@ -121,6 +138,18 @@ describe("openai-compatible generate()", () => {
     expect(sent.tools).toBeUndefined();
     expect(r.text).toBe("plain text");
     expect(r.toolCall).toBeUndefined();
+  });
+
+  it("throws a classified bad_request LLMError when the response has no choices (misbehaving runner)", async () => {
+    create.mockResolvedValue({ choices: [] });
+    const p = createOpenAICompatibleProvider();
+    await expect(
+      p.generate({
+        model: "m",
+        messages: [{ role: "user", content: "x" }],
+        maxTokens: 10,
+      }),
+    ).rejects.toMatchObject({ kind: "bad_request", retryable: false });
   });
 
   it("returns no toolCall when the arguments are malformed JSON", async () => {
@@ -338,6 +367,69 @@ describe("openai-compatible stream()", () => {
     await expect(it.next()).rejects.toMatchObject({
       kind: "rate_limit",
       retryable: true,
+    });
+  });
+});
+
+describe("openai-compatible bounded retry (#59 Task 8)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("generate() retries a 429 twice then returns the eventual success", async () => {
+    create
+      .mockRejectedValueOnce(Object.assign(new Error("rate"), { status: 429 }))
+      .mockRejectedValueOnce(Object.assign(new Error("rate"), { status: 429 }))
+      .mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] });
+    const p = createOpenAICompatibleProvider();
+    const promise = p.generate({
+      model: "m",
+      messages: [{ role: "user", content: "x" }],
+      maxTokens: 10,
+    });
+    await vi.advanceTimersByTimeAsync(200); // 1st backoff
+    await vi.advanceTimersByTimeAsync(400); // 2nd backoff
+    await expect(promise).resolves.toMatchObject({ text: "ok" });
+    expect(create).toHaveBeenCalledTimes(3);
+  });
+
+  it("generate() throws a non-retryable auth error immediately, with no retry", async () => {
+    create.mockRejectedValue(Object.assign(new Error("nope"), { status: 401 }));
+    const p = createOpenAICompatibleProvider();
+    await expect(
+      p.generate({
+        model: "m",
+        messages: [{ role: "user", content: "x" }],
+        maxTokens: 10,
+      }),
+    ).rejects.toMatchObject({ kind: "auth", retryable: false });
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("stream() retries the ESTABLISHMENT call on a retryable failure, then streams normally", async () => {
+    async function* singleChunk() {
+      yield { choices: [{ delta: { content: "ok" } }] };
+    }
+    create
+      .mockRejectedValueOnce(Object.assign(new Error("rate"), { status: 429 }))
+      .mockResolvedValueOnce(singleChunk());
+    const p = createOpenAICompatibleProvider();
+    const events: unknown[] = [];
+    const pump = (async () => {
+      for await (const ev of p.stream({
+        model: "m",
+        messages: [{ role: "user", content: "x" }],
+        maxTokens: 10,
+      })) {
+        events.push(ev);
+      }
+    })();
+    await vi.advanceTimersByTimeAsync(200); // 1st backoff
+    await pump;
+    expect(create).toHaveBeenCalledTimes(2);
+    const final = events.at(-1);
+    expect(final).toEqual({
+      type: "final",
+      result: { text: "ok", toolCall: undefined },
     });
   });
 });

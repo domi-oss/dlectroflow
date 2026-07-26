@@ -11,6 +11,7 @@ import {
   buildStructuredInstruction,
   parseStructuredResult,
 } from "./structured-output";
+import { withRetry } from "./retry";
 
 function client(): OpenAI {
   const baseURL = process.env.LLM_BASE_URL;
@@ -144,46 +145,63 @@ export function createOpenAICompatibleProvider(): LLMProvider {
       return supportsTools();
     },
     async generate(req) {
-      try {
-        const fallback = structuredFallback(req);
-        const effective = fallback?.req ?? req;
-        const useTools = supportsTools() && !!req.tools?.length;
-        const resp = await client().chat.completions.create({
-          model: req.model,
-          max_tokens: req.maxTokens,
-          ...(req.temperature != null ? { temperature: req.temperature } : {}),
-          messages: messages(effective),
-          ...(useTools ? toolsParam(req) : {}),
-        } as never);
-        const result = parseChoice(
-          (resp as unknown as { choices: [{ message: ChoiceMessage }] })
-            .choices[0].message,
-          req.toolChoice,
-        );
-        if (fallback && !result.toolCall) {
-          result.toolCall = parseStructuredResult(result.text, fallback.tool);
+      return withRetry(async () => {
+        try {
+          const fallback = structuredFallback(req);
+          const effective = fallback?.req ?? req;
+          const useTools = supportsTools() && !!req.tools?.length;
+          const resp = await client().chat.completions.create({
+            model: req.model,
+            max_tokens: req.maxTokens,
+            ...(req.temperature != null
+              ? { temperature: req.temperature }
+              : {}),
+            messages: messages(effective),
+            ...(useTools ? toolsParam(req) : {}),
+          } as never);
+          const choice = (
+            resp as unknown as { choices?: Array<{ message?: ChoiceMessage }> }
+          ).choices?.[0];
+          if (!choice?.message) {
+            // A misbehaving runner can return an empty `choices` array —
+            // surface a classified, non-retryable error instead of a raw
+            // TypeError from indexing past the end of it.
+            throw new LLMError(
+              "bad_request",
+              undefined,
+              "Model runner returned no choices in the completion response.",
+              false,
+            );
+          }
+          const result = parseChoice(choice.message, req.toolChoice);
+          if (fallback && !result.toolCall) {
+            result.toolCall = parseStructuredResult(result.text, fallback.tool);
+          }
+          return result;
+        } catch (err) {
+          throw toLLMError(err);
         }
-        return result;
-      } catch (err) {
-        throw toLLMError(err);
-      }
+      });
     },
     async *stream(req) {
       const fallback = structuredFallback(req);
       const effective = fallback?.req ?? req;
       const useTools = supportsTools() && !!req.tools?.length;
-      let s: AsyncIterable<StreamChunk>;
-      try {
-        s = (await client().chat.completions.create({
-          model: req.model,
-          max_tokens: req.maxTokens,
-          stream: true,
-          messages: messages(effective),
-          ...(useTools ? toolsParam(req) : {}),
-        } as never)) as unknown as AsyncIterable<StreamChunk>;
-      } catch (err) {
-        throw toLLMError(err);
-      }
+      // Only the ESTABLISHMENT call is retried — once text starts flowing
+      // below, a partial stream can't be safely replayed.
+      const s = await withRetry(async () => {
+        try {
+          return (await client().chat.completions.create({
+            model: req.model,
+            max_tokens: req.maxTokens,
+            stream: true,
+            messages: messages(effective),
+            ...(useTools ? toolsParam(req) : {}),
+          } as never)) as unknown as AsyncIterable<StreamChunk>;
+        } catch (err) {
+          throw toLLMError(err);
+        }
+      });
       let text = "";
       const toolArgs: Record<number, { name: string; args: string }> = {};
       try {

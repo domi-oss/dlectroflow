@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const create = vi.fn();
 const streamFn = vi.fn();
@@ -21,7 +21,11 @@ describe("anthropic adapter generate()", () => {
     create.mockResolvedValue({
       content: [
         { type: "text", text: "here you go" },
-        { type: "tool_use", name: "propose_steps", input: { parentEmoji: "🗂️", steps: [] } },
+        {
+          type: "tool_use",
+          name: "propose_steps",
+          input: { parentEmoji: "🗂️", steps: [] },
+        },
       ],
     });
     const p = createAnthropicProvider();
@@ -33,7 +37,10 @@ describe("anthropic adapter generate()", () => {
       toolChoice: "propose_steps",
     });
     expect(r.text).toBe("here you go");
-    expect(r.toolCall).toEqual({ name: "propose_steps", input: { parentEmoji: "🗂️", steps: [] } });
+    expect(r.toolCall).toEqual({
+      name: "propose_steps",
+      input: { parentEmoji: "🗂️", steps: [] },
+    });
   });
 
   it("passes system as top-level param and applies thinking/effort hints", async () => {
@@ -56,15 +63,27 @@ describe("anthropic adapter generate()", () => {
     create.mockRejectedValue(Object.assign(new Error("rate"), { status: 429 }));
     const p = createAnthropicProvider();
     await expect(
-      p.generate({ model: "m", messages: [{ role: "user", content: "x" }], maxTokens: 10 }),
-    ).rejects.toMatchObject({ kind: "rate_limit", retryable: true, status: 429 });
+      p.generate({
+        model: "m",
+        messages: [{ role: "user", content: "x" }],
+        maxTokens: 10,
+      }),
+    ).rejects.toMatchObject({
+      kind: "rate_limit",
+      retryable: true,
+      status: 429,
+    });
   });
 
   it("keeps a missing API key as a non-retryable auth error (not reclassified as network)", async () => {
     delete process.env.ANTHROPIC_API_KEY;
     const p = createAnthropicProvider();
     await expect(
-      p.generate({ model: "m", messages: [{ role: "user", content: "x" }], maxTokens: 10 }),
+      p.generate({
+        model: "m",
+        messages: [{ role: "user", content: "x" }],
+        maxTokens: 10,
+      }),
     ).rejects.toMatchObject({ kind: "auth", retryable: false });
   });
 });
@@ -77,43 +96,80 @@ describe("anthropic adapter error mapping", () => {
     { status: 503, kind: "server", retryable: true },
     { status: 400, kind: "bad_request", retryable: false },
     { status: 404, kind: "bad_request", retryable: false },
-  ])("maps status $status to kind $kind (retryable=$retryable)", async ({ status, kind, retryable }) => {
-    create.mockRejectedValue(Object.assign(new Error("boom"), { status }));
-    const p = createAnthropicProvider();
-    await expect(
-      p.generate({ model: "m", messages: [{ role: "user", content: "x" }], maxTokens: 10 }),
-    ).rejects.toMatchObject({ kind, retryable, status });
-  });
+  ])(
+    "maps status $status to kind $kind (retryable=$retryable)",
+    async ({ status, kind, retryable }) => {
+      create.mockRejectedValue(Object.assign(new Error("boom"), { status }));
+      const p = createAnthropicProvider();
+      await expect(
+        p.generate({
+          model: "m",
+          messages: [{ role: "user", content: "x" }],
+          maxTokens: 10,
+        }),
+      ).rejects.toMatchObject({ kind, retryable, status });
+    },
+  );
 
   it("maps a status-less error to a retryable network LLMError", async () => {
     create.mockRejectedValue(new Error("socket hang up"));
     const p = createAnthropicProvider();
     await expect(
-      p.generate({ model: "m", messages: [{ role: "user", content: "x" }], maxTokens: 10 }),
-    ).rejects.toMatchObject({ kind: "network", retryable: true, status: undefined });
+      p.generate({
+        model: "m",
+        messages: [{ role: "user", content: "x" }],
+        maxTokens: 10,
+      }),
+    ).rejects.toMatchObject({
+      kind: "network",
+      retryable: true,
+      status: undefined,
+    });
   });
 });
 
 describe("anthropic adapter stream()", () => {
   it("yields text deltas then a final result", async () => {
     const handlers: Record<string, (d: string) => void> = {};
+    // Control exactly when finalMessage() settles so it can't race ahead of
+    // the injected text delta below (the stream-establishment call now goes
+    // through the bounded-retry wrapper — #59 Task 8 — so it resolves a
+    // microtask tick later than a synchronous `on()` registration used to).
+    let resolveFinal!: (v: {
+      content: { type: string; text: string }[];
+    }) => void;
+    const finalDeferred = new Promise<{
+      content: { type: string; text: string }[];
+    }>((resolve) => {
+      resolveFinal = resolve;
+    });
     streamFn.mockReturnValue({
       on: (evt: string, cb: (d: string) => void) => {
         handlers[evt] = cb;
       },
-      finalMessage: async () => {
-        return { content: [{ type: "text", text: "hello world" }] };
-      },
+      finalMessage: () => finalDeferred,
     });
     const p = createAnthropicProvider();
-    const it = p.stream({ model: "m", messages: [{ role: "user", content: "x" }], maxTokens: 10 });
+    const it = p.stream({
+      model: "m",
+      messages: [{ role: "user", content: "x" }],
+      maxTokens: 10,
+    });
     // drive the async iterator, feeding a text delta mid-stream
     const events: unknown[] = [];
     const pump = (async () => {
       for await (const e of it) events.push(e);
     })();
-    // simulate SDK emitting a delta then finishing
+    // Wait for stream establishment to finish and register the "text"
+    // handler before feeding it a delta.
+    while (!handlers["text"]) {
+      await Promise.resolve();
+    }
     handlers["text"]?.("hello ");
+    // Let the delta propagate before finishing the stream.
+    await Promise.resolve();
+    await Promise.resolve();
+    resolveFinal({ content: [{ type: "text", text: "hello world" }] });
     await pump;
     expect(events).toContainEqual({ type: "text", delta: "hello " });
     expect(events.at(-1)).toEqual({
@@ -132,7 +188,11 @@ describe("anthropic adapter stream()", () => {
       },
     });
     const p = createAnthropicProvider();
-    const it = p.stream({ model: "m", messages: [{ role: "user", content: "x" }], maxTokens: 10 });
+    const it = p.stream({
+      model: "m",
+      messages: [{ role: "user", content: "x" }],
+      maxTokens: 10,
+    });
 
     const unhandled: unknown[] = [];
     const onUnhandledRejection = (reason: unknown) => unhandled.push(reason);
@@ -145,7 +205,11 @@ describe("anthropic adapter stream()", () => {
             void e; // drain until the rejection surfaces
           }
         })(),
-      ).rejects.toMatchObject({ kind: "rate_limit", retryable: true, status: 429 });
+      ).rejects.toMatchObject({
+        kind: "rate_limit",
+        retryable: true,
+        status: 429,
+      });
 
       // Flush the macrotask queue so a floating/orphaned promise rejection
       // (if any) would have fired `unhandledRejection` by now.
@@ -154,5 +218,73 @@ describe("anthropic adapter stream()", () => {
     } finally {
       process.off("unhandledRejection", onUnhandledRejection);
     }
+  });
+});
+
+describe("anthropic adapter bounded retry (#59 Task 8)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("generate() retries a 429 twice then returns the eventual success", async () => {
+    create
+      .mockRejectedValueOnce(Object.assign(new Error("rate"), { status: 429 }))
+      .mockRejectedValueOnce(Object.assign(new Error("rate"), { status: 429 }))
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "ok" }] });
+    const p = createAnthropicProvider();
+    const promise = p.generate({
+      model: "m",
+      messages: [{ role: "user", content: "x" }],
+      maxTokens: 10,
+    });
+    await vi.advanceTimersByTimeAsync(200); // 1st backoff
+    await vi.advanceTimersByTimeAsync(400); // 2nd backoff
+    await expect(promise).resolves.toMatchObject({ text: "ok" });
+    expect(create).toHaveBeenCalledTimes(3);
+  });
+
+  it("generate() throws a non-retryable auth error immediately, with no retry", async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    const p = createAnthropicProvider();
+    await expect(
+      p.generate({
+        model: "m",
+        messages: [{ role: "user", content: "x" }],
+        maxTokens: 10,
+      }),
+    ).rejects.toMatchObject({ kind: "auth", retryable: false });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("stream() retries the ESTABLISHMENT call on a retryable failure, then streams normally", async () => {
+    streamFn
+      .mockImplementationOnce(() => {
+        throw Object.assign(new Error("rate"), { status: 429 });
+      })
+      .mockReturnValueOnce({
+        on: () => {
+          // no text deltas in this scenario
+        },
+        finalMessage: async () => ({
+          content: [{ type: "text", text: "ok" }],
+        }),
+      });
+    const p = createAnthropicProvider();
+    const events: unknown[] = [];
+    const pump = (async () => {
+      for await (const e of p.stream({
+        model: "m",
+        messages: [{ role: "user", content: "x" }],
+        maxTokens: 10,
+      })) {
+        events.push(e);
+      }
+    })();
+    await vi.advanceTimersByTimeAsync(200); // 1st backoff
+    await pump;
+    expect(streamFn).toHaveBeenCalledTimes(2);
+    expect(events.at(-1)).toEqual({
+      type: "final",
+      result: { text: "ok", toolCall: undefined },
+    });
   });
 });
