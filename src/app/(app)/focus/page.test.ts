@@ -16,6 +16,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { BrainDumpStatus } from "@/lib/constants";
 
 const { prismaMock, getSettingsMock, currentWorkspaceIdMock } = vi.hoisted(
   () => {
@@ -63,7 +64,9 @@ describe("FocusLauncherPage — Task query", () => {
     const call = prismaMock.task.findMany.mock.calls[0][0];
     expect(call.where).toMatchObject({
       workspaceId: "owner",
-      brainDumpItems: { some: { status: { not: "archived" } } },
+      brainDumpItems: {
+        some: { status: { not: BrainDumpStatus.Archived } },
+      },
     });
   });
 });

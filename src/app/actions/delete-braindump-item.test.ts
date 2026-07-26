@@ -18,7 +18,7 @@ const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
     const prismaMock = {
       brainDumpItem: {
         findFirst: vi.fn(),
-        delete: vi.fn().mockResolvedValue({}),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
         count: vi.fn().mockResolvedValue(0),
       },
       task: {
@@ -57,6 +57,7 @@ vi.mock("@/lib/rewards", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   currentWorkspaceIdMock.mockResolvedValue("owner");
+  prismaMock.brainDumpItem.deleteMany.mockResolvedValue({ count: 1 });
   prismaMock.brainDumpItem.count.mockResolvedValue(0);
 });
 
@@ -68,7 +69,7 @@ describe("deleteBrainDumpItem", () => {
     await deleteBrainDumpItem("nope");
 
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
-    expect(prismaMock.brainDumpItem.delete).not.toHaveBeenCalled();
+    expect(prismaMock.brainDumpItem.deleteMany).not.toHaveBeenCalled();
   });
 
   it("deletes a single-task item (no linked Task) without touching Task at all", async () => {
@@ -80,8 +81,8 @@ describe("deleteBrainDumpItem", () => {
 
     await deleteBrainDumpItem("i1");
 
-    expect(prismaMock.brainDumpItem.delete).toHaveBeenCalledWith({
-      where: { id: "i1" },
+    expect(prismaMock.brainDumpItem.deleteMany).toHaveBeenCalledWith({
+      where: { id: "i1", workspaceId: "owner" },
     });
     expect(prismaMock.brainDumpItem.count).not.toHaveBeenCalled();
     expect(prismaMock.task.deleteMany).not.toHaveBeenCalled();
@@ -97,8 +98,8 @@ describe("deleteBrainDumpItem", () => {
 
     await deleteBrainDumpItem("i1");
 
-    expect(prismaMock.brainDumpItem.delete).toHaveBeenCalledWith({
-      where: { id: "i1" },
+    expect(prismaMock.brainDumpItem.deleteMany).toHaveBeenCalledWith({
+      where: { id: "i1", workspaceId: "owner" },
     });
     expect(prismaMock.brainDumpItem.count).toHaveBeenCalledWith({
       where: { taskId: "t1" },
@@ -133,6 +134,24 @@ describe("deleteBrainDumpItem", () => {
 
     expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
     expect(prismaMock.$transaction.mock.calls[0][0]).toBeInstanceOf(Function);
+  });
+
+  it("does not throw and skips Task cleanup when the item was already deleted concurrently (race between the read and the transaction)", async () => {
+    // `existing` was found by the pre-transaction read (so we know its taskId),
+    // but by the time the transaction's deleteMany runs, a concurrent
+    // deleteBrainDumpItem call already removed the row — deleteMany matches
+    // 0 rows instead of throwing (unlike `delete`, which would P2025 here).
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i1",
+      taskId: "t1",
+    });
+    prismaMock.brainDumpItem.deleteMany.mockResolvedValueOnce({ count: 0 });
+    const { deleteBrainDumpItem } = await import("./braindump");
+
+    await expect(deleteBrainDumpItem("i1")).resolves.toBeUndefined();
+
+    expect(prismaMock.brainDumpItem.count).not.toHaveBeenCalled();
+    expect(prismaMock.task.deleteMany).not.toHaveBeenCalled();
   });
 
   it("still awards inbox-zero + revalidates after cleanup", async () => {

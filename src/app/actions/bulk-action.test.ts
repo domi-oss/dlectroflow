@@ -21,7 +21,7 @@ const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
         findMany: vi.fn(),
         findFirst: vi.fn(),
         update: vi.fn().mockResolvedValue({}),
-        delete: vi.fn().mockResolvedValue({}),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
         count: vi.fn().mockResolvedValue(0),
       },
       step: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
@@ -86,15 +86,15 @@ describe("bulkBrainDumpAction", () => {
       where: { id: { in: ["a", "b", "c"] }, workspaceId: "ws1" },
       select: { id: true },
     });
-    expect(prismaMock.brainDumpItem.delete).toHaveBeenCalledTimes(2);
-    expect(prismaMock.brainDumpItem.delete).toHaveBeenCalledWith({
-      where: { id: "a" },
+    expect(prismaMock.brainDumpItem.deleteMany).toHaveBeenCalledTimes(2);
+    expect(prismaMock.brainDumpItem.deleteMany).toHaveBeenCalledWith({
+      where: { id: "a", workspaceId: "ws1" },
     });
-    expect(prismaMock.brainDumpItem.delete).toHaveBeenCalledWith({
-      where: { id: "b" },
+    expect(prismaMock.brainDumpItem.deleteMany).toHaveBeenCalledWith({
+      where: { id: "b", workspaceId: "ws1" },
     });
-    expect(prismaMock.brainDumpItem.delete).not.toHaveBeenCalledWith({
-      where: { id: "c" },
+    expect(prismaMock.brainDumpItem.deleteMany).not.toHaveBeenCalledWith({
+      where: { id: "c", workspaceId: "ws1" },
     });
     expect(res).toEqual({ count: 2 });
   });

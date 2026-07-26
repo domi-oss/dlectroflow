@@ -138,6 +138,14 @@ export async function renameItem(id: string, text: string) {
  * too if nothing else still references it; Step/BreakdownTurn cascade for
  * free (schema.prisma onDelete: Cascade on their taskId FK). Both deletes run
  * in one transaction so a mid-way failure can't leave a half-orphaned state.
+ *
+ * `existing` is read outside the transaction as a workspace-ownership guard,
+ * so a concurrent delete of the same item between that read and the
+ * transaction is possible. The item delete below uses `deleteMany` (not
+ * `delete`) specifically so that race is a silent 0-row no-op instead of a
+ * Prisma P2025 "record not found" throw that would roll back the transaction;
+ * when that happens we skip the Task cleanup too, since there is nothing left
+ * that this call actually removed.
  */
 export async function deleteBrainDumpItem(id: string) {
   const workspaceId = await currentWorkspaceId();
@@ -147,7 +155,10 @@ export async function deleteBrainDumpItem(id: string) {
   if (!existing) return;
 
   await prisma.$transaction(async (tx) => {
-    await tx.brainDumpItem.delete({ where: { id } });
+    const { count } = await tx.brainDumpItem.deleteMany({
+      where: { id, workspaceId },
+    });
+    if (count === 0) return; // already deleted concurrently — nothing to clean up
     if (existing.taskId) {
       // Defensive: the schema allows multiple BrainDumpItems to reference the
       // same Task, though no code path today creates more than one. Only
