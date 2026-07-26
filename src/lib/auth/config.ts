@@ -34,4 +34,29 @@ export function assertAuthConfig(): void {
       `Owner auth misconfigured — refusing to boot with data reachable. Missing: ${missing.join(", ")}`,
     );
   }
+  assertLLMConfig();
+}
+
+/**
+ * In production, fail fast if the selected LLM provider is not fully
+ * configured. Provider selection is env-only (`LLM_PROVIDER`, default
+ * `anthropic`); each provider has its own required keys.
+ */
+export function assertLLMConfig(): void {
+  if (process.env.NODE_ENV !== "production") return;
+  const provider = process.env.LLM_PROVIDER ?? "anthropic";
+  const missing: string[] = [];
+  if (provider === "openai-compatible") {
+    if (!process.env.LLM_BASE_URL) missing.push("LLM_BASE_URL");
+    if (!process.env.LLM_MODEL) missing.push("LLM_MODEL");
+  } else {
+    // anthropic (the default) — also the fallback for any unknown value, which
+    // getLLM() resolves to anthropic.
+    if (!process.env.ANTHROPIC_API_KEY) missing.push("ANTHROPIC_API_KEY");
+  }
+  if (missing.length) {
+    throw new Error(
+      `LLM provider "${provider}" misconfigured — refusing to boot. Missing: ${missing.join(", ")}`,
+    );
+  }
 }

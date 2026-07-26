@@ -120,4 +120,14 @@ describe("openai-compatible provider", () => {
     process.env.LLM_OWNER_MODEL = "llama3.1:70b";
     expect(resolveUtilityModel()).toBe("llama3.1:70b");
   });
+
+  it("throws a descriptive error when no model env is configured", () => {
+    delete process.env.LLM_MODEL;
+    delete process.env.LLM_OWNER_MODEL;
+    delete process.env.LLM_GUEST_MODEL;
+    expect(() => resolveBreakdownModel({ isOwner: true })).toThrow(
+      /requires LLM_MODEL/,
+    );
+    expect(() => resolveUtilityModel()).toThrow(/requires LLM_MODEL/);
+  });
 });

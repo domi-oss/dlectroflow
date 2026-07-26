@@ -63,7 +63,16 @@ function resolveOpenAICompatibleModel(opts: { isOwner: boolean }): string {
   const split = opts.isOwner
     ? process.env.LLM_OWNER_MODEL
     : process.env.LLM_GUEST_MODEL;
-  return split || process.env.LLM_MODEL || "";
+  const model = split || process.env.LLM_MODEL;
+  if (!model) {
+    // Env validation (assertLLMConfig) catches this at boot; this guard stops
+    // the resolver from silently returning "" if it's ever reached without a
+    // configured model (e.g. a code path that bypasses the boot check).
+    throw new Error(
+      "LLM_PROVIDER=openai-compatible requires LLM_MODEL (or LLM_OWNER_MODEL / LLM_GUEST_MODEL) to be set.",
+    );
+  }
+  return model;
 }
 
 // ── public API ───────────────────────────────────────────────────────────────
