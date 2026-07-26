@@ -58,6 +58,8 @@ async function scanColorContrast(page: Page) {
 // helpers correct if that ever changes (one variant's cleanup can never delete
 // another's data).
 const SEED_MARKER = "a11y-lib-pill";
+// #56 seeding marker (see seedSavedLaterItem below).
+const SAVED_MARKER = "a11y-saved-idle";
 const OWNER_WS = "owner"; // OWNER_WORKSPACE_ID (src/lib/constants.ts)
 
 async function seedPlatedItems(
@@ -80,6 +82,40 @@ async function seedPlatedItems(
         status: "triaged", // BrainDumpStatus.Triaged → singleTask/plated bucket
         workspaceId: OWNER_WS,
       })),
+    });
+  } catch (err) {
+    await prisma.$disconnect();
+    throw err;
+  }
+  return prisma;
+}
+
+// #56 seeding. The saved-for-later row, in its IDLE state, dimmed the whole
+// row with `opacity-70`, which composited the bg-primary "Review now" CTA below
+// WCAG-AA (~3.3:1 light / ~3.6:1 dark against its background; needs 4.5:1). The
+// fresh-DB scans above can never catch it: a freshly captured item lands in
+// Needs-review, never savedLater. So — like the #48 pill — seed the exact state
+// the regression needs. An inbox item snoozed into the future lands in the
+// savedLater bucket (see bucketItems in src/components/inbox/bucket.ts) and
+// renders idle by default, so its dimmed "Review now" CTA is on screen for the
+// scan. Seeding via Prisma (not the capture UI) keeps it deterministic; the row
+// is deleted after each scan (cleanupSeed) so the DB stays clean for other
+// specs. Marker is per-theme so each variant owns its own slice.
+async function seedSavedLaterItem(marker: string): Promise<PrismaClient> {
+  const prisma = new PrismaClient();
+  try {
+    await prisma.workspace.upsert({
+      where: { id: OWNER_WS },
+      create: { id: OWNER_WS, kind: "owner" },
+      update: {},
+    });
+    await prisma.brainDumpItem.create({
+      data: {
+        text: marker,
+        status: "inbox", // BrainDumpStatus.Inbox …
+        snoozedUntil: new Date(Date.now() + 24 * 3600_000), // … + future snooze → savedLater
+        workspaceId: OWNER_WS,
+      },
     });
   } catch (err) {
     await prisma.$disconnect();
@@ -161,6 +197,35 @@ for (const theme of THEMES) {
         // count, or axe would skip it as "too short" and the scan would be a
         // no-op that can't catch #48.
         await expect(activePill).toHaveText(/^\d{2,}$/);
+        expectNoContrastViolations(await scanColorContrast(page));
+      } finally {
+        await cleanupSeed(prisma, marker);
+      }
+    });
+
+    // #56: the saved-for-later row's IDLE "Review now" CTA. The row dimmed
+    // itself with `opacity-70`, compositing the bg-primary CTA below AA (~3.3:1
+    // light / ~3.6:1 dark; needs 4.5:1). Seed an inbox item snoozed into the
+    // future so it lands in savedLater and renders idle (its "Review now" CTA
+    // on screen), then scan. The fix moves the dim onto the title line only, so
+    // the CTA keeps its full 5.41:1 (light) / 6.32:1 (dark).
+    test(`zero color-contrast violations: inbox saved-for-later idle "Review now" CTA (${theme})`, async ({
+      page,
+    }) => {
+      const marker = `${SAVED_MARKER}-${theme}`;
+      const prisma = await seedSavedLaterItem(marker);
+      try {
+        await page.goto("/");
+        await waitForShell(page);
+        const savedRow = page
+          .locator('[data-bucket="savedLater"]')
+          .getByRole("listitem")
+          .filter({ hasText: marker });
+        // Guard the repro precondition: the idle CTA must actually be on screen,
+        // or the scan is a no-op that can't catch #56.
+        await expect(
+          savedRow.getByRole("button", { name: "Review now" }),
+        ).toBeVisible();
         expectNoContrastViolations(await scanColorContrast(page));
       } finally {
         await cleanupSeed(prisma, marker);

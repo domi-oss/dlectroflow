@@ -1450,7 +1450,12 @@ describe("InboxView — saved-for-later inline sorting options", () => {
       />,
     );
     const row = screen.getByText("stored thing").closest("li")!;
-    expect(row.className).toContain("opacity-70"); // idle = dimmed
+    // #56: the idle dim lives on the title line, not the row/CTA.
+    const titleLine = within(row)
+      .getByRole("button", { name: "stored thing" })
+      .closest("div")!;
+    expect(titleLine.className).toContain("opacity-70"); // idle = title dimmed
+    expect(row.className).not.toContain("opacity-70"); // …never the row/CTA
 
     await user.click(within(row).getByRole("button", { name: "Review now" }));
     // v6: short inline buttons + icon end-cluster (📥 "Move to", 🗑 "Delete").
@@ -1467,7 +1472,11 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     expect(
       within(row).queryByRole("button", { name: "Review now" }),
     ).not.toBeInTheDocument();
-    expect(row.className).not.toContain("opacity-70"); // reviewing = looks active
+    // reviewing = looks active: the title dim is lifted too.
+    expect(
+      within(row).getByRole("button", { name: "stored thing" }).closest("div")!
+        .className,
+    ).not.toContain("opacity-70");
     expect(triageBrainDumpItem).not.toHaveBeenCalled();
 
     // Collapse via the row title — back to idle.
@@ -1532,6 +1541,65 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     expect(del).not.toHaveBeenCalled(); // first click only reveals confirm
     await user.click(within(row).getByRole("button", { name: "Delete" }));
     expect(del).toHaveBeenCalledWith("sv1");
+  });
+});
+
+describe("InboxView — saved-for-later idle CTA contrast (#56)", () => {
+  const saved = () =>
+    makeItem({
+      id: "sv1",
+      text: "stored thing",
+      snoozedUntil: new Date(Date.now() + 60 * 60_000),
+    });
+
+  // #56: the idle saved-for-later row was dimmed with `opacity-70` on the whole
+  // <li>, which composited the bg-primary "Review now" CTA below WCAG-AA
+  // (~3.3:1 light / ~3.6:1 dark against its background; needs 4.5:1). The fix
+  // moves the dim onto the title/metadata line only, so the CTA keeps its full
+  // 5.41:1 (light) / 6.32:1 (dark). jsdom can't compute real contrast (no
+  // CSS-variable resolution — see library-tab-pill.test.tsx), so the WCAG
+  // number itself is asserted in the axe gate (e2e/a11y-contrast.spec.ts, on a
+  // seeded saved-later idle row); this test locks the DOM contract so the
+  // failing row-level opacity can't come back.
+  it("keeps the idle 'Review now' CTA free of any ancestor opacity dim", () => {
+    render(
+      <InboxView
+        initialItems={[saved()]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const cta = screen.getByRole("button", { name: "Review now" });
+    // Walk from the CTA up to its bucket <ul>: no element on the path may carry
+    // an `opacity-*` utility, which would composite the accent CTA below AA.
+    // (`hover:opacity-90` on the CTA itself is fine — it is not a static dim,
+    // and the leading `:` means it never matches this whitespace-anchored regex.)
+    for (
+      let el: HTMLElement | null = cta;
+      el && el.tagName !== "UL";
+      el = el.parentElement
+    ) {
+      expect(el.className).not.toMatch(/(^|\s)opacity-\d/);
+    }
+    // …and it still carries the full-contrast brand-token pairing.
+    expect(cta.className).toContain("bg-primary");
+    expect(cta.className).toContain("text-primary-foreground");
+  });
+
+  it("still dims the idle title line so the row reads as 'asleep'", () => {
+    render(
+      <InboxView
+        initialItems={[saved()]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const titleLine = screen
+      .getByRole("button", { name: "stored thing" })
+      .closest("div")!;
+    expect(titleLine.className).toContain("opacity-70");
   });
 });
 
