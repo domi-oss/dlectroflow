@@ -13,6 +13,7 @@ import { DonePill } from "@/components/completion/done-pill";
 import { LibraryRows } from "@/components/library/library-rows";
 import { LibraryMultistep } from "@/components/library/library-multistep";
 import { BackLink } from "@/components/nav/back-link";
+import { openSessionRemainingSec } from "@/lib/focus-timer-clock";
 
 // DB-backed, always fresh (mirrors the Inbox — reads live workspace data).
 export const dynamic = "force-dynamic";
@@ -64,6 +65,10 @@ export default async function LibraryPage({
   searchParams: Promise<{ tab?: string; from?: string }>;
 }) {
   const workspaceId = await currentWorkspaceId();
+  // One request-time clock, threaded down so bucketing (savedLater = snoozed
+  // into the future), the "added Xh ago" labels, and each step's persisted
+  // remaining-time snapshot (#27 follow-up) all agree (matches layout.tsx).
+  const now = Date.now();
   const [settings, { tab, from }, rawItems] = await Promise.all([
     getSettings(workspaceId),
     searchParams,
@@ -76,14 +81,21 @@ export default async function LibraryPage({
           include: {
             steps: {
               orderBy: { order: "asc" },
-              // #27 — a step is "resumable" if it has a TRULY PAUSED focus
-              // session (pausedAt set). Mirrors inbox/page.tsx — batched by
-              // Prisma into one query per relation, not a per-step N+1.
+              // #27 follow-up — fetch ANY open session (paused or actively
+              // running); `resumable` is derived from `pausedAt` below, and
+              // the full row also feeds the step's effective remaining time
+              // (task-remaining.ts) for the row's total + active-step pills.
               include: {
                 focusSessions: {
-                  where: { endedAt: null, pausedAt: { not: null } },
-                  select: { id: true },
+                  where: { endedAt: null },
+                  orderBy: { startedAt: "desc" },
                   take: 1,
+                  select: {
+                    startedAt: true,
+                    pausedAt: true,
+                    accumulatedPausedMs: true,
+                    plannedMin: true,
+                  },
                 },
               },
             },
@@ -102,20 +114,21 @@ export default async function LibraryPage({
     scheduledAt: task?.scheduledAt ?? null,
     estMinutes: item.estMinutes,
     steps:
-      task?.steps.map((s) => ({
-        id: s.id,
-        order: s.order,
-        text: s.text,
-        done: s.done,
-        estMinutes: s.estMinutes,
-        subtaskEmoji: s.subtaskEmoji,
-        resumable: s.focusSessions.length > 0,
-      })) ?? [],
+      task?.steps.map((s) => {
+        const session = s.focusSessions[0] ?? null;
+        return {
+          id: s.id,
+          order: s.order,
+          text: s.text,
+          done: s.done,
+          estMinutes: s.estMinutes,
+          subtaskEmoji: s.subtaskEmoji,
+          resumable: session?.pausedAt != null,
+          openRemainingSec: openSessionRemainingSec(session, now),
+        };
+      }) ?? [],
   }));
 
-  // One request-time clock, threaded down so bucketing (savedLater = snoozed
-  // into the future) and the "added Xh ago" labels agree (matches layout.tsx).
-  const now = Date.now();
   const buckets = libraryBuckets(items, now);
   const active = isTabParam(tab) ? tab : "plated";
   const activeTab = TABS.find((it) => it.param === active)!;

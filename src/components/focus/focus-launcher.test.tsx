@@ -53,6 +53,9 @@ const hero = (
   taskTitle: "Task " + o.stepId,
   resumable: true,
   resumeAt: 1,
+  // #27 follow-up — defaults to match estMinutes (the common "not paused
+  // mid-way" case); the dedicated remaining-time test overrides it.
+  remainingMin: o.estMinutes ?? 12,
   stepIndex: 2,
   stepsDone: 1,
   stepsTotal: 4,
@@ -162,6 +165,30 @@ describe("FocusLauncher shell", () => {
     );
     expect(resume.className).toContain("font-bold");
     expect(resume.className).toContain("min-h-[44px]");
+  });
+
+  // #27 follow-up — the paused banner shows the step's TRUE remaining time,
+  // not its original estimate (a step paused partway through reads its real
+  // remaining, which can be well under the full estimate).
+  it("shows the paused step's true remaining time, not its full estimate", () => {
+    render(
+      <FocusLauncher
+        voice="plain"
+        focusMinToday={0}
+        currentStreak={0}
+        clearedToday={false}
+        data={data({
+          resumeHero: hero({
+            stepId: "h1",
+            stepText: "Wire the API",
+            estMinutes: 25,
+            remainingMin: 9,
+          }),
+        })}
+      />,
+    );
+    expect(screen.getByText(/~9m/)).toBeInTheDocument();
+    expect(screen.queryByText(/~25m/)).not.toBeInTheDocument();
   });
 
   it("shows the new-user empty state (Inbox card) when nothing is focusable and nothing was cleared", () => {

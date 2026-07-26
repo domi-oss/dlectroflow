@@ -10,6 +10,8 @@ import {
 import { getDashboardData } from "@/lib/rewards";
 import { FocusLauncher } from "@/components/focus/focus-launcher";
 import { type Voice } from "@/lib/strings";
+import { openSessionRemainingSec } from "@/lib/focus-timer-clock";
+import { effectiveRemainingMin } from "@/lib/task-remaining";
 
 // DB-backed, always fresh.
 export const dynamic = "force-dynamic";
@@ -42,14 +44,21 @@ export default async function FocusLauncherPage() {
         steps: {
           orderBy: { order: "asc" },
           include: {
-            // Most-recent TRULY PAUSED session (#27) → drives resumable +
-            // resumeAt ordering. An open-but-never-paused session is stale,
-            // not resumable (beginFocus retires it on the next Start).
+            // #27 follow-up — fetch ANY open session (paused or actively
+            // running), not just paused ones: `resumable` (the CTA/ordering
+            // signal) is derived from `pausedAt` in the mapping below, while
+            // the full row also feeds the step's effective remaining time
+            // (task-remaining.ts) for the resume hero's "~Xm left".
             focusSessions: {
-              where: { endedAt: null, pausedAt: { not: null } },
+              where: { endedAt: null },
               orderBy: { startedAt: "desc" },
               take: 1,
-              select: { startedAt: true },
+              select: {
+                startedAt: true,
+                pausedAt: true,
+                accumulatedPausedMs: true,
+                plannedMin: true,
+              },
             },
           },
         },
@@ -88,16 +97,28 @@ export default async function FocusLauncherPage() {
     id: task.id,
     title: task.title,
     createdAt: task.createdAt,
-    steps: task.steps.map((s) => ({
-      id: s.id,
-      order: s.order,
-      text: s.text,
-      done: s.done,
-      estMinutes: s.estMinutes,
-      subtaskEmoji: s.subtaskEmoji,
-      resumable: s.focusSessions.length > 0,
-      resumeAt: s.focusSessions[0]?.startedAt.getTime() ?? null,
-    })),
+    steps: task.steps.map((s) => {
+      const session = s.focusSessions[0] ?? null;
+      const openRemainingSec = openSessionRemainingSec(session, now);
+      return {
+        id: s.id,
+        order: s.order,
+        text: s.text,
+        done: s.done,
+        estMinutes: s.estMinutes,
+        subtaskEmoji: s.subtaskEmoji,
+        // #27 — resumable means TRULY paused (pausedAt set), not merely open.
+        resumable: session?.pausedAt != null,
+        resumeAt: session?.startedAt.getTime() ?? null,
+        // #27 follow-up — the resume hero's "~Xm left" reflects real
+        // progress (task-remaining.ts), not just the original estimate.
+        remainingMin: effectiveRemainingMin({
+          done: s.done,
+          estMinutes: s.estMinutes,
+          openRemainingSec,
+        }),
+      };
+    }),
   }));
 
   const items: Item[] = rawItems.map(({ task, ...item }) => ({

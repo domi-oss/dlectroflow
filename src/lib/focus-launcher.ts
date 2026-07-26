@@ -17,6 +17,12 @@ export type FocusStep = {
   resumable: boolean;
   /** ms of the open FocusSession's startedAt; null when not resumable. Orders the resume hero. */
   resumeAt: number | null;
+  /** #27 follow-up — this step's EFFECTIVE remaining minutes (full estimate
+   * if not started; the open session's persisted remaining if paused/in
+   * progress; 0 if done — see `effectiveRemainingMin` in task-remaining.ts).
+   * The page computes this; the resume hero shows it instead of the raw
+   * estimate so "~Xm left" reflects real progress, not the original ask. */
+  remainingMin: number;
 };
 
 export type FocusTask = {
@@ -41,6 +47,10 @@ export type FocusableStep = {
   resumable: boolean;
   /** Carried from the next incomplete step's open session; null when not paused. */
   resumeAt: number | null;
+  /** #27 follow-up — the next incomplete step's effective remaining minutes
+   * (see `FocusStep.remainingMin`). Equals `estMinutes` when nothing's in
+   * progress; shrinks to the open session's remaining once paused/running. */
+  remainingMin: number;
   /** 1-based position of this (next-incomplete) step among the task's ordered steps. */
   stepIndex: number;
   stepsDone: number;
@@ -78,6 +88,7 @@ export function focusableSteps(tasks: FocusTask[]): FocusableStep[] {
         taskTitle: task.title,
         resumable: next.resumable,
         resumeAt: next.resumeAt,
+        remainingMin: next.remainingMin,
         stepIndex: nextPos + 1,
         stepsDone: sorted.filter((s) => s.done).length,
         stepsTotal: sorted.length,

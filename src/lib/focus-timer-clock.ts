@@ -77,3 +77,40 @@ export function remainingSecForSession(
   const plannedSec = clock.plannedMin * 60;
   return Math.max(0, plannedSec - Math.floor(elapsedMs / 1000));
 }
+
+/** A step's open (`endedAt: null`) FocusSession, as read straight off Prisma —
+ * paused or actively running. Mirrors `PausedSessionClock` but with real
+ * `Date`s, so server-component pages can pass a fetched row through without
+ * hand-converting each field at every call site. */
+export type OpenFocusSessionRow = {
+  startedAt: Date;
+  pausedAt: Date | null;
+  accumulatedPausedMs: number;
+  plannedMin: number;
+};
+
+/**
+ * Remaining seconds of a step's open FocusSession as of `nowMs` — a
+ * server-rendered SNAPSHOT (no live ticking; the caller re-renders to refresh
+ * it, e.g. on the next page load). `null` in, `null` out: a step with no open
+ * session has no "remaining" to report. For a currently-PAUSED session this
+ * is frozen at the pause instant (`remainingSecForSession`'s behavior); for
+ * an actively-RUNNING one (pausedAt null — e.g. left open on another device),
+ * it's simply "what the remaining time is right now" — the sensible
+ * snapshot-at-render answer, same formula either way.
+ */
+export function openSessionRemainingSec(
+  session: OpenFocusSessionRow | null | undefined,
+  nowMs: number,
+): number | null {
+  if (!session) return null;
+  return remainingSecForSession(
+    {
+      plannedMin: session.plannedMin,
+      startedAt: session.startedAt.getTime(),
+      pausedAt: session.pausedAt ? session.pausedAt.getTime() : null,
+      accumulatedPausedMs: session.accumulatedPausedMs,
+    },
+    nowMs,
+  );
+}

@@ -4,6 +4,7 @@ import { getGoogleStatus } from "@/lib/google";
 import { BrainDumpStatus } from "@/lib/constants";
 import { InboxView } from "@/components/inbox/inbox-view";
 import { firstResumableStep } from "@/components/inbox/resume-step";
+import { openSessionRemainingSec } from "@/lib/focus-timer-clock";
 
 // DB-backed, always fresh.
 export const dynamic = "force-dynamic";
@@ -17,6 +18,9 @@ export default async function InboxPage({
   }>;
 }) {
   const workspaceId = await currentWorkspaceId();
+  // One request-time clock — also snapshots each step's persisted remaining
+  // time (#27 follow-up), matching the Library page's same-request approach.
+  const now = Date.now();
   const [rawItems, settings, sp, owner, googleStatus] = await Promise.all([
     prisma.brainDumpItem.findMany({
       where: { workspaceId, status: { not: BrainDumpStatus.Archived } },
@@ -26,16 +30,25 @@ export default async function InboxPage({
           include: {
             steps: {
               orderBy: { order: "asc" },
-              // #27 — a step is "resumable" if it has a TRULY PAUSED focus
-              // session (pausedAt set), not merely an open one — an open-but-
-              // never-paused session is stale (e.g. a closed tab mid-
-              // countdown) and isn't offered as resumable. Batched by Prisma
-              // into one query per relation, so this is not a per-step N+1.
+              // #27 follow-up — fetch ANY open session (paused or actively
+              // running); `resumable` is derived from `pausedAt` below
+              // (an open-but-never-paused session is stale — e.g. a closed
+              // tab mid-countdown — and isn't offered as resumable), and the
+              // full row also feeds the step's effective remaining time
+              // (task-remaining.ts) for the row's total + active-step pills.
+              // Batched by Prisma into one query per relation, so this is
+              // not a per-step N+1.
               include: {
                 focusSessions: {
-                  where: { endedAt: null, pausedAt: { not: null } },
-                  select: { id: true },
+                  where: { endedAt: null },
+                  orderBy: { startedAt: "desc" },
                   take: 1,
+                  select: {
+                    startedAt: true,
+                    pausedAt: true,
+                    accumulatedPausedMs: true,
+                    plannedMin: true,
+                  },
                 },
               },
             },
@@ -65,15 +78,19 @@ export default async function InboxPage({
     scheduledAt: task?.scheduledAt ?? null,
     estMinutes: item.estMinutes,
     steps:
-      task?.steps.map((s) => ({
-        id: s.id,
-        order: s.order,
-        text: s.text,
-        done: s.done,
-        estMinutes: s.estMinutes,
-        subtaskEmoji: s.subtaskEmoji,
-        resumable: s.focusSessions.length > 0,
-      })) ?? [],
+      task?.steps.map((s) => {
+        const session = s.focusSessions[0] ?? null;
+        return {
+          id: s.id,
+          order: s.order,
+          text: s.text,
+          done: s.done,
+          estMinutes: s.estMinutes,
+          subtaskEmoji: s.subtaskEmoji,
+          resumable: session?.pausedAt != null,
+          openRemainingSec: openSessionRemainingSec(session, now),
+        };
+      }) ?? [],
   }));
 
   // Phase 5 (#8): the demo/first-run preview override shows the Inbox as a

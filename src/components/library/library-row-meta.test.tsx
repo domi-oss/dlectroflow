@@ -65,6 +65,19 @@ describe("meta helpers", () => {
     expect(remainingMinutes(base)).toBe(20); // 15 + 5
     expect(remainingMinutes({ ...base, steps: [] })).toBe(0);
   });
+  // #27 follow-up — the total is the SUM of each step's EFFECTIVE remaining:
+  // a step with an open FocusSession contributes its real remaining, not its
+  // full estimate, so the total shrinks below the raw sum as you progress.
+  it("remainingMinutes shrinks below the raw estimate sum once a step is paused/in progress", () => {
+    const paused = {
+      ...base,
+      steps: base.steps.map((s) =>
+        s.id === "s2" ? { ...s, openRemainingSec: 4 * 60 } : s,
+      ),
+    };
+    // Raw sum would be 20 (15 + 5); s2 (est 15) is paused with only 4m left.
+    expect(remainingMinutes(paused)).toBe(9); // 4 + 5
+  });
   it("singleTaskEstimate falls back to 5 when null", () => {
     expect(singleTaskEstimate({ ...base, estMinutes: null })).toBe(5);
     expect(singleTaskEstimate({ ...base, estMinutes: 12 })).toBe(12);

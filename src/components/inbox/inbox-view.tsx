@@ -66,6 +66,7 @@ import {
   type Item,
   type BucketId,
 } from "@/components/inbox/bucket";
+import { itemRemainingMin, activeStepRemainingMin } from "@/lib/task-remaining";
 import { dropPlan } from "@/components/inbox/move-dispatch";
 import { MoveToMenu } from "@/components/inbox/move-to-menu";
 import {
@@ -778,6 +779,12 @@ export function InboxView({
                        step count it shows a red "Break into steps now?" CTA into the editor. */
                     const expanded = expandedId === item.id;
                     const awaitingBreakdown = item.stepsTotal === 0;
+                    // #27 follow-up — task total (shrinks as steps are
+                    // paused/completed) + the active step's own remaining
+                    // time, if one is open. Both are persisted SNAPSHOTS as
+                    // of this page load — no live ticking in the list.
+                    const totalRemainingMin = itemRemainingMin(item);
+                    const activeRemainingMin = activeStepRemainingMin(item);
                     // No steps yet → nothing to push, so 📅 offers the same
                     // duration popover a single-task row uses. Rows with
                     // steps push them straight to Google Tasks on tap.
@@ -873,6 +880,16 @@ export function InboxView({
                             </span>
                           )}
                         </div>
+                        {/* #27 follow-up — task total remaining + (when a
+                            step is paused/in progress) that step's own
+                            remaining time. */}
+                        {!awaitingBreakdown && (
+                          <p className="text-muted-foreground pl-9 text-xs tabular-nums">
+                            ≈{totalRemainingMin} {t("lib.minLeft", voice)}
+                            {activeRemainingMin != null &&
+                              ` · ≈${activeRemainingMin} ${t("lib.minOnStep", voice)}`}
+                          </p>
+                        )}
                         <RowActions
                           className="pl-9"
                           scheduled={item.scheduledAt != null}

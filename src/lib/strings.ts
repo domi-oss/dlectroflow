@@ -501,6 +501,10 @@ export const STRINGS = {
   "lib.next": { plain: "Next:", playful: "Next:" },
   "lib.minLeft": { plain: "min left", playful: "min left" },
   "lib.min": { plain: "min", playful: "min" },
+  // #27 follow-up — the active-step pill on a multi-step row (Library +
+  // Inbox), distinguishing "time left on the step you're mid-way through"
+  // from the row's task-total pill (lib.minLeft).
+  "lib.minOnStep": { plain: "min on step", playful: "min on step" },
   "lib.editEstimate": { plain: "Edit estimate", playful: "Edit estimate" },
 
   // ── Task working-view — schedule indicator (#8 follow-up) ─────────────────

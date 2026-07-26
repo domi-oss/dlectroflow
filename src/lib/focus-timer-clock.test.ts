@@ -6,6 +6,7 @@ import {
   netAddedMin,
   timerFraction,
   remainingSecForSession,
+  openSessionRemainingSec,
 } from "@/lib/focus-timer-clock";
 
 describe("mmss", () => {
@@ -143,5 +144,45 @@ describe("remainingSecForSession", () => {
       accumulatedPausedMs: 0,
     };
     expect(remainingSecForSession(clock, 999 * MIN)).toBe(0);
+  });
+});
+
+// Extension (#27 follow-up) — task-total-remaining / row surfaces read
+// Prisma rows (real Dates) straight off the wire; this wrapper does the
+// Date→ms conversion once so pages don't hand-roll it at every call site.
+describe("openSessionRemainingSec", () => {
+  const MIN = 60_000;
+
+  it("null/undefined session → null (nothing to report)", () => {
+    expect(openSessionRemainingSec(null, Date.now())).toBeNull();
+    expect(openSessionRemainingSec(undefined, Date.now())).toBeNull();
+  });
+
+  it("a paused session's remaining is frozen at the pause instant", () => {
+    const startedAt = new Date("2026-07-26T10:00:00Z");
+    const pausedAt = new Date("2026-07-26T10:10:00Z"); // paused after 10 min
+    const session = {
+      startedAt,
+      pausedAt,
+      accumulatedPausedMs: 0,
+      plannedMin: 25,
+    };
+    // Rendered right away, or a day later — same frozen 15m answer.
+    expect(openSessionRemainingSec(session, pausedAt.getTime())).toBe(15 * 60);
+    expect(
+      openSessionRemainingSec(session, pausedAt.getTime() + 24 * 60 * MIN),
+    ).toBe(15 * 60);
+  });
+
+  it("an actively-running (never paused) session reports its live remaining as of `nowMs` — the snapshot-at-render answer", () => {
+    const startedAt = new Date("2026-07-26T10:00:00Z");
+    const session = {
+      startedAt,
+      pausedAt: null,
+      accumulatedPausedMs: 0,
+      plannedMin: 25,
+    };
+    const renderedAt = startedAt.getTime() + 10 * MIN; // rendered 10m in
+    expect(openSessionRemainingSec(session, renderedAt)).toBe(15 * 60);
   });
 });

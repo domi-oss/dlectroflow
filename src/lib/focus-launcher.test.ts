@@ -17,6 +17,10 @@ function step(overrides: Partial<FocusTask["steps"][number]> & { id: string }) {
     subtaskEmoji: null,
     resumable: false,
     resumeAt: null,
+    // Defaults to the (possibly overridden) estimate — "not started" is the
+    // common case in these fixtures; tests exercising the paused/in-progress
+    // case override remainingMin explicitly.
+    remainingMin: overrides.estMinutes ?? 10,
     ...overrides,
   };
 }
@@ -61,6 +65,7 @@ describe("focusableSteps", () => {
       taskTitle: "Write report",
       resumable: false,
       resumeAt: null,
+      remainingMin: 25,
       stepIndex: 2,
       stepsDone: 1,
       stepsTotal: 3,
@@ -95,6 +100,30 @@ describe("focusableSteps", () => {
       stepId: "s2",
       resumable: true,
       resumeAt: 222,
+    });
+  });
+
+  it("carries remainingMin through from the next incomplete step — shrinks below the estimate once paused", () => {
+    const tasks = [
+      task({
+        id: "t1",
+        steps: [
+          step({ id: "s1", order: 1, done: true, estMinutes: 20 }),
+          step({
+            id: "s2",
+            order: 2,
+            done: false,
+            estMinutes: 25,
+            resumable: true,
+            remainingMin: 9, // paused with 9m left, not the full 25m estimate
+          }),
+        ],
+      }),
+    ];
+    expect(focusableSteps(tasks)[0]).toMatchObject({
+      stepId: "s2",
+      estMinutes: 25,
+      remainingMin: 9,
     });
   });
 
