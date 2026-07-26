@@ -1074,10 +1074,12 @@ describe("DragGhostRow — mobile drag preview (#62)", () => {
     fireEvent.mouseDown(grip, { clientX: 0, clientY: 0, button: 0 });
     fireEvent.mouseMove(document, { clientX: 0, clientY: 20 }); // > 5px activation distance
 
-    const ghost = screen.getAllByText("draggable row").find((el) => {
-      const li = el.closest("li");
-      return !li; // the row copy lives in <li>; the overlay ghost doesn't
-    });
+    // Identify the ghost positively by the overlay it lives in (a fixed-position
+    // wrapper) rather than by the absence of an <li> — robust even if dnd-kit
+    // ever wraps its portal content in a list element (Duo review).
+    const ghost = screen
+      .getAllByText("draggable row")
+      .find((el) => el.closest('[style*="position: fixed"]'));
     expect(ghost).toBeTruthy();
     const overlayWrapper = ghost!.closest(
       '[style*="position: fixed"]',
@@ -1091,8 +1093,9 @@ describe("DragGhostRow — mobile drag preview (#62)", () => {
     // listeners by 50ms (AbstractPointerSensor.detach) to let the browser's
     // native click-after-drag fire first. Wait it out so those listeners
     // (added straight on the real `document`) don't leak into later tests
-    // and swallow their clicks.
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    // and swallow their clicks. Use 120ms for comfortable headroom over the
+    // 50ms delay on a loaded CI runner (Duo review — 60ms was too tight).
+    await new Promise((resolve) => setTimeout(resolve, 120));
   });
 });
 
