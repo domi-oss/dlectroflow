@@ -4,6 +4,9 @@
 
 An ADHD helper web app — **capture → clarify → schedule → focus → reward**.
 
+> [!NOTE]
+> **Built with AI, run for real.** dlectroflow is developed primarily with AI assistance (Claude Code), directed by a human maintainer. It ships with genuine security measures — automated SAST and dependency scanning in CI, encrypted OAuth tokens, TLS hardening, and periodic security audits — but it's a personal project that handles personal data. Review the code and consider self-hosting before trusting it with anything sensitive. Provided as-is, with no warranty (see [AGPL-3.0](LICENSE)).
+
 **🌐 Try it:** a hosted instance runs at [dlectroflow.dev](https://dlectroflow.dev) — kick the tyres as a guest, no signup.
 
 You brain-dump anything, Claude breaks the scary stuff into tiny do-able steps,
