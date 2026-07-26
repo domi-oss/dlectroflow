@@ -16,6 +16,7 @@ function client(): Anthropic {
 }
 
 function toLLMError(err: unknown): LLMError {
+  if (err instanceof LLMError) return err;
   const e = err as { message?: unknown; status?: unknown } | undefined;
   const status = typeof e?.status === "number" ? e.status : undefined;
   const message = typeof e?.message === "string" ? e.message : String(err);
@@ -99,17 +100,23 @@ export function createAnthropicProvider(): LLMProvider {
         throw toLLMError(err);
       });
       let done = false;
-      finalPromise.finally(() => {
-        done = true;
-        resolveNext?.();
-        resolveNext = null;
-      });
+      finalPromise
+        .finally(() => {
+          done = true;
+          resolveNext?.();
+          resolveNext = null;
+        })
+        .catch(() => {
+          // The rejection is surfaced below via `await finalPromise`; this
+          // no-op catch only prevents the `.finally()`-derived promise from
+          // being an unhandled rejection (it is a separate promise from
+          // `finalPromise` and would otherwise go unobserved).
+        });
       while (!done || queue.length > 0) {
         if (queue.length > 0) {
           yield { type: "text", delta: queue.shift() as string } satisfies LLMStreamEvent;
           continue;
         }
-        if (done) break;
         await new Promise<void>((r) => (resolveNext = r));
       }
       const final = await finalPromise;
