@@ -9,13 +9,11 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { generateMock, prismaMock, currentWorkspaceIdMock } = vi.hoisted(
-  () => ({
-    generateMock: vi.fn(),
-    prismaMock: { step: { findFirst: vi.fn() } },
-    currentWorkspaceIdMock: vi.fn().mockResolvedValue("owner"),
-  }),
-);
+const { generateMock, prismaMock, currentWorkspaceIdMock } = vi.hoisted(() => ({
+  generateMock: vi.fn(),
+  prismaMock: { step: { findFirst: vi.fn() } },
+  currentWorkspaceIdMock: vi.fn().mockResolvedValue("owner"),
+}));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/db", () => ({ prisma: prismaMock }));
@@ -58,7 +56,7 @@ beforeEach(() => {
 });
 
 describe("focus.ts › proposeNewEstimate", () => {
-  it("owner: getLLM().generate() success extracts {\"minutes\":N} from .text", async () => {
+  it('owner: getLLM().generate() success extracts {"minutes":N} from .text', async () => {
     generateMock.mockResolvedValue({
       text: 'Sure thing! {"minutes": 35}',
       toolCall: undefined,

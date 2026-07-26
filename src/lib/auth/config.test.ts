@@ -63,7 +63,9 @@ describe("assertLLMConfig — provider-conditional env", () => {
 
   it("throws for openai-compatible when LLM_BASE_URL / LLM_MODEL are missing", () => {
     process.env.LLM_PROVIDER = "openai-compatible";
-    expect(() => assertLLMConfig()).toThrow(/LLM_BASE_URL.*LLM_MODEL|LLM_MODEL/);
+    expect(() => assertLLMConfig()).toThrow(
+      /LLM_BASE_URL.*LLM_MODEL|LLM_MODEL/,
+    );
   });
 
   it("is a no-op outside production", () => {

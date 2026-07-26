@@ -28,16 +28,10 @@ export type LLMToolCall = { name: string; input: Record<string, unknown> };
 export type LLMResult = { text: string; toolCall?: LLMToolCall };
 
 export type LLMStreamEvent =
-  | { type: "text"; delta: string }
-  | { type: "final"; result: LLMResult };
+  { type: "text"; delta: string } | { type: "final"; result: LLMResult };
 
 export type LLMErrorKind =
-  | "rate_limit"
-  | "auth"
-  | "bad_request"
-  | "server"
-  | "network"
-  | "unknown";
+  "rate_limit" | "auth" | "bad_request" | "server" | "network" | "unknown";
 
 export class LLMError extends Error {
   constructor(

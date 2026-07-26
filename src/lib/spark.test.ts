@@ -31,14 +31,22 @@ beforeEach(() => {
     ({
       create,
     }: {
-      create: { quote: string; source: string; date: string; workspaceId: string };
+      create: {
+        quote: string;
+        source: string;
+        date: string;
+        workspaceId: string;
+      };
     }) => Promise.resolve(create),
   );
 });
 
 describe("spark.ts › getTodaySpark", () => {
   it("owner: getLLM().generate() success returns source AI with the generated text", async () => {
-    generateMock.mockResolvedValue({ text: "a warm line", toolCall: undefined });
+    generateMock.mockResolvedValue({
+      text: "a warm line",
+      toolCall: undefined,
+    });
     const { getTodaySpark } = await import("@/lib/spark");
 
     const result = await getTodaySpark("owner");

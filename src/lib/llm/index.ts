@@ -13,7 +13,9 @@ export function getLLM(): LLMProvider {
   }
   if (provider !== "anthropic") {
     // Unknown value → fall back to the safe default, but make it visible.
-    console.error(`[llm] unknown LLM_PROVIDER="${provider}", defaulting to anthropic`);
+    console.error(
+      `[llm] unknown LLM_PROVIDER="${provider}", defaulting to anthropic`,
+    );
   }
   cached = createAnthropicProvider();
   return cached;
