@@ -14,7 +14,7 @@ GCP project **`YOUR_GCP_PROJECT`**, region **`europe-west2`**, account `you@exam
 | **ClusterIssuer** `letsencrypt-prod` | **READY** (ACMEAccountRegistered), HTTP-01 via nginx |
 | **Production DNS** | `dlectroflow.dev` A → `YOUR_STATIC_IP` (set) |
 | **GitLab agent** `dlectroflow` | ✅ Installed & Connected (`helm ... gitlab/gitlab-agent` in ns `gitlab-agent`). Its `ci_access` config lives on `main` (`.gitlab/agents/dlectroflow/config.yaml`) — required, KAS reads it from the default branch only. |
-| **cert-manager hostAlias** (prod TLS) | ✅ `dlectroflow.dev` → ingress ClusterIP `34.118.234.248` (set via `helm upgrade cert-manager ... --set hostAliases[0]...`). Works around GKE not hairpinning to its own external LB IP during the HTTP-01 self-check. |
+| **cert-manager hostAlias** (prod TLS) | ✅ both `dlectroflow.dev` **and** legacy `dlectroflow.dlectronique.dev` → ingress ClusterIP `34.118.234.248` (set via `helm upgrade cert-manager ... --set hostAliases[0].hostnames[0]=dlectroflow.dev --set hostAliases[0].hostnames[1]=dlectroflow.dlectronique.dev`). Both hosts are required so the legacy `dlectroflow-legacy-tls` cert's HTTP-01 self-check also passes (GKE hairpin quirk). Works around GKE not hairpinning to its own external LB IP. |
 | **App image / CI** | ✅ `build` + `deploy_production` green; app pod 1/1, `/api/health` 200, HTTP→HTTPS 308, valid Let's Encrypt cert. Review apps deploy per-MR and auto-tear-down on close. |
 
 > kubectl access: needs `gke-gcloud-auth-plugin` on PATH (`/opt/homebrew/share/google-cloud-sdk/bin`) + `export USE_GKE_GCLOUD_AUTH_PLUGIN=True`.
