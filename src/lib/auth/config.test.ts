@@ -48,9 +48,14 @@ describe("assertLLMConfig — provider-conditional env", () => {
     expect(() => assertLLMConfig()).not.toThrow();
   });
 
-  it("throws when anthropic is selected but ANTHROPIC_API_KEY is missing", () => {
+  it("does NOT throw when anthropic is selected but ANTHROPIC_API_KEY is missing (lazy — pre-#59 behavior)", () => {
     delete process.env.ANTHROPIC_API_KEY;
-    expect(() => assertLLMConfig()).toThrow(/ANTHROPIC_API_KEY/);
+    expect(() => assertLLMConfig()).not.toThrow();
+  });
+
+  it("does NOT throw via assertAuthConfig either when ANTHROPIC_API_KEY is missing", () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    expect(() => assertAuthConfig()).not.toThrow();
   });
 
   it("passes for openai-compatible when LLM_BASE_URL + LLM_MODEL are set", () => {

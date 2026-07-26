@@ -47,12 +47,21 @@ export function assertLLMConfig(): void {
   const provider = process.env.LLM_PROVIDER ?? "anthropic";
   const missing: string[] = [];
   if (provider === "openai-compatible") {
+    // New provider, no lazy precedent: a missing base URL/model is a deploy
+    // misconfig the app can't function with at all, so fail fast at boot.
     if (!process.env.LLM_BASE_URL) missing.push("LLM_BASE_URL");
     if (!process.env.LLM_MODEL) missing.push("LLM_MODEL");
-  } else {
-    // anthropic (the default) — also the fallback for any unknown value, which
-    // getLLM() resolves to anthropic.
-    if (!process.env.ANTHROPIC_API_KEY) missing.push("ANTHROPIC_API_KEY");
+  } else if (!process.env.ANTHROPIC_API_KEY) {
+    // anthropic (the default) — also the fallback for any unknown value,
+    // which getLLM() resolves to anthropic. The API key is a secret, not
+    // structural config, and pre-#59 it was intentionally lazy (see
+    // src/lib/anthropic.ts) so a missing key doesn't blow up `next build`
+    // or CI's keyless boot. Don't hard-fail here: the anthropic adapter
+    // already throws a descriptive LLMError("auth", …) at first request
+    // when the key is absent (src/lib/llm/anthropic.ts), same as before #59.
+    console.warn(
+      'LLM provider "anthropic" has no ANTHROPIC_API_KEY set — AI features will fail at first use.',
+    );
   }
   if (missing.length) {
     throw new Error(
