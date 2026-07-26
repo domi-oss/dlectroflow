@@ -1,6 +1,6 @@
-import type Anthropic from "@anthropic-ai/sdk";
 import { headers } from "next/headers";
-import { getAnthropic } from "@/lib/anthropic";
+import { getLLM } from "@/lib/llm";
+import type { LLMTool } from "@/lib/llm/types";
 import {
   buildUserPrompt,
   localBreakdown,
@@ -42,11 +42,11 @@ Steps:
 
 Always finish by calling the propose_steps tool with the structured steps. Emit your short conversational text FIRST, then the tool call.`;
 
-const PROPOSE_TOOL: Anthropic.Tool = {
+const PROPOSE_TOOL: LLMTool = {
   name: "propose_steps",
   description:
     "Propose the breakdown of the task into small, ordered, actionable steps.",
-  input_schema: {
+  inputSchema: {
     type: "object",
     properties: {
       parentEmoji: {
@@ -163,21 +163,24 @@ export async function POST(req: Request): Promise<Response> {
       }
 
       try {
-        const anthropic = getAnthropic();
-        const ms = anthropic.messages.stream({
-          ...breakdownParamsFor(model),
-          max_tokens: 6000,
+        const params = breakdownParamsFor(model); // { model, thinking?, output_config? }
+        const llm = getLLM();
+        for await (const ev of llm.stream({
+          model: params.model,
           system: SYSTEM,
-          tools: [PROPOSE_TOOL],
           messages: [{ role: "user", content: buildUserPrompt(body) }],
-        });
-        ms.on("text", (delta) => send({ type: "text", delta }));
-        const final = await ms.finalMessage();
-        const tool = final.content.find(
-          (b) => b.type === "tool_use" && b.name === "propose_steps",
-        );
-        if (tool && tool.type === "tool_use") {
-          send({ type: "steps", data: tool.input as unknown as Proposal });
+          tools: [PROPOSE_TOOL],
+          toolChoice: "propose_steps",
+          maxTokens: 6000,
+          hints: { thinking: !!params.thinking, effort: params.output_config?.effort },
+        })) {
+          if (ev.type === "text") {
+            send({ type: "text", delta: ev.delta });
+          } else if (ev.type === "final") {
+            if (ev.result.toolCall?.name === "propose_steps") {
+              send({ type: "steps", data: ev.result.toolCall.input as unknown as Proposal });
+            }
+          }
         }
         send({ type: "done" });
       } catch (err) {
