@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { Play, Square } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { updateFocusTimerSettings } from "@/app/actions/settings";
 import { FocusTimerStyle, FocusSound } from "@/lib/constants";
@@ -203,7 +204,11 @@ export function FocusTimerSection({
                 )} — ${track.title}`}
                 className="hover:bg-accent inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md border"
               >
-                <span aria-hidden="true">{isPreviewing ? "⏹" : "▶"}</span>
+                {isPreviewing ? (
+                  <Square aria-hidden="true" className="h-4 w-4" />
+                ) : (
+                  <Play aria-hidden="true" className="h-4 w-4" />
+                )}
               </button>
             </div>
           );

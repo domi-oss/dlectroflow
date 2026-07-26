@@ -304,12 +304,12 @@ describe("FocusTimer — ±time with clamp + signed note", () => {
       />,
     );
     await start(user);
-    await user.click(screen.getByRole("button", { name: /\+5m/i }));
-    // The signed net note is a <p>; scope the match to it so the "+5m" button
-    // (which also reads "+5m") doesn't make the query ambiguous.
+    await user.click(screen.getByRole("button", { name: /add 5 minutes/i }));
+    // The signed net note is a <p>; scope the match to it (the add/subtract
+    // buttons now carry aria-labels + icons, not a "+5m" accessible name).
     expect(screen.getByText(/\+5m/, { selector: "p" })).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /−5m|-5m/i }),
+      screen.getByRole("button", { name: /subtract 5 minutes/i }),
     ).toBeInTheDocument();
   });
 });
@@ -607,7 +607,7 @@ describe("FocusTimer — true pause/resume persistence", () => {
     await user.click(screen.getByRole("button", { name: /resume/i }));
     // Back to the running controls (Pause visible again), not stuck on Resume.
     expect(
-      screen.getByRole("button", { name: /^⏸️ pause$/i }),
+      screen.getByRole("button", { name: /^pause$/i }),
     ).toBeInTheDocument();
   });
 
@@ -625,10 +625,10 @@ describe("FocusTimer — true pause/resume persistence", () => {
     expect(pauseFocus).toHaveBeenCalledWith("session-1", { totalSec: 60 });
     // Still showing the running controls (Pause button), not Resume.
     expect(
-      screen.getByRole("button", { name: /^⏸️ pause$/i }),
+      screen.getByRole("button", { name: /^pause$/i }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /^▶ resume$/i }),
+      screen.queryByRole("button", { name: /^resume$/i }),
     ).not.toBeInTheDocument();
   });
 });
@@ -650,7 +650,7 @@ describe("FocusTimer — setup screen: existing paused session (#27)", () => {
       screen.getByRole("button", { name: /start fresh/i }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /^▶ start focusing$/i }),
+      screen.queryByRole("button", { name: /^start focusing$/i }),
     ).not.toBeInTheDocument();
   });
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Check, Minus, Pause, Play, Plus, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -35,6 +36,14 @@ import { FocusSound } from "@/lib/constants";
 import { usePrefersReducedMotion } from "@/lib/use-prefers-reduced-motion";
 import { t } from "@/lib/strings";
 import { useVoice } from "@/components/voice-provider";
+
+// #43 — the shared focus control strings carry a leading functional glyph
+// (✓/▶/⏸/✅) for text-only surfaces; on the focus timer we render a lucide icon
+// instead, so strip that leading glyph from the button label here (the strings
+// themselves stay glyph-bearing for the inbox/lane/task-step affordances).
+function stripLeadingGlyph(label: string): string {
+  return label.replace(/^\P{L}+/u, "");
+}
 
 const DONE_MESSAGES = [
   "Nice — step done!",
@@ -271,8 +280,7 @@ export function FocusTimer({
     setPending(false);
     if (!res.ok) return;
     if (settings.alarmEnabled) alarmRef.current = createAlarm();
-    const src = FOCUS_SOUND_SRC[settings.sound] ?? null;
-    if (src) loopRef.current = createLoopPlayer(src);
+    if (!soundOff) playSound();
     setSessionId(existingSession.id);
     setPlannedMin(res.plannedMin);
     setTotalSec(res.totalSec);
@@ -432,9 +440,10 @@ export function FocusTimer({
           {nextStep ? (
             <Link
               href={`/focus/${nextStep.id}`}
-              className="bg-primary text-primary-foreground rounded-md px-4 py-2 font-medium"
+              className="bg-primary text-primary-foreground inline-flex items-center gap-1.5 rounded-md px-4 py-2 font-medium"
             >
-              ▶ {t("focus.nextStep", voice)}
+              <Play aria-hidden="true" className="h-4 w-4 shrink-0" />
+              {t("focus.nextStep", voice)}
             </Link>
           ) : (
             <p className="text-sm">That was the last step of this task. 🏁</p>
@@ -539,11 +548,14 @@ export function FocusTimer({
               variant="brand"
               onClick={resumeExisting}
               disabled={pending}
-              className="h-auto min-h-[52px] rounded-full px-8 py-3"
+              className="h-auto min-h-[52px] gap-2 rounded-full px-8 py-3"
             >
-              {t("focus.resume", voice)} · ~
-              {Math.max(1, Math.ceil(existingSession.remainingSec / 60))}m{" "}
-              {t("focus.hero.left", voice)}
+              <Play aria-hidden="true" />
+              <span>
+                {stripLeadingGlyph(t("focus.resume", voice))} · ~
+                {Math.max(1, Math.ceil(existingSession.remainingSec / 60))}m{" "}
+                {t("focus.hero.left", voice)}
+              </span>
             </Button>
           )}
           <label className="text-muted-foreground flex items-center gap-2 text-sm">
@@ -573,13 +585,18 @@ export function FocusTimer({
             disabled={pending}
             className={
               existingSession
-                ? "min-h-[44px] rounded-full px-6"
-                : "h-auto min-h-[52px] rounded-full px-8 py-3"
+                ? "min-h-[44px] gap-2 rounded-full px-6"
+                : "h-auto min-h-[52px] gap-2 rounded-full px-8 py-3"
             }
           >
+            {existingSession ? (
+              <RotateCcw aria-hidden="true" />
+            ) : (
+              <Play aria-hidden="true" />
+            )}
             {existingSession
-              ? t("focus.startFresh", voice)
-              : t("focus.startTimer", voice)}
+              ? stripLeadingGlyph(t("focus.startFresh", voice))
+              : stripLeadingGlyph(t("focus.startTimer", voice))}
           </Button>
         </div>
       )}
@@ -589,31 +606,44 @@ export function FocusTimer({
           <button
             onClick={finishComplete}
             disabled={pending}
-            className="inline-flex min-h-[44px] items-center rounded-md bg-green-600 px-5 font-medium text-white disabled:opacity-50"
+            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-md bg-green-600 px-5 font-medium text-white disabled:opacity-50"
           >
-            {t("focus.timer.completeStep", voice)}
+            <Check aria-hidden="true" className="h-4 w-4 shrink-0" />
+            {stripLeadingGlyph(t("focus.timer.completeStep", voice))}
           </button>
           <button
             onClick={togglePause}
             disabled={pending}
-            className="hover:bg-accent inline-flex min-h-[44px] items-center rounded-md border px-4 disabled:opacity-50"
+            className="hover:bg-accent inline-flex min-h-[44px] items-center gap-1.5 rounded-md border px-4 disabled:opacity-50"
           >
-            {phase === "running"
-              ? t("focus.pause", voice)
-              : t("focus.resume", voice)}
+            {phase === "running" ? (
+              <>
+                <Pause aria-hidden="true" className="h-4 w-4 shrink-0" />
+                {stripLeadingGlyph(t("focus.pause", voice))}
+              </>
+            ) : (
+              <>
+                <Play aria-hidden="true" className="h-4 w-4 shrink-0" />
+                {stripLeadingGlyph(t("focus.resume", voice))}
+              </>
+            )}
           </button>
           <button
             onClick={() => changeTime(-inc)}
             disabled={atFloor}
-            className="hover:bg-accent inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border disabled:opacity-40"
+            aria-label={`Subtract ${inc} minutes`}
+            className="hover:bg-accent inline-flex min-h-[44px] min-w-[44px] items-center justify-center gap-0.5 rounded-md border disabled:opacity-40"
           >
-            −{inc}m
+            <Minus aria-hidden="true" className="h-4 w-4 shrink-0" />
+            {inc}m
           </button>
           <button
             onClick={() => changeTime(inc)}
-            className="hover:bg-accent inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border"
+            aria-label={`Add ${inc} minutes`}
+            className="hover:bg-accent inline-flex min-h-[44px] min-w-[44px] items-center justify-center gap-0.5 rounded-md border"
           >
-            +{inc}m
+            <Plus aria-hidden="true" className="h-4 w-4 shrink-0" />
+            {inc}m
           </button>
         </div>
       )}
@@ -625,15 +655,18 @@ export function FocusTimer({
             <button
               onClick={finishComplete}
               disabled={pending}
-              className="inline-flex min-h-[44px] items-center rounded-md bg-green-600 px-4 font-medium text-white disabled:opacity-50"
+              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-md bg-green-600 px-4 font-medium text-white disabled:opacity-50"
             >
-              {t("focus.yesDone", voice)}
+              <Check aria-hidden="true" className="h-4 w-4 shrink-0" />
+              {stripLeadingGlyph(t("focus.yesDone", voice))}
             </button>
             <button
               onClick={() => changeTime(inc)}
-              className="hover:bg-accent inline-flex min-h-[44px] items-center rounded-md border px-4"
+              aria-label={`Add ${inc} minutes`}
+              className="hover:bg-accent inline-flex min-h-[44px] items-center gap-0.5 rounded-md border px-4"
             >
-              +{inc}m
+              <Plus aria-hidden="true" className="h-4 w-4 shrink-0" />
+              {inc}m
             </button>
             <button
               onClick={startReestimate}
