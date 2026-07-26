@@ -71,17 +71,47 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   output: "standalone",
 
-  // The inbox now renders at the bare root `/` (src/app/(app)/page.tsx). Keep
-  // the old `/inbox` URL working with a permanent redirect so OAuth callbacks,
-  // old bookmarks, and any external links still resolve. `permanent: true`
-  // emits a 308 (the method-preserving permanent redirect) and is cached by
-  // clients/search engines. Redirects run before the filesystem + proxy, so a
-  // browser hitting `/inbox` is sent to `/` before any page renders. (#58)
+  // ── Redirects ────────────────────────────────────────────────────────────
   async redirects() {
     return [
+      // The inbox now renders at the bare root `/` (src/app/(app)/page.tsx).
+      // Keep the old `/inbox` URL working with a permanent redirect so OAuth
+      // callbacks, old bookmarks, and any external links still resolve.
+      // `permanent: true` emits a 308 (the method-preserving permanent
+      // redirect) and is cached by clients/search engines. Redirects run
+      // before the filesystem + proxy, so a browser hitting `/inbox` is sent
+      // to `/` before any page renders. (#58)
       {
         source: "/inbox",
         destination: "/",
+        permanent: true,
+      },
+
+      // ── Legacy-domain 301 redirect (#54) ─────────────────────────────────
+      // Permanently redirect every request arriving on the old domain
+      // (dlectroflow.dlectronique.dev) to the canonical domain (dlectroflow.dev),
+      // preserving the full path and query string via `:path*`.
+      //
+      // The `has` host condition matches only requests whose Host header equals
+      // the legacy hostname, so canonical-domain traffic is unaffected.
+      //
+      // Infrastructure side: the legacy host is added to the PRIMARY ingress
+      // (multi-SAN TLS cert in charts/dlectroflow/templates/ingress.yaml) so
+      // TLS terminates correctly and the request reaches this app. The separate
+      // ingress-legacy-redirect.yaml was removed — the ingress-nginx
+      // `permanent-redirect` annotation cannot do a path-preserving cross-domain
+      // redirect (it emits a literal `return 301 <url>;` with no $request_uri
+      // appended, and the admission webhook rejects nginx variables post-CVE
+      // hardening). Doing the redirect here is unit-testable and webhook-safe.
+      {
+        source: "/:path*",
+        has: [
+          {
+            type: "host",
+            value: "dlectroflow.dlectronique.dev",
+          },
+        ],
+        destination: "https://dlectroflow.dev/:path*",
         permanent: true,
       },
     ];
