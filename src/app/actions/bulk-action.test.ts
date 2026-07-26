@@ -22,10 +22,23 @@ const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
         findFirst: vi.fn(),
         update: vi.fn().mockResolvedValue({}),
         delete: vi.fn().mockResolvedValue({}),
+        count: vi.fn().mockResolvedValue(0),
       },
       step: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
-      task: { update: vi.fn().mockResolvedValue({}) },
+      task: {
+        update: vi.fn().mockResolvedValue({}),
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      $transaction: vi.fn(),
     };
+    // deleteBrainDumpItem (#64) wraps its item delete + orphan-cleanup Task
+    // delete in a transaction — run the callback against this same mock, as
+    // in complete.test.ts.
+    prismaMock.$transaction.mockImplementation((arg: unknown) =>
+      typeof arg === "function"
+        ? (arg as (tx: unknown) => unknown)(prismaMock)
+        : Promise.all(arg as Promise<unknown>[]),
+    );
     return {
       prismaMock,
       revalidatePathMock: vi.fn(),

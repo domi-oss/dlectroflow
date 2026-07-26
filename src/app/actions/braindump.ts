@@ -128,13 +128,41 @@ export async function renameItem(id: string, text: string) {
   revalidatePath(INBOX_PATH);
 }
 
+/**
+ * Deleting an item must not orphan its linked Task (#64): Focus reads Task
+ * directly with no existence check against BrainDumpItem, so a Task left
+ * behind here would linger forever in the Focus launcher while being
+ * structurally invisible to the Library (whose only source query is
+ * BrainDumpItem) — a permanent phantom that can never be completed from the
+ * Library's point of view either. Once this item is gone, delete the Task
+ * too if nothing else still references it; Step/BreakdownTurn cascade for
+ * free (schema.prisma onDelete: Cascade on their taskId FK). Both deletes run
+ * in one transaction so a mid-way failure can't leave a half-orphaned state.
+ */
 export async function deleteBrainDumpItem(id: string) {
   const workspaceId = await currentWorkspaceId();
   const existing = await prisma.brainDumpItem.findFirst({
     where: { id, workspaceId },
   });
   if (!existing) return;
-  await prisma.brainDumpItem.delete({ where: { id } });
+
+  await prisma.$transaction(async (tx) => {
+    await tx.brainDumpItem.delete({ where: { id } });
+    if (existing.taskId) {
+      // Defensive: the schema allows multiple BrainDumpItems to reference the
+      // same Task, though no code path today creates more than one. Only
+      // delete the Task once this was the last item pointing at it.
+      const stillLinked = await tx.brainDumpItem.count({
+        where: { taskId: existing.taskId },
+      });
+      if (stillLinked === 0) {
+        await tx.task.deleteMany({
+          where: { id: existing.taskId, workspaceId },
+        });
+      }
+    }
+  });
+
   await maybeAwardInboxZero(workspaceId);
   revalidatePath(INBOX_PATH);
 }

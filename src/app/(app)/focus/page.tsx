@@ -28,7 +28,15 @@ export default async function FocusLauncherPage() {
 
   const [rawTasks, rawItems, settings, dashboard] = await Promise.all([
     prisma.task.findMany({
-      where: { workspaceId, status: { not: TaskStatus.Archived } },
+      where: {
+        workspaceId,
+        status: { not: TaskStatus.Archived },
+        // #64 defensive filter: a Task with no live BrainDumpItem pointing at
+        // it is structurally invisible to the Library (its only source query
+        // is BrainDumpItem) — never surface one here either, however it
+        // arose, so Focus and Library can't disagree on what's phantom.
+        brainDumpItems: { some: { status: { not: BrainDumpStatus.Archived } } },
+      },
       orderBy: { createdAt: "desc" },
       include: {
         steps: {
