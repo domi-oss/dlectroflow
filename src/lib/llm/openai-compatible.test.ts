@@ -19,6 +19,12 @@ beforeEach(() => {
 });
 
 describe("openai-compatible generate()", () => {
+  // Retryable-error cases below now go through withRetry's real backoff
+  // (~200ms/400ms); fake timers keep those tests instant instead of
+  // burning wall-clock on every CI run.
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
   it("prepends system as a message and parses stringified tool arguments", async () => {
     create.mockResolvedValue({
       choices: [
@@ -58,13 +64,18 @@ describe("openai-compatible generate()", () => {
   it("maps a 429 to a retryable rate_limit LLMError", async () => {
     create.mockRejectedValue(Object.assign(new Error("rate"), { status: 429 }));
     const p = createOpenAICompatibleProvider();
-    await expect(
-      p.generate({
-        model: "m",
-        messages: [{ role: "user", content: "x" }],
-        maxTokens: 10,
-      }),
-    ).rejects.toMatchObject({ kind: "rate_limit", retryable: true });
+    const promise = p.generate({
+      model: "m",
+      messages: [{ role: "user", content: "x" }],
+      maxTokens: 10,
+    });
+    const assertion = expect(promise).rejects.toMatchObject({
+      kind: "rate_limit",
+      retryable: true,
+    });
+    await vi.advanceTimersByTimeAsync(200); // 1st backoff
+    await vi.advanceTimersByTimeAsync(400); // 2nd backoff
+    await assertion;
   });
 
   it("maps 401 to a non-retryable auth LLMError", async () => {
@@ -82,25 +93,35 @@ describe("openai-compatible generate()", () => {
   it("maps a 5xx to a retryable server LLMError", async () => {
     create.mockRejectedValue(Object.assign(new Error("boom"), { status: 503 }));
     const p = createOpenAICompatibleProvider();
-    await expect(
-      p.generate({
-        model: "m",
-        messages: [{ role: "user", content: "x" }],
-        maxTokens: 10,
-      }),
-    ).rejects.toMatchObject({ kind: "server", retryable: true });
+    const promise = p.generate({
+      model: "m",
+      messages: [{ role: "user", content: "x" }],
+      maxTokens: 10,
+    });
+    const assertion = expect(promise).rejects.toMatchObject({
+      kind: "server",
+      retryable: true,
+    });
+    await vi.advanceTimersByTimeAsync(200); // 1st backoff
+    await vi.advanceTimersByTimeAsync(400); // 2nd backoff
+    await assertion;
   });
 
   it("maps a status-less failure to a retryable network LLMError", async () => {
     create.mockRejectedValue(new Error("ECONNREFUSED"));
     const p = createOpenAICompatibleProvider();
-    await expect(
-      p.generate({
-        model: "m",
-        messages: [{ role: "user", content: "x" }],
-        maxTokens: 10,
-      }),
-    ).rejects.toMatchObject({ kind: "network", retryable: true });
+    const promise = p.generate({
+      model: "m",
+      messages: [{ role: "user", content: "x" }],
+      maxTokens: 10,
+    });
+    const assertion = expect(promise).rejects.toMatchObject({
+      kind: "network",
+      retryable: true,
+    });
+    await vi.advanceTimersByTimeAsync(200); // 1st backoff
+    await vi.advanceTimersByTimeAsync(400); // 2nd backoff
+    await assertion;
   });
 
   it("throws a descriptive, non-retryable auth LLMError when LLM_BASE_URL is not set", async () => {
@@ -231,6 +252,11 @@ describe("openai-compatible generate()", () => {
 });
 
 describe("openai-compatible stream()", () => {
+  // "maps a stream-open failure" below is retryable and now goes through
+  // withRetry's real backoff; fake timers keep it instant.
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
   async function* chunks(
     parts: Array<{
       content?: string;
@@ -364,10 +390,13 @@ describe("openai-compatible stream()", () => {
         maxTokens: 10,
       })
       [Symbol.asyncIterator]();
-    await expect(it.next()).rejects.toMatchObject({
+    const assertion = expect(it.next()).rejects.toMatchObject({
       kind: "rate_limit",
       retryable: true,
     });
+    await vi.advanceTimersByTimeAsync(200); // 1st backoff
+    await vi.advanceTimersByTimeAsync(400); // 2nd backoff
+    await assertion;
   });
 });
 

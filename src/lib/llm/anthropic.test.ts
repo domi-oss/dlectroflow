@@ -17,6 +17,12 @@ beforeEach(() => {
 });
 
 describe("anthropic adapter generate()", () => {
+  // Retryable-error cases below now go through withRetry's real backoff
+  // (~200ms/400ms); fake timers keep those tests instant instead of
+  // burning wall-clock on every CI run.
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
   it("maps content blocks to { text, toolCall }", async () => {
     create.mockResolvedValue({
       content: [
@@ -62,17 +68,19 @@ describe("anthropic adapter generate()", () => {
   it("maps a 429 APIError to a retryable rate_limit LLMError", async () => {
     create.mockRejectedValue(Object.assign(new Error("rate"), { status: 429 }));
     const p = createAnthropicProvider();
-    await expect(
-      p.generate({
-        model: "m",
-        messages: [{ role: "user", content: "x" }],
-        maxTokens: 10,
-      }),
-    ).rejects.toMatchObject({
+    const promise = p.generate({
+      model: "m",
+      messages: [{ role: "user", content: "x" }],
+      maxTokens: 10,
+    });
+    const assertion = expect(promise).rejects.toMatchObject({
       kind: "rate_limit",
       retryable: true,
       status: 429,
     });
+    await vi.advanceTimersByTimeAsync(200); // 1st backoff
+    await vi.advanceTimersByTimeAsync(400); // 2nd backoff
+    await assertion;
   });
 
   it("keeps a missing API key as a non-retryable auth error (not reclassified as network)", async () => {
@@ -89,6 +97,11 @@ describe("anthropic adapter generate()", () => {
 });
 
 describe("anthropic adapter error mapping", () => {
+  // Retryable cases (500/503) below go through withRetry's real backoff;
+  // fake timers keep them instant instead of burning ~600ms each on CI.
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
   it.each([
     { status: 401, kind: "auth", retryable: false },
     { status: 403, kind: "auth", retryable: false },
@@ -101,30 +114,39 @@ describe("anthropic adapter error mapping", () => {
     async ({ status, kind, retryable }) => {
       create.mockRejectedValue(Object.assign(new Error("boom"), { status }));
       const p = createAnthropicProvider();
-      await expect(
-        p.generate({
-          model: "m",
-          messages: [{ role: "user", content: "x" }],
-          maxTokens: 10,
-        }),
-      ).rejects.toMatchObject({ kind, retryable, status });
+      const promise = p.generate({
+        model: "m",
+        messages: [{ role: "user", content: "x" }],
+        maxTokens: 10,
+      });
+      const assertion = expect(promise).rejects.toMatchObject({
+        kind,
+        retryable,
+        status,
+      });
+      // No-op when the case above is non-retryable (nothing scheduled).
+      await vi.advanceTimersByTimeAsync(200);
+      await vi.advanceTimersByTimeAsync(400);
+      await assertion;
     },
   );
 
   it("maps a status-less error to a retryable network LLMError", async () => {
     create.mockRejectedValue(new Error("socket hang up"));
     const p = createAnthropicProvider();
-    await expect(
-      p.generate({
-        model: "m",
-        messages: [{ role: "user", content: "x" }],
-        maxTokens: 10,
-      }),
-    ).rejects.toMatchObject({
+    const promise = p.generate({
+      model: "m",
+      messages: [{ role: "user", content: "x" }],
+      maxTokens: 10,
+    });
+    const assertion = expect(promise).rejects.toMatchObject({
       kind: "network",
       retryable: true,
       status: undefined,
     });
+    await vi.advanceTimersByTimeAsync(200);
+    await vi.advanceTimersByTimeAsync(400);
+    await assertion;
   });
 });
 

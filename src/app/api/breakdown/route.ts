@@ -149,8 +149,16 @@ export async function POST(req: Request): Promise<Response> {
   // models, a malformed response). Either way the guest didn't get a real AI
   // breakdown, so refund the quota unit exactly as a blocked guest would
   // never have spent it. No-op for the owner / already-blocked guests.
+  //
+  // Idempotency guard: both call sites below (the soft-failure branch and
+  // the catch block) live in the SAME try, so if `send()` throws after the
+  // soft-failure branch already refunded (e.g. the client disconnected and
+  // controller.enqueue() throws), control falls into the catch, which would
+  // otherwise refund a second time. `refunded` makes a second call a no-op.
+  let refunded = false;
   async function refundGuestOnLLMFailure(): Promise<void> {
-    if (isGuest && guestIpHash && !blockedReason) {
+    if (isGuest && guestIpHash && !blockedReason && !refunded) {
+      refunded = true;
       await refundGuestBreakdown(guestIpHash);
     }
   }

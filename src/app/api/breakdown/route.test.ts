@@ -262,6 +262,46 @@ describe("POST /api/breakdown", () => {
     });
   });
 
+  it("refunds the guest's quota exactly once, even when the soft-failure send() throws and control falls into the catch too", async () => {
+    // Idempotency regression test: the soft-failure branch and the catch
+    // block both live in the same try and both call
+    // refundGuestOnLLMFailure(). A realistic trigger: the client
+    // disconnects right after the soft-failure branch's refund, so the very
+    // next send() — controller.enqueue() on a closed/errored controller —
+    // throws, and control falls into the catch, which attempts the refund
+    // again. Without a guard this double-refunds one failed breakdown.
+    isOwnerRequestMock.mockResolvedValue(false);
+    currentWorkspaceIdMock.mockResolvedValue("guest-abc");
+    streamImpl.current = async function* () {
+      yield {
+        type: "final",
+        result: { text: "rambling, no structured block", toolCall: undefined },
+      };
+    };
+    // Build the Request first — constructing it (undici) exercises
+    // TextEncoder internally, which would otherwise consume our
+    // mockImplementationOnce below before the route ever runs.
+    const req = postRequest(REQUEST_BODY);
+    // Make the FIRST send() (the soft-failure branch's fallback event, sent
+    // right after the first refund) throw, simulating a disconnected
+    // client. Subsequent sends (from the catch block) use the real encoder.
+    const encodeSpy = vi
+      .spyOn(TextEncoder.prototype, "encode")
+      .mockImplementationOnce(() => {
+        throw new Error("controller is closed");
+      });
+    try {
+      const { POST } = await import("./route");
+      const res = await POST(req);
+      const events = await readAllEvents(res);
+
+      expect(refundGuestBreakdownMock).toHaveBeenCalledTimes(1);
+      expect(events.at(-1)).toEqual({ type: "done" });
+    } finally {
+      encodeSpy.mockRestore();
+    }
+  });
+
   it("blocked guest gets a canned fallback with NO call to the LLM", async () => {
     isOwnerRequestMock.mockResolvedValue(false);
     currentWorkspaceIdMock.mockResolvedValue("guest-abc");
