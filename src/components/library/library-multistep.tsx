@@ -16,6 +16,7 @@ import {
   ProgressBar,
   AgeLabel,
   EstimatePill,
+  ActiveStepPill,
   rowEmoji,
   remainingMinutes,
 } from "./library-row-meta";
@@ -199,6 +200,7 @@ export function LibraryMultistep({
                     voice={voice}
                   />
                 )}
+                {!expanded && <ActiveStepPill item={item} voice={voice} />}
               </div>
 
               {expanded && item.taskId && (

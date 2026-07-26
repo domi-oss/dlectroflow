@@ -30,6 +30,7 @@ const multi = (
   taskTitle: "Task " + o.stepId,
   resumable: false,
   resumeAt: null,
+  remainingMin: o.estMinutes ?? 15,
   stepIndex: 1,
   stepsDone: 0,
   stepsTotal: 2,

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, act } from "@testing-library/react";
+import { render, screen, cleanup, act, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FocusTimer } from "@/components/focus/focus-timer";
 import type { TrackerStep } from "@/components/focus/focus-step-tracker";
@@ -31,6 +31,13 @@ vi.mock("@/app/actions/focus", () => ({
   }),
   requeueFocus: vi.fn().mockResolvedValue({ ok: true }),
   proposeNewEstimate: vi.fn().mockResolvedValue(20),
+  pauseFocus: vi.fn().mockResolvedValue({ ok: true }),
+  resumeFocus: vi.fn().mockResolvedValue({
+    ok: true,
+    remainingSec: 300,
+    totalSec: 600,
+    plannedMin: 10,
+  }),
 }));
 vi.mock("@/app/actions/settings", () => ({
   dismissFocusTimerTip: vi.fn().mockResolvedValue(undefined),
@@ -63,7 +70,12 @@ vi.mock("@/lib/focus-sounds", () => ({
   FOCUS_SOUND_SRC: { off: null, lofi_calm: "/audio/lofi-calm.mp3" },
 }));
 
-import { beginFocus, completeFocus } from "@/app/actions/focus";
+import {
+  beginFocus,
+  completeFocus,
+  pauseFocus,
+  resumeFocus,
+} from "@/app/actions/focus";
 import { dismissFocusTimerTip } from "@/app/actions/settings";
 
 const STEPS: TrackerStep[] = [
@@ -106,6 +118,7 @@ function base(overrides: Partial<Parameters<typeof FocusTimer>[0]> = {}) {
       sound: "off",
     },
     tipDismissed: false,
+    existingSession: null,
     ...overrides,
   } as Parameters<typeof FocusTimer>[0];
 }
@@ -285,9 +298,13 @@ describe("FocusTimer — multi-step context + minimal mode", () => {
     render(<FocusTimer {...base()} />);
     await start(user);
     await user.click(screen.getByRole("button", { name: /pause/i }));
-    expect(screen.getByRole("button", { name: /steps/i })).toHaveAttribute(
-      "aria-expanded",
-      "true",
+    // #27 — pausing now awaits the server (pauseFocus) before the phase
+    // flips, so the aria-expanded update lands a tick after the click.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /steps/i })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      ),
     );
   });
 
@@ -434,5 +451,214 @@ describe("FocusTimer — complete", () => {
     await user.click(screen.getByRole("button", { name: /complete step/i }));
     expect(completeFocus).toHaveBeenCalled();
     expect(loop.stop).toHaveBeenCalled();
+  });
+});
+
+// #27 — the in-session Pause/Resume toggle now persists real server state
+// instead of only flipping local phase.
+describe("FocusTimer — true pause/resume persistence", () => {
+  it("Pause calls pauseFocus with the session id + current totalSec", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimer {...base()} />);
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /pause/i }));
+    expect(pauseFocus).toHaveBeenCalledWith("session-1", { totalSec: 60 }); // 1-minute step
+  });
+
+  it("Resume (in-session) calls resumeFocus and restores the returned remaining time", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimer {...base()} />);
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /pause/i }));
+    await user.click(screen.getByRole("button", { name: /resume/i }));
+    expect(resumeFocus).toHaveBeenCalledWith("session-1");
+    // The mock resolves remainingSec: 300 → 5:00 on the readout.
+    expect(screen.getByText("5:00")).toBeInTheDocument();
+  });
+
+  it("a failed resume falls back to running rather than stranding the user paused", async () => {
+    (resumeFocus as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: false,
+      remainingSec: 0,
+      totalSec: 0,
+      plannedMin: 0,
+    });
+    const user = userEvent.setup();
+    render(<FocusTimer {...base()} />);
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /pause/i }));
+    await user.click(screen.getByRole("button", { name: /resume/i }));
+    // Back to the running controls (Pause visible again), not stuck on Resume.
+    expect(
+      screen.getByRole("button", { name: /^⏸️ pause$/i }),
+    ).toBeInTheDocument();
+  });
+
+  // Duo review: pauseFocus's result wasn't checked — the UI showed "paused"
+  // even when the server rejected it (e.g. another device/concurrent request
+  // already closed the session). The server's answer must win.
+  it("a failed pause stays on the running controls instead of showing a paused state the server doesn't have", async () => {
+    (pauseFocus as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: false,
+    });
+    const user = userEvent.setup();
+    render(<FocusTimer {...base()} />);
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /pause/i }));
+    expect(pauseFocus).toHaveBeenCalledWith("session-1", { totalSec: 60 });
+    // Still showing the running controls (Pause button), not Resume.
+    expect(
+      screen.getByRole("button", { name: /^⏸️ pause$/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^▶ resume$/i }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("FocusTimer — setup screen: existing paused session (#27)", () => {
+  const paused = {
+    id: "sess-paused",
+    plannedMin: 10,
+    totalSec: 600,
+    remainingSec: 222, // → ceil(222/60) = 4m
+  };
+
+  it("offers BOTH Resume and Start fresh instead of a single Start CTA", () => {
+    render(<FocusTimer {...base({ existingSession: paused })} />);
+    expect(
+      screen.getByRole("button", { name: /resume.*4m.*left/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /start fresh/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^▶ start focusing$/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("Resume reuses the existing session (resumeFocus) — no new beginFocus call", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimer {...base({ existingSession: paused })} />);
+    await user.click(screen.getByRole("button", { name: /resume.*left/i }));
+    expect(resumeFocus).toHaveBeenCalledWith("sess-paused");
+    expect(beginFocus).not.toHaveBeenCalled();
+  });
+
+  it("Start fresh still calls beginFocus (server retires the stale session)", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimer {...base({ existingSession: paused })} />);
+    // Bugfix (ring/Duration now seed from existingSession, not step.estMinutes,
+    // see the "bugfix" describe block below): the Duration field the user
+    // actually sees starts at the session's plannedMin (10), not the step's
+    // stale estimate (1) — so an unedited "Start fresh" click submits the
+    // value that's genuinely on screen.
+    await user.click(screen.getByRole("button", { name: /start fresh/i }));
+    expect(beginFocus).toHaveBeenCalledWith("s2", 10);
+    expect(resumeFocus).not.toHaveBeenCalled();
+  });
+
+  // Bug fix (owner-reported, !139): pauseFocus() bakes mid-session +time taps
+  // into the SESSION's own plannedMin without ever touching Step.estMinutes —
+  // so a 10m step that got +5m tapped twice then paused persists a session
+  // with plannedMin=20/remaining~15m, while the ring/Duration used to seed
+  // from the stale step.estMinutes (10). Result: ring said "of 10m" while the
+  // Resume button (reading existingSession.remainingSec) said "~15m left" —
+  // two different numbers for what's supposed to be the same session. The
+  // ring/Duration/remaining must now seed from existingSession, matching
+  // exactly what resumeExisting() applies on click.
+  describe("bugfix: ring/Duration must agree with the Resume button's number", () => {
+    // A 10m step (step.estMinutes), +5m tapped twice while running (session
+    // totalSec grew to 20m), then paused with ~15m left of that 20m.
+    const grown = {
+      id: "sess-grown",
+      plannedMin: 20,
+      totalSec: 1200,
+      remainingSec: 15 * 60,
+    };
+
+    it("multi-step: seeds the ring/Duration from the session's plannedMin/remaining, not step.estMinutes", () => {
+      render(
+        <FocusTimer
+          {...base({
+            step: { ...base().step, estMinutes: 10 },
+            existingSession: grown,
+          })}
+        />,
+      );
+      // Duration field reads the SESSION's plannedMin (20) — not the step's
+      // stale estimate (10).
+      expect(screen.getByRole("spinbutton", { name: /duration/i })).toHaveValue(
+        20,
+      );
+      // The ring's remaining readout + "of Xm" total agree with the session.
+      expect(screen.getByText("15:00")).toBeInTheDocument();
+      expect(screen.getByText(/of 20m/)).toBeInTheDocument();
+      expect(screen.queryByText(/of 10m/)).not.toBeInTheDocument();
+      // …and now MATCHES the Resume button's own number — no more "ring says
+      // 10m, button says ~15m left" contradiction.
+      expect(
+        screen.getByRole("button", { name: /resume.*~15m.*left/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("single-task: same seeding fix applies (FocusTimer is shared — existingSession/pauseFocus are step-generic)", () => {
+      render(
+        <FocusTimer
+          {...base({
+            isSingleTask: true,
+            step: {
+              id: "s1",
+              text: "Call the bank",
+              estMinutes: 10,
+              subtaskEmoji: null,
+              order: 1,
+              total: 1,
+              done: false,
+            },
+            steps: [
+              {
+                id: "s1",
+                text: "Call the bank",
+                done: false,
+                estMinutes: 10,
+                subtaskEmoji: null,
+              },
+            ],
+            nextStep: null,
+            existingSession: grown,
+          })}
+        />,
+      );
+      expect(screen.getByRole("spinbutton", { name: /duration/i })).toHaveValue(
+        20,
+      );
+      expect(screen.getByText("15:00")).toBeInTheDocument();
+      expect(screen.getByText(/of 20m/)).toBeInTheDocument();
+      expect(screen.queryByText(/of 10m/)).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /resume.*~15m.*left/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("fresh start (no existing session) still seeds from step.estMinutes, unaffected", () => {
+      render(
+        <FocusTimer {...base({ step: { ...base().step, estMinutes: 10 } })} />,
+      );
+      expect(screen.getByRole("spinbutton", { name: /duration/i })).toHaveValue(
+        10,
+      );
+      expect(screen.getByText(/of 10m/)).toBeInTheDocument();
+    });
+  });
+
+  it("no existing session: the normal single Start CTA renders", () => {
+    render(<FocusTimer {...base()} />);
+    expect(
+      screen.getByRole("button", { name: /start focusing/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /start fresh/i }),
+    ).not.toBeInTheDocument();
   });
 });

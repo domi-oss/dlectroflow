@@ -30,11 +30,12 @@ export default async function TaskPage({
       include: {
         steps: {
           orderBy: { order: "asc" },
-          // Resumable = has an unfinished focus session (started, never ended).
-          // Batched by Prisma into one query, so not a per-step N+1.
+          // #27 — resumable = has a TRULY PAUSED focus session (pausedAt
+          // set), not merely an open one. Batched by Prisma into one query,
+          // so not a per-step N+1.
           include: {
             focusSessions: {
-              where: { endedAt: null },
+              where: { endedAt: null, pausedAt: { not: null } },
               select: { id: true },
               take: 1,
             },

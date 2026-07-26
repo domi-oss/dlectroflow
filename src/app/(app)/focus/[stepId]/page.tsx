@@ -2,7 +2,11 @@ import { notFound } from "next/navigation";
 import { prisma, getSettings } from "@/lib/db";
 import { currentWorkspaceId } from "@/lib/workspace";
 import { getDashboardData } from "@/lib/rewards";
-import { FocusTimer } from "@/components/focus/focus-timer";
+import {
+  FocusTimer,
+  type ExistingPausedSession,
+} from "@/components/focus/focus-timer";
+import { remainingSecForSession } from "@/lib/focus-timer-clock";
 
 export const dynamic = "force-dynamic";
 
@@ -19,23 +23,50 @@ export default async function FocusPage({
   });
   if (!step) notFound();
 
-  const [settings, dashboard, steps, nextStep] = await Promise.all([
-    getSettings(workspaceId),
-    getDashboardData(workspaceId),
-    prisma.step.findMany({
-      where: { taskId: step.taskId, task: { workspaceId } },
-      orderBy: { order: "asc" },
-    }),
-    prisma.step.findFirst({
-      where: {
-        taskId: step.taskId,
-        done: false,
-        order: { gt: step.order },
-        task: { workspaceId },
-      },
-      orderBy: { order: "asc" },
-    }),
-  ]);
+  const [settings, dashboard, steps, nextStep, openSession] = await Promise.all(
+    [
+      getSettings(workspaceId),
+      getDashboardData(workspaceId),
+      prisma.step.findMany({
+        where: { taskId: step.taskId, task: { workspaceId } },
+        orderBy: { order: "asc" },
+      }),
+      prisma.step.findFirst({
+        where: {
+          taskId: step.taskId,
+          done: false,
+          order: { gt: step.order },
+          task: { workspaceId },
+        },
+        orderBy: { order: "asc" },
+      }),
+      // #27 — the step's own open FocusSession, if any. Only a truly PAUSED
+      // one (pausedAt set) is offered as "Resume …" below; an open-but-never-
+      // paused row is stale (e.g. a closed tab mid-countdown) and Start will
+      // silently retire it (see beginFocus).
+      prisma.focusSession.findFirst({
+        where: { stepId: step.id, workspaceId, endedAt: null },
+        orderBy: { startedAt: "desc" },
+      }),
+    ],
+  );
+
+  const existingSession: ExistingPausedSession | null = openSession?.pausedAt
+    ? {
+        id: openSession.id,
+        plannedMin: openSession.plannedMin,
+        totalSec: openSession.plannedMin * 60,
+        remainingSec: remainingSecForSession(
+          {
+            plannedMin: openSession.plannedMin,
+            startedAt: openSession.startedAt.getTime(),
+            pausedAt: openSession.pausedAt.getTime(),
+            accumulatedPausedMs: openSession.accumulatedPausedMs,
+          },
+          Date.now(),
+        ),
+      }
+    : null;
 
   return (
     <FocusTimer
@@ -79,6 +110,7 @@ export default async function FocusPage({
         sound: settings.focusSound,
       }}
       tipDismissed={settings.focusTimerTipDismissedAt != null}
+      existingSession={existingSession}
     />
   );
 }

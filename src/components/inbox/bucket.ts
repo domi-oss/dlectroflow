@@ -35,6 +35,11 @@ export type Item = {
     estMinutes: number;
     subtaskEmoji: string | null;
     resumable: boolean;
+    /** #27 follow-up — remaining seconds of this step's open FocusSession
+     * (paused or actively running) as of when the page was rendered; null/
+     * undefined when it has none (not started, or not fetched by this read
+     * site). Drives `taskRemainingMin`/`activeStepRemainingMin`. */
+    openRemainingSec?: number | null;
   }[];
 };
 

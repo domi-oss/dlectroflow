@@ -850,6 +850,43 @@ describe("InboxView — multi-step step count + expand", () => {
     expect(screen.getByText(/3 steps · 1 done/)).toBeInTheDocument();
   });
 
+  // #27 follow-up — task total remaining + (when a step is paused/in
+  // progress) that step's own remaining time, shown as a persisted snapshot.
+  it("shows the task-total remaining (not-done steps' full estimates, no open session)", () => {
+    render(
+      <InboxView
+        initialItems={[makeMultiStep()]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    // makeMultiStep: s1 done (10m, excluded), s2 not-done 20m, s3 not-done
+    // 5m — no open session on either, so the total is their full estimates:
+    // 20 + 5 = 25.
+    expect(screen.getByText(/≈25\s*min left/)).toBeInTheDocument();
+    expect(screen.queryByText(/min on step/)).not.toBeInTheDocument();
+  });
+
+  it("a paused/in-progress step's row shows BOTH the shrunk task total and the active-step remaining", () => {
+    const paused = makeMultiStep();
+    paused.steps = paused.steps.map((s) =>
+      s.id === "s2" ? { ...s, openRemainingSec: 6 * 60 } : s,
+    ); // s2: 20m estimate, paused with 6m left
+    render(
+      <InboxView
+        initialItems={[paused]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const row = screen.getByText("plan trip").closest("li")!;
+    // Total = 6 (paused s2) + 5 (s3's full estimate) = 11, not the raw 25.
+    expect(within(row).getByText(/≈11\s*min left/)).toBeInTheDocument();
+    expect(within(row).getByText(/≈6\s*min on step/)).toBeInTheDocument();
+  });
+
   it("expands the inline step list when the row body is tapped", async () => {
     const user = userEvent.setup();
     render(

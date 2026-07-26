@@ -142,6 +142,55 @@ describe("LibraryMultistep", () => {
     // estimate pill reads "≈15 min left" (lib.minLeft) — assert it renders on
     // this row, scoped with within() so it can't match another row's pill.
     expect(within(oldRow).getByText(/≈15\s*min left/)).toBeTruthy();
+    // No open session on either step → no active-step pill (lib.minOnStep).
+    expect(within(oldRow).queryByText(/min on step/)).toBeNull();
+  });
+
+  // #27 follow-up — a step with an open FocusSession shows a SECOND pill for
+  // its own remaining time, and the task-total pill shrinks to reflect it
+  // (not the raw estimate sum).
+  it("a paused/in-progress step's row shows BOTH the (shrunk) task total and the active-step remaining", () => {
+    const paused = [
+      {
+        ...mk("p", new Date("2026-07-20")),
+        steps: [
+          {
+            id: "pa",
+            order: 1,
+            text: "first",
+            done: false,
+            estMinutes: 10,
+            subtaskEmoji: "🍳",
+            resumable: true,
+            openRemainingSec: 4 * 60, // paused with 4m left (of a 10m estimate)
+          },
+          {
+            id: "pb",
+            order: 2,
+            text: "second",
+            done: false,
+            estMinutes: 5,
+            subtaskEmoji: null,
+            resumable: false,
+          },
+        ],
+      },
+    ];
+    render(
+      <LibraryMultistep
+        items={paused}
+        voice="plain"
+        now={Date.now()}
+        settings={settings}
+      />,
+    );
+    // Collapse the auto-opened row so the collapsed-row meta (pills) render.
+    fireEvent.click(screen.getByRole("button", { name: /^collapse all$/i }));
+    const row = screen.getByRole("button", { name: /task p/i }).closest("li")!;
+    // Total = 4 (paused step's remaining) + 5 (not-started step) = 9, not the
+    // raw 10 + 5 = 15 the old estimate-sum would have shown.
+    expect(within(row).getByText(/≈9\s*min left/)).toBeTruthy();
+    expect(within(row).getByText(/≈4\s*min on step/)).toBeTruthy();
   });
   it("playful voice shows the row's emoji anchor (first not-done step's subtaskEmoji)", () => {
     render(

@@ -3,14 +3,19 @@ import { t, type Voice } from "@/lib/strings";
 import { isAging, type AgingSettings } from "@/lib/aging";
 import { formatAgo } from "@/lib/format";
 import type { Item } from "@/components/inbox/bucket";
+import { itemRemainingMin, activeStepRemainingMin } from "@/lib/task-remaining";
 
 export function nextStepText(item: Item): string | null {
   return item.steps.find((s) => !s.done)?.text ?? null;
 }
+/**
+ * #27 follow-up — the row's task total is now the SUM of each not-done
+ * step's EFFECTIVE remaining time (task-remaining.ts): a step with an open
+ * FocusSession contributes its real remaining, not its full estimate, so
+ * this shrinks as a step is paused mid-way, not only on full completion.
+ */
 export function remainingMinutes(item: Item): number {
-  return item.steps
-    .filter((s) => !s.done)
-    .reduce((n, s) => n + (s.estMinutes || 0), 0);
+  return itemRemainingMin(item);
 }
 export function singleTaskEstimate(item: Item): number {
   return item.estMinutes ?? 5;
@@ -91,6 +96,22 @@ export function EstimatePill({
   return (
     <span className="text-muted-foreground shrink-0 rounded-full border px-2 py-0.5 text-xs">
       ≈{minutes} {t("lib.minLeft", voice)}
+    </span>
+  );
+}
+
+/**
+ * #27 follow-up — a second pill alongside `EstimatePill`, shown only when a
+ * step in this row has an open FocusSession (paused or actively running):
+ * the row's remaining-on-THIS-step time, distinct from the task total. A
+ * persisted snapshot as of render — it does not live-tick in the list.
+ */
+export function ActiveStepPill({ item, voice }: { item: Item; voice: Voice }) {
+  const minutes = activeStepRemainingMin(item);
+  if (minutes == null) return null;
+  return (
+    <span className="text-muted-foreground shrink-0 rounded-full border px-2 py-0.5 text-xs">
+      ≈{minutes} {t("lib.minOnStep", voice)}
     </span>
   );
 }

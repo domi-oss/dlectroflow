@@ -39,6 +39,7 @@ const hero: FocusableStep = {
   taskTitle: "Ship",
   resumable: true,
   resumeAt: 1,
+  remainingMin: 12,
   stepIndex: 2,
   stepsDone: 1,
   stepsTotal: 4,
