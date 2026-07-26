@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  cleanup,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BreakdownChat } from "@/components/breakdown/breakdown-chat";
 import type { Proposal } from "@/lib/breakdown";
@@ -146,5 +152,51 @@ describe("BreakdownChat — manual step editing", () => {
     expect(createBrainDumpItem).toHaveBeenCalledWith("First step");
     expect(screen.getAllByLabelText("Step text")).toHaveLength(1);
     expect(screen.getByLabelText("Step text")).toHaveValue("Second step");
+  });
+});
+
+describe("BreakdownChat — step rows are responsive on mobile (#63)", () => {
+  // #63: grip + order + emoji + text input + minutes + Back-to-inbox + × were
+  // all crammed onto one fixed row, and the text input had no `min-w-0` — so
+  // on a narrow viewport it couldn't shrink at all, forcing the row to
+  // overflow and the step text to render truncated. Fixed by stacking the
+  // primary (grip/order/emoji/text) and secondary (minutes/actions) groups
+  // on mobile and returning to one row at the `sm:` breakpoint, matching the
+  // mobile-first convention already used elsewhere in this codebase (see the
+  // dashboard's `grid-cols-2 sm:grid-cols-4`). jsdom doesn't apply media
+  // queries, so this asserts the responsive utility classes are present
+  // rather than the rendered layout at a given width — an eyeball on a real
+  // mobile device is still needed (see MR).
+  it("the step row stacks on mobile and returns to a single row at sm:", () => {
+    renderChat();
+    const row = screen.getAllByLabelText("Step text")[0].closest("li")!;
+    expect(row.className).toMatch(/flex-col/);
+    expect(row.className).toMatch(/sm:flex-row/);
+  });
+
+  it("the step text input can shrink to make room instead of forcing the row to overflow", () => {
+    renderChat();
+    const input = screen.getAllByLabelText("Step text")[0];
+    expect(input.className).toMatch(/min-w-0/);
+    expect(input.className).toMatch(/flex-1/);
+  });
+
+  it("minutes + Back-to-inbox + × move to their own row on mobile, alongside the grip/emoji/text row", () => {
+    renderChat();
+    const input = screen.getAllByLabelText("Step text")[0];
+    const primaryGroup = input.closest("div")!;
+    const row = primaryGroup.parentElement!;
+    // The secondary controls (minutes, Back to inbox, ×) live in a sibling
+    // group, not inline with the primary group, so they can wrap to their
+    // own row under `flex-col` on mobile.
+    const secondaryGroup = primaryGroup.nextElementSibling as HTMLElement;
+    expect(secondaryGroup).toBeTruthy();
+    expect(
+      within(secondaryGroup).getByLabelText("Estimated minutes"),
+    ).toBeInTheDocument();
+    expect(
+      within(secondaryGroup).getByRole("button", { name: "Back to inbox" }),
+    ).toBeInTheDocument();
+    expect(row.className).toMatch(/flex-col/);
   });
 });
