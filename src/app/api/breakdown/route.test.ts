@@ -67,8 +67,9 @@ vi.mock("@/lib/llm", () => ({
   getLLM: () => ({
     id: "anthropic",
     supportsTools: true,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test double, streamImpl is set per-test
-    stream: (...args: any[]) => (streamImpl.current as (...a: any[]) => AsyncGenerator<unknown>)(...args),
+    // streamImpl is reassigned per-test to control what the fake provider yields.
+    stream: (req: unknown) =>
+      (streamImpl.current as (req: unknown) => AsyncGenerator<unknown>)(req),
     generate: vi.fn(),
   }),
 }));
@@ -113,7 +114,10 @@ describe("POST /api/breakdown", () => {
         type: "final",
         result: {
           text: "hi there",
-          toolCall: { name: "propose_steps", input: { parentEmoji: "🗂️", steps: [] } },
+          toolCall: {
+            name: "propose_steps",
+            input: { parentEmoji: "🗂️", steps: [] },
+          },
         },
       };
     };
@@ -128,6 +132,66 @@ describe("POST /api/breakdown", () => {
       type: "steps",
       data: { parentEmoji: "🗂️", steps: [] },
     });
+    expect(events.at(-1)).toEqual({ type: "done" });
+  });
+
+  it("tool-less provider: <result> block WAS parsed → still sends a steps event", async () => {
+    // Simulates the openai-compatible adapter's structured-output fallback
+    // (#59 Task 7) succeeding: a tool-less local model has no native tool
+    // call, but the adapter parsed a <result> block into toolCall itself,
+    // so by the time it reaches the route this looks just like a normal
+    // tool call.
+    streamImpl.current = async function* () {
+      yield { type: "text", delta: "here's a plan" };
+      yield {
+        type: "final",
+        result: {
+          text: 'here\'s a plan <result>{"parentEmoji":"🗂️","steps":[]}</result>',
+          toolCall: {
+            name: "propose_steps",
+            input: { parentEmoji: "🗂️", steps: [] },
+          },
+        },
+      };
+    };
+
+    const { POST } = await import("./route");
+    const res = await POST(postRequest(REQUEST_BODY));
+    const events = await readAllEvents(res);
+
+    expect(events).toContainEqual({
+      type: "steps",
+      data: { parentEmoji: "🗂️", steps: [] },
+    });
+    expect(events.find((e) => e.type === "fallback")).toBeUndefined();
+    expect(events.at(-1)).toEqual({ type: "done" });
+  });
+
+  it("tool-less provider: no <result> block parsed → falls back to localBreakdown so the user still gets steps", async () => {
+    // Simulates a tool-less local model whose response never produced a
+    // parseable <result> block (missing/malformed) — the adapter's
+    // structured-output fallback (#59 Task 7) yields toolCall: undefined on
+    // the final event without throwing. The route must not leave the user
+    // with a dead stream.
+    streamImpl.current = async function* () {
+      yield { type: "text", delta: "rambling, no structured block" };
+      yield {
+        type: "final",
+        result: { text: "rambling, no structured block", toolCall: undefined },
+      };
+    };
+
+    const { POST } = await import("./route");
+    const { localBreakdown } = await import("@/lib/breakdown");
+    const res = await POST(postRequest(REQUEST_BODY));
+    const events = await readAllEvents(res);
+
+    expect(events).toContainEqual({
+      type: "fallback",
+      reason: "error",
+      data: localBreakdown(REQUEST_BODY.title),
+    });
+    expect(events.find((e) => e.type === "steps")).toBeUndefined();
     expect(events.at(-1)).toEqual({ type: "done" });
   });
 
@@ -171,7 +235,10 @@ describe("POST /api/breakdown", () => {
   it("blocked guest gets a canned fallback with NO call to the LLM", async () => {
     isOwnerRequestMock.mockResolvedValue(false);
     currentWorkspaceIdMock.mockResolvedValue("guest-abc");
-    consumeGuestBreakdownMock.mockResolvedValue({ allowed: false, reason: "quota" });
+    consumeGuestBreakdownMock.mockResolvedValue({
+      allowed: false,
+      reason: "quota",
+    });
     streamImpl.current = async function* () {
       throw new Error("must not be called");
     };
@@ -182,7 +249,11 @@ describe("POST /api/breakdown", () => {
     const events = await readAllEvents(res);
 
     expect(events).toEqual([
-      { type: "fallback", reason: "quota", data: localBreakdown(REQUEST_BODY.title) },
+      {
+        type: "fallback",
+        reason: "quota",
+        data: localBreakdown(REQUEST_BODY.title),
+      },
       { type: "done" },
     ]);
     expect(refundGuestBreakdownMock).not.toHaveBeenCalled();

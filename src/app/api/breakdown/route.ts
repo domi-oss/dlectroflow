@@ -180,6 +180,16 @@ export async function POST(req: Request): Promise<Response> {
                 type: "steps",
                 data: ev.result.toolCall.input as unknown as Proposal,
               });
+            } else {
+              // Tool-less/local models or a malformed response can complete
+              // the stream with no parsed tool call (see #59 Task 7's
+              // structured-output fallback). Never leave the user with a
+              // dead stream — degrade to the same canned plan as an error.
+              send({
+                type: "fallback",
+                reason: "error",
+                data: localBreakdown(body.title),
+              });
             }
           }
         }
