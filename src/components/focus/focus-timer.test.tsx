@@ -56,18 +56,45 @@ vi.mock("@/components/voice-provider", () => ({ useVoice: () => mockVoice }));
 
 // Device-effect boundary — assert calls, never touch real APIs.
 const alarmPlay = vi.fn();
-const loop = { play: vi.fn(), pause: vi.fn(), stop: vi.fn() };
 const wakeRelease = vi.fn();
 const createAlarm = vi.fn((..._args: unknown[]) => ({ play: alarmPlay }));
-const createLoopPlayer = vi.fn((..._args: unknown[]) => loop);
 const acquireWakeLock = vi.fn((..._args: unknown[]) =>
   Promise.resolve({ release: wakeRelease }),
 );
 vi.mock("@/lib/focus-sounds", () => ({
   createAlarm: (...a: unknown[]) => createAlarm(...a),
-  createLoopPlayer: (...a: unknown[]) => createLoopPlayer(...a),
   acquireWakeLock: (...a: unknown[]) => acquireWakeLock(...a),
-  FOCUS_SOUND_SRC: { off: null, lofi_calm: "/audio/lofi-calm.mp3" },
+}));
+
+// #43 — the shared lo-fi player controls (useFocusSound) are mocked so we can
+// assert the timer drives them (play on Start, stop on complete) without audio.
+const soundControls = {
+  track: {
+    id: "lofi_calm",
+    title: "Aurora on Mute",
+    category: "ambient-lofi",
+    categoryLabel: "Ambient lo-fi",
+    src: "/audio/lofi/aurora-on-mute.mp3",
+  },
+  playing: false,
+  volume: 0.5,
+  hasTracks: true,
+  play: vi.fn(),
+  pause: vi.fn(),
+  toggle: vi.fn(),
+  next: vi.fn(),
+  prev: vi.fn(),
+  setVolume: vi.fn(),
+  stop: vi.fn(),
+};
+vi.mock("@/lib/use-focus-sound", () => ({
+  useFocusSound: () => soundControls,
+  DEFAULT_FOCUS_VOLUME: 0.5,
+}));
+// The mini-player's own behaviour is covered in focus-sound-player.test.tsx;
+// stub it here so it doesn't add duplicate play/pause buttons to the timer DOM.
+vi.mock("@/components/focus/focus-sound-player", () => ({
+  FocusSoundPlayer: () => <div data-testid="focus-sound-player" />,
 }));
 
 import {
@@ -352,17 +379,19 @@ describe("FocusTimer — first-run hint gating", () => {
 });
 
 describe("FocusTimer — device effects behind the boundary", () => {
-  it("primes alarm + acquires the wake lock on Start when enabled; no loop when sound is off", async () => {
+  it("primes alarm + acquires the wake lock on Start when enabled; no lofi when sound is off", async () => {
     const user = userEvent.setup();
     render(<FocusTimer {...base()} />);
     await start(user);
     expect(beginFocus).toHaveBeenCalledWith("s2", 1);
     expect(createAlarm).toHaveBeenCalled();
     expect(acquireWakeLock).toHaveBeenCalled();
-    expect(createLoopPlayer).not.toHaveBeenCalled();
+    expect(soundControls.play).not.toHaveBeenCalled();
+    // With sound off, the mini-player is not rendered.
+    expect(screen.queryByTestId("focus-sound-player")).not.toBeInTheDocument();
   });
 
-  it("does NOT prime alarm / wake lock / loop when all are disabled", async () => {
+  it("does NOT prime alarm / wake lock / lofi when all are disabled", async () => {
     const user = userEvent.setup();
     render(
       <FocusTimer
@@ -380,10 +409,10 @@ describe("FocusTimer — device effects behind the boundary", () => {
     await start(user);
     expect(createAlarm).not.toHaveBeenCalled();
     expect(acquireWakeLock).not.toHaveBeenCalled();
-    expect(createLoopPlayer).not.toHaveBeenCalled();
+    expect(soundControls.play).not.toHaveBeenCalled();
   });
 
-  it("starts the lofi loop when a sound is chosen", async () => {
+  it("starts the lofi player + shows the mini-player when a sound is chosen", async () => {
     const user = userEvent.setup();
     render(
       <FocusTimer
@@ -399,8 +428,29 @@ describe("FocusTimer — device effects behind the boundary", () => {
       />,
     );
     await start(user);
-    expect(createLoopPlayer).toHaveBeenCalledWith("/audio/lofi-calm.mp3");
-    expect(loop.play).toHaveBeenCalled();
+    expect(soundControls.play).toHaveBeenCalled();
+    expect(screen.getByTestId("focus-sound-player")).toBeInTheDocument();
+  });
+
+  it("hides the mini-player in minimal mode while running", async () => {
+    const user = userEvent.setup();
+    render(
+      <FocusTimer
+        {...base({
+          settings: {
+            timerStyle: null,
+            minimalMode: true,
+            keepAwake: false,
+            alarmEnabled: false,
+            sound: "lofi_calm",
+          },
+        })}
+      />,
+    );
+    await start(user);
+    // Sound still starts (ambient bed), but its chrome is hidden while running.
+    expect(soundControls.play).toHaveBeenCalled();
+    expect(screen.queryByTestId("focus-sound-player")).not.toBeInTheDocument();
   });
 });
 
@@ -432,7 +482,7 @@ describe("FocusTimer — alarm + auto-expand at time's-up (fake timers)", () => 
 });
 
 describe("FocusTimer — complete", () => {
-  it("Complete step calls completeFocus and stops the loop", async () => {
+  it("Complete step calls completeFocus and stops the lofi player", async () => {
     const user = userEvent.setup();
     render(
       <FocusTimer
@@ -450,7 +500,7 @@ describe("FocusTimer — complete", () => {
     await start(user);
     await user.click(screen.getByRole("button", { name: /complete step/i }));
     expect(completeFocus).toHaveBeenCalled();
-    expect(loop.stop).toHaveBeenCalled();
+    expect(soundControls.stop).toHaveBeenCalled();
   });
 });
 

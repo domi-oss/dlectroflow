@@ -315,6 +315,27 @@ export const STRINGS = {
     plain: "Lo-fi (calm)",
     playful: "Lo-fi (calm)",
   },
+  // #43 — lo-fi library picker + preview. Labels stay identical across voices
+  // (functional controls); the composed aria-labels append the track title.
+  "focusSettings.soundPickerHint": {
+    plain:
+      "Pick a lo-fi track to loop while you focus, or preview each one first.",
+    playful:
+      "Pick a lo-fi track to loop while you focus, or preview each one first. 🎧",
+  },
+  "focusSettings.preview": { plain: "Preview", playful: "Preview" },
+  "focusSettings.stopPreview": { plain: "Stop preview", playful: "Stop preview" },
+  // #43 — in-timer mini-player controls (aria labels + visible now-playing text).
+  "focus.sound.region": { plain: "Focus sound", playful: "🎧 Focus sound" },
+  "focus.sound.nowPlaying": { plain: "Now playing", playful: "Now playing" },
+  "focus.sound.play": { plain: "Play focus sound", playful: "Play focus sound" },
+  "focus.sound.pause": {
+    plain: "Pause focus sound",
+    playful: "Pause focus sound",
+  },
+  "focus.sound.next": { plain: "Next track", playful: "Next track" },
+  "focus.sound.prev": { plain: "Previous track", playful: "Previous track" },
+  "focus.sound.volume": { plain: "Volume", playful: "Volume" },
 
   // ── Breakdown confirm ──────────────────────────────────────────────────────
   "breakdown.looksRight": { plain: "Looks right", playful: "👍 Looks right" },

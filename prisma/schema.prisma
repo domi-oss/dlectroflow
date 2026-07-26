@@ -77,7 +77,7 @@ model Settings {
   focusMinimalMode         Boolean   @default(false)
   focusKeepAwake           Boolean   @default(true)
   focusAlarmEnabled        Boolean   @default(true)
-  focusSound               String    @default("off") // off | lofi_calm
+  focusSound               String    @default("off") // off | lofi_* (see FocusSound; #43 lo-fi library)
   focusTimerTipDismissedAt DateTime?
   // MR ③ — app-wide completion style (Appearance). completeTickColor mirrors
   // CompleteTickColor in src/lib/constants.ts + Settings_completeTickColor_check.

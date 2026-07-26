@@ -25,13 +25,13 @@ import { resolveTimerStyle } from "@/lib/focus-timer-style";
 import { applyTimeDelta, netAddedMin } from "@/lib/focus-timer-clock";
 import {
   createAlarm,
-  createLoopPlayer,
   acquireWakeLock,
-  FOCUS_SOUND_SRC,
   type Alarm,
-  type LoopPlayer,
   type WakeGuard,
 } from "@/lib/focus-sounds";
+import { useFocusSound } from "@/lib/use-focus-sound";
+import { FocusSoundPlayer } from "@/components/focus/focus-sound-player";
+import { FocusSound } from "@/lib/constants";
 import { usePrefersReducedMotion } from "@/lib/use-prefers-reduced-motion";
 import { t } from "@/lib/strings";
 import { useVoice } from "@/components/voice-provider";
@@ -163,8 +163,11 @@ export function FocusTimer({
 
   // Device-effect handles (created on Start inside the user gesture).
   const alarmRef = useRef<Alarm | null>(null);
-  const loopRef = useRef<LoopPlayer | null>(null);
   const wakeRef = useRef<WakeGuard | null>(null);
+  // #43 — the shared lo-fi player (current track / play state / volume). Drives
+  // both the Start-gesture autoplay and the embedded mini-player below.
+  const sound = useFocusSound(settings.sound);
+  const soundOff = settings.sound === FocusSound.Off;
 
   const inc = Math.max(1, addTimeIncrementMin || 5);
   const durationMin = () => Math.max(0, Math.round(elapsedRef.current / 60));
@@ -193,17 +196,17 @@ export function FocusTimer({
     return () => clearInterval(id);
   }, [phase]);
 
-  // Focus sound + wake lock follow the "running" phase.
+  // Wake lock follows the "running" phase. (Focus sound is intentionally
+  // decoupled from pause — it stays a continuous ambient bed, controlled by the
+  // mini-player — so it isn't paused/resumed here.)
   useEffect(() => {
     if (phase === "running") {
-      loopRef.current?.play();
       if (settings.keepAwake && !wakeRef.current) {
         void acquireWakeLock().then((g) => {
           wakeRef.current = g;
         });
       }
     } else {
-      loopRef.current?.pause();
       releaseWake();
     }
   }, [phase, settings.keepAwake]);
@@ -220,12 +223,14 @@ export function FocusTimer({
   }, [phase]);
 
   // Cleanup on unmount — ← Back leaves the FocusSession OPEN (no server call),
-  // so we only stop local effects here.
+  // so we only stop local effects here. (useFocusSound also stops its element on
+  // unmount; this is belt-and-braces.)
   useEffect(
     () => () => {
-      loopRef.current?.stop();
+      sound.stop();
       releaseWake();
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 
@@ -236,8 +241,7 @@ export function FocusTimer({
     if (!id) return;
     // Prime device effects inside the user gesture (unlocks audio playback).
     if (settings.alarmEnabled) alarmRef.current = createAlarm();
-    const src = FOCUS_SOUND_SRC[settings.sound] ?? null;
-    if (src) loopRef.current = createLoopPlayer(src);
+    if (!soundOff) sound.play();
     setSessionId(id);
     setTotalSec(plannedMin * 60);
     setRemainingSec(plannedMin * 60);
@@ -318,11 +322,11 @@ export function FocusTimer({
     });
     setPending(false);
     setResult(res);
-    loopRef.current?.stop();
+    sound.stop();
     releaseWake();
     setPhase("done");
     router.refresh();
-  }, [sessionId, net, router]);
+  }, [sessionId, net, router, sound]);
 
   const startReestimate = async () => {
     setPhase("reestimate");
@@ -341,7 +345,7 @@ export function FocusTimer({
       newEstMinutes: newEst,
     });
     setPending(false);
-    loopRef.current?.stop();
+    sound.stop();
     releaseWake();
     setPhase("requeued");
   };
@@ -354,6 +358,11 @@ export function FocusTimer({
   const running = phase === "running";
   const showContext = !isSingleTask && !(settings.minimalMode && running);
   const showCorner = !(settings.minimalMode && running);
+  // #43 — the mini-player rides along an active session (running or paused) when
+  // a lo-fi track is chosen; minimal mode hides it while running (no distraction).
+  const sessionActive = phase === "running" || phase === "paused";
+  const showSoundPlayer =
+    sessionActive && !soundOff && !(settings.minimalMode && running);
   const remainingInTask = steps
     .filter((s) => !s.done)
     .reduce((n, s) => n + s.estMinutes, 0);
@@ -657,6 +666,10 @@ export function FocusTimer({
           )}
         </div>
       )}
+
+      {/* #43 — embedded lo-fi mini-player (play/pause · prev/next · volume ·
+          now-playing). Hidden when sound is off or minimal-mode-while-running. */}
+      {showSoundPlayer && <FocusSoundPlayer controls={sound} voice={voice} />}
 
       {/* Next-step peek (below controls). Shown for any multi-step active/setup
           phase; hidden by minimal mode while running (via showContext) and on the

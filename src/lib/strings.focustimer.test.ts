@@ -24,4 +24,17 @@ describe("focus-timer redesign strings (MR ②)", () => {
     expect(t("focusSettings.soundOff", "plain")).toBe("Off");
     expect(t("focusSettings.soundLofiCalm", "plain")).toBe("Lo-fi (calm)");
   });
+
+  it("#43 — lo-fi picker + mini-player control labels resolve; plain stays plain", () => {
+    expect(t("focusSettings.preview", "plain")).toBe("Preview");
+    expect(t("focusSettings.stopPreview", "plain")).toBe("Stop preview");
+    expect(t("focus.sound.play", "plain")).toBe("Play focus sound");
+    expect(t("focus.sound.pause", "plain")).toBe("Pause focus sound");
+    expect(t("focus.sound.next", "plain")).toBe("Next track");
+    expect(t("focus.sound.prev", "plain")).toBe("Previous track");
+    expect(t("focus.sound.volume", "plain")).toBe("Volume");
+    // Region label picks up a playful headphones anchor only in playful voice.
+    expect(t("focus.sound.region", "plain")).toBe("Focus sound");
+    expect(t("focus.sound.region", "playful")).toBe("🎧 Focus sound");
+  });
 });
