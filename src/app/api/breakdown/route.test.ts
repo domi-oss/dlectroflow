@@ -278,27 +278,36 @@ describe("POST /api/breakdown", () => {
         result: { text: "rambling, no structured block", toolCall: undefined },
       };
     };
-    // Build the Request first — constructing it (undici) exercises
-    // TextEncoder internally, which would otherwise consume our
-    // mockImplementationOnce below before the route ever runs.
-    const req = postRequest(REQUEST_BODY);
-    // Make the FIRST send() (the soft-failure branch's fallback event, sent
-    // right after the first refund) throw, simulating a disconnected
-    // client. Subsequent sends (from the catch block) use the real encoder.
-    const encodeSpy = vi
-      .spyOn(TextEncoder.prototype, "encode")
+    // Force the route's own FIRST controller.enqueue() call — the
+    // soft-failure branch's fallback send(), issued right after the first
+    // refund — to throw, simulating a disconnected client.
+    //
+    // Deliberately spying on ReadableStreamDefaultController.prototype.enqueue
+    // rather than TextEncoder.prototype.encode: an earlier version of this
+    // test used a one-shot TextEncoder spy and relied on undici NOT calling
+    // `encode` while building the Request body, so our route's first
+    // in-stream `encode` would be the one that mattered. That assumption is
+    // undici-version-dependent — it held locally but not on CI's
+    // node:22-alpine, where the one-shot spy got consumed by Request
+    // construction instead, the intended throw never fired, and the test
+    // failed with 0 refund calls. `controller.enqueue` has no such ambiguity:
+    // it is only ever called by this route's own `send()`, never by undici's
+    // Request/Response body machinery, so which call is "first" doesn't
+    // depend on any runtime's internal encoding details.
+    const enqueueSpy = vi
+      .spyOn(ReadableStreamDefaultController.prototype, "enqueue")
       .mockImplementationOnce(() => {
         throw new Error("controller is closed");
       });
     try {
       const { POST } = await import("./route");
-      const res = await POST(req);
+      const res = await POST(postRequest(REQUEST_BODY));
       const events = await readAllEvents(res);
 
       expect(refundGuestBreakdownMock).toHaveBeenCalledTimes(1);
       expect(events.at(-1)).toEqual({ type: "done" });
     } finally {
-      encodeSpy.mockRestore();
+      enqueueSpy.mockRestore();
     }
   });
 
