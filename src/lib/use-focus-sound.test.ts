@@ -61,6 +61,19 @@ describe("useFocusSound", () => {
     expect(result.current.playing).toBe(true);
   });
 
+  it("pause() then play() pause/resume the same element without tearing it down", () => {
+    const { result } = renderHook(() => useFocusSound("lofi_calm"));
+    act(() => result.current.play());
+    act(() => result.current.pause());
+    expect(player.pause).toHaveBeenCalled();
+    expect(result.current.playing).toBe(false);
+    act(() => result.current.play());
+    expect(result.current.playing).toBe(true);
+    // Resumed the same element — no second createLoopPlayer, no stop().
+    expect(createLoopPlayer).toHaveBeenCalledTimes(1);
+    expect(player.stop).not.toHaveBeenCalled();
+  });
+
   it("next()/prev() cycle the playlist via load() (wrapping), reusing one element", () => {
     const { result } = renderHook(() => useFocusSound("lofi_calm"));
     act(() => result.current.play()); // creates the element

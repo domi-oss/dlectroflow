@@ -171,7 +171,7 @@ export function FocusTimer({
   // the hook) to use in this component's effects/handlers — depending on the
   // whole `sound` object would needlessly recreate memoised callbacks.
   const sound = useFocusSound(settings.sound);
-  const { play: playSound, stop: stopSound } = sound;
+  const { play: playSound, pause: pauseSound, stop: stopSound } = sound;
   const soundOff = settings.sound === FocusSound.Off;
 
   const inc = Math.max(1, addTimeIncrementMin || 5);
@@ -201,20 +201,26 @@ export function FocusTimer({
     return () => clearInterval(id);
   }, [phase]);
 
-  // Wake lock follows the "running" phase. (Focus sound is intentionally
-  // decoupled from pause — it stays a continuous ambient bed, controlled by the
-  // mini-player — so it isn't paused/resumed here.)
+  // Focus sound + wake lock follow the "running" phase: the lo-fi pauses and
+  // resumes WITH the timer (owner decision). The first play() happens in the
+  // Start gesture (start()) to unlock autoplay; this effect keeps the audio in
+  // lockstep on pause↔resume (and any other transition out of "running" pauses
+  // it). Session end / unmount still fully stop it (finishComplete / cleanup).
+  // No-op when sound is off. The mini-player reflects the paused state via the
+  // hook's `playing` flag, which pause()/play() here keep truthful.
   useEffect(() => {
     if (phase === "running") {
+      if (!soundOff) playSound();
       if (settings.keepAwake && !wakeRef.current) {
         void acquireWakeLock().then((g) => {
           wakeRef.current = g;
         });
       }
     } else {
+      if (!soundOff) pauseSound();
       releaseWake();
     }
-  }, [phase, settings.keepAwake]);
+  }, [phase, settings.keepAwake, soundOff, playSound, pauseSound]);
 
   // Alarm at time's-up.
   useEffect(() => {

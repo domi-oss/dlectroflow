@@ -432,6 +432,32 @@ describe("FocusTimer — device effects behind the boundary", () => {
     expect(screen.getByTestId("focus-sound-player")).toBeInTheDocument();
   });
 
+  it("pauses the lofi with the timer and resumes it on resume (moves together)", async () => {
+    const user = userEvent.setup();
+    render(
+      <FocusTimer
+        {...base({
+          settings: {
+            timerStyle: null,
+            minimalMode: false,
+            keepAwake: false,
+            alarmEnabled: false,
+            sound: "lofi_calm",
+          },
+        })}
+      />,
+    );
+    await start(user);
+    expect(soundControls.play).toHaveBeenCalled();
+    // Pause the timer → audio pauses.
+    await user.click(screen.getByRole("button", { name: /pause/i }));
+    expect(soundControls.pause).toHaveBeenCalled();
+    // Resume the timer → audio resumes.
+    soundControls.play.mockClear();
+    await user.click(screen.getByRole("button", { name: /resume/i }));
+    expect(soundControls.play).toHaveBeenCalled();
+  });
+
   it("hides the mini-player in minimal mode while running", async () => {
     const user = userEvent.setup();
     render(
