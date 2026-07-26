@@ -35,6 +35,9 @@ spec:
   tls:
     - hosts:
         - {{ .Values.host }}
+        {{- range .Values.legacyHosts }}
+        - {{ . | quote }}
+        {{- end }}
       secretName: dlectroflow-tls
   rules:
     - host: {{ .Values.host }}
@@ -47,3 +50,19 @@ spec:
                 name: dlectroflow
                 port:
                   number: 80
+    {{- range .Values.legacyHosts }}
+    # Legacy host served on the same ingress (multi-SAN cert). The 301 redirect
+    # to the canonical host is handled in the Next.js app via redirects() with a
+    # `has` host condition — path + query are preserved, and no nginx annotation
+    # tricks are needed (#54). Traffic reaches the app pod; the app redirects.
+    - host: {{ . | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dlectroflow
+                port:
+                  number: 80
+    {{- end }}
