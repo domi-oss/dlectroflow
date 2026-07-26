@@ -1205,13 +1205,25 @@ export function InboxView({
                         key={item.id}
                         className={cn(
                           "rounded-lg border px-4 py-3 text-sm",
-                          item.id === activeDragId
-                            ? "opacity-40"
-                            : !optionsOpen && "opacity-70",
+                          item.id === activeDragId && "opacity-40",
                         )}
                       >
-                        {/* Title line + action row below — mirrors the Needs-review row layout. */}
-                        <div className="flex items-start gap-2">
+                        {/* Title line + action row below — mirrors the Needs-review row layout.
+                            An idle row reads as "asleep" by dimming ONLY this title/metadata
+                            line — NOT the whole row (#56). Layering opacity-70 over the <li>
+                            also composited the bg-primary "Review now" CTA below WCAG-AA
+                            (~3.3:1 light / ~3.6:1 dark against its background; needs 4.5:1).
+                            Keeping the dim off the CTA lets it stay at its full 5.41:1 (light)
+                            / 6.32:1 (dark). The dim lifts once the row is under review
+                            (optionsOpen) or being dragged (the <li>'s opacity-40 covers it). */}
+                        <div
+                          className={cn(
+                            "flex items-start gap-2",
+                            !optionsOpen &&
+                              item.id !== activeDragId &&
+                              "opacity-70",
+                          )}
+                        >
                           <DragGrip id={item.id} label={item.text} />
                           {editingId === item.id ? (
                             titleEditor(item)
