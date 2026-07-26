@@ -154,6 +154,8 @@ export type LoopPlayer = {
   setVolume(v: number): void;
   /** Swap the looping source; resumes automatically if currently playing. */
   load(src: string): void;
+  /** Current playback position + track length (seconds); 0s where unknown. */
+  getTime(): { currentTime: number; duration: number };
 };
 export type PreviewPlayer = {
   /** Play a one-shot (non-looping) preview; stops any previous preview first. */
@@ -248,6 +250,18 @@ export function createLoopPlayer(
         if (playing) void audio.play().catch(() => {});
       } catch {
         /* ignore */
+      }
+    },
+    getTime() {
+      try {
+        if (!audio) return { currentTime: 0, duration: 0 };
+        const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+        const currentTime = Number.isFinite(audio.currentTime)
+          ? audio.currentTime
+          : 0;
+        return { currentTime, duration };
+      } catch {
+        return { currentTime: 0, duration: 0 };
       }
     },
   };

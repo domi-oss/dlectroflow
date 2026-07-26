@@ -342,6 +342,11 @@ export const STRINGS = {
   "focus.sound.next": { plain: "Next track", playful: "Next track" },
   "focus.sound.prev": { plain: "Previous track", playful: "Previous track" },
   "focus.sound.volume": { plain: "Volume", playful: "Volume" },
+  "focus.sound.volumeLevel": { plain: "Volume level", playful: "Volume level" },
+  "focus.sound.progress": {
+    plain: "Playback progress",
+    playful: "Playback progress",
+  },
 
   // ── Breakdown confirm ──────────────────────────────────────────────────────
   "breakdown.looksRight": { plain: "Looks right", playful: "👍 Looks right" },

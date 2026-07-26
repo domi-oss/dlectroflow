@@ -32,6 +32,10 @@ export type FocusSoundControls = {
   prev: () => void;
   setVolume: (v: number) => void;
   stop: () => void;
+  /** Read the current playback position + track length (seconds). Stable; the
+   * mini-player polls it for its progress bar so progress lives there, not here
+   * (keeps this hook's identity stable across ticks). */
+  getTime: () => { currentTime: number; duration: number };
 };
 
 export const DEFAULT_FOCUS_VOLUME = 0.5;
@@ -124,6 +128,11 @@ export function useFocusSound(initialSound: string): FocusSoundControls {
     setPlay(false);
   }, []);
 
+  const getTime = useCallback(
+    () => playerRef.current?.getTime() ?? { currentTime: 0, duration: 0 },
+    [],
+  );
+
   // Tear the element down on unmount so audio never outlives the timer.
   useEffect(
     () => () => {
@@ -151,6 +160,7 @@ export function useFocusSound(initialSound: string): FocusSoundControls {
       prev,
       setVolume,
       stop,
+      getTime,
     }),
     [
       tracks,
@@ -164,6 +174,7 @@ export function useFocusSound(initialSound: string): FocusSoundControls {
       prev,
       setVolume,
       stop,
+      getTime,
     ],
   );
 }

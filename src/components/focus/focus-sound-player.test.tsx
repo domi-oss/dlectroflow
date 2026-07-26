@@ -26,6 +26,7 @@ function controls(over: Partial<FocusSoundControls> = {}): FocusSoundControls {
     prev: vi.fn(),
     setVolume: vi.fn(),
     stop: vi.fn(),
+    getTime: () => ({ currentTime: 0, duration: 0 }),
     ...over,
   };
 }
@@ -68,14 +69,48 @@ describe("FocusSoundPlayer", () => {
     expect(c.next).toHaveBeenCalled();
   });
 
-  it("volume slider is labeled and forwards changes", () => {
+  it("volume is behind a labeled speaker button; the slider pops out (closed by default) and forwards changes", async () => {
+    const user = userEvent.setup();
     const c = controls({ volume: 0.5 });
     render(<FocusSoundPlayer controls={c} voice="plain" />);
-    const slider = screen.getByRole("slider", { name: /volume/i });
+    const volBtn = screen.getByRole("button", { name: /^volume$/i });
+    expect(volBtn).toHaveAttribute("aria-expanded", "false");
+    expect(volBtn).toHaveAttribute("aria-haspopup", "true");
+    // No slider until the popover is opened.
+    expect(screen.queryByRole("slider")).not.toBeInTheDocument();
+    await user.click(volBtn);
+    expect(volBtn).toHaveAttribute("aria-expanded", "true");
+    const slider = screen.getByRole("slider", { name: /volume level/i });
     expect(slider).toHaveValue("0.5");
-    // React tracks range changes via the change event.
     fireEvent.change(slider, { target: { value: "0.2" } });
     expect(c.setVolume).toHaveBeenCalledWith(0.2);
+  });
+
+  it("Escape closes the volume popover", async () => {
+    const user = userEvent.setup();
+    render(<FocusSoundPlayer controls={controls()} voice="plain" />);
+    await user.click(screen.getByRole("button", { name: /^volume$/i }));
+    expect(screen.getByRole("slider")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("slider")).not.toBeInTheDocument();
+  });
+
+  it("shows a playback progress bar reflecting currentTime / duration (display only)", () => {
+    const c = controls({ getTime: () => ({ currentTime: 30, duration: 120 }) });
+    render(<FocusSoundPlayer controls={c} voice="plain" />);
+    const bar = screen.getByRole("progressbar", { name: /playback progress/i });
+    expect(bar).toHaveAttribute("aria-valuenow", "25");
+    expect(bar).toHaveAttribute("aria-valuemin", "0");
+    expect(bar).toHaveAttribute("aria-valuemax", "100");
+    // Progress is display-only — not a slider/seek control.
+    expect(bar).not.toHaveAttribute("tabindex");
+  });
+
+  it("is width-capped + centered so it aligns with the timer button row", () => {
+    render(<FocusSoundPlayer controls={controls()} voice="plain" />);
+    const region = screen.getByRole("region", { name: /focus sound/i });
+    expect(region.className).toMatch(/max-w-md/);
+    expect(region.className).toMatch(/mx-auto/);
   });
 
   it("every control button meets the ≥44px touch target", () => {
