@@ -42,3 +42,38 @@ export function netAddedMin(totalSec: number, plannedSec: number): number {
 export function timerFraction(remainingSec: number, totalSec: number): number {
   return totalSec > 0 ? remainingSec / totalSec : 0;
 }
+
+/**
+ * #27 — true pause/resume. The persisted clock for a `FocusSession`: `pausedAt`
+ * (ms epoch) is set while the session is paused, null while running/never
+ * paused; `accumulatedPausedMs` is the running total of every prior pause
+ * interval's duration. Mirrors `prisma/schema.prisma`'s `FocusSession` fields
+ * 1:1 so callers can pass a row straight through (after `.getTime()`).
+ */
+export type PausedSessionClock = {
+  plannedMin: number;
+  startedAt: number;
+  pausedAt: number | null;
+  accumulatedPausedMs: number;
+};
+
+/**
+ * Remaining seconds for a session's clock as of `nowMs`. While paused, the
+ * clock is frozen at the pause instant (elapsed time is measured up to
+ * `pausedAt`, not the live `nowMs`) — a session sitting paused for hours or
+ * days doesn't silently drain in the background. On resume,
+ * `accumulatedPausedMs` grows by the pause's duration and `pausedAt` clears,
+ * so the very next call with the same `nowMs` returns the same remaining
+ * value the user saw right before resuming — the countdown then continues
+ * from there. Supports any number of pause/resume cycles (accumulatedPausedMs
+ * simply keeps summing). Floors at 0, never negative.
+ */
+export function remainingSecForSession(
+  clock: PausedSessionClock,
+  nowMs: number,
+): number {
+  const effectiveNow = clock.pausedAt ?? nowMs;
+  const elapsedMs = effectiveNow - clock.startedAt - clock.accumulatedPausedMs;
+  const plannedSec = clock.plannedMin * 60;
+  return Math.max(0, plannedSec - Math.floor(elapsedMs / 1000));
+}

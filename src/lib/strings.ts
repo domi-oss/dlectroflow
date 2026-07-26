@@ -199,6 +199,11 @@ export const STRINGS = {
     plain: "⏸️ Pause for now",
     playful: "⏸️ Pause for now",
   },
+  // #27 — setup screen for a step with a truly-paused session: offered
+  // alongside the normal Start button (owner decision: ask, don't silently
+  // resume). "focus.resume"'s "▶ Resume" pairs with the composed "~Xm left"
+  // (mirrors focus.hero.left's "~Xm left" pattern on the launcher hero).
+  "focus.startFresh": { plain: "↻ Start fresh", playful: "↻ Start fresh" },
 
   // ── Resume banner (Phase 5, #8) — surfaces the most-recent paused/open focus
   // step on the Inbox so a user can jump straight back in. ⏸/→ are functional

@@ -13,8 +13,20 @@ import {
 } from "@/lib/constants";
 import { awardBadge, logReward, rewardStepDone } from "@/lib/rewards";
 import { currentWorkspaceId } from "@/lib/workspace";
+import { remainingSecForSession } from "@/lib/focus-timer-clock";
 
-/** Start a focus session on a step. Returns the session id. */
+/**
+ * Start a focus session on a step. Returns the session id.
+ *
+ * #27 — resume-aware: any OPEN session already sitting on this step (paused,
+ * or just abandoned mid-run by a closed tab) is retired first, as a
+ * "gaveup"/abandoned close. Without this, re-entering a step left a *second*
+ * (or third…) row permanently open — the setup screen offers a real "Resume"
+ * CTA for a truly-paused session (see /focus/[stepId]/page.tsx +
+ * `resumeFocus` below); beginFocus is only reached when the user picks
+ * "Start fresh" (or there was nothing to resume), so it always means
+ * "abandon whatever was open, start clean."
+ */
 export async function beginFocus(
   stepId: string,
   plannedMin: number,
@@ -24,6 +36,21 @@ export async function beginFocus(
     where: { id: stepId, task: { workspaceId } },
   });
   if (!step) return null;
+
+  // Retire stale open session(s) before creating a fresh one. Actual elapsed
+  // active time for an abandoned-never-paused session isn't known (it was
+  // never explicitly paused/stamped), so this is a best-effort 0 — the point
+  // is closing the row, not stats precision for a session the user walked
+  // away from.
+  await prisma.focusSession.updateMany({
+    where: { stepId: step.id, workspaceId, endedAt: null },
+    data: {
+      endedAt: new Date(),
+      outcome: FocusOutcome.GaveUp,
+      durationMin: 0,
+    },
+  });
+
   const session = await prisma.focusSession.create({
     data: {
       stepId: step.id,
@@ -35,6 +62,90 @@ export async function beginFocus(
   // First focus — awarded the first time a focus session begins (idempotent).
   await awardBadge(workspaceId, BadgeKey.FirstFocus);
   return session.id;
+}
+
+/**
+ * Pause an in-progress focus session: stamps `pausedAt` and bakes the
+ * caller's current adjusted total (`totalSec`, including any ±time taps made
+ * before this pause) into `plannedMin`, so a resume — even after a reload or
+ * from another device — restores the same total the user was looking at.
+ * Idempotent: pausing an already-paused session is a no-op success (guards
+ * against a double click / race).
+ */
+export async function pauseFocus(
+  sessionId: string,
+  opts: { totalSec: number },
+): Promise<{ ok: boolean }> {
+  const workspaceId = await currentWorkspaceId();
+  const session = await prisma.focusSession.findFirst({
+    where: { id: sessionId, workspaceId, endedAt: null },
+  });
+  if (!session) return { ok: false };
+  if (session.pausedAt) return { ok: true };
+
+  await prisma.focusSession.update({
+    where: { id: sessionId },
+    data: {
+      pausedAt: new Date(),
+      plannedMin: Math.max(1, Math.round(opts.totalSec / 60)),
+    },
+  });
+  return { ok: true };
+}
+
+export type ResumeResult = {
+  ok: boolean;
+  remainingSec: number;
+  totalSec: number;
+  plannedMin: number;
+};
+
+const FAILED_RESUME: ResumeResult = {
+  ok: false,
+  remainingSec: 0,
+  totalSec: 0,
+  plannedMin: 0,
+};
+
+/**
+ * Resume a paused focus session — REUSES the existing row (no new
+ * FocusSession is created; this is the fix for the "double session" bug
+ * where re-entering a step silently opened a second one). Folds the just-
+ * ended pause interval into `accumulatedPausedMs`, clears `pausedAt`, and
+ * returns the remaining time computed at that exact instant (so it matches
+ * what the user saw right before pausing, modulo any earlier active time).
+ */
+export async function resumeFocus(sessionId: string): Promise<ResumeResult> {
+  const workspaceId = await currentWorkspaceId();
+  const session = await prisma.focusSession.findFirst({
+    where: { id: sessionId, workspaceId, endedAt: null },
+  });
+  if (!session || !session.pausedAt) return FAILED_RESUME;
+
+  const now = new Date();
+  const accumulatedPausedMs =
+    session.accumulatedPausedMs + (now.getTime() - session.pausedAt.getTime());
+
+  await prisma.focusSession.update({
+    where: { id: sessionId },
+    data: { pausedAt: null, accumulatedPausedMs },
+  });
+
+  const remainingSec = remainingSecForSession(
+    {
+      plannedMin: session.plannedMin,
+      startedAt: session.startedAt.getTime(),
+      pausedAt: null,
+      accumulatedPausedMs,
+    },
+    now.getTime(),
+  );
+  return {
+    ok: true,
+    remainingSec,
+    totalSec: session.plannedMin * 60,
+    plannedMin: session.plannedMin,
+  };
 }
 
 async function closeSession(

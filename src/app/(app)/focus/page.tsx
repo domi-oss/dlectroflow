@@ -42,9 +42,11 @@ export default async function FocusLauncherPage() {
         steps: {
           orderBy: { order: "asc" },
           include: {
-            // Most-recent open session → drives resumable + resumeAt ordering.
+            // Most-recent TRULY PAUSED session (#27) → drives resumable +
+            // resumeAt ordering. An open-but-never-paused session is stale,
+            // not resumable (beginFocus retires it on the next Start).
             focusSessions: {
-              where: { endedAt: null },
+              where: { endedAt: null, pausedAt: { not: null } },
               orderBy: { startedAt: "desc" },
               take: 1,
               select: { startedAt: true },
@@ -64,8 +66,9 @@ export default async function FocusLauncherPage() {
             steps: {
               orderBy: { order: "asc" },
               include: {
+                // #27 — same truly-paused filter as the tasks query above.
                 focusSessions: {
-                  where: { endedAt: null },
+                  where: { endedAt: null, pausedAt: { not: null } },
                   select: { id: true },
                   take: 1,
                 },

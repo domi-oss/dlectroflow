@@ -5,8 +5,8 @@
 // the existing /focus/[stepId] timer.
 
 /** A step as loaded by the focus page's Prisma query. `resumable` = the step
- * has an unfinished FocusSession (started, never ended) — the "paused" state,
- * mirroring the inbox's per-step `resumable` mapping. */
+ * has a TRULY PAUSED FocusSession (`pausedAt` set, #27) — mirroring the
+ * inbox's per-step `resumable` mapping. */
 export type FocusStep = {
   id: string;
   order: number;

@@ -25,7 +25,10 @@ const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
         deleteMany: vi.fn().mockResolvedValue({}),
         createMany: vi.fn().mockResolvedValue({}),
       },
-      focusSession: { create: vi.fn().mockResolvedValue({ id: "sess" }) },
+      focusSession: {
+        create: vi.fn().mockResolvedValue({ id: "sess" }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
       $transaction: vi.fn(),
     };
     prismaMock.$transaction.mockImplementation((arg: unknown) =>
@@ -75,6 +78,7 @@ beforeEach(() => {
   prismaMock.task.findFirst.mockResolvedValue({ id: "t1" });
   prismaMock.brainDumpItem.create.mockResolvedValue({ id: "item-1" });
   prismaMock.focusSession.create.mockResolvedValue({ id: "sess" });
+  prismaMock.focusSession.updateMany.mockResolvedValue({ count: 0 });
 });
 
 describe("streak engagement — the three qualifying actions", () => {

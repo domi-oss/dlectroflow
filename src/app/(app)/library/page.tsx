@@ -76,12 +76,12 @@ export default async function LibraryPage({
           include: {
             steps: {
               orderBy: { order: "asc" },
-              // A step is "resumable" if it has an unfinished focus session
-              // (started, never ended). Mirrors inbox/page.tsx — batched by
+              // #27 — a step is "resumable" if it has a TRULY PAUSED focus
+              // session (pausedAt set). Mirrors inbox/page.tsx — batched by
               // Prisma into one query per relation, not a per-step N+1.
               include: {
                 focusSessions: {
-                  where: { endedAt: null },
+                  where: { endedAt: null, pausedAt: { not: null } },
                   select: { id: true },
                   take: 1,
                 },

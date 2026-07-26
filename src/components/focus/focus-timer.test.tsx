@@ -31,6 +31,13 @@ vi.mock("@/app/actions/focus", () => ({
   }),
   requeueFocus: vi.fn().mockResolvedValue({ ok: true }),
   proposeNewEstimate: vi.fn().mockResolvedValue(20),
+  pauseFocus: vi.fn().mockResolvedValue({ ok: true }),
+  resumeFocus: vi.fn().mockResolvedValue({
+    ok: true,
+    remainingSec: 300,
+    totalSec: 600,
+    plannedMin: 10,
+  }),
 }));
 vi.mock("@/app/actions/settings", () => ({
   dismissFocusTimerTip: vi.fn().mockResolvedValue(undefined),
@@ -63,7 +70,12 @@ vi.mock("@/lib/focus-sounds", () => ({
   FOCUS_SOUND_SRC: { off: null, lofi_calm: "/audio/lofi-calm.mp3" },
 }));
 
-import { beginFocus, completeFocus } from "@/app/actions/focus";
+import {
+  beginFocus,
+  completeFocus,
+  pauseFocus,
+  resumeFocus,
+} from "@/app/actions/focus";
 import { dismissFocusTimerTip } from "@/app/actions/settings";
 
 const STEPS: TrackerStep[] = [
@@ -106,6 +118,7 @@ function base(overrides: Partial<Parameters<typeof FocusTimer>[0]> = {}) {
       sound: "off",
     },
     tipDismissed: false,
+    existingSession: null,
     ...overrides,
   } as Parameters<typeof FocusTimer>[0];
 }
@@ -434,5 +447,94 @@ describe("FocusTimer — complete", () => {
     await user.click(screen.getByRole("button", { name: /complete step/i }));
     expect(completeFocus).toHaveBeenCalled();
     expect(loop.stop).toHaveBeenCalled();
+  });
+});
+
+// #27 — the in-session Pause/Resume toggle now persists real server state
+// instead of only flipping local phase.
+describe("FocusTimer — true pause/resume persistence", () => {
+  it("Pause calls pauseFocus with the session id + current totalSec", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimer {...base()} />);
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /pause/i }));
+    expect(pauseFocus).toHaveBeenCalledWith("session-1", { totalSec: 60 }); // 1-minute step
+  });
+
+  it("Resume (in-session) calls resumeFocus and restores the returned remaining time", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimer {...base()} />);
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /pause/i }));
+    await user.click(screen.getByRole("button", { name: /resume/i }));
+    expect(resumeFocus).toHaveBeenCalledWith("session-1");
+    // The mock resolves remainingSec: 300 → 5:00 on the readout.
+    expect(screen.getByText("5:00")).toBeInTheDocument();
+  });
+
+  it("a failed resume falls back to running rather than stranding the user paused", async () => {
+    (resumeFocus as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: false,
+      remainingSec: 0,
+      totalSec: 0,
+      plannedMin: 0,
+    });
+    const user = userEvent.setup();
+    render(<FocusTimer {...base()} />);
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /pause/i }));
+    await user.click(screen.getByRole("button", { name: /resume/i }));
+    // Back to the running controls (Pause visible again), not stuck on Resume.
+    expect(
+      screen.getByRole("button", { name: /^⏸️ pause$/i }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("FocusTimer — setup screen: existing paused session (#27)", () => {
+  const paused = {
+    id: "sess-paused",
+    plannedMin: 10,
+    totalSec: 600,
+    remainingSec: 222, // → ceil(222/60) = 4m
+  };
+
+  it("offers BOTH Resume and Start fresh instead of a single Start CTA", () => {
+    render(<FocusTimer {...base({ existingSession: paused })} />);
+    expect(
+      screen.getByRole("button", { name: /resume.*4m.*left/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /start fresh/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^▶ start focusing$/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("Resume reuses the existing session (resumeFocus) — no new beginFocus call", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimer {...base({ existingSession: paused })} />);
+    await user.click(screen.getByRole("button", { name: /resume.*left/i }));
+    expect(resumeFocus).toHaveBeenCalledWith("sess-paused");
+    expect(beginFocus).not.toHaveBeenCalled();
+  });
+
+  it("Start fresh still calls beginFocus (server retires the stale session)", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimer {...base({ existingSession: paused })} />);
+    await user.click(screen.getByRole("button", { name: /start fresh/i }));
+    expect(beginFocus).toHaveBeenCalledWith("s2", 1);
+    expect(resumeFocus).not.toHaveBeenCalled();
+  });
+
+  it("no existing session: the normal single Start CTA renders", () => {
+    render(<FocusTimer {...base()} />);
+    expect(
+      screen.getByRole("button", { name: /start focusing/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /start fresh/i }),
+    ).not.toBeInTheDocument();
   });
 });

@@ -26,12 +26,14 @@ export default async function InboxPage({
           include: {
             steps: {
               orderBy: { order: "asc" },
-              // A step is "resumable" if it has an unfinished focus session
-              // (started, never ended). Batched by Prisma into one query per
-              // relation, so this is not a per-step N+1.
+              // #27 — a step is "resumable" if it has a TRULY PAUSED focus
+              // session (pausedAt set), not merely an open one — an open-but-
+              // never-paused session is stale (e.g. a closed tab mid-
+              // countdown) and isn't offered as resumable. Batched by Prisma
+              // into one query per relation, so this is not a per-step N+1.
               include: {
                 focusSessions: {
-                  where: { endedAt: null },
+                  where: { endedAt: null, pausedAt: { not: null } },
                   select: { id: true },
                   take: 1,
                 },

@@ -8,6 +8,8 @@ import {
   completeFocus,
   requeueFocus,
   proposeNewEstimate,
+  pauseFocus,
+  resumeFocus,
   type CompleteResult,
 } from "@/app/actions/focus";
 import { dismissFocusTimerTip } from "@/app/actions/settings";
@@ -75,6 +77,17 @@ export type NextStepPeek = {
   subtaskEmoji: string | null;
 };
 
+/** #27 — a TRULY paused (not merely abandoned) open session for this step,
+ * loaded by the page so the setup screen can offer a real "Resume" instead of
+ * only "Start" (owner decision: ask, don't silently resume). Null when there
+ * is none. */
+export type ExistingPausedSession = {
+  id: string;
+  plannedMin: number;
+  totalSec: number;
+  remainingSec: number;
+};
+
 export function FocusTimer({
   step,
   steps,
@@ -87,6 +100,7 @@ export function FocusTimer({
   addTimeIncrementMin,
   settings,
   tipDismissed,
+  existingSession = null,
 }: {
   step: StepInfo;
   steps: TrackerStep[];
@@ -103,6 +117,7 @@ export function FocusTimer({
   addTimeIncrementMin: number;
   settings: TimerSettings;
   tipDismissed: boolean;
+  existingSession?: ExistingPausedSession | null;
 }) {
   const router = useRouter();
   const voice = useVoice();
@@ -206,6 +221,52 @@ export function FocusTimer({
     setRemainingSec(plannedMin * 60);
     elapsedRef.current = 0;
     setPhase("running");
+  };
+
+  // #27 — setup-screen "Resume" CTA: reuses the existing paused session (no
+  // new FocusSession row) and restores its frozen remaining time. Device
+  // effects are primed here too — this is the user gesture that (re)starts
+  // the countdown, same as start().
+  const resumeExisting = async () => {
+    if (!existingSession) return;
+    setPending(true);
+    const res = await resumeFocus(existingSession.id);
+    setPending(false);
+    if (!res.ok) return;
+    if (settings.alarmEnabled) alarmRef.current = createAlarm();
+    const src = FOCUS_SOUND_SRC[settings.sound] ?? null;
+    if (src) loopRef.current = createLoopPlayer(src);
+    setSessionId(existingSession.id);
+    setPlannedMin(res.plannedMin);
+    setTotalSec(res.totalSec);
+    setRemainingSec(res.remainingSec);
+    elapsedRef.current = Math.max(0, res.totalSec - res.remainingSec);
+    setPhase(res.remainingSec <= 0 ? "timeup" : "running");
+  };
+
+  // #27 — the in-session Pause/Resume toggle now persists real state instead
+  // of only flipping local `phase`: pausing stamps the session (so leaving
+  // the tab, reloading, or opening another device restores correctly);
+  // resuming reuses that same session (see resumeFocus). On a resume failure
+  // (e.g. the session was retired elsewhere) fail safe by staying in
+  // "running" rather than stranding the user on an inert Paused screen.
+  const togglePause = async () => {
+    if (phase === "running") {
+      setPhase("paused");
+      if (sessionId) await pauseFocus(sessionId, { totalSec });
+      return;
+    }
+    if (phase !== "paused" || !sessionId) return;
+    setPending(true);
+    const res = await resumeFocus(sessionId);
+    setPending(false);
+    if (!res.ok) {
+      setPhase("running");
+      return;
+    }
+    setRemainingSec(res.remainingSec);
+    elapsedRef.current = Math.max(0, res.totalSec - res.remainingSec);
+    setPhase(res.remainingSec <= 0 ? "timeup" : "running");
   };
 
   const changeTime = (mins: number) => {
@@ -416,6 +477,22 @@ export function FocusTimer({
       {/* Controls */}
       {phase === "setup" && (
         <div className="flex flex-col items-center gap-3">
+          {/* #27 — a truly-paused session exists for this step: offer BOTH
+              choices rather than silently resuming (owner decision) or
+              silently discarding it. "Start fresh" below still works exactly
+              as before — beginFocus retires this paused row first. */}
+          {existingSession && (
+            <Button
+              variant="brand"
+              onClick={resumeExisting}
+              disabled={pending}
+              className="h-auto min-h-[52px] rounded-full px-8 py-3"
+            >
+              {t("focus.resume", voice)} · ~
+              {Math.max(1, Math.ceil(existingSession.remainingSec / 60))}m{" "}
+              {t("focus.hero.left", voice)}
+            </Button>
+          )}
           <label className="text-muted-foreground flex items-center gap-2 text-sm">
             Duration
             <input
@@ -434,14 +511,22 @@ export function FocusTimer({
           </label>
           {/* #40 Phase 3.1 — the single CTA that launches the neon focus
               session earns the brand gradient (hero moment). variant="brand"
-              carries the ≥18.6px-bold label + visible focus ring. */}
+              carries the ≥18.6px-bold label + visible focus ring. Once an
+              existingSession offers Resume above, this becomes the secondary
+              "Start fresh" choice (outline, not the hero gradient). */}
           <Button
-            variant="brand"
+            variant={existingSession ? "outline" : "brand"}
             onClick={start}
             disabled={pending}
-            className="h-auto min-h-[52px] rounded-full px-8 py-3"
+            className={
+              existingSession
+                ? "min-h-[44px] rounded-full px-6"
+                : "h-auto min-h-[52px] rounded-full px-8 py-3"
+            }
           >
-            {t("focus.startTimer", voice)}
+            {existingSession
+              ? t("focus.startFresh", voice)
+              : t("focus.startTimer", voice)}
           </Button>
         </div>
       )}
@@ -456,10 +541,9 @@ export function FocusTimer({
             {t("focus.timer.completeStep", voice)}
           </button>
           <button
-            onClick={() =>
-              setPhase((p) => (p === "running" ? "paused" : "running"))
-            }
-            className="hover:bg-accent inline-flex min-h-[44px] items-center rounded-md border px-4"
+            onClick={togglePause}
+            disabled={pending}
+            className="hover:bg-accent inline-flex min-h-[44px] items-center rounded-md border px-4 disabled:opacity-50"
           >
             {phase === "running"
               ? t("focus.pause", voice)

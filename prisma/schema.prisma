@@ -196,6 +196,15 @@ model FocusSession {
   outcome       String? // completed | requeued | gaveup
   workspaceId   String
   workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  // #27 — true pause/resume. `pausedAt` set = the session is currently paused
+  // (this, not `endedAt: null` alone, is what "resumable" means now — an
+  // open-but-never-paused session is stale/abandoned, not resumable).
+  // `accumulatedPausedMs` sums every prior pause interval's duration, so
+  // remaining time = plannedMin*60 - (now|pausedAt - startedAt - accumulatedPausedMs)/1000
+  // stays correct across any number of pause/resume cycles. See
+  // src/lib/focus-timer-clock.ts `remainingSecForSession`.
+  pausedAt      DateTime?
+  accumulatedPausedMs Int  @default(0)
 
   @@index([stepId])
   @@index([workspaceId])
