@@ -385,7 +385,15 @@ deploy_review:
   # (waiting on the test *stage* for them would be pure delay). deploy_production
   # keeps the same gate via stage scheduling (no explicit needs) so scan results
   # also land before a prod rollout.
-  needs: ["build_image", "test_app", "e2e_test"]
+  # Explicit long form (matches the tag-rule override above): deploy_review
+  # consumes none of these jobs' artifacts — it deploys the pushed image via helm.
+  needs:
+    - job: build_image
+      artifacts: false
+    - job: test_app
+      artifacts: false
+    - job: e2e_test
+      artifacts: false
   # Serialize helm per review env: deploy jobs aren't interruptible, so a
   # quick follow-up push otherwise races the previous pipeline's still-running
   # helm op on the same release → "another operation is in progress" (hit on
