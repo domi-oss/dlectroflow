@@ -19,6 +19,123 @@ operators upgrading a self-hosted instance don't get surprised.
 > Shipped to production but not yet tagged. At cut time this becomes
 > `## [X.Y.Z] - <date>` and a fresh empty `## [Unreleased]` is added above it.
 
+## [0.4.0] - 2026-07-27
+
+**Focus-session depth + bring-your-own-model.** A focus session is now something you
+can sit inside for an hour: real lo-fi music with a playlist that actually moves on,
+a pause that survives a reload or a second device, and a setup screen that puts one
+number and one action in front of you instead of four competing figures. Alongside
+it, the dormant LLM seam is live — a self-hoster can point dlectroflow at a local
+model or another vendor instead of needing an Anthropic key.
+
+### ⚠️ Upgrade notes
+
+- **This release migrates the database.** Four Prisma migrations run on container
+  start: `FocusSession.pausedAt` + `accumulatedPausedMs` (#27), a widened
+  `Settings.focusSound` CHECK constraint (#43), `Settings.focusShuffle` (#68), and a
+  **one-off data cleanup that deletes orphaned `Task` rows** (#64). The schema
+  changes are additive and default-valued; the cleanup is idempotent and only
+  removes rows that were already unreachable from the Library. Still: take a backup
+  and upgrade sequentially from 0.3.0.
+- **New environment variables — required only if you change LLM provider (#59).**
+  `LLM_PROVIDER` still defaults to `anthropic`, and that path is unchanged, so an
+  existing deployment needs no config edits. Setting
+  `LLM_PROVIDER=openai-compatible` makes **`LLM_BASE_URL` and `LLM_MODEL`
+  boot-required in production** — the app refuses to start without them rather than
+  failing at first use. Optional alongside them: `LLM_API_KEY` (omit it for local
+  runners that need none), `LLM_OWNER_MODEL` / `LLM_GUEST_MODEL` (per-role split,
+  each falling back to `LLM_MODEL`), and `LLM_SUPPORTS_TOOLS=false` for a model
+  without native tool-calling. All documented in `.env.example`.
+- **The container image is larger** (~893 MB) because the lo-fi tracks are bundled
+  (#43). A cold rollout onto fresh nodes now spends real time pulling it, so the
+  deploy jobs' `helm --timeout` was raised (production 10m → 20m, review 10m →
+  15m). If you deploy with your own `helm --timeout`, raise it too — the first
+  rollout of this version can otherwise time out and roll back on time alone,
+  with healthy pods.
+
+### Added
+
+- **Bring-your-own-LLM (#59):** the `LLM_PROVIDER` seam is now real. A `getLLM()`
+  factory serves one normalized provider interface behind every AI call (task
+  breakdown, daily spark, end-of-day round-up, focus re-estimate), with two
+  adapters: `anthropic` (today's behaviour, unchanged) and `openai-compatible` —
+  one adapter covering hosted vendors (OpenAI, OpenRouter, Groq, Together) and
+  local runners (Ollama, LM Studio, vLLM) via a base URL. Models for a
+  non-Anthropic provider come from env rather than the built-in allowlist, and a
+  model **without** tool-calling still works: steps are requested as JSON in the
+  response and, if that can't be parsed, the deterministic local breakdown takes
+  over. Provider health is surfaced on `/api/livez` (`llmFailures`), and retryable
+  429/5xx responses get bounded backoff (never mid-stream).
+- **Real lo-fi focus music (#43):** the placeholder sound is replaced by 10 curated
+  **CC0** tracks (one per open-lofi category, bundled — no external requests, no new
+  CSP origin, provenance recorded in `public/audio/LICENSE.md`). Settings gains a
+  track picker with per-track preview, and `/focus` gets a mini-player
+  (play/pause, prev/next, volume, now-playing as text). The music is coupled to the
+  timer: pausing the session pauses the music, resuming resumes it, and it stops
+  when the session ends.
+- **The playlist moves on, and can shuffle (#68):** a track no longer loops
+  forever. Playback walks the library as a "pass", so nothing repeats until the
+  pass is exhausted, and Shuffle deals a shuffled copy of that order up front
+  (rather than picking at random per track, which is what made it feel repetitive).
+  The preference persists per workspace. This is Phase 1 — per-category playlists
+  wait on catalog streaming (#61).
+- **True pause/resume for the focus timer (#27):** pausing is now persisted, not
+  just local React state, so a paused session survives a reload or a move to
+  another device. The clock freezes at the pause instant — a session left paused
+  overnight doesn't silently drain — and resuming returns the exact remaining time
+  you left, across any number of pause/resume cycles. Pressing Start on a step with
+  a genuinely paused session offers **both** "Resume · ~Xm left" and "Start fresh"
+  instead of guessing. Task-level "time left" figures now derive from the same
+  effective-remaining calculation, so the step and the task agree.
+
+### Changed
+
+- **Focus setup screen: one number, one action (#66).** The pre-session screen
+  showed up to four figures at once (ring countdown, step-context line, the Resume
+  button's own estimate, and a duration input) — and in the resume case two of them
+  contradicted each other. Now the ring shows a single number labelled for what it
+  is, there is one primary action, duration is a chip row (5/10/15/25m, plus the
+  step's own estimate when it's off-preset) instead of a free-type input, and
+  "Start fresh" reveals the chips only when asked — reversibly, so a mis-tap can't
+  retire a paused session. On a multi-step task, `Step N of M` becomes the header
+  eyebrow and the whole-task total is demoted to one quiet line: re-ranked, not
+  removed.
+- **CI is faster without weakening any gate (#53):** the image build no longer
+  waits on tests it doesn't consume — the "no deploy from a red suite" gate moved
+  downstream to the deploy jobs, and tag pipelines explicitly re-add the test gate
+  so a release image can never be published from a red suite. Secret detection was
+  deduplicated.
+- **Dependency health:** `react` + `react-dom` upgraded to 19.2.8 as a peer pair,
+  with a Renovate grouping rule so the React peer set always lands in one MR;
+  `@axe-core/playwright` pinned; `google/cloud-sdk:slim` and `renovate/renovate`
+  image digests refreshed.
+- README now opens with an AI-built + no-warranty transparency note.
+
+### Fixed
+
+- **Phantom tasks in the focus launcher, and completions that never reached the
+  Library (#64).** Deleting a captured item left its linked `Task` behind: the
+  Focus launcher reads `Task` directly and kept offering the orphan forever, while
+  the Library (which reads only captured items) couldn't see it at all — so
+  completing it wrote to zero rows. Deletion now removes the linked task in the
+  same transaction, and the migration clears orphans created before the fix.
+- **Mobile drag preview (#62):** dragging an inbox row showed a grip-sized sliver
+  with the title wrapped to one word per line; the drag ghost now sizes to its own
+  content and reads as a full row, as it does on desktop.
+- **Cramped breakdown step rows on mobile (#63):** the step row's controls now
+  stack below `sm:` instead of overflowing and truncating the step text.
+- **The saved-for-later "Review now" button failed WCAG-AA contrast (#56).** The
+  idle row dimmed itself with `opacity-70`, which composited the brand-coloured CTA
+  toward the background (~3.3:1). The dim now applies to the title line only, so
+  the row still reads as asleep while the CTA stays at 5.4:1 (light) / 6.3:1
+  (dark).
+- **Renovate-generated lockfiles could no longer be installed by CI (#67):** two
+  dependents needed incompatible `esbuild` ranges, so npm nested a second copy —
+  and Renovate's newer npm dropped that nested subtree while keeping the package
+  requiring it, so every dependency MR failed `npm ci` immediately. Upgrading
+  `tsx` collapses `esbuild` to a single hoisted version, leaving nothing for the
+  two npm versions to disagree about. Tooling only: no user-facing change.
+
 ## [0.3.0] - 2026-07-26
 
 The **open-source launch**: dlectroflow is now public under AGPL-3.0, running on its
@@ -230,7 +347,8 @@ Baseline — first tracked release of the shipped app.
 - GKE Autopilot deployment with valid TLS, per-MR review apps, and the full
   GitLab security-scanner suite.
 
-[Unreleased]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.3.0...main
+[Unreleased]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.4.0...main
+[0.4.0]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.3.0...v0.4.0
 [0.3.0]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.2.0...v0.3.0
 [0.2.0]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.1.0...v0.2.0
 [0.1.0]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.0.1...v0.1.0
