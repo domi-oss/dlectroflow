@@ -99,8 +99,12 @@ async function getAllCsps(): Promise<{ source: string; csp: CspDirectives }[]> {
 
 /**
  * Origins a third-party audio/video embed would need. None may appear anywhere.
- * Matched as substrings so `https://www.youtube.com` and `*.youtube.com` are
- * both caught.
+ *
+ * Matched on **host boundaries**, never as substrings: `hostOf()` reduces a CSP
+ * source to its host and `isForbiddenHost()` accepts only an exact match or a
+ * subdomain. A substring test would flag `https://demux.com` for `mux.com`
+ * (raised in review on !163) — and a policy test that cries wolf is a policy
+ * test somebody eventually deletes, so the matcher is unit-tested below.
  */
 const FORBIDDEN_MEDIA_HOSTS = [
   "youtube.com",
@@ -128,6 +132,35 @@ const WILDCARD_SOURCES = ["*", "http:", "https:", "ws:", "wss:"];
 function isWildcardSource(source: string): boolean {
   const token = source.toLowerCase();
   return WILDCARD_SOURCES.includes(token) || token.includes("*");
+}
+
+/**
+ * Reduce a CSP source expression to the host it names, or `null` if it names no
+ * host — keywords (`'self'`, `'none'`, `'unsafe-inline'`) and scheme-only
+ * sources (`data:`, `blob:`, `https:`) have no host to check.
+ *
+ * Handles the forms a CSP source can actually take: `https://host`, `//host`,
+ * `host:443`, `https://host/path`, and `*.host`.
+ */
+function hostOf(source: string): string | null {
+  let token = source.trim().toLowerCase();
+  if (!token) return null;
+  if (token.startsWith("'")) return null; // 'self', 'none', 'unsafe-inline'…
+  if (/^[a-z][a-z0-9+.-]*:$/.test(token)) return null; // data:, blob:, https:
+  token = token.replace(/^[a-z][a-z0-9+.-]*:\/\//, ""); // strip scheme://
+  token = token.replace(/^\/\//, ""); // protocol-relative
+  token = token.split("/")[0]; // drop any path
+  token = token.replace(/:\d+$/, ""); // drop any port
+  token = token.replace(/^\*\./, ""); // *.host → host
+  return token || null;
+}
+
+/**
+ * True when `host` IS `forbidden` or a subdomain of it — never when it merely
+ * contains it. `demux.com` is not `mux.com`; `cdn.mux.com` is.
+ */
+function isForbiddenHost(host: string, forbidden: string): boolean {
+  return host === forbidden || host.endsWith(`.${forbidden}`);
 }
 
 describe("CSP — self-hosted-only media posture (#69)", () => {
@@ -178,12 +211,18 @@ describe("CSP — self-hosted-only media posture (#69)", () => {
 
   it("names no third-party media or embed host in any directive", async () => {
     for (const { source, csp } of await getAllCsps()) {
-      const allSources = Object.values(csp).flat().join(" ").toLowerCase();
-      for (const host of FORBIDDEN_MEDIA_HOSTS) {
-        expect(
-          allSources,
-          `CSP on route ${source} must not allow ${host} — audio is self-hosted (#69); more variety goes through #61, served same-origin`,
-        ).not.toContain(host);
+      for (const [directive, sources] of Object.entries(csp)) {
+        for (const candidate of sources) {
+          const host = hostOf(candidate);
+          if (!host) continue;
+          const match = FORBIDDEN_MEDIA_HOSTS.find((forbidden) =>
+            isForbiddenHost(host, forbidden),
+          );
+          expect(
+            match,
+            `${directive} on route ${source} allows ${candidate} (${match}) — audio is self-hosted (#69); more variety goes through #61, served same-origin`,
+          ).toBeUndefined();
+        }
       }
     }
   });
@@ -220,5 +259,77 @@ describe("CSP — self-hosted-only media posture (#69)", () => {
         `X-Frame-Options for route ${group.source}`,
       ).toBe("DENY");
     }
+  });
+});
+
+/**
+ * The host matcher is the one piece of real logic in this file, and a policy
+ * test that raises false alarms is a policy test somebody deletes under
+ * deadline pressure. So it is tested itself — in particular against the
+ * substring bug this originally shipped with (review on !163): `mux.com` is the
+ * shortest entry in the blocklist and matched inside `demux.com`.
+ */
+describe("host matching (the matcher the media policy relies on)", () => {
+  it("returns no host for CSP keywords and scheme-only sources", () => {
+    for (const keyword of [
+      "'self'",
+      "'none'",
+      "'unsafe-inline'",
+      "'strict-dynamic'",
+    ]) {
+      expect(hostOf(keyword), keyword).toBeNull();
+    }
+    for (const scheme of ["data:", "blob:", "https:", "ws:"]) {
+      expect(hostOf(scheme), scheme).toBeNull();
+    }
+  });
+
+  it("extracts the host from the source forms a CSP can use", () => {
+    expect(hostOf("https://www.youtube.com")).toBe("www.youtube.com");
+    expect(hostOf("http://example.com")).toBe("example.com");
+    expect(hostOf("//example.com")).toBe("example.com");
+    expect(hostOf("example.com:8443")).toBe("example.com");
+    expect(hostOf("https://example.com/embed/path")).toBe("example.com");
+    expect(hostOf("https://*.googlevideo.com")).toBe("googlevideo.com");
+    expect(hostOf("HTTPS://WWW.YouTube.COM")).toBe("www.youtube.com");
+  });
+
+  it("flags a forbidden host and its subdomains", () => {
+    expect(isForbiddenHost("mux.com", "mux.com")).toBe(true);
+    expect(isForbiddenHost("cdn.mux.com", "mux.com")).toBe(true);
+    expect(isForbiddenHost("www.youtube.com", "youtube.com")).toBe(true);
+    expect(
+      isForbiddenHost("rr1---sn-x.googlevideo.com", "googlevideo.com"),
+    ).toBe(true);
+  });
+
+  it("does not flag unrelated hosts that merely contain a forbidden name", () => {
+    // Regression: the substring matcher flagged every one of these. (!163)
+    const legitimate: [string, string][] = [
+      ["demux.com", "mux.com"],
+      ["demuxer.mux.example", "mux.com"],
+      ["notspotify.com", "spotify.com"],
+      ["myvimeo.com.au", "vimeo.com"],
+      ["bandcamp.com.example.net", "bandcamp.com"],
+      ["fake-youtube.com", "youtube.com"],
+    ];
+    for (const [host, forbidden] of legitimate) {
+      expect(isForbiddenHost(host, forbidden), `${host} vs ${forbidden}`).toBe(
+        false,
+      );
+    }
+  });
+
+  it("still catches a real embed origin end to end", () => {
+    const host = hostOf("https://www.youtube-nocookie.com")!;
+    expect(FORBIDDEN_MEDIA_HOSTS.some((f) => isForbiddenHost(host, f))).toBe(
+      true,
+    );
+
+    // …and leaves a legitimate lookalike alone.
+    const benign = hostOf("https://demux.com")!;
+    expect(FORBIDDEN_MEDIA_HOSTS.some((f) => isForbiddenHost(benign, f))).toBe(
+      false,
+    );
   });
 });
