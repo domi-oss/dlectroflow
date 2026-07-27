@@ -49,10 +49,9 @@ model or another vendor instead of needing an Anthropic key.
 - **The container image is larger** (~893 MB) because the lo-fi tracks are bundled
   (#43). A cold rollout onto fresh nodes now spends real time pulling it, so the
   deploy jobs' `helm --timeout` was raised (production 10m → 20m, review 10m →
-  15m). If
-  you deploy with your own `helm --timeout`, raise it too — the first rollout of
-  this version can otherwise time out and roll back on time alone, with healthy
-  pods.
+  15m). If you deploy with your own `helm --timeout`, raise it too — the first
+  rollout of this version can otherwise time out and roll back on time alone,
+  with healthy pods.
 
 ### Added
 
