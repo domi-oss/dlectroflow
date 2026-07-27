@@ -28,11 +28,6 @@ export const ENV_DRIFT_ALLOWLIST: readonly string[] = [
   // meaningless) in production and never set by a developer locally — see
   // prisma/seed.ts and src/proxy.ts for the full explanation.
   "REVIEW_DEMO_WS",
-  // Documented in .env.example as a forward-looking BYO-LLM provider seam
-  // ("only anthropic is implemented today") — intentionally unread in src/
-  // until a second provider lands (see docs/design/specs/
-  // 2026-07-06-workspace-access-design.md).
-  "LLM_PROVIDER",
 ];
 
 export interface EnvDriftResult {

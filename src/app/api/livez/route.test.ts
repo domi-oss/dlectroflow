@@ -8,12 +8,12 @@ vi.mock("@/lib/db", () => {
 
 import { GET } from "./route";
 import {
-  _resetAnthropicFailuresForTest,
-  recordAnthropicFailure,
+  _resetLLMFailuresForTest,
+  recordLLMFailure,
 } from "@/lib/observability";
 
 describe("GET /api/livez", () => {
-  beforeEach(() => _resetAnthropicFailuresForTest());
+  beforeEach(() => _resetLLMFailuresForTest());
   afterEach(() => vi.restoreAllMocks());
 
   it("returns 200 alive without any DB access", async () => {
@@ -23,10 +23,11 @@ describe("GET /api/livez", () => {
     expect(body.status).toBe("alive");
   });
 
-  it("surfaces the anthropic failure counter", async () => {
+  it("surfaces the LLM failure counter under both the canonical and deprecated keys", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    recordAnthropicFailure("breakdown", new Error("x"));
+    recordLLMFailure("anthropic", "breakdown", new Error("x"));
     const body = await (await GET()).json();
+    expect(body.llmFailures).toBe(1);
     expect(body.anthropicFailures).toBe(1);
   });
 });

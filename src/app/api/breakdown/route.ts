@@ -1,6 +1,6 @@
-import type Anthropic from "@anthropic-ai/sdk";
 import { headers } from "next/headers";
-import { getAnthropic } from "@/lib/anthropic";
+import { getLLM } from "@/lib/llm";
+import type { LLMTool } from "@/lib/llm/types";
 import {
   buildUserPrompt,
   localBreakdown,
@@ -16,7 +16,7 @@ import {
   consumeGuestBreakdown,
   refundGuestBreakdown,
 } from "@/lib/guest-quota";
-import { recordAnthropicFailure } from "@/lib/observability";
+import { recordLLMFailure } from "@/lib/observability";
 import { OWNER_WORKSPACE_ID } from "@/lib/constants";
 
 export const runtime = "nodejs";
@@ -42,11 +42,11 @@ Steps:
 
 Always finish by calling the propose_steps tool with the structured steps. Emit your short conversational text FIRST, then the tool call.`;
 
-const PROPOSE_TOOL: Anthropic.Tool = {
+const PROPOSE_TOOL: LLMTool = {
   name: "propose_steps",
   description:
     "Propose the breakdown of the task into small, ordered, actionable steps.",
-  input_schema: {
+  inputSchema: {
     type: "object",
     properties: {
       parentEmoji: {
@@ -144,6 +144,25 @@ export async function POST(req: Request): Promise<Response> {
     ownerSetting: settings?.breakdownModel ?? null,
   });
 
+  // The LLM call failed to produce a usable breakdown — either it threw, or
+  // it streamed to completion with no parsed tool call (tool-less/local
+  // models, a malformed response). Either way the guest didn't get a real AI
+  // breakdown, so refund the quota unit exactly as a blocked guest would
+  // never have spent it. No-op for the owner / already-blocked guests.
+  //
+  // Idempotency guard: both call sites below (the soft-failure branch and
+  // the catch block) live in the SAME try, so if `send()` throws after the
+  // soft-failure branch already refunded (e.g. the client disconnected and
+  // controller.enqueue() throws), control falls into the catch, which would
+  // otherwise refund a second time. `refunded` makes a second call a no-op.
+  let refunded = false;
+  async function refundGuestOnLLMFailure(): Promise<void> {
+    if (isGuest && guestIpHash && !blockedReason && !refunded) {
+      refunded = true;
+      await refundGuestBreakdown(guestIpHash);
+    }
+  }
+
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -163,31 +182,45 @@ export async function POST(req: Request): Promise<Response> {
       }
 
       try {
-        const anthropic = getAnthropic();
-        const ms = anthropic.messages.stream({
-          ...breakdownParamsFor(model),
-          max_tokens: 6000,
+        const llm = getLLM();
+        for await (const ev of llm.stream({
           system: SYSTEM,
-          tools: [PROPOSE_TOOL],
           messages: [{ role: "user", content: buildUserPrompt(body) }],
-        });
-        ms.on("text", (delta) => send({ type: "text", delta }));
-        const final = await ms.finalMessage();
-        const tool = final.content.find(
-          (b) => b.type === "tool_use" && b.name === "propose_steps",
-        );
-        if (tool && tool.type === "tool_use") {
-          send({ type: "steps", data: tool.input as unknown as Proposal });
+          tools: [PROPOSE_TOOL],
+          toolChoice: "propose_steps",
+          maxTokens: 6000,
+          ...breakdownParamsFor(model),
+        })) {
+          if (ev.type === "text") {
+            send({ type: "text", delta: ev.delta });
+          } else if (ev.type === "final") {
+            if (ev.result.toolCall?.name === "propose_steps") {
+              send({
+                type: "steps",
+                data: ev.result.toolCall.input as unknown as Proposal,
+              });
+            } else {
+              // Tool-less/local models or a malformed response can complete
+              // the stream with no parsed tool call (see #59 Task 7's
+              // structured-output fallback). Never leave the user with a
+              // dead stream — degrade to the same canned plan as an error,
+              // and refund a guest exactly as the thrown-error path below.
+              await refundGuestOnLLMFailure();
+              send({
+                type: "fallback",
+                reason: "error",
+                data: localBreakdown(body.title),
+              });
+            }
+          }
         }
         send({ type: "done" });
       } catch (err) {
         // #21 P4: fallback mode must be visible — one structured log line +
         // the per-pod counter on /api/livez (was a silent bare catch).
-        recordAnthropicFailure("breakdown", err);
-        // Claude failed → refund the guest's quota so a transient error doesn't burn an allowance.
-        if (isGuest && guestIpHash && !blockedReason) {
-          await refundGuestBreakdown(guestIpHash);
-        }
+        recordLLMFailure(getLLM().id, "breakdown", err);
+        // The LLM call failed → refund the guest's quota so a transient error doesn't burn an allowance.
+        await refundGuestOnLLMFailure();
         // Canned fallback rather than a dead end.
         send({
           type: "fallback",

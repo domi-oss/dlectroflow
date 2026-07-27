@@ -3,6 +3,7 @@ import { getSettings } from "@/lib/db";
 import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
 import { getGoogleStatus } from "@/lib/google";
 import { SettingsPanel } from "@/components/settings/settings-panel";
+import { modelChoicesForProvider, resolveUtilityModel } from "@/lib/models";
 import { NotificationsSection } from "@/components/settings/notifications-section";
 import { AppearanceSection } from "@/components/settings/appearance-section";
 import { FocusTimerSection } from "@/components/settings/focus-timer-section";
@@ -43,6 +44,14 @@ export default async function SettingsPage({
         }}
         isOwner={owner}
         breakdownModel={settings.breakdownModel ?? null}
+        // #59 — env-driven (LLM_PROVIDER); must be resolved server-side and
+        // passed as a prop so SSR and client hydration see the same value
+        // (a client component can't safely read non-NEXT_PUBLIC_ env vars).
+        modelChoices={modelChoicesForProvider()}
+        // Resolve via the same owner-model path resolveBreakdownModel/
+        // resolveUtilityModel use, not a raw env read — LLM_MODEL alone
+        // misreports when an owner/guest split (LLM_OWNER_MODEL) is set.
+        activeModelName={resolveUtilityModel()}
         voice={voice}
       />
       <div className="border-t pt-4">

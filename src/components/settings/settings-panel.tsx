@@ -9,10 +9,7 @@ import {
   updateVoice,
 } from "@/app/actions/settings";
 import type { AgingSettings } from "@/lib/aging";
-import {
-  OWNER_BREAKDOWN_ALLOWLIST,
-  OWNER_BREAKDOWN_MODEL_DEFAULT,
-} from "@/lib/constants";
+import { OWNER_BREAKDOWN_MODEL_DEFAULT } from "@/lib/constants";
 import { t, type Voice } from "@/lib/strings";
 import {
   useSaveStatus,
@@ -28,22 +25,29 @@ const FABLE_LINES = [
   "Overkill detector tripped. Fable stays in its cage for this one.",
 ];
 
-const MODEL_LABELS: Record<string, string> = {
-  "claude-haiku-4-5": "Haiku 4.5 — fastest, cheapest",
-  "claude-sonnet-4-6": "Sonnet 4.6 — balanced (default)",
-  "claude-opus-4-8": "Opus 4.8 — deepest reasoning, slower",
-};
-
 export function SettingsPanel({
   settings,
   isOwner,
   breakdownModel,
+  modelChoices,
+  activeModelName,
   voice,
   autoSaveDelayMs = 600,
 }: {
   settings: AgingSettings & { firstRunPreview: boolean };
   isOwner: boolean;
   breakdownModel: string | null;
+  /**
+   * Provider-scoped model choices for the picker below, computed server-side
+   * via `modelChoicesForProvider()` (#59) — `null` when the active
+   * `LLM_PROVIDER` exposes no user-facing choice (e.g. a single-model
+   * openai-compatible deploy). Must be resolved by the server (env vars
+   * aren't available in this client component's browser bundle) and passed
+   * in as a prop so server-rendered HTML and client hydration agree.
+   */
+  modelChoices: { id: string; label: string }[] | null;
+  /** The single configured model name, shown read-only when `modelChoices` is null. */
+  activeModelName?: string | null;
   voice: Voice;
   /** Debounce for numeric auto-saves. Overridable so tests stay fast + deterministic. */
   autoSaveDelayMs?: number;
@@ -286,45 +290,60 @@ export function SettingsPanel({
             </span>
           )}
         </h2>
-        <div
-          className="flex flex-col gap-1"
-          role="radiogroup"
-          aria-label="Breakdown model"
-          aria-describedby={isOwner ? undefined : "breakdown-model-owner-hint"}
-        >
-          {OWNER_BREAKDOWN_ALLOWLIST.map((m) => (
-            <label
-              key={m}
-              className={
-                "flex items-center gap-2 text-sm" +
-                (isOwner ? "" : " opacity-50")
+        {modelChoices ? (
+          <>
+            <div
+              className="flex flex-col gap-1"
+              role="radiogroup"
+              aria-label="Breakdown model"
+              aria-describedby={
+                isOwner ? undefined : "breakdown-model-owner-hint"
               }
             >
-              <input
-                type="radio"
-                name="breakdown-model"
-                // Guests never see the owner's stored choice reflected.
-                checked={isOwner && model === m}
-                disabled={!isOwner || voicePending}
-                onChange={() => saveModel(m)}
-              />
-              {MODEL_LABELS[m]}
-            </label>
-          ))}
-          <label
-            className="flex items-center gap-2 text-sm opacity-50"
-            title={fable}
-          >
-            <input type="radio" name="breakdown-model" disabled />
-            🔒 Fable 5 — {fable}
-          </label>
-        </div>
-        {!isOwner && (
-          <p
-            id="breakdown-model-owner-hint"
-            className="text-muted-foreground text-xs"
-          >
-            {t("settings.modelOwnerHint", voice)}
+              {modelChoices.map(({ id, label }) => (
+                <label
+                  key={id}
+                  className={
+                    "flex items-center gap-2 text-sm" +
+                    (isOwner ? "" : " opacity-50")
+                  }
+                >
+                  <input
+                    type="radio"
+                    name="breakdown-model"
+                    // Guests never see the owner's stored choice reflected.
+                    checked={isOwner && model === id}
+                    disabled={!isOwner || voicePending}
+                    onChange={() => saveModel(id)}
+                  />
+                  {label}
+                </label>
+              ))}
+              {/* Decoy is anthropic-only: it rides along with the anthropic
+                  tier list (the only provider with a choice today). */}
+              <label
+                className="flex items-center gap-2 text-sm opacity-50"
+                title={fable}
+              >
+                <input type="radio" name="breakdown-model" disabled />
+                🔒 Fable 5 — {fable}
+              </label>
+            </div>
+            {!isOwner && (
+              <p
+                id="breakdown-model-owner-hint"
+                className="text-muted-foreground text-xs"
+              >
+                {t("settings.modelOwnerHint", voice)}
+              </p>
+            )}
+          </>
+        ) : (
+          // Single-model deploy (e.g. openai-compatible with no owner/guest
+          // split) — nothing to pick, so show what's configured instead of a
+          // picker nobody can act on.
+          <p className="text-muted-foreground text-xs">
+            Using model: <code>{activeModelName ?? "unknown"}</code>
           </p>
         )}
       </section>
