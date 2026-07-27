@@ -26,6 +26,7 @@ export const dynamic = "force-dynamic";
  */
 export default async function FocusLauncherPage() {
   const workspaceId = await currentWorkspaceId();
+  // eslint-disable-next-line react-hooks/purity -- async Server Component: this runs once per request on the server, not in a compiler-memoised client render.
   const now = Date.now();
 
   const [rawTasks, rawItems, settings, dashboard] = await Promise.all([

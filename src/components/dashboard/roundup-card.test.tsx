@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   RoundupCard,
@@ -23,10 +23,22 @@ vi.mock("@/app/actions/settings", () => ({
 }));
 
 const showReminder = vi.fn().mockResolvedValue(undefined);
+// Stand-in for the real permission store: reads are live and a successful
+// request notifies subscribers, exactly like src/lib/notifications.ts.
+let permissionValue: NotificationPermission | "unsupported" = "granted";
+const permissionListeners = new Set<() => void>();
 vi.mock("@/lib/notifications", () => ({
   registerServiceWorker: vi.fn().mockResolvedValue(null),
-  notificationPermission: () => "granted",
-  requestNotificationPermission: vi.fn().mockResolvedValue("granted"),
+  notificationPermission: () => permissionValue,
+  subscribeNotificationPermission: (listener: () => void) => {
+    permissionListeners.add(listener);
+    return () => permissionListeners.delete(listener);
+  },
+  requestNotificationPermission: vi.fn(async () => {
+    permissionValue = "granted";
+    permissionListeners.forEach((listener) => listener());
+    return "granted";
+  }),
   showReminder: (title: string, body: string) => showReminder(title, body),
 }));
 
@@ -37,6 +49,8 @@ afterEach(() => {
 });
 beforeEach(() => {
   vi.clearAllMocks();
+  permissionValue = "granted";
+  permissionListeners.clear();
   // Freeze the wall clock to a fixed morning time so the scheduled workday-end
   // effect (RoundupCard's mount `tick()`) never fires during these tests — it
   // only fires once `Date.now() >= workdayEndTime`. Fake *only* Date so that
@@ -95,5 +109,79 @@ describe("RoundupCard notifyRoundup gating", () => {
     );
     await user.click(screen.getByRole("button", { name: /trigger now/i }));
     await waitFor(() => expect(showReminder).toHaveBeenCalledTimes(1));
+  });
+});
+
+// #23 safety net: the permission prompt used to be mirrored into component
+// state by a mount effect; it now reads the shared notifications store.
+describe("RoundupCard notification-permission prompt", () => {
+  const enableButton = () =>
+    screen.queryByRole("button", { name: /enable a workday-end desktop/i });
+
+  it("offers the enable-reminders prompt only while permission is 'default'", () => {
+    permissionValue = "default";
+    render(
+      <RoundupCard
+        initialRollup={null}
+        settings={settings(true)}
+        emailConfigured={false}
+      />,
+    );
+    expect(enableButton()).toBeInTheDocument();
+  });
+
+  it("hides the prompt once permission has been granted", () => {
+    permissionValue = "granted";
+    render(
+      <RoundupCard
+        initialRollup={null}
+        settings={settings(true)}
+        emailConfigured={false}
+      />,
+    );
+    expect(enableButton()).toBeNull();
+  });
+
+  it("drops the prompt after the user grants permission", async () => {
+    permissionValue = "default";
+    const user = userEvent.setup();
+    render(
+      <RoundupCard
+        initialRollup={null}
+        settings={settings(true)}
+        emailConfigured={false}
+      />,
+    );
+    await user.click(enableButton()!);
+    await waitFor(() => expect(enableButton()).toBeNull());
+  });
+});
+
+// #23 safety net for the mount-clock refactor (`useRef(Date.now())` ran an
+// impure call during render): the demo override must still fire the round-up
+// about 4s after the card mounts, and not before.
+describe("RoundupCard demo override timing", () => {
+  it("fires ~4s after mount, not sooner", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 0, 15, 9, 0, 0));
+    render(
+      <RoundupCard
+        initialRollup={null}
+        settings={{ ...settings(false), roundupDemoOverride: true }}
+        emailConfigured={false}
+      />,
+    );
+    expect(triggerRollup).not.toHaveBeenCalled();
+
+    // The poll runs every 5s; at +3s the 4s target hasn't passed yet.
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+    expect(triggerRollup).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(2500);
+    });
+    expect(triggerRollup).toHaveBeenCalledTimes(1);
   });
 });

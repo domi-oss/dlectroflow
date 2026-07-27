@@ -40,7 +40,9 @@ export default async function AppLayout({
       remaining,
       quota,
       expiresAt: (
-        ws?.expiresAt ?? new Date(Date.now() + 24 * 3600_000)
+        ws?.expiresAt ??
+        // eslint-disable-next-line react-hooks/purity -- async Server Component: this runs once per request on the server, not in a compiler-memoised client render.
+        new Date(Date.now() + 24 * 3600_000)
       ).toISOString(),
     };
   }

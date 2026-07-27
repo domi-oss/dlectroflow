@@ -19,13 +19,30 @@ const eslintConfig = defineConfig([
     "**/.next/**",
   ]),
   {
-    // React-compiler-era advisory rules, demoted to warn so the CI lint gate
-    // (#21 P3) can block on real errors today. Existing findings + restoring
-    // these to error are tracked in issue #23 — don't add new ones.
     rules: {
-      "react-hooks/purity": "warn",
-      "react-hooks/set-state-in-effect": "warn",
-      "react-hooks/refs": "warn",
+      // React-compiler-era rules. Demoted to warn when the CI lint gate landed
+      // (#21 P3) because main already had findings — 15 of them by the time #23
+      // was picked up, since nothing was blocking new ones. #23 fixed 9 and
+      // suppressed 6 inline with a per-site reason (5 Date.now() reads in async
+      // Server Components + one deliberate poll), so they are back at ERROR and
+      // now block CI. New violations are bugs, not backlog.
+      "react-hooks/purity": "error",
+      "react-hooks/set-state-in-effect": "error",
+      "react-hooks/refs": "error",
+      // #23 — a leading underscore is already this repo's marker for "declared
+      // to satisfy a contract / arity, deliberately not read" (see the
+      // scheduling providers' `_ctx`/`_opts`, which say so in a comment). Honour
+      // it instead of leaving five permanently-warning intentional cases that
+      // train people to ignore lint output. Anything unmarked still warns.
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+          destructuredArrayIgnorePattern: "^_",
+        },
+      ],
     },
   },
 ]);

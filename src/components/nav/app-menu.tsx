@@ -16,20 +16,23 @@ const DESTINATIONS = [
 ] as const;
 
 export function AppMenu({ voice }: { voice: Voice }) {
-  const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close on route change.
-  useEffect(() => {
-    setOpen(false);
-  }, [pathname]);
+  // #23 — "open" is stored as *the route the menu was opened on*, so closing on
+  // navigation is derived during render instead of synced by an effect that
+  // called setOpen(false) on every pathname change (react-hooks/
+  // set-state-in-effect: that effect re-rendered the whole header twice per
+  // navigation). Same behaviour: the popover never survives a route change, and
+  // re-opening on the new route works because the key is the *current* path.
+  const [openedAt, setOpenedAt] = useState<string | null>(null);
+  const open = openedAt !== null && openedAt === pathname;
 
   // Close on Escape.
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") setOpenedAt(null);
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
@@ -45,7 +48,7 @@ export function AppMenu({ voice }: { voice: Voice }) {
         aria-label="Menu"
         aria-expanded={open}
         aria-haspopup="menu"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpenedAt(open ? null : pathname)}
         className="flex h-11 w-11 items-center justify-center rounded-full text-white outline-none [background-image:var(--gradient-brand)] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       >
         <svg

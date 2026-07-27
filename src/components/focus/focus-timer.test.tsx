@@ -622,6 +622,37 @@ describe("FocusTimer — complete", () => {
     expect(completeFocus).toHaveBeenCalled();
     expect(soundControls.stop).toHaveBeenCalled();
   });
+
+  // #23 safety net: the celebration line is one of a fixed set, picked at
+  // random (it used to be rolled during render into a ref — impure render +
+  // a ref read during render; it is now picked when the step is completed).
+  it("celebrates with a randomly chosen done message", async () => {
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.9); // → last entry
+    try {
+      const user = userEvent.setup();
+      render(<FocusTimer {...base()} />);
+      await start(user);
+      await user.click(screen.getByRole("button", { name: /complete step/i }));
+      expect(
+        await screen.findByText("Done and dusted. Proud of you."),
+      ).toBeInTheDocument();
+    } finally {
+      random.mockRestore();
+    }
+  });
+
+  it("picks a different done message for a different roll", async () => {
+    const random = vi.spyOn(Math, "random").mockReturnValue(0); // → first entry
+    try {
+      const user = userEvent.setup();
+      render(<FocusTimer {...base()} />);
+      await start(user);
+      await user.click(screen.getByRole("button", { name: /complete step/i }));
+      expect(await screen.findByText("Nice — step done!")).toBeInTheDocument();
+    } finally {
+      random.mockRestore();
+    }
+  });
 });
 
 // #27 — the in-session Pause/Resume toggle now persists real server state

@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { cn, touchTarget } from "@/lib/utils";
 
 const DURATION_PRESETS = [15, 30, 60] as const;
@@ -58,14 +64,23 @@ export function ScheduleControl({
   const needsDuration =
     state === "needs_duration" || state === "ics_needs_duration";
 
+  // Closing always clears the custom-duration input so a stale value can't
+  // reappear on reopen (Duo review). #23 — every close route calls this
+  // instead of an effect watching `open` (react-hooks/set-state-in-effect),
+  // which cost an extra render pass on each dismissal.
+  const close = useCallback(() => {
+    setOpen(false);
+    setCustom("");
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") close();
     };
     const onPointerDown = (e: Event) => {
       if (rootRef.current && !rootRef.current.contains(e.target as Node))
-        setOpen(false);
+        close();
     };
     document.addEventListener("keydown", onKeyDown);
     document.addEventListener("pointerdown", onPointerDown);
@@ -73,14 +88,7 @@ export function ScheduleControl({
       document.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("pointerdown", onPointerDown);
     };
-  }, [open]);
-
-  // Clear the custom-duration input whenever the popover closes (Escape /
-  // outside-click / preset pick) so a stale value can't reappear on reopen
-  // (Duo review).
-  useEffect(() => {
-    if (!open) setCustom("");
-  }, [open]);
+  }, [open, close]);
 
   if (state === "connect" || state === "reconnect") {
     return (
@@ -107,8 +115,7 @@ export function ScheduleControl({
 
   const fireCustom = () => {
     if (custom === "" || customOutOfRange) return;
-    setOpen(false);
-    setCustom("");
+    close();
     if (isIcs) onScheduleIcs?.(customMinutes);
     else onScheduleSingle?.(customMinutes);
   };
@@ -129,7 +136,8 @@ export function ScheduleControl({
         onClick={() => {
           if (state === "ready_steps") onScheduleSteps?.();
           else if (state === "ics_ready_steps") onScheduleIcs?.();
-          else setOpen((o) => !o); // needs_duration | ics_needs_duration
+          else if (open) close();
+          else setOpen(true); // needs_duration | ics_needs_duration
         }}
         className={cn(
           isMenu
@@ -162,7 +170,7 @@ export function ScheduleControl({
                   touchTarget,
                 )}
                 onClick={() => {
-                  setOpen(false);
+                  close();
                   if (isIcs) onScheduleIcs?.(minutes);
                   else onScheduleSingle?.(minutes);
                 }}

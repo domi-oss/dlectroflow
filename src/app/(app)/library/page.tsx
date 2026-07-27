@@ -68,6 +68,7 @@ export default async function LibraryPage({
   // One request-time clock, threaded down so bucketing (savedLater = snoozed
   // into the future), the "added Xh ago" labels, and each step's persisted
   // remaining-time snapshot (#27 follow-up) all agree (matches layout.tsx).
+  // eslint-disable-next-line react-hooks/purity -- async Server Component: this runs once per request on the server, not in a compiler-memoised client render.
   const now = Date.now();
   const [settings, { tab, from }, rawItems] = await Promise.all([
     getSettings(workspaceId),

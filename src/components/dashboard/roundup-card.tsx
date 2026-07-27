@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  useTransition,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { triggerRollup } from "@/app/actions/rollup";
@@ -9,6 +15,7 @@ import type { Rollup } from "@/lib/rollup";
 import {
   notificationPermission,
   requestNotificationPermission,
+  subscribeNotificationPermission,
   registerServiceWorker,
   showReminder,
 } from "@/lib/notifications";
@@ -53,13 +60,17 @@ export function RoundupCard({
   const [pending, startTransition] = useTransition();
   const [emailNote, setEmailNote] = useState<string | null>(null);
 
-  // Notifications (shared helpers with the inbox).
-  const [permission, setPermission] = useState<
-    NotificationPermission | "unsupported"
-  >("default");
+  // Notifications (shared helpers with the inbox). #23 — permission is read
+  // through the shared subscription (notified after our own requests) rather
+  // than copied into state by a mount effect, matching inbox-view and the
+  // settings notifications section.
+  const permission = useSyncExternalStore(
+    subscribeNotificationPermission,
+    notificationPermission,
+    () => "default" as const,
+  );
   useEffect(() => {
     registerServiceWorker();
-    setPermission(notificationPermission());
   }, []);
 
   const run = (force: boolean) =>
@@ -96,8 +107,14 @@ export function RoundupCard({
   // ignores the daily guard so you can re-demo). Otherwise fires once when the
   // clock passes the workday-end time (guarded per day via localStorage).
   const firedRef = useRef(false);
-  const mountRef = useRef(Date.now());
+  // #23 — the mount clock is read in the effect, not during render (reading
+  // Date.now() in a `useRef` initialiser is an impure render, react-hooks/
+  // purity). Assigned once, so the ~4s demo countdown is still measured from
+  // the card's first mount even if this effect re-runs on a settings change.
+  const mountRef = useRef<number | null>(null);
   useEffect(() => {
+    mountRef.current ??= Date.now();
+    const mountedAt = mountRef.current;
     const dayKey = `dlectroflow-roundup-fired-${ymd(new Date())}`;
     if (!settings.roundupDemoOverride && localStorage.getItem(dayKey)) {
       firedRef.current = true;
@@ -106,7 +123,7 @@ export function RoundupCard({
     const tick = () => {
       if (firedRef.current) return;
       const target = settings.roundupDemoOverride
-        ? mountRef.current + 4000
+        ? mountedAt + 4000
         : targetTimeToday(settings.workdayEndTime);
       if (Date.now() < target) return;
       firedRef.current = true;
@@ -186,9 +203,9 @@ export function RoundupCard({
 
       {permission === "default" && (
         <button
-          onClick={() =>
-            requestNotificationPermission().then((p) => setPermission(p))
-          }
+          onClick={() => {
+            void requestNotificationPermission();
+          }}
           className="hover:bg-accent mt-3 w-full rounded-lg border border-dashed px-3 py-2 text-xs"
         >
           🔔 Enable a workday-end desktop reminder
