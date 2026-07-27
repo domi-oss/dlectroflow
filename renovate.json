@@ -35,6 +35,12 @@
       "labels": ["dependencies", "docker", "base-image"]
     },
     {
+      "description": "Keep react and react-dom in a single MR. react-dom@X declares `peerDependencies: react ^X` and both are exact-pinned in package.json, so a react-dom-only update is unresolvable: npm exits ERESOLVE, Renovate's updateArtifacts step fails, and the MR lands with a bumped package.json and no lockfile change at all (!147 - react-dom 19.2.8 against react 19.2.7). Grouping makes the peer pair move together. Remove this rule only once react/react-dom stop being release-locked peers, or if this repo stops exact-pinning them.",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["react", "react-dom"],
+      "groupName": "react monorepo"
+    },
+    {
       "description": "Defer ESLint 10 (#21/!51): no released eslint-plugin-react supports it (latest 7.37.5 peers eslint ^3||...||^9.7, pinned via eslint-config-next). Lift this line once the Next plugin chain ships ESLint-10 support - Renovate will re-propose the major automatically.",
       "matchPackageNames": ["eslint"],
       "allowedVersions": "<10"
