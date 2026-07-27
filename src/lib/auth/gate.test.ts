@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { isPublicPath, isOwnerOnlyPath } from "./gate";
+import {
+  isPublicPath,
+  isOwnerOnlyPath,
+  isAuthenticatedOnlyPath,
+  AUTHENTICATED_PREFIXES,
+} from "./gate";
 
 describe("gate paths", () => {
   it("health is public", () => {
@@ -29,5 +34,39 @@ describe("gate paths", () => {
   });
   it("app root is not owner-only", () => {
     expect(isOwnerOnlyPath("/")).toBe(false);
+  });
+});
+
+// #35 Phase A — a third category. Before this, gate.ts knew only "public" and
+// "owner-only", so anything that was not owner-only was reachable by a guest
+// session. Phase C moves /api/google/oauth/ out of owner-only; without this
+// category to move it INTO, that would open the OAuth callback to guests.
+describe("authenticated-only paths", () => {
+  it("classifies an authenticated-only path", () => {
+    expect(isAuthenticatedOnlyPath("/api/account/export")).toBe(true);
+    expect(isAuthenticatedOnlyPath("/api/health")).toBe(false);
+  });
+
+  it("app root is not authenticated-only (guests use the app)", () => {
+    expect(isAuthenticatedOnlyPath("/")).toBe(false);
+  });
+
+  it("does not treat lookalike paths as authenticated-only", () => {
+    expect(isAuthenticatedOnlyPath("/api/accounts-evil")).toBe(false);
+    expect(isAuthenticatedOnlyPath("/api/account-evil/export")).toBe(false);
+  });
+
+  it("matches subpaths of every declared prefix", () => {
+    for (const prefix of AUTHENTICATED_PREFIXES) {
+      expect(isAuthenticatedOnlyPath(`${prefix}anything/deeper`)).toBe(true);
+    }
+  });
+
+  it("declares every prefix with a trailing slash", () => {
+    // A prefix without one ("/api/account") would also match
+    // "/api/accountant", quietly gating an unrelated future route.
+    for (const prefix of AUTHENTICATED_PREFIXES) {
+      expect(prefix.endsWith("/")).toBe(true);
+    }
   });
 });

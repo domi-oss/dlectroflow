@@ -7,7 +7,11 @@ import {
   GUEST_WS_HEADER,
 } from "@/lib/auth/session";
 import { authConfig } from "@/lib/auth/config";
-import { isPublicPath, isOwnerOnlyPath } from "@/lib/auth/gate";
+import {
+  isPublicPath,
+  isOwnerOnlyPath,
+  isAuthenticatedOnlyPath,
+} from "@/lib/auth/gate";
 import { requestOrigin } from "@/lib/origin";
 
 export const config = {
@@ -25,14 +29,24 @@ export async function proxy(req: NextRequest) {
   const requestHeaders = new Headers(req.headers);
   requestHeaders.delete(GUEST_WS_HEADER);
 
-  const ownerToken = req.cookies.get(OWNER_COOKIE)?.value;
-  const ownerPayload = ownerToken
-    ? await verifySession(ownerToken, sessionSecret)
+  const sessionToken = req.cookies.get(OWNER_COOKIE)?.value;
+  const sessionPayload = sessionToken
+    ? await verifySession(sessionToken, sessionSecret)
     : null;
-  const isOwner = ownerPayload?.kind === "user";
+  // A real signed-in account (#35). The middleware can only tell "signed in"
+  // from "guest" — telling an OWNER from a MEMBER needs the database, which the
+  // Edge runtime has no client for, so role checks stay in isOwnerRequest() at
+  // the route/action layer. OWNER_ONLY_PREFIXES therefore means "signed in" at
+  // this layer and "role = owner" at the handler; both gates run.
+  const isSignedIn = sessionPayload?.kind === "user";
 
   // Owner-only paths: block guests.
-  if (isOwnerOnlyPath(pathname) && !isOwner) {
+  if (isOwnerOnlyPath(pathname) && !isSignedIn) {
+    return NextResponse.redirect(new URL("/login", req.url));
+  }
+
+  // Authenticated-only paths: a valid GUEST session is not enough here.
+  if (isAuthenticatedOnlyPath(pathname) && !isSignedIn) {
     return NextResponse.redirect(new URL("/login", req.url));
   }
 
@@ -40,8 +54,10 @@ export async function proxy(req: NextRequest) {
     return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
-  // Owner passes through (with inbound header stripped).
-  if (isOwner) {
+  // A signed-in account passes through with the inbound header stripped and
+  // NO guest cookie minted below — otherwise they would carry a guest workspace
+  // header alongside their own session and the resolver could read either.
+  if (isSignedIn) {
     return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
