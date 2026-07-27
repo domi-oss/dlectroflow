@@ -21,9 +21,11 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Changed
 
-- **The container image is ~4× smaller (#71).** Measured on the same build,
-  registry-equivalent (gzipped layers): **795 MB → 198 MB**, a 75% cut. Almost
-  none of the bulk was the app. The runtime stage ran `npm install` with `/app`
+- **The container image is ~4× smaller (#71).** **893 MB → 207 MB** as reported
+  by the container registry — the same metric the failed rollout logged
+  (`Image size: 893096400 bytes`) — a 77% cut, so a cold pull onto a fresh
+  Autopilot node no longer dominates the deploy. Almost none of the bulk was
+  the app. The runtime stage ran `npm install` with `/app`
   as the working directory, so npm treated the standalone output's
   `package.json` as the project manifest and reinstalled the **entire**
   dependency tree — 392 packages including `next`, `typescript`, `playwright`
