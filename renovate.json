@@ -35,7 +35,7 @@
       "labels": ["dependencies", "docker", "base-image"]
     },
     {
-      "description": "Keep react and react-dom in a single MR. react-dom@X declares `peerDependencies: react ^X` and both are exact-pinned in package.json, so a react-dom-only update is unresolvable: npm exits ERESOLVE, Renovate's updateArtifacts step fails, and the MR lands with a bumped package.json and no lockfile change at all (!147 - react-dom 19.2.8 against react 19.2.7). Grouping makes the peer pair move together. Remove this rule only once react/react-dom stop being release-locked peers, or if this repo stops exact-pinning them.",
+      "description": "Keep react and react-dom in a single MR - splitting them produces two MRs that can never merge. React 19 asserts at runtime that the two packages are the exact same version (https://react.dev/warnings/version-mismatch), so a react-only bump breaks: !146 (react 19.2.8, react-dom 19.2.7) passed dependency resolution and then failed 47 test files with 'Incompatible React versions'. A react-dom-only bump is not even resolvable, because react-dom@X peers react ^X against our exact pin: npm exits ERESOLVE, Renovate's updateArtifacts step fails, and the MR lands with a bumped package.json and no lockfile change at all (!147). Grouping makes the peer pair move together. Remove this rule only once react/react-dom stop being release-locked peers, or if this repo stops exact-pinning them.",
       "matchManagers": ["npm"],
       "matchPackageNames": ["react", "react-dom"],
       "groupName": "react monorepo"
