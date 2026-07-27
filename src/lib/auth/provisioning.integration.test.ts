@@ -303,6 +303,27 @@ describe("provisionFromProfile", () => {
     expect(second.userId).toBe(first.userId);
   });
 
+  // Duo review (!169): the self-heal path for an existing account whose
+  // workspace is missing. Workspace.userId is unique so a duplicate is
+  // impossible, but the losing request's create rejects with P2002 — which
+  // reached the user as a 500 on sign-in until it was handled.
+  it("self-heals a missing workspace, even under a concurrent sign-in", async () => {
+    const u = await prisma.user.create({
+      data: { provider: PROVIDER, providerSub: "60", status: "active" },
+    });
+
+    const [a, b] = await Promise.all([
+      provisionFromProfile(PROVIDER, { subject: "60" }),
+      provisionFromProfile(PROVIDER, { subject: "60" }),
+    ]);
+
+    expect(a.ok).toBe(true);
+    expect(b.ok).toBe(true);
+    if (!a.ok || !b.ok) return;
+    expect(a.workspaceId).toBe(b.workspaceId);
+    expect(await prisma.workspace.count({ where: { userId: u.id } })).toBe(1);
+  });
+
   // Two browser tabs finishing OAuth at once must not produce two accounts, two
   // workspaces, or a 500. The unique (provider, providerSub) index is the
   // backstop; this asserts the module copes with losing that race.

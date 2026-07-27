@@ -107,13 +107,7 @@ async function provision(
     // sign-in, or a hand-repaired database) rather than throwing a 500 at
     // someone who is legitimately signed in.
     const workspaceId =
-      existing.workspace?.id ??
-      (
-        await prisma.workspace.create({
-          data: { kind: WorkspaceKind.User, userId: existing.id },
-          select: { id: true },
-        })
-      ).id;
+      existing.workspace?.id ?? (await ensureWorkspace(existing.id));
     return { ...resultFor(updated), workspaceId };
   }
 
@@ -190,6 +184,36 @@ async function provision(
       return provision(provider, profile, attempt + 1);
     }
     if (lostRace) return { ok: false, reason: "not_invited" };
+    throw err;
+  }
+}
+
+/**
+ * Create the missing workspace for an existing account, tolerating a race.
+ *
+ * `Workspace.userId` is unique, so two concurrent sign-ins can never produce
+ * two workspaces — but without this the loser's `create` rejects with P2002 and
+ * the user gets a 500 on sign-in (Duo review, !169). Re-read instead: the
+ * winner's row is the answer for both.
+ */
+async function ensureWorkspace(userId: string): Promise<string> {
+  try {
+    const ws = await prisma.workspace.create({
+      data: { kind: WorkspaceKind.User, userId },
+      select: { id: true },
+    });
+    return ws.id;
+  } catch (err) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === "P2002"
+    ) {
+      const ws = await prisma.workspace.findUnique({
+        where: { userId },
+        select: { id: true },
+      });
+      if (ws) return ws.id;
+    }
     throw err;
   }
 }
