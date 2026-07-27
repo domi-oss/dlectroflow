@@ -64,9 +64,16 @@ export type FocusSoundOptions = {
 
 export const DEFAULT_FOCUS_VOLUME = 0.5;
 
-/** The pass being played: track indices consumed head→tail, plus where in them
- * we are. Wrapping is only allowed once `cursor` reaches the tail (#68). */
-type Pass = { order: number[]; cursor: number };
+/**
+ * The pass being played: track indices, where in them we are, and which
+ * POSITIONS have actually been heard this pass (#68).
+ *
+ * `heard` is what makes "wrap only after exhaustion" true even when the user
+ * navigates by hand — reaching the tail is not the same as having played
+ * everything (prev from the head jumps there, and an in-order pass starts on
+ * whichever track settings chose). Duo review (!151).
+ */
+type Pass = { order: number[]; cursor: number; heard: Set<number> };
 
 export function useFocusSound(
   initialSound: string,
@@ -114,7 +121,8 @@ export function useFocusSound(
         shuffle: shuffleRef.current,
         startAt: startIndex,
       });
-      passRef.current = { order, cursor: playOrderCursor(order, startIndex) };
+      const cursor = playOrderCursor(order, startIndex);
+      passRef.current = { order, cursor, heard: new Set([cursor]) };
     }
     return passRef.current;
   }, [tracks, startIndex]);
@@ -168,12 +176,18 @@ export function useFocusSound(
   }, [play, pause]);
 
   /**
-   * Move one entry through the current pass and load that track. Running off the
-   * tail is the ONLY place the playlist wraps — and a shuffled pass is re-dealt
-   * there, keeping the track that just finished off the new head so a wrap can't
-   * sound like a repeat either. Running off the head (prev) goes to the tail of
-   * the SAME pass: that's a deliberate user tap, not an exhausted pass, so it
-   * must not re-deal the order underneath them.
+   * Move one entry through the current pass and load that track.
+   *
+   * Running off the tail is the only place the playlist can start over — and it
+   * only does so once every position has actually been heard. If some haven't
+   * (the user tapped prev, or the in-order pass started mid-list), we hand them
+   * the first unheard one instead, so nothing repeats while something new is
+   * still owed. On a genuinely exhausted pass a shuffled order is re-dealt with
+   * the track that just finished kept off the new head, so even the wrap can't
+   * sound like a repeat.
+   *
+   * Running off the head (prev) goes to the tail of the SAME pass: a deliberate
+   * user tap, never a reason to re-deal the order underneath them.
    */
   const step = useCallback(
     (delta: 1 | -1) => {
@@ -181,17 +195,24 @@ export function useFocusSound(
       const p = pass();
       let cursor = p.cursor + delta;
       if (cursor >= p.order.length) {
-        if (shuffleRef.current) {
-          p.order = buildPlayOrder(tracks.length, {
-            shuffle: true,
-            avoidFirst: p.order[p.order.length - 1],
-          });
+        const unheard = p.order.findIndex((_, at) => !p.heard.has(at));
+        if (unheard >= 0) {
+          cursor = unheard;
+        } else {
+          if (shuffleRef.current) {
+            p.order = buildPlayOrder(tracks.length, {
+              shuffle: true,
+              avoidFirst: p.order[p.cursor],
+            });
+          }
+          p.heard.clear();
+          cursor = 0;
         }
-        cursor = 0;
       } else if (cursor < 0) {
         cursor = p.order.length - 1;
       }
       p.cursor = cursor;
+      p.heard.add(cursor);
       const i = p.order[cursor];
       setIdx(i);
       // Changing tracks: create the element if needed, then load() the new src
@@ -219,10 +240,8 @@ export function useFocusSound(
       shuffle: nextShuffle,
       startAt: indexRef.current,
     });
-    passRef.current = {
-      order,
-      cursor: playOrderCursor(order, indexRef.current),
-    };
+    const cursor = playOrderCursor(order, indexRef.current);
+    passRef.current = { order, cursor, heard: new Set([cursor]) };
     onShuffleChangeRef.current?.(nextShuffle);
   }, [tracks]);
 

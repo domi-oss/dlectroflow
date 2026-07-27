@@ -212,6 +212,55 @@ describe("useFocusSound — auto-advance + no repeats until exhausted (#68)", ()
     }
   });
 
+  // Duo review (!151): stepping BACK to the tail must not look like exhaustion.
+  // The user went back one track — they haven't heard the rest of the pass yet,
+  // so the next forward move owes them an unheard track, not a re-deal (which
+  // could serve up what they just heard).
+  it("in order: prev to the tail then forward plays an unheard track, not the head again", () => {
+    const { result } = renderHook(() => useFocusSound("lofi_calm"));
+    act(() => result.current.play());
+    act(() => result.current.prev()); // head → tail of the same pass
+    expect(result.current.track?.id).toBe(FOCUS_SOUND_TRACKS[N - 1].id);
+    endTrack();
+    expect(result.current.track?.id).toBe(FOCUS_SOUND_TRACKS[1].id);
+  });
+
+  it("shuffled: prev to the tail then forward keeps the pass (still no repeat until exhausted)", () => {
+    for (let attempt = 0; attempt < 25; attempt++) {
+      const { result, unmount } = renderHook(() =>
+        useFocusSound("lofi_calm", { shuffle: true }),
+      );
+      act(() => result.current.play());
+      const heard = [result.current.track!.id];
+      act(() => result.current.prev()); // head → tail
+      heard.push(result.current.track!.id);
+      // The remaining N-2 entries of the pass must still be the ones nobody has
+      // heard: a re-deal here would repeat something.
+      for (let i = 2; i < N; i++) {
+        endTrack();
+        heard.push(result.current.track!.id);
+      }
+      expect(new Set(heard).size).toBe(N);
+      unmount();
+    }
+  });
+
+  it("a pass that starts mid-list plays the tracks it skipped before repeating any", () => {
+    const mid = FOCUS_SOUND_TRACKS[5].id;
+    const { result } = renderHook(() => useFocusSound(mid));
+    act(() => result.current.play());
+    const heard = [result.current.track!.id];
+    for (let i = 1; i < N; i++) {
+      endTrack();
+      heard.push(result.current.track!.id);
+    }
+    expect(heard[0]).toBe(mid);
+    expect(new Set(heard).size).toBe(N);
+    // A full rotation later, the track it opened on comes round again.
+    endTrack();
+    expect(result.current.track?.id).toBe(mid);
+  });
+
   it("a track ending while the timer has it paused does not advance (#43 coupling)", () => {
     const { result } = renderHook(() => useFocusSound("lofi_calm"));
     act(() => result.current.play());
