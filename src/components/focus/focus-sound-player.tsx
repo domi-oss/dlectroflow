@@ -141,7 +141,11 @@ export function FocusSoundPlayer({
             onClick={() => setVolumeOpen((o) => !o)}
             className={btn}
             aria-label={t("focus.sound.volume", voice)}
-            aria-haspopup="true"
+            // "dialog", not the "true"/"menu" default: the popover is a
+            // focus-capturing slider group (Esc restores focus), not a menu, so
+            // AT shouldn't promise arrow-key menu navigation (#43, matches the
+            // row-actions schedule popover).
+            aria-haspopup="dialog"
             aria-expanded={volumeOpen}
             aria-controls={popoverId}
           >

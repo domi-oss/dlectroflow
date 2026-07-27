@@ -75,7 +75,9 @@ describe("FocusSoundPlayer", () => {
     render(<FocusSoundPlayer controls={c} voice="plain" />);
     const volBtn = screen.getByRole("button", { name: /^volume$/i });
     expect(volBtn).toHaveAttribute("aria-expanded", "false");
-    expect(volBtn).toHaveAttribute("aria-haspopup", "true");
+    // Duo a11y fix: "dialog", not "true" (≡ "menu") — the popover is a
+    // focus-capturing slider group, so AT must not promise menu-key navigation.
+    expect(volBtn).toHaveAttribute("aria-haspopup", "dialog");
     // No slider until the popover is opened.
     expect(screen.queryByRole("slider")).not.toBeInTheDocument();
     await user.click(volBtn);

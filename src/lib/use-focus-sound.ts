@@ -16,9 +16,10 @@ import {
  * calls play() inside the Start gesture to unlock autoplay) and the embedded
  * mini-player share ONE source of truth for current-track / playing / volume.
  * The audio element is created lazily on first play() — which is always driven by
- * a user gesture — so autoplay policies are respected. Sound is decoupled from
- * the countdown: it keeps looping while the timer is paused (an ambient bed), and
- * only stops on session end / unmount / an explicit pause in the mini-player.
+ * a user gesture — so autoplay policies are respected. Sound is coupled to the
+ * countdown, one-directionally: the timer pauses it when it pauses and resumes it
+ * (from position) when it resumes, and it stops on session end / unmount. The
+ * mini-player can still pause/resume on its own without touching the timer.
  */
 export type FocusSoundControls = {
   track: FocusTrack | null;
