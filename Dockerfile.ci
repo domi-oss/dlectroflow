@@ -18,6 +18,9 @@
 # This file intentionally skips the build stage so Kaniko only assembles
 # the final image. All layers here are stable and will almost always be
 # Kaniko cache hits. For local development builds, use the regular Dockerfile.
+#
+# Keep this stage and the runtime stage of ./Dockerfile in lock-step — the
+# guards in src/lib/dockerfile-hygiene.test.ts assert both (#71).
 
 # alpine (musl) base — dramatically smaller attack surface than Debian: no
 # perl-base, no Debian zlib1g/ncurses/gzip, so the container-scan CVEs that had
@@ -30,21 +33,51 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
-# Standalone server (server.js at /app, minimal traced node_modules)
-COPY ci-dist/standalone ./
-COPY ci-dist/static ./.next/static
-COPY public ./public
+# ── Cluster-invoked CLIs: prisma + tsx (+ dotenv for prisma.config.ts) ───────
+# The migrate initContainer runs `npx prisma migrate deploy`, the review-only
+# seed runs `npx tsx prisma/seed.ts`, and the purge CronJob runs
+# `npx tsx prisma/scheduled-purge.ts` — all from THIS image with /app as the
+# working directory, so those binaries must resolve from /app/node_modules.
+#
+# They are installed into an ISOLATED prefix and grafted in afterwards. Run in
+# /app, `npm install` treats the standalone output's package.json as the project
+# manifest and reinstalls the app's ENTIRE dependency tree on top of the minimal
+# traced node_modules (+392 packages: next, typescript, playwright, @next/swc,
+# …). That, plus npm's 885 MB tarball cache, was the bulk of the 893 MB image
+# whose cold pull timed out Autopilot deploys (#71).
+#
+# One RUN, so the npm cache never survives into a layer; first in the file, so
+# it stays a cache hit on every app-only change. Versions are pinned to
+# package-lock.json (guarded by src/lib/dockerfile-hygiene.test.ts) so the
+# container never runs migrations on a different Prisma than the app was built
+# against.
+RUN mkdir -p /opt/tools \
+  && printf '{"name":"dlectroflow-image-tools","private":true}\n' > /opt/tools/package.json \
+  && cd /opt/tools \
+  && npm install --no-audit --no-fund --cache /tmp/npm-cache \
+       prisma@6.19.3 dotenv@16.6.1 tsx@4.23.1 \
+  && mkdir -p /app/node_modules \
+  && cp -a /opt/tools/node_modules/. /app/node_modules/ \
+  && rm -rf /opt/tools /tmp/npm-cache /root/.npm \
+  && chown -R node:node /app
 
-# Prisma CLI + engines + migrations for the migrate initContainer (same image).
-# tsx runs the TypeScript review-app seed (prisma/seed.ts) in the review-only
-# `seed` initContainer — see charts/dlectroflow/templates/deployment.yaml.
-# --no-save installs alongside the traced node_modules without touching lockfiles.
-COPY prisma ./prisma
-COPY prisma.config.ts ./prisma.config.ts
-RUN npm install --no-save prisma@6.19.3 dotenv@16.4.7 tsx@4.19.2
+# Schema + migrations for the migrate initContainer, then the rarely-changing
+# assets, then the per-commit build output: cheapest layer churn for node-level
+# image caches.
+#
+# COPY --chown replaces the trailing `RUN chown -R node:node /app` this file
+# used to end with: chown rewrites every file it touches, so that single line
+# wrote a second full copy of /app into its own layer (+854 MB) (#71).
+COPY --chown=node:node prisma ./prisma
+COPY --chown=node:node prisma.config.ts ./prisma.config.ts
+COPY --chown=node:node public ./public
+
+# Standalone server (server.js at /app, minimal traced node_modules). Copied
+# after the tooling so the app's traced dependencies win any name collision.
+COPY --chown=node:node ci-dist/standalone ./
+COPY --chown=node:node ci-dist/static ./.next/static
 
 # Run as the non-root `node` user (uid 1000, present in node images).
-RUN chown -R node:node /app
 USER node
 
 EXPOSE 3000

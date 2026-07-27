@@ -93,6 +93,16 @@ index in the layer; `apk upgrade` keeps the base current between rebuilds.
 
 **Compliance:** CIS Docker Benchmark 4.3 (minimal base image), SOC 2 CC7.1
 
+> Update (#71): "slimming" was aspirational until 2026-07-27. The runtime stage ran
+> `npm install` with `/app` as its working directory, so npm read the standalone output's
+> `package.json` and reinstalled the whole dependency tree (392 packages) over the traced
+> `node_modules`, npm's tarball cache included; the trailing `RUN chown -R node:node /app`
+> then duplicated the result into a second layer. Registry-equivalent size went from
+> **795 MB to 198 MB** once the CLIs moved to an isolated prefix and ownership moved to
+> `COPY --chown`. Attack surface shrank with it — the image no longer ships `typescript`,
+> `playwright`, `@next/swc` or the rest of the build-time tree. `src/lib/dockerfile-hygiene.test.ts`
+> fails the suite if either mistake returns.
+
 > Note: an earlier version of this doc described a `node:22-slim` (Debian) base with
 > `apt --no-install-recommends`, and claimed the base shipped ImageMagick/HDF5/libraw causing
 > "140+ CVEs". Neither matches what shipped: the images are `node:22-alpine` + `apk`, and the

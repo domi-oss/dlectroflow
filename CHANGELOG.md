@@ -19,6 +19,30 @@ operators upgrading a self-hosted instance don't get surprised.
 > Shipped to production but not yet tagged. At cut time this becomes
 > `## [X.Y.Z] - <date>` and a fresh empty `## [Unreleased]` is added above it.
 
+### Changed
+
+- **The container image is ~4× smaller (#71).** Measured on the same build,
+  registry-equivalent (gzipped layers): **795 MB → 198 MB**, a 75% cut. Almost
+  none of the bulk was the app. The runtime stage ran `npm install` with `/app`
+  as the working directory, so npm treated the standalone output's
+  `package.json` as the project manifest and reinstalled the **entire**
+  dependency tree — 392 packages including `next`, `typescript`, `playwright`
+  and `@next/swc` — on top of the minimal `node_modules` that
+  `output: "standalone"` had just traced, and kept npm's 885 MB tarball cache
+  in the same layer (408 MiB compressed). A closing `RUN chown -R node:node
+  /app` then rewrote every file, writing a second copy of the whole app into
+  another layer (219 MiB compressed). The migrate/seed/purge CLIs (`prisma`,
+  `tsx`, `dotenv`) now install into an isolated prefix and are grafted into
+  `/app/node_modules`; ownership comes from `COPY --chown`.
+  - **Nothing was removed.** The bundled lo-fi audio (29 MB, #43) — which the
+    0.4.0 note above blamed for the size — stays, and `npx prisma migrate
+    deploy`, `npx tsx prisma/seed.ts` and the purge CronJob were all verified
+    to still run from the image. The image's `tsx` pin also caught up with the
+    lockfile (4.19.2 → 4.23.1, the version #67 realigned on).
+  - **Operators:** no action. The `helm --timeout` values raised in 0.4.0
+    (production 20m, review 15m) are left as they are — they are now headroom
+    rather than a requirement.
+
 ## [0.4.0] - 2026-07-27
 
 **Focus-session depth + bring-your-own-model.** A focus session is now something you
