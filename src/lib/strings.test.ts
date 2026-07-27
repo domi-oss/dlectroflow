@@ -324,6 +324,52 @@ describe("Task 2 — inbox/focus/breakdown keys (plain vs playful)", () => {
     expect(t("focus.nextStep", "playful")).toBe("Focus the next bite");
   });
 
+  // #66 setup screen ("one number, one action") — the ring's sub-label, the
+  // duration chip row and the single quiet subordinate line. Numbers are
+  // composed in JSX around these static units (t() has no interpolation).
+  it('t("focus.setup.focusFor", "plain") → "Focus for"', () => {
+    expect(t("focus.setup.focusFor", "plain")).toBe("Focus for");
+  });
+  it('t("focus.setup.ringFocusTime", "plain") → "focus time"', () => {
+    expect(t("focus.setup.ringFocusTime", "plain")).toBe("focus time");
+  });
+  it('t("focus.setup.ringLeftOnStep", "plain") → "left on this step"', () => {
+    expect(t("focus.setup.ringLeftOnStep", "plain")).toBe("left on this step");
+  });
+  it('t("focus.setup.ringLeftOnStep", "playful") → "left on this bite"', () => {
+    expect(t("focus.setup.ringLeftOnStep", "playful")).toBe(
+      "left on this bite",
+    );
+  });
+  it('t("focus.setup.ringPickUp", "plain") → "left — pick up where you paused"', () => {
+    expect(t("focus.setup.ringPickUp", "plain")).toBe(
+      "left — pick up where you paused",
+    );
+  });
+  it('t("focus.setup.onThisTask", "plain") → "on this task"', () => {
+    expect(t("focus.setup.onThisTask", "plain")).toBe("on this task");
+  });
+  it('t("focus.setup.leftWholeTask", "plain") → "left on the whole task"', () => {
+    expect(t("focus.setup.leftWholeTask", "plain")).toBe(
+      "left on the whole task",
+    );
+  });
+  it('t("focus.setup.stepsToGo", "plain") → "steps to go"', () => {
+    expect(t("focus.setup.stepsToGo", "plain")).toBe("steps to go");
+  });
+  it('t("focus.setup.stepsToGo", "playful") → "bites to go"', () => {
+    expect(t("focus.setup.stepsToGo", "playful")).toBe("bites to go");
+  });
+  it('t("focus.setup.stepToGo", "plain") → "step to go" (singular, so "1 steps to go" can\'t render)', () => {
+    expect(t("focus.setup.stepToGo", "plain")).toBe("step to go");
+    expect(t("focus.setup.stepToGo", "playful")).toBe("bite to go");
+  });
+  it('t("focus.setup.keepPaused", "plain") → "↻ Keep my paused session"', () => {
+    expect(t("focus.setup.keepPaused", "plain")).toBe(
+      "↻ Keep my paused session",
+    );
+  });
+
   // step counter (used in FocusTimer title)
   it('t("step.counter", "plain") → "Step"', () => {
     expect(t("step.counter", "plain")).toBe("Step");
@@ -522,6 +568,17 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "settings.helpDocs",
     "guest.newHere",
     "guest.helpCta",
+    // #66 — the focus setup screen's copy is literal in plain voice (↻ is a
+    // functional glyph, allowed).
+    "focus.setup.focusFor",
+    "focus.setup.ringFocusTime",
+    "focus.setup.ringLeftOnStep",
+    "focus.setup.ringPickUp",
+    "focus.setup.onThisTask",
+    "focus.setup.leftWholeTask",
+    "focus.setup.stepsToGo",
+    "focus.setup.stepToGo",
+    "focus.setup.keepPaused",
   ];
 
   for (const key of plainOnlyKeys) {

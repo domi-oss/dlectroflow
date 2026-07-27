@@ -205,6 +205,40 @@ export const STRINGS = {
   // (mirrors focus.hero.left's "~Xm left" pattern on the launcher hero).
   "focus.startFresh": { plain: "↻ Start fresh", playful: "↻ Start fresh" },
 
+  // ── #66 setup screen: "one number, one action" ─────────────────────────────
+  // The setup phase used to stack four figures (ring countdown, the step-context
+  // minutes line, the Resume button's own "~Xm left", and a Duration number
+  // input). These are the units of the replacement hierarchy: ONE ring sub-label
+  // naming what the single big number means, a chip row instead of the number
+  // field, and ONE quiet subordinate line for the task total. Numbers are
+  // composed in JSX around them (t() has no interpolation). ↻ is a functional
+  // glyph (allowed in plain); on the timer it's rendered as a lucide icon and
+  // stripped from the label (stripLeadingGlyph).
+  "focus.setup.focusFor": { plain: "Focus for", playful: "Focus for" },
+  "focus.setup.ringFocusTime": { plain: "focus time", playful: "focus time" },
+  "focus.setup.ringLeftOnStep": {
+    plain: "left on this step",
+    playful: "left on this bite",
+  },
+  "focus.setup.ringPickUp": {
+    plain: "left — pick up where you paused",
+    playful: "left — pick up where you paused",
+  },
+  "focus.setup.onThisTask": {
+    plain: "on this task",
+    playful: "on this task",
+  },
+  "focus.setup.leftWholeTask": {
+    plain: "left on the whole task",
+    playful: "left on the whole task",
+  },
+  "focus.setup.stepsToGo": { plain: "steps to go", playful: "bites to go" },
+  "focus.setup.stepToGo": { plain: "step to go", playful: "bite to go" },
+  "focus.setup.keepPaused": {
+    plain: "↻ Keep my paused session",
+    playful: "↻ Keep my paused session",
+  },
+
   // ── Resume banner (Phase 5, #8) — surfaces the most-recent paused/open focus
   // step on the Inbox so a user can jump straight back in. ⏸/→ are functional
   // status glyphs, allowed in Plain voice.
@@ -258,7 +292,6 @@ export const STRINGS = {
     playful: "✓ Complete step",
   },
   "focus.timer.of": { plain: "of", playful: "of" },
-  "focus.timer.leftInTask": { plain: "left in task", playful: "left in task" },
   "focus.timer.steps": { plain: "steps", playful: "steps" },
   "focus.tip.body": {
     plain: "Make this timer yours — style, sounds, alarm & more.",

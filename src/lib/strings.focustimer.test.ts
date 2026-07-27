@@ -5,7 +5,6 @@ describe("focus-timer redesign strings (MR ②)", () => {
   it("timer readout + controls resolve; plain stays free of decorative emoji", () => {
     expect(t("focus.timer.completeStep", "plain")).toBe("✓ Complete step");
     expect(t("focus.timer.of", "plain")).toBe("of");
-    expect(t("focus.timer.leftInTask", "plain")).toBe("left in task");
     expect(t("focus.timer.steps", "plain")).toBe("steps");
   });
 

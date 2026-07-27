@@ -27,6 +27,48 @@ describe("TimerVisual", () => {
     },
   );
 
+  // #66 — on the setup screen the ring must show ONE number. `subLabel` swaps
+  // the "of Nm" total (a second, competing figure) for a word that says what the
+  // single number means.
+  it.each(styles)(
+    "%s style: a subLabel replaces the 'of Nm' total with the given words",
+    (style) => {
+      render(
+        <TimerVisual
+          style={style}
+          remainingSec={600}
+          totalSec={600}
+          phase="setup"
+          reducedMotion={false}
+          voice="plain"
+          subLabel="focus time"
+        />,
+      );
+      const root = screen.getByTestId(`timer-visual-${style}`);
+      expect(within(root).getByText("10:00")).toBeInTheDocument();
+      expect(within(root).getByText("focus time")).toBeInTheDocument();
+      expect(within(root).queryByText(/of 10m/)).not.toBeInTheDocument();
+    },
+  );
+
+  it("the ring graphic is aria-hidden — the readout text is the exposed figure", () => {
+    const { container } = render(
+      <TimerVisual
+        style="ring"
+        remainingSec={600}
+        totalSec={600}
+        phase="setup"
+        reducedMotion={false}
+        voice="plain"
+      />,
+    );
+    expect(container.querySelector("svg")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+    expect(screen.getByText("10:00")).toBeInTheDocument();
+  });
+
   it("bar style exposes a progressbar with numeric min/now/max", () => {
     render(
       <TimerVisual

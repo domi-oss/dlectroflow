@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Check, Minus, Pause, Play, Plus, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -23,7 +23,12 @@ import {
 } from "@/components/focus/focus-step-tracker";
 import { TimerCustomizationHint } from "@/components/focus/timer-customization-hint";
 import { resolveTimerStyle } from "@/lib/focus-timer-style";
-import { applyTimeDelta, netAddedMin } from "@/lib/focus-timer-clock";
+import {
+  applyTimeDelta,
+  durationChoices,
+  netAddedMin,
+  normalizeEstMin,
+} from "@/lib/focus-timer-clock";
 import {
   createAlarm,
   acquireWakeLock,
@@ -35,6 +40,7 @@ import { FocusSoundPlayer } from "@/components/focus/focus-sound-player";
 import { FocusSound } from "@/lib/constants";
 import { usePrefersReducedMotion } from "@/lib/use-prefers-reduced-motion";
 import { t } from "@/lib/strings";
+import { cn } from "@/lib/utils";
 import { useVoice } from "@/components/voice-provider";
 
 // #43 — the shared focus control strings carry a leading functional glyph
@@ -134,30 +140,33 @@ export function FocusTimer({
   const timerStyle = resolveTimerStyle(settings.timerStyle, voice);
 
   const [phase, setPhase] = useState<Phase>("setup");
-  // #27 bugfix — when a paused session exists, seed the ring/Duration/
-  // remaining state from IT (the same values resumeExisting() applies on
-  // click), not from the step's static estMinutes. pauseFocus() bakes any
-  // mid-session +/-time taps into the session's own plannedMin without ever
-  // touching Step.estMinutes, so a 10m step paused after +5m twice persists
-  // a session with plannedMin=20 — seeding from estMinutes here made the
-  // ring/Duration show "10m" while the Resume button (reading
-  // existingSession.remainingSec) said "~15m left": two different numbers
-  // for what's supposed to be the same session. Note start() (the "Start
-  // fresh" handler) doesn't itself reset plannedMin — it submits whatever's
-  // currently in this state — so with a resumable session present, an
-  // unedited "Start fresh" now begins at the session's (possibly grown)
-  // plannedMin rather than the original estimate; that's consistent with
-  // what the Duration field visibly shows, and the fresh-start-with-no-
-  // session path (no existingSession) is unaffected, still seeding from
-  // step.estMinutes as before.
-  const [plannedMin, setPlannedMin] = useState(
+  // #27 bugfix (!139) — when a paused session exists, seed the clock state from
+  // IT (the same values resumeExisting() applies on click), not from the step's
+  // static estMinutes. pauseFocus() bakes any mid-session +/-time taps into the
+  // session's own plannedMin without ever touching Step.estMinutes, so a 10m
+  // step paused after +5m twice persists a session with plannedMin=20 — seeding
+  // from estMinutes made the setup screen show "10m" while the Resume button
+  // (reading existingSession.remainingSec) said "~15m left": two different
+  // numbers for what's supposed to be the same session. #66 additionally makes
+  // the setup ring DERIVE its figure per state (setupRemainingSec below), so
+  // there is no longer a stored number that can drift from the CTA at all — but
+  // this seed still decides which duration chip starts selected and what "Start
+  // fresh" submits, so it must be the session's value (what's on screen), not
+  // the stale estimate. The no-session path is unaffected: step.estMinutes.
+  //
+  // Duo review (#66) — normalized through the SAME helper the chips use, so the
+  // seeded value is always one of the chips on offer. estMinutes/plannedMin are
+  // plain Ints with no CHECK bounding them to >= 1, and a 0 row would otherwise
+  // preselect nothing and let Start open a 0-minute session.
+  const seedMin = normalizeEstMin(
     existingSession?.plannedMin ?? step.estMinutes,
   );
+  const [plannedMin, setPlannedMin] = useState(seedMin);
   const [totalSec, setTotalSec] = useState(
-    existingSession?.totalSec ?? step.estMinutes * 60,
+    existingSession?.totalSec ?? seedMin * 60,
   );
   const [remainingSec, setRemainingSec] = useState(
-    existingSession?.remainingSec ?? step.estMinutes * 60,
+    existingSession?.remainingSec ?? seedMin * 60,
   );
   const elapsedRef = useRef(0);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -166,6 +175,20 @@ export function FocusTimer({
   const [result, setResult] = useState<CompleteResult | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [tipVisible, setTipVisible] = useState(!tipDismissed);
+  // #66 — progressive disclosure. While a resumable session exists the setup
+  // screen offers ONE choice (Resume); flipping this (the "Start fresh"
+  // affordance) is what reveals the duration chips. It's a plain UI toggle, not
+  // a commitment: nothing is retired server-side until Start is pressed, so a
+  // mis-tap can be undone with "Keep my paused session".
+  const [startingFresh, setStartingFresh] = useState(false);
+  // The chip group is named by its visible "Focus for" label (no aria-label to
+  // drift from it); useId keeps that association collision-free, matching
+  // focus-sound-player's popover id.
+  const durationLabelId = useId();
+  // The setup screen's primary CTA (Resume or Start), focused after a
+  // disclosure toggle — see the effect below.
+  const setupCtaRef = useRef<HTMLButtonElement | null>(null);
+  const disclosureMounted = useRef(false);
   const doneMsgRef = useRef(
     DONE_MESSAGES[Math.floor(Math.random() * DONE_MESSAGES.length)],
   );
@@ -241,6 +264,19 @@ export function FocusTimer({
   useEffect(() => {
     if (phase === "paused" || phase === "timeup") setExpanded(true);
   }, [phase]);
+
+  // #66 — either disclosure toggle unmounts the button that was just clicked
+  // (the setup CTA block is swapped wholesale), which would drop focus to
+  // <body> and lose a keyboard/screen-reader user's place mid-decision. Hand it
+  // to whichever action is now primary. The mounted guard keeps it from stealing
+  // focus on first render.
+  useEffect(() => {
+    if (!disclosureMounted.current) {
+      disclosureMounted.current = true;
+      return;
+    }
+    setupCtaRef.current?.focus();
+  }, [startingFresh]);
 
   // Cleanup on unmount — ← Back leaves the FocusSession OPEN (no server call),
   // so we only stop local effects here. (useFocusSound also stops its element on
@@ -386,11 +422,63 @@ export function FocusTimer({
     .filter((s) => !s.done)
     .reduce((n, s) => n + s.estMinutes, 0);
 
+  // ── #66: the setup screen's ONE number ─────────────────────────────────────
+  // The setup phase used to show up to four figures at once (ring countdown,
+  // the step-context line's "~Xm left in task", the Resume button's own
+  // "~Xm left", and a "Duration [n] min" input) — and in the resume case the
+  // ring and the button openly contradicted each other (!139 fixed the data
+  // side; this closes it on the presentation side). Now: one number, one
+  // action, everything else revealed only when asked.
+  const setup = phase === "setup";
+  // The paused session the setup screen is currently OFFERING (null once the
+  // user has asked to start fresh). Every setup-phase figure below derives from
+  // this single value, so the ring and the CTA cannot disagree.
+  const resumable = startingFresh ? null : existingSession;
+  // Rounded UP to whole minutes, once, and reused by both the CTA and the quiet
+  // line — never recomputed differently in two places. No 1m floor: a session
+  // paused with nothing left must read the same 0m the ring shows (resuming it
+  // lands straight on time's-up, which is correct).
+  const resumeMinLeft = resumable ? Math.ceil(resumable.remainingSec / 60) : 0;
+  // What the ring shows in setup: the paused session's remainder while resuming,
+  // the chosen duration when starting fresh. Derived, never stored, so there is
+  // no second copy to drift.
+  const setupRemainingSec = resumable
+    ? resumable.remainingSec
+    : plannedMin * 60;
+  const setupTotalSec = resumable ? resumable.totalSec : plannedMin * 60;
+  // …and a word instead of the "of Nm" total, naming what that one number is.
+  const setupSubLabel = resumable
+    ? isSingleTask
+      ? t("focus.setup.ringPickUp", voice)
+      : t("focus.setup.ringLeftOnStep", voice)
+    : t("focus.setup.ringFocusTime", voice);
+  // The chips are derived from the SEEDED estimate, not the live `plannedMin`:
+  // an off-preset seed (a 7m step, or a session grown to 20m by +time taps)
+  // keeps its own chip after the user taps another one, so its value stays
+  // reachable.
+  const chipMinutes = durationChoices(seedMin);
+  const stepsToGo = Math.max(0, step.total - step.order);
+  // The ONE quiet subordinate line for a multi-step task: progress is a count
+  // ("Step N of M", now the header eyebrow), so the whole-task minutes figure
+  // sits here — present for context, never competing with the step's ring.
+  // Built as a single string so it reads (and is testable) as one unit.
+  const taskTotalText =
+    `~${remainingInTask}m ${t("focus.setup.leftWholeTask", voice)}` +
+    (stepsToGo > 0
+      ? ` · ${stepsToGo} ${t(stepsToGo === 1 ? "focus.setup.stepToGo" : "focus.setup.stepsToGo", voice)}`
+      : "");
+  const taskTotalLine = showContext ? (
+    <p className="text-muted-foreground text-center text-xs tabular-nums">
+      {taskTotalText}
+    </p>
+  ) : null;
+
   // Single-task focus uses the auto-created ensureFocusStep step, whose text
   // equals the task title — so rendering both the task-context line AND the step
   // heading would show the same title twice. Collapse to one primary heading (the
-  // task title). Multi-step keeps the hierarchy: task title as context + the
-  // active step as the h1.
+  // task title). Multi-step keeps the hierarchy: task title as context, a
+  // "Step N of M" eyebrow, then the active step as the h1 hero (#66 — the step
+  // is what you're about to do, so it's the biggest thing on screen).
   const stepHeading = (
     <div className="min-w-0">
       {isSingleTask ? (
@@ -403,6 +491,9 @@ export function FocusTimer({
           <p className="text-muted-foreground truncate text-sm font-semibold">
             {parentEmoji ? `${parentEmoji} ` : ""}
             {taskTitle}
+          </p>
+          <p className="text-primary text-xs font-bold tracking-[0.12em] uppercase tabular-nums">
+            {t("step.counter", voice)} {step.order} of {step.total}
           </p>
           <h1 className="text-xl font-bold">
             {step.subtaskEmoji ? `${step.subtaskEmoji} ` : ""}
@@ -505,31 +596,31 @@ export function FocusTimer({
         <TimerCustomizationHint voice={voice} onDismiss={dismissTip} />
       )}
 
+      {/* #66 — the step count moved up into the heading eyebrow and the
+          whole-task minutes into the one quiet line below the controls, so
+          what's left here is the tracker itself. */}
       {showContext && (
-        <div className="space-y-2">
-          <p className="text-muted-foreground text-xs tabular-nums">
-            {t("step.counter", voice)} {step.order} of {step.total} · ~
-            {remainingInTask}m {t("focus.timer.leftInTask", voice)}
-          </p>
-          <FocusStepTracker
-            steps={steps}
-            currentStepId={step.id}
-            expanded={expanded}
-            onToggle={() => setExpanded((e) => !e)}
-            voice={voice}
-          />
-        </div>
+        <FocusStepTracker
+          steps={steps}
+          currentStepId={step.id}
+          expanded={expanded}
+          onToggle={() => setExpanded((e) => !e)}
+          voice={voice}
+        />
       )}
 
       <TimerVisual
         style={timerStyle}
-        remainingSec={remainingSec}
-        totalSec={totalSec}
+        remainingSec={setup ? setupRemainingSec : remainingSec}
+        totalSec={setup ? setupTotalSec : totalSec}
         phase={phase === "reestimate" ? "timeup" : phase}
         reducedMotion={reducedMotion}
         voice={voice}
+        subLabel={setup ? setupSubLabel : undefined}
       />
-      {net !== 0 && (
+      {/* The ±Nm net note belongs to a live session's ±time taps; in setup it
+          would just be another number next to the ring (#66). */}
+      {!setup && net !== 0 && (
         <p className="text-muted-foreground text-center text-xs tabular-nums">
           {net > 0 ? "+" : "−"}
           {Math.abs(net)}m
@@ -537,67 +628,122 @@ export function FocusTimer({
       )}
 
       {/* Controls */}
-      {phase === "setup" && (
+      {setup && (
         <div className="flex flex-col items-center gap-3">
-          {/* #27 — a truly-paused session exists for this step: offer BOTH
-              choices rather than silently resuming (owner decision) or
-              silently discarding it. "Start fresh" below still works exactly
-              as before — beginFocus retires this paused row first. */}
-          {existingSession && (
-            <Button
-              variant="brand"
-              onClick={resumeExisting}
-              disabled={pending}
-              className="h-auto min-h-[52px] gap-2 rounded-full px-8 py-3"
-            >
-              <Play aria-hidden="true" />
-              <span>
-                {stripLeadingGlyph(t("focus.resume", voice))} · ~
-                {Math.max(1, Math.ceil(existingSession.remainingSec / 60))}m{" "}
-                {t("focus.hero.left", voice)}
-              </span>
-            </Button>
+          {resumable ? (
+            <>
+              {/* #27 — a truly-paused session exists for this step: offer it
+                  rather than silently resuming (owner decision) or silently
+                  discarding it. #66 — it's the screen's ONE action, and its
+                  figure is the same one the ring is showing above (both read
+                  `resumable.remainingSec`, rounded once into resumeMinLeft). */}
+              <Button
+                ref={setupCtaRef}
+                variant="brand"
+                onClick={resumeExisting}
+                disabled={pending}
+                className="h-auto min-h-[52px] gap-2 rounded-full px-8 py-3"
+              >
+                <Play aria-hidden="true" />
+                <span>
+                  {stripLeadingGlyph(t("focus.resume", voice))} · ~
+                  {resumeMinLeft}m {t("focus.hero.left", voice)}
+                </span>
+              </Button>
+              {/* One quiet subordinate line: the same figure again for a single
+                  task, the whole-task total for a multi-step one. */}
+              {isSingleTask ? (
+                <p className="text-muted-foreground text-center text-xs tabular-nums">
+                  {resumeMinLeft} min {t("focus.hero.left", voice)}{" "}
+                  {t("focus.setup.onThisTask", voice)}
+                </p>
+              ) : (
+                taskTotalLine
+              )}
+              {/* #66 — progressive disclosure: the duration chips only exist
+                  once the user asks to start fresh. One decision at a time. */}
+              <button
+                type="button"
+                onClick={() => setStartingFresh(true)}
+                disabled={pending}
+                className="text-muted-foreground hover:text-foreground inline-flex min-h-[44px] items-center gap-1.5 text-sm font-semibold underline underline-offset-4 disabled:opacity-50"
+              >
+                <RotateCcw aria-hidden="true" className="h-4 w-4 shrink-0" />
+                {stripLeadingGlyph(t("focus.startFresh", voice))}
+              </button>
+            </>
+          ) : (
+            <>
+              {/* #40 Phase 3.1 — the single CTA that launches the neon focus
+                  session earns the brand gradient (hero moment). variant="brand"
+                  carries the ≥18.6px-bold label + visible focus ring. */}
+              <Button
+                ref={setupCtaRef}
+                variant="brand"
+                onClick={start}
+                disabled={pending}
+                className="h-auto min-h-[52px] gap-2 rounded-full px-8 py-3"
+              >
+                <Play aria-hidden="true" />
+                {stripLeadingGlyph(t("focus.startTimer", voice))}
+              </Button>
+              {/* #66 — duration is a chip row, not a free-type number field:
+                  one tap, nothing to second-guess, and every chip is a ≥44px
+                  aria-pressed toggle. Picking one moves the ring (which derives
+                  from `plannedMin`), so the number on screen is always the
+                  number Start will use. */}
+              <div className="flex flex-col items-center gap-2">
+                <p
+                  id={durationLabelId}
+                  className="text-muted-foreground text-sm font-semibold"
+                >
+                  {t("focus.setup.focusFor", voice)}
+                </p>
+                <div
+                  role="group"
+                  aria-labelledby={durationLabelId}
+                  className="flex flex-wrap justify-center gap-2"
+                >
+                  {chipMinutes.map((min) => {
+                    const active = min === plannedMin;
+                    return (
+                      <button
+                        key={min}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => setPlannedMin(min)}
+                        className={cn(
+                          "inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border px-4 text-sm font-semibold tabular-nums transition-colors",
+                          active
+                            ? // Token-paired tint (designed to clear AA in both
+                              // themes) — deliberately quieter than the gradient
+                              // CTA it sits under.
+                              "border-primary bg-accent text-accent-foreground"
+                            : "border-border text-foreground hover:bg-muted",
+                        )}
+                      >
+                        {min}m
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              {!isSingleTask && taskTotalLine}
+              {/* The way back out of the disclosure — the paused session is
+                  still there until Start actually retires it. */}
+              {existingSession && (
+                <button
+                  type="button"
+                  onClick={() => setStartingFresh(false)}
+                  disabled={pending}
+                  className="text-muted-foreground hover:text-foreground inline-flex min-h-[44px] items-center gap-1.5 text-sm font-semibold underline underline-offset-4 disabled:opacity-50"
+                >
+                  <RotateCcw aria-hidden="true" className="h-4 w-4 shrink-0" />
+                  {stripLeadingGlyph(t("focus.setup.keepPaused", voice))}
+                </button>
+              )}
+            </>
           )}
-          <label className="text-muted-foreground flex items-center gap-2 text-sm">
-            Duration
-            <input
-              type="number"
-              min={1}
-              value={plannedMin}
-              onChange={(e) => {
-                const v = Math.max(1, Number(e.target.value) || 1);
-                setPlannedMin(v);
-                setTotalSec(v * 60);
-                setRemainingSec(v * 60);
-              }}
-              className="border-input w-20 rounded-md border px-2 py-1 text-right"
-            />
-            min
-          </label>
-          {/* #40 Phase 3.1 — the single CTA that launches the neon focus
-              session earns the brand gradient (hero moment). variant="brand"
-              carries the ≥18.6px-bold label + visible focus ring. Once an
-              existingSession offers Resume above, this becomes the secondary
-              "Start fresh" choice (outline, not the hero gradient). */}
-          <Button
-            variant={existingSession ? "outline" : "brand"}
-            onClick={start}
-            disabled={pending}
-            className={
-              existingSession
-                ? "min-h-[44px] gap-2 rounded-full px-6"
-                : "h-auto min-h-[52px] gap-2 rounded-full px-8 py-3"
-            }
-          >
-            {existingSession ? (
-              <RotateCcw aria-hidden="true" />
-            ) : (
-              <Play aria-hidden="true" />
-            )}
-            {existingSession
-              ? stripLeadingGlyph(t("focus.startFresh", voice))
-              : stripLeadingGlyph(t("focus.startTimer", voice))}
-          </Button>
         </div>
       )}
 
@@ -710,6 +856,11 @@ export function FocusTimer({
           )}
         </div>
       )}
+
+      {/* #66 — the same quiet task-total line for the live/time's-up phases (in
+          setup it's rendered inside the controls, directly under the CTA, per
+          the approved mockup's hierarchy). */}
+      {!setup && taskTotalLine}
 
       {/* #43 — embedded lo-fi mini-player (play/pause · prev/next · volume ·
           now-playing). Hidden when sound is off or minimal-mode-while-running. */}

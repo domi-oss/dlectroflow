@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, act, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  cleanup,
+  act,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FocusTimer } from "@/components/focus/focus-timer";
 import type { TrackerStep } from "@/components/focus/focus-step-tracker";
@@ -662,15 +669,22 @@ describe("FocusTimer — setup screen: existing paused session (#27)", () => {
     expect(beginFocus).not.toHaveBeenCalled();
   });
 
-  it("Start fresh still calls beginFocus (server retires the stale session)", async () => {
+  it("Start fresh discloses the duration chips first, THEN begins on Start (server retires the stale session)", async () => {
     const user = userEvent.setup();
     render(<FocusTimer {...base({ existingSession: paused })} />);
-    // Bugfix (ring/Duration now seed from existingSession, not step.estMinutes,
-    // see the "bugfix" describe block below): the Duration field the user
-    // actually sees starts at the session's plannedMin (10), not the step's
-    // stale estimate (1) — so an unedited "Start fresh" click submits the
-    // value that's genuinely on screen.
+    // #66 — "Start fresh" is a disclosure, not the launch: it swaps the Resume
+    // choice for the duration chips + Start, so the length is chosen before any
+    // session begins (and a mis-tap hasn't retired the paused row yet).
     await user.click(screen.getByRole("button", { name: /start fresh/i }));
+    expect(beginFocus).not.toHaveBeenCalled();
+    // The preselected chip is the SESSION's plannedMin (10) — the number the
+    // ring is showing — not the step's stale estimate (1). See the !139 bugfix
+    // block below.
+    expect(screen.getByRole("button", { name: "10m" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await user.click(screen.getByRole("button", { name: /^start focusing$/i }));
     expect(beginFocus).toHaveBeenCalledWith("s2", 10);
     expect(resumeFocus).not.toHaveBeenCalled();
   });
@@ -681,10 +695,12 @@ describe("FocusTimer — setup screen: existing paused session (#27)", () => {
   // with plannedMin=20/remaining~15m, while the ring/Duration used to seed
   // from the stale step.estMinutes (10). Result: ring said "of 10m" while the
   // Resume button (reading existingSession.remainingSec) said "~15m left" —
-  // two different numbers for what's supposed to be the same session. The
-  // ring/Duration/remaining must now seed from existingSession, matching
-  // exactly what resumeExisting() applies on click.
-  describe("bugfix: ring/Duration must agree with the Resume button's number", () => {
+  // two different numbers for what's supposed to be the same session. !139
+  // fixed the seeding; #66 closes the class of bug on the presentation side —
+  // the setup ring is DERIVED from the one source per state, and the competing
+  // figures (the "of Nm" total, the free-type Duration field) are gone, so
+  // there is nothing left that can disagree with the CTA.
+  describe("bugfix: the ring must agree with the Resume button's number", () => {
     // A 10m step (step.estMinutes), +5m tapped twice while running (session
     // totalSec grew to 20m), then paused with ~15m left of that 20m.
     const grown = {
@@ -694,7 +710,7 @@ describe("FocusTimer — setup screen: existing paused session (#27)", () => {
       remainingSec: 15 * 60,
     };
 
-    it("multi-step: seeds the ring/Duration from the session's plannedMin/remaining, not step.estMinutes", () => {
+    it("multi-step: the ring reads the session's remaining time and nothing contradicts it", () => {
       render(
         <FocusTimer
           {...base({
@@ -703,23 +719,21 @@ describe("FocusTimer — setup screen: existing paused session (#27)", () => {
           })}
         />,
       );
-      // Duration field reads the SESSION's plannedMin (20) — not the step's
-      // stale estimate (10).
-      expect(screen.getByRole("spinbutton", { name: /duration/i })).toHaveValue(
-        20,
-      );
-      // The ring's remaining readout + "of Xm" total agree with the session.
+      // The ring shows the session's remaining time, labelled for the step.
       expect(screen.getByText("15:00")).toBeInTheDocument();
-      expect(screen.getByText(/of 20m/)).toBeInTheDocument();
-      expect(screen.queryByText(/of 10m/)).not.toBeInTheDocument();
-      // …and now MATCHES the Resume button's own number — no more "ring says
-      // 10m, button says ~15m left" contradiction.
+      expect(screen.getByText("left on this step")).toBeInTheDocument();
+      // No second figure: neither the "of Nm" total (10m or 20m)…
+      expect(screen.queryByText(/of \d+m/)).not.toBeInTheDocument();
+      // …nor a free-type Duration field.
+      expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
+      // …and the CTA says exactly what the ring says — no more "ring says 10m,
+      // button says ~15m left".
       expect(
         screen.getByRole("button", { name: /resume.*~15m.*left/i }),
       ).toBeInTheDocument();
     });
 
-    it("single-task: same seeding fix applies (FocusTimer is shared — existingSession/pauseFocus are step-generic)", () => {
+    it("single-task: same fix applies (FocusTimer is shared — existingSession/pauseFocus are step-generic)", () => {
       render(
         <FocusTimer
           {...base({
@@ -747,25 +761,27 @@ describe("FocusTimer — setup screen: existing paused session (#27)", () => {
           })}
         />,
       );
-      expect(screen.getByRole("spinbutton", { name: /duration/i })).toHaveValue(
-        20,
-      );
       expect(screen.getByText("15:00")).toBeInTheDocument();
-      expect(screen.getByText(/of 20m/)).toBeInTheDocument();
-      expect(screen.queryByText(/of 10m/)).not.toBeInTheDocument();
+      expect(
+        screen.getByText("left — pick up where you paused"),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/of \d+m/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
       expect(
         screen.getByRole("button", { name: /resume.*~15m.*left/i }),
       ).toBeInTheDocument();
     });
 
-    it("fresh start (no existing session) still seeds from step.estMinutes, unaffected", () => {
+    it("fresh start (no existing session) still seeds the chip + ring from step.estMinutes, unaffected", () => {
       render(
         <FocusTimer {...base({ step: { ...base().step, estMinutes: 10 } })} />,
       );
-      expect(screen.getByRole("spinbutton", { name: /duration/i })).toHaveValue(
-        10,
+      expect(screen.getByRole("button", { name: "10m" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
       );
-      expect(screen.getByText(/of 10m/)).toBeInTheDocument();
+      expect(screen.getByText("10:00")).toBeInTheDocument();
+      expect(screen.queryByText(/of \d+m/)).not.toBeInTheDocument();
     });
   });
 
@@ -777,5 +793,368 @@ describe("FocusTimer — setup screen: existing paused session (#27)", () => {
     expect(
       screen.queryByRole("button", { name: /start fresh/i }),
     ).not.toBeInTheDocument();
+  });
+});
+
+// #66 — the setup screen used to stack up to FOUR competing figures: the ring
+// countdown, the step-context line ("Step 2 of 5 · ~38m left in task"), the
+// Resume button's own "~Xm left", and a "Duration [n] min" number input (plus
+// the ±Nm note). The rule these tests pin down: one number, one action on
+// screen at a time — everything else revealed only when asked.
+describe("FocusTimer — setup screen: one number, one action (#66)", () => {
+  const singleTask = {
+    isSingleTask: true,
+    taskTitle: "Water the office plants",
+    step: {
+      id: "s1",
+      text: "Water the office plants",
+      estMinutes: 10,
+      subtaskEmoji: null,
+      order: 1,
+      total: 1,
+      done: false,
+    },
+    steps: [
+      {
+        id: "s1",
+        text: "Water the office plants",
+        done: false,
+        estMinutes: 10,
+        subtaskEmoji: null,
+      },
+    ],
+    nextStep: null,
+  } satisfies Partial<Parameters<typeof FocusTimer>[0]>;
+
+  // ── State 1: single task, start fresh ────────────────────────────────────
+  describe("state 1 — start fresh", () => {
+    it("the ring shows the duration and only the duration (no 'of Nm' second figure)", () => {
+      render(<FocusTimer {...base(singleTask)} />);
+      expect(screen.getByText("10:00")).toBeInTheDocument();
+      expect(screen.getByText("focus time")).toBeInTheDocument();
+      expect(screen.queryByText(/of \d+m/)).not.toBeInTheDocument();
+    });
+
+    it("duration is a chip row preselected at the step's estimate — no free-type number field", () => {
+      render(<FocusTimer {...base(singleTask)} />);
+      expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
+      const group = screen.getByRole("group", { name: /focus for/i });
+      expect(
+        within(group)
+          .getAllByRole("button")
+          .map((b) => b.textContent),
+      ).toEqual(["5m", "10m", "15m", "25m"]);
+      expect(screen.getByRole("button", { name: "10m" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(screen.getByRole("button", { name: "25m" })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
+    });
+
+    it("tapping a chip moves the ring AND the minutes Start submits (one source of truth)", async () => {
+      const user = userEvent.setup();
+      render(<FocusTimer {...base(singleTask)} />);
+      await user.click(screen.getByRole("button", { name: "25m" }));
+      expect(screen.getByText("25:00")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "25m" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(screen.getByRole("button", { name: "10m" })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
+      await user.click(
+        screen.getByRole("button", { name: /^start focusing$/i }),
+      );
+      expect(beginFocus).toHaveBeenCalledWith("s1", 25);
+    });
+
+    it("an off-preset estimate gets its own chip, so the ring's number stays reachable", () => {
+      render(
+        <FocusTimer
+          {...base({
+            ...singleTask,
+            step: { ...singleTask.step, estMinutes: 7 },
+          })}
+        />,
+      );
+      expect(screen.getByText("7:00")).toBeInTheDocument();
+      const group = screen.getByRole("group", { name: /focus for/i });
+      expect(
+        within(group)
+          .getAllByRole("button")
+          .map((b) => b.textContent),
+      ).toEqual(["5m", "7m", "10m", "15m", "25m"]);
+      expect(screen.getByRole("button", { name: "7m" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+
+    // Duo review (#66): the chips normalize the estimate (floor 1m, whole
+    // minutes) but plannedMin used to be seeded from the raw value, so a row
+    // the schema doesn't forbid — estMinutes is a plain Int with no CHECK —
+    // could leave every chip unpressed and let Start open a 0-minute session.
+    it("a 0m estimate (bad data) still preselects the 1m chip and starts a 1m session", async () => {
+      const user = userEvent.setup();
+      render(
+        <FocusTimer
+          {...base({
+            ...singleTask,
+            step: { ...singleTask.step, estMinutes: 0 },
+          })}
+        />,
+      );
+      const group = screen.getByRole("group", { name: /focus for/i });
+      const pressed = within(group)
+        .getAllByRole("button")
+        .filter((b) => b.getAttribute("aria-pressed") === "true");
+      expect(pressed.map((b) => b.textContent)).toEqual(["1m"]);
+      expect(screen.getByText("1:00")).toBeInTheDocument();
+      await user.click(
+        screen.getByRole("button", { name: /^start focusing$/i }),
+      );
+      expect(beginFocus).toHaveBeenCalledWith("s1", 1);
+    });
+
+    it("a single task shows no subordinate task-total line (its total IS the step)", () => {
+      render(<FocusTimer {...base(singleTask)} />);
+      expect(
+        screen.queryByText(/left on the whole task/),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  // ── State 2: single task, resume ──────────────────────────────────────────
+  describe("state 2 — resume", () => {
+    const paused = {
+      id: "sess-paused",
+      plannedMin: 10,
+      totalSec: 600,
+      remainingSec: 5 * 60,
+    };
+
+    it("the ring reads time left and agrees with the Resume CTA", () => {
+      render(
+        <FocusTimer {...base({ ...singleTask, existingSession: paused })} />,
+      );
+      expect(screen.getByText("5:00")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /resume.*~5m.*left/i }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/of \d+m/)).not.toBeInTheDocument();
+    });
+
+    it("one quiet subordinate line repeats that same figure, rounded the same way", () => {
+      render(
+        <FocusTimer {...base({ ...singleTask, existingSession: paused })} />,
+      );
+      expect(screen.getByText("5 min left on this task")).toBeInTheDocument();
+    });
+
+    it("the duration chips stay hidden until 'Start fresh' asks for them", () => {
+      render(
+        <FocusTimer {...base({ ...singleTask, existingSession: paused })} />,
+      );
+      expect(
+        screen.queryByRole("group", { name: /focus for/i }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "10m" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("'Start fresh' reveals the chips and re-points the ring at the duration", async () => {
+      const user = userEvent.setup();
+      render(
+        <FocusTimer {...base({ ...singleTask, existingSession: paused })} />,
+      );
+      await user.click(screen.getByRole("button", { name: /start fresh/i }));
+      expect(
+        screen.getByRole("group", { name: /focus for/i }),
+      ).toBeInTheDocument();
+      // The ring now shows the duration Start would use, not the paused
+      // remainder — it always matches the action offered next to it.
+      expect(screen.getByText("10:00")).toBeInTheDocument();
+      expect(screen.getByText("focus time")).toBeInTheDocument();
+      expect(screen.queryByText("5:00")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /resume/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("'Keep my paused session' undoes the disclosure — a mis-tap is not a dead end", async () => {
+      const user = userEvent.setup();
+      render(
+        <FocusTimer {...base({ ...singleTask, existingSession: paused })} />,
+      );
+      await user.click(screen.getByRole("button", { name: /start fresh/i }));
+      await user.click(
+        screen.getByRole("button", { name: /keep my paused session/i }),
+      );
+      expect(
+        screen.getByRole("button", { name: /resume.*~5m.*left/i }),
+      ).toBeInTheDocument();
+      expect(screen.getByText("5:00")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("group", { name: /focus for/i }),
+      ).not.toBeInTheDocument();
+      // Nothing was committed either way.
+      expect(beginFocus).not.toHaveBeenCalled();
+      expect(resumeFocus).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── State 3: multi-step ───────────────────────────────────────────────────
+  describe("state 3 — multi-step", () => {
+    it("'Step N of M' is an eyebrow above the step title: progress is a count, not another minutes figure", () => {
+      render(<FocusTimer {...base()} />);
+      const eyebrow = screen.getByText("Step 2 of 3");
+      expect(eyebrow.className).toMatch(/uppercase/);
+      // The step title is still the hero heading…
+      expect(
+        screen.getByRole("heading", { name: /draft intro/i }).className,
+      ).toMatch(/text-xl/);
+      // …and the old welded-together context line is gone.
+      expect(screen.queryByText(/left in task/)).not.toBeInTheDocument();
+    });
+
+    it("the task total is demoted to ONE quiet subordinate line", () => {
+      render(<FocusTimer {...base()} />);
+      // STEPS: s1 done (5m), s2 current (1m), s3 (10m) → 11m of work left, and
+      // one step after this one.
+      expect(
+        screen.getByText("~11m left on the whole task · 1 step to go"),
+      ).toBeInTheDocument();
+    });
+
+    it("pluralises the steps-to-go count", () => {
+      render(<FocusTimer {...base({ step: { ...base().step, total: 5 } })} />);
+      expect(screen.getByText(/· 3 steps to go$/)).toBeInTheDocument();
+    });
+
+    it("drops the steps-to-go clause on the last step", () => {
+      render(
+        <FocusTimer
+          {...base({ step: { ...base().step, order: 3, total: 3 } })}
+        />,
+      );
+      expect(
+        screen.getByText("~11m left on the whole task"),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/steps? to go/)).not.toBeInTheDocument();
+    });
+
+    it("resuming a multi-step step: the ring is the STEP's time left, the task total stays quiet", () => {
+      render(
+        <FocusTimer
+          {...base({
+            existingSession: {
+              id: "sess-multi",
+              plannedMin: 20,
+              totalSec: 1200,
+              remainingSec: 12 * 60,
+            },
+          })}
+        />,
+      );
+      expect(screen.getByText("12:00")).toBeInTheDocument();
+      expect(screen.getByText("left on this step")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /resume.*~12m.*left/i }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("~11m left on the whole task · 1 step to go"),
+      ).toBeInTheDocument();
+    });
+  });
+
+  // ── The collapsed numbers ─────────────────────────────────────────────────
+  it("setup shows exactly ONE clock figure — no ±Nm note, no second total", () => {
+    render(<FocusTimer {...base(singleTask)} />);
+    expect(screen.getAllByText(/^\d+:\d\d$/)).toHaveLength(1);
+    expect(screen.queryByText(/^[+−]\d+m$/)).not.toBeInTheDocument();
+  });
+
+  // ── a11y ──────────────────────────────────────────────────────────────────
+  describe("a11y", () => {
+    it("chips are aria-pressed toggles with ≥44px targets inside a named group", () => {
+      render(<FocusTimer {...base(singleTask)} />);
+      const chips = within(
+        screen.getByRole("group", { name: /focus for/i }),
+      ).getAllByRole("button");
+      for (const chip of chips) {
+        expect(chip.tagName).toBe("BUTTON");
+        expect(chip).toHaveAttribute("aria-pressed");
+        expect(chip.className).toMatch(/min-h-\[44px\]/);
+        expect(chip.className).toMatch(/min-w-\[44px\]/);
+      }
+    });
+
+    it("'Start fresh' / 'Keep my paused session' are real buttons with ≥44px targets", async () => {
+      const user = userEvent.setup();
+      render(
+        <FocusTimer
+          {...base({
+            ...singleTask,
+            existingSession: {
+              id: "sess-paused",
+              plannedMin: 10,
+              totalSec: 600,
+              remainingSec: 300,
+            },
+          })}
+        />,
+      );
+      const fresh = screen.getByRole("button", { name: /start fresh/i });
+      expect(fresh.tagName).toBe("BUTTON");
+      expect(fresh.className).toMatch(/min-h-\[44px\]/);
+      await user.click(fresh);
+      const keep = screen.getByRole("button", {
+        name: /keep my paused session/i,
+      });
+      expect(keep.tagName).toBe("BUTTON");
+      expect(keep.className).toMatch(/min-h-\[44px\]/);
+    });
+
+    it("the disclosure moves focus to the newly-primary action instead of dropping it", async () => {
+      const user = userEvent.setup();
+      render(
+        <FocusTimer
+          {...base({
+            ...singleTask,
+            existingSession: {
+              id: "sess-paused",
+              plannedMin: 10,
+              totalSec: 600,
+              remainingSec: 300,
+            },
+          })}
+        />,
+      );
+      // Both toggles unmount the button that was just clicked, so focus would
+      // otherwise fall back to <body> mid-decision.
+      await user.click(screen.getByRole("button", { name: /start fresh/i }));
+      expect(
+        screen.getByRole("button", { name: /^start focusing$/i }),
+      ).toHaveFocus();
+      await user.click(
+        screen.getByRole("button", { name: /keep my paused session/i }),
+      );
+      expect(screen.getByRole("button", { name: /resume/i })).toHaveFocus();
+    });
+
+    it("the ring's live figure is exposed as text (the graphic itself is aria-hidden)", () => {
+      const { container } = render(<FocusTimer {...base(singleTask)} />);
+      expect(container.querySelector("svg")).toHaveAttribute(
+        "aria-hidden",
+        "true",
+      );
+      expect(screen.getByText("10:00")).toBeInTheDocument();
+    });
   });
 });

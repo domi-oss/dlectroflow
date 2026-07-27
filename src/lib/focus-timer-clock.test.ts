@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   MIN_REMAINING_SEC,
+  DURATION_PRESET_MIN,
+  durationChoices,
+  normalizeEstMin,
   mmss,
   applyTimeDelta,
   netAddedMin,
@@ -184,5 +187,55 @@ describe("openSessionRemainingSec", () => {
     };
     const renderedAt = startedAt.getTime() + 10 * MIN; // rendered 10m in
     expect(openSessionRemainingSec(session, renderedAt)).toBe(15 * 60);
+  });
+});
+
+// #66 — the setup screen's duration chip row replaces a free-type number input,
+// so the offered set must always contain the value the ring is showing (or the
+// user could not get back to it after tapping another chip).
+describe("durationChoices", () => {
+  it("offers the four presets, with the current estimate already among them", () => {
+    expect(durationChoices(10)).toEqual([...DURATION_PRESET_MIN]);
+    expect(durationChoices(25)).toEqual([5, 10, 15, 25]);
+  });
+
+  it("adds a chip for an off-preset estimate, in ascending order", () => {
+    expect(durationChoices(7)).toEqual([5, 7, 10, 15, 25]);
+    expect(durationChoices(1)).toEqual([1, 5, 10, 15, 25]);
+    expect(durationChoices(45)).toEqual([5, 10, 15, 25, 45]);
+  });
+
+  it("never offers a sub-minute or non-integer chip (bad data clamps to 1m)", () => {
+    expect(durationChoices(0)).toEqual([1, 5, 10, 15, 25]);
+    expect(durationChoices(-30)).toEqual([1, 5, 10, 15, 25]);
+    expect(durationChoices(7.4)).toEqual([5, 7, 10, 15, 25]);
+    expect(durationChoices(Number.NaN)).toEqual([...DURATION_PRESET_MIN]);
+  });
+
+  // Duo review (#66): the chips normalize the estimate, so whatever seeds the
+  // timer's plannedMin must normalize it the SAME way — otherwise the seeded
+  // value isn't among the chips and the setup screen preselects nothing.
+  it("always contains normalizeEstMin() of the same estimate", () => {
+    for (const est of [0, -30, 1, 7, 7.4, 10, 24.5, 45, Number.NaN]) {
+      expect(durationChoices(est)).toContain(normalizeEstMin(est));
+    }
+  });
+});
+
+describe("normalizeEstMin", () => {
+  it("passes through a sane whole-minute estimate", () => {
+    expect(normalizeEstMin(10)).toBe(10);
+    expect(normalizeEstMin(45)).toBe(45);
+  });
+
+  it("floors bad/legacy data to 1m and rounds fractions (matches durationChoices)", () => {
+    expect(normalizeEstMin(0)).toBe(1);
+    expect(normalizeEstMin(-30)).toBe(1);
+    expect(normalizeEstMin(7.4)).toBe(7);
+    expect(normalizeEstMin(24.5)).toBe(25);
+  });
+
+  it("falls back to the middle preset when the estimate isn't a number", () => {
+    expect(normalizeEstMin(Number.NaN)).toBe(10);
   });
 });
