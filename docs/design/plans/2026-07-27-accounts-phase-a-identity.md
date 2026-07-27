@@ -101,6 +101,10 @@ model Allowlist {
   provider    String
   identity    String
   note        String?
+  // Grants role="owner" on claim. A DEDICATED column, never a sentinel value
+  // in `note` — a free-text field deciding a privilege level means any row
+  // that happens to carry the magic string escalates whoever claims it.
+  isOwnerSeed Boolean   @default(false)
   invitedAt   DateTime  @default(now())
   claimedAt   DateTime?
   claimedById String?   @unique
@@ -426,7 +430,11 @@ FROM unnest(string_to_array(current_setting('app.owner_allowlist', true), ',')) 
 WHERE trim(x) <> '';
 ```
 
-If setting a runtime GUC is awkward in the deploy path, use a small idempotent seed script invoked by the same job that runs `prisma migrate deploy`, reading `OWNER_ALLOWLIST` from the environment. Either way it must be idempotent and must run **before** the first sign-in attempt. Also mark the owner's row `role = 'owner'` when it is claimed — extend `provisionFromProfile` so an invite carrying `note = 'seeded from OWNER_ALLOWLIST'` provisions with `role: "owner"`, and add a test asserting exactly that.
+The seeded rows must set `"isOwnerSeed" = true`. If setting a runtime GUC is awkward in the deploy path, use a small idempotent seed script invoked by the same job that runs `prisma migrate deploy`, reading `OWNER_ALLOWLIST` from the environment. Either way it must be idempotent and must run **before** the first sign-in attempt.
+
+Then extend `provisionFromProfile` so a claimed invite with `isOwnerSeed === true` provisions `role: "owner"`, and everything else provisions `role: "member"`.
+
+**Use the boolean column, never a sentinel string in `note`.** A free-text field deciding a privilege level is a privilege-escalation hole: any row that happens to carry the magic string — set by accident, by a future People UI, or by copy-paste — would silently make the claimer an owner. Add a test that an invite with `note: "seeded from OWNER_ALLOWLIST"` but `isOwnerSeed: false` provisions a **member**, so the sentinel can never quietly come back.
 
 - [ ] **Step 6: Commit**
 
@@ -489,10 +497,12 @@ export async function signUserSession(
   return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: SESSION_ALG })
     .setIssuedAt(nowSec)
-    .setExpirationTime(nowSec + OWNER_SESSION_TTL_SECONDS)
+    .setExpirationTime(nowSec + USER_SESSION_TTL_SECONDS)
     .sign(key(secret));
 }
 ```
+
+(Do the `OWNER_SESSION_TTL_SECONDS` → `USER_SESSION_TTL_SECONDS` rename below *before* this snippet compiles.)
 
 In `verifySession`, replace the `owner` branch:
 
@@ -694,26 +704,61 @@ git commit -m "feat(auth): add an authenticated-user route category (#35)"
 
 - [ ] **Step 1: Write the harness**
 
+The obvious version of this test is a trap. Asserting that the `workspaceId`-carrying models are not in an `EXEMPT` set is **tautological** — the filter already selected models that have `workspaceId`, so the assertion can only fail if someone adds `workspaceId` to an exempt model. It would pass forever while proving nothing.
+
+What actually has to be true is that **every Prisma read/write against a scoped model carries a workspace filter**. That is a source-level property, so scan for it:
+
 ```ts
 import { Prisma } from "@prisma/client";
+import { readFileSync } from "node:fs";
+import { globSync } from "node:fs";
 
-const EXEMPT = new Set(["Workspace", "User", "Allowlist", "UserAiUsage", "GuestAiUsage", "GuestDailyActivity", "GoogleAuth"]);
+// Call sites reviewed and deliberately unscoped, each with a stated reason.
+// Adding to this list is a security decision — it should show up in review.
+const REVIEWED_UNSCOPED: Record<string, string> = {
+  "src/lib/purge.ts": "deletes whole expired workspaces by design",
+};
 
-it("every workspace-scoped model is reachable only through a workspace filter", () => {
+it("finds the scoped models at all (guards against the harness silently matching nothing)", () => {
   const scoped = Prisma.dmmf.datamodel.models
     .filter((m) => m.fields.some((f) => f.name === "workspaceId"))
     .map((m) => m.name);
-  expect(scoped.length).toBeGreaterThan(5); // the harness itself must not silently find nothing
-  for (const model of scoped) {
-    expect(EXEMPT.has(model)).toBe(false);
-  }
+  expect(scoped.length).toBeGreaterThanOrEqual(8);
 });
 
-it("no source file references a removed owner-workspace constant", async () => {
-  const hits = await grepSrc("OWNER_WORKSPACE_ID");
+it("every prisma call against a workspace-scoped model filters by workspaceId", () => {
+  const scoped = Prisma.dmmf.datamodel.models
+    .filter((m) => m.fields.some((f) => f.name === "workspaceId"))
+    .map((m) => m.name[0].toLowerCase() + m.name.slice(1));
+
+  const offenders: string[] = [];
+  for (const file of globSync("src/**/*.{ts,tsx}").filter((f) => !f.includes(".test."))) {
+    if (REVIEWED_UNSCOPED[file]) continue;
+    const src = readFileSync(file, "utf8");
+    for (const model of scoped) {
+      // Match `prisma.<model>.<op>( ... )` and require workspaceId inside the
+      // call's argument object.
+      const re = new RegExp(
+        `prisma\\.${model}\\.(findMany|findFirst|findUnique|update|updateMany|delete|deleteMany|count|aggregate)\\(([\\s\\S]*?)\\n\\s*\\)`,
+        "g",
+      );
+      for (const m of src.matchAll(re)) {
+        if (!m[2].includes("workspaceId")) offenders.push(`${file}: prisma.${model}.${m[1]}`);
+      }
+    }
+  }
+  expect(offenders).toEqual([]);
+});
+
+it("no source file references the removed owner-workspace constant", () => {
+  const hits = globSync("src/**/*.{ts,tsx}").filter((f) =>
+    readFileSync(f, "utf8").includes("OWNER_WORKSPACE_ID"),
+  );
   expect(hits).toEqual([]);
 });
 ```
+
+If the regex proves too brittle against the real call sites, replace it with a Prisma client extension that throws at runtime when a scoped model is queried without `workspaceId`, and drive it from the integration tests — but **do not** fall back to the tautological version.
 
 - [ ] **Step 2: Prove the harness bites**
 
