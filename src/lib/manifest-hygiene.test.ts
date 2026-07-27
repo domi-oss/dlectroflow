@@ -75,6 +75,18 @@ describe("importedPackages", () => {
     );
   });
 
+  // The `@/…` alias tsconfig paths and vitest map to src/ opens with `@`, so
+  // a naive scoped-package read would report it as an undeclared `@/lib`.
+  it("ignores the @/ alias rather than reading it as a scoped package", () => {
+    expect(importedPackages('import { db } from "@/lib/db";')).toEqual([]);
+  });
+
+  it("still reports a genuine scoped package", () => {
+    expect(importedPackages('import { P } from "@prisma/client";')).toEqual([
+      "@prisma/client",
+    ]);
+  });
+
   it("ignores Node builtins with and without the node: prefix", () => {
     const source = 'import a from "node:path";\nimport b from "fs";';
     expect(importedPackages(source)).toEqual([]);

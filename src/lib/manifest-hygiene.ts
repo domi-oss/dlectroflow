@@ -47,14 +47,25 @@ export function packageNameOf(specifier: string): string {
 const SPECIFIER = /(?:\bfrom|\bimport|\brequire)\s*\(?\s*["']([^"']+)["']/g;
 
 /**
+ * Specifiers that resolve inside the repo rather than to a package: relative
+ * paths, and the `@/…` alias that tsconfig `paths` and vitest both map to
+ * `src/`. The alias needs saying explicitly — it opens with `@`, so without
+ * this it would be read as the scoped package `@/lib` and reported as an
+ * undeclared dependency.
+ */
+function isInternal(specifier: string): boolean {
+  return specifier.startsWith(".") || specifier.startsWith("@/");
+}
+
+/**
  * Every third-party package `source` imports, sorted and de-duplicated.
- * Relative specifiers and Node builtins (with or without the `node:` prefix)
+ * Internal specifiers and Node builtins (with or without the `node:` prefix)
  * are dropped, since neither is ever declared in `package.json`.
  */
 export function importedPackages(source: string): string[] {
   const names = [...stripComments(source).matchAll(SPECIFIER)]
     .map((match) => match[1])
-    .filter((specifier) => !specifier.startsWith(".") && !isBuiltin(specifier))
+    .filter((specifier) => !isInternal(specifier) && !isBuiltin(specifier))
     .map(packageNameOf);
   return [...new Set(names)].sort();
 }
