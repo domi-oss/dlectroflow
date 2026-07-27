@@ -44,7 +44,7 @@ export async function GET(req: Request): Promise<Response> {
       codeVerifier: verifier,
       redirectUri: `${origin}/api/auth/gitlab/callback`,
     });
-    identity = await provider.fetchIdentity(token);
+    identity = (await provider.fetchProfile(token)).subject;
   } catch (err) {
     return fail(err instanceof Error ? err.message : "auth_failed");
   }

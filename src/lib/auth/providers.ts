@@ -1,5 +1,20 @@
 import { authConfig } from "./config";
 
+/**
+ * A provider identity, normalized at the boundary (#35 Phase A).
+ *
+ * `subject` is the provider's stable id and is what a User row keys on — it
+ * survives a rename, which `username` does not. `username` and `email` exist
+ * only so provisioning can match an invitation the owner typed by hand; both
+ * are lowercased + trimmed here so every consumer compares like for like, and
+ * both are optional because a provider may withhold them.
+ */
+export interface AuthProfile {
+  subject: string;
+  username?: string;
+  email?: string;
+}
+
 export interface AuthProvider {
   buildAuthorizeUrl(a: {
     redirectUri: string;
@@ -11,10 +26,22 @@ export interface AuthProvider {
     codeVerifier: string;
     redirectUri: string;
   }): Promise<string>;
-  /** Returns a stable identity string (e.g. GitLab numeric id). */
-  fetchIdentity(accessToken: string): Promise<string>;
+  /** Returns the normalized profile for the signed-in identity. */
+  fetchProfile(accessToken: string): Promise<AuthProfile>;
 }
 
+/** Lowercase + trim an optional identity field, collapsing "" to undefined so
+ *  an absent value can never match an accidentally-empty allowlist row. */
+function normalizeIdentity(value: string | undefined): string | undefined {
+  const v = value?.trim().toLowerCase();
+  return v ? v : undefined;
+}
+
+/**
+ * @deprecated #35 Phase A — the env `OWNER_ALLOWLIST` check. Superseded by the
+ * database Allowlist (`provisionFromProfile`); still wired up only so the OAuth
+ * callback keeps compiling until it is rewritten. Deleted with its last caller.
+ */
 export function isOwner(identity: string, allowlist: string[]): boolean {
   const id = identity.trim().toLowerCase();
   if (!id) return false;
@@ -55,13 +82,21 @@ const gitlabProvider: AuthProvider = {
     const data = (await res.json()) as { access_token: string };
     return data.access_token;
   },
-  async fetchIdentity(accessToken) {
+  async fetchProfile(accessToken) {
     const res = await fetch(`${GITLAB}/api/v4/user`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!res.ok) throw new Error(`GitLab user fetch failed (${res.status})`);
-    const data = (await res.json()) as { id: number };
-    return String(data.id);
+    const data = (await res.json()) as {
+      id: number;
+      username?: string;
+      email?: string;
+    };
+    return {
+      subject: String(data.id),
+      username: normalizeIdentity(data.username),
+      email: normalizeIdentity(data.email),
+    };
   },
 };
 
