@@ -1,10 +1,16 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { Play, Square } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { updateFocusTimerSettings } from "@/app/actions/settings";
 import { FocusTimerStyle, FocusSound } from "@/lib/constants";
 import { resolveTimerStyle } from "@/lib/focus-timer-style";
+import {
+  FOCUS_SOUND_TRACKS,
+  createPreviewPlayer,
+  type PreviewPlayer,
+} from "@/lib/focus-sounds";
 import { t, type Voice } from "@/lib/strings";
 import {
   useSaveStatus,
@@ -49,6 +55,23 @@ export function FocusTimerSection({
     alarmEnabled,
     sound,
   });
+
+  // #43 — one shared preview player: auditioning a track stops any previous
+  // preview. Created lazily on first click (a user gesture, so autoplay unlocks).
+  const previewRef = useRef<PreviewPlayer | null>(null);
+  const [previewingId, setPreviewingId] = useState<string | null>(null);
+  useEffect(() => () => previewRef.current?.stop(), []);
+
+  const togglePreview = (id: string, src: string) => {
+    if (!previewRef.current) previewRef.current = createPreviewPlayer();
+    if (previewingId === id) {
+      previewRef.current.stop();
+      setPreviewingId(null);
+      return;
+    }
+    previewRef.current.play(src, () => setPreviewingId(null));
+    setPreviewingId(id);
+  };
 
   const persist = (next: Prefs) =>
     startTransition(async () => {
@@ -133,21 +156,64 @@ export function FocusTimerSection({
         onChange={(v) => set("alarmEnabled", v)}
       />
 
-      <label className="flex min-h-[44px] items-center justify-between gap-2 text-sm">
-        <span className="font-medium">{t("focusSettings.sound", voice)}</span>
-        <select
-          value={prefs.sound}
-          onChange={(e) => set("sound", e.target.value)}
-          className="border-input rounded-md border px-2 py-1"
-        >
-          <option value={FocusSound.Off}>
-            {t("focusSettings.soundOff", voice)}
-          </option>
-          <option value={FocusSound.LofiCalm}>
-            {t("focusSettings.soundLofiCalm", voice)}
-          </option>
-        </select>
-      </label>
+      <fieldset className="space-y-1">
+        <legend className="text-sm font-medium">
+          {t("focusSettings.sound", voice)}
+        </legend>
+        <p className="text-muted-foreground text-xs">
+          {t("focusSettings.soundPickerHint", voice)}
+        </p>
+        {/* Off */}
+        <label className="flex min-h-[44px] items-center gap-2 text-sm">
+          <input
+            type="radio"
+            name="focusSound"
+            checked={prefs.sound === FocusSound.Off}
+            onChange={() => set("sound", FocusSound.Off)}
+          />
+          {t("focusSettings.soundOff", voice)}
+        </label>
+        {/* One curated CC0 track per category, each with a preview toggle. */}
+        {FOCUS_SOUND_TRACKS.map((track) => {
+          const isPreviewing = previewingId === track.id;
+          return (
+            <div key={track.id} className="flex items-center gap-2">
+              <label className="flex min-h-[44px] flex-1 items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="focusSound"
+                  checked={prefs.sound === track.id}
+                  onChange={() => set("sound", track.id)}
+                />
+                <span className="min-w-0">
+                  <span className="font-medium">{track.title}</span>{" "}
+                  <span className="text-muted-foreground">
+                    · {track.categoryLabel}
+                  </span>
+                </span>
+              </label>
+              <button
+                type="button"
+                onClick={() => togglePreview(track.id, track.src)}
+                aria-pressed={isPreviewing}
+                aria-label={`${t(
+                  isPreviewing
+                    ? "focusSettings.stopPreview"
+                    : "focusSettings.preview",
+                  voice,
+                )} — ${track.title}`}
+                className="hover:bg-accent inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md border"
+              >
+                {isPreviewing ? (
+                  <Square aria-hidden="true" className="h-4 w-4" />
+                ) : (
+                  <Play aria-hidden="true" className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+          );
+        })}
+      </fieldset>
     </section>
   );
 }

@@ -136,9 +136,24 @@ export const FocusTimerStyle = {
 export type FocusTimerStyle =
   (typeof FocusTimerStyle)[keyof typeof FocusTimerStyle];
 
+// #43 — real lofi library. Each value (other than Off) is one bundled CC0 track
+// from the open-lofi collection (one per category), mapped to its file in
+// src/lib/focus-sounds.ts (FOCUS_SOUND_SRC / FOCUS_SOUND_TRACKS). Adding/removing
+// a value REQUIRES a paired Settings_focusSound_check migration + keeps the
+// enum-constraint-sync test green (#38). `lofi_calm` is retained from MR ② for
+// backward-compat with already-saved rows; it now points at a real ambient track.
 export const FocusSound = {
   Off: "off",
   LofiCalm: "lofi_calm",
+  LofiChillhop: "lofi_chillhop",
+  LofiJazzhop: "lofi_jazzhop",
+  LofiSoulRnb: "lofi_soul_rnb",
+  LofiLateNight: "lofi_late_night",
+  LofiFunkSoul: "lofi_funk_soul",
+  LofiAsian: "lofi_asian",
+  LofiSeasonal: "lofi_seasonal",
+  LofiActivities: "lofi_activities",
+  LofiHybrid: "lofi_hybrid",
 } as const;
 export type FocusSound = (typeof FocusSound)[keyof typeof FocusSound];
 

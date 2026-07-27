@@ -3,6 +3,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FocusTimerSection } from "@/components/settings/focus-timer-section";
+import { FOCUS_SOUND_TRACKS } from "@/lib/focus-sounds";
 
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -13,8 +14,27 @@ vi.mock("@/app/actions/settings", () => ({
 }));
 import { updateFocusTimerSettings } from "@/app/actions/settings";
 
+// Fake <audio> so preview clicks don't hit jsdom's unimplemented media API.
+const audioPlay = vi.fn().mockResolvedValue(undefined);
+const audioPause = vi.fn();
+class FakeAudio {
+  src: string;
+  loop = false;
+  currentTime = 0;
+  volume = 1;
+  onended: (() => void) | null = null;
+  play = audioPlay;
+  pause = audioPause;
+  constructor(src: string) {
+    this.src = src;
+  }
+}
+
 afterEach(cleanup);
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.stubGlobal("Audio", FakeAudio as unknown as typeof Audio);
+});
 
 const base = {
   timerStyle: null as string | null,
@@ -34,7 +54,11 @@ describe("FocusTimerSection", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /^bar$/i })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /^mug$/i })).toBeInTheDocument();
-    expect(screen.getAllByRole("radio")).toHaveLength(4);
+    // Exactly 4 *style* radios (the sound picker adds its own radio group).
+    const styleRadios = screen
+      .getAllByRole("radio")
+      .filter((r) => r.getAttribute("name") === "focusTimerStyle");
+    expect(styleRadios).toHaveLength(4);
     expect(screen.queryByRole("radio", { name: /match voice/i })).toBeNull();
     expect(screen.queryByRole("radio", { name: /auto/i })).toBeNull();
   });
@@ -97,17 +121,64 @@ describe("FocusTimerSection", () => {
     );
   });
 
-  it("choosing a sound auto-saves", async () => {
+  it("lists Off + one radio per curated lo-fi track", () => {
+    render(<FocusTimerSection {...base} />);
+    const soundRadios = screen
+      .getAllByRole("radio")
+      .filter((r) => r.getAttribute("name") === "focusSound");
+    // Off + FOCUS_SOUND_TRACKS.length (10).
+    expect(soundRadios).toHaveLength(FOCUS_SOUND_TRACKS.length + 1);
+    expect(screen.getByRole("radio", { name: /^off$/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("radio", { name: /aurora on mute/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("choosing a lo-fi track auto-saves that track's id", async () => {
     const user = userEvent.setup();
     render(<FocusTimerSection {...base} />);
-    await user.selectOptions(
-      screen.getByLabelText(/focus sounds/i),
-      "lofi_calm",
-    );
+    await user.click(screen.getByRole("radio", { name: /aurora on mute/i }));
     await waitFor(() =>
       expect(updateFocusTimerSettings).toHaveBeenCalledWith(
         expect.objectContaining({ sound: "lofi_calm" }),
       ),
     );
+  });
+
+  it("preview button toggles aria-pressed and drives the preview player", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimerSection {...base} />);
+    const btn = screen.getByRole("button", {
+      name: /^preview — aurora on mute/i,
+    });
+    expect(btn).toHaveAttribute("aria-pressed", "false");
+    await user.click(btn);
+    expect(audioPlay).toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: /^stop preview — aurora on mute/i }),
+    ).toHaveAttribute("aria-pressed", "true");
+    // Clicking again stops the preview.
+    await user.click(
+      screen.getByRole("button", { name: /^stop preview — aurora on mute/i }),
+    );
+    expect(audioPause).toHaveBeenCalled();
+  });
+
+  it("previewing a second track stops the first (one at a time)", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimerSection {...base} />);
+    await user.click(
+      screen.getByRole("button", { name: /^preview — aurora on mute/i }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: /^preview — 3 am echoes/i }),
+    );
+    // Only the second is pressed.
+    expect(
+      screen.getByRole("button", { name: /^stop preview — 3 am echoes/i }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.getByRole("button", { name: /^preview — aurora on mute/i }),
+    ).toHaveAttribute("aria-pressed", "false");
   });
 });
