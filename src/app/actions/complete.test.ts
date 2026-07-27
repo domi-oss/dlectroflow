@@ -277,7 +277,7 @@ describe("completeStep", () => {
     const { completeStep } = await import("./focus");
     await completeStep("s2");
     expect(prismaMock.task.update).toHaveBeenCalledWith({
-      where: { id: "t1" },
+      where: { id: "t1", workspaceId: "owner" },
       data: { status: "done" },
     });
     expect(prismaMock.brainDumpItem.updateMany).toHaveBeenCalledWith(
@@ -317,7 +317,7 @@ describe("completeFocus — task completion", () => {
     const { completeFocus } = await import("./focus");
     await completeFocus("sess", { durationMin: 25, addedMin: 0 });
     expect(prismaMock.task.update).toHaveBeenCalledWith({
-      where: { id: "t1" },
+      where: { id: "t1", workspaceId: "owner" },
       data: { status: "done" },
     });
     expect(prismaMock.brainDumpItem.updateMany).toHaveBeenCalledWith(
@@ -347,7 +347,7 @@ describe("completeFocus — task completion", () => {
       "task_complete",
     );
     expect(prismaMock.task.update).not.toHaveBeenCalledWith({
-      where: { id: "t1" },
+      where: { id: "t1", workspaceId: "owner" },
       data: { status: "done" },
     });
   });
