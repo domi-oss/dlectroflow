@@ -676,46 +676,6 @@ export const STRINGS = {
     plain: "See the help & docs →",
     playful: "🆘 See the help & docs →",
   },
-  // Guest banner copy (#73). Short scannable lines rather than one paragraph —
-  // this is the first screen of an ADHD-support app. Every claim below is
-  // verifiable against shipped behaviour; the breakdown allowance is NOT stated
-  // here because the component renders it from the live `quota` prop.
-  "guest.bannerIntro": {
-    plain: "Guest mode — a private sandbox that lives in this browser session.",
-    playful:
-      "👋 Guest mode — your own private sandbox, gone when this browser session ends.",
-  },
-  "guest.bannerPerksLead": {
-    plain: "Yours while you're here:",
-    playful: "Yours while you're here:",
-  },
-  // Rendered after the numeric quota, i.e. "5 AI breakdowns on a fast model".
-  "guest.perkBreakdowns": {
-    plain: "AI breakdowns on a fast model",
-    playful: "AI breakdowns on a speedy model",
-  },
-  "guest.perkFocus": {
-    plain: "Focus timer with lo-fi music",
-    playful: "Focus timer with lo-fi beats",
-  },
-  "guest.perkRewards": {
-    plain: "Streaks and rewards",
-    playful: "Streaks and shiny rewards",
-  },
-  "guest.perkExport": {
-    plain: "One-click calendar export (.ics)",
-    playful: "One-click calendar export (.ics)",
-  },
-  "guest.bannerOwnerOnly": {
-    plain: "Owner-only: live Google Tasks sync, and changing settings.",
-    playful: "Owner-only: live Google Tasks sync, and changing settings.",
-  },
-  "guest.bannerSelfHost": {
-    plain:
-      "Want it permanent? dlectroflow is open source (AGPL) — self-host it and bring your own LLM key.",
-    playful:
-      "Want it permanent? dlectroflow is open source (AGPL) — self-host it and bring your own LLM key.",
-  },
 } as const;
 
 export type StringKey = keyof typeof STRINGS;

@@ -47,17 +47,17 @@ afterEach(() => {
 });
 
 describe("GuestIndicator banner copy (#73)", () => {
-  it("names the lo-fi focus music among the perks", () => {
+  it("names the lofi focus music", () => {
     const { container } = render(<GuestIndicator {...props} voice="plain" />);
-    expect(container.textContent).toMatch(/lo-fi/i);
+    expect(container.textContent).toMatch(/lofi music/i);
   });
 
   it("takes the breakdown allowance from the quota prop, not a hardcoded number", () => {
     const { container } = render(
       <GuestIndicator {...props} quota={7} voice="plain" />,
     );
-    expect(container.textContent).toMatch(/7 AI breakdowns/i);
-    expect(container.textContent).not.toMatch(/5 AI breakdowns/i);
+    expect(container.textContent).toMatch(/7 AI assisted task breakdowns/i);
+    expect(container.textContent).not.toMatch(/5 AI assisted task breakdowns/i);
   });
 
   it("promises nothing as 'coming soon' — self-hosting and BYO key both shipped", () => {
@@ -67,23 +67,23 @@ describe("GuestIndicator banner copy (#73)", () => {
     expect(container.textContent).toMatch(/own LLM key/i);
   });
 
-  it("states which capabilities are owner-only", () => {
+  it("states which capabilities need an account", () => {
     const { container } = render(<GuestIndicator {...props} voice="plain" />);
-    expect(container.textContent).toMatch(/owner-only/i);
+    expect(container.textContent).toMatch(/account owners/i);
     expect(container.textContent).toMatch(/google tasks/i);
   });
 
-  it("lists the perks as a list, not one prose paragraph", () => {
-    render(<GuestIndicator {...props} voice="plain" />);
-    expect(screen.getAllByRole("listitem").length).toBeGreaterThanOrEqual(4);
-  });
-
-  it("keeps decorative emoji to the playful voice (plain gets none in the intro)", () => {
+  // Owner decision (2026-07-27): the banner body is NOT voice-aware — the same
+  // wording persists through both voices. Only the #11 help nudge below it
+  // still differs (playful adds 🆘).
+  it("reads identically in both voices, apart from the #11 help nudge", () => {
     const plain = render(<GuestIndicator {...props} voice="plain" />);
-    expect(plain.container.textContent).not.toMatch(/👋/);
+    const plainBody = plain.container.querySelectorAll("p")[0].textContent;
     cleanup();
     const playful = render(<GuestIndicator {...props} voice="playful" />);
-    expect(playful.container.textContent).toMatch(/👋/);
+    const playfulBody = playful.container.querySelectorAll("p")[0].textContent;
+    expect(playfulBody).toBe(plainBody);
+    expect(plainBody).toMatch(/^👋 You're in guest mode/);
   });
 });
 

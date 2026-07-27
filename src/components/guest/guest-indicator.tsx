@@ -4,6 +4,20 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { t, type Voice } from "@/lib/strings";
 
+// #73 — owner-authored copy, deliberately NOT voice-aware: the same wording
+// persists across plain and playful. Only the breakdown allowance is
+// interpolated, from the live `quota` prop, so it can't drift from the enforced
+// cap. (The "New here?" nudge below it keeps #11's voice-aware strings.)
+const bannerText = (quota: number) =>
+  `👋 You're in guest mode - a private sandbox just for this browser session, ` +
+  `where you get ${quota} AI assisted task breakdowns on a fast model, visual ` +
+  `focus timer with lofi music, streaks and activity rewards, and one-click ` +
+  `calendar export via .ics - account owners get access to Google Tasks sync, ` +
+  `and further customisations.`;
+
+const SELF_HOST =
+  "Want it permanent? dlectroflow is open source (AGPL) — self-host it and bring your own LLM key.";
+
 function useCountdown(expiresAtIso: string): string {
   const [label, setLabel] = useState("");
   useEffect(() => {
@@ -52,18 +66,8 @@ export function GuestIndicator({
       <div className="border-b bg-amber-500/10 px-4 py-2 text-sm text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
         <div className="mx-auto flex max-w-3xl items-start gap-3">
           <div className="flex-1 space-y-1">
-            <p>{t("guest.bannerIntro", voice)}</p>
-            <p>{t("guest.bannerPerksLead", voice)}</p>
-            <ul className="ml-5 list-disc">
-              <li>
-                {quota} {t("guest.perkBreakdowns", voice)}
-              </li>
-              <li>{t("guest.perkFocus", voice)}</li>
-              <li>{t("guest.perkRewards", voice)}</li>
-              <li>{t("guest.perkExport", voice)}</li>
-            </ul>
-            <p>{t("guest.bannerOwnerOnly", voice)}</p>
-            <p>{t("guest.bannerSelfHost", voice)}</p>
+            <p>{bannerText(quota)}</p>
+            <p>{SELF_HOST}</p>
             {/* #11 — onboarding nudge to the in-app /help docs (voice-aware). */}
             <p>
               <span className="font-medium">{t("guest.newHere", voice)}</span>{" "}
