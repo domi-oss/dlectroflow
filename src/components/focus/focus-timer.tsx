@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Check, Minus, Pause, Play, Plus, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -173,6 +173,10 @@ export function FocusTimer({
   // a commitment: nothing is retired server-side until Start is pressed, so a
   // mis-tap can be undone with "Keep my paused session".
   const [startingFresh, setStartingFresh] = useState(false);
+  // The chip group is named by its visible "Focus for" label (no aria-label to
+  // drift from it); useId keeps that association collision-free, matching
+  // focus-sound-player's popover id.
+  const durationLabelId = useId();
   // The setup screen's primary CTA (Resume or Start), focused after a
   // disclosure toggle — see the effect below.
   const setupCtaRef = useRef<HTMLButtonElement | null>(null);
@@ -681,14 +685,14 @@ export function FocusTimer({
                   number Start will use. */}
               <div className="flex flex-col items-center gap-2">
                 <p
-                  id="focus-duration-label"
+                  id={durationLabelId}
                   className="text-muted-foreground text-sm font-semibold"
                 >
                   {t("focus.setup.focusFor", voice)}
                 </p>
                 <div
                   role="group"
-                  aria-labelledby="focus-duration-label"
+                  aria-labelledby={durationLabelId}
                   className="flex flex-wrap justify-center gap-2"
                 >
                   {chipMinutes.map((min) => {
