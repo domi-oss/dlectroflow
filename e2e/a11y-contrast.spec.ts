@@ -2,6 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
 import { captureItem, needsReviewRow } from "./helpers";
+import { OWNER_WS_ID } from "./constants";
 
 // Dedicated color-contrast gate for the #40 visual-identity-refresh palette
 // (Phase 1.2), covering both themes. Distinct from the broader
@@ -60,7 +61,10 @@ async function scanColorContrast(page: Page) {
 const SEED_MARKER = "a11y-lib-pill";
 // #56 seeding marker (see seedSavedLaterItem below).
 const SAVED_MARKER = "a11y-saved-idle";
-const OWNER_WS = "owner"; // OWNER_WORKSPACE_ID (src/lib/constants.ts)
+// #35 Phase A: seed into the SAME workspace the forged session resolves to.
+// Pre-accounts this was the constant "owner"; now the suite has a real account
+// (see e2e/global-setup.ts) and its workspace id comes from e2e/constants.ts.
+const OWNER_WS = OWNER_WS_ID;
 
 async function seedPlatedItems(
   count: number,
@@ -73,7 +77,7 @@ async function seedPlatedItems(
   try {
     await prisma.workspace.upsert({
       where: { id: OWNER_WS },
-      create: { id: OWNER_WS, kind: "owner" },
+      create: { id: OWNER_WS, kind: "user" },
       update: {},
     });
     await prisma.brainDumpItem.createMany({
@@ -106,7 +110,7 @@ async function seedSavedLaterItem(marker: string): Promise<PrismaClient> {
   try {
     await prisma.workspace.upsert({
       where: { id: OWNER_WS },
-      create: { id: OWNER_WS, kind: "owner" },
+      create: { id: OWNER_WS, kind: "user" },
       update: {},
     });
     await prisma.brainDumpItem.create({

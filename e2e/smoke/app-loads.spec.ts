@@ -20,3 +20,26 @@ test("/inbox permanently redirects to / (bookmarks + OAuth callbacks)", async ({
   await expect(page).toHaveURL(/^https?:\/\/[^/]+\/(\?.*)?$/);
   await expect(page.getByPlaceholder(CAPTURE_PLACEHOLDER)).toBeVisible();
 });
+
+// #35 Phase A — the trap guard.
+//
+// The forged session in e2e/global-setup.ts now names a real account, and the
+// app resolves that id against the database. If it ever stops matching a real
+// User row, the cookie still verifies, currentUser() returns null, and the WHOLE
+// suite silently runs as an anonymous visitor — every other spec above keeps
+// passing, because guests can capture and browse too. So assert the signed-in
+// state explicitly, from the outside, on something only a signed-in account
+// sees: the header's Account/Sign out controls, and the ABSENCE of the guest
+// sandbox banner.
+test("the suite really is signed in (guards against a silently anonymous run)", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  await expect(page.getByRole("link", { name: /^account$/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible();
+
+  // A guest would be offered sign-in and shown the sandbox banner instead.
+  await expect(page.getByRole("link", { name: /^sign in$/i })).toHaveCount(0);
+  await expect(page.getByText(/sandbox/i)).toHaveCount(0);
+});
