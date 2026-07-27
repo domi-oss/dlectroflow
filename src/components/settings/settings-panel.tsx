@@ -15,6 +15,7 @@ import {
   useSaveStatus,
   SaveIndicator,
 } from "@/components/settings/use-save-status";
+import { SectionHeading } from "@/components/nav/section-heading";
 
 const FABLE_LINES = [
   "Our most capable model. Also $50/M tokens. To split 'clean the kitchen' into 3 steps? We love you, but no.",
@@ -157,15 +158,14 @@ export function SettingsPanel({
   return (
     <div className="space-y-6 text-sm">
       <section className="space-y-3">
-        <h2 className="flex items-center gap-2 font-semibold">
-          Aging &amp; reminder
+        <SectionHeading id="settings-aging" voice={voice}>
           {settings.demoOverrideSeconds != null && (
             <span className="text-xs font-normal text-amber-600">
               demo override: {settings.demoOverrideSeconds}s
             </span>
           )}
           <SaveIndicator status={status} voice={voice} />
-        </h2>
+        </SectionHeading>
         <div className="flex flex-wrap items-end gap-4">
           <label className="flex flex-col gap-1">
             <span className="text-muted-foreground text-xs">
@@ -251,7 +251,7 @@ export function SettingsPanel({
       </section>
 
       <section className="space-y-2 border-t pt-4">
-        <h2 className="font-semibold">Voice</h2>
+        <SectionHeading id="settings-voice" voice={voice} />
         <div
           className="inline-flex rounded-md border"
           role="group"
@@ -282,14 +282,13 @@ export function SettingsPanel({
           without being able to change it. Server-side, updateBreakdownModel
           already rejects non-owners — this is the matching UI. */}
       <section className="space-y-2 border-t pt-4">
-        <h2 className="flex items-center gap-2 font-semibold">
-          Breakdown model
+        <SectionHeading id="settings-breakdown-model" voice={voice}>
           {!isOwner && (
             <span className="border-input text-muted-foreground rounded-full border px-2 py-0.5 text-xs font-normal">
               🔒 {t("settings.ownerOnly", voice)}
             </span>
           )}
-        </h2>
+        </SectionHeading>
         {modelChoices ? (
           <>
             <div
@@ -349,7 +348,7 @@ export function SettingsPanel({
       </section>
 
       <section className="space-y-2 border-t pt-4">
-        <h2 className="font-semibold">Demo</h2>
+        <SectionHeading id="settings-demo" voice={voice} />
         <label className="flex items-start gap-2 text-sm">
           <input
             type="checkbox"

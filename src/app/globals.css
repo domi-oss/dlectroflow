@@ -234,3 +234,16 @@
     }
   }
 }
+
+/* #72 — jump targets for the collapsible sticky section nav (Settings, Help).
+ * Every <SectionHeading> carries data-section-target. The nav is position:sticky
+ * at the top of the viewport, so without a scroll margin the browser parks the
+ * heading it just jumped to *underneath* the bar — the classic bug with this
+ * pattern. The bar measures itself and publishes its live height as
+ * --section-nav-h (it changes as the list expands, collapses or rewraps), so the
+ * margin always matches what is actually on screen; the fallback covers the
+ * collapsed one-row bar before hydration (and if JS never runs). Deliberately
+ * outside @layer so it beats Tailwind's scroll-mt-* utilities. */
+[data-section-target] {
+  scroll-margin-top: calc(var(--section-nav-h, 3.5rem) + 1rem);
+}

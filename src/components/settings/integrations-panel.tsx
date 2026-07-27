@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { disconnectGoogleTasks } from "@/app/actions/google-schedule";
 import { t, type Voice } from "@/lib/strings";
+import { SectionHeading } from "@/components/nav/section-heading";
 
 type GoogleStatus = {
   configured: boolean;
@@ -58,12 +59,11 @@ export function IntegrationsPanel({
   if (readOnly) {
     return (
       <section className="space-y-3">
-        <h2 className="flex items-center gap-2 text-lg font-semibold">
-          Integrations
+        <SectionHeading id="settings-integrations" voice={voice}>
           <span className="border-input text-muted-foreground rounded-full border px-2 py-0.5 text-xs font-medium">
             🔒 {t("settings.ownerOnly", voice)}
           </span>
-        </h2>
+        </SectionHeading>
         <div className="rounded-lg border p-4 opacity-70">
           <div className="flex items-center gap-3">
             <div className="flex-1">
@@ -98,7 +98,7 @@ export function IntegrationsPanel({
 
   return (
     <section className="space-y-3">
-      <h2 className="text-lg font-semibold">Integrations</h2>
+      <SectionHeading id="settings-integrations" voice={voice} />
       <div className="rounded-lg border p-4">
         <div className="flex items-center gap-3">
           <div className="flex-1">
