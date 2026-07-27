@@ -46,6 +46,75 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("GuestIndicator banner copy (#73)", () => {
+  it("names the lofi focus music", () => {
+    const { container } = render(<GuestIndicator {...props} voice="plain" />);
+    expect(container.textContent).toMatch(/lofi music/i);
+  });
+
+  it("takes the breakdown allowance from the quota prop, not a hardcoded number", () => {
+    const { container } = render(
+      <GuestIndicator {...props} quota={7} voice="plain" />,
+    );
+    expect(container.textContent).toMatch(/7 AI assisted task breakdowns/i);
+    expect(container.textContent).not.toMatch(/5 AI assisted task breakdowns/i);
+  });
+
+  it("promises nothing as 'coming soon' — self-hosting and BYO key both shipped", () => {
+    const { container } = render(<GuestIndicator {...props} voice="plain" />);
+    expect(container.textContent).not.toMatch(/coming soon/i);
+    expect(container.textContent).toMatch(/self-host/i);
+    expect(container.textContent).toMatch(/own LLM key/i);
+  });
+
+  it("states which capabilities need an account", () => {
+    const { container } = render(<GuestIndicator {...props} voice="plain" />);
+    expect(container.textContent).toMatch(/account owners/i);
+    expect(container.textContent).toMatch(/google tasks/i);
+  });
+
+  // Owner decision (2026-07-27): the banner body is NOT voice-aware — the same
+  // wording persists through both voices. Only the #11 help nudge below it
+  // still differs (playful adds 🆘).
+  it("reads identically in both voices, apart from the #11 help nudge", () => {
+    const plain = render(<GuestIndicator {...props} voice="plain" />);
+    const plainBody = plain.container.querySelectorAll("p")[0].textContent;
+    cleanup();
+    const playful = render(<GuestIndicator {...props} voice="playful" />);
+    const playfulBody = playful.container.querySelectorAll("p")[0].textContent;
+    expect(playfulBody).toBe(plainBody);
+    expect(plainBody).toMatch(/^👋 You're in guest mode/);
+  });
+});
+
+describe("GuestIndicator dark-mode contrast + target size (#73)", () => {
+  // The banner shipped with no `dark:` variants at all, so amber-800 landed on
+  // a near-black page at 2.44:1 — well under AA. Pair it the way the aging
+  // tiers already do elsewhere (see inbox-view / status-pill).
+  it("pairs the expanded banner's amber with an AA-tuned dark variant", () => {
+    const { container } = render(<GuestIndicator {...props} voice="plain" />);
+    const banner = container.firstElementChild as HTMLElement;
+    expect(banner.className).toContain("dark:bg-amber-950/20");
+    expect(banner.className).toContain("dark:text-amber-300");
+  });
+
+  it("pairs the collapsed pill's amber with an AA-tuned dark variant", () => {
+    render(<GuestIndicator {...props} voice="plain" />);
+    fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
+    // The pill's accessible name comes from its own text (the `title` is
+    // ignored once a button has content), so match on the quota text.
+    const pill = screen.getByRole("button", { name: /breakdowns/i });
+    expect(pill.className).toContain("dark:text-amber-300");
+  });
+
+  it("gives the dismiss control a WCAG 2.2 target size (44px)", () => {
+    render(<GuestIndicator {...props} voice="plain" />);
+    const dismiss = screen.getByRole("button", { name: /dismiss/i });
+    expect(dismiss.className).toContain("h-11");
+    expect(dismiss.className).toContain("w-11");
+  });
+});
+
 describe("GuestIndicator onboarding help banner (#11)", () => {
   it("links guests to the in-app /help docs (plain voice)", () => {
     render(<GuestIndicator {...props} voice="plain" />);
