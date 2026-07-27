@@ -34,7 +34,10 @@ test("focus timer starts and pauses", async ({ page }) => {
     "/focus",
   );
 
-  await page.getByRole("button", { name: "▶ Start focusing" }).click();
+  // The timer's own controls render their glyph as an aria-hidden lucide icon
+  // and strip the leading glyph from the shared string, so the accessible name
+  // is the bare text ("Start focusing", not "▶ Start focusing").
+  await page.getByRole("button", { name: "Start focusing" }).click();
 
   // Complete-step + Pause/Resume are the on-page controls now; the old
   // "Pause for now" control + the gaveup screen were removed in the redesign.
@@ -42,10 +45,11 @@ test("focus timer starts and pauses", async ({ page }) => {
     page.getByRole("button", { name: /complete step/i }),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: "⏸️ Pause", exact: true }).click();
+  // exact: true keeps these off the mini-player's "Play/Pause focus sound".
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
   // The ring/countdown are animated and time-dependent — assert only the
   // stable post-pause control state, relying on Playwright auto-waiting.
   await expect(
-    page.getByRole("button", { name: "▶ Resume", exact: true }),
+    page.getByRole("button", { name: "Resume", exact: true }),
   ).toBeVisible();
 });
