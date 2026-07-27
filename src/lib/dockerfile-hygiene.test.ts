@@ -280,7 +280,13 @@ describe.each([["Dockerfile"], ["Dockerfile.ci"]])(
       for (const pkg of ["prisma", "tsx", "dotenv"]) {
         const locked = lock.packages[`node_modules/${pkg}`]?.version;
         expect(locked, `${pkg} missing from package-lock.json`).toBeDefined();
-        expect(installed).toContain(`${pkg}@${locked}`);
+        expect(
+          installed,
+          `${filename} must install ${pkg}@${locked} to match package-lock.json. ` +
+            `The cluster runs migrations and scripts from this image, so a pin ` +
+            `that drifts from the lockfile means the container runs them on a ` +
+            `different ${pkg} than the app was built and tested against`,
+        ).toContain(`${pkg}@${locked}`);
       }
     });
   },
