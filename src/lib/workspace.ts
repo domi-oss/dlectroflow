@@ -25,7 +25,8 @@ export async function resolveWorkspaceId(input: {
   const { sessionSecret } = authConfig();
   if (input.owner) {
     const p = await verifySession(input.owner, sessionSecret);
-    if (p?.kind === "owner") return OWNER_WORKSPACE_ID;
+    // The signed-in user's own workspace, carried in the token — not a constant.
+    if (p?.kind === "user") return p.wsId;
   }
   if (input.guest) {
     const p = await verifySession(input.guest, sessionSecret);
@@ -68,5 +69,5 @@ export async function isOwnerRequest(): Promise<boolean> {
   const token = jar.get(OWNER_COOKIE)?.value;
   if (!token) return false;
   const p = await verifySession(token, authConfig().sessionSecret);
-  return p?.kind === "owner";
+  return p?.kind === "user";
 }

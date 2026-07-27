@@ -37,17 +37,6 @@ function normalizeIdentity(value: string | undefined): string | undefined {
   return v ? v : undefined;
 }
 
-/**
- * @deprecated #35 Phase A — the env `OWNER_ALLOWLIST` check. Superseded by the
- * database Allowlist (`provisionFromProfile`); still wired up only so the OAuth
- * callback keeps compiling until it is rewritten. Deleted with its last caller.
- */
-export function isOwner(identity: string, allowlist: string[]): boolean {
-  const id = identity.trim().toLowerCase();
-  if (!id) return false;
-  return allowlist.some((a) => a.trim().toLowerCase() === id);
-}
-
 const GITLAB = "https://gitlab.com";
 
 const gitlabProvider: AuthProvider = {

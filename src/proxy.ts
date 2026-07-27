@@ -29,7 +29,7 @@ export async function proxy(req: NextRequest) {
   const ownerPayload = ownerToken
     ? await verifySession(ownerToken, sessionSecret)
     : null;
-  const isOwner = ownerPayload?.kind === "owner";
+  const isOwner = ownerPayload?.kind === "user";
 
   // Owner-only paths: block guests.
   if (isOwnerOnlyPath(pathname) && !isOwner) {

@@ -1,5 +1,5 @@
 import { chromium } from "@playwright/test";
-import { signOwnerSession, OWNER_COOKIE } from "../src/lib/auth/session";
+import { signUserSession, OWNER_COOKIE } from "../src/lib/auth/session";
 import {
   SESSION_SECRET,
   OWNER_SUB,
@@ -11,8 +11,8 @@ import {
 // then persist it as Playwright storageState so every spec starts logged in.
 // No auth-bypass path is added to application code.
 export default async function globalSetup(): Promise<void> {
-  const token = await signOwnerSession(
-    { kind: "owner", sub: OWNER_SUB },
+  const token = await signUserSession(
+    { kind: "user", userId: OWNER_SUB, wsId: OWNER_SUB },
     SESSION_SECRET,
   );
   const url = new URL(BASE_URL);

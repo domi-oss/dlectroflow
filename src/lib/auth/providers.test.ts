@@ -1,27 +1,10 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { isOwner, getAuthProvider } from "./providers";
+import { getAuthProvider } from "./providers";
 import { assertAuthConfig } from "./config";
 
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
-});
-
-// Deprecated env-allowlist check — kept green until #35 Phase A Task 4 deletes
-// it along with its last caller (the OAuth callback).
-describe("isOwner", () => {
-  it("matches an allowlisted id", () => {
-    expect(isOwner("1234567", ["1234567"])).toBe(true);
-  });
-  it("is case-insensitive and trims", () => {
-    expect(isOwner("  Me@x.com ", ["me@x.com"])).toBe(true);
-  });
-  it("rejects a non-listed identity", () => {
-    expect(isOwner("999", ["1234567"])).toBe(false);
-  });
-  it("rejects empty identity", () => {
-    expect(isOwner("", ["1234567"])).toBe(false);
-  });
 });
 
 // #35 Phase A — the callback needs more than an opaque subject now: invites are

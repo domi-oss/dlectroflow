@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { resolveWorkspaceId, MissingWorkspaceError } from "./workspace";
-import { signOwnerSession, signGuestSession } from "./auth/session";
+import { signUserSession, signGuestSession } from "./auth/session";
 
 const SECRET = "test-secret-at-least-32-bytes-long-xxxxx";
 
@@ -13,9 +13,12 @@ afterEach(() => {
 });
 
 describe("resolveWorkspaceId", () => {
-  it("returns 'owner' for a valid owner cookie", async () => {
-    const owner = await signOwnerSession({ kind: "owner", sub: "1" }, SECRET);
-    expect(await resolveWorkspaceId({ owner })).toBe("owner");
+  it("returns the user's own workspace for a valid user cookie", async () => {
+    const owner = await signUserSession(
+      { kind: "user", userId: "u1", wsId: "ws-real" },
+      SECRET,
+    );
+    expect(await resolveWorkspaceId({ owner })).toBe("ws-real");
   });
 
   it("returns the guest wsId for a valid guest cookie", async () => {
@@ -23,10 +26,13 @@ describe("resolveWorkspaceId", () => {
     expect(await resolveWorkspaceId({ guest })).toBe("g-123");
   });
 
-  it("prefers owner over guest", async () => {
-    const owner = await signOwnerSession({ kind: "owner", sub: "1" }, SECRET);
+  it("prefers the user session over guest", async () => {
+    const owner = await signUserSession(
+      { kind: "user", userId: "u1", wsId: "ws-real" },
+      SECRET,
+    );
     const guest = await signGuestSession("g-1", SECRET, 3600);
-    expect(await resolveWorkspaceId({ owner, guest })).toBe("owner");
+    expect(await resolveWorkspaceId({ owner, guest })).toBe("ws-real");
   });
 
   it("resolves a signed guest token forwarded via header", async () => {
