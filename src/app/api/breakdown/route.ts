@@ -4,10 +4,13 @@ import type { LLMTool } from "@/lib/llm/types";
 import {
   buildUserPrompt,
   localBreakdown,
+  BREAKDOWN_APP_CONTEXT,
+  type BreakdownContext,
   type BreakdownRequest,
   type Proposal,
   type StreamEvent,
 } from "@/lib/breakdown";
+import { gatherBreakdownContext } from "@/lib/breakdown-context";
 import { isOwnerRequest, currentWorkspaceId } from "@/lib/workspace";
 import { getSettings } from "@/lib/settings-read";
 import { resolveBreakdownModel, breakdownParamsFor } from "@/lib/models";
@@ -28,7 +31,20 @@ export const runtime = "nodejs";
 // OWASP ASVS V13.2.6 — API abuse prevention.
 const MAX_BODY_CHARS = 10_000;
 
+// #14 — the coach's SYSTEM prompt. Two rules govern edits here:
+//   1. It must stay FREE of per-request values. BREAKDOWN_APP_CONTEXT is a
+//      hoisted constant precisely so this string is byte-identical for every
+//      request and every workspace (live state goes in the user turn instead).
+//      Nothing is prompt-cached today — see #14's spec §5 — but a stable
+//      prefix is the precondition for ever enabling it.
+//   2. The `propose_steps` sentence must remain the LAST line. On a tool-less
+//      provider the openai-compatible adapter appends the whole JSON Schema
+//      after this string (`buildStructuredInstruction`, #59 Task 7); burying
+//      the tool instruction in the middle is how small local models start
+//      forgetting to emit the `<result>` block.
 const SYSTEM = `You are a warm, encouraging ADHD coach who helps break an overwhelming task into tiny, concrete, doable steps.
+
+${BREAKDOWN_APP_CONTEXT}
 
 Voice:
 - Open with a FRESH, creative, varied one-line greeting tailored to THIS specific task. Never reuse a stock opener; be warm and human, and end it inviting the person to confirm or tweak.
@@ -137,8 +153,22 @@ export async function POST(req: Request): Promise<Response> {
     }
   }
 
-  // Resolve model (owner setting → env → default; guest → haiku).
-  const settings = owner ? await getSettings(OWNER_WORKSPACE_ID) : null;
+  // Resolve the model tier and gather the coach's live context in ONE round
+  // trip. Two distinct workspace reads live here and must not be conflated:
+  //   • getSettings(OWNER_WORKSPACE_ID) is the OWNER's model-tier lookup, and
+  //     stays gated on `owner`.
+  //   • gatherBreakdownContext(wsId) is the REQUESTER's own data. Passing
+  //     OWNER_WORKSPACE_ID here would hand a guest the owner's voice, streak
+  //     and board — the single most important line in this file.
+  // Blocked guests never reach the LLM, so they do no context work either; and
+  // a context failure degrades to no context rather than failing the request
+  // (the breakdown path was DB-light before #14 and must stay resilient).
+  const [settings, breakdownContext] = await Promise.all([
+    owner ? getSettings(OWNER_WORKSPACE_ID) : Promise.resolve(null),
+    blockedReason
+      ? Promise.resolve<BreakdownContext>({})
+      : gatherBreakdownContext(wsId).catch(() => ({}) as BreakdownContext),
+  ]);
   const model = resolveBreakdownModel({
     isOwner: owner,
     ownerSetting: settings?.breakdownModel ?? null,
@@ -185,7 +215,9 @@ export async function POST(req: Request): Promise<Response> {
         const llm = getLLM();
         for await (const ev of llm.stream({
           system: SYSTEM,
-          messages: [{ role: "user", content: buildUserPrompt(body) }],
+          messages: [
+            { role: "user", content: buildUserPrompt(body, breakdownContext) },
+          ],
           tools: [PROPOSE_TOOL],
           toolChoice: "propose_steps",
           maxTokens: 6000,
