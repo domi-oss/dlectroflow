@@ -292,7 +292,6 @@ export const STRINGS = {
     playful: "✓ Complete step",
   },
   "focus.timer.of": { plain: "of", playful: "of" },
-  "focus.timer.leftInTask": { plain: "left in task", playful: "left in task" },
   "focus.timer.steps": { plain: "steps", playful: "steps" },
   "focus.tip.body": {
     plain: "Make this timer yours — style, sounds, alarm & more.",
