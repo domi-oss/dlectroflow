@@ -12,8 +12,9 @@ import { FocusSound } from "@/lib/constants";
  * #43 — the curated, bundled lo-fi library. One CC0 track per open-lofi category
  * (see public/audio/lofi/ + public/audio/LICENSE.md for provenance). This array
  * is BOTH the settings-picker data source and the in-timer mini-player playlist;
- * its order is the next/prev cycle order. `id` is the FocusSound value persisted
- * in Settings.focusSound. Titles/categories mirror open-lofi's catalog.json.
+ * its order is the playlist's in-order pass (#68). `id` is the FocusSound value
+ * persisted in Settings.focusSound. Titles/categories mirror open-lofi's
+ * catalog.json.
  */
 export type FocusTrack = {
   id: string;
@@ -143,16 +144,92 @@ export function clampVolume(v: number): number {
   return Math.min(1, Math.max(0, v));
 }
 
+// ── Play order (#68) ──────────────────────────────────────────────────────────
+// The player consumes a "pass": an array of track indices, head→tail, and only
+// wraps once the pass is exhausted. That is what guarantees no track repeats
+// mid-pass — including in shuffle, which shuffles a COPY of the order up front
+// rather than picking at random on each advance (random-per-advance can play the
+// same track twice in a row, which is the complaint #68 exists to fix).
+
+/**
+ * Fisher–Yates shuffle of a COPY of `indices` (the input is never mutated).
+ * `rng` is injectable so tests get a deterministic order; it must return a
+ * number in [0, 1) like Math.random.
+ */
+export function shuffleIndices(
+  indices: readonly number[],
+  rng: () => number = Math.random,
+): number[] {
+  const out = [...indices];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+/**
+ * Build a pass over `length` tracks: `[0..length-1]` in order, or a full
+ * permutation of it when `shuffle` is set. Both forms contain every track
+ * exactly once.
+ *
+ * - `startAt` — deal this track to the head of a shuffled pass, so toggling
+ *   shuffle (or starting a session) never interrupts what is already playing.
+ *   Ignored when out of range, and irrelevant in order (the cursor, not the
+ *   order, says where an in-order pass is being read from).
+ * - `avoidFirst` — keep this track OFF the head. Used when a shuffled pass is
+ *   re-dealt on exhaustion: the track that just finished must not immediately
+ *   play again. Ignored for a single-track playlist (nothing else to play).
+ */
+export function buildPlayOrder(
+  length: number,
+  opts: {
+    shuffle?: boolean;
+    startAt?: number;
+    avoidFirst?: number;
+    rng?: () => number;
+  } = {},
+): number[] {
+  if (length <= 0) return [];
+  const inOrder = Array.from({ length }, (_, i) => i);
+  if (!opts.shuffle) return inOrder;
+
+  const rng = opts.rng ?? Math.random;
+  const order = shuffleIndices(inOrder, rng);
+  const { startAt, avoidFirst } = opts;
+  const inRange = (i: number | undefined): i is number =>
+    i != null && Number.isInteger(i) && i >= 0 && i < length;
+
+  if (inRange(startAt)) {
+    // Swap the requested track into the head — still a permutation.
+    const at = order.indexOf(startAt);
+    [order[0], order[at]] = [order[at], order[0]];
+  } else if (inRange(avoidFirst) && length > 1 && order[0] === avoidFirst) {
+    const j = 1 + Math.floor(rng() * (length - 1));
+    [order[0], order[j]] = [order[j], order[0]];
+  }
+  return order;
+}
+
+/** Where a track index sits in a pass; the head (0) when it isn't in there. */
+export function playOrderCursor(
+  order: readonly number[],
+  index: number,
+): number {
+  const at = order.indexOf(index);
+  return at < 0 ? 0 : at;
+}
+
 const ALARM_SRC = "/audio/alarm.wav";
 
 export type Alarm = { play(): void };
-export type LoopPlayer = {
+export type PlaylistPlayer = {
   play(): void;
   pause(): void;
   stop(): void;
   /** Set output volume (0..1, clamped). */
   setVolume(v: number): void;
-  /** Swap the looping source; resumes automatically if currently playing. */
+  /** Swap the source; resumes automatically if currently playing. */
   load(src: string): void;
   /** Current playback position + track length (seconds); 0s where unknown. */
   getTime(): { currentTime: number; duration: number };
@@ -164,11 +241,13 @@ export type PreviewPlayer = {
 };
 export type WakeGuard = { release(): void };
 
-function makeAudio(src: string, loop = false): HTMLAudioElement | null {
+// Nothing here loops an element any more (#68): the background player advances
+// its playlist on `ended` instead, and the alarm/preview are one-shots.
+function makeAudio(src: string): HTMLAudioElement | null {
   try {
     if (typeof Audio === "undefined") return null;
     const a = new Audio(src);
-    a.loop = loop;
+    a.loop = false;
     return a;
   } catch {
     return null;
@@ -197,15 +276,25 @@ export function createAlarm(): Alarm {
   };
 }
 
-/** Looping background player for the given asset. Supports live volume changes
- * and swapping the source (for the mini-player's next/prev) without losing the
- * play/pause state. */
-export function createLoopPlayer(
+/**
+ * Background player for one shared element. Supports live volume changes and
+ * swapping the source (the mini-player's next/prev, and the playlist's own
+ * auto-advance) without losing the play/pause state.
+ *
+ * #68 — the element deliberately does NOT loop: a looping single source is what
+ * made the focus music repeat the same track forever. When a track finishes we
+ * report it via `onEnded` and the caller (useFocusSound) loads the next one, so
+ * "what plays next" belongs to the playlist rather than to the element.
+ */
+export function createPlaylistPlayer(
   src: string,
-  opts: { volume?: number } = {},
-): LoopPlayer {
-  const audio = makeAudio(src, true);
+  opts: { volume?: number; onEnded?: () => void } = {},
+): PlaylistPlayer {
+  const audio = makeAudio(src);
   if (audio && opts.volume != null) audio.volume = clampVolume(opts.volume);
+  // Assigned once, on the element we keep for the whole session — load() swaps
+  // only `src`, so the handler survives every track change.
+  if (audio) audio.onended = opts.onEnded ?? null;
   let playing = false;
   return {
     play() {
@@ -274,7 +363,7 @@ export function createPreviewPlayer(): PreviewPlayer {
   return {
     play(src: string, onEnded?: () => void) {
       try {
-        if (!audio) audio = makeAudio(src, false);
+        if (!audio) audio = makeAudio(src);
         if (!audio) return;
         audio.pause();
         audio.src = src;

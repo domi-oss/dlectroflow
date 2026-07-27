@@ -103,6 +103,90 @@ describe("focus-sounds — pure playlist helpers", () => {
   });
 });
 
+// #68 — the play order is what stops the "same track again" complaint: the
+// player consumes a whole pass before it wraps, so no track can repeat
+// mid-pass in either order.
+describe("focus-sounds — play order (#68)", () => {
+  it("shuffleIndices returns a permutation of a COPY (input untouched)", async () => {
+    const { shuffleIndices } = await import("@/lib/focus-sounds");
+    const input = [0, 1, 2, 3, 4];
+    const out = shuffleIndices(input);
+    expect(out).not.toBe(input);
+    expect(input).toEqual([0, 1, 2, 3, 4]);
+    expect([...out].sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it("shuffleIndices is deterministic for an injected rng (Fisher–Yates)", async () => {
+    const { shuffleIndices } = await import("@/lib/focus-sounds");
+    // rng always 0 → every swap picks index 0.
+    expect(shuffleIndices([0, 1, 2], () => 0)).toEqual([1, 2, 0]);
+    // rng at the top of the range → each element swaps with itself (identity).
+    expect(shuffleIndices([0, 1, 2], () => 0.99)).toEqual([0, 1, 2]);
+  });
+
+  it("buildPlayOrder is the sequential order when shuffle is off", async () => {
+    const { buildPlayOrder } = await import("@/lib/focus-sounds");
+    expect(buildPlayOrder(4, { shuffle: false })).toEqual([0, 1, 2, 3]);
+    // startAt does not rotate an in-order pass — the cursor handles that.
+    expect(buildPlayOrder(4, { shuffle: false, startAt: 2 })).toEqual([
+      0, 1, 2, 3,
+    ]);
+  });
+
+  it("a shuffled pass contains every track exactly once", async () => {
+    const { buildPlayOrder } = await import("@/lib/focus-sounds");
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const order = buildPlayOrder(10, { shuffle: true });
+      expect([...order].sort((a, b) => a - b)).toEqual([
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+      ]);
+    }
+  });
+
+  it("a shuffled pass starts at startAt, so the chosen track plays first", async () => {
+    const { buildPlayOrder } = await import("@/lib/focus-sounds");
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const order = buildPlayOrder(10, { shuffle: true, startAt: 7 });
+      expect(order[0]).toBe(7);
+      expect(new Set(order).size).toBe(10);
+    }
+  });
+
+  it("ignores an out-of-range startAt rather than corrupting the pass", async () => {
+    const { buildPlayOrder } = await import("@/lib/focus-sounds");
+    const order = buildPlayOrder(5, { shuffle: true, startAt: 99 });
+    expect([...order].sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it("avoidFirst keeps the just-played track off the head of the next pass", async () => {
+    const { buildPlayOrder } = await import("@/lib/focus-sounds");
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const order = buildPlayOrder(10, { shuffle: true, avoidFirst: 3 });
+      expect(order[0]).not.toBe(3);
+      expect(new Set(order).size).toBe(10);
+    }
+  });
+
+  it("avoidFirst is ignored for a one-track playlist (nothing else to play)", async () => {
+    const { buildPlayOrder } = await import("@/lib/focus-sounds");
+    expect(buildPlayOrder(1, { shuffle: true, avoidFirst: 0 })).toEqual([0]);
+  });
+
+  it("returns an empty order for an empty playlist", async () => {
+    const { buildPlayOrder } = await import("@/lib/focus-sounds");
+    expect(buildPlayOrder(0, { shuffle: true })).toEqual([]);
+    expect(buildPlayOrder(0, { shuffle: false })).toEqual([]);
+  });
+
+  it("playOrderCursor locates a track in the pass and falls back to the head", async () => {
+    const { playOrderCursor } = await import("@/lib/focus-sounds");
+    expect(playOrderCursor([4, 2, 0, 1, 3], 0)).toBe(2);
+    expect(playOrderCursor([4, 2, 0, 1, 3], 4)).toBe(0);
+    expect(playOrderCursor([4, 2, 0, 1, 3], 9)).toBe(0);
+    expect(playOrderCursor([], 0)).toBe(0);
+  });
+});
+
 describe("createAlarm", () => {
   it("plays the chime from the start and vibrates on play()", async () => {
     const { createAlarm } = await import("@/lib/focus-sounds");
@@ -112,10 +196,10 @@ describe("createAlarm", () => {
   });
 });
 
-describe("createLoopPlayer", () => {
-  it("loops, and play/pause/stop drive the element", async () => {
-    const { createLoopPlayer } = await import("@/lib/focus-sounds");
-    const p = createLoopPlayer("/audio/lofi/aurora-on-mute.mp3");
+describe("createPlaylistPlayer", () => {
+  it("play/pause/stop drive the element", async () => {
+    const { createPlaylistPlayer } = await import("@/lib/focus-sounds");
+    const p = createPlaylistPlayer("/audio/lofi/aurora-on-mute.mp3");
     p.play();
     expect(audioPlay).toHaveBeenCalled();
     p.pause();
@@ -124,8 +208,10 @@ describe("createLoopPlayer", () => {
     expect(audioPause).toHaveBeenCalledTimes(2);
   });
 
-  it("setVolume clamps and initial volume is applied", async () => {
-    const { createLoopPlayer } = await import("@/lib/focus-sounds");
+  // #68 — the element must NOT loop: a looping single source is exactly the
+  // "it repeats the same track" bug. The playlist advances on `ended` instead.
+  it("never loops the element and reports the track end via onEnded", async () => {
+    const { createPlaylistPlayer } = await import("@/lib/focus-sounds");
     const captured: FakeAudio[] = [];
     vi.stubGlobal(
       "Audio",
@@ -136,7 +222,34 @@ describe("createLoopPlayer", () => {
         }
       } as unknown as typeof Audio,
     );
-    const p = createLoopPlayer("/audio/lofi/aurora-on-mute.mp3", {
+    const onEnded = vi.fn();
+    const p = createPlaylistPlayer("/audio/lofi/aurora-on-mute.mp3", {
+      onEnded,
+    });
+    expect(captured[0].loop).toBe(false);
+    p.play();
+    captured[0].onended?.();
+    expect(onEnded).toHaveBeenCalledTimes(1);
+    // Swapping the source (next/prev/auto-advance) keeps the handler attached,
+    // so the pass keeps advancing for the whole session.
+    p.load("/audio/lofi/3-am-echoes.mp3");
+    captured[0].onended?.();
+    expect(onEnded).toHaveBeenCalledTimes(2);
+  });
+
+  it("setVolume clamps and initial volume is applied", async () => {
+    const { createPlaylistPlayer } = await import("@/lib/focus-sounds");
+    const captured: FakeAudio[] = [];
+    vi.stubGlobal(
+      "Audio",
+      class extends FakeAudio {
+        constructor(src: string) {
+          super(src);
+          captured.push(this);
+        }
+      } as unknown as typeof Audio,
+    );
+    const p = createPlaylistPlayer("/audio/lofi/aurora-on-mute.mp3", {
       volume: 0.3,
     });
     expect(captured[0].volume).toBe(0.3);
@@ -145,7 +258,7 @@ describe("createLoopPlayer", () => {
   });
 
   it("play() after pause() resumes from the current position (no currentTime reset)", async () => {
-    const { createLoopPlayer } = await import("@/lib/focus-sounds");
+    const { createPlaylistPlayer } = await import("@/lib/focus-sounds");
     const captured: FakeAudio[] = [];
     vi.stubGlobal(
       "Audio",
@@ -156,7 +269,7 @@ describe("createLoopPlayer", () => {
         }
       } as unknown as typeof Audio,
     );
-    const p = createLoopPlayer("/audio/lofi/aurora-on-mute.mp3");
+    const p = createPlaylistPlayer("/audio/lofi/aurora-on-mute.mp3");
     p.play();
     // Simulate playback progress, then a timer-driven pause + resume.
     captured[0].currentTime = 42;
@@ -168,7 +281,7 @@ describe("createLoopPlayer", () => {
   });
 
   it("stop() rewinds to the start (session-end semantics)", async () => {
-    const { createLoopPlayer } = await import("@/lib/focus-sounds");
+    const { createPlaylistPlayer } = await import("@/lib/focus-sounds");
     const captured: FakeAudio[] = [];
     vi.stubGlobal(
       "Audio",
@@ -179,7 +292,7 @@ describe("createLoopPlayer", () => {
         }
       } as unknown as typeof Audio,
     );
-    const p = createLoopPlayer("/audio/lofi/aurora-on-mute.mp3");
+    const p = createPlaylistPlayer("/audio/lofi/aurora-on-mute.mp3");
     p.play();
     captured[0].currentTime = 30;
     p.stop();
@@ -187,7 +300,7 @@ describe("createLoopPlayer", () => {
   });
 
   it("load() swaps the source and resumes only when playing", async () => {
-    const { createLoopPlayer } = await import("@/lib/focus-sounds");
+    const { createPlaylistPlayer } = await import("@/lib/focus-sounds");
     const captured: FakeAudio[] = [];
     vi.stubGlobal(
       "Audio",
@@ -198,7 +311,7 @@ describe("createLoopPlayer", () => {
         }
       } as unknown as typeof Audio,
     );
-    const p = createLoopPlayer("/audio/lofi/aurora-on-mute.mp3");
+    const p = createPlaylistPlayer("/audio/lofi/aurora-on-mute.mp3");
     // Not playing yet: load swaps src but does not auto-play.
     p.load("/audio/lofi/3-am-echoes.mp3");
     expect(captured[0].src).toBe("/audio/lofi/3-am-echoes.mp3");

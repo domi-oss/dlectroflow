@@ -108,6 +108,7 @@ export default async function FocusPage({
         keepAwake: settings.focusKeepAwake,
         alarmEnabled: settings.focusAlarmEnabled,
         sound: settings.focusSound,
+        shuffle: settings.focusShuffle,
       }}
       tipDismissed={settings.focusTimerTipDismissedAt != null}
       existingSession={existingSession}

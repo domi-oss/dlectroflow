@@ -13,7 +13,10 @@ import {
   resumeFocus,
   type CompleteResult,
 } from "@/app/actions/focus";
-import { dismissFocusTimerTip } from "@/app/actions/settings";
+import {
+  dismissFocusTimerTip,
+  updateFocusShuffle,
+} from "@/app/actions/settings";
 import { Celebration } from "@/components/focus/celebration";
 import { TimerVisual } from "@/components/focus/timer-visual";
 import { Button } from "@/components/ui/button";
@@ -84,6 +87,10 @@ export type TimerSettings = {
   keepAwake: boolean;
   alarmEnabled: boolean;
   sound: string;
+  /** #68 — persisted playlist shuffle (Settings.focusShuffle). Optional: the
+   * column defaults false, so a caller that predates the pref (or a test that
+   * doesn't care) simply gets in-order playback. */
+  shuffle?: boolean;
 };
 
 export type NextStepPeek = {
@@ -202,7 +209,16 @@ export function FocusTimer({
   // so we destructure the *stable* callbacks (each is useCallback-memoised inside
   // the hook) to use in this component's effects/handlers — depending on the
   // whole `sound` object would needlessly recreate memoised callbacks.
-  const sound = useFocusSound(settings.sound);
+  // #68 — shuffle is a taste setting: seed the playlist from Settings and write
+  // the new value straight back when the mini-player toggles it (fire-and-forget,
+  // like the tip dismissal — nothing on screen waits on the round-trip).
+  const persistShuffle = useCallback((next: boolean) => {
+    void updateFocusShuffle(next);
+  }, []);
+  const sound = useFocusSound(settings.sound, {
+    shuffle: settings.shuffle ?? false,
+    onShuffleChange: persistShuffle,
+  });
   const { play: playSound, pause: pauseSound, stop: stopSound } = sound;
   const soundOff = settings.sound === FocusSound.Off;
 

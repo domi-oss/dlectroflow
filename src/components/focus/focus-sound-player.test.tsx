@@ -19,11 +19,13 @@ function controls(over: Partial<FocusSoundControls> = {}): FocusSoundControls {
     playing: false,
     volume: 0.5,
     hasTracks: true,
+    shuffle: false,
     play: vi.fn(),
     pause: vi.fn(),
     toggle: vi.fn(),
     next: vi.fn(),
     prev: vi.fn(),
+    toggleShuffle: vi.fn(),
     setVolume: vi.fn(),
     stop: vi.fn(),
     getTime: () => ({ currentTime: 0, duration: 0 }),
@@ -115,12 +117,44 @@ describe("FocusSoundPlayer", () => {
     expect(region.className).toMatch(/mx-auto/);
   });
 
+  // #68 — shuffle is a toggle button, so it reports its state with aria-pressed
+  // (not a swapped label/icon like play↔pause) and repeats that state as text,
+  // never colour alone.
+  it("shuffle is an aria-pressed toggle with a decorative glyph and a text label", async () => {
+    const user = userEvent.setup();
+    const c = controls({ shuffle: false });
+    render(<FocusSoundPlayer controls={c} voice="plain" />);
+    const btn = screen.getByRole("button", { name: /shuffle tracks/i });
+    expect(btn).toHaveAttribute("aria-pressed", "false");
+    expect(btn.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    await user.click(btn);
+    expect(c.toggleShuffle).toHaveBeenCalled();
+  });
+
+  it("shuffle-on is announced by aria-pressed AND shown as text (not colour-only)", () => {
+    render(
+      <FocusSoundPlayer controls={controls({ shuffle: true })} voice="plain" />,
+    );
+    expect(
+      screen.getByRole("button", { name: /shuffle tracks/i }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(/now playing · shuffled/i)).toBeInTheDocument();
+  });
+
+  it("does not claim shuffle in the now-playing line when it is off", () => {
+    render(<FocusSoundPlayer controls={controls()} voice="plain" />);
+    expect(screen.getByText("Now playing")).toBeInTheDocument();
+    expect(screen.queryByText(/shuffled/i)).not.toBeInTheDocument();
+  });
+
   it("every control button meets the ≥44px touch target", () => {
     render(<FocusSoundPlayer controls={controls()} voice="plain" />);
     for (const name of [
       /previous track/i,
       /play focus sound/i,
       /next track/i,
+      /shuffle tracks/i,
+      /^volume$/i,
     ]) {
       const btn = screen.getByRole("button", { name });
       expect(btn.className).toMatch(/min-h-\[44px\]/);

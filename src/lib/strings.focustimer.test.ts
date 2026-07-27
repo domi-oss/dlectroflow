@@ -36,4 +36,21 @@ describe("focus-timer redesign strings (MR ②)", () => {
     expect(t("focus.sound.region", "plain")).toBe("Focus sound");
     expect(t("focus.sound.region", "playful")).toBe("🎧 Focus sound");
   });
+
+  it("#68 — the settings copy promises a playlist, never a looping track", () => {
+    // The picker seeds where the playlist starts; nothing loops a single file
+    // any more, so the hints must not say it does.
+    expect(t("focusSettings.soundPickerHint", "plain")).toMatch(/playlist/i);
+    for (const voice of ["plain", "playful"] as const) {
+      expect(t("focusSettings.soundPickerHint", voice)).not.toMatch(/loop/i);
+      expect(t("focusSettings.soundHint", voice)).not.toMatch(/loop/i);
+    }
+  });
+
+  it("#68 — shuffle label + state text resolve identically in both voices (functional control)", () => {
+    expect(t("focus.sound.shuffle", "plain")).toBe("Shuffle tracks");
+    expect(t("focus.sound.shuffle", "playful")).toBe("Shuffle tracks");
+    expect(t("focus.sound.shuffled", "plain")).toBe("Shuffled");
+    expect(t("focus.sound.shuffled", "playful")).toBe("Shuffled");
+  });
 });

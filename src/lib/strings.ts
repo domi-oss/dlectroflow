@@ -339,9 +339,11 @@ export const STRINGS = {
       "Play a short chime (and vibrate on mobile) when the timer reaches zero.",
   },
   "focusSettings.sound": { plain: "Focus sounds", playful: "🎧 Focus sounds" },
+  // #68 — the timer plays a real playlist now (it advances itself and only
+  // wraps once every track has played), so this copy must not promise a loop.
   "focusSettings.soundHint": {
-    plain: "Loop a calm background track while you focus.",
-    playful: "Loop a calm background track while you focus.",
+    plain: "Play a calm lo-fi playlist while you focus.",
+    playful: "Play a calm lo-fi playlist while you focus.",
   },
   "focusSettings.soundOff": { plain: "Off", playful: "Off" },
   "focusSettings.soundLofiCalm": {
@@ -352,9 +354,9 @@ export const STRINGS = {
   // (functional controls); the composed aria-labels append the track title.
   "focusSettings.soundPickerHint": {
     plain:
-      "Pick a lo-fi track to loop while you focus, or preview each one first.",
+      "Pick the track your focus playlist starts on, or preview each one first.",
     playful:
-      "Pick a lo-fi track to loop while you focus, or preview each one first. 🎧",
+      "Pick the track your focus playlist starts on, or preview each one first. 🎧",
   },
   "focusSettings.preview": { plain: "Preview", playful: "Preview" },
   "focusSettings.stopPreview": {
@@ -380,6 +382,12 @@ export const STRINGS = {
     plain: "Playback progress",
     playful: "Playback progress",
   },
+  // #68 — playlist shuffle. A functional toggle, so the label is identical in
+  // both voices and stays constant in both states (aria-pressed carries the
+  // state); "Shuffled" repeats that state as text in the now-playing line so it
+  // is never conveyed by colour alone.
+  "focus.sound.shuffle": { plain: "Shuffle tracks", playful: "Shuffle tracks" },
+  "focus.sound.shuffled": { plain: "Shuffled", playful: "Shuffled" },
 
   // ── Breakdown confirm ──────────────────────────────────────────────────────
   "breakdown.looksRight": { plain: "Looks right", playful: "👍 Looks right" },

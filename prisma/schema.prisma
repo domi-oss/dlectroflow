@@ -78,6 +78,10 @@ model Settings {
   focusKeepAwake           Boolean   @default(true)
   focusAlarmEnabled        Boolean   @default(true)
   focusSound               String    @default("off") // off | lofi_* (see FocusSound; #43 lo-fi library)
+  // #68 — playlist shuffle for the focus mini-player. A taste setting, so it
+  // persists across sessions. Plain Boolean: no pseudo-enum, hence no CHECK
+  // constraint to mirror in src/lib/constants.ts.
+  focusShuffle             Boolean   @default(false)
   focusTimerTipDismissedAt DateTime?
   // MR ③ — app-wide completion style (Appearance). completeTickColor mirrors
   // CompleteTickColor in src/lib/constants.ts + Settings_completeTickColor_check.

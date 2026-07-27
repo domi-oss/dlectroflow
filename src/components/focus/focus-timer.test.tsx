@@ -48,6 +48,7 @@ vi.mock("@/app/actions/focus", () => ({
 }));
 vi.mock("@/app/actions/settings", () => ({
   dismissFocusTimerTip: vi.fn().mockResolvedValue(undefined),
+  updateFocusShuffle: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/lib/use-prefers-reduced-motion", () => ({
   usePrefersReducedMotion: () => false,
@@ -93,9 +94,18 @@ const soundControls = {
   prev: vi.fn(),
   setVolume: vi.fn(),
   stop: vi.fn(),
+  shuffle: false,
+  toggleShuffle: vi.fn(),
 };
+// #68 — capture the hook's arguments so we can assert the timer seeds shuffle
+// from Settings and writes a toggle back (the hook itself is covered in
+// use-focus-sound.test.ts).
+let soundHookArgs: unknown[] = [];
 vi.mock("@/lib/use-focus-sound", () => ({
-  useFocusSound: () => soundControls,
+  useFocusSound: (...args: unknown[]) => {
+    soundHookArgs = args;
+    return soundControls;
+  },
   DEFAULT_FOCUS_VOLUME: 0.5,
 }));
 // The mini-player's own behaviour is covered in focus-sound-player.test.tsx;
@@ -118,7 +128,10 @@ import {
   pauseFocus,
   resumeFocus,
 } from "@/app/actions/focus";
-import { dismissFocusTimerTip } from "@/app/actions/settings";
+import {
+  dismissFocusTimerTip,
+  updateFocusShuffle,
+} from "@/app/actions/settings";
 
 const STEPS: TrackerStep[] = [
   { id: "s1", text: "Outline", done: true, estMinutes: 5, subtaskEmoji: null },
@@ -525,6 +538,39 @@ describe("FocusTimer — device effects behind the boundary", () => {
     // Sound still starts (ambient bed), but its chrome is hidden while running.
     expect(soundControls.play).toHaveBeenCalled();
     expect(screen.queryByTestId("focus-sound-player")).not.toBeInTheDocument();
+  });
+
+  // #68 — shuffle is a taste setting, so the timer seeds the playlist from
+  // Settings and writes a toggle straight back (fire-and-forget, like the tip
+  // dismissal). The ordering logic itself lives in the hook.
+  it("seeds the playlist's shuffle from Settings and persists a toggle", () => {
+    render(
+      <FocusTimer
+        {...base({
+          settings: {
+            timerStyle: null,
+            minimalMode: false,
+            keepAwake: false,
+            alarmEnabled: false,
+            sound: "lofi_calm",
+            shuffle: true,
+          },
+        })}
+      />,
+    );
+    const opts = soundHookArgs[1] as {
+      shuffle?: boolean;
+      onShuffleChange?: (v: boolean) => void;
+    };
+    expect(soundHookArgs[0]).toBe("lofi_calm");
+    expect(opts.shuffle).toBe(true);
+    act(() => opts.onShuffleChange?.(false));
+    expect(updateFocusShuffle).toHaveBeenCalledWith(false);
+  });
+
+  it("defaults shuffle to off when Settings has never stored it", () => {
+    render(<FocusTimer {...base()} />);
+    expect((soundHookArgs[1] as { shuffle?: boolean }).shuffle).toBe(false);
   });
 });
 

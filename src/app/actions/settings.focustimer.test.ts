@@ -17,6 +17,7 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 import {
   updateFocusTimerSettings,
   dismissFocusTimerTip,
+  updateFocusShuffle,
 } from "@/app/actions/settings";
 
 beforeEach(() => vi.clearAllMocks());
@@ -75,6 +76,35 @@ describe("updateFocusTimerSettings", () => {
         }),
       }),
     );
+  });
+});
+
+describe("updateFocusShuffle (#68)", () => {
+  it("persists the shuffle preference for the current workspace", async () => {
+    await updateFocusShuffle(true);
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { workspaceId: "ws-1" },
+        create: expect.objectContaining({
+          workspaceId: "ws-1",
+          focusShuffle: true,
+        }),
+        update: { focusShuffle: true },
+      }),
+    );
+  });
+
+  it("coerces a non-boolean to a boolean (the column is NOT NULL)", async () => {
+    await updateFocusShuffle(undefined as unknown as boolean);
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: { focusShuffle: false } }),
+    );
+  });
+
+  it("is not owner-gated — a guest workspace keeps its own taste setting", async () => {
+    isOwnerRequestMock.mockResolvedValueOnce(false);
+    await updateFocusShuffle(true);
+    expect(upsert).toHaveBeenCalled();
   });
 });
 
