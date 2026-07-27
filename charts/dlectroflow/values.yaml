@@ -123,7 +123,7 @@ backup:
   # `slim` is a rolling tag, so Renovate tracks the DIGEST here (the customManager
   # in renovate.json bumps it as google/cloud-sdk:slim is rebuilt). (#15)
   # renovate: datasource=docker depName=google/cloud-sdk
-  uploadImage: google/cloud-sdk:slim@sha256:85419a311666821eb3a195d86753cb9bf253c0b869492fdaf632bd2f983d0d83
+  uploadImage: google/cloud-sdk:slim@sha256:4ff69e21bec9a7d0ed54d0134a9b9682fc8008252cb5f173a23ddd70b8e024a4
 
 # Daily purge of expired guest workspaces + stale guest counters (#21; prod
 # only; see templates/purge-cronjob.yaml). Enabled by default — unlike backup,
