@@ -219,3 +219,181 @@ describe("disconnectGoogle", () => {
     expect(prismaMock.googleAuth.deleteMany).toHaveBeenCalled();
   });
 });
+
+describe("Google Tasks URL construction (#79)", () => {
+  const TASKS_API = "https://tasks.googleapis.com/tasks/v1";
+
+  function stubTasksFetch() {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ id: "gtask-1" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  /**
+   * The URL actually handed to `fetch`, parsed the way `fetch` parses it.
+   *
+   * Asserting on the raw string alone is not enough: the URL parser resolves
+   * `.`/`..` segments, so a string that *looks* contained can still resolve to
+   * a different path. Requiring `parsed.href === raw` proves the identifier
+   * smuggled no structure into the URL.
+   */
+  function urlPassedToFetch(fetchMock: ReturnType<typeof vi.fn>): URL {
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const raw = String(fetchMock.mock.calls[0][0]);
+    const parsed = new URL(raw);
+    expect(parsed.href).toBe(raw);
+    return parsed;
+  }
+
+  /** Identifiers that must stay inert inside a single path segment. */
+  const hostileIds = [
+    "../../../oauth2/v1/tokeninfo",
+    "..%2f..%2fadmin",
+    "%2e%2e%2f%2e%2e%2f",
+    "?maxResults=1&key=leak",
+    "#fragment",
+    "@evil.example",
+    "https://evil.example",
+    "evil.example:443",
+    "lists/other/tasks",
+    "a\\b",
+  ];
+
+  describe("createGoogleTask", () => {
+    it("keeps a normal listId in its own path segment", async () => {
+      const fetchMock = stubTasksFetch();
+      const { createGoogleTask } = await import("./google");
+      await createGoogleTask("tok", "MDk4NzY1NDMyMQ", { title: "t" });
+      expect(fetchMock.mock.calls[0][0]).toBe(
+        `${TASKS_API}/lists/MDk4NzY1NDMyMQ/tasks`,
+      );
+    });
+
+    it.each(hostileIds)(
+      "a hostile listId (%j) cannot alter the path or query",
+      async (listId) => {
+        const fetchMock = stubTasksFetch();
+        const { createGoogleTask } = await import("./google");
+        await createGoogleTask("tok", listId, { title: "t" });
+
+        const url = urlPassedToFetch(fetchMock);
+        expect(url.origin).toBe("https://tasks.googleapis.com");
+        expect(url.search).toBe("");
+        expect(url.hash).toBe("");
+        // Exactly ["", "tasks", "v1", "lists", <listId>, "tasks"] — the
+        // identifier occupies one segment and adds none.
+        const segments = url.pathname.split("/");
+        expect(segments).toHaveLength(6);
+        expect(segments.slice(0, 4)).toEqual(["", "tasks", "v1", "lists"]);
+        expect(segments[5]).toBe("tasks");
+      },
+    );
+
+    it("percent-encodes a full URL into a single segment", async () => {
+      const fetchMock = stubTasksFetch();
+      const { createGoogleTask } = await import("./google");
+      await createGoogleTask("tok", "https://evil.example", { title: "t" });
+      expect(fetchMock.mock.calls[0][0]).toBe(
+        `${TASKS_API}/lists/https%3A%2F%2Fevil.example/tasks`,
+      );
+    });
+  });
+
+  describe("patchGoogleTask", () => {
+    it("keeps normal identifiers in their own path segments", async () => {
+      const fetchMock = stubTasksFetch();
+      const { patchGoogleTask } = await import("./google");
+      await patchGoogleTask("tok", "list-9", "gtask-9", {
+        status: "completed",
+      });
+      expect(fetchMock.mock.calls[0][0]).toBe(
+        `${TASKS_API}/lists/list-9/tasks/gtask-9`,
+      );
+    });
+
+    it.each(hostileIds)(
+      "a hostile taskId (%j) cannot alter the path or query",
+      async (taskId) => {
+        const fetchMock = stubTasksFetch();
+        const { patchGoogleTask } = await import("./google");
+        await patchGoogleTask("tok", "list-9", taskId, {
+          status: "completed",
+        });
+
+        const url = urlPassedToFetch(fetchMock);
+        expect(url.origin).toBe("https://tasks.googleapis.com");
+        expect(url.search).toBe("");
+        expect(url.hash).toBe("");
+        // ["", "tasks", "v1", "lists", "list-9", "tasks", <taskId>]
+        const segments = url.pathname.split("/");
+        expect(segments).toHaveLength(7);
+        expect(segments.slice(0, 6)).toEqual([
+          "",
+          "tasks",
+          "v1",
+          "lists",
+          "list-9",
+          "tasks",
+        ]);
+      },
+    );
+
+    it.each(hostileIds)(
+      "a hostile listId (%j) cannot alter the path or query",
+      async (listId) => {
+        const fetchMock = stubTasksFetch();
+        const { patchGoogleTask } = await import("./google");
+        await patchGoogleTask("tok", listId, "gtask-9", {
+          status: "completed",
+        });
+
+        const url = urlPassedToFetch(fetchMock);
+        expect(url.origin).toBe("https://tasks.googleapis.com");
+        expect(url.search).toBe("");
+        expect(url.hash).toBe("");
+        const segments = url.pathname.split("/");
+        expect(segments).toHaveLength(7);
+        expect(segments.slice(0, 4)).toEqual(["", "tasks", "v1", "lists"]);
+        expect(segments[5]).toBe("tasks");
+        expect(segments[6]).toBe("gtask-9");
+      },
+    );
+  });
+
+  /**
+   * `encodeURIComponent` cannot neutralise these: `.` is an unreserved
+   * character so it is left as-is, and the URL parser treats a bare `.`/`..`
+   * segment (and `%2e%2e`, which is what encoding the dots would produce) as a
+   * directory hop. No Google identifier is ever `.`, `..` or empty, so these
+   * must be rejected outright rather than sent.
+   */
+  describe("dot-segment identifiers are rejected, not sent", () => {
+    const dotSegments = ["..", ".", ""];
+
+    it.each(dotSegments)(
+      "createGoogleTask rejects listId %j without calling fetch",
+      async (listId) => {
+        const fetchMock = stubTasksFetch();
+        const { createGoogleTask } = await import("./google");
+        await expect(
+          createGoogleTask("tok", listId, { title: "t" }),
+        ).rejects.toThrow(/identifier/i);
+        expect(fetchMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(dotSegments)(
+      "patchGoogleTask rejects taskId %j without calling fetch",
+      async (taskId) => {
+        const fetchMock = stubTasksFetch();
+        const { patchGoogleTask } = await import("./google");
+        await expect(
+          patchGoogleTask("tok", "list-9", taskId, { status: "completed" }),
+        ).rejects.toThrow(/identifier/i);
+        expect(fetchMock).not.toHaveBeenCalled();
+      },
+    );
+  });
+});
