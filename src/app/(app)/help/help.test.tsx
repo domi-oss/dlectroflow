@@ -67,6 +67,7 @@ describe("HelpPage", () => {
     const section = screen
       .getByRole("heading", { name: /The focus session/i, level: 2 })
       .closest("section");
+    expect(section).not.toBeNull();
     // The picker lives in Settings, so this section must link there rather than
     // naming a control the reader then has to hunt for.
     const hrefs = Array.from(section!.querySelectorAll("a")).map((a) =>
