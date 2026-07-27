@@ -48,17 +48,22 @@ describe("scheduled-purge entrypoint is self-contained", () => {
 });
 
 describe("purgeWorkspace", () => {
-  it("refuses to delete the owner workspace", async () => {
+  it("refuses to delete the legacy owner workspace", async () => {
     const db = makeDb();
     await expect(purgeWorkspace(db, "owner")).rejects.toThrow(/owner/i);
     expect(db.workspace.delete).not.toHaveBeenCalled();
   });
 
-  it("deletes a guest workspace (cascade removes scoped rows at the DB level)", async () => {
+  // #35 Phase A: the id-based guard above stopped being sufficient the moment
+  // workspaces got opaque per-account ids — a signed-in account's workspace is
+  // indistinguishable from a guest's by id alone. The delete now carries
+  // `kind: "guest"` in its filter, so the database itself refuses to delete a
+  // user's workspace even if this job is handed the wrong id.
+  it("scopes the delete to guest workspaces so a user's data cannot be swept", async () => {
     const db = makeDb();
     await purgeWorkspace(db, "guest-123");
     expect(db.workspace.delete).toHaveBeenCalledWith({
-      where: { id: "guest-123" },
+      where: { id: "guest-123", kind: "guest" },
     });
     expect(db.workspace.delete).toHaveBeenCalledTimes(1);
   });

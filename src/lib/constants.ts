@@ -93,11 +93,11 @@ export const DASHBOARD_BADGE_KEYS: readonly BadgeKey[] = [
 
 export const SINGLETON_ID = "singleton";
 
-export const OWNER_WORKSPACE_ID = "owner";
-
-export function isGuestWorkspace(workspaceId: string): boolean {
-  return workspaceId !== OWNER_WORKSPACE_ID;
-}
+// #35 Phase A: OWNER_WORKSPACE_ID and the synchronous isGuestWorkspace() that
+// compared against it are GONE. Workspaces belong to User records now, so
+// "is this the owner?" is a role question (isOwnerRequest) and "is this a guest
+// sandbox?" is a database question (src/lib/workspace-kind.ts). The scoping
+// harness asserts the constant cannot come back.
 
 export const WorkspaceKind = {
   // Legacy (#35 Phase A): the pre-accounts singleton workspace, id "owner".

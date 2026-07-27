@@ -15,7 +15,7 @@ import {
   sendRoundupEmail,
 } from "@/lib/email";
 import { currentWorkspaceId } from "@/lib/workspace";
-import { isGuestWorkspace } from "@/lib/constants";
+import { isGuestWorkspace } from "@/lib/workspace-kind";
 
 export type TriggerResult = {
   rollup: Rollup;
@@ -40,7 +40,7 @@ export async function triggerRollup(opts?: {
   // Send-site guard, independent of the settings action: guest workspaces
   // never email, even if their Settings row predates the owner-only rule (#20).
   const wantsEmail =
-    !isGuestWorkspace(workspaceId) &&
+    !(await isGuestWorkspace(workspaceId)) &&
     settings.roundupEmailEnabled &&
     (opts?.sendEmail ?? true);
 

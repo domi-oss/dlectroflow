@@ -20,7 +20,7 @@ import {
   refundGuestBreakdown,
 } from "@/lib/guest-quota";
 import { recordLLMFailure } from "@/lib/observability";
-import { OWNER_WORKSPACE_ID } from "@/lib/constants";
+import { isGuestWorkspace } from "@/lib/workspace-kind";
 
 export const runtime = "nodejs";
 
@@ -137,7 +137,11 @@ export async function POST(req: Request): Promise<Response> {
   // ── Role + allowance resolution ────────────────────────────────────────────
   const owner = await isOwnerRequest();
   const wsId = await currentWorkspaceId();
-  const isGuest = wsId !== OWNER_WORKSPACE_ID;
+  // #35 Phase A: "guest" is a property of the workspace, not of its id. Every
+  // signed-in account now has an opaque workspace id, so the old
+  // `wsId !== OWNER_WORKSPACE_ID` test would have metered every member against
+  // the per-IP guest quota.
+  const isGuest = await isGuestWorkspace(wsId);
 
   let blockedReason: "quota" | "global_cap" | null = null;
   let guestIpHash: string | null = null;
@@ -155,16 +159,18 @@ export async function POST(req: Request): Promise<Response> {
 
   // Resolve the model tier and gather the coach's live context in ONE round
   // trip. Two distinct workspace reads live here and must not be conflated:
-  //   • getSettings(OWNER_WORKSPACE_ID) is the OWNER's model-tier lookup, and
-  //     stays gated on `owner`.
+  //   • the model-tier lookup is the OWNER's own Settings row and stays gated
+  //     on `owner`. Pre-#35 it read the constant OWNER_WORKSPACE_ID; now the
+  //     owner's workspace IS wsId when `owner` is true, so it reads wsId —
+  //     same row, no constant.
   //   • gatherBreakdownContext(wsId) is the REQUESTER's own data. Passing
-  //     OWNER_WORKSPACE_ID here would hand a guest the owner's voice, streak
-  //     and board — the single most important line in this file.
+  //     anyone else's workspace here would hand them another person's voice,
+  //     streak and board — the single most important line in this file.
   // Blocked guests never reach the LLM, so they do no context work either; and
   // a context failure degrades to no context rather than failing the request
   // (the breakdown path was DB-light before #14 and must stay resilient).
   const [settings, breakdownContext] = await Promise.all([
-    owner ? getSettings(OWNER_WORKSPACE_ID) : Promise.resolve(null),
+    owner ? getSettings(wsId) : Promise.resolve(null),
     blockedReason
       ? Promise.resolve<BreakdownContext>({})
       : gatherBreakdownContext(wsId).catch(() => ({}) as BreakdownContext),

@@ -2,7 +2,8 @@ import { prisma } from "@/lib/db";
 import { getStreak } from "@/lib/db";
 import { getLLM } from "@/lib/llm";
 import { resolveUtilityModel } from "@/lib/models";
-import { FocusOutcome, TaskStatus, isGuestWorkspace } from "@/lib/constants";
+import { FocusOutcome, TaskStatus } from "@/lib/constants";
+import { isGuestWorkspace } from "@/lib/workspace-kind";
 import { getTodaySpark } from "@/lib/spark";
 
 // ── date helpers (server-local day, matching rewards.ts) ────────────────────
@@ -124,7 +125,7 @@ async function generateNarrative(
   workspaceId: string,
 ): Promise<string> {
   // Guests never call Claude — use the local narrative builder.
-  if (!isGuestWorkspace(workspaceId)) {
+  if (!(await isGuestWorkspace(workspaceId))) {
     try {
       const { text } = await getLLM().generate({
         model: resolveUtilityModel(),

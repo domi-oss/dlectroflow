@@ -11,8 +11,8 @@ import {
   getGoogleStatus,
   disconnectGoogle,
 } from "@/lib/google";
-import { OWNER_WORKSPACE_ID, TaskSource, TaskStatus } from "@/lib/constants";
-import { currentWorkspaceId } from "@/lib/workspace";
+import { TaskSource, TaskStatus } from "@/lib/constants";
+import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
 import { awardFirstSchedule } from "@/lib/scheduling/award";
 import { SchedulingMethod } from "@/lib/scheduling/types";
 import { buildScheduleNote } from "@/lib/scheduling/note";
@@ -61,7 +61,10 @@ export async function pushStepsToGoogleTasks(
   taskId: string,
 ): Promise<GoogleScheduleResult> {
   const workspaceId = await currentWorkspaceId();
-  if (workspaceId !== OWNER_WORKSPACE_ID) throw new Error("owner only");
+  // #35 Phase A: an explicit role check replaces the workspace-id comparison.
+  // Google is still a single instance-level connection until Phase C makes it
+  // per user, so it stays owner-only rather than any-signed-in-member.
+  if (!(await isOwnerRequest())) throw new Error("owner only");
 
   if (!googleConfigured()) return { ok: false, reason: "not_configured" };
   const token = await getValidAccessToken();
@@ -185,7 +188,10 @@ export async function scheduleSingleTask(
   estMinutes: number,
 ): Promise<GoogleScheduleSingleResult> {
   const workspaceId = await currentWorkspaceId();
-  if (workspaceId !== OWNER_WORKSPACE_ID) throw new Error("owner only");
+  // #35 Phase A: an explicit role check replaces the workspace-id comparison.
+  // Google is still a single instance-level connection until Phase C makes it
+  // per user, so it stays owner-only rather than any-signed-in-member.
+  if (!(await isOwnerRequest())) throw new Error("owner only");
 
   // Server-side clamp (final-review fix): the client popover already refuses
   // out-of-range custom durations, but this action is the single source of
@@ -293,15 +299,13 @@ export async function scheduleSingleTask(
 }
 
 export async function googleStatus() {
-  const workspaceId = await currentWorkspaceId();
-  if (workspaceId !== OWNER_WORKSPACE_ID)
+  if (!(await isOwnerRequest()))
     return { configured: false, connected: false, needsReconnect: false };
   return getGoogleStatus();
 }
 
 export async function disconnectGoogleTasks(): Promise<{ ok: true }> {
-  const workspaceId = await currentWorkspaceId();
-  if (workspaceId !== OWNER_WORKSPACE_ID) throw new Error("owner only");
+  if (!(await isOwnerRequest())) throw new Error("owner only");
   await disconnectGoogle();
   revalidatePath("/settings");
   return { ok: true };

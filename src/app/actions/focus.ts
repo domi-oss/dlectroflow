@@ -10,8 +10,8 @@ import {
   FocusOutcome,
   RewardType,
   TaskStatus,
-  isGuestWorkspace,
 } from "@/lib/constants";
+import { isGuestWorkspace } from "@/lib/workspace-kind";
 import { awardBadge, logReward, rewardStepDone } from "@/lib/rewards";
 import { currentWorkspaceId } from "@/lib/workspace";
 import { remainingSecForSession } from "@/lib/focus-timer-clock";
@@ -435,7 +435,7 @@ export async function proposeNewEstimate(stepId: string): Promise<number> {
     where: { id: stepId, task: { workspaceId } },
   });
   if (!step) return 15;
-  if (isGuestWorkspace(workspaceId)) return step.estMinutes + 10;
+  if (await isGuestWorkspace(workspaceId)) return step.estMinutes + 10;
   try {
     const { text } = await getLLM().generate({
       model: resolveUtilityModel(),

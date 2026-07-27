@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/db";
 import { getLLM } from "@/lib/llm";
 import { resolveUtilityModel } from "@/lib/models";
-import { SparkSource, isGuestWorkspace } from "@/lib/constants";
+import { SparkSource } from "@/lib/constants";
+import { isGuestWorkspace } from "@/lib/workspace-kind";
 
 const FALLBACK_SPARKS = [
   "You don't have to do it all — just the next tiny thing.",
@@ -50,7 +51,7 @@ async function generateQuote(): Promise<{ quote: string; source: string }> {
 async function quoteFor(
   workspaceId: string,
 ): Promise<{ quote: string; source: string }> {
-  if (isGuestWorkspace(workspaceId)) {
+  if (await isGuestWorkspace(workspaceId)) {
     return { quote: randomFallback(), source: SparkSource.Fallback };
   }
   return generateQuote();

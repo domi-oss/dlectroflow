@@ -10,9 +10,10 @@
 // a prompt and sent to whichever LLM the deploy is configured with — under
 // BYO-LLM (#59) that can be a third-party endpoint the owner pointed us at. So
 // this module is an egress boundary, and it holds three lines:
-//   1. Every read is scoped to the REQUEST's workspace. Never OWNER_WORKSPACE_ID
-//      (the route resolves the owner's model tier separately, still gated on
-//      `owner` — that call must not be confused with these).
+//   1. Every read is scoped to the REQUEST's workspace — never anybody else's.
+//      (The route resolves the owner's model tier separately, still gated on
+//      `owner`; that call must not be confused with these. Pre-#35 the danger
+//      was the OWNER_WORKSPACE_ID constant; now it is any other account's id.)
 //   2. Every read pins an explicit `select` of numeric / enum / boolean / date
 //      columns. Notably `Step.text` and `BrainDumpItem.text` are never selected:
 //      not fetching them is a far stronger guarantee than remembering not to
