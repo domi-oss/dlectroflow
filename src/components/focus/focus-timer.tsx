@@ -657,7 +657,8 @@ export function FocusTimer({
               <button
                 type="button"
                 onClick={() => setStartingFresh(true)}
-                className="text-muted-foreground hover:text-foreground inline-flex min-h-[44px] items-center gap-1.5 text-sm font-semibold underline underline-offset-4"
+                disabled={pending}
+                className="text-muted-foreground hover:text-foreground inline-flex min-h-[44px] items-center gap-1.5 text-sm font-semibold underline underline-offset-4 disabled:opacity-50"
               >
                 <RotateCcw aria-hidden="true" className="h-4 w-4 shrink-0" />
                 {stripLeadingGlyph(t("focus.startFresh", voice))}
@@ -726,7 +727,8 @@ export function FocusTimer({
                 <button
                   type="button"
                   onClick={() => setStartingFresh(false)}
-                  className="text-muted-foreground hover:text-foreground inline-flex min-h-[44px] items-center gap-1.5 text-sm font-semibold underline underline-offset-4"
+                  disabled={pending}
+                  className="text-muted-foreground hover:text-foreground inline-flex min-h-[44px] items-center gap-1.5 text-sm font-semibold underline underline-offset-4 disabled:opacity-50"
                 >
                   <RotateCcw aria-hidden="true" className="h-4 w-4 shrink-0" />
                   {stripLeadingGlyph(t("focus.setup.keepPaused", voice))}
