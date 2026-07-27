@@ -163,11 +163,15 @@ describe("SectionNav (#72)", () => {
     expect(document.querySelectorAll("a[aria-current]")).toHaveLength(1);
   });
 
-  it("hands the current section to its own heading, for the sticky header", () => {
+  it("hands the current section to its own heading band, for the sticky header", () => {
     render(<Page />);
     const io = FakeIntersectionObserver.instances.at(-1)!;
-    const breakdown = document.getElementById("help-task-breakdown")!;
-    const inbox = document.getElementById("help-inbox-freshness")!;
+    // The BAND is what sticks and what globals.css styles, so that is what gets
+    // marked — not the h2 inside it.
+    const band = (id: string) =>
+      document.getElementById(id)!.closest("[data-section-header]")!;
+    const breakdown = band("help-task-breakdown");
+    const inbox = band("help-inbox-freshness");
 
     io.fire([{ target: inbox.closest("section")!, isIntersecting: true }]);
     expect(inbox).toHaveAttribute("data-current");
@@ -188,10 +192,11 @@ describe("SectionNav (#72)", () => {
     const view = render(<Page />);
     const io = FakeIntersectionObserver.instances.at(-1)!;
     const heading = document.getElementById("help-task-breakdown")!;
+    const band = heading.closest("[data-section-header]")!;
     io.fire([{ target: heading.closest("section")!, isIntersecting: true }]);
-    expect(heading).toHaveAttribute("data-current");
+    expect(band).toHaveAttribute("data-current");
     view.unmount();
-    expect(heading).not.toHaveAttribute("data-current");
+    expect(band).not.toHaveAttribute("data-current");
   });
 
   it("picks the topmost section when several are in the tracking band", () => {

@@ -11,20 +11,12 @@ import {
 import type { AgingSettings } from "@/lib/aging";
 import { OWNER_BREAKDOWN_MODEL_DEFAULT } from "@/lib/constants";
 import { t, type Voice } from "@/lib/strings";
+import { FABLE_LINES } from "@/lib/fable-lines";
 import {
   useSaveStatus,
   SaveIndicator,
 } from "@/components/settings/use-save-status";
 import { SectionHeading } from "@/components/nav/section-heading";
-
-const FABLE_LINES = [
-  "Our most capable model. Also $50/M tokens. To split 'clean the kitchen' into 3 steps? We love you, but no.",
-  "We tried it. It wrote a dissertation on the philosophy of procrastination instead of your task. Disabled for everyone's safety.",
-  "Reserved for problems harder than 'remember to buy milk.' 💸",
-  "Bringing a frontier reasoning model to a to-do list felt… irresponsible.",
-  "It kept trying to solve P vs NP instead of your laundry. Locked.",
-  "Overkill detector tripped. Fable stays in its cage for this one.",
-];
 
 export function SettingsPanel({
   settings,
@@ -33,6 +25,7 @@ export function SettingsPanel({
   modelChoices,
   activeModelName,
   voice,
+  fable = FABLE_LINES[0],
   autoSaveDelayMs = 600,
 }: {
   settings: AgingSettings & { firstRunPreview: boolean };
@@ -50,6 +43,12 @@ export function SettingsPanel({
   /** The single configured model name, shown read-only when `modelChoices` is null. */
   activeModelName?: string | null;
   voice: Voice;
+  /**
+   * The decoy model's flavour line, rolled server-side so SSR and hydration
+   * agree (see randomFableLine). Defaults to the first line, keeping tests and
+   * any other caller deterministic.
+   */
+  fable?: string;
   /** Debounce for numeric auto-saves. Overridable so tests stay fast + deterministic. */
   autoSaveDelayMs?: number;
 }) {
@@ -71,9 +70,6 @@ export function SettingsPanel({
 
   const [model, setModel] = useState<string>(
     breakdownModel ?? OWNER_BREAKDOWN_MODEL_DEFAULT,
-  );
-  const [fable] = useState(
-    () => FABLE_LINES[Math.floor(Math.random() * FABLE_LINES.length)],
   );
   const [currentVoice, setCurrentVoice] = useState<Voice>(voice);
 

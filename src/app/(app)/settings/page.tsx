@@ -3,6 +3,7 @@ import { getSettings } from "@/lib/db";
 import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
 import { getGoogleStatus } from "@/lib/google";
 import { SettingsPanel } from "@/components/settings/settings-panel";
+import { randomFableLine } from "@/lib/fable-lines";
 import { modelChoicesForProvider, resolveUtilityModel } from "@/lib/models";
 import { NotificationsSection } from "@/components/settings/notifications-section";
 import { AppearanceSection } from "@/components/settings/appearance-section";
@@ -65,6 +66,8 @@ export default async function SettingsPage({
         // misreports when an owner/guest split (LLM_OWNER_MODEL) is set.
         activeModelName={resolveUtilityModel()}
         voice={voice}
+        // Rolled here, on the server, so SSR and hydration see the same line.
+        fable={randomFableLine()}
       />
       <div className="border-t pt-4">
         <AppearanceSection
