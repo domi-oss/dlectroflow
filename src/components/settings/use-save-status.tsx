@@ -49,7 +49,11 @@ export function SaveIndicator({
 }) {
   if (status === "saving")
     return (
-      <span className="text-muted-foreground text-xs" role="status">
+      <span
+        className="text-muted-foreground text-xs"
+        role="status"
+        data-save-status="saving"
+      >
         …
       </span>
     );
@@ -58,13 +62,18 @@ export function SaveIndicator({
       <span
         className="text-xs text-green-600 dark:text-green-400"
         role="status"
+        data-save-status="saved"
       >
         {t("settings.saved", voice)}
       </span>
     );
   if (status === "error")
     return (
-      <span className="text-xs text-red-600 dark:text-red-400" role="alert">
+      <span
+        className="text-xs text-red-600 dark:text-red-400"
+        role="alert"
+        data-save-status="error"
+      >
         {t("settings.saveError", voice)}
       </span>
     );

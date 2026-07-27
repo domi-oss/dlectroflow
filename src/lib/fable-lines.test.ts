@@ -23,8 +23,13 @@ describe("fable decoy lines (#72 follow-up)", () => {
     // inside settings-panel.tsx ("use client"), which made every /settings load
     // a hydration mismatch. Moving it to a client module's exports is NOT a fix
     // either — a server render cannot call a client reference.
+    // Resolved against THIS file, not the process cwd, so the test still works
+    // if vitest is ever run from somewhere other than the repo root.
     const source = await import("node:fs").then((fs) =>
-      fs.readFileSync("src/components/settings/settings-panel.tsx", "utf8"),
+      fs.readFileSync(
+        new URL("../components/settings/settings-panel.tsx", import.meta.url),
+        "utf8",
+      ),
     );
     expect(source).not.toMatch(/Math\.random/);
   });

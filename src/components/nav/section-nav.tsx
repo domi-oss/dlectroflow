@@ -71,6 +71,23 @@ export function SectionNav({
   // scroll-margin (via a CSS custom property) and the tracking band below.
   const [barHeight, setBarHeight] = useState(0);
 
+  // `current` was set from whatever section list was live when the observer was
+  // built, and props can hand us a SHORTER list before the observer catches up:
+  // Settings renders a different set for owner vs guest (Integrations is
+  // conditional) and several saves call router.refresh(). Resolve the id to a
+  // section ONCE and tolerate a miss — an id we can no longer find means we do
+  // not know where the reader is, and marking the wrong entry is worse than
+  // marking none. EVERY "you are here" cue keys off this single resolved value
+  // — the highlighted pill, the collapsed-row label and the pinned heading band
+  // — so they cannot disagree with each other.
+  const currentSection = current
+    ? (sections.find((s) => s.id === current) ?? null)
+    : null;
+  const currentSectionId = currentSection?.id ?? null;
+  const currentLabel = currentSection
+    ? sectionLabel(currentSection, voice)
+    : null;
+
   // Smooth in-page scrolling while this page is open (reduced motion still wins,
   // via globals.css).
   useEffect(() => {
@@ -133,6 +150,14 @@ export function SectionNav({
       return maxScroll > 4 && window.scrollY >= maxScroll - 2;
     };
 
+    // Measure the bar HERE rather than trusting the `barHeight` state, which is
+    // still 0 on the very first run (the ResizeObserver has not reported yet).
+    // Building the first observer with no bar offset would open a brief window
+    // of exactly the bug BAND_TOP_SLACK exists to prevent. `barHeight` stays in
+    // the dependency list purely as the rebuild trigger for later resizes.
+    const barOffset = () =>
+      Math.round(navRef.current?.getBoundingClientRect().height ?? barHeight);
+
     const inBand = new Set<string>();
     const observer = new IntersectionObserver(
       (entries) => {
@@ -153,7 +178,7 @@ export function SectionNav({
         if (next) setCurrent(next);
       },
       {
-        rootMargin: `-${barHeight + BAND_TOP_SLACK}px 0px ${BAND_BOTTOM} 0px`,
+        rootMargin: `-${barOffset() + BAND_TOP_SLACK}px 0px ${BAND_BOTTOM} 0px`,
         threshold: 0,
       },
     );
@@ -185,15 +210,18 @@ export function SectionNav({
   // client components — so there is no shared React state to thread `current`
   // through; marking the element is the honest way across that boundary.
   useEffect(() => {
-    if (!current) return;
-    const heading = document.getElementById(current);
+    // Keyed off the RESOLVED section, not the raw id, so the pinned band and
+    // the highlighted nav pill can never disagree: if the id is not in
+    // `sections` no pill is lit, and no band may claim to be current either.
+    if (!currentSectionId) return;
+    const heading = document.getElementById(currentSectionId);
     // Mark the surrounding band — that is the element globals.css styles and
     // the one that actually sticks.
     const band = heading?.closest("[data-section-header]") ?? heading;
     if (!band) return;
     band.setAttribute("data-current", "");
     return () => band.removeAttribute("data-current");
-  }, [current]);
+  }, [currentSectionId]);
 
   const onJump = (
     event: React.MouseEvent<HTMLAnchorElement>,
@@ -217,21 +245,6 @@ export function SectionNav({
     if (!wide) setExpanded(false);
     document.getElementById(id)?.focus({ preventScroll: true });
   };
-
-  // `current` was set from whatever section list was live when the observer was
-  // built, and props can hand us a SHORTER list before the observer catches up:
-  // Settings renders a different set for owner vs guest (Integrations is
-  // conditional) and several saves call router.refresh(). Resolve the id to a
-  // section ONCE and tolerate a miss — an id we can no longer find means we do
-  // not know where the reader is, and marking the wrong entry is worse than
-  // marking none. Everything below keys off this, so the highlighted pill and
-  // the collapsed-row label can never disagree.
-  const currentSection = current
-    ? (sections.find((s) => s.id === current) ?? null)
-    : null;
-  const currentLabel = currentSection
-    ? sectionLabel(currentSection, voice)
-    : null;
 
   return (
     <nav

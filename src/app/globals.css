@@ -279,12 +279,26 @@
   border-radius: var(--radius-md);
 }
 
-/* Inline badges inside the band (the auto-save indicator, the owner-only lock)
- * carry their own greens/reds/muted greys, none of which are legible on
- * magenta. Make them inherit while the header is highlighted. */
-[data-section-header][data-current] * {
+/* Inline badges inside the band (the owner-only lock, the demo-override note)
+ * carry their own muted greys and ambers, none of which are legible on magenta.
+ * Make them inherit while the header is highlighted — their meaning is in their
+ * words, so losing the hue costs nothing. */
+[data-section-header][data-current] *:not([data-save-status]) {
   color: currentColor;
   border-color: currentColor;
+}
+
+/* …with ONE exception. The auto-save indicator's colour IS its meaning: green
+ * saved, red failed. Forcing it to inherit made "Saved ✓" and "Couldn't save"
+ * identical at a glance for exactly the sections whose header is highlighted.
+ * It keeps its own colour, and gets the opaque chip treatment the Library hub's
+ * count pill already uses for text on magenta (#48) so green-600 / red-600 read
+ * against a solid background instead of ~1.3:1 against the band. */
+[data-section-header][data-current] [data-save-status] {
+  background-color: var(--primary-foreground);
+  border-radius: 9999px;
+  padding-inline: 0.4rem;
+  padding-block: 0.05rem;
 }
 
 /* WCAG 1.4.1 — the magenta is never the only signal that this is the current

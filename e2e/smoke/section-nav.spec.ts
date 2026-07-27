@@ -288,6 +288,58 @@ test.describe("section nav — desktop", () => {
     expect(layers).toEqual({ bar: true, band: true });
   });
 
+  test("the save indicator keeps its own colour inside a highlighted band", async ({
+    page,
+  }) => {
+    // Review finding on !162: the band forces its inline badges to inherit its
+    // magenta foreground so they stay legible, but the save indicator's colour
+    // IS its meaning — green saved, red failed. Forcing it to inherit made the
+    // two states identical at a glance for exactly the section you are reading.
+    await page.goto("/settings");
+    await waitForShell(page);
+    await waitForNavHydrated(page);
+    // The first section is current at the top of the page, so its band is lit
+    // and the aging inputs live inside that very section.
+    await expect(
+      page.locator("[data-section-header][data-current]"),
+    ).toHaveText(/Aging & reminder/);
+
+    const threshold = page.getByLabel("Aging threshold (minutes)");
+    const original = await threshold.inputValue();
+    await threshold.fill(String(Number(original) + 1));
+
+    const indicator = page.locator("[data-save-status]");
+    await expect(indicator).toBeVisible({ timeout: 15_000 });
+
+    const paint = await page.evaluate(() => {
+      const band = document.querySelector(
+        "[data-section-header][data-current]",
+      )!;
+      const chip = document.querySelector("[data-save-status]")!;
+      const chipStyle = getComputedStyle(chip);
+      return {
+        insideBand: band.contains(chip),
+        bandForeground: getComputedStyle(band).color,
+        chipForeground: chipStyle.color,
+        chipBackground: chipStyle.backgroundColor,
+      };
+    });
+
+    expect(paint.insideBand).toBe(true);
+    // It did NOT inherit the band's foreground…
+    expect(paint.chipForeground).not.toBe(paint.bandForeground);
+    // …and it sits on an opaque chip, so its own colour is readable rather than
+    // ~1.3:1 green-on-magenta.
+    expect(paint.chipBackground).not.toBe("rgba(0, 0, 0, 0)");
+    expect(paint.chipBackground).not.toBe("transparent");
+
+    // Leave the workspace as we found it — other specs read these settings.
+    await threshold.fill(original);
+    await expect(page.locator("[data-save-status]")).toBeVisible({
+      timeout: 15_000,
+    });
+  });
+
   test("the header's app menu still opens OVER the bar", async ({ page }) => {
     // The flip side of the z-index above: the bar must not bury the global
     // menu, which drops down from the header right on top of it.

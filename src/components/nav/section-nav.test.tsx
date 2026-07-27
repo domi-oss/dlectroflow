@@ -60,11 +60,19 @@ function mockViewport(wide: boolean) {
 function Page({
   voice = "plain" as Voice,
   sections = HELP_SECTIONS as readonly (typeof HELP_SECTIONS)[number][],
+  /** Headings on the page. Defaults to `sections`, but can be held constant to
+   *  reproduce the split case: a heading still in the DOM for a section the nav
+   *  no longer lists. */
+  headings = sections,
+}: {
+  voice?: Voice;
+  sections?: readonly (typeof HELP_SECTIONS)[number][];
+  headings?: readonly (typeof HELP_SECTIONS)[number][];
 }) {
   return (
     <>
       <SectionNav sections={sections} voice={voice} label="Help sections" />
-      {sections.map((s) => (
+      {headings.map((s) => (
         <section key={s.id}>
           <SectionHeading id={s.id} voice={voice} />
           <p>body of {s.id}</p>
@@ -197,6 +205,29 @@ describe("SectionNav (#72)", () => {
     expect(band).toHaveAttribute("data-current");
     view.unmount();
     expect(band).not.toHaveAttribute("data-current");
+  });
+
+  it("never marks a band the nav no longer lists (the split case)", () => {
+    // Review finding on !162: the band marker used the raw `current` id while
+    // the pill used the resolved section, so a heading still in the DOM for a
+    // dropped section could pin itself magenta with no pill lit — two "you are
+    // here" cues disagreeing. Here the headings stay put and only the nav's
+    // list shrinks.
+    const all = [...HELP_SECTIONS];
+    const { rerender } = render(<Page sections={all} />);
+    const io = FakeIntersectionObserver.instances.at(-1)!;
+    const heading = document.getElementById("help-guests-ai-limits")!;
+    const band = heading.closest("[data-section-header]")!;
+    io.fire([{ target: heading.closest("section")!, isIntersecting: true }]);
+    expect(band).toHaveAttribute("data-current");
+
+    rerender(<Page sections={all.slice(0, -1)} headings={all} />);
+
+    // The heading is still on the page…
+    expect(document.getElementById("help-guests-ai-limits")).not.toBeNull();
+    // …but nothing claims to be current, on either layer.
+    expect(document.querySelectorAll("[data-current]")).toHaveLength(0);
+    expect(document.querySelectorAll("a[aria-current]")).toHaveLength(0);
   });
 
   it("picks the topmost section when several are in the tracking band", () => {
