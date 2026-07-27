@@ -173,19 +173,10 @@ export function FocusTimer({
   // a commitment: nothing is retired server-side until Start is pressed, so a
   // mis-tap can be undone with "Keep my paused session".
   const [startingFresh, setStartingFresh] = useState(false);
-  // Either disclosure toggle unmounts the button that was just clicked (the CTA
-  // block is swapped wholesale), which would drop focus to <body> and lose a
-  // keyboard/screen-reader user's place mid-decision. Hand it to whichever
-  // action is now primary. Guarded so it never steals focus on first render.
+  // The setup screen's primary CTA (Resume or Start), focused after a
+  // disclosure toggle — see the effect below.
   const setupCtaRef = useRef<HTMLButtonElement | null>(null);
   const disclosureMounted = useRef(false);
-  useEffect(() => {
-    if (!disclosureMounted.current) {
-      disclosureMounted.current = true;
-      return;
-    }
-    setupCtaRef.current?.focus();
-  }, [startingFresh]);
   const doneMsgRef = useRef(
     DONE_MESSAGES[Math.floor(Math.random() * DONE_MESSAGES.length)],
   );
@@ -261,6 +252,19 @@ export function FocusTimer({
   useEffect(() => {
     if (phase === "paused" || phase === "timeup") setExpanded(true);
   }, [phase]);
+
+  // #66 — either disclosure toggle unmounts the button that was just clicked
+  // (the setup CTA block is swapped wholesale), which would drop focus to
+  // <body> and lose a keyboard/screen-reader user's place mid-decision. Hand it
+  // to whichever action is now primary. The mounted guard keeps it from stealing
+  // focus on first render.
+  useEffect(() => {
+    if (!disclosureMounted.current) {
+      disclosureMounted.current = true;
+      return;
+    }
+    setupCtaRef.current?.focus();
+  }, [startingFresh]);
 
   // Cleanup on unmount — ← Back leaves the FocusSession OPEN (no server call),
   // so we only stop local effects here. (useFocusSound also stops its element on
