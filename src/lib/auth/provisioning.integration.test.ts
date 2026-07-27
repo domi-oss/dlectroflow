@@ -225,15 +225,14 @@ describe("provisionFromProfile", () => {
     expect(await userCount()).toBe(1);
   });
 
-  // The role comes from an explicit Allowlist.role column rather than being
-  // inferred from the free-text `note`: a human label must never be what
-  // decides whether an account can administer the instance.
+  // Ownership comes from the dedicated `isOwnerSeed` boolean, which only the
+  // deploy-time OWNER_ALLOWLIST seed sets.
   it("provisions the owner role from an invite that confers it", async () => {
     await prisma.allowlist.create({
       data: {
         provider: PROVIDER,
         identity: "1234567",
-        role: "owner",
+        isOwnerSeed: true,
         note: "seeded from OWNER_ALLOWLIST",
       },
     });
@@ -263,9 +262,37 @@ describe("provisionFromProfile", () => {
     expect(r.role).toBe("member");
   });
 
+  // Privilege escalation regression. An earlier draft of the plan keyed the
+  // owner role off `note === "seeded from OWNER_ALLOWLIST"`. A free-text field
+  // deciding a privilege level means any row that happens to carry the string —
+  // set by accident, by a future People admin UI, or by copy-paste — silently
+  // mints an owner. `isOwnerSeed` is the only thing that may confer it.
+  it("does NOT grant owner to an invite that merely carries the seed note", async () => {
+    await prisma.allowlist.create({
+      data: {
+        provider: PROVIDER,
+        identity: "impostor",
+        note: "seeded from OWNER_ALLOWLIST",
+        isOwnerSeed: false,
+      },
+    });
+
+    const r = await provisionFromProfile(PROVIDER, {
+      subject: "51",
+      username: "impostor",
+    });
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.role).toBe("member");
+    expect(
+      (await prisma.user.findUnique({ where: { id: r.userId } }))?.role,
+    ).toBe("member");
+  });
+
   it("returns the stored role on a repeat sign-in, not a recomputed one", async () => {
     await prisma.allowlist.create({
-      data: { provider: PROVIDER, identity: "1234567", role: "owner" },
+      data: { provider: PROVIDER, identity: "1234567", isOwnerSeed: true },
     });
     const first = await provisionFromProfile(PROVIDER, { subject: "1234567" });
     const second = await provisionFromProfile(PROVIDER, { subject: "1234567" });

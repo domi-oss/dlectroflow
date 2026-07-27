@@ -4,7 +4,7 @@
  * The accounts migration makes sign-in invite-only. Without a seeded invitation
  * the owner is locked out of their own instance the moment Phase A deploys, so
  * this turns the `OWNER_ALLOWLIST` env var — the list that used to BE the auth
- * check — into `Allowlist` rows carrying `role = "owner"`.
+ * check — into `Allowlist` rows carrying `isOwnerSeed = true`.
  *
  * Why a script and not SQL inside the migration: the plan offered a Postgres GUC
  * (`current_setting('app.owner_allowlist', true)`), but nothing in this deploy
@@ -27,7 +27,11 @@
  */
 import { PrismaClient } from "@prisma/client";
 
-/** Marks rows this script owns, so a human-added invite is never mistaken for one. */
+/**
+ * A human-readable label on the rows this script owns. Purely descriptive:
+ * `isOwnerSeed` is what actually confers ownership, precisely so that no
+ * free-text field is ever load-bearing for a privilege decision.
+ */
 export const OWNER_SEED_NOTE = "seeded from OWNER_ALLOWLIST";
 
 /**
@@ -58,7 +62,7 @@ export type AllowlistSeedClient = {
 /**
  * Ensure an owner invitation exists for every identity in the list.
  *
- * `update` re-asserts `role` only. Re-running must never touch `claimedById` or
+ * `update` re-asserts `isOwnerSeed` only. Re-running must never touch `claimedById` or
  * `claimedAt` — the owner's invitation is claimed the first time they sign in,
  * and clearing that would hand their invite to whoever asked next. A row that
  * was deleted entirely IS recreated, which is intended: `OWNER_ALLOWLIST` is the
@@ -76,10 +80,10 @@ export async function seedOwnerAllowlist(
       create: {
         provider,
         identity,
-        role: "owner",
+        isOwnerSeed: true,
         note: OWNER_SEED_NOTE,
       },
-      update: { role: "owner" },
+      update: { isOwnerSeed: true },
     });
   }
   return identities.length;

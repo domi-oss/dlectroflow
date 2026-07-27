@@ -125,7 +125,7 @@ async function provision(
     // Deterministic pick when a person was invited twice (say by username and
     // by email): the oldest invitation is the one that gets claimed.
     orderBy: { invitedAt: "asc" },
-    select: { id: true, role: true },
+    select: { id: true, isOwnerSeed: true },
   });
   if (!invite) {
     // Not necessarily a denial. The user lookup and this one are two separate
@@ -147,7 +147,9 @@ async function provision(
           providerSub: profile.subject,
           handle: profile.username,
           email: profile.email,
-          role: invite.role,
+          // The ONLY path that mints an owner, and it reads a dedicated
+          // boolean set solely by the deploy-time OWNER_ALLOWLIST seed.
+          role: invite.isOwnerSeed ? UserRole.Owner : UserRole.Member,
         },
         select: { id: true, role: true },
       });

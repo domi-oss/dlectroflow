@@ -167,13 +167,6 @@ const REGISTRY: ReadonlyArray<{
     values: AiPolicy,
     nullable: false,
   },
-  {
-    constraint: "Allowlist_role_check",
-    table: "Allowlist",
-    column: "role",
-    values: UserRole,
-    nullable: false,
-  },
 ];
 
 // #78 — numeric-range CHECK constraints. Unlike the pseudo-enum columns above
@@ -356,11 +349,6 @@ describe("identity CHECK constraints actually reject out-of-set values", () => {
       column: "User.aiPolicy",
       bad: "free_for_all",
       sql: `INSERT INTO "User" (id, provider, "providerSub", "aiPolicy") VALUES ('check-bite-policy','gitlab','check-bite-3','free_for_all')`,
-    },
-    {
-      column: "Allowlist.role",
-      bad: "superuser",
-      sql: `INSERT INTO "Allowlist" (id, provider, identity, role) VALUES ('check-bite-allow','gitlab','check-bite@example.com','superuser')`,
     },
     {
       column: "Workspace.kind",

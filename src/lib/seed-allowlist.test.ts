@@ -57,11 +57,30 @@ describe("seedOwnerAllowlist", () => {
       create: {
         provider: "gitlab",
         identity: "1234567",
-        role: "owner",
+        isOwnerSeed: true,
         note: OWNER_SEED_NOTE,
       },
-      update: { role: "owner" },
+      update: { isOwnerSeed: true },
     });
+  });
+
+  it("confers ownership through the dedicated boolean, never through the note", async () => {
+    const { db, upsert } = fakeDb();
+
+    await seedOwnerAllowlist(db, "gitlab", ["domi"]);
+
+    const [args] = upsert.mock.calls[0] as [
+      {
+        create: Record<string, unknown>;
+        update: Record<string, unknown>;
+      },
+    ];
+    // `note` is a human label; isOwnerSeed is the authorization fact. If the
+    // note ever became load-bearing, any row carrying the string would mint an
+    // owner — see provisioning.integration.test.ts for the matching guard.
+    expect(args.create.isOwnerSeed).toBe(true);
+    expect(args.update).toEqual({ isOwnerSeed: true });
+    expect(args.update).not.toHaveProperty("note");
   });
 
   it("never writes claimedById/claimedAt on re-run", async () => {

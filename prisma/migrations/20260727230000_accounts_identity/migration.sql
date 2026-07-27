@@ -5,9 +5,13 @@
 -- data layer was already workspace-scoped, so this migration changes *who a
 -- workspace belongs to*, not how content is partitioned.
 --
--- Pseudo-enum columns (User.role / User.status / User.aiPolicy /
--- Allowlist.role) get CHECK constraints mirroring src/lib/constants.ts, kept in
--- lockstep by src/lib/enum-constraint-sync.integration.test.ts (#38 pattern).
+-- Pseudo-enum columns (User.role / User.status / User.aiPolicy) get CHECK
+-- constraints mirroring src/lib/constants.ts, kept in lockstep by
+-- src/lib/enum-constraint-sync.integration.test.ts (#38 pattern).
+--
+-- Allowlist.isOwnerSeed is a BOOLEAN, not a role string and emphatically not a
+-- sentinel value in `note`: a free-text field deciding a privilege level is a
+-- privilege-escalation hole. Only prisma/seed-allowlist.ts sets it.
 
 -- ── New identity tables ───────────────────────────────────────────────────
 CREATE TABLE "User" (
@@ -34,7 +38,7 @@ CREATE TABLE "Allowlist" (
     "id" TEXT NOT NULL,
     "provider" TEXT NOT NULL,
     "identity" TEXT NOT NULL,
-    "role" TEXT NOT NULL DEFAULT 'member',
+    "isOwnerSeed" BOOLEAN NOT NULL DEFAULT false,
     "note" TEXT,
     "invitedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "claimedAt" TIMESTAMP(3),
@@ -109,8 +113,3 @@ ALTER TABLE "User"
 ALTER TABLE "User"
   ADD CONSTRAINT "User_aiPolicy_check"
   CHECK ("aiPolicy" IN ('uncapped', 'capped', 'own_key'));
-
--- Allowlist.role ← UserRole (owner | member)
-ALTER TABLE "Allowlist"
-  ADD CONSTRAINT "Allowlist_role_check"
-  CHECK ("role" IN ('owner', 'member'));

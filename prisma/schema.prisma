@@ -53,10 +53,17 @@ model Allowlist {
   id          String    @id @default(cuid())
   provider    String
   identity    String
-  // The role the invite confers when claimed. An explicit column rather than
-  // inferring "owner" from the free-text `note`: the note is a human label and
-  // must never be load-bearing for authorization.
-  role        String    @default("member") // owner | member
+  // Does claiming this invitation make the claimer the instance owner?
+  //
+  // A dedicated boolean, NOT a sentinel value in `note`: a free-text field
+  // deciding a privilege level is a privilege-escalation hole, because any row
+  // that happens to carry the magic string — set by accident, by a future
+  // People admin UI, or by copy-paste — would silently mint an owner.
+  //
+  // Only prisma/seed-allowlist.ts sets it, from the deploy-time OWNER_ALLOWLIST.
+  // Deliberately narrower than a general `role` column: the People UI (Phase B)
+  // invites members, and should not be able to grant ownership at all.
+  isOwnerSeed Boolean   @default(false)
   note        String?
   invitedAt   DateTime  @default(now())
   claimedAt   DateTime?
