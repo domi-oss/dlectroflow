@@ -8,16 +8,18 @@ const DISMISS_KEY = "df-guest-banner";
 
 // #23 — the dismissal lives in sessionStorage, so read it as an external store
 // instead of copying it into state from a mount effect
-// (react-hooks/set-state-in-effect). sessionStorage fires no same-tab event, so
-// dismiss() notifies these listeners itself; "storage" covers other tabs.
+// (react-hooks/set-state-in-effect). sessionStorage emits no event of its own,
+// so dismiss() notifies these listeners directly. There is deliberately no
+// "storage" listener: each tab has its OWN sessionStorage area, so there is
+// nothing to sync across tabs (Duo review, !160).
 const dismissListeners = new Set<() => void>();
 
-function subscribeDismissed(listener: () => void): () => void {
+/** Exported for the teardown test — the component subscribes via
+ *  useSyncExternalStore, which needs a stable module-level function. */
+export function subscribeDismissed(listener: () => void): () => void {
   dismissListeners.add(listener);
-  window.addEventListener("storage", listener);
   return () => {
     dismissListeners.delete(listener);
-    window.removeEventListener("storage", listener);
   };
 }
 

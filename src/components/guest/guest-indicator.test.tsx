@@ -18,7 +18,7 @@ vi.mock("next/link", () => ({
   ),
 }));
 
-import { GuestIndicator } from "./guest-indicator";
+import { GuestIndicator, subscribeDismissed } from "./guest-indicator";
 
 const props = {
   remaining: 3,
@@ -169,6 +169,29 @@ describe("GuestIndicator dismissal persistence", () => {
     unmount();
     render(<GuestIndicator {...props} voice="plain" />);
     expect(screen.queryByRole("link", { name: /help/i })).toBeNull();
+  });
+
+  // Duo review (!160): the store notifies subscribers itself, so its teardown
+  // is the only thing stopping a stale listener from being called forever.
+  it("notifies subscribers on dismiss and stops once unsubscribed", () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeDismissed(listener);
+    try {
+      render(<GuestIndicator {...props} voice="plain" />);
+      fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
+      expect(listener).toHaveBeenCalledTimes(1);
+
+      unsubscribe();
+
+      // Re-open the banner and dismiss it again: the store still works…
+      fireEvent.click(screen.getByRole("button", { name: /breakdowns/i }));
+      fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
+      expect(screen.queryByRole("link", { name: /help/i })).toBeNull();
+      // …but the unsubscribed listener is never called again.
+      expect(listener).toHaveBeenCalledTimes(1);
+    } finally {
+      unsubscribe();
+    }
   });
 
   it("degrades to showing the banner when sessionStorage is unavailable", () => {
