@@ -1,8 +1,16 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { Pause, Play, SkipBack, SkipForward, Volume2 } from "lucide-react";
+import {
+  Pause,
+  Play,
+  Shuffle,
+  SkipBack,
+  SkipForward,
+  Volume2,
+} from "lucide-react";
 import { t, type Voice } from "@/lib/strings";
+import { cn } from "@/lib/utils";
 import type { FocusSoundControls } from "@/lib/use-focus-sound";
 
 /**
@@ -32,8 +40,18 @@ export function FocusSoundPlayer({
   controls: FocusSoundControls;
   voice: Voice;
 }) {
-  const { track, playing, volume, toggle, next, prev, setVolume, getTime } =
-    controls;
+  const {
+    track,
+    playing,
+    volume,
+    shuffle,
+    toggle,
+    next,
+    prev,
+    toggleShuffle,
+    setVolume,
+    getTime,
+  } = controls;
 
   // Live playback position (polled while playing — display only, no seek).
   const [pos, setPos] = useState({ currentTime: 0, duration: 0 });
@@ -126,13 +144,35 @@ export function FocusSoundPlayer({
         </button>
         <div className="min-w-0 flex-1 leading-tight">
           <p className="text-muted-foreground text-[11px] uppercase tracking-wide">
+            {/* #68 — shuffle state as text, so it isn't carried by the toggle's
+                tint alone (WCAG 1.4.1). */}
             {t("focus.sound.nowPlaying", voice)}
+            {shuffle ? ` · ${t("focus.sound.shuffled", voice)}` : ""}
           </p>
           <p className="truncate text-sm font-medium">{track.title}</p>
           <p className="text-muted-foreground truncate text-xs">
             {track.categoryLabel}
           </p>
         </div>
+        {/* #68 — shuffle: a state toggle, not a transport action, so it sits with
+            volume on the right rather than in the prev/play/next group. Same
+            label in both states; aria-pressed + the "Shuffled" text above carry
+            the state. */}
+        <button
+          type="button"
+          onClick={toggleShuffle}
+          className={cn(
+            btn,
+            "shrink-0",
+            // Same token-paired active tint as the timer's duration chips
+            // (designed to clear AA in both themes).
+            shuffle && "border-primary bg-accent text-accent-foreground",
+          )}
+          aria-pressed={shuffle}
+          aria-label={t("focus.sound.shuffle", voice)}
+        >
+          <Shuffle aria-hidden="true" className="h-5 w-5" />
+        </button>
         {/* Volume behind a speaker button that pops out a slider. */}
         <div className="relative shrink-0" ref={volWrapRef}>
           <button

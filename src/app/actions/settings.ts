@@ -207,6 +207,24 @@ export async function updateFocusTimerSettings(input: {
   revalidatePath("/settings");
 }
 
+/**
+ * #68 — the mini-player's shuffle toggle. Workspace-scoped taste setting (guests
+ * keep their own value; no owner gate, same as the other focus-timer prefs) and
+ * a plain Boolean column, so the only validation needed is the coercion below.
+ * Called fire-and-forget from the timer: the toggle's own state lives in
+ * useFocusSound for the rest of the session, and the force-dynamic focus route
+ * re-reads Settings on the next load — so there is nothing to revalidate here.
+ */
+export async function updateFocusShuffle(enabled: boolean) {
+  const workspaceId = await currentWorkspaceId();
+  const focusShuffle = Boolean(enabled);
+  await prisma.settings.upsert({
+    where: { workspaceId },
+    create: { id: workspaceId, workspaceId, focusShuffle },
+    update: { focusShuffle },
+  });
+}
+
 /** MR ② — record that the workspace dismissed the one-time "make this timer
  * yours" hint (via ✕ or by tapping through to settings). One-shot flag; the
  * force-dynamic timer route won't show it again on the next load. */
