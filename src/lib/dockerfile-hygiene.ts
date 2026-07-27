@@ -70,6 +70,65 @@ export function parseDockerfile(text: string): DockerfileInstruction[] {
 }
 
 /**
+ * Shell operators that end one command and begin another inside a single
+ * `RUN`. A pattern that walks across one of these has left the command it
+ * started in, so every check below refuses to cross them.
+ */
+const COMMAND_BOUNDARY = "[^&|;]";
+
+/** Escape a literal path for embedding in a RegExp. */
+function escapeForRegExp(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * True when `path` is an argument of an `rm -rf` **in `command` itself**, with
+ * no shell command boundary between the two.
+ *
+ * The boundary matters: without it, a command that merely mentions the path
+ * after some unrelated deletion — `rm -rf /opt/tools; echo cleaned
+ * /tmp/npm-cache` — reads as proof that the cache was purged when it was not.
+ * (Duo review on !159 flagged that `;` was missing from the original class.)
+ */
+export function deletesPathInSameCommand(
+  command: string,
+  path: string,
+): boolean {
+  return new RegExp(`rm -rf${COMMAND_BOUNDARY}*${escapeForRegExp(path)}`).test(
+    command,
+  );
+}
+
+/** A `RUN` that recursively re-owns /app — the +854 MB duplicate-layer bug. */
+const RECURSIVE_APP_CHOWN = new RegExp(
+  `chown\\s+-R${COMMAND_BOUNDARY}*/app\\b`,
+);
+
+/**
+ * `RUN` instructions that recursively `chown` /app at or after the stage's
+ * first `COPY` — i.e. in a layer of their own, where rewriting every file
+ * duplicates everything copied above it. A chown *before* the COPYs (inside
+ * the install RUN) is free, because a layer records only its final state.
+ *
+ * Returns **`null`** when the stage contains no `COPY` at all, rather than a
+ * misleading empty array: with no anchor there is nothing to measure "after"
+ * against, and callers must say what that means instead of reading `[]` as a
+ * pass. (The earlier inline version did `slice(findIndex(...))`, and
+ * `findIndex` returning `-1` made `slice(-1)` quietly narrow the search to the
+ * single last instruction — a guard that stops guarding. Duo review on !159.)
+ */
+export function lateRecursiveChowns(
+  instructions: readonly DockerfileInstruction[],
+): DockerfileInstruction[] | null {
+  const copyIndex = instructions.findIndex((i) => i.instruction === "COPY");
+  if (copyIndex === -1) return null;
+
+  return instructions
+    .slice(copyIndex)
+    .filter((i) => i.instruction === "RUN" && RECURSIVE_APP_CHOWN.test(i.args));
+}
+
+/**
  * Return only the instructions belonging to the named build stage
  * (`FROM <image> AS <stage>`), i.e. everything from that FROM up to the next
  * one. Returns `[]` when the stage does not exist.

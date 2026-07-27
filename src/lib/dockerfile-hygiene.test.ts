@@ -1,7 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseDockerfile, stageInstructions } from "./dockerfile-hygiene";
+import {
+  parseDockerfile,
+  stageInstructions,
+  deletesPathInSameCommand,
+  lateRecursiveChowns,
+} from "./dockerfile-hygiene";
 
 describe("parseDockerfile", () => {
   it("splits an instruction from its arguments", () => {
@@ -75,6 +80,97 @@ describe("stageInstructions", () => {
   });
 });
 
+describe("deletesPathInSameCommand", () => {
+  const REAL_INSTALL =
+    "cd /opt/tools && npm install --cache /tmp/npm-cache prisma@6.19.3 " +
+    "&& rm -rf /opt/tools /tmp/npm-cache /root/.npm && chown -R node:node /app";
+
+  it("accepts a path deleted by the rm it belongs to", () => {
+    expect(deletesPathInSameCommand(REAL_INSTALL, "/tmp/npm-cache")).toBe(true);
+    expect(deletesPathInSameCommand(REAL_INSTALL, "/root/.npm")).toBe(true);
+  });
+
+  it("rejects a command that never deletes the path", () => {
+    expect(
+      deletesPathInSameCommand(
+        "npm install --cache /tmp/npm-cache",
+        "/tmp/npm-cache",
+      ),
+    ).toBe(false);
+  });
+
+  // Duo review on !159: the original class was [^&|], so a `;` did not stop
+  // the scan and this input passed the guard while leaving the cache in place.
+  it("does not walk past a semicolon to find the path", () => {
+    expect(
+      deletesPathInSameCommand(
+        "npm install && rm -rf /opt/tools; echo cleaned /tmp/npm-cache",
+        "/tmp/npm-cache",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not walk past && or || or a pipe either", () => {
+    for (const separator of ["&&", "||", "|"]) {
+      expect(
+        deletesPathInSameCommand(
+          `rm -rf /opt/tools ${separator} echo /root/.npm`,
+          "/root/.npm",
+        ),
+      ).toBe(false);
+    }
+  });
+
+  it("treats dots in the path as literals, not as any-character", () => {
+    // /root/Xnpm must not satisfy a check for /root/.npm.
+    expect(deletesPathInSameCommand("rm -rf /root/Xnpm", "/root/.npm")).toBe(
+      false,
+    );
+  });
+});
+
+describe("lateRecursiveChowns", () => {
+  const withCopies = (chownLine: string) =>
+    parseDockerfile(
+      [
+        "RUN npm install && chown -R node:node /app",
+        "COPY --chown=node:node public ./public",
+        chownLine,
+        "USER node",
+      ].join("\n"),
+    );
+
+  it("returns no offenders when ownership is set inside the install RUN", () => {
+    expect(lateRecursiveChowns(withCopies("EXPOSE 3000"))).toEqual([]);
+  });
+
+  it("catches a RUN chown -R /app after the COPYs", () => {
+    expect(
+      lateRecursiveChowns(withCopies("RUN chown -R node:node /app")),
+    ).toEqual([{ instruction: "RUN", args: "chown -R node:node /app" }]);
+  });
+
+  it("ignores a recursive chown of some other tree", () => {
+    expect(
+      lateRecursiveChowns(withCopies("RUN chown -R node:node /var/log")),
+    ).toEqual([]);
+  });
+
+  // Duo review on !159: findIndex returns -1 with no COPY, and the earlier
+  // inline `slice(-1)` then searched only the LAST instruction — so this
+  // fragment, which re-owns /app in its own layer, read as clean. Returning
+  // null forces the caller to fail closed instead.
+  it("returns null rather than [] when the stage has no COPY to anchor on", () => {
+    const noCopies = parseDockerfile(
+      ["RUN chown -R node:node /app", "USER node"].join("\n"),
+    );
+    expect(noCopies.slice(-1).filter((i) => i.instruction === "RUN")).toEqual(
+      [],
+    ); // what the old logic saw: nothing wrong here
+    expect(lateRecursiveChowns(noCopies)).toBeNull();
+  });
+});
+
 /**
  * #71 regression guards. The runtime image was 893 MB and a cold pull on a
  * newly scaled Autopilot node blew past Helm's timeout, so `--atomic` rolled
@@ -123,21 +219,18 @@ describe.each([["Dockerfile"], ["Dockerfile.ci"]])(
 
     it("deletes the npm cache in the same layer as the install", () => {
       for (const command of npmInstalls) {
-        expect(command).toMatch(/rm -rf[^&|]*\/tmp\/npm-cache/);
-        expect(command).toMatch(/rm -rf[^&|]*\/root\/\.npm/);
+        expect(deletesPathInSameCommand(command, "/tmp/npm-cache")).toBe(true);
+        expect(deletesPathInSameCommand(command, "/root/.npm")).toBe(true);
       }
     });
 
     it("never re-owns the whole app tree in a layer of its own", () => {
       // Ownership inside the install layer is free (the layer only captures the
       // final state); a standalone `RUN chown -R /app` after the COPYs is not.
-      const copyIndex = runtime.findIndex((i) => i.instruction === "COPY");
-      const offenders = runtime
-        .slice(copyIndex)
-        .filter(
-          (i) =>
-            i.instruction === "RUN" && /chown\s+-R[^&|]*\/app\b/.test(i.args),
-        );
+      const offenders = lateRecursiveChowns(runtime);
+      // Fail closed: null means there was no COPY to anchor the search, which
+      // is a broken runtime stage, not a clean one (Duo review on !159).
+      expect(offenders, `${filename} runner stage has no COPY`).not.toBeNull();
       expect(offenders).toEqual([]);
     });
 
