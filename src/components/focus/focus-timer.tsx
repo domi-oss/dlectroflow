@@ -27,6 +27,7 @@ import {
   applyTimeDelta,
   durationChoices,
   netAddedMin,
+  normalizeEstMin,
 } from "@/lib/focus-timer-clock";
 import {
   createAlarm,
@@ -152,13 +153,20 @@ export function FocusTimer({
   // this seed still decides which duration chip starts selected and what "Start
   // fresh" submits, so it must be the session's value (what's on screen), not
   // the stale estimate. The no-session path is unaffected: step.estMinutes.
-  const seedMin = existingSession?.plannedMin ?? step.estMinutes;
+  //
+  // Duo review (#66) — normalized through the SAME helper the chips use, so the
+  // seeded value is always one of the chips on offer. estMinutes/plannedMin are
+  // plain Ints with no CHECK bounding them to >= 1, and a 0 row would otherwise
+  // preselect nothing and let Start open a 0-minute session.
+  const seedMin = normalizeEstMin(
+    existingSession?.plannedMin ?? step.estMinutes,
+  );
   const [plannedMin, setPlannedMin] = useState(seedMin);
   const [totalSec, setTotalSec] = useState(
-    existingSession?.totalSec ?? step.estMinutes * 60,
+    existingSession?.totalSec ?? seedMin * 60,
   );
   const [remainingSec, setRemainingSec] = useState(
-    existingSession?.remainingSec ?? step.estMinutes * 60,
+    existingSession?.remainingSec ?? seedMin * 60,
   );
   const elapsedRef = useRef(0);
   const [sessionId, setSessionId] = useState<string | null>(null);

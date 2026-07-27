@@ -14,6 +14,19 @@ export const MIN_REMAINING_SEC = 60;
 export const DURATION_PRESET_MIN = [5, 10, 15, 25] as const;
 
 /**
+ * #66 — the whole-minute duration a raw estimate means. Nothing in the schema
+ * bounds Step.estMinutes / FocusSession.plannedMin to >= 1 (they're plain Ints,
+ * no CHECK), so a 0/negative row is possible; NaN only via a bad caller. The
+ * setup screen seeds its plannedMin through this AND builds its chips from it,
+ * so the seeded value is always one of the chips on offer — otherwise a 0m
+ * estimate would preselect nothing and Start would open a 0-minute session.
+ */
+export function normalizeEstMin(estMin: number): number {
+  if (!Number.isFinite(estMin)) return DURATION_PRESET_MIN[1];
+  return Math.max(1, Math.round(estMin));
+}
+
+/**
  * The duration chips to offer for a step estimated at `estMin`: the presets,
  * plus a chip for the estimate itself when it isn't one of them — otherwise a
  * 7m step would show a ring reading 7m with no chip able to express it, and a
@@ -22,7 +35,7 @@ export const DURATION_PRESET_MIN = [5, 10, 15, 25] as const;
  */
 export function durationChoices(estMin: number): number[] {
   const choices = new Set<number>(DURATION_PRESET_MIN);
-  if (Number.isFinite(estMin)) choices.add(Math.max(1, Math.round(estMin)));
+  if (Number.isFinite(estMin)) choices.add(normalizeEstMin(estMin));
   return [...choices].sort((a, b) => a - b);
 }
 

@@ -895,6 +895,32 @@ describe("FocusTimer — setup screen: one number, one action (#66)", () => {
       );
     });
 
+    // Duo review (#66): the chips normalize the estimate (floor 1m, whole
+    // minutes) but plannedMin used to be seeded from the raw value, so a row
+    // the schema doesn't forbid — estMinutes is a plain Int with no CHECK —
+    // could leave every chip unpressed and let Start open a 0-minute session.
+    it("a 0m estimate (bad data) still preselects the 1m chip and starts a 1m session", async () => {
+      const user = userEvent.setup();
+      render(
+        <FocusTimer
+          {...base({
+            ...singleTask,
+            step: { ...singleTask.step, estMinutes: 0 },
+          })}
+        />,
+      );
+      const group = screen.getByRole("group", { name: /focus for/i });
+      const pressed = within(group)
+        .getAllByRole("button")
+        .filter((b) => b.getAttribute("aria-pressed") === "true");
+      expect(pressed.map((b) => b.textContent)).toEqual(["1m"]);
+      expect(screen.getByText("1:00")).toBeInTheDocument();
+      await user.click(
+        screen.getByRole("button", { name: /^start focusing$/i }),
+      );
+      expect(beginFocus).toHaveBeenCalledWith("s1", 1);
+    });
+
     it("a single task shows no subordinate task-total line (its total IS the step)", () => {
       render(<FocusTimer {...base(singleTask)} />);
       expect(
