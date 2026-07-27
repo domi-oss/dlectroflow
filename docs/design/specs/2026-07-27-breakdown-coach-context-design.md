@@ -169,7 +169,8 @@ prefix; enabling `cache_control` is a separate follow-up on the adapter.
 | --- | --- |
 | Brand-new user / empty context | Block is `""`; prompt byte-identical to pre-#14 |
 | Junk `Settings.voice` value | Treated as "no preference"; line omitted |
-| `NaN` / negative / absurd numbers | Coerced and clamped; unusable rows dropped, never rendered raw |
+| Unusable `estMinutes` (`NaN`, `Infinity`, zero, negative, sub-minute) | Row **skipped**, never coerced. Clamping a negative to `0` and keeping it would inflate `stepCount`, drag `minMinutes` to `0` and shift the median — telling the coach this person likes 0-minute steps. A task whose every estimate is unusable produces no entry at all |
+| Absurd but valid numbers | Clamped at render time; minute figures re-sorted so a malformed row cannot produce an inverted range |
 | Context read throws or is slow | Resolves to `{}`; breakdown still streams `text` + `steps`, **no** `fallback` event, nothing logged as an LLM failure |
 | Blocked guest | Zero context reads; unchanged `[fallback, done]` |
 | Provider without tool support | Same prompt, one code path. The adapter appends the `propose_steps` JSON Schema *after* SYSTEM, so SYSTEM still ends with the tool instruction and the static block is capped to limit small-model drift |
@@ -198,6 +199,10 @@ prefix; enabling `cache_control` is a separate follow-up on the adapter.
 4. **`summarizeRecentBreakdowns` lives in `breakdown-context.ts`, not
    `breakdown.ts`.** It operates on DB row shapes; `breakdown.ts` promises to
    stay import-safe for client components.
+
+## Known gap: `Step.estMinutes` has no CHECK constraint
+
+Every current writer clamps to `>= 1` — `confirmBreakdown` (`Math.max(1, Math.round(s.estMinutes || 15))`, which is also what stops a hostile model proposing a negative estimate), `updateStepEstimate`, `requeueFocus`, and the single-task seed. But unlike this schema's pseudo-enum columns, `Step.estMinutes` has no CHECK constraint, so that guarantee rests on four scattered call sites staying correct forever. `summarizeRecentBreakdowns` therefore skips non-positive estimates as a read-side backstop. Adding the constraint would need a migration, which #14 explicitly rules out — worth a follow-up issue.
 
 Also: the spec's own token estimate ("~10–20% input growth") assumed the
 proposal JSON dominates a 600–1,200-token user turn. Measured, a realistic

@@ -349,17 +349,33 @@ describe("summarizeRecentBreakdowns", () => {
   it("carries no step text through, even when the rows have some", async () => {
     const { summarizeRecentBreakdowns } = await import("./breakdown-context");
     const { buildContextBlock } = await import("./breakdown");
-    const SECRET = "call Dr Nowak about the biopsy results";
+    // A deliberately synthetic sentinel rather than realistic-looking personal
+    // data: GitLab redacts health/PII-shaped strings out of the diff it feeds
+    // its reviewers, which made an earlier version of this fixture invisible in
+    // review and got the test wrongly reported as unfallible (!158). The
+    // sentinel is equally strong here and stays legible to a reviewer.
+    const SENSITIVE = "ZZ-STEP-TEXT-MUST-NEVER-REACH-THE-PROMPT-ZZ";
     const out = summarizeRecentBreakdowns([
-      { ...row("t1", 10, "2026-07-05T00:00:00Z"), text: SECRET },
-      { ...row("t1", 20, "2026-07-05T00:00:00Z"), text: SECRET },
+      { ...row("t1", 10, "2026-07-05T00:00:00Z"), text: SENSITIVE },
+      { ...row("t1", 20, "2026-07-05T00:00:00Z"), text: SENSITIVE },
     ] as never);
 
-    expect(JSON.stringify(out)).not.toContain("Nowak");
-    expect(JSON.stringify(out)).not.toContain("biopsy");
+    expect(JSON.stringify(out)).not.toContain(SENSITIVE);
     expect(
       buildContextBlock({ voice: "plain", recentBreakdowns: out }),
-    ).not.toMatch(/Nowak|biopsy/);
+    ).not.toContain(SENSITIVE);
+
+    // Stronger than a substring check: the summary must expose EXACTLY the
+    // four shape fields, so ANY extra column carried through from a row — text
+    // today, something else tomorrow — fails this, not just the one we named.
+    for (const shape of out) {
+      expect(Object.keys(shape).sort()).toEqual([
+        "maxMinutes",
+        "medianMinutes",
+        "minMinutes",
+        "stepCount",
+      ]);
+    }
   });
 
   it("ignores rows with an unusable estimate rather than rendering junk", async () => {
@@ -371,6 +387,52 @@ describe("summarizeRecentBreakdowns", () => {
     expect(out).toEqual([
       { stepCount: 1, minMinutes: 15, medianMinutes: 15, maxMinutes: 15 },
     ]);
+  });
+
+  it("skips a non-positive estimate instead of folding it in as a zero", async () => {
+    // Regression guard (!158 review). A negative or zero estMinutes used to be
+    // clamped to 0 and KEPT, which silently distorted the shape the coach is
+    // shown: it inflated stepCount, dragged minMinutes to 0 and shifted the
+    // median — i.e. it told the coach this person likes 0-minute steps. NaN was
+    // already skipped; these must behave the same way.
+    const { summarizeRecentBreakdowns } = await import("./breakdown-context");
+    const out = summarizeRecentBreakdowns([
+      { taskId: "t1", estMinutes: -5, createdAt: new Date() },
+      { taskId: "t1", estMinutes: 0, createdAt: new Date() },
+      { taskId: "t1", estMinutes: 0.4, createdAt: new Date() },
+      { taskId: "t1", estMinutes: 10, createdAt: new Date() },
+      { taskId: "t1", estMinutes: 20, createdAt: new Date() },
+    ]);
+    expect(out).toEqual([
+      { stepCount: 2, minMinutes: 10, medianMinutes: 15, maxMinutes: 20 },
+    ]);
+  });
+
+  it("drops a task entirely when every one of its estimates is unusable", async () => {
+    const { summarizeRecentBreakdowns } = await import("./breakdown-context");
+    const out = summarizeRecentBreakdowns([
+      { taskId: "all-bad", estMinutes: -1, createdAt: new Date() },
+      { taskId: "all-bad", estMinutes: 0, createdAt: new Date() },
+    ]);
+    expect(out).toEqual([]);
+  });
+
+  it("never emits a zero minute figure, whatever the rows contain", async () => {
+    const { summarizeRecentBreakdowns } = await import("./breakdown-context");
+    const { buildContextBlock } = await import("./breakdown");
+    const out = summarizeRecentBreakdowns([
+      { taskId: "t1", estMinutes: -999, createdAt: new Date() },
+      { taskId: "t1", estMinutes: 25, createdAt: new Date() },
+    ]);
+    for (const s of out) {
+      expect(s.minMinutes).toBeGreaterThan(0);
+      expect(s.medianMinutes).toBeGreaterThan(0);
+      expect(s.maxMinutes).toBeGreaterThan(0);
+      expect(s.stepCount).toBeGreaterThan(0);
+    }
+    expect(
+      buildContextBlock({ voice: "plain", recentBreakdowns: out }),
+    ).not.toMatch(/\b0 min|\(0–/);
   });
 });
 

@@ -94,13 +94,31 @@ export function summarizeRecentBreakdowns(
   const groups = new Map<string, { newest: number; minutes: number[] }>();
   for (const r of rows) {
     if (typeof r.taskId !== "string" || !r.taskId) continue;
-    if (typeof r.estMinutes !== "number" || !Number.isFinite(r.estMinutes)) {
+    // An estimate is usable only if it is a real number of at least one whole
+    // minute. Anything else — NaN, Infinity, zero, negative, sub-minute — is
+    // SKIPPED, not coerced.
+    //
+    // Clamping a negative to 0 and keeping it (the original behaviour, caught
+    // in !158 review) is worse than dropping the row: it inflates stepCount,
+    // drags minMinutes to 0 and shifts the median, so the coach is told this
+    // person likes 0-minute steps and sizes its next proposal accordingly.
+    //
+    // No writer can currently persist one — confirmBreakdown, updateStepEstimate,
+    // requeueFocus and the single-task seed all clamp to >= 1 — but Step.estMinutes
+    // has no CHECK constraint behind it (unlike this schema's pseudo-enum columns),
+    // so that guarantee rests entirely on four scattered call sites staying correct.
+    // This is the read-side backstop; see the note in the MR about the constraint.
+    if (
+      typeof r.estMinutes !== "number" ||
+      !Number.isFinite(r.estMinutes) ||
+      r.estMinutes < 1
+    ) {
       continue;
     }
     const at = r.createdAt instanceof Date ? r.createdAt.getTime() : 0;
     const g = groups.get(r.taskId) ?? { newest: at, minutes: [] };
     g.newest = Math.max(g.newest, at);
-    g.minutes.push(Math.max(0, Math.trunc(r.estMinutes)));
+    g.minutes.push(Math.trunc(r.estMinutes));
     groups.set(r.taskId, g);
   }
 
