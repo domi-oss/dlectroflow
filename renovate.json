@@ -13,7 +13,7 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Track the pinned image refs in the Helm chart values.yaml (postgres server — which the backup dumpImage also inherits — and the backup upload image google/cloud-sdk). These are single-string `name:tag@digest` values, not the repository/tag shape the built-in helm-values manager parses, so an annotated regex manager is used instead. Add a `# renovate: datasource=docker depName=<image> [versioning=docker]` line directly above any new image field to bring it under tracking (#15).",
+      "description": "Track the pinned image refs in the Helm chart values.yaml (postgres server \u2014 which the backup dumpImage also inherits \u2014 and the backup upload image google/cloud-sdk). These are single-string `name:tag@digest` values, not the repository/tag shape the built-in helm-values manager parses, so an annotated regex manager is used instead. Add a `# renovate: datasource=docker depName=<image> [versioning=docker]` line directly above any new image field to bring it under tracking (#15).",
       "managerFilePatterns": ["/^charts/dlectroflow/values\\.yaml$/"],
       "matchStrings": [
         "#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)(?:\\s+versioning=(?<versioning>\\S+))?\\s+\\w+:\\s*\\S+?:(?<currentValue>[^@\\s\"']+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?"
@@ -44,6 +44,11 @@
         "@types/react-dom"
       ],
       "groupName": "react monorepo"
+    },
+    {
+      "description": "Keep tsx on a release whose esbuild range overlaps vite's, so the lockfile resolves esbuild to a SINGLE version (#67). Renovate regenerates lockfiles with npm 11 while CI installs with npm 10 (node:22-alpine). When tsx 4.19.2 pinned esbuild ~0.23.0 and vitest's nested vite 8 needed ^0.28, npm nested a second esbuild subtree \u2014 and npm 11 dropped those 28 entries while keeping the nested vite that required them, producing a lockfile CI's npm ci rejected as out of sync. That blocked every dependency MR (!143/!146/!147) until each lockfile was rebuilt by hand. tsx >= 4.22.0 moved to esbuild ~0.28.0, which overlaps vite 8, so there is no nested subtree left for either npm version to disagree about. The invariant is enforced by src/lib/lockfile-hygiene.test.ts \u2014 if that test fails, realign the ranges rather than deleting it.",
+      "matchPackageNames": ["tsx"],
+      "allowedVersions": ">=4.22.0"
     },
     {
       "description": "Defer ESLint 10 (#21/!51): no released eslint-plugin-react supports it (latest 7.37.5 peers eslint ^3||...||^9.7, pinned via eslint-config-next). Lift this line once the Next plugin chain ships ESLint-10 support - Renovate will re-propose the major automatically.",
