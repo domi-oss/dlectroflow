@@ -14,6 +14,9 @@ import {
   FocusSound,
   CompleteTickColor,
   Typeface,
+  UserRole,
+  UserStatus,
+  AiPolicy,
 } from "@/lib/constants";
 
 // #38 — keep the DB CHECK constraints (see the
@@ -140,6 +143,35 @@ const REGISTRY: ReadonlyArray<{
     table: "Settings",
     column: "typeface",
     values: Typeface,
+    nullable: false,
+  },
+  // #35 Phase A — accounts identity.
+  {
+    constraint: "User_role_check",
+    table: "User",
+    column: "role",
+    values: UserRole,
+    nullable: false,
+  },
+  {
+    constraint: "User_status_check",
+    table: "User",
+    column: "status",
+    values: UserStatus,
+    nullable: false,
+  },
+  {
+    constraint: "User_aiPolicy_check",
+    table: "User",
+    column: "aiPolicy",
+    values: AiPolicy,
+    nullable: false,
+  },
+  {
+    constraint: "Allowlist_role_check",
+    table: "Allowlist",
+    column: "role",
+    values: UserRole,
     nullable: false,
   },
 ];
@@ -299,4 +331,68 @@ describe("numeric-range CHECK constraints are applied (#78)", () => {
       ).toBe(false);
     },
   );
+});
+
+// #35 Phase A — the sync test above proves the constraint *definitions* match
+// constants.ts. It does NOT prove Postgres enforces them: a constraint that was
+// added `NOT VALID`, or dropped by a later out-of-band migration, would still
+// have to be re-added for the sync test to pass, but a test that never sees a
+// rejection is a test nobody has watched fail. These insert a genuinely
+// out-of-set value through raw SQL (bypassing Prisma's types, which is the only
+// way this reaches the DB) and require the write to be rejected.
+describe("identity CHECK constraints actually reject out-of-set values", () => {
+  const cases: ReadonlyArray<{ column: string; bad: string; sql: string }> = [
+    {
+      column: "User.role",
+      bad: "admin",
+      sql: `INSERT INTO "User" (id, provider, "providerSub", role) VALUES ('check-bite-role','gitlab','check-bite-1','admin')`,
+    },
+    {
+      column: "User.status",
+      bad: "suspended",
+      sql: `INSERT INTO "User" (id, provider, "providerSub", status) VALUES ('check-bite-status','gitlab','check-bite-2','suspended')`,
+    },
+    {
+      column: "User.aiPolicy",
+      bad: "free_for_all",
+      sql: `INSERT INTO "User" (id, provider, "providerSub", "aiPolicy") VALUES ('check-bite-policy','gitlab','check-bite-3','free_for_all')`,
+    },
+    {
+      column: "Allowlist.role",
+      bad: "superuser",
+      sql: `INSERT INTO "Allowlist" (id, provider, identity, role) VALUES ('check-bite-allow','gitlab','check-bite@example.com','superuser')`,
+    },
+    {
+      column: "Workspace.kind",
+      bad: "shared",
+      sql: `INSERT INTO "Workspace" (id, kind) VALUES ('check-bite-ws','shared')`,
+    },
+  ];
+
+  it.each(cases)("$column rejects '$bad'", async ({ sql }) => {
+    await expect(prisma.$executeRawUnsafe(sql)).rejects.toThrow(
+      /violates check constraint/i,
+    );
+  });
+
+  it("still accepts every value constants.ts declares for User.role", async () => {
+    for (const role of Object.values(UserRole)) {
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "User" (id, provider, "providerSub", role) VALUES ($1,'gitlab',$2,$3)`,
+        `check-ok-${role}`,
+        `check-ok-${role}`,
+        role,
+      );
+    }
+    const ids = Object.values(UserRole).map((r) => `check-ok-${r}`);
+    const rows = await prisma.$queryRawUnsafe<{ id: string }[]>(
+      `SELECT id FROM "User" WHERE id = ANY($1::text[])`,
+      ids,
+    );
+    expect(rows).toHaveLength(ids.length);
+    await prisma.$executeRawUnsafe(
+      `DELETE FROM "User" WHERE id = ANY($1::text[])`,
+      ids,
+    );
+  });
 });
