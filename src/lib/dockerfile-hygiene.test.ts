@@ -171,13 +171,20 @@ describe.each([["Dockerfile"], ["Dockerfile.ci"]])(
     // resolves. The image's CLIs must match what `npm ci` installs, or the
     // container runs migrations/scripts on a different Prisma or tsx than the
     // one the app and its lockfile were tested with.
-    it("pins prisma and tsx to the versions in package-lock.json", () => {
+    //
+    // dotenv is included (Duo review on !159) even though package.json never
+    // declares it: prisma.config.ts imports `dotenv/config`, and it resolves
+    // because the Prisma CLI's own tree hoists it to the top of the lockfile.
+    // If it ever vanishes from there this test fails loudly — which is right,
+    // because prisma.config.ts would be broken locally and in CI too, not just
+    // in the image.
+    it("pins prisma, tsx and dotenv to the versions in package-lock.json", () => {
       const lock = JSON.parse(
         readFileSync(join(process.cwd(), "package-lock.json"), "utf8"),
       ) as { packages: Record<string, { version?: string }> };
       const installed = npmInstalls.join(" ");
 
-      for (const pkg of ["prisma", "tsx"]) {
+      for (const pkg of ["prisma", "tsx", "dotenv"]) {
         const locked = lock.packages[`node_modules/${pkg}`]?.version;
         expect(locked, `${pkg} missing from package-lock.json`).toBeDefined();
         expect(installed).toContain(`${pkg}@${locked}`);
