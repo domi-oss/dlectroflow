@@ -5,7 +5,7 @@
 An ADHD helper web app — **capture → clarify → schedule → focus → reward**.
 
 > [!NOTE]
-> **Built with AI, run for real.** dlectroflow is developed primarily with AI assistance (Claude Code and GitLab Duo), directed by a human maintainer. It ships with genuine security measures — automated SAST and dependency scanning in CI, encrypted OAuth tokens, TLS hardening, and periodic self-directed security reviews (not formal third-party audits) — but it's a personal project that handles personal data. Review the code and consider self-hosting before trusting it with anything sensitive. Provided as-is, with no warranty (see [AGPL-3.0](LICENSE)).
+> **Built with AI, run for real.** dlectroflow is developed primarily with AI assistance (Claude Code and GitLab Duo), directed by a human maintainer. It ships with genuine security measures — automated SAST and dependency scanning in CI, encrypted OAuth tokens, TLS hardening, and periodic self-directed security reviews (not formal third-party audits) — but it's a personal project that handles personal data. Review the code and consider self-hosting before trusting it with anything sensitive. Where a feature hasn't been exercised for real, this README says so out loud — no human has yet run the `openai-compatible` [BYO-LLM](#-bring-your-own-llm-byo-llm) adapter against a real non-Anthropic endpoint, for instance. Provided as-is, with no warranty (see [AGPL-3.0](LICENSE)).
 
 **🌐 Try it:** a hosted instance runs at [dlectroflow.dev](https://dlectroflow.dev) — kick the tyres as a guest, no signup.
 
@@ -27,7 +27,9 @@ to run it locally, or [Deploy](#-deploy) to host your own. (Also a learning proj
 - [🔑 Third-party services](#-third-party-services)
 - [🚀 Quick start (local, ~5 minutes)](#-quick-start-local-5-minutes)
 - [🔐 Secrets & environment](#-secrets--environment)
+- [🤖 Bring your own LLM (BYO-LLM)](#-bring-your-own-llm-byo-llm)
 - [📅 Connecting Google Tasks](#-connecting-google-tasks)
+- [🎧 Focus music](#-focus-music)
 - [🗄️ Database & migrations](#️-database--migrations)
 - [🐳 Deploy](#-deploy)
 - [🧯 Troubleshooting](#-troubleshooting)
@@ -46,9 +48,11 @@ This is **in active development**. Being honest so you don't hit surprises:
 |---|---|
 | 🧠 Brain Dump — capture, triage, aging reminders | ✅ works |
 | 🔔 Desktop notifications + demo override | ✅ works |
-| ✂️ Claude task breakdown (streaming chat) | ✅ works (needs a Claude API key) |
-| 📅 Scheduling (Claude → Google Tasks) | ✅ works — connect Google from **Settings → Integrations** (or right from a breakdown) and steps land in your Google Tasks list, durations parsed; a Reclaim-synced list is scheduled automatically. Direct Reclaim-MCP task creation is also available as a fallback but is gated on some accounts → steps then save locally in that case (see [Connecting Google Tasks](#-connecting-google-tasks)). |
-| ⏱️ Focus Timer | ✅ works |
+| ✂️ AI task breakdown (streaming chat) | ✅ works — Claude by default (needs an Anthropic API key) |
+| 🤖 Bring your own LLM (`LLM_PROVIDER`) | ⚠️ **partly** — `anthropic` is what runs in production; `openai-compatible` ships but is unit-tested only, and **no human has yet run it against a real non-Anthropic endpoint** (see [BYO-LLM](#-bring-your-own-llm-byo-llm)) |
+| 📅 Scheduling (breakdown → Google Tasks) | ✅ works — connect Google from **Settings → Integrations** (or right from a breakdown) and steps land in your Google Tasks list, durations parsed; a Reclaim-synced list is scheduled automatically (see [Connecting Google Tasks](#-connecting-google-tasks)). No Google? Steps save locally and export as `.ics`. |
+| ⏱️ Focus timer — true pause/resume, one-number setup screen | ✅ works |
+| 🎧 Focus music — 10 bundled CC0 lo-fi tracks, in-session mini-player, shuffle | ✅ works (see [Focus music](#-focus-music)) |
 | 🎉 Rewards & streaks + dashboard | ✅ works |
 | 🌇 End-of-day round-up (in-app + desktop) | ✅ works |
 | ✉️ Round-up **email** (opt-in) | ✅ works when `RESEND_API_KEY` is set; cleanly disabled otherwise |
@@ -63,7 +67,7 @@ and genuinely useful.
 
 You'll need these installed **before** you start. (One-time, ~5 min if you have none.)
 
-- [ ] **Node.js 20.9+** (tested on 26). Check: `node -v`
+- [ ] **Node.js 20.19+** (`package.json` engines). CI, the container and `.nvmrc` all use **22** — that's the version to match if you want an exact fit. Check: `node -v`
   - Don't have it? [nodejs.org](https://nodejs.org) or `brew install node` (macOS) / your package manager. There's a `.nvmrc` if you use [nvm](https://github.com/nvm-sh/nvm) (`nvm use`).
 - [ ] **npm** (ships with Node). Check: `npm -v`
 - [ ] **Git**. Check: `git --version`
@@ -77,9 +81,10 @@ That's it for running locally. Postgres runs via Docker — no manual database s
 
 | Service | Needed for | Required? | Cost |
 |---|---|---|---|
-| **Anthropic (Claude API)** | The task breakdown chat | ✅ Required | Pay-as-you-go; a breakdown is a few cents. [console.anthropic.com](https://console.anthropic.com) → **API keys** |
+| **Anthropic (Claude API)** | The task breakdown chat | ✅ Required — *unless* you switch provider (see [BYO-LLM](#-bring-your-own-llm-byo-llm)) | Pay-as-you-go; a breakdown is a few cents. [console.anthropic.com](https://console.anthropic.com) → **API keys** |
+| **Your own model endpoint** | Running breakdowns on a local runner (Ollama, LM Studio, vLLM) or another vendor instead of Claude | Optional — ⚠️ experimental, untested | Free if it's local. Set `LLM_PROVIDER=openai-compatible` — read [BYO-LLM](#-bring-your-own-llm-byo-llm) first. |
 | **Google Tasks** | Scheduling steps — connect from **Settings → Integrations** | Optional | Free. Create an OAuth client in [Google Cloud Console](https://console.cloud.google.com/) (see [Connecting Google Tasks](#-connecting-google-tasks)). |
-| **Reclaim.ai** | Auto-scheduling your Google Tasks list onto your calendar | Optional | Free tier connects; **auto-scheduling tasks may need a paid plan / beta access** (see caveat below). [reclaim.ai](https://reclaim.ai) |
+| **Reclaim.ai** | Auto-scheduling your Google Tasks list onto your calendar | Optional | Set up entirely inside Reclaim — its own Google Tasks integration creates a 🗓 Reclaim list, and dlectroflow just writes into that list. Nothing to configure here. [reclaim.ai](https://reclaim.ai) |
 | **Resend** | Opt-in end-of-day round-up **email** | Optional | Free tier is plenty. Set `RESEND_API_KEY`, then opt in on the dashboard. In-app + desktop round-up work without it. [resend.com](https://resend.com) |
 
 You can run and demo the whole capture → breakdown flow with **just the Anthropic key**.
@@ -97,6 +102,7 @@ cd dlectroflow
 npm run setup        # = docker compose up -d db && npm install && prisma migrate dev
 
 # 3. Add your Claude API key (see options below), e.g. for this shell session:
+#    (or point the app at a model of your own instead — see "Bring your own LLM")
 export ANTHROPIC_API_KEY='sk-ant-...'
 
 # 4. Run it
@@ -113,8 +119,10 @@ hit **Break down →**, and watch Claude stream a plan. 🎉
 
 ## 🔐 Secrets & environment
 
-**Golden rule: no secrets in the repo, ever.** The app only ever reads
-`process.env.ANTHROPIC_API_KEY` — it doesn't care *how* the value got there.
+**Golden rule: no secrets in the repo, ever.** The app only ever reads its model
+key from the environment — `process.env.ANTHROPIC_API_KEY`, or
+`process.env.LLM_API_KEY` on a [BYO-LLM](#-bring-your-own-llm-byo-llm) deploy — and
+it doesn't care *how* the value got there.
 
 **Local dev — pick whichever suits you:**
 - **Quickest:** `export ANTHROPIC_API_KEY='sk-ant-...'` in your terminal before `npm run dev`.
@@ -137,7 +145,9 @@ job:
 Other options GitLab supports: external Vault / cloud KMS via OIDC `id_tokens`,
 or (simplest) a masked + protected CI/CD variable.
 
-See [`.env.example`](.env.example) for the full list of variables.
+See [`.env.example`](.env.example) for the full list of variables. Running a model
+other than Claude? The `LLM_*` vars are documented in
+[Bring your own LLM](#-bring-your-own-llm-byo-llm).
 
 ### Phase 2: guest access & AI cost controls
 
@@ -145,7 +155,7 @@ Guest users get a sandboxed AI breakdown experience with built-in guardrails:
 
 - **AI quota:** 5 breakdowns / IP / 24 h; 10 unique guest IPs / day globally (Haiku model — cheaper, still useful).
 - **Owner model:** selectable in Settings (defaults to `claude-sonnet-4-6`).
-- **`.ics` export:** no integration needed — pure client-side `.ics` file generation.
+- **`.ics` export:** no integration or OAuth needed — the calendar file is built on request and downloaded.
 - **Dark mode:** persists via `localStorage`; no backend required.
 
 New env vars for Phase 2:
@@ -157,8 +167,61 @@ New env vars for Phase 2:
 | `GUEST_AI_WINDOW_HOURS` | `.gitlab-ci.yml` prod job env | Sliding window length in hours (default 24). |
 | `GUEST_GLOBAL_DAILY_GUEST_CAP` | `.gitlab-ci.yml` prod job env | Max unique guest IPs per day globally (default 10). |
 | `GUEST_SANDBOX_TTL_HOURS` | `.gitlab-ci.yml` prod job env | How long a guest sandbox lives (default 24 h). |
-| `OWNER_BREAKDOWN_MODEL` | `.gitlab-ci.yml` prod job env | Claude model for owner breakdowns (default `claude-sonnet-4-6`). |
-| `GUEST_BREAKDOWN_MODEL` | `.gitlab-ci.yml` prod job env | Claude model for guest breakdowns (default `claude-haiku-4-5`). |
+| `OWNER_BREAKDOWN_MODEL` | `.gitlab-ci.yml` prod job env | Claude model for owner breakdowns (default `claude-sonnet-4-6`). `anthropic` provider only. |
+| `GUEST_BREAKDOWN_MODEL` | `.gitlab-ci.yml` prod job env | Claude model for guest breakdowns (default `claude-haiku-4-5`). `anthropic` provider only. |
+
+---
+
+## 🤖 Bring your own LLM (BYO-LLM)
+
+Self-hosting shouldn't force you to hold an Anthropic key. The breakdown chat
+talks to a provider-agnostic seam (`src/lib/llm/`) with two adapters, picked by
+one env var (#59):
+
+- **`LLM_PROVIDER=anthropic`** — the hosted Claude API. The default, and what runs
+  on dlectroflow.dev.
+- **`LLM_PROVIDER=openai-compatible`** — any OpenAI-compatible `/v1` endpoint: a
+  local runner (Ollama, LM Studio, vLLM) or another hosted vendor.
+
+> [!WARNING]
+> **`openai-compatible` is unit-tested only — no human has yet run it against a
+> real non-Anthropic endpoint.** Its tests mock the SDK
+> (`src/lib/llm/openai-compatible.test.ts`), so the adapter's logic is covered but
+> the wire has never been exercised. Treat it as **experimental and expect to
+> debug it**: response shapes, streaming and tool-calling all vary between
+> runtimes and vendors. The `anthropic` default is the path running in
+> production, and the one that's supported. If you get another provider working —
+> or find exactly where it breaks — an issue or MR would be genuinely useful.
+
+**Provider choice is deploy-time only:** env vars, no in-app switcher. The
+Settings model picker only offers a choice on `anthropic` (its three tiers); on a
+single-model `openai-compatible` deploy it collapses to a read-only
+`Using model: …` line.
+
+| Variable | Applies to | Purpose |
+|---|---|---|
+| `LLM_PROVIDER` | both | `anthropic` (default) or `openai-compatible`. An unrecognised value logs an error and falls back to `anthropic`. |
+| `ANTHROPIC_API_KEY` | `anthropic` | Your Claude key. Missing → the app still boots (production logs a warning) and AI features fail at first use. |
+| `LLM_BASE_URL` | `openai-compatible` — **required** | The OpenAI-compatible base URL, e.g. `http://localhost:11434/v1` for Ollama. |
+| `LLM_MODEL` | `openai-compatible` — **required** | Model id, e.g. `llama3.1:8b`. |
+| `LLM_API_KEY` | `openai-compatible` | Key for that endpoint. Local runners usually need none — the adapter sends a harmless placeholder when it's unset. |
+| `LLM_OWNER_MODEL` / `LLM_GUEST_MODEL` | `openai-compatible` | Optional owner/guest model split; each falls back to `LLM_MODEL`. |
+| `LLM_SUPPORTS_TOOLS` | `openai-compatible` | `true` (default) or `false`. Set `false` for a model with no native tool-calling — breakdowns then use a prompted JSON-in-text fallback instead of a tool call. |
+
+**In production the app refuses to boot** on `openai-compatible` unless *both*
+`LLM_BASE_URL` and `LLM_MODEL` are set — a half-configured provider fails fast
+instead of at someone's first breakdown.
+
+The config a local Ollama would use (untested — see the warning above):
+
+```bash
+ollama pull llama3.1:8b
+export LLM_PROVIDER=openai-compatible
+export LLM_BASE_URL=http://localhost:11434/v1
+export LLM_MODEL=llama3.1:8b
+# add LLM_SUPPORTS_TOOLS=false if the model can't do tool calls
+npm run dev
+```
 
 ---
 
@@ -179,19 +242,38 @@ revokes access, **Settings → Integrations** shows **Reconnect needed** and a t
 schedule button degrades to a reconnect link instead — click it, nothing is lost.
 Settings → Integrations is also where you disconnect.
 
-### Optional: direct Reclaim MCP scheduling
+### No Google account? `.ics` still works
 
-As a fallback (e.g. no Google OAuth client configured), the app can ask Claude to
-create Reclaim tasks directly via the Reclaim remote-MCP connector. This flow uses
-a **browser OAuth flow** — no API key to paste, and the app **self-registers** with
-Reclaim (dynamic client registration), so there's no manual "create an OAuth app"
-step. From a broken-down task, click **Connect Reclaim →**, log in, and approve;
-then hit **📅 Schedule in Reclaim (MCP)**.
+Scheduling isn't all-or-nothing. With no Google connection at all, a task's steps
+still save locally and **Add to calendar (.ics)** hands you a calendar file to
+import wherever you like — no OAuth client, no integration to set up. It's
+available to everyone, guests included.
 
-> ⚠️ **Known limitation (honest heads-up):** Reclaim gates task-*creation* via MCP
-> per account. If yours only has read access, you'll see *"create_reclaim_task is
-> not available for your account"* — your steps still save locally, nothing breaks.
-> The Google Tasks route above sidesteps this entirely.
+> **Heads-up if you read an older copy of this README:** the direct
+> "Schedule in Reclaim (MCP)" flow was **removed in v0.2.0** (#36). Reclaim is
+> still supported, just downstream — you point *Reclaim's* own Google Tasks
+> integration at your account, and dlectroflow writes into the list it creates.
+
+---
+
+## 🎧 Focus music
+
+Optional lo-fi to focus to, bundled with the app — no streaming account, no media
+service, works offline.
+
+- **10 tracks**, one per genre category, in `public/audio/lofi/`. Every file is
+  **CC0 1.0 (public domain)**; per-file provenance is in
+  [`public/audio/LICENSE.md`](public/audio/LICENSE.md).
+- **Pick one** in **Settings → Focus timer** — each track has a preview toggle, so
+  you can audition without starting a session.
+- **In-session mini-player**: now-playing, prev/next, play/pause, volume, progress,
+  and a **shuffle** toggle.
+- **It follows the timer** — the music pauses when you pause and resumes when you
+  resume, so a paused session is actually quiet.
+- **The playlist advances itself** when a track ends, and plays every track once
+  before starting a new pass (shuffled or in order) — no accidental repeats.
+
+Streaming a bigger catalogue is a later release (#61); this is the bundled set.
 
 ---
 
@@ -300,7 +382,9 @@ Visit **http://localhost:3000**.
 | Breakdown returns *"ANTHROPIC_API_KEY is not set"* | Export the key (or put it in `.env.local`) **and restart** `npm run dev`. Env is read at server start. |
 | DB error mentioning a table/model that should exist | You ran a migration while `npm run dev` was running. **Restart the dev server.** |
 | `Port 3000 is already in use` | Another server is running: `npm run dev -- -p 3001`, or stop the other one. |
-| Reclaim: *"create_reclaim_task is not available for your account"* | Account-level Reclaim MCP limit, not a bug — steps save locally, or use the recommended Google Tasks route instead. See [Connecting Google Tasks](#-connecting-google-tasks). |
+| Boot fails: *LLM provider "openai-compatible" misconfigured — refusing to boot* | In production both `LLM_BASE_URL` and `LLM_MODEL` are required. Set them — see [BYO-LLM](#-bring-your-own-llm-byo-llm). |
+| Breakdown returns *"LLM_BASE_URL is not set"* | You set `LLM_PROVIDER=openai-compatible` without a base URL (outside production nothing checks at boot). Set `LLM_BASE_URL` and restart. |
+| Your own model chats back but never produces steps | It probably can't do native tool-calling: set `LLM_SUPPORTS_TOOLS=false` for the JSON-in-text fallback. Also read the [experimental warning](#-bring-your-own-llm-byo-llm) — no human has run this path against a real non-Anthropic endpoint yet. |
 | Prisma client seems out of date after `git pull` | `npm install` (runs `prisma generate`) or `npm run db:migrate`. |
 
 ---
@@ -310,8 +394,10 @@ Visit **http://localhost:3000**.
 - **Next.js 16** (App Router) + **React 19** + **TypeScript**
 - **Tailwind CSS v4** + **shadcn/ui** + **Motion** (née Framer Motion)
 - **Prisma 6** + **PostgreSQL** (local dev via Docker Compose; production on GKE, deployed via GitLab CI/CD)
-- **Claude API** (`@anthropic-ai/sdk`, streaming with adaptive thinking; model is configurable — defaults to `claude-sonnet-4-6` for owners and `claude-haiku-4-5` for guests, see [Phase 2](#phase-2-guest-access--ai-cost-controls))
-- **Google Tasks API** via OAuth 2.0 (primary scheduling integration) + **Reclaim** via OAuth 2.1 + the Claude remote-MCP connector (optional fallback)
+- **Provider-agnostic LLM seam** (`src/lib/llm/`) — **Claude API** by default (`@anthropic-ai/sdk`, streaming with adaptive thinking; model is configurable — defaults to `claude-sonnet-4-6` for owners and `claude-haiku-4-5` for guests, see [Phase 2](#phase-2-guest-access--ai-cost-controls))
+- …or **any OpenAI-compatible endpoint** via the `openai` SDK — a local runner or another vendor (see [BYO-LLM](#-bring-your-own-llm-byo-llm))
+- **Google Tasks API** via OAuth 2.0 (the scheduling integration; Reclaim syncs that list from its own side) + a zero-OAuth `.ics` download as the universal fallback
+- Bundled **CC0** focus audio under `public/audio/` — no external media service
 - Deploy: **Docker** → GKE Autopilot via GitLab CI/CD
 
 Full feature spec and the build order live in [`docs/dlectroflow-plan.md`](docs/dlectroflow-plan.md).
