@@ -208,8 +208,10 @@ test_app:
   script:
     - npm ci --cache .npm --prefer-offline --no-audit --no-fund
     - npx tsc --noEmit
-    # Errors fail the gate; the react-hooks compiler-era rules are warn-level
-    # pending the #23 burn-down, so their findings stay visible but don't block.
+    # Errors fail the gate. The react-hooks compiler-era rules were warn-level
+    # while #23 burned down the backlog; that landed in !160, so purity,
+    # set-state-in-effect and refs are all at ERROR now and block CI. New
+    # violations are bugs, not backlog. See eslint.config.mjs.
     - npm run lint
     # #32: fail the gate on unformatted code. Config in prettier.config.mjs
     # (double quotes, semicolons, 2-space, trailing-comma:all, 80 cols — the
