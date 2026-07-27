@@ -56,7 +56,7 @@ model User {
   role         String    @default("member")  // owner | member
   status       String    @default("active")  // active | revoked
   aiPolicy     String    @default("capped")  // uncapped | capped | own_key
-  aiQuota      Int       @default(50)        // breakdowns per rolling 30 days when capped
+  aiQuota      Int       @default(50)        // breakdowns per rolling window when capped
   llmProvider  String?                       // null = instance default
   llmKeyEnc    String?                       // token-cipher ciphertext, never returned to a client
   revokedAt    DateTime?
@@ -64,7 +64,8 @@ model User {
   createdAt    DateTime  @default(now())
   lastSeenAt   DateTime  @default(now())
   workspace    Workspace?
-  aiUsage      UserAiUsage[]
+  aiUsage      UserAiUsage?
+  allowlistRow Allowlist?
 
   @@unique([provider, providerSub])
   @@index([status, purgeAfter])
@@ -78,20 +79,30 @@ model Allowlist {
   invitedAt    DateTime  @default(now())
   claimedAt    DateTime?
   claimedById  String?   @unique
+  // A bare `claimedById String?` would be a plain column with no foreign key,
+  // so a claim pointing at a deleted user would silently dangle. SetNull keeps
+  // the allowlist row (the invitation is still a fact) but drops the pointer.
+  claimedBy    User?     @relation(fields: [claimedById], references: [id], onDelete: SetNull)
 
   @@unique([provider, identity])
 }
 
-model UserAiUsage {  // mirrors GuestAiUsage
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  day       DateTime @db.Date
-  count     Int      @default(0)
-
-  @@unique([userId, day])
+// Mirrors the mechanism GuestAiUsage actually uses — a single row per subject
+// carrying a sliding window, NOT one row per day. `consumeGuestBreakdown`'s
+// atomic increment pattern transfers unchanged, and there is no ambiguity
+// between "rolling 30 days" and "calendar month" to get wrong in two places.
+model UserAiUsage {
+  userId          String   @id
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  count           Int      @default(0)
+  windowStartedAt DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 ```
+
+**Window semantics, stated explicitly** because leaving it implicit is how two code paths diverge: the window is `USER_AI_WINDOW_HOURS` (default `720`, i.e. 30 days), read the same way `GUEST_AI_WINDOW_HOURS` (default 24) is read in `guestQuotaConfig()`. A consume checks `windowStartedAt <= now - windowHours`; if the window has expired the row resets to `count = 1, windowStartedAt = now`, otherwise it increments. It is a **sliding window from first use**, not a calendar month. The People screen reports `count` against `aiQuota` plus the window's start, so what the owner sees is exactly what the enforcement uses.
+
+Trade-off accepted: a single row keeps no usage history, so the People screen shows the current window only. Per-day rows would give trends, but they would also be a second, subtly different quota mechanism sitting next to the guest one — not worth it for a graph nobody has asked for.
 
 `Workspace` gains `userId String? @unique` + relation, and `kind` gains the value `user`. `GoogleAuth` gains `userId String @unique` and loses its `@default("singleton")` id.
 
@@ -135,7 +146,9 @@ The rest of the Account group is per-user and visible to any signed-in user: ide
 
 ### 5. Per-user integrations
 
-`GoogleAuth` becomes one row per user, keyed by `userId`. Every call site in `src/app/actions/google-schedule.ts` currently guards with `workspaceId !== OWNER_WORKSPACE_ID`; each becomes "load the current user's `GoogleAuth`", which is the same guard expressed correctly — a user without a connection simply has no row. The OAuth callback writes the row for the user who initiated it, and `OWNER_ONLY_PREFIXES` drops `/api/google/oauth/` because it is now per-user rather than owner-only.
+`GoogleAuth` becomes one row per user, keyed by `userId`. Every call site in `src/app/actions/google-schedule.ts` currently guards with `workspaceId !== OWNER_WORKSPACE_ID`; each becomes "load the current user's `GoogleAuth`", which is the same guard expressed correctly — a user without a connection simply has no row. The OAuth callback writes the row for the user who initiated it.
+
+**This needs a third route category, and Phase A must add it.** `src/lib/auth/gate.ts` has exactly two today — `PUBLIC_PREFIXES` and `OWNER_ONLY_PREFIXES` — so anything not owner-only is reachable by a guest session. Moving `/api/google/oauth/` out of `OWNER_ONLY_PREFIXES` without a replacement would leave the OAuth callback open to guests. Phase A therefore introduces `AUTHENTICATED_PREFIXES` (a real signed-in user, guests rejected) plus its middleware enforcement and tests, even though the Google route itself only moves into that category in Phase C. Until then it stays owner-only.
 
 ### 6. Guest carryover
 
@@ -166,14 +179,14 @@ Carryover gets an explicit negative test: a forged or absent guest cookie cannot
 |---|---|
 | Owner locked out by the session-kind cutover | The allowlist is seeded with the owner's own identity in the same migration that adds it; the owner signs in once after deploy. Verify on the review app before production. |
 | Purge job deletes live data | Count-and-log before delete, sanity threshold, and the legacy-owner purge is a manual script rather than a migration. |
-| Google singleton migration | Fresh start means no token migration: the singleton row is dropped and the owner reconnects Google once. |
+| Google singleton migration | Fresh start means no token migration. **The drop happens in Phase A**, together with `OWNER_WORKSPACE_ID`, rather than waiting for Phase C — leaving the singleton alive while its only guard has been deleted is worse than removing it. **This means Google Tasks sync is down between the Phase A and Phase C deploys**, and the owner reconnects once Phase C ships. Accepted deliberately: the owner is the only account with Google connected, is starting fresh anyway, and would have had to reconnect regardless. |
 | Four phases racing five other v0.5.0 MRs | Phase A lands alone (it touches auth and session shape); B/C/D branch off it. |
 
 ## Phases
 
 Each is a separate MR. A blocks the rest; B, C and D are independent of one another.
 
-- **A — Identity foundation.** `User`/`Allowlist` models, provisioning, session shape, `resolveWorkspaceId`/`isOwnerRequest` rewrite, deletion of `OWNER_WORKSPACE_ID`, menu "Sign in" → "Account", scoping harness. *~1–2 days.*
+- **A — Identity foundation.** `User`/`Allowlist` models, provisioning, session shape, `resolveWorkspaceId`/`isOwnerRequest` rewrite, deletion of `OWNER_WORKSPACE_ID` **and of the `GoogleAuth` singleton row**, the new `AUTHENTICATED_PREFIXES` route category and its enforcement, menu "Sign in" → "Account", scoping harness. *~1–2 days.*
 - **B — People admin + AI policy.** People panel, policy/quota enforcement, `UserAiUsage`. *~1 day.*
 - **C — Per-user integrations + key.** `GoogleAuth` per user, encrypted per-user LLM key, Account group in `/settings`. Unblocks S2/S3/S4. *~1.5 days.*
 - **D — Lifecycle.** Guest carryover prompt, JSON export, revoke → freeze → 30-day purge, legacy-owner purge script. *~1 day.*
