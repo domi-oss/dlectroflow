@@ -7,6 +7,25 @@
 /** The countdown can never be pushed to/under this by a −time tap. */
 export const MIN_REMAINING_SEC = 60;
 
+/**
+ * #66 — the setup screen's duration chips (a Pomodoro-ish ladder). Deliberately
+ * four: one tap, no free-type field to second-guess.
+ */
+export const DURATION_PRESET_MIN = [5, 10, 15, 25] as const;
+
+/**
+ * The duration chips to offer for a step estimated at `estMin`: the presets,
+ * plus a chip for the estimate itself when it isn't one of them — otherwise a
+ * 7m step would show a ring reading 7m with no chip able to express it, and a
+ * user who tapped 15m could never get back. Ascending, whole minutes, floored
+ * at 1m so bad/legacy data (0, negative, fractional) can't produce a 0m chip.
+ */
+export function durationChoices(estMin: number): number[] {
+  const choices = new Set<number>(DURATION_PRESET_MIN);
+  if (Number.isFinite(estMin)) choices.add(Math.max(1, Math.round(estMin)));
+  return [...choices].sort((a, b) => a - b);
+}
+
 /** Format whole seconds as `m:ss` (seconds zero-padded); negatives floor to 0:00. */
 export function mmss(totalSec: number): string {
   const s = Math.max(0, Math.floor(totalSec));

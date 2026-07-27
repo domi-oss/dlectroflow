@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   MIN_REMAINING_SEC,
+  DURATION_PRESET_MIN,
+  durationChoices,
   mmss,
   applyTimeDelta,
   netAddedMin,
@@ -184,5 +186,28 @@ describe("openSessionRemainingSec", () => {
     };
     const renderedAt = startedAt.getTime() + 10 * MIN; // rendered 10m in
     expect(openSessionRemainingSec(session, renderedAt)).toBe(15 * 60);
+  });
+});
+
+// #66 — the setup screen's duration chip row replaces a free-type number input,
+// so the offered set must always contain the value the ring is showing (or the
+// user could not get back to it after tapping another chip).
+describe("durationChoices", () => {
+  it("offers the four presets, with the current estimate already among them", () => {
+    expect(durationChoices(10)).toEqual([...DURATION_PRESET_MIN]);
+    expect(durationChoices(25)).toEqual([5, 10, 15, 25]);
+  });
+
+  it("adds a chip for an off-preset estimate, in ascending order", () => {
+    expect(durationChoices(7)).toEqual([5, 7, 10, 15, 25]);
+    expect(durationChoices(1)).toEqual([1, 5, 10, 15, 25]);
+    expect(durationChoices(45)).toEqual([5, 10, 15, 25, 45]);
+  });
+
+  it("never offers a sub-minute or non-integer chip (bad data clamps to 1m)", () => {
+    expect(durationChoices(0)).toEqual([1, 5, 10, 15, 25]);
+    expect(durationChoices(-30)).toEqual([1, 5, 10, 15, 25]);
+    expect(durationChoices(7.4)).toEqual([5, 7, 10, 15, 25]);
+    expect(durationChoices(Number.NaN)).toEqual([...DURATION_PRESET_MIN]);
   });
 });

@@ -15,17 +15,24 @@ type ReadoutTone = "default" | "light" | "gradient";
 
 /** The readable countdown text — always shown, in every style, so time-status
  * is never conveyed by colour/shape alone. On the near-black neon field the
- * digits switch to a light (or gradient) tone so they clear AA on near-black. */
+ * digits switch to a light (or gradient) tone so they clear AA on near-black.
+ *
+ * #66 — `subLabel` replaces the "of Nm" total. The live timer wants both figures
+ * (how long is left, of how long), but the setup screen must show exactly ONE
+ * number, so it passes a word that names what that number is instead
+ * ("focus time" / "left on this step"). */
 function Readout({
   remainingSec,
   totalSec,
   voice,
   tone = "default",
+  subLabel,
 }: {
   remainingSec: number;
   totalSec: number;
   voice: Voice;
   tone?: ReadoutTone;
+  subLabel?: string;
 }) {
   return (
     <div className="flex flex-col items-center">
@@ -41,11 +48,13 @@ function Readout({
       </span>
       <span
         className={cn(
-          "text-xs tabular-nums",
+          "text-xs",
+          !subLabel && "tabular-nums",
           tone === "default" ? "text-muted-foreground" : "text-white/70",
         )}
       >
-        {t("focus.timer.of", voice)} {Math.round(totalSec / 60)}m
+        {subLabel ??
+          `${t("focus.timer.of", voice)} ${Math.round(totalSec / 60)}m`}
       </span>
     </div>
   );
@@ -61,6 +70,9 @@ function Readout({
  * neon signature: the depleting element fills with `--gradient-brand` on a
  * near-black field with a `--shadow-glow-dark` glow. Time's-up keeps its warm
  * amber semantic (not repainted with brand).
+ *
+ * #66 — pass `subLabel` to replace the readout's "of Nm" total with a word (the
+ * setup screen shows one number only; see `Readout`).
  */
 export function TimerVisual({
   style,
@@ -69,6 +81,7 @@ export function TimerVisual({
   phase,
   reducedMotion,
   voice,
+  subLabel,
 }: {
   style: FocusTimerStyle;
   remainingSec: number;
@@ -76,6 +89,7 @@ export function TimerVisual({
   phase: VisualPhase;
   reducedMotion: boolean;
   voice: Voice;
+  subLabel?: string;
 }) {
   const fraction = timerFraction(remainingSec, totalSec);
   const timeup = phase === "timeup";
@@ -97,6 +111,7 @@ export function TimerVisual({
           totalSec={totalSec}
           voice={voice}
           tone={neon ? "gradient" : "default"}
+          subLabel={subLabel}
         />
       </div>
     );
@@ -137,6 +152,7 @@ export function TimerVisual({
             totalSec={totalSec}
             voice={voice}
             tone={neon ? "light" : "default"}
+            subLabel={subLabel}
           />
         </div>
       </div>
@@ -177,6 +193,7 @@ export function TimerVisual({
           totalSec={totalSec}
           voice={voice}
           tone={neon ? "light" : "default"}
+          subLabel={subLabel}
         />
       </div>
     );
@@ -194,7 +211,13 @@ export function TimerVisual({
           neon && `rounded-full ${NEON_FIELD}`,
         )}
       >
-        <svg viewBox="0 0 240 240" className="h-full w-full -rotate-90">
+        {/* Decorative: the depletion arc duplicates the Readout text below it,
+            which is the figure AT exposes (#66). */}
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 240 240"
+          className="h-full w-full -rotate-90"
+        >
           {gradientStroke && (
             <defs>
               <linearGradient id="timerRingGrad" x1="0" y1="0" x2="1" y2="1">
@@ -241,6 +264,7 @@ export function TimerVisual({
             totalSec={totalSec}
             voice={voice}
             tone={neon ? "light" : "default"}
+            subLabel={subLabel}
           />
         </div>
       </div>
