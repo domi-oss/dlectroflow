@@ -102,6 +102,54 @@ export default async function HelpPage({
       </section>
 
       <section className="space-y-2">
+        <h2 className="text-lg font-semibold">The focus session</h2>
+        <p className="text-sm">
+          Opening a step shows one number and one action. Pick how long you want
+          from the duration <strong>chips</strong> (the step&rsquo;s own
+          estimate is already selected), then press{" "}
+          <strong>Start focusing</strong>. While the timer runs you can{" "}
+          <strong>Complete step</strong>, nudge the clock by a few minutes
+          either way, or <strong>Pause</strong>.
+        </p>
+        <p className="text-sm">
+          Pausing is real: the session is saved, so you can close the tab, come
+          back later or open it on another device and pick up where you left off
+          — the clock does not keep draining while you are away. When a paused
+          session exists, the step offers <strong>Resume</strong> with the time
+          remaining, or <strong>Start fresh</strong> if you would rather begin
+          again. Choosing &ldquo;Start fresh&rdquo; only reveals the duration
+          chips; nothing is discarded until you actually start, and you can back
+          out with <strong>Keep my paused session</strong>.
+        </p>
+        <p className="text-sm">
+          <strong>Focus music</strong>: ten lo-fi tracks are bundled with the
+          app, so nothing is streamed from anywhere else. Choose one under{" "}
+          <strong>Focus timer → Focus sounds</strong> on the{" "}
+          <Link href="/settings?from=help" className="underline">
+            Settings
+          </Link>{" "}
+          page — each has a preview toggle so you can audition it without
+          starting a session. During a session a small player gives you
+          play/pause, previous/next, volume and progress, plus{" "}
+          <strong>Shuffle</strong>. The playlist moves itself along when a track
+          ends and only starts over once every track has played, so you should
+          not hear the same thing twice in a row. It follows the timer: pausing
+          pauses the music, resuming resumes it, and ending the session stops
+          it.
+        </p>
+        <p className="text-sm">
+          Also in <strong>Focus timer</strong> settings: four timer styles,{" "}
+          <strong>Keep screen awake</strong>, an{" "}
+          <strong>Alarm at time&rsquo;s-up</strong>, and{" "}
+          <strong>Minimal / distraction-free</strong>, which strips the screen
+          back to the countdown and its controls while the timer runs. Worth
+          knowing: minimal mode also hides the music player mid-session — the
+          music keeps playing, there is just nothing on screen to control it
+          until you pause.
+        </p>
+      </section>
+
+      <section className="space-y-2">
         <h2 className="text-lg font-semibold">Voice &amp; settings</h2>
         <p className="text-sm">
           Switch between the calm <strong>Plain</strong> voice and the playful
