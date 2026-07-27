@@ -69,6 +69,29 @@ describe("useMediaQuery", () => {
     expect(mm.listenerCount()).toBe(0);
   });
 
+  // Regression guard for the classic useSyncExternalStore footgun, raised in
+  // review of !162: if getSnapshot returned the MediaQueryList itself (a fresh
+  // object per call) React's Object.is comparison would never settle and it
+  // would either loop forever or throw "The result of getSnapshot should be
+  // cached". It returns `.matches` — a boolean — so the comparison is stable.
+  it("returns a PRIMITIVE snapshot, so React's store comparison settles", () => {
+    mockMatchMedia(true);
+    let renders = 0;
+    const { result, rerender } = renderHook(() => {
+      renders++;
+      return useMediaQuery("(min-width: 40rem)");
+    });
+    expect(typeof result.current).toBe("boolean");
+
+    const afterMount = renders;
+    rerender();
+    // Exactly one more render. A fresh-object snapshot would not stop here.
+    expect(renders).toBe(afterMount + 1);
+    rerender();
+    expect(renders).toBe(afterMount + 2);
+    expect(result.current).toBe(true);
+  });
+
   it("falls back to the caller's server snapshot when matchMedia is unavailable", () => {
     // No matchMedia installed — the SSR / pre-hydration path.
     const { result: dflt } = renderHook(() =>

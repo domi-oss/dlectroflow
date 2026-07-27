@@ -57,15 +57,14 @@ function mockViewport(wide: boolean) {
 }
 
 /** The Help page in miniature: the real nav over the real headings. */
-function Page({ voice = "plain" as Voice }) {
+function Page({
+  voice = "plain" as Voice,
+  sections = HELP_SECTIONS as readonly (typeof HELP_SECTIONS)[number][],
+}) {
   return (
     <>
-      <SectionNav
-        sections={HELP_SECTIONS}
-        voice={voice}
-        label="Help sections"
-      />
-      {HELP_SECTIONS.map((s) => (
+      <SectionNav sections={sections} voice={voice} label="Help sections" />
+      {sections.map((s) => (
         <section key={s.id}>
           <SectionHeading id={s.id} voice={voice} />
           <p>body of {s.id}</p>
@@ -230,6 +229,32 @@ describe("SectionNav (#72)", () => {
     expect(document.documentElement).toHaveClass("scroll-smooth");
     view.unmount();
     expect(document.documentElement).not.toHaveClass("scroll-smooth");
+  });
+
+  it("survives the section list shrinking while `current` still points into it", () => {
+    // Real path (!162 review): the Settings page renders a DIFFERENT section
+    // set depending on owner/google status, and several settings saves call
+    // router.refresh(). When the new props arrive, the component re-renders
+    // with the shorter list BEFORE the effect can rebuild the observer, so
+    // `current` still names a section that is no longer there.
+    const all = [...HELP_SECTIONS];
+    const { rerender } = render(<Page sections={all} />);
+    const io = FakeIntersectionObserver.instances.at(-1)!;
+    const lastSection = document
+      .getElementById("help-guests-ai-limits")!
+      .closest("section")!;
+    io.fire([{ target: lastSection, isIntersecting: true }]);
+    expect(
+      screen.getByRole("link", { name: "Guests & AI limits" }),
+    ).toHaveAttribute("aria-current", "true");
+
+    // Drop the section that is currently marked.
+    expect(() => rerender(<Page sections={all.slice(0, -1)} />)).not.toThrow();
+
+    // Nothing claims to be current: we no longer know where the reader is, and
+    // guessing would put aria-current on the wrong entry. The observer sets it
+    // again on the next scroll.
+    expect(document.querySelectorAll("a[aria-current]")).toHaveLength(0);
   });
 
   it("tracks the section, not just the heading, so short headings don't flicker", () => {

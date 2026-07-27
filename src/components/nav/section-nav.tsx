@@ -222,11 +222,19 @@ export function SectionNav({
     document.getElementById(id)?.focus({ preventScroll: true });
   };
 
-  const currentLabel = current
-    ? sectionLabel(
-        sections.find((s) => s.id === current)!,
-        voice,
-      )
+  // `current` was set from whatever section list was live when the observer was
+  // built, and props can hand us a SHORTER list before the observer catches up:
+  // Settings renders a different set for owner vs guest (Integrations is
+  // conditional) and several saves call router.refresh(). Resolve the id to a
+  // section ONCE and tolerate a miss — an id we can no longer find means we do
+  // not know where the reader is, and marking the wrong entry is worse than
+  // marking none. Everything below keys off this, so the highlighted pill and
+  // the collapsed-row label can never disagree.
+  const currentSection = current
+    ? (sections.find((s) => s.id === current) ?? null)
+    : null;
+  const currentLabel = currentSection
+    ? sectionLabel(currentSection, voice)
     : null;
 
   return (
@@ -279,7 +287,7 @@ export function SectionNav({
 
       <ul id={listId} className={cn("flex-wrap gap-1.5 pt-2", listClass)}>
         {sections.map((section) => {
-          const active = section.id === current;
+          const active = section.id === currentSection?.id;
           return (
             <li key={section.id}>
               <a
