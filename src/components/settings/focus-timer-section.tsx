@@ -107,10 +107,9 @@ export function FocusTimerSection({
 
   return (
     <section className="space-y-3">
-      <div className="flex items-center gap-2">
-        <SectionHeading id="settings-focus-timer" voice={voice} />
+      <SectionHeading id="settings-focus-timer" voice={voice}>
         <SaveIndicator status={status} voice={voice} />
-      </div>
+      </SectionHeading>
       <p className="text-muted-foreground text-sm">
         {t("focusSettings.intro", voice)}
       </p>

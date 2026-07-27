@@ -72,10 +72,9 @@ export function AppearanceSection({
 
   return (
     <section className="space-y-3">
-      <div className="flex items-center gap-3">
-        <SectionHeading id="settings-appearance" voice={voice} />
+      <SectionHeading id="settings-appearance" voice={voice}>
         <SaveIndicator status={status} voice={voice} />
-      </div>
+      </SectionHeading>
 
       {/* Theme (moved here so Appearance is a single group). */}
       <div className="space-y-1">

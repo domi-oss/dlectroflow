@@ -97,10 +97,9 @@ export function NotificationsSection({
 
   return (
     <section className="space-y-3">
-      <div className="flex items-center gap-3">
-        <SectionHeading id="settings-notifications" voice={voice} />
+      <SectionHeading id="settings-notifications" voice={voice}>
         <SaveIndicator status={status} voice={voice} />
-      </div>
+      </SectionHeading>
       <p className="text-muted-foreground text-sm">
         {t("notify.intro", voice)}
       </p>

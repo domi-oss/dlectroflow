@@ -122,27 +122,28 @@ describe("SectionNav (#72)", () => {
   it("exposes collapse state: aria-expanded on a button that owns the list", async () => {
     render(<Page />);
     const btn = toggle();
-    expect(btn).toHaveAttribute("aria-expanded", "true");
-    expect(btn).toHaveAttribute("aria-controls", list().id);
-
-    await userEvent.click(btn);
     expect(btn).toHaveAttribute("aria-expanded", "false");
+    expect(btn).toHaveAttribute("aria-controls", list().id);
     expect(list()).toHaveClass("hidden");
 
     await userEvent.click(btn);
     expect(btn).toHaveAttribute("aria-expanded", "true");
     expect(list()).not.toHaveClass("hidden");
+
+    await userEvent.click(btn);
+    expect(btn).toHaveAttribute("aria-expanded", "false");
+    expect(list()).toHaveClass("hidden");
   });
 
-  it("defaults expanded on a wide viewport and collapsed on a narrow one", () => {
-    mockViewport(true);
-    const wide = render(<Page />);
-    expect(toggle()).toHaveAttribute("aria-expanded", "true");
-    wide.unmount();
-
-    mockViewport(false);
-    render(<Page />);
-    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+  it("rests COLLAPSED at every viewport — the compact row is the default", () => {
+    // Owner call: the resting state of both pages is the one-line bar, wide
+    // screens included. It also means server and client agree on first paint.
+    for (const wide of [true, false]) {
+      mockViewport(wide);
+      const view = render(<Page />);
+      expect(toggle()).toHaveAttribute("aria-expanded", "false");
+      view.unmount();
+    }
   });
 
   it("marks the current section with aria-current plus a non-colour cue", () => {
@@ -160,6 +161,37 @@ describe("SectionNav (#72)", () => {
     expect(link.querySelector("[data-current-marker]")).not.toBeNull();
     // …and nothing else claims to be current.
     expect(document.querySelectorAll("a[aria-current]")).toHaveLength(1);
+  });
+
+  it("hands the current section to its own heading, for the sticky header", () => {
+    render(<Page />);
+    const io = FakeIntersectionObserver.instances.at(-1)!;
+    const breakdown = document.getElementById("help-task-breakdown")!;
+    const inbox = document.getElementById("help-inbox-freshness")!;
+
+    io.fire([{ target: inbox.closest("section")!, isIntersecting: true }]);
+    expect(inbox).toHaveAttribute("data-current");
+    // Exactly one heading is ever marked — globals.css keys the pinned magenta
+    // header off this attribute, so two would mean two highlighted headers.
+    expect(document.querySelectorAll("[data-current]")).toHaveLength(1);
+
+    io.fire([
+      { target: inbox.closest("section")!, isIntersecting: false },
+      { target: breakdown.closest("section")!, isIntersecting: true },
+    ]);
+    expect(inbox).not.toHaveAttribute("data-current");
+    expect(breakdown).toHaveAttribute("data-current");
+    expect(document.querySelectorAll("[data-current]")).toHaveLength(1);
+  });
+
+  it("cleans the heading marker up when the nav unmounts", () => {
+    const view = render(<Page />);
+    const io = FakeIntersectionObserver.instances.at(-1)!;
+    const heading = document.getElementById("help-task-breakdown")!;
+    io.fire([{ target: heading.closest("section")!, isIntersecting: true }]);
+    expect(heading).toHaveAttribute("data-current");
+    view.unmount();
+    expect(heading).not.toHaveAttribute("data-current");
   });
 
   it("picks the topmost section when several are in the tracking band", () => {
@@ -204,6 +236,7 @@ describe("SectionNav (#72)", () => {
 
   it("on a wide viewport the map stays open after you jump", async () => {
     render(<Page />);
+    await userEvent.click(toggle());
     await userEvent.click(screen.getByRole("link", { name: "Task breakdown" }));
     expect(toggle()).toHaveAttribute("aria-expanded", "true");
     expect(document.activeElement).toBe(

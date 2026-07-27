@@ -6,33 +6,22 @@ import { sectionLabel, type SectionDef } from "@/lib/section-nav";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { type Voice } from "@/lib/strings";
 
-/** Tailwind's `sm` breakpoint (40rem). Keep in step with `max-sm:` below. */
+/** Tailwind's `sm` breakpoint (40rem). */
 const WIDE = "(min-width: 40rem)";
 
 /**
  * "Which section am I in" is answered by the topmost section overlapping a band
  * near the top of the viewport. Two details make or break it:
  *
- *  - the band must START below the sticky bar, past where a jump target lands
- *    (`--section-nav-h` + the 1rem in globals.css, plus a few px of slack).
- *    Otherwise the sliver of the PREVIOUS section still showing under the bar is
- *    the topmost match, and clicking "Focus timer" leaves "Notifications" lit.
+ *  - the band must START below the sticky bar, at exactly where a jump target
+ *    lands (`--section-nav-h`, plus a few px for rounding). Otherwise the sliver
+ *    of the PREVIOUS section still showing under the bar is the topmost match,
+ *    and clicking "Focus timer" leaves "Notifications" lit.
  *  - it must reach well down the viewport, because at the very top of the page
  *    the first section starts below the header, the h1 and the expanded bar.
  */
-const BAND_TOP_SLACK = 16 + 4; // globals.css scroll-margin fudge + rounding
+const BAND_TOP_SLACK = 4; // rounding only — a jump now lands flush at the bar
 const BAND_BOTTOM = "-35%"; // band ends 65% down the viewport
-
-/** Visibility of the link list. Three states, because "default" is a CSS
- *  decision (see `expanded` below) and must survive server rendering. */
-const LIST_CLASS = {
-  // Untouched: expanded from `sm` up, collapsed below it — resolved by CSS, so
-  // the first paint is already right at both widths (no expand/collapse jump
-  // once React hydrates).
-  default: "flex max-sm:hidden",
-  open: "flex",
-  closed: "hidden",
-} as const;
 
 /**
  * #72 — collapsible sticky section nav for the long pages (Settings, Help).
@@ -45,7 +34,9 @@ const LIST_CLASS = {
  *  - real `<nav>` with an accessible name (`label`), one `<ul>` of links;
  *  - the toggle is a `<button>` with `aria-expanded` + `aria-controls`;
  *  - the current section carries `aria-current="true"` AND a dot marker, so the
- *    "you are here" cue is never colour alone;
+ *    "you are here" cue is never colour alone. The same section's heading is
+ *    marked `data-current`, which globals.css renders as the pinned magenta
+ *    section header — its PINNED POSITION is a second non-colour cue;
  *  - every control clears the 44px touch-target minimum;
  *  - motion: the smooth scroll is opted into by adding `scroll-smooth` to
  *    `<html>`, which the global `prefers-reduced-motion` rule in globals.css
@@ -66,30 +57,19 @@ export function SectionNav({
 }) {
   const listId = useId();
   const navRef = useRef<HTMLElement>(null);
-  // Wide is the optimistic server guess: the desktop layout is the one where the
-  // full map fits, and it matches the CSS default above so first paint is stable.
+  // Only used to decide whether picking a section should close the panel again
+  // (see onJump) — the collapsed/expanded DEFAULT no longer depends on it.
   const wide = useMediaQuery(WIDE, true);
-  // The user's toggle is remembered WITH the breakpoint it was made at, so
-  // crossing the breakpoint hands control back to the viewport default instead
-  // of restoring a state chosen for a different screen size. Keying it this way
-  // keeps that purely derived — no effect syncing state to state.
-  const [override, setOverride] = useState<{
-    wide: boolean;
-    open: boolean;
-  } | null>(null);
+  // Collapsed at every viewport on load: the resting state of both pages is the
+  // single compact row. Server and client agree on `false`, so there is no
+  // first-paint flip and `aria-expanded` is honest from the very first byte.
+  // Reopening is remembered for the rest of the visit, nothing is persisted
+  // across visits.
+  const [expanded, setExpanded] = useState(false);
   const [current, setCurrent] = useState<string | null>(null);
   // Measured height of the sticky bar. Feeds both the jump targets'
   // scroll-margin (via a CSS custom property) and the tracking band below.
   const [barHeight, setBarHeight] = useState(0);
-
-  const applied = override?.wide === wide ? override : null;
-  const expanded = applied?.open ?? wide;
-  const listClass =
-    applied == null
-      ? LIST_CLASS.default
-      : applied.open
-        ? LIST_CLASS.open
-        : LIST_CLASS.closed;
 
   // Smooth in-page scrolling while this page is open (reduced motion still wins,
   // via globals.css).
@@ -199,6 +179,22 @@ export function SectionNav({
     // expands, collapses or rewraps.
   }, [ids, barHeight]);
 
+  // Hand the current section to its own heading, which globals.css turns into
+  // the pinned magenta header. The headings live OUTSIDE this component's tree
+  // — Help renders them from a server component, Settings from five separate
+  // client components — so there is no shared React state to thread `current`
+  // through; marking the element is the honest way across that boundary.
+  useEffect(() => {
+    if (!current) return;
+    const heading = document.getElementById(current);
+    // Mark the surrounding band — that is the element globals.css styles and
+    // the one that actually sticks.
+    const band = heading?.closest("[data-section-header]") ?? heading;
+    if (!band) return;
+    band.setAttribute("data-current", "");
+    return () => band.removeAttribute("data-current");
+  }, [current]);
+
   const onJump = (
     event: React.MouseEvent<HTMLAnchorElement>,
     id: string,
@@ -218,7 +214,7 @@ export function SectionNav({
     // currently has focus, so move focus onto the destination heading ourselves
     // instead of relying on the browser's fragment-navigation focus move —
     // `preventScroll` leaves the (smooth) scroll to the anchor's default action.
-    if (!wide) setOverride({ wide, open: false });
+    if (!wide) setExpanded(false);
     document.getElementById(id)?.focus({ preventScroll: true });
   };
 
@@ -241,23 +237,29 @@ export function SectionNav({
     <nav
       ref={navRef}
       aria-label={label}
-      // z-index 1, chosen precisely. Sticky alone is NOT enough: anything later
+      // z-index 2, chosen precisely. Sticky alone is NOT enough: anything later
       // in the page with `opacity` < 1 (the disabled model radios, the guest
       // integrations shell) forms its own stacking context at the same level as
       // a positioned element, and being later in the DOM it painted straight
-      // over the stuck bar. 1 clears all of that while staying under the
-      // header's z-10 app-menu dropdown, which must stay on top of the bar.
+      // over the stuck bar. There are now TWO stacked sticky layers, so the
+      // order is: page content (0) < sticky section header (1) < this bar (2)
+      // < the header's app-menu dropdown (10), which must stay on top of both.
       // The negative margin lets the background cover the page container's
       // gutters when the bar is stuck.
-      className="bg-background sticky top-0 z-[1] -mx-4 border-b px-4 py-2"
+      className="bg-background sticky top-0 z-[2] -mx-4 border-b px-4 py-2"
     >
       <div className="flex items-center gap-2">
         <button
           type="button"
           aria-expanded={expanded}
           aria-controls={listId}
-          onClick={() => setOverride({ wide, open: !expanded })}
-          className="hover:bg-accent focus-visible:ring-ring focus-visible:ring-offset-background inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+          onClick={() => setExpanded((v) => !v)}
+          // Collapsed is now the resting state at every width, so this row is
+          // the whole nav most of the time — it carries real weight (semibold,
+          // full-contrast) rather than reading as quiet chrome. The -ml-2
+          // pulls the padded hit area back to the page's text margin so the
+          // extra weight costs no extra height.
+          className="hover:bg-accent focus-visible:ring-ring focus-visible:ring-offset-background -ml-2 inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-md px-2 text-base font-semibold outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
         >
           <svg
             aria-hidden="true"
@@ -268,7 +270,7 @@ export function SectionNav({
             strokeLinecap="round"
             strokeLinejoin="round"
             className={cn(
-              "h-3.5 w-3.5 transition-transform",
+              "h-4 w-4 shrink-0 transition-transform",
               expanded && "rotate-180",
             )}
           >
@@ -277,15 +279,20 @@ export function SectionNav({
           Jump to…
         </button>
         {!expanded && currentLabel && (
-          // Collapsed, the bar still answers "where am I?" — the whole point of
-          // the nav on a page you can get lost scrolling.
-          <span className="text-muted-foreground min-w-0 truncate text-xs">
+          // Collapsed, the bar still answers "where am I?" — and at the top of
+          // the page, before any section header has pinned, it is the ONLY
+          // thing that does. Full-contrast and semibold to match the button:
+          // between them they are the entire resting UI.
+          <span className="text-foreground min-w-0 truncate text-base font-semibold">
             {currentLabel}
           </span>
         )}
       </div>
 
-      <ul id={listId} className={cn("flex-wrap gap-1.5 pt-2", listClass)}>
+      <ul
+        id={listId}
+        className={cn("flex-wrap gap-1.5 pt-2", expanded ? "flex" : "hidden")}
+      >
         {sections.map((section) => {
           const active = section.id === currentSection?.id;
           return (

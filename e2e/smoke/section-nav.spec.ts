@@ -32,6 +32,14 @@ async function waitForNavHydrated(page: Page): Promise<void> {
     .toBe(true);
 }
 
+/** Open the "Jump to…" panel — collapsed is the resting state at every width. */
+async function openPanel(nav: Locator): Promise<void> {
+  const toggle = nav.getByRole("button", { name: /jump to/i });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+}
+
 /** Wait for a (possibly smooth-animated) scroll to come to rest. */
 async function waitForScrollToSettle(page: Page): Promise<void> {
   await page.waitForFunction(
@@ -70,7 +78,7 @@ async function expectClearOfStickyBar(
 test.describe("section nav — desktop", () => {
   test.use({ viewport: DESKTOP });
 
-  test("expanded by default, and a jump lands the heading clear of the sticky bar", async ({
+  test("collapsed by default, and a jump lands the heading clear of the sticky bar", async ({
     page,
   }) => {
     await page.goto("/settings");
@@ -79,8 +87,7 @@ test.describe("section nav — desktop", () => {
     await waitForNavHydrated(page);
 
     const nav = page.locator(SETTINGS_NAV);
-    const toggle = nav.getByRole("button", { name: /jump to/i });
-    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await openPanel(nav);
 
     // One entry per section that is actually on the page.
     const links = nav.getByRole("link");
@@ -113,6 +120,7 @@ test.describe("section nav — desktop", () => {
     // At the top of the page the first section is current.
     await expect(nav.locator("a[aria-current]")).toHaveText(/Aging & reminder/);
 
+    await openPanel(nav);
     await nav.getByRole("link", { name: "Focus timer" }).click();
     await expect(nav.locator("a[aria-current]")).toHaveText(/Focus timer/);
     // Exactly one, always.
@@ -133,10 +141,13 @@ test.describe("section nav — desktop", () => {
     const toggle = nav.getByRole("button", { name: /jump to/i });
 
     // The toggle is operable from the keyboard and reports its state.
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
     await toggle.focus();
     await page.keyboard.press("Enter");
-    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
     await page.keyboard.press(" ");
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await page.keyboard.press("Enter");
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
 
     // Tab moves into the link list…
@@ -168,6 +179,7 @@ test.describe("section nav — desktop", () => {
     await waitForShell(page);
     await waitForNavHydrated(page);
     const nav = page.locator(HELP_NAV);
+    await openPanel(nav);
     const links = await nav.getByRole("link").count();
 
     await nav.getByRole("button", { name: /jump to/i }).focus();
@@ -190,6 +202,7 @@ test.describe("section nav — desktop", () => {
     await waitForShell(page);
     await waitForNavHydrated(page);
     const nav = page.locator(SETTINGS_NAV);
+    await openPanel(nav);
     await nav.getByRole("link", { name: "Appearance" }).click();
     await waitForScrollToSettle(page);
 
@@ -202,6 +215,77 @@ test.describe("section nav — desktop", () => {
       return Boolean(el?.closest(selector));
     }, SETTINGS_NAV);
     expect(onTop).toBe(true);
+  });
+
+  test("the current section's heading pins below the bar, highlighted", async ({
+    page,
+  }) => {
+    await page.goto("/settings");
+    await waitForShell(page);
+    await waitForNavHydrated(page);
+    const nav = page.locator(SETTINGS_NAV);
+
+    // Scroll well into a section (not via the nav — this is the scroll case).
+    await page.evaluate(() => window.scrollTo(0, 1100));
+    await waitForScrollToSettle(page);
+
+    const pinned = page.locator("[data-section-header][data-current]");
+    await expect(pinned).toHaveCount(1);
+
+    const navBox = (await nav.boundingBox())!;
+    const pinnedBox = (await pinned.boundingBox())!;
+    // Pinned directly below the bar — iOS-style, not scrolled away with the
+    // content and not hidden underneath the bar.
+    expect(Math.round(pinnedBox.y)).toBe(Math.round(navBox.y + navBox.height));
+
+    // The nav entry for that same section is the one marked current, so the two
+    // layers can never tell the reader two different things.
+    const pinnedId = await pinned.locator("h2").getAttribute("id");
+    const currentHref = await nav
+      .locator("a[aria-current]")
+      .getAttribute("href");
+    expect(currentHref).toBe(`#${pinnedId}`);
+
+    // Not colour alone: the pinned position plus a marker dot (::before) plus
+    // aria-current on the nav entry. Assert the dot actually renders.
+    const dot = await pinned.evaluate(
+      (el) => getComputedStyle(el, "::before").width,
+    );
+    expect(dot).not.toBe("auto");
+    expect(dot).not.toBe("0px");
+  });
+
+  test("the pinned header is opaque and above the page's content", async ({
+    page,
+  }) => {
+    await page.goto("/settings");
+    await waitForShell(page);
+    await waitForNavHydrated(page);
+    await page.evaluate(() => window.scrollTo(0, 1100));
+    await waitForScrollToSettle(page);
+
+    // A second sticky layer is a second chance for `opacity < 1` elements later
+    // in the page to paint over it (see the bar's z-index note).
+    const layers = await page.evaluate(() => {
+      const nav = document.querySelector(
+        'nav[aria-label="Settings sections"]',
+      )!;
+      const band = document.querySelector(
+        "[data-section-header][data-current]",
+      )!;
+      const box = band.getBoundingClientRect();
+      const mid = Math.round(window.innerWidth / 2);
+      const atBar = document.elementFromPoint(mid, 3);
+      const atBand = document.elementFromPoint(
+        mid,
+        Math.round(box.y + box.height / 2),
+      );
+      return {
+        bar: atBar ? nav.contains(atBar) || atBar === nav : false,
+        band: atBand ? band.contains(atBand) || atBand === band : false,
+      };
+    });
+    expect(layers).toEqual({ bar: true, band: true });
   });
 
   test("the header's app menu still opens OVER the bar", async ({ page }) => {
@@ -301,46 +385,93 @@ test.describe("section nav — mobile", () => {
   });
 });
 
+test.describe("section nav — mobile budget", () => {
+  test.use({ viewport: MOBILE });
+
+  test("both sticky layers together stay a small slice of a phone screen", async ({
+    page,
+  }) => {
+    await page.goto("/settings");
+    await waitForShell(page);
+    await waitForNavHydrated(page);
+    await page.evaluate(() => window.scrollTo(0, 1100));
+    await waitForScrollToSettle(page);
+
+    const nav = (await page.locator(SETTINGS_NAV).boundingBox())!;
+    const band = (await page
+      .locator("[data-section-header][data-current]")
+      .boundingBox())!;
+    const combined = nav.height + band.height;
+
+    // Measured at 390x844: 61px bar + 40px header = 101px, 12% of the viewport.
+    // Budget it at 20% so a future change that doubles it fails here rather
+    // than quietly eating the screen.
+    expect(combined).toBeLessThan(MOBILE.height * 0.2);
+  });
+});
+
 // Screenshots for review. Not assertions — the owner wants to eyeball this one.
+// Three states x two viewports x both themes: the collapsed resting bar, the
+// expanded "Jump to" panel, and mid-scroll with a section header pinned.
 test.describe("section nav — screenshots", () => {
-  for (const [name, viewport] of [
+  for (const [size, viewport] of [
     ["desktop", DESKTOP],
     ["mobile", MOBILE],
   ] as const) {
-    test(`captures /settings and /help (${name})`, async ({ page }) => {
-      await page.setViewportSize(viewport);
-      for (const route of ["settings", "help"]) {
-        await page.goto(`/${route}`);
-        await waitForShell(page);
-        await expect(page.locator(`nav[aria-label$="sections"]`)).toBeVisible();
-        await waitForNavHydrated(page);
-        await page.screenshot({ path: `${SHOTS}/${route}-${name}.png` });
-      }
-      // The bar stuck to the top mid-page — the state a reviewer wants to see.
-      await page.goto("/settings");
-      await waitForShell(page);
-      await waitForNavHydrated(page);
-      const bar = page.locator(SETTINGS_NAV);
-      const barToggle = bar.getByRole("button", { name: /jump to/i });
-      // Narrow viewports start collapsed — open the map before picking from it.
-      if ((await barToggle.getAttribute("aria-expanded")) === "false") {
-        await barToggle.click();
-      }
-      await bar.getByRole("link", { name: "Appearance" }).click();
-      await waitForScrollToSettle(page);
-      await page.screenshot({ path: `${SHOTS}/settings-stuck-${name}.png` });
+    for (const theme of ["light", "dark"] as const) {
+      test(`captures ${size} / ${theme}`, async ({ page }) => {
+        await page.setViewportSize(viewport);
+        // Matches the app's own inline bootstrap (see src/app/layout.tsx) and
+        // e2e/a11y-contrast.spec.ts. addInitScript must run before goto.
+        await page.addInitScript((value: string) => {
+          try {
+            localStorage.setItem("df-theme", value);
+          } catch {
+            /* private mode — matches the app's best-effort persistence */
+          }
+        }, theme);
 
-      // …and the mobile bar in its expanded state, which is the one that needed
-      // a deliberate decision.
-      if (name === "mobile") {
+        for (const route of ["settings", "help"] as const) {
+          await page.goto(`/${route}`);
+          await waitForShell(page);
+          await waitForNavHydrated(page);
+          // Guard the precondition: a silently-light "dark" screenshot is worse
+          // than no screenshot, because it looks like it was reviewed.
+          expect(
+            await page.evaluate(() =>
+              document.documentElement.classList.contains("dark"),
+            ),
+          ).toBe(theme === "dark");
+          const nav = page.locator(`nav[aria-label$="sections"]`);
+
+          // 1. resting state: the collapsed one-line bar.
+          await expect(
+            nav.getByRole("button", { name: /jump to/i }),
+          ).toHaveAttribute("aria-expanded", "false");
+          await page.screenshot({
+            path: `${SHOTS}/${route}-${size}-${theme}-collapsed.png`,
+          });
+
+          // 2. the expanded map.
+          await openPanel(nav);
+          await page.screenshot({
+            path: `${SHOTS}/${route}-${size}-${theme}-expanded.png`,
+          });
+        }
+
+        // 3. mid-scroll on Settings, with a section header pinned under the bar.
         await page.goto("/settings");
         await waitForShell(page);
         await waitForNavHydrated(page);
-        await page.locator(SETTINGS_NAV).getByRole("button").click();
+        await page.evaluate(() => window.scrollTo(0, 1100));
+        await waitForScrollToSettle(page);
+        await expect(
+          page.locator("[data-section-header][data-current]"),
+        ).toBeVisible();
         await page.screenshot({
-          path: `${SHOTS}/settings-mobile-expanded.png`,
+          path: `${SHOTS}/settings-${size}-${theme}-pinned.png`,
         });
-      }
-    });
+      });
+    }
   }
 });
