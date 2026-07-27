@@ -424,6 +424,10 @@ deploy_review:
     # ephemeral review app (holds no real OAuth tokens). od/tr are busybox
     # built-ins; avoid openssl (not in this Alpine deploy image).
     - TOKEN_ENC_KEY=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    # --timeout 15m (was 10m) for the same Autopilot cold-scale + ~893MB image
+    # pull reason documented on the production job below. Review apps land on
+    # fresh spot nodes more often, but run a single replica, so they need less
+    # headroom than prod's 20m.
     - helm upgrade --install "dlectroflow-mr-$CI_MERGE_REQUEST_IID" charts/dlectroflow
         --namespace "dlectroflow-mr-$CI_MERGE_REQUEST_IID" --create-namespace
         --set env=review --set spot=true --set postgres.persistent=false
@@ -441,7 +445,7 @@ deploy_review:
         --set-string registry.username="$GITLAB_DEPLOY_TOKEN_USER"
         --set-string registry.password="$GITLAB_DEPLOY_TOKEN"
         --set resources.app.cpu=250m
-        --atomic --timeout 10m
+        --atomic --timeout 15m
   environment:
     name: review/$CI_MERGE_REQUEST_IID
     url: https://mr-$CI_MERGE_REQUEST_IID.35-246-93-255.sslip.io
@@ -491,6 +495,17 @@ deploy_production:
   script:
     # image.tag is the protected main-<short-sha> tag (kept forever by the
     # registry cleanup policy), never the ephemeral bare SHA which cleanup reaps.
+    #
+    # --timeout 20m (was 10m): 10m is not enough for a COLD rollout on GKE
+    # Autopilot. The !151 deploy failed with "context deadline exceeded" and
+    # --atomic rolled it back, purely on time — the pods were healthy. Autopilot
+    # had to scale for memory ("0/7 nodes are available: Insufficient memory"),
+    # and each new node then spent ~1m20s pulling the ~893MB image; two replicas
+    # with a spread constraint means that happens on more than one node. A plain
+    # retry (warm nodes, image already pulled) then succeeded in ~6m.
+    # --atomic still guarantees rollback, so the cost of a longer timeout is only
+    # slower rollback on a genuinely bad deploy; the benefit is not rolling back
+    # good ones. The real lever is the image size — see the follow-up issue.
     - helm upgrade --install dlectroflow charts/dlectroflow
         --namespace dlectroflow-prod --create-namespace
         --set env=production --set postgres.persistent=true
@@ -512,7 +527,7 @@ deploy_production:
         --set backup.enabled=true
         --set-string backup.gcsBucket="$BACKUP_GCS_BUCKET"
         --set-string backup.gcpServiceAccount="$BACKUP_GCP_SA"
-        --atomic --timeout 10m
+        --atomic --timeout 20m
   environment:
     name: production
     url: https://dlectroflow.dev
