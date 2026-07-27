@@ -54,8 +54,18 @@ export function FocusSoundPlayer({
   } = controls;
 
   // Live playback position (polled while playing — display only, no seek).
+  //
+  // #23 — kept as a poll-into-state on purpose. The rule's prescribed fix,
+  // useSyncExternalStore, is unsafe for a *continuously advancing* value: React
+  // re-reads getSnapshot after commit to detect tearing, an audio element's
+  // currentTime differs on every read, so it would force a re-render on every
+  // commit — a render storm for as long as the track plays. The read below is
+  // the initial snapshot for a mount / track change / play-pause flip (the
+  // interval only covers the steady state), and dropping it would leave the
+  // previous track's elapsed time on screen for up to 250ms after a skip.
   const [pos, setPos] = useState({ currentTime: 0, duration: 0 });
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial read of an external, continuously-changing system (see above); useSyncExternalStore would loop here.
     setPos(getTime());
     if (!playing) return;
     const id = setInterval(() => setPos(getTime()), 250);

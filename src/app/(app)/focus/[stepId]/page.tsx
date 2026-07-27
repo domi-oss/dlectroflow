@@ -63,6 +63,7 @@ export default async function FocusPage({
             pausedAt: openSession.pausedAt.getTime(),
             accumulatedPausedMs: openSession.accumulatedPausedMs,
           },
+          // eslint-disable-next-line react-hooks/purity -- async Server Component: this runs once per request on the server, not in a compiler-memoised client render.
           Date.now(),
         ),
       }

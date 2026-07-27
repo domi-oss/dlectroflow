@@ -196,9 +196,13 @@ export function FocusTimer({
   // disclosure toggle — see the effect below.
   const setupCtaRef = useRef<HTMLButtonElement | null>(null);
   const disclosureMounted = useRef(false);
-  const doneMsgRef = useRef(
-    DONE_MESSAGES[Math.floor(Math.random() * DONE_MESSAGES.length)],
-  );
+  // #23 — the celebration line is rolled when the step is actually completed
+  // (an event), not during render into a ref: Math.random() in render is impure
+  // (react-hooks/purity) and reading a ref during render is unsafe
+  // (react-hooks/refs) — under the React compiler a render could be repeated or
+  // discarded, so a "stable" ref read is not guaranteed stable. The initial
+  // value is never shown: `done` is only reachable through finishComplete.
+  const [doneMsg, setDoneMsg] = useState(DONE_MESSAGES[0]);
 
   // Device-effect handles (created on Start inside the user gesture).
   const alarmRef = useRef<Alarm | null>(null);
@@ -232,6 +236,17 @@ export function FocusTimer({
     wakeRef.current = null;
   };
 
+  // #23 — every phase change goes through this so that stopping the timer
+  // auto-expands the step tracker (calm while running, orienting when stopped).
+  // That used to be an effect watching `phase`, which re-rendered the whole
+  // timer a second time on each pause / time's-up (react-hooks/
+  // set-state-in-effect); doing it at the transition is the same behaviour in
+  // one pass, and keeps new transitions honest by construction.
+  const goToPhase = useCallback((next: Phase) => {
+    if (next === "paused" || next === "timeup") setExpanded(true);
+    setPhase(next);
+  }, []);
+
   // Countdown ticker.
   useEffect(() => {
     if (phase !== "running") return;
@@ -240,14 +255,14 @@ export function FocusTimer({
       setRemainingSec((r) => {
         if (r <= 1) {
           clearInterval(id);
-          setPhase("timeup");
+          goToPhase("timeup");
           return 0;
         }
         return r - 1;
       });
     }, 1000);
     return () => clearInterval(id);
-  }, [phase]);
+  }, [phase, goToPhase]);
 
   // Focus sound + wake lock follow the "running" phase: the lo-fi pauses and
   // resumes WITH the timer (owner decision). The first play() happens in the
@@ -273,12 +288,6 @@ export function FocusTimer({
   // Alarm at time's-up.
   useEffect(() => {
     if (phase === "timeup") alarmRef.current?.play();
-  }, [phase]);
-
-  // Auto-expand the step tracker when the timer stops (calm while running,
-  // orienting when stopped).
-  useEffect(() => {
-    if (phase === "paused" || phase === "timeup") setExpanded(true);
   }, [phase]);
 
   // #66 — either disclosure toggle unmounts the button that was just clicked
@@ -318,7 +327,7 @@ export function FocusTimer({
     setTotalSec(plannedMin * 60);
     setRemainingSec(plannedMin * 60);
     elapsedRef.current = 0;
-    setPhase("running");
+    goToPhase("running");
   };
 
   // #27 — setup-screen "Resume" CTA: reuses the existing paused session (no
@@ -338,7 +347,7 @@ export function FocusTimer({
     setTotalSec(res.totalSec);
     setRemainingSec(res.remainingSec);
     elapsedRef.current = Math.max(0, res.totalSec - res.remainingSec);
-    setPhase(res.remainingSec <= 0 ? "timeup" : "running");
+    goToPhase(res.remainingSec <= 0 ? "timeup" : "running");
   };
 
   // #27 — the in-session Pause/Resume toggle now persists real state instead
@@ -354,14 +363,14 @@ export function FocusTimer({
   const togglePause = async () => {
     if (phase === "running") {
       if (!sessionId) {
-        setPhase("paused");
+        goToPhase("paused");
         return;
       }
       setPending(true);
       const res = await pauseFocus(sessionId, { totalSec });
       setPending(false);
       if (!res.ok) return; // server disagrees — stay running, don't show a paused state it doesn't have
-      setPhase("paused");
+      goToPhase("paused");
       return;
     }
     if (phase !== "paused" || !sessionId) return;
@@ -369,19 +378,19 @@ export function FocusTimer({
     const res = await resumeFocus(sessionId);
     setPending(false);
     if (!res.ok) {
-      setPhase("running");
+      goToPhase("running");
       return;
     }
     setRemainingSec(res.remainingSec);
     elapsedRef.current = Math.max(0, res.totalSec - res.remainingSec);
-    setPhase(res.remainingSec <= 0 ? "timeup" : "running");
+    goToPhase(res.remainingSec <= 0 ? "timeup" : "running");
   };
 
   const changeTime = (mins: number) => {
     const next = applyTimeDelta({ totalSec, remainingSec }, mins * 60);
     setTotalSec(next.totalSec);
     setRemainingSec(next.remainingSec);
-    if (phase === "timeup" && mins > 0) setPhase("running");
+    if (phase === "timeup" && mins > 0) goToPhase("running");
   };
 
   const finishComplete = useCallback(async () => {
@@ -395,12 +404,13 @@ export function FocusTimer({
     setResult(res);
     stopSound();
     releaseWake();
-    setPhase("done");
+    setDoneMsg(DONE_MESSAGES[Math.floor(Math.random() * DONE_MESSAGES.length)]);
+    goToPhase("done");
     router.refresh();
-  }, [sessionId, net, router, stopSound]);
+  }, [sessionId, net, router, stopSound, goToPhase]);
 
   const startReestimate = async () => {
-    setPhase("reestimate");
+    goToPhase("reestimate");
     setPending(true);
     const suggested = await proposeNewEstimate(step.id);
     setNewEst(suggested);
@@ -418,7 +428,7 @@ export function FocusTimer({
     setPending(false);
     stopSound();
     releaseWake();
-    setPhase("requeued");
+    goToPhase("requeued");
   };
 
   const dismissTip = () => {
@@ -529,7 +539,7 @@ export function FocusTimer({
           <Celebration />
         </div>
         <div className="text-6xl">🎉</div>
-        <p className="text-lg font-medium">{doneMsgRef.current}</p>
+        <p className="text-lg font-medium">{doneMsg}</p>
         {result && (
           <p className="text-muted-foreground text-sm">
             +{result.points} points

@@ -20,6 +20,7 @@ export default async function InboxPage({
   const workspaceId = await currentWorkspaceId();
   // One request-time clock — also snapshots each step's persisted remaining
   // time (#27 follow-up), matching the Library page's same-request approach.
+  // eslint-disable-next-line react-hooks/purity -- async Server Component: this runs once per request on the server, not in a compiler-memoised client render.
   const now = Date.now();
   const [rawItems, settings, sp, owner, googleStatus] = await Promise.all([
     prisma.brainDumpItem.findMany({

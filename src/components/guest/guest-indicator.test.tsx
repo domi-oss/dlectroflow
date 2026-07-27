@@ -18,7 +18,7 @@ vi.mock("next/link", () => ({
   ),
 }));
 
-import { GuestIndicator } from "./guest-indicator";
+import { GuestIndicator, subscribeDismissed } from "./guest-indicator";
 
 const props = {
   remaining: 3,
@@ -132,6 +132,83 @@ describe("GuestIndicator onboarding help banner (#11)", () => {
     fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
     expect(screen.queryByRole("link", { name: /help/i })).toBeNull();
     // The collapsed pill still surfaces the guest quota.
+    expect(screen.getByText(/Guest/)).toBeInTheDocument();
+  });
+});
+
+// #23 safety net for the setState-in-effect rewrite: the dismissal lives in
+// sessionStorage, so it has to survive a remount (navigating between pages
+// re-mounts the layout's indicator) without the banner popping back up.
+describe("GuestIndicator dismissal persistence", () => {
+  it("shows the banner when this session has not dismissed it", () => {
+    render(<GuestIndicator {...props} voice="plain" />);
+    expect(screen.getByRole("link", { name: /help/i })).toBeInTheDocument();
+  });
+
+  it("stays collapsed on remount once dismissed this session", () => {
+    const { unmount } = render(<GuestIndicator {...props} voice="plain" />);
+    fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
+    unmount();
+
+    render(<GuestIndicator {...props} voice="plain" />);
+    expect(screen.queryByRole("link", { name: /help/i })).toBeNull();
+    expect(screen.getByText(/Guest/)).toBeInTheDocument();
+  });
+
+  // The collapsed pill is a button: clicking it re-opens the banner for this
+  // page view only — the dismissal stays recorded, so the next mount is
+  // collapsed again. (Untested before #23; the rewrite has to keep it.)
+  it("re-opens the banner when the collapsed pill is clicked, without forgetting the dismissal", () => {
+    const { unmount } = render(<GuestIndicator {...props} voice="plain" />);
+    fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
+    expect(screen.queryByRole("link", { name: /help/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /breakdowns/i }));
+    expect(screen.getByRole("link", { name: /help/i })).toBeInTheDocument();
+
+    unmount();
+    render(<GuestIndicator {...props} voice="plain" />);
+    expect(screen.queryByRole("link", { name: /help/i })).toBeNull();
+  });
+
+  // Duo review (!160): the store notifies subscribers itself, so its teardown
+  // is the only thing stopping a stale listener from being called forever.
+  it("notifies subscribers on dismiss and stops once unsubscribed", () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeDismissed(listener);
+    try {
+      render(<GuestIndicator {...props} voice="plain" />);
+      fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
+      expect(listener).toHaveBeenCalledTimes(1);
+
+      unsubscribe();
+
+      // Re-open the banner and dismiss it again: the store still works…
+      fireEvent.click(screen.getByRole("button", { name: /breakdowns/i }));
+      fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
+      expect(screen.queryByRole("link", { name: /help/i })).toBeNull();
+      // …but the unsubscribed listener is never called again.
+      expect(listener).toHaveBeenCalledTimes(1);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("degrades to showing the banner when sessionStorage is unavailable", () => {
+    // Safari private mode / storage-blocked browsers throw on access.
+    vi.stubGlobal("sessionStorage", {
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("blocked");
+      },
+    });
+    render(<GuestIndicator {...props} voice="plain" />);
+    expect(screen.getByRole("link", { name: /help/i })).toBeInTheDocument();
+    // …and ✕ must still collapse it — it just can't be remembered across loads.
+    fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
+    expect(screen.queryByRole("link", { name: /help/i })).toBeNull();
     expect(screen.getByText(/Guest/)).toBeInTheDocument();
   });
 });

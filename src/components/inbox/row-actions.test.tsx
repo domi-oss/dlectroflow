@@ -276,6 +276,63 @@ describe("RowActions", () => {
     expect(screen.getByRole("spinbutton")).toHaveValue(null);
   });
 
+  // #23 — the clear-on-close used to be a single effect watching `open`, so it
+  // covered every dismissal route at once. These pin the two routes the Duo
+  // review test above doesn't: clicking away, and re-clicking the trigger.
+  it("clears the custom duration input when the popover is closed by an outside click", () => {
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{ state: "needs_duration", onScheduleSingle: vi.fn() }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
+    fireEvent.change(screen.getByRole("spinbutton"), {
+      target: { value: "99" },
+    });
+    fireEvent.pointerDown(document.body); // click away
+    fireEvent.click(screen.getByRole("button", { name: /schedule/i })); // reopen
+    expect(screen.getByRole("spinbutton")).toHaveValue(null);
+  });
+
+  it("clears the custom duration input when the trigger itself closes the popover", () => {
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{ state: "needs_duration", onScheduleSingle: vi.fn() }}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: /schedule/i });
+    fireEvent.click(trigger);
+    fireEvent.change(screen.getByRole("spinbutton"), {
+      target: { value: "99" },
+    });
+    fireEvent.click(trigger); // close via the trigger
+    fireEvent.click(trigger); // reopen
+    expect(screen.getByRole("spinbutton")).toHaveValue(null);
+  });
+
+  it("clears the custom duration input after a preset is picked", () => {
+    const onScheduleSingle = vi.fn();
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{ state: "needs_duration", onScheduleSingle }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
+    fireEvent.change(screen.getByRole("spinbutton"), {
+      target: { value: "99" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "30 min" }));
+    expect(onScheduleSingle).toHaveBeenCalledWith(30);
+    fireEvent.click(screen.getByRole("button", { name: /schedule/i })); // reopen
+    expect(screen.getByRole("spinbutton")).toHaveValue(null);
+  });
+
   it("reconnect state renders the OAuth link, not a button", () => {
     render(
       <RowActions inline={[]} menu={[]} schedule={{ state: "reconnect" }} />,
