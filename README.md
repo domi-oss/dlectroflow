@@ -137,7 +137,7 @@ it doesn't care *how* the value got there.
 
 **Local dev — pick whichever suits you:**
 - **Quickest:** `export ANTHROPIC_API_KEY='sk-ant-...'` in your terminal before `npm run dev`.
-- **Persistent:** put it in `.env` (`cp .env.example .env` if you skipped step 2). Gitignored.
+- **Persistent:** put it in `.env` (`cp .env.example .env` if you skipped step 2). `.env.local` works for this one too — [which file?](#which-file-env-vs-envlocal). Both are gitignored.
 
 ### Which file: `.env` vs `.env.local`
 
@@ -408,7 +408,7 @@ Visit **http://localhost:3000**.
 | `P1000: Authentication failed against database server` | Your `DATABASE_URL` password doesn't match `docker-compose.yml` (it's `dlectroflow`). Re-copy the template: `cp .env.example .env`. |
 | `P1001: Can't reach database server at localhost:5432` | Postgres isn't running. `docker compose up -d db` (or just re-run `npm run setup`, which starts it). |
 | First-ever page load logs `prisma:error … Unique constraint failed on the fields: (id)` | Harmless, and only on a brand-new database: two concurrent first-use reads race to create your Settings/Streak row, and the loser re-fetches it (see the docblock in `src/lib/db.ts`). The page still renders; you won't see it again. |
-| Breakdown returns *"ANTHROPIC_API_KEY is not set"* | Export the key (or put it in `.env`) **and restart** `npm run dev`. Env is read at server start. |
+| Breakdown returns *"ANTHROPIC_API_KEY is not set"* | Export the key (or put it in `.env`, or `.env.local` — either works for runtime values) **and restart** `npm run dev`. Env is read at server start. |
 | DB error mentioning a table/model that should exist | You ran a migration while `npm run dev` was running. **Restart the dev server.** |
 | `Port 3000 is already in use` | Another server is running: `npm run dev -- -p 3001`, or stop the other one. |
 | Boot fails: *LLM provider "openai-compatible" misconfigured — refusing to boot* | In production both `LLM_BASE_URL` and `LLM_MODEL` are required. Set them — see [BYO-LLM](#-bring-your-own-llm-byo-llm). |
