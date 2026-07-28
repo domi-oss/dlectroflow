@@ -208,12 +208,20 @@ describe("workspace-scoping harness", () => {
   });
 
   it("no People module queries a workspace-scoped model at all", () => {
+    // Plain substring search per (receiver, model) pair rather than one regex
+    // assembled from the model names. Same result, and it keeps a
+    // regex-built-from-a-variable out of the codebase (semgrep
+    // `non-literal-regexp`, flagged on !175) — the model list comes from Prisma's
+    // DMMF, but a literal search needs no escaping argument at all.
     const models = scopedModels();
-    const re = new RegExp(`(?:prisma|tx|db)\\.(?:${models.join("|")})\\.`, "g");
     const offenders: string[] = [];
     for (const file of PEOPLE_FILES) {
-      for (const m of readFileSync(file, "utf8").matchAll(re)) {
-        offenders.push(`${file}: ${m[0]}`);
+      const src = readFileSync(file, "utf8");
+      for (const receiver of ["prisma", "tx", "db"]) {
+        for (const model of models) {
+          const needle = `${receiver}.${model}.`;
+          if (src.includes(needle)) offenders.push(`${file}: ${needle}`);
+        }
       }
     }
     // A People query against a content model would be a cross-workspace read

@@ -542,16 +542,18 @@ describe("PeoplePanel — accessibility", () => {
 
     for (const label of ["ada", "grace"]) {
       const card = personCard(label);
+      // Exact strings, not case-insensitive regexes built from `label`: the
+      // accessible names are known exactly, an exact match cannot pass on a
+      // near-miss, and it keeps a regex-from-a-variable out of the codebase
+      // (semgrep `non-literal-regexp`, flagged on !175).
       expect(
-        within(card).getByLabelText(new RegExp(`ai policy for ${label}`, "i")),
+        within(card).getByLabelText(`AI policy for ${label}`),
       ).toBeInTheDocument();
       expect(
-        within(card).getByLabelText(new RegExp(`quota for ${label}`, "i")),
+        within(card).getByLabelText(`Quota for ${label}`),
       ).toBeInTheDocument();
       expect(
-        within(card).getByRole("button", {
-          name: new RegExp(`save ${label}`, "i"),
-        }),
+        within(card).getByRole("button", { name: `Save ${label}` }),
       ).toBeInTheDocument();
     }
   });

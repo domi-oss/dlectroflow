@@ -159,7 +159,9 @@ test.describe("People admin — the disclosure", () => {
       "no collapsed People trigger in the server HTML",
     ).not.toBeNull();
     // The controlled body is present AND hidden in that same first response.
-    expect(html).toMatch(new RegExp(`id="${trigger![1]}" hidden=""`));
+    // `toContain` on the exact substring: no regex built from a captured value,
+    // and no escaping to get wrong in an id React generates.
+    expect(html).toContain(`id="${trigger![1]}" hidden=""`);
   });
 
   test("is keyboard operable with a visible focus ring", async ({ page }) => {
@@ -370,9 +372,7 @@ test.describe("People admin (owner)", () => {
     await page.getByRole("button", { name: /send invitation/i }).click();
 
     // Reported, and the form is cleared ready for the next one.
-    await expect(page.getByRole("status")).toContainText(
-      new RegExp(`Invited ${identity}`, "i"),
-    );
+    await expect(page.getByRole("status")).toContainText(`Invited ${identity}`);
     await expect(page.getByLabel(/invite a username or email/i)).toHaveValue(
       "",
     );
@@ -388,7 +388,7 @@ test.describe("People admin (owner)", () => {
     // the next run.
     await row
       .getByRole("button", {
-        name: new RegExp(`withdraw the invitation for ${identity}`, "i"),
+        name: `Withdraw the invitation for ${identity}`,
       })
       .click();
     await expect(page.getByRole("status")).toContainText(/withdrawn/i);
