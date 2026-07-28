@@ -58,6 +58,22 @@ vi.mock("@/lib/workspace", () => ({
   currentWorkspaceId: currentWorkspaceIdMock,
 }));
 
+// #84 — keeps this file a real unit test. #35 Phase A turned isGuestWorkspace()
+// into a `prisma.workspace.findUnique()` call, which silently made these route
+// tests require a live Postgres. Mocked here exactly as every other call-site
+// unit test does (focus, settings, rollup, spark, ai-scope-guards), with
+// "owner" as this file's existing non-guest sentinel id.
+//
+// No coverage is lost: the real guest-vs-user branch — including the fail-closed
+// unknown-workspace case and the query shape — is asserted against a mocked
+// prisma in src/lib/ai-scope.test.ts, which is where that unit belongs. Against
+// a real database this file never exercised the distinction anyway: neither
+// sentinel id resolves to a `kind:"user"` row, so isGuestWorkspace() returned
+// true for both, and the "owner" default silently ran the *guest* path.
+vi.mock("@/lib/workspace-kind", () => ({
+  isGuestWorkspace: (id: string) => Promise.resolve(id !== "owner"),
+}));
+
 vi.mock("@/lib/settings-read", () => ({
   getSettings: getSettingsMock,
 }));
