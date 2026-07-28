@@ -25,6 +25,8 @@ type Prefs = {
   keepAwake: boolean;
   alarmEnabled: boolean;
   sound: string;
+  /** #65 — opt-in music↔timer pause coupling (Settings.focusPauseTogether). */
+  pauseTogether: boolean;
 };
 
 /**
@@ -44,6 +46,7 @@ export function FocusTimerSection({
   keepAwake,
   alarmEnabled,
   sound,
+  pauseTogether,
   voice,
 }: Prefs & { voice: Voice }) {
   const router = useRouter();
@@ -55,6 +58,7 @@ export function FocusTimerSection({
     keepAwake,
     alarmEnabled,
     sound,
+    pauseTogether,
   });
 
   // #43 — one shared preview player: auditioning a track stops any previous
@@ -212,6 +216,20 @@ export function FocusTimerSection({
           );
         })}
       </fieldset>
+
+      {/* #65 — sits under the sound picker rather than with the timer toggles
+          above: it's a behaviour of the MUSIC (what pausing it should do), and
+          it's the one focus pref that can stop a running session, so its hint
+          spells out both directions before you turn it on. Left enabled when
+          sound is "off" — nothing to pause then, so a stored true is simply
+          inert (same as focusShuffle), and hiding it would only make the pref
+          vanish while someone is picking a track. */}
+      <Toggle
+        label={t("focusSettings.pauseTogether", voice)}
+        hint={t("focusSettings.pauseTogetherHint", voice)}
+        checked={prefs.pauseTogether}
+        onChange={(v) => set("pauseTogether", v)}
+      />
     </section>
   );
 }
