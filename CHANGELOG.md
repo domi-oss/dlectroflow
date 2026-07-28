@@ -64,10 +64,13 @@ operators upgrading a self-hosted instance don't get surprised.
     and three `eslint-config-next` plugins (`import`, `jsx-a11y`, `react`) —
     none of which has a release that moved off `minimatch@3`, including with
     `eslint@10`. It is scoped to 2.1.3 via a nested override until they do.
-  - **Reachability:** the only production-reachable copy (via
-    `shadcn` → `ts-morph` → `@ts-morph/common`) **is** now on 5.0.8. The
-    residual copy is reachable only from lint tooling in `devDependencies`, so
-    it cannot be fed untrusted input by a request path.
+  - **Reachability:** **no copy of `brace-expansion` ships in the production
+    image at all** — it is absent from the `output: "standalone"` trace and from
+    the image's isolated `prisma`/`dotenv`/`tsx` install. It reaches the tree
+    only through build and lint tooling, so no request path can feed it
+    untrusted input. The one copy that is nonetheless *declared* under runtime
+    `dependencies` (`shadcn` → `ts-morph` → `@ts-morph/common`) is on 5.0.8
+    anyway; the residual one is `devDependencies`-only.
   - **Operators:** no action.
 
 ## [0.4.0] - 2026-07-27
