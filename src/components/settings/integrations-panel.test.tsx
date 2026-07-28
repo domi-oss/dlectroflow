@@ -67,6 +67,18 @@ describe("IntegrationsPanel — guest read-only shell (#11)", () => {
     expect(screen.queryByRole("button", { name: /disconnect/i })).toBeNull();
   });
 
+  // #90 — regression lock. The card was dimmed with `opacity-70`, which
+  // composited its muted copy and its "Owner-only" pill below WCAG-AA (2.74:1
+  // – 4.42:1 depending on theme; needs 4.5:1) — the same mistake #56 fixed on
+  // the saved-for-later row. The e2e guest contrast gate
+  // (e2e/a11y/axe-guest-surfaces.spec.ts) measures the real ratios; this holds
+  // the line cheaply at the unit level.
+  it("never washes the read-only card in an opacity dim (AA)", () => {
+    render(<IntegrationsPanel google={null} readOnly voice="plain" />);
+    const card = screen.getByText("Google Tasks").closest("div.rounded-lg")!;
+    expect(card.className).not.toContain("opacity-");
+  });
+
   it("never leaks the owner's real connection status to guests", () => {
     render(<IntegrationsPanel google={null} readOnly voice="plain" />);
     expect(screen.queryByText(/^connected$/i)).toBeNull();
