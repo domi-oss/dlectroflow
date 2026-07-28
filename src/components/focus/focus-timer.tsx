@@ -377,7 +377,14 @@ export function FocusTimer({
   // rather than showing a phase it doesn't (Duo review) — same fail-safe
   // shape either way: stay "running", the one state both sides always agree
   // a live session is in.
-  const togglePause = async () => {
+  //
+  // #65 — memoised because togglePauseFromPlayer (below) is handed to the
+  // mini-player, and a useCallback whose own dependency is recreated on every
+  // render would be theatre: it would be invalidated by the per-second tick
+  // anyway. The deps are everything this reads — none of which changes on a
+  // tick (`remainingSec` is not read here, and elapsedRef is a ref), so the
+  // identity is genuinely stable while the countdown runs.
+  const togglePause = useCallback(async () => {
     if (phase === "running") {
       if (!sessionId) {
         goToPhase("paused");
@@ -401,7 +408,7 @@ export function FocusTimer({
     setRemainingSec(res.remainingSec);
     elapsedRef.current = Math.max(0, res.totalSec - res.remainingSec);
     goToPhase(res.remainingSec <= 0 ? "timeup" : "running");
-  };
+  }, [phase, sessionId, totalSec, goToPhase]);
 
   /**
    * #65 — the mini-player's transport press, WHEN this workspace opted into the
@@ -416,14 +423,21 @@ export function FocusTimer({
    * here. Those are things the audio does, not things the user asked of their
    * focus session — and the element's own `pause` event can't tell them apart
    * from the pauses this timer itself issues, which would feed back on itself.
+   *
+   * Memoised (Duo review): it is the one handler this component hands to a
+   * child, so its identity is part of that child's props. Nothing re-renders
+   * needlessly today — FocusSoundPlayer is not React.memo-wrapped, so it
+   * re-renders with its parent regardless — but that makes a future memo() on
+   * the player a trap, where a handler rebuilt on every countdown tick would
+   * silently defeat it. Stable now, and stable if that changes.
    */
-  const togglePauseFromPlayer = async () => {
+  const togglePauseFromPlayer = useCallback(async () => {
     // A coupled RESUME can unmount the player (minimal mode hides it while
     // running; a resume landing on time's-up hides it outright), so flag the
     // focus hand-off before the phase moves. A coupled pause keeps it mounted.
     pauseHandoffRef.current = phase === "paused";
     await togglePause();
-  };
+  }, [phase, togglePause]);
 
   const changeTime = (mins: number) => {
     const next = applyTimeDelta({ totalSec, remainingSec }, mins * 60);
