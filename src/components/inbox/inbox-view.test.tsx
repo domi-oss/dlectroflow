@@ -1151,8 +1151,12 @@ describe("InboxView — Move to… menu dispatch", () => {
     const row = screen.getByText("todo").closest("li")!;
     // Move to… now lives inside the row's ⋯ overflow menu.
     await user.click(within(row).getByRole("button", { name: "All options" }));
-    await user.click(within(row).getByRole("button", { name: "Move to…" }));
-    await user.click(within(row).getByRole("menuitem", { name: /Completed/ }));
+    await user.click(
+      await within(row).findByRole("button", { name: "Move to…" }),
+    );
+    await user.click(
+      await within(row).findByRole("menuitem", { name: /Completed/ }),
+    );
     expect(completeItem).toHaveBeenCalledWith("s1");
   });
 
@@ -1169,9 +1173,11 @@ describe("InboxView — Move to… menu dispatch", () => {
     );
     const row = screen.getByText("todo").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "All options" }));
-    await user.click(within(row).getByRole("button", { name: "Move to…" }));
     await user.click(
-      within(row).getByRole("menuitem", { name: /Needs review/ }),
+      await within(row).findByRole("button", { name: "Move to…" }),
+    );
+    await user.click(
+      await within(row).findByRole("menuitem", { name: /Needs review/ }),
     );
     expect(moveToReview).toHaveBeenCalledWith("s1");
   });
@@ -1198,7 +1204,7 @@ describe("InboxView — Move to… menu dispatch", () => {
     // v6: completed rows' Move-to is the 📥 icon (aria "Move to").
     await user.click(within(row).getByRole("button", { name: "Move to" }));
     await user.click(
-      within(row).getByRole("menuitem", { name: /Single-task/ }),
+      await within(row).findByRole("menuitem", { name: /Single-task/ }),
     );
     expect(reopenItem).toHaveBeenCalledWith("d1", undefined);
     expect(triageBrainDumpItem).toHaveBeenCalledWith("d1");
@@ -1219,12 +1225,22 @@ describe("InboxView — Move to… menu dispatch", () => {
     const row = screen.getByText("big thing").closest("li")!;
     // Move to… now lives inside the needs-review row's ⋯ overflow menu too.
     await user.click(within(row).getByRole("button", { name: "All options" }));
-    await user.click(within(row).getByRole("button", { name: "Move to…" }));
-    await user.click(within(row).getByRole("menuitem", { name: /Multi-step/ }));
+    await user.click(
+      await within(row).findByRole("button", { name: "Move to…" }),
+    );
+    await user.click(
+      await within(row).findByRole("menuitem", { name: /Multi-step/ }),
+    );
     expect(requestBreakdown).toHaveBeenCalledWith("n1");
     // The editor only opens from the row's "Break into steps now?" CTA.
     expect(startBreakdown).not.toHaveBeenCalled();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    // Dismiss the row's own 🔽 popover first — since #92 it is a `dialog`, so
+    // leaving it open would make the "no editor opened" check below pass or
+    // fail for the wrong reason.
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
   });
 
   it("moving a Completed item to Multi-step reopens it first, then requests the breakdown", async () => {
@@ -1247,7 +1263,9 @@ describe("InboxView — Move to… menu dispatch", () => {
     );
     const row = screen.getByText("finished big thing").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Move to" }));
-    await user.click(within(row).getByRole("menuitem", { name: /Multi-step/ }));
+    await user.click(
+      await within(row).findByRole("menuitem", { name: /Multi-step/ }),
+    );
     expect(reopenItem).toHaveBeenCalledWith("d1", undefined);
     expect(requestBreakdown).toHaveBeenCalledWith("d1");
   });
@@ -1313,9 +1331,11 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
     );
     const row = screen.getByText("needs a plan").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "All options" }));
-    await user.click(within(row).getByRole("button", { name: "Move to…" }));
     await user.click(
-      within(row).getByRole("menuitem", { name: /Single-task/ }),
+      await within(row).findByRole("button", { name: "Move to…" }),
+    );
+    await user.click(
+      await within(row).findByRole("menuitem", { name: /Single-task/ }),
     );
     expect(triageBrainDumpItem).toHaveBeenCalledWith("aw1");
   });

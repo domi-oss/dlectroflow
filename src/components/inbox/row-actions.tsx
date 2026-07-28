@@ -7,7 +7,12 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { Popover } from "@base-ui/react/popover";
 import { cn, touchTarget } from "@/lib/utils";
+import {
+  ANCHORED_POSITIONER,
+  popupSurface,
+} from "@/components/ui/anchored-popup";
 
 const DURATION_PRESETS = [15, 30, 60] as const;
 
@@ -46,6 +51,12 @@ export type ScheduleControlProps = {
  * (0, negative, non-numeric, or >480) visibly disable Go and show a hint instead
  * of silently doing nothing. `connect`/`reconnect` render an OAuth link instead
  * of a button (nothing to click-handle client-side).
+ *
+ * #92: the icon variant's popover is a `Popover.Positioner` (see
+ * ui/anchored-popup.ts) — it used to be `absolute right-0`, which clipped it
+ * past the bottom edge on any row low on a phone screen. The `menu` variant is
+ * untouched: it expands in normal flow inside the 🔽 popover, so there is no
+ * floating element to position and nothing to collide with.
  */
 export function ScheduleControl({
   state,
@@ -73,8 +84,11 @@ export function ScheduleControl({
     setCustom("");
   }, []);
 
+  // Dismissal for the `menu` variant only. Its presets expand in normal flow
+  // (no popup), so nothing else manages them; the icon variant's dismissal now
+  // comes from Popover, which routes every close through `close()` below.
   useEffect(() => {
-    if (!open) return;
+    if (!isMenu || !open) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") close();
     };
@@ -88,7 +102,7 @@ export function ScheduleControl({
       document.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("pointerdown", onPointerDown);
     };
-  }, [open, close]);
+  }, [isMenu, open, close]);
 
   if (state === "connect" || state === "reconnect") {
     return (
@@ -120,95 +134,153 @@ export function ScheduleControl({
     else onScheduleSingle?.(customMinutes);
   };
 
-  return (
-    <span ref={rootRef} className={isMenu ? "flex flex-col" : "relative"}>
-      <button
-        type="button"
-        aria-label={
-          isMenu ? undefined : isIcs ? "Add to calendar (.ics)" : "Schedule"
-        }
-        title={
-          isMenu ? undefined : isIcs ? "Add to calendar (.ics)" : "Schedule"
-        }
-        aria-haspopup={needsDuration ? "dialog" : undefined}
-        aria-expanded={needsDuration ? open : undefined}
-        disabled={pending}
-        onClick={() => {
-          if (state === "ready_steps") onScheduleSteps?.();
-          else if (state === "ics_ready_steps") onScheduleIcs?.();
-          else if (open) close();
-          else setOpen(true); // needs_duration | ics_needs_duration
-        }}
-        className={cn(
-          isMenu
-            ? "hover:bg-accent w-full rounded-md px-2.5 py-1 text-left font-medium disabled:opacity-50"
-            : // End-cluster icon: ghost hover (matches Complete/▾) + a slightly
-              // bigger glyph than the surrounding text-xs row (owner: mobile
-              // icons read too tiny) — the label stays `font-medium` text-xs.
-              "hover:bg-accent rounded-md px-2 py-1 text-sm font-medium disabled:opacity-50",
-          !isMenu && touchTarget,
-        )}
-      >
-        {isMenu ? label : "📅"}
-      </button>
-      {needsDuration && open && (
-        <span
-          className={
-            isMenu
-              ? "mt-1 flex flex-col gap-2 px-2.5 pb-1 text-xs"
-              : "bg-background absolute right-0 z-10 mt-1 flex min-w-48 flex-col gap-2 rounded-md border p-2 text-xs shadow-md"
-          }
-        >
-          <span className="flex gap-1">
-            {DURATION_PRESETS.map((minutes) => (
-              <button
-                key={minutes}
-                type="button"
-                disabled={pending}
-                className={cn(
-                  "hover:bg-accent rounded-md px-2.5 py-1 font-medium disabled:opacity-50",
-                  touchTarget,
-                )}
-                onClick={() => {
-                  close();
-                  if (isIcs) onScheduleIcs?.(minutes);
-                  else onScheduleSingle?.(minutes);
-                }}
-              >
-                {minutes} min
-              </button>
-            ))}
-          </span>
-          <span className="flex items-center gap-1">
-            <input
-              type="number"
-              min={1}
-              max={MAX_CUSTOM_MINUTES}
-              step={1}
-              value={custom}
-              onChange={(e) => setCustom(e.target.value)}
-              className="w-16 rounded-md border px-2 py-1"
-              placeholder="min"
-            />
-            <button
-              type="button"
-              disabled={pending || custom === "" || customOutOfRange}
-              className={cn(
-                "hover:bg-accent rounded-md px-2.5 py-1 font-medium disabled:opacity-50",
-                touchTarget,
-              )}
-              onClick={fireCustom}
-            >
-              Go
-            </button>
-          </span>
-          {customOutOfRange && (
-            <span className="text-destructive">
-              Enter 1–{MAX_CUSTOM_MINUTES} minutes
-            </span>
+  const iconLabel = isIcs ? "Add to calendar (.ics)" : "Schedule";
+  const triggerClassName = cn(
+    isMenu
+      ? "hover:bg-accent w-full rounded-md px-2.5 py-1 text-left font-medium disabled:opacity-50"
+      : // End-cluster icon: ghost hover (matches Complete/▾) + a slightly
+        // bigger glyph than the surrounding text-xs row (owner: mobile
+        // icons read too tiny) — the label stays `font-medium` text-xs.
+        "hover:bg-accent rounded-md px-2 py-1 text-sm font-medium disabled:opacity-50",
+    !isMenu && touchTarget,
+  );
+
+  const durationFields = (
+    <>
+      <span className="flex gap-1">
+        {DURATION_PRESETS.map((minutes) => (
+          <button
+            key={minutes}
+            type="button"
+            disabled={pending}
+            className={cn(
+              "hover:bg-accent rounded-md px-2.5 py-1 font-medium disabled:opacity-50",
+              touchTarget,
+            )}
+            onClick={() => {
+              close();
+              if (isIcs) onScheduleIcs?.(minutes);
+              else onScheduleSingle?.(minutes);
+            }}
+          >
+            {minutes} min
+          </button>
+        ))}
+      </span>
+      <span className="flex items-center gap-1">
+        <input
+          type="number"
+          min={1}
+          max={MAX_CUSTOM_MINUTES}
+          step={1}
+          value={custom}
+          onChange={(e) => setCustom(e.target.value)}
+          className="w-16 rounded-md border px-2 py-1"
+          placeholder="min"
+        />
+        <button
+          type="button"
+          disabled={pending || custom === "" || customOutOfRange}
+          className={cn(
+            "hover:bg-accent rounded-md px-2.5 py-1 font-medium disabled:opacity-50",
+            touchTarget,
           )}
+          onClick={fireCustom}
+        >
+          Go
+        </button>
+      </span>
+      {customOutOfRange && (
+        <span className="text-destructive">
+          Enter 1–{MAX_CUSTOM_MINUTES} minutes
         </span>
       )}
+    </>
+  );
+
+  // ▾-dropdown variant: presets expand inline, in normal flow, so the column
+  // reflows around them. Nothing floats, nothing can be clipped.
+  if (isMenu) {
+    return (
+      <span ref={rootRef} className="flex flex-col">
+        <button
+          type="button"
+          aria-haspopup={needsDuration ? "dialog" : undefined}
+          aria-expanded={needsDuration ? open : undefined}
+          disabled={pending}
+          onClick={() => {
+            if (state === "ready_steps") onScheduleSteps?.();
+            else if (state === "ics_ready_steps") onScheduleIcs?.();
+            else if (open) close();
+            else setOpen(true); // needs_duration | ics_needs_duration
+          }}
+          className={triggerClassName}
+        >
+          {label}
+        </button>
+        {needsDuration && open && (
+          <span className="mt-1 flex flex-col gap-2 px-2.5 pb-1 text-xs">
+            {durationFields}
+          </span>
+        )}
+      </span>
+    );
+  }
+
+  // Icon variant, nothing to choose: 📅 acts immediately, no popup at all.
+  if (!needsDuration) {
+    return (
+      <span ref={rootRef} className="relative">
+        <button
+          type="button"
+          aria-label={iconLabel}
+          title={iconLabel}
+          disabled={pending}
+          onClick={() => {
+            if (state === "ready_steps") onScheduleSteps?.();
+            else onScheduleIcs?.(); // ics_ready_steps
+          }}
+          className={triggerClassName}
+        >
+          📅
+        </button>
+      </span>
+    );
+  }
+
+  // Icon variant + a duration to pick: a viewport-aware popover (#92).
+  return (
+    <span ref={rootRef} className="relative">
+      <Popover.Root
+        open={open}
+        // Every close route — Escape, outside press, re-pressing 📅, picking a
+        // preset — funnels through `close()`, which clears the custom-duration
+        // input so a stale value can't reappear on reopen (#23).
+        onOpenChange={(nextOpen) => (nextOpen ? setOpen(true) : close())}
+      >
+        <Popover.Trigger
+          aria-label={iconLabel}
+          title={iconLabel}
+          disabled={pending}
+          className={triggerClassName}
+        >
+          📅
+        </Popover.Trigger>
+        <Popover.Portal container={rootRef} render={<span />}>
+          <Popover.Positioner {...ANCHORED_POSITIONER} render={<span />}>
+            <Popover.Popup
+              render={<span />}
+              // Names the dialog for screen readers and for axe's
+              // aria-dialog-name rule — there is no visible heading to point
+              // `aria-labelledby` at.
+              aria-label={`${iconLabel} — duration`}
+              className={popupSurface("min-w-48 gap-2 p-2 text-xs")}
+            >
+              {durationFields}
+            </Popover.Popup>
+          </Popover.Positioner>
+        </Popover.Portal>
+      </Popover.Root>
     </span>
   );
 }
@@ -246,25 +318,7 @@ export function RowActions({
    * gutter, instead of sitting flush at the card edge. */
   className?: string;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMenuOpen(false);
-    };
-    const onPointerDown = (e: Event) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node))
-        setMenuOpen(false);
-    };
-    document.addEventListener("keydown", onKeyDown);
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.removeEventListener("pointerdown", onPointerDown);
-    };
-  }, [menuOpen]);
 
   return (
     <div
@@ -295,25 +349,37 @@ export function RowActions({
         {/* Visible gap so 📅 Schedule and 🗑 Delete don't sit flush — avoids misclicks. */}
         {del && <span aria-hidden="true" className="w-3" />}
         {del}
+        {/* #92 — a Popover, not `absolute right-0`: this ~288px popup used to
+            hang past the bottom edge from any row low on a phone screen. Still
+            NOT an ARIA menu (see the doc comment above): Popover.Popup is a
+            `dialog`, and `menu` entries stay ordinary buttons/links. Portaled
+            into `menuRef` rather than <body> so a press on a nested control
+            (the "Move to…" menu) is still a press inside this popup, and so
+            row-scoped queries keep meaning "this row's options". */}
         <span ref={menuRef} className="relative">
-          <button
-            type="button"
-            aria-label="All options"
-            aria-haspopup="true"
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((o) => !o)}
-            className={cn(
-              "hover:bg-accent rounded-md px-2 py-1 text-sm font-medium",
-              touchTarget,
-            )}
-          >
-            🔽
-          </button>
-          {menuOpen && (
-            <span className="bg-background absolute right-0 z-10 mt-1 flex min-w-40 flex-col gap-1 rounded-md border p-1 shadow-md">
-              {menu}
-            </span>
-          )}
+          <Popover.Root>
+            <Popover.Trigger
+              aria-label="All options"
+              className={cn(
+                "hover:bg-accent rounded-md px-2 py-1 text-sm font-medium",
+                touchTarget,
+              )}
+            >
+              🔽
+            </Popover.Trigger>
+            <Popover.Portal container={menuRef} render={<span />}>
+              <Popover.Positioner {...ANCHORED_POSITIONER} render={<span />}>
+                <Popover.Popup
+                  render={<span />}
+                  // The dialog's accessible name (axe aria-dialog-name).
+                  aria-label="All options"
+                  className={popupSurface("min-w-40 gap-1 p-1")}
+                >
+                  {menu}
+                </Popover.Popup>
+              </Popover.Positioner>
+            </Popover.Portal>
+          </Popover.Root>
         </span>
       </span>
     </div>
