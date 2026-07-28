@@ -132,12 +132,13 @@ export default async function HelpPage({
           out with <strong>Keep my paused session</strong>.
         </p>
         <p className="text-sm">
-          While a session is paused, the ring turns into a slow breathing pacer:
-          four seconds growing, six seconds settling back. Follow it if a pause
-          means you need a moment, or ignore it entirely —{" "}
-          <strong>Resume</strong> stays exactly where it was, and there is
-          nothing to switch on. If your system asks for reduced motion, the ring
-          simply holds still.
+          From the moment you start, the ring is also a slow breathing pacer:
+          four seconds growing, six seconds settling back. It runs for the whole
+          session — through a pause and out the other side — and stops when time
+          is up. Follow it if you want something to steady yourself against,
+          ignore it the rest of the time; it never moves the clock or the
+          buttons, and there is nothing to switch on. If your system asks for
+          reduced motion, the ring simply holds still.
         </p>
         <p className="text-sm">
           <strong>Focus music</strong>: ten lo-fi tracks are bundled with the

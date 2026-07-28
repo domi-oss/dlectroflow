@@ -315,10 +315,11 @@
   background-color: currentColor;
 }
 
-/* #89 — the paced breathing guide on a PAUSED focus session's ring. The ring
+/* #89 — the paced breathing guide on a live focus session's ring. The ring
  * graphic (src/components/focus/timer-visual.tsx) carries [data-breathing] for
- * exactly as long as the session is paused; see that component for why the
- * pacer is scoped to the paused ring and nothing else.
+ * exactly as long as the session is live — from Start, through any pause, until
+ * time's-up; see that component for the boundaries and why the pacer is scoped
+ * to the ring and nothing else.
  *
  * A real breathing cadence, not an arbitrary pulse: a 10s cycle whose single
  * intermediate stop sits at 40%, so the ring grows for 4s and settles back over
@@ -330,6 +331,13 @@
  * remaining time is a sibling overlay and stays perfectly still and legible),
  * and the peak is the ring's RESTING size — it breathes *into* its normal
  * dimensions rather than past the glow field it sits on.
+ *
+ * While the session RUNS, the same ring is also depleting (a per-second
+ * `stroke-dashoffset` transition on the arc, see timer-visual.tsx). That is a
+ * different property on a child of this element, so the two compose instead of
+ * fighting: the arc keeps depicting progress accurately at every scale, and the
+ * opacity floor is deliberately shallow (0.8) so it stays readable at the bottom
+ * of an exhale rather than fading out of the way.
  *
  * `scale` as the standalone property rather than `transform: scale()`: the ring
  * already carries Tailwind's -rotate-90 to start the arc at twelve o'clock, and

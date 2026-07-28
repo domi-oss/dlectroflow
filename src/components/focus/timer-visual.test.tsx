@@ -138,39 +138,45 @@ describe("TimerVisual", () => {
     },
   );
 
-  // #89 — a PAUSED session's ring doubles as a paced breathing guide (4s in /
-  // 6s out; the cadence itself lives in the `focus-breathe` keyframes, asserted
-  // in globals.breathe.test.ts). The marker attribute is what these tests can
-  // see: jsdom loads no stylesheet, so the component's contract is "does the
-  // ring opt into the pacer", not "is it moving".
-  describe("breathing pacer on pause (#89)", () => {
+  // #89 — the ring doubles as a paced breathing guide for as long as a session
+  // is LIVE: from Start, straight through any pause, until the clock runs out
+  // (4s in / 6s out; the cadence itself lives in the `focus-breathe` keyframes,
+  // asserted in globals.breathe.test.ts). Scope widened by the owner after
+  // seeing the pause-only build working. The marker attribute is what these
+  // tests can see: jsdom loads no stylesheet, so the component's contract is
+  // "does the ring opt into the pacer", not "is it moving".
+  describe("breathing pacer through the live session (#89)", () => {
     const ringSvg = (container: HTMLElement) =>
       container.querySelector("[data-testid='timer-visual-ring'] svg");
 
-    it("the paused ring opts into the pacer", () => {
-      const { container } = render(
-        <TimerVisual
-          style="ring"
-          remainingSec={300}
-          totalSec={600}
-          phase="paused"
-          reducedMotion={false}
-          voice="plain"
-        />,
-      );
-      expect(ringSvg(container)).toHaveAttribute("data-breathing");
-    });
+    it.each(["running", "paused"] as const)(
+      "the %s ring opts into the pacer",
+      (phase) => {
+        const { container } = render(
+          <TimerVisual
+            style="ring"
+            remainingSec={300}
+            totalSec={600}
+            phase={phase}
+            reducedMotion={false}
+            voice="plain"
+          />,
+        );
+        expect(ringSvg(container)).toHaveAttribute("data-breathing");
+      },
+    );
 
     // It is a guide you can choose to follow, not information: the element it
-    // rides on stays out of the a11y tree, so pausing announces nothing new to a
-    // screen reader (the phase is already carried by the Pause/Resume control).
+    // rides on stays out of the a11y tree, so nothing new is announced to a
+    // screen reader as the session runs or pauses (the phase is carried by the
+    // Pause/Resume control, and the time by the readout).
     it("stays out of the a11y tree", () => {
       const { container } = render(
         <TimerVisual
           style="ring"
           remainingSec={300}
           totalSec={600}
-          phase="paused"
+          phase="running"
           reducedMotion={false}
           voice="plain"
         />,
@@ -179,8 +185,11 @@ describe("TimerVisual", () => {
       expect(container.querySelector("[aria-live]")).toBeNull();
     });
 
-    it.each(["setup", "running", "timeup"] as const)(
-      "the %s ring does NOT breathe — the pacer is the paused state only",
+    // The two ends of a session. Setup is a decision screen, and time's-up
+    // switches the ring to its amber "answer me" semantic — neither is a moment
+    // to be breathing through.
+    it.each(["setup", "timeup"] as const)(
+      "the %s ring does NOT breathe — the pacer spans the live session only",
       (phase) => {
         const { container } = render(
           <TimerVisual
@@ -196,53 +205,60 @@ describe("TimerVisual", () => {
       },
     );
 
-    // The spec is explicit: reduced motion turns the pacer OFF, it does not slow
-    // it down. Leaning on the global @media rule in globals.css would instead
-    // leave a 0.01ms single-iteration animation on the element.
-    it("reduced motion disables it outright rather than slowing it", () => {
-      const { container } = render(
-        <TimerVisual
-          style="ring"
-          remainingSec={300}
-          totalSec={600}
-          phase="paused"
-          reducedMotion={true}
-          voice="plain"
-        />,
-      );
-      expect(ringSvg(container)).not.toHaveAttribute("data-breathing");
-    });
-
-    // A breathing bar / mug / set of digits is a different (worse) idea — the
-    // ring is the shape a breath maps onto. The other three styles keep the
-    // paused view they have today.
-    it.each(["digits", "bar", "mug"] as const)(
-      "%s style: nothing breathes when paused (ring-only pacer)",
-      (style) => {
+    // Reduced motion is the ONLY off switch (owner decision — there is no
+    // in-app setting), and it turns the pacer off rather than slowing it.
+    // Leaning on the global @media rule in globals.css would instead leave a
+    // 0.01ms single-iteration animation on the element.
+    it.each(["running", "paused"] as const)(
+      "reduced motion disables it outright in the %s phase, rather than slowing it",
+      (phase) => {
         const { container } = render(
           <TimerVisual
-            style={style}
+            style="ring"
             remainingSec={300}
             totalSec={600}
-            phase="paused"
-            reducedMotion={false}
+            phase={phase}
+            reducedMotion={true}
             voice="plain"
           />,
         );
-        expect(container.querySelector("[data-breathing]")).toBeNull();
+        expect(ringSvg(container)).not.toHaveAttribute("data-breathing");
       },
     );
 
-    // Legibility through the whole cycle: the animated element is the ring
-    // graphic alone, so the mm:ss readout (a sibling overlay) neither scales nor
-    // fades with it.
+    // A breathing bar / mug / set of digits is a different (worse) idea — the
+    // ring is the shape a breath maps onto. The other three styles are unchanged
+    // in every phase.
+    it.each(["digits", "bar", "mug"] as const)(
+      "%s style: nothing breathes in any phase (ring-only pacer)",
+      (style) => {
+        for (const phase of ["running", "paused"] as const) {
+          cleanup();
+          const { container } = render(
+            <TimerVisual
+              style={style}
+              remainingSec={300}
+              totalSec={600}
+              phase={phase}
+              reducedMotion={false}
+              voice="plain"
+            />,
+          );
+          expect(container.querySelector("[data-breathing]")).toBeNull();
+        }
+      },
+    );
+
+    // Legibility for the whole session: the animated element is the ring graphic
+    // alone, so the mm:ss readout (a sibling overlay) neither scales nor fades
+    // with it — including while it is counting down.
     it("animates the ring graphic only — the readout is outside it", () => {
       const { container } = render(
         <TimerVisual
           style="ring"
           remainingSec={125}
           totalSec={600}
-          phase="paused"
+          phase="running"
           reducedMotion={false}
           voice="plain"
         />,
@@ -251,10 +267,13 @@ describe("TimerVisual", () => {
       expect(screen.getByText("2:05")).toBeInTheDocument();
     });
 
-    // No layout shift entering or leaving the paused state: the pacer adds no
-    // element and changes no box — the ring's fixed 16rem frame is byte-for-byte
-    // the same markup running and paused, apart from the marker attribute.
-    it("adds no element and no size change on entering the paused state", () => {
+    // No layout shift, and no interruption, crossing between running and paused:
+    // the ring's markup is now byte-for-byte identical in both, so React
+    // reconciles the same element with the same attributes and the breath simply
+    // carries on mid-cycle instead of restarting. (The browser side of that —
+    // one Animation object whose start time never changes — is asserted in
+    // e2e/smoke/focus-timer.spec.ts.)
+    it("renders identical ring markup running and paused, so a pause cannot restart or shift it", () => {
       const props = {
         style: "ring",
         remainingSec: 300,
@@ -266,9 +285,8 @@ describe("TimerVisual", () => {
       const runningHtml = running.container.innerHTML;
       cleanup();
       const paused = render(<TimerVisual {...props} phase="paused" />);
-      expect(paused.container.innerHTML.replace(' data-breathing=""', "")).toBe(
-        runningHtml,
-      );
+      expect(paused.container.innerHTML).toBe(runningHtml);
+      expect(runningHtml).toContain('data-breathing=""');
     });
   });
 

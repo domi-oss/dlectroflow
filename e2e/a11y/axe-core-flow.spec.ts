@@ -92,5 +92,37 @@ test.describe("accessibility: core-flow routes (axe)", () => {
     // test's wait on the "Step text" field. (The countdown span has no ARIA role.)
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await scanA11y(page, "/focus/[stepId]");
+
+    // #89 — a RUNNING session is a different surface from the setup screen it was
+    // scanned on: the near-black neon hero, a light/gradient readout, its own
+    // control set, and now a continuously breathing ring. Scan it too — the timer
+    // is guest-visible, and this is where the pacer paints.
+    //
+    // Both keys went into axe-baseline.json carrying ONE pre-existing violation
+    // that this new coverage found on its first run: white on `bg-green-600`
+    // ("Complete step" / "Yes, done!") is 3.27:1, filed as #99. Baselined rather
+    // than fixed here because it is a palette decision on the session's primary
+    // CTA, not part of #89 — anything further on this surface still fails.
+    //
+    // Scanned in BOTH motion states. This file runs with prefers-reduced-motion
+    // (see test.use above), which is exactly the state where the pacer must be
+    // absent — so the first scan doubles as an independent check of that, driven
+    // by a real context-level media preference rather than a live emulateMedia
+    // flip. The second allows motion, which is the state a typical user is in.
+    // Nothing inside the animated element is text (the ring is two circles), so
+    // its scale/opacity cannot move an axe contrast result either way.
+    await page.getByRole("button", { name: "Start focusing" }).click();
+    await expect(
+      page.getByRole("button", { name: /complete step/i }),
+    ).toBeVisible();
+    const pacer = page.locator(
+      "[data-testid='timer-visual-ring'] svg[data-breathing]",
+    );
+    await expect(pacer).toHaveCount(0);
+    await scanA11y(page, "/focus/[stepId] running");
+
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await expect(pacer).toBeVisible();
+    await scanA11y(page, "/focus/[stepId] running (breathing)");
   });
 });
