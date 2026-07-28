@@ -1,6 +1,6 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
-import { MOBILE, setTheme, expectThemeApplied, waitForShell } from "../helpers";
+import { MOBILE, waitForShell } from "../helpers";
 import { OWNER_WS_ID } from "../constants";
 
 // #92 — row-action popups must stay inside the viewport at phone width.
@@ -23,6 +23,11 @@ import { OWNER_WS_ID } from "../constants";
 // require it to be inside the viewport. They are deliberately measurement
 // tests, not screenshot tests — a pixel baseline would go stale on every
 // unrelated style change and would not say *why* it failed.
+//
+// Every test here pins its own seeded row by text and polls coordinates rather
+// than reading them once. Both matter: the suite shares one workspace, so a
+// `.first()` row belongs to whichever spec ran last, and the inbox re-sorts as
+// items age, so a node can detach between "is it visible?" and "where is it?".
 //
 // Non-regression, asserted below and easy to lose: opening a row popup must NOT
 // lock page scroll, and scrolling must NOT dismiss it. That is what made fault
@@ -123,13 +128,37 @@ function expectInsideViewport(box: Box, what: string) {
   );
 }
 
+/** One seeded row, addressed by its own text. Deliberately not `.first()`: the
+ *  suite shares one workspace, so "the first 📥 on the page" is whatever an
+ *  earlier spec happened to leave behind — a row that may be mid-re-sort (the
+ *  inbox re-sorts as items age), which is how a `.first()` version of this spec
+ *  produced a null bounding box in CI while passing locally. */
+function seededRow(page: Page, marker: string, index: number): Locator {
+  return page
+    .locator('[data-bucket="singleTask"]')
+    .getByRole("listitem")
+    .filter({ hasText: `${marker} ${index}` });
+}
+
+/** A locator's on-screen x/y, polled: an inbox re-render between "is it
+ *  visible?" and "where is it?" detaches the node and `boundingBox()` returns
+ *  null, so read it as a retrying assertion rather than a one-shot `!`. */
+function triggerCoord(el: Locator, axis: "x" | "y") {
+  return expect.poll(async () => (await el.boundingBox())?.[axis] ?? null);
+}
+
 /** Scroll so `el` sits `fromBottom` px above the viewport bottom — the position
  *  a real user's last row occupies when they reach for its menu. */
 async function parkNearBottom(page: Page, el: Locator, fromBottom = 60) {
   const vh = page.viewportSize()!.height;
   for (let i = 0; i < 8; i++) {
     const b = await el.boundingBox();
-    if (!b) return;
+    // null = detached mid-re-render; retry rather than give up, or the caller's
+    // "is it really near the bottom?" precondition silently stops holding.
+    if (!b) {
+      await page.waitForTimeout(120);
+      continue;
+    }
     const delta = b.y - (vh - fromBottom);
     if (Math.abs(delta) < 8) return;
     await page.evaluate((d) => window.scrollBy(0, d), delta);
@@ -140,76 +169,74 @@ async function parkNearBottom(page: Page, el: Locator, fromBottom = 60) {
 test.describe("#92 row-action popups fit the phone viewport", () => {
   test.use({ viewport: MOBILE });
 
-  for (const theme of ["light", "dark"] as const) {
-    test(`the 📥 Move-to menu stays inside the viewport (${theme})`, async ({
-      page,
-    }) => {
-      const marker = `${SEED_MARKER} move ${theme}`;
-      const prisma = await seedRows(marker);
-      try {
-        await setTheme(page, theme);
-        await page.goto("/");
-        await waitForShell(page);
-        await expectThemeApplied(page, theme);
+  // Light mode only, on purpose. What these tests measure is geometry — a
+  // bounding box against the viewport — and the popup box is identical in both
+  // themes (same border, padding and min-width; only the palette differs), so a
+  // dark re-run would re-measure the same numbers. It would also inherit #98, a
+  // pre-existing intermittent hydration mismatch that strips the pre-hydration
+  // `dark` class, which made an earlier theme-swept version of this spec fail
+  // ~1 run in 10 for a reason that has nothing to do with popup positioning.
+  // Dark mode at 390 is covered for appearance by e2e/a11y-contrast.spec.ts.
+  test("the 📥 Move-to menu stays inside the viewport", async ({ page }) => {
+    const marker = `${SEED_MARKER} move`;
+    const prisma = await seedRows(marker);
+    try {
+      await page.goto("/");
+      await waitForShell(page);
 
-        const trigger = page.getByRole("button", { name: "Move to" }).first();
-        await expect(trigger).toBeVisible();
+      const trigger = seededRow(page, marker, 0).getByRole("button", {
+        name: "Move to",
+        exact: true, // not the "Move to…" entry inside the 🔽 popup
+      });
+      await expect(trigger).toBeVisible();
 
-        // Guard the repro precondition: the trigger really is near the left
-        // edge of a wide end cluster. If a layout change ever moves it back to
-        // the right, the measurement below stops proving anything.
-        const tb = (await trigger.boundingBox())!;
-        expect(
-          tb.x,
-          "📥 trigger sits left of centre (the fault-1 precondition)",
-        ).toBeLessThan(MOBILE.width / 2);
+      // Guard the repro precondition: the trigger really is near the left
+      // edge of a wide end cluster. If a layout change ever moves it back to
+      // the right, the measurement below stops proving anything.
+      await triggerCoord(trigger, "x").toBeLessThan(MOBILE.width / 2);
 
-        await trigger.click();
-        const menu = page.getByRole("menu").filter({ visible: true }).first();
-        await expect(menu).toBeVisible();
-        expectInsideViewport(await measure(menu), "📥 Move-to menu");
-      } finally {
-        await cleanupSeed(prisma, marker);
-      }
-    });
+      await trigger.click();
+      const menu = page.getByRole("menu").filter({ visible: true }).first();
+      await expect(menu).toBeVisible();
+      expectInsideViewport(await measure(menu), "📥 Move-to menu");
+    } finally {
+      await cleanupSeed(prisma, marker);
+    }
+  });
 
-    test(`the 🔽 All-options popup opened near the bottom edge stays inside the viewport (${theme})`, async ({
-      page,
-    }) => {
-      const marker = `${SEED_MARKER} overflow ${theme}`;
-      const prisma = await seedRows(marker);
-      try {
-        await setTheme(page, theme);
-        await page.goto("/");
-        await waitForShell(page);
-        await expectThemeApplied(page, theme);
+  test("the 🔽 All-options popup opened near the bottom edge stays inside the viewport", async ({
+    page,
+  }) => {
+    const marker = `${SEED_MARKER} overflow`;
+    const prisma = await seedRows(marker);
+    try {
+      await page.goto("/");
+      await waitForShell(page);
 
-        const trigger = page
-          .getByRole("button", { name: "All options" })
-          .first();
-        await expect(trigger).toBeAttached();
-        await parkNearBottom(page, trigger);
+      // The last seeded row: low on the page to begin with, then parked right
+      // against the bottom edge.
+      const trigger = seededRow(page, marker, SEED_COUNT - 1).getByRole(
+        "button",
+        { name: "All options" },
+      );
+      await expect(trigger).toBeVisible();
+      await parkNearBottom(page, trigger);
 
-        // Guard the repro precondition: an unflipped 288px popup from here
-        // could not possibly fit, so a pass means collision handling ran.
-        const tb = (await trigger.boundingBox())!;
-        expect(
-          tb.y - (await page.evaluate(() => window.scrollY)),
-          "🔽 trigger is parked in the bottom third (the fault-2 precondition)",
-        ).toBeGreaterThan(MOBILE.height * 0.6);
+      // Guard the repro precondition: an unflipped 288px popup from here
+      // could not possibly fit, so a pass means collision handling ran.
+      await triggerCoord(trigger, "y").toBeGreaterThan(MOBILE.height * 0.6);
 
-        await trigger.click();
-        const popup = page
-          .getByRole("dialog", { name: "All options" })
-          .filter({ visible: true })
-          .first();
-        await expect(popup).toBeVisible();
-        expectInsideViewport(await measure(popup), "🔽 All-options popup");
-      } finally {
-        await cleanupSeed(prisma, marker);
-      }
-    });
-  }
+      await trigger.click();
+      const popup = page
+        .getByRole("dialog", { name: "All options" })
+        .filter({ visible: true })
+        .first();
+      await expect(popup).toBeVisible();
+      expectInsideViewport(await measure(popup), "🔽 All-options popup");
+    } finally {
+      await cleanupSeed(prisma, marker);
+    }
+  });
 
   test("opening a row popup neither locks page scroll nor is dismissed by it", async ({
     page,
@@ -220,7 +247,10 @@ test.describe("#92 row-action popups fit the phone viewport", () => {
       await page.goto("/");
       await waitForShell(page);
 
-      const trigger = page.getByRole("button", { name: "Move to" }).first();
+      const trigger = seededRow(page, marker, 0).getByRole("button", {
+        name: "Move to",
+        exact: true,
+      });
       await expect(trigger).toBeVisible();
       await trigger.click();
       const menu = page.getByRole("menu").filter({ visible: true }).first();
@@ -256,10 +286,7 @@ test.describe("#92 row-action popups fit the phone viewport", () => {
       await page.goto("/");
       await waitForShell(page);
 
-      const row = page
-        .locator('[data-bucket="singleTask"]')
-        .getByRole("listitem")
-        .filter({ hasText: `${marker} 0` });
+      const row = seededRow(page, marker, 0);
       await expect(row).toBeVisible();
       await row.getByRole("button", { name: "All options" }).click();
       // Nested floating elements: the 🔽 popup must not treat a press inside
@@ -310,9 +337,10 @@ test.describe("#92 the 📅 duration popover fits the phone viewport", () => {
     }
 
     const trigger = page
-      .getByRole("button", { name: "Add to calendar (.ics)" })
-      .first();
-    await expect(trigger).toBeAttached();
+      .getByRole("listitem")
+      .filter({ hasText: `${SEED_MARKER} ics 0` })
+      .getByRole("button", { name: "Add to calendar (.ics)" });
+    await expect(trigger).toBeVisible();
     await parkNearBottom(page, trigger);
     await trigger.click();
 
