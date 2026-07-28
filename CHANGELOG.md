@@ -53,9 +53,16 @@ operators upgrading a self-hosted instance don't get surprised.
   widened after #55: the 2.1.2 that #55 landed on is itself affected, and only
   5.0.8 is clean (`npm audit` range `<=5.0.7`).
   The `brace-expansion: ^2.0.2` override #55 added had also become the *cause*
-  of two of the three findings — `minimatch@10.2.5` already asks for
+  of two of the three affected copies — `minimatch@10.2.5` already asks for
   `brace-expansion@^5.0.5`, and the override was pinning it back down to 2.x.
-  Reported copies go **3 → 1**.
+  Installed affected copies go **3 → 1**.
+  - **This does not clear the finding, and is not claimed to.** GitLab's
+    Dependency Scanning already reported `brace-expansion` as a *single* finding
+    (it reports per package version in `package-lock.json`, and all three copies
+    were the same 2.1.2), so the HIGH stays — now attributed to 2.1.3. What
+    changes is that two of the three installed copies are genuinely patched.
+    Clearing the finding needs the upstream move described below, or a policy
+    decision on #82.
   - **The one remaining copy is upstream-blocked, not overlooked.** It serves
     `minimatch@3.1.5`, which does `expand(pattern)` on a default import;
     5.0.8's CommonJS build exports only `{ expand }`, so forcing it there
