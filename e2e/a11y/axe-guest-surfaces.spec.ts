@@ -6,6 +6,7 @@ import {
   setTheme,
   expectThemeApplied,
   waitForShell,
+  expandAllSections,
 } from "../helpers";
 import {
   scanA11y,
@@ -156,6 +157,21 @@ for (const theme of THEMES) {
         expectNoContrastViolations(await scanColorContrast(page));
       });
     }
+
+    // #101 — a guest's /settings is now eight disclosures, all closed. Closed is
+    // the state they FIRST meet (so the triggers and chevrons above are scanned
+    // in it), but everything the earlier run of this gate caught — the guest
+    // integrations shell, the disabled model radios, the owner-only pills — is
+    // behind a `hidden` attribute that axe correctly skips. Scan the open page
+    // too, or this gate silently stops covering the markup it was written for.
+    test(`zero color-contrast violations: guest settings with every section expanded (${theme})`, async ({
+      page,
+    }) => {
+      await gotoAsGuest(page, "/settings");
+      await expectThemeApplied(page, theme);
+      await expandAllSections(page);
+      expectNoContrastViolations(await scanColorContrast(page));
+    });
   });
 }
 

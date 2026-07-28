@@ -32,7 +32,10 @@ vi.mock("@/lib/notifications", () => ({
   subscribeNotificationPermission: () => () => {},
 }));
 
-import { SettingsPanel } from "@/components/settings/settings-panel";
+import { AgingSection } from "@/components/settings/aging-section";
+import { VoiceSection } from "@/components/settings/voice-section";
+import { BreakdownModelSection } from "@/components/settings/breakdown-model-section";
+import { DemoSection } from "@/components/settings/demo-section";
 import { AppearanceSection } from "@/components/settings/appearance-section";
 import { NotificationsSection } from "@/components/settings/notifications-section";
 import { FocusTimerSection } from "@/components/settings/focus-timer-section";
@@ -59,20 +62,24 @@ function AllSections({ voice = "plain" as Voice }) {
         now={NOW}
         voice={voice}
       />
-      <SettingsPanel
+      <AgingSection
         settings={{
           agingThresholdMinutes: 45,
           demoOverrideSeconds: null,
           agingHours: 24,
           overdueHours: 48,
           wayOverdueHours: 72,
-          firstRunPreview: false,
         }}
+        voice={voice}
+      />
+      <VoiceSection voice={voice} />
+      <BreakdownModelSection
         isOwner
         breakdownModel={null}
         modelChoices={[{ id: "sonnet", label: "Sonnet" }]}
         voice={voice}
       />
+      <DemoSection firstRunPreview={false} voice={voice} />
       <AppearanceSection
         completeStrikethrough
         completeTickColor="green"

@@ -6,6 +6,7 @@ import {
   setTheme,
   expectThemeApplied,
   waitForShell,
+  sectionToggle,
 } from "../helpers";
 import {
   scanColorContrast,
@@ -65,9 +66,26 @@ async function waitForScrollToSettle(page: Page): Promise<void> {
   );
 }
 
-/** The panel's disclosure trigger. */
+/**
+ * The panel's disclosure trigger.
+ *
+ * #101 moved it inside the h2 (the chevron has to sit before the title), so its
+ * accessible name is now the section's own label — which the "Jump to…" nav also
+ * renders as a link. `data-section-toggle` is the unambiguous hook every section
+ * carries.
+ */
 function peopleToggle(page: Page): Locator {
-  return page.getByRole("button", { name: /people admin/i });
+  return sectionToggle(page, "settings-people");
+}
+
+/**
+ * The triage line in the heading band, beside the title.
+ *
+ * A sibling of the H2 rather than of the trigger: the trigger lives inside the
+ * heading now, so `[data-section-toggle] ~ span` finds nothing.
+ */
+function peopleSummary(page: Page): Locator {
+  return page.locator("#settings-people ~ span").first();
 }
 
 /** Open the panel (it rests collapsed) and wait for its body to be on screen. */
@@ -92,8 +110,11 @@ test.describe("People admin — the disclosure", () => {
     const toggle = peopleToggle(page);
     await expect(toggle).toBeVisible();
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
-    // The summary is the collapsed row's whole justification.
-    await expect(toggle).toContainText(/\d+ account/);
+    // The summary is the collapsed row's whole justification. It sits beside the
+    // title now (#101) and is wired to the trigger as its accessible description,
+    // so it is still what a screen-reader user hears on the collapsed row.
+    await expect(peopleSummary(page)).toContainText(/\d+ account/);
+    await expect(toggle).toHaveAccessibleDescription(/\d+ account/);
 
     // Nothing behind it is reachable — not on screen, not in the tab order.
     await expect(page.getByRole("list", { name: /accounts/i })).toHaveCount(0);
@@ -125,12 +146,12 @@ test.describe("People admin — the disclosure", () => {
     const res = await page.request.get("/settings");
     const html = await res.text();
 
-    // Matched on the PEOPLE trigger specifically, via its aria-label. The
+    // Matched on the PEOPLE trigger specifically, via its section hook. The
     // section nav's own "Jump to…" toggle also carries aria-expanded="false" +
     // aria-controls and comes FIRST in the document, so a generic pattern finds
     // that one instead and proves nothing about this panel.
     const trigger =
-      /<button[^>]*aria-expanded="false"[^>]*aria-controls="([^"]+)"[^>]*aria-label="Show people admin[^"]*"/.exec(
+      /<button[^>]*data-section-toggle="settings-people"[^>]*aria-expanded="false"[^>]*aria-controls="([^"]+)"/.exec(
         html,
       );
     expect(
@@ -215,12 +236,19 @@ for (const state of ["collapsed", "expanded"] as const) {
       expect(headingBox.y).toBeGreaterThanOrEqual(navBox.y + navBox.height - 1);
     });
 
-    test("the scroll-spy names People at the top of the page", async ({
+    test("the scroll-spy names People at the END of the page", async ({
       page,
     }) => {
-      // People leads the page, so at rest it is the current section. A section
-      // too short to overlap the tracking band would leave the nav lit on the
-      // wrong entry — the exact failure mode collapsing invites.
+      // #101 moved People to the end (administration last), which puts it in the
+      // hardest spot for the spy: the last section can never reach the top of the
+      // viewport, so "topmost in the band wins" would strand the entry above it.
+      // Collapsed, it is a ~56px band, which is the version of that bug this
+      // whole disclosure invites.
+      await page.evaluate(() =>
+        window.scrollTo(0, document.documentElement.scrollHeight),
+      );
+      await waitForScrollToSettle(page);
+
       await expect(page.locator(`${SETTINGS_NAV} a[aria-current]`)).toHaveText(
         /People/,
       );
@@ -229,9 +257,14 @@ for (const state of ["collapsed", "expanded"] as const) {
       );
     });
 
-    test("the pinned section header is People's, and exactly one is pinned", async ({
+    test("the pinned section header is People's at the end, and exactly one is pinned", async ({
       page,
     }) => {
+      await page.evaluate(() =>
+        window.scrollTo(0, document.documentElement.scrollHeight),
+      );
+      await waitForScrollToSettle(page);
+
       const pinned = page.locator("[data-section-header][data-current]");
       await expect(pinned).toHaveCount(1);
       await expect(pinned).toContainText("People");
@@ -243,37 +276,37 @@ for (const state of ["collapsed", "expanded"] as const) {
       expect(currentHref).toBe(`#${pinnedId}`);
     });
 
-    test("scrolling on past People still hands the current section over", async ({
+    test("scrolling back up off People hands the current section over", async ({
       page,
     }) => {
-      // Whatever People's height, the section AFTER it must be able to become
-      // current — a mis-measured band can strand the spy on the first section.
-      await page.evaluate(() => {
-        const h = document.getElementById("settings-aging")!;
-        const section = h.closest("section") ?? h;
-        const r = section.getBoundingClientRect();
-        window.scrollTo(0, window.scrollY + r.top + r.height / 3);
-      });
+      // Whatever People's height, the sections ABOVE it must be able to become
+      // current again — a mis-measured band can strand the spy on the last one.
+      await page.evaluate(() =>
+        window.scrollTo(0, document.documentElement.scrollHeight),
+      );
+      await waitForScrollToSettle(page);
+      await page.evaluate(() => window.scrollTo(0, 0));
       await waitForScrollToSettle(page);
 
       await expect(page.locator(`${SETTINGS_NAV} a[aria-current]`)).toHaveText(
-        /Aging & reminder/,
+        /Focus timer/,
       );
     });
   });
 }
 
 test.describe("People admin (owner)", () => {
-  test("the panel leads the settings page and is listed in the nav", async ({
+  test("the panel CLOSES the settings page and is listed in the nav", async ({
     page,
   }) => {
     await page.goto("/settings");
     await waitForShell(page);
 
     await expect(page.locator(PEOPLE)).toBeVisible();
-    // The design puts the Account group at the TOP of /settings.
+    // #101 — instance administration is not what should greet the owner on their
+    // own settings page. It used to be first; it is now last.
     const headings = page.locator("h2[data-section-target]");
-    await expect(headings.first()).toHaveAttribute("id", "settings-people");
+    await expect(headings.last()).toHaveAttribute("id", "settings-people");
 
     // …and the section nav lists it, so the anchor is reachable.
     const nav = page.locator(SETTINGS_NAV);
@@ -467,8 +500,10 @@ for (const theme of THEMES) {
       await page.goto("/settings");
       await waitForShell(page);
       await expectThemeApplied(page, theme);
-      // The resting state: the trigger and its summary line are the only People
-      // UI on the page, and they are `text-muted-foreground` at `text-sm`.
+      // The resting state: the trigger (the section title, `text-lg
+      // font-semibold`) and its muted `text-sm` summary line are the only People
+      // UI on the page. Since #101 every other section is collapsed here too, so
+      // this scan also covers eight more triggers and chevrons.
       await expect(peopleToggle(page)).toBeVisible();
       expectNoContrastViolations(await scanColorContrast(page));
     });

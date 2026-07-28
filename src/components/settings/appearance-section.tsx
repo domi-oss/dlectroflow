@@ -17,7 +17,7 @@ import {
   SaveIndicator,
 } from "@/components/settings/use-save-status";
 import { cn } from "@/lib/utils";
-import { SectionHeading } from "@/components/nav/section-heading";
+import { CollapsibleSection } from "@/components/nav/collapsible-section";
 
 type AppearancePrefs = {
   completeStrikethrough: boolean;
@@ -46,7 +46,8 @@ export function AppearanceSection({
   completeTickColor,
   typeface,
   voice,
-}: AppearancePrefs & { voice: Voice }) {
+  defaultExpanded,
+}: AppearancePrefs & { voice: Voice; defaultExpanded?: boolean }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const { status, markSaving, markSaved, markError } = useSaveStatus();
@@ -71,11 +72,12 @@ export function AppearanceSection({
   };
 
   return (
-    <section className="space-y-3">
-      <SectionHeading id="settings-appearance" voice={voice}>
-        <SaveIndicator status={status} voice={voice} />
-      </SectionHeading>
-
+    <CollapsibleSection
+      id="settings-appearance"
+      voice={voice}
+      defaultExpanded={defaultExpanded}
+      headingExtras={<SaveIndicator status={status} voice={voice} />}
+    >
       {/* Theme (moved here so Appearance is a single group). */}
       <div className="space-y-1">
         <span className="text-muted-foreground text-xs">
@@ -184,6 +186,6 @@ export function AppearanceSection({
       >
         {t("appearance.typefacePreview", voice)}
       </p>
-    </section>
+    </CollapsibleSection>
   );
 }

@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { disconnectGoogleTasks } from "@/app/actions/google-schedule";
 import { t, type Voice } from "@/lib/strings";
-import { SectionHeading } from "@/components/nav/section-heading";
+import { CollapsibleSection } from "@/components/nav/collapsible-section";
 
 type GoogleStatus = {
   configured: boolean;
@@ -41,12 +41,14 @@ export function IntegrationsPanel({
   google,
   readOnly = false,
   voice = "plain",
+  defaultExpanded,
 }: {
   /** Owner status. `null` in the guest read-only shell (no status is fetched). */
   google: GoogleStatus | null;
   /** #11 — guest read-only presentation: show the shell, never real status. */
   readOnly?: boolean;
   voice?: Voice;
+  defaultExpanded?: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -58,12 +60,16 @@ export function IntegrationsPanel({
   // caller can't accidentally get the guest UI by passing a null status.
   if (readOnly) {
     return (
-      <section className="space-y-3">
-        <SectionHeading id="settings-integrations" voice={voice}>
+      <CollapsibleSection
+        id="settings-integrations"
+        voice={voice}
+        defaultExpanded={defaultExpanded}
+        headingExtras={
           <span className="border-input text-muted-foreground rounded-full border px-2 py-0.5 text-xs font-medium">
             🔒 {t("settings.ownerOnly", voice)}
           </span>
-        </SectionHeading>
+        }
+      >
         {/* #90 — this card used to be dimmed with `opacity-70`, which is the
             exact mechanism #56 fixed on the saved-for-later row: compositing a
             70% wash over `text-muted-foreground` dropped the description and
@@ -89,7 +95,7 @@ export function IntegrationsPanel({
             {t("settings.integrationsOwnerHint", voice)}
           </p>
         </div>
-      </section>
+      </CollapsibleSection>
     );
   }
 
@@ -106,8 +112,11 @@ export function IntegrationsPanel({
         : "bg-muted text-muted-foreground";
 
   return (
-    <section className="space-y-3">
-      <SectionHeading id="settings-integrations" voice={voice} />
+    <CollapsibleSection
+      id="settings-integrations"
+      voice={voice}
+      defaultExpanded={defaultExpanded}
+    >
       <div className="rounded-lg border p-4">
         <div className="flex items-center gap-3">
           <div className="flex-1">
@@ -173,6 +182,6 @@ export function IntegrationsPanel({
           )}
         </div>
       </div>
-    </section>
+    </CollapsibleSection>
   );
 }

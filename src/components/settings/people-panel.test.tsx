@@ -69,9 +69,23 @@ function view(over: Partial<PeopleAdminView> = {}): PeopleAdminView {
   };
 }
 
-/** The disclosure trigger — the panel's whole resting UI when collapsed. */
-function toggle() {
-  return screen.getByRole("button", { name: /people admin/i });
+/**
+ * The disclosure trigger — the panel's whole resting UI when collapsed.
+ *
+ * #101 moved the trigger INSIDE the h2 (the chevron has to sit before the title,
+ * so the title is the trigger), which makes its accessible name the section's
+ * registry label. `data-section-toggle` is the stable hook every section carries;
+ * matching on the name alone would also match the nav's "People" jump link.
+ */
+function toggle(): HTMLButtonElement {
+  return document.querySelector<HTMLButtonElement>(
+    '[data-section-toggle="settings-people"]',
+  )!;
+}
+
+/** The triage line in the heading band, beside the title. */
+function summary(): HTMLElement {
+  return document.getElementById(toggle().getAttribute("aria-describedby")!)!;
 }
 
 /**
@@ -808,7 +822,7 @@ describe("PeoplePanel — the collapsed row earns its space", () => {
       ],
     });
 
-    expect(toggle()).toHaveTextContent(
+    expect(summary()).toHaveTextContent(
       "5 accounts · 1 revoked · 2 invitations pending",
     );
   });
@@ -819,9 +833,9 @@ describe("PeoplePanel — the collapsed row earns its space", () => {
       invitations: [],
     });
 
-    expect(toggle()).toHaveTextContent("1 account");
-    expect(toggle()).not.toHaveTextContent(/revoked/);
-    expect(toggle()).not.toHaveTextContent(/pending/);
+    expect(summary()).toHaveTextContent("1 account");
+    expect(summary()).not.toHaveTextContent(/revoked/);
+    expect(summary()).not.toHaveTextContent(/pending/);
   });
 
   it("counts only UNCLAIMED invitations as pending", () => {
@@ -837,7 +851,7 @@ describe("PeoplePanel — the collapsed row earns its space", () => {
         },
       ],
     });
-    expect(toggle()).not.toHaveTextContent(/pending/);
+    expect(summary()).not.toHaveTextContent(/pending/);
   });
 
   it("pluralises properly, so the row never reads like a bug", () => {
@@ -854,7 +868,7 @@ describe("PeoplePanel — the collapsed row earns its space", () => {
         },
       ],
     });
-    expect(toggle()).toHaveTextContent(
+    expect(summary()).toHaveTextContent(
       "1 account · 1 revoked · 1 invitation pending",
     );
   });
@@ -862,26 +876,31 @@ describe("PeoplePanel — the collapsed row earns its space", () => {
   it("carries NO usage totals — the collapsed row is triage, not a dashboard", () => {
     renderCollapsed();
     // The default fixture has a person with 12/50 used; none of it belongs here.
-    expect(toggle()).not.toHaveTextContent(/used/);
-    expect(toggle()).not.toHaveTextContent(/\d+ \/ \d+/);
+    expect(summary()).not.toHaveTextContent(/used/);
+    expect(summary()).not.toHaveTextContent(/\d+ \/ \d+/);
   });
 
-  it("gives the trigger an accessible name that says what it DOES, summary included", () => {
+  it("names the trigger after the section and DESCRIBES it with the summary", () => {
     renderCollapsed({ people: [person()], invitations: [] });
-    // Visible text is the summary; the accessible name prefixes the action, and
-    // contains the visible text (WCAG 2.5.3 Label in Name).
-    const name = toggle().getAttribute("aria-label")!;
-    expect(name).toMatch(/^Show people admin/i);
-    expect(name).toContain("1 account");
-
+    // #101: the visible label of a section heading is the section's name, and
+    // WCAG 2.5.3 (Label in Name) wants the accessible name to be that. The
+    // triage line is carried as the DESCRIPTION instead, so a screen-reader user
+    // still hears it — "People, collapsed, button, 1 account" — without the
+    // heading being renamed to a running commentary.
+    expect(toggle()).toHaveAccessibleName("People");
+    expect(toggle()).toHaveAccessibleDescription("1 account");
+    // State comes from aria-expanded, not from the words, so it cannot drift.
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(toggle());
-    expect(toggle().getAttribute("aria-label")).toMatch(/^Hide people admin/i);
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+    expect(toggle()).toHaveAccessibleName("People");
   });
 
   it("keeps the summary visible while expanded, so the row does not jump", () => {
     renderCollapsed();
-    const before = toggle().textContent;
+    const before = summary().textContent;
     fireEvent.click(toggle());
-    expect(toggle().textContent).toBe(before);
+    expect(summary()).toBeVisible();
+    expect(summary().textContent).toBe(before);
   });
 });

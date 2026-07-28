@@ -2,7 +2,12 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { sectionLabel, type SectionDef } from "@/lib/section-nav";
+import {
+  SECTION_ACTIVATE_EVENT,
+  sectionLabel,
+  type SectionActivateDetail,
+  type SectionDef,
+} from "@/lib/section-nav";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { type Voice } from "@/lib/strings";
 
@@ -22,6 +27,27 @@ const WIDE = "(min-width: 40rem)";
  */
 const BAND_TOP_SLACK = 4; // rounding only — a jump now lands flush at the bar
 const BAND_BOTTOM = "-35%"; // band ends 65% down the viewport
+
+/**
+ * Is this section still (partly) on screen, below the sticky bar?
+ *
+ * Deliberately wider than the tracking band: this answers "is the section the
+ * reader explicitly asked for still in front of them?", and a section can be
+ * perfectly visible while sitting below the band's 65% cut-off — which is where
+ * the last few sections of a page live once it is scrolled to its limit.
+ *
+ * Module level, taking the measured bar height as an argument, so it never reads
+ * a ref: callers are event handlers and observer callbacks, never render.
+ */
+function sectionOnScreen(id: string, barHeight: number): boolean {
+  const heading = document.getElementById(id);
+  const target = heading?.closest("section") ?? heading;
+  if (!target) return false;
+  const rect = target.getBoundingClientRect();
+  return (
+    rect.bottom > barHeight + BAND_TOP_SLACK && rect.top < window.innerHeight
+  );
+}
 
 /**
  * #72 — collapsible sticky section nav for the long pages (Settings, Help).
@@ -70,6 +96,18 @@ export function SectionNav({
   // Measured height of the sticky bar. Feeds both the jump targets'
   // scroll-margin (via a CSS custom property) and the tracking band below.
   const [barHeight, setBarHeight] = useState(0);
+
+  // #101 — the section the reader NAMED, by jumping to it or by clicking its own
+  // header. It outranks the scroll-spy's "topmost section in the band" verdict
+  // and the end-of-page rule below, both of which answer a different question
+  // ("what am I reading?" rather than "what did I just ask for?"). Refs, not
+  // state: nothing renders from them directly, and they must survive the
+  // observer being rebuilt on a bar-height change.
+  const explicitRef = useRef<string | null>(null);
+  // Has that section actually been on screen yet? A smooth jump to the far end of
+  // the page is still travelling for a few hundred ms, and until it arrives the
+  // honest answer is "hold the highlight where the reader pointed it".
+  const explicitArmedRef = useRef(false);
 
   // `current` was set from whatever section list was live when the observer was
   // built, and props can hand us a SHORTER list before the observer catches up:
@@ -167,6 +205,31 @@ export function SectionNav({
           if (entry.isIntersecting) inBand.add(id);
           else inBand.delete(id);
         }
+        // An explicit choice wins for as long as its section is in front of the
+        // reader. Without this, clicking a section header (which expands it and
+        // therefore moves every section below it) immediately hands the highlight
+        // to whatever sits topmost in the band — usually a section ABOVE the one
+        // just clicked — and a jump to one of the last sections loses it to the
+        // end-of-page rule instead.
+        const explicit = explicitRef.current;
+        if (explicit) {
+          if (sectionOnScreen(explicit, barOffset())) {
+            explicitArmedRef.current = true;
+            setCurrent(explicit);
+            return;
+          }
+          // Never got there yet: a smooth scroll is still in flight, so hold
+          // rather than lighting up everything it flies past. Unless the section
+          // is not on the PAGE any more (a save calls router.refresh(), and
+          // Settings renders a different set for owner vs guest) — holding for a
+          // section that no longer exists would freeze the highlight for good.
+          if (!explicitArmedRef.current && document.getElementById(explicit)) {
+            return;
+          }
+          // Reached and scrolled away, or gone — the spy takes over again.
+          explicitRef.current = null;
+          explicitArmedRef.current = false;
+        }
         if (atDocumentEnd()) {
           setCurrent(order[order.length - 1]);
           return;
@@ -190,6 +253,19 @@ export function SectionNav({
     // rest — not a scroll-position poller — and where it is unsupported the
     // observer's own (possibly mid-animation) verdict simply stands.
     const onScrollEnd = () => {
+      const explicit = explicitRef.current;
+      if (explicit) {
+        if (sectionOnScreen(explicit, barOffset())) {
+          explicitArmedRef.current = true;
+          setCurrent(explicit);
+          return;
+        }
+        // The scroll came to rest and the section we were sent to is nowhere in
+        // sight (a hash for a section that has since gone, say). Release the
+        // override rather than freezing the highlight on something invisible.
+        explicitRef.current = null;
+        explicitArmedRef.current = false;
+      }
       if (atDocumentEnd()) setCurrent(order[order.length - 1]);
     };
     const hasScrollEnd = "onscrollend" in window;
@@ -223,6 +299,36 @@ export function SectionNav({
     return () => band.removeAttribute("data-current");
   }, [currentSectionId]);
 
+  /**
+   * Name the section the reader asked for: light it now, and keep it lit until it
+   * leaves the screen (see the observer above). Both callers are explicit user
+   * actions — a nav jump, and #101's click on a section's own header.
+   */
+  const activate = (id: string): void => {
+    const bar = Math.round(navRef.current?.getBoundingClientRect().height ?? 0);
+    explicitRef.current = id;
+    // A header you just clicked is on screen by definition; a jump target across
+    // the page is not, yet.
+    explicitArmedRef.current = sectionOnScreen(id, bar);
+    setCurrent(id);
+  };
+
+  // #101 — a collapsible section's header publishes itself as the section being
+  // worked in when it is clicked (src/components/nav/collapsible-section.tsx).
+  // Those headings live outside this component's tree, so a DOM event is the
+  // channel; the highlight it lands on is !162's existing magenta treatment,
+  // aria-current and marker dot, unchanged.
+  useEffect(() => {
+    const onActivate = (event: Event) => {
+      const id = (event as CustomEvent<SectionActivateDetail>).detail?.id;
+      if (id) activate(id);
+    };
+    window.addEventListener(SECTION_ACTIVATE_EVENT, onActivate);
+    return () => window.removeEventListener(SECTION_ACTIVATE_EVENT, onActivate);
+    // Set up exactly once: `activate` only touches refs, `setCurrent` and the nav
+    // element, all stable for the component's lifetime.
+  }, []);
+
   const onJump = (
     event: React.MouseEvent<HTMLAnchorElement>,
     id: string,
@@ -244,6 +350,11 @@ export function SectionNav({
     // `preventScroll` leaves the (smooth) scroll to the anchor's default action.
     if (!wide) setExpanded(false);
     document.getElementById(id)?.focus({ preventScroll: true });
+    // Light the destination straight away and hold it through the (smooth) scroll,
+    // instead of following whatever the flight passes over — and instead of
+    // losing it to the end-of-page rule for a section the page cannot scroll to
+    // the top, which #101's reorder made an everyday case rather than a corner.
+    activate(id);
   };
 
   return (

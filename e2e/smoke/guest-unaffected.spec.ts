@@ -75,12 +75,22 @@ test("a guest sees NOTHING of the People admin — no card, no heading, no empty
   // gate would be quietly scanning owner administration UI and passing.
   await page.goto("/settings");
 
+  // POSITIVE CONTROL first. Every assertion below is an absence, and #101 gave
+  // absences a second way to be vacuous: "not visible" is also what a COLLAPSED
+  // section looks like, and a page that failed to render at all would pass every
+  // one of them. So prove the settings page really is here, with its other eight
+  // sections, before proving this one is not.
+  await expect(page.locator("[data-section-toggle]")).toHaveCount(8);
+  await expect(
+    page.locator('[data-section-toggle="settings-appearance"]'),
+  ).toBeVisible();
+
   // Not the section, not the heading, and not a collapsed shell of either.
   await expect(page.locator("#settings-people")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "People" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /people admin/i })).toHaveCount(
-    0,
-  );
+  await expect(
+    page.locator('[data-section-toggle="settings-people"]'),
+  ).toHaveCount(0);
   // No summary line either — "N accounts" is itself information about the
   // instance that a guest has no business reading.
   await expect(page.getByText(/\d+ account/)).toHaveCount(0);
@@ -114,9 +124,16 @@ test("a guest's /settings HTML never carries the People panel at all", async ({
   const res = await page.request.get("/settings");
   const html = await res.text();
 
+  // Positive control: the response really is the settings page (#101 — otherwise
+  // every `not.toContain` below passes on an error page just as happily).
+  expect(html).toContain('data-section-toggle="settings-appearance"');
+
   expect(html).not.toContain("settings-people");
-  expect(html).not.toContain("people admin");
   expect(html).not.toContain("data-person-label");
+  // The panel's own copy, which exists nowhere else in the app — the check that
+  // survives any future rename of the id or the section hook.
+  expect(html).not.toMatch(/never anyone.s tasks, notes or other content/i);
+  expect(html).not.toMatch(/send invitation/i);
   // The seeded handles, straight out of the database.
   expect(html).not.toContain("e2e-owner");
   expect(html).not.toContain("e2e-member");

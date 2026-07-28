@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   invitePerson,
@@ -13,7 +13,7 @@ import type { InvitationView, PeopleAdminView, PersonView } from "@/lib/people";
 import { AiPolicy, UserRole, UserStatus } from "@/lib/constants";
 import { formatAgo } from "@/lib/format";
 import { type Voice } from "@/lib/strings";
-import { SectionHeading } from "@/components/nav/section-heading";
+import { CollapsibleSection } from "@/components/nav/collapsible-section";
 import { cn } from "@/lib/utils";
 
 /**
@@ -425,24 +425,24 @@ export function PeoplePanel({
   view,
   now,
   voice,
+  defaultExpanded,
 }: {
   view: PeopleAdminView;
   /** Server-render timestamp, so relative times survive hydration. */
   now: number;
   voice: Voice;
+  /**
+   * Every section takes this (#101), for one uniform disclosure API — but the
+   * settings page deliberately never passes it here: administration is not what
+   * should greet the owner on their own settings page.
+   */
+  defaultExpanded?: boolean;
 }) {
   const router = useRouter();
-  const bodyId = useId();
-  // Collapsed on load, EVERY visit. Following !162's precedent: the section nav
-  // deliberately defaults collapsed rather than restoring a state the reader has
-  // forgotten they left. Reopening is remembered for the rest of this visit and
-  // nothing is persisted across visits.
-  //
-  // Plain `useState(false)` — server and client agree, so `aria-expanded` is
-  // honest from the first byte and there is no expanded-then-collapsed flash on
-  // hydration. Deliberately NOT synced from an effect: the react-hooks rules are
-  // at `error` here, and a set-state-in-effect would be the flash.
-  const [expanded, setExpanded] = useState(false);
+  // The disclosure itself now lives in <CollapsibleSection> (#101) — every
+  // section of /settings uses the mechanism this panel introduced in !175, so it
+  // is shared code rather than nine copies. Collapsed on load, EVERY visit;
+  // reopening is remembered for the rest of the visit and nothing is persisted.
   const [identity, setIdentity] = useState("");
   const [note, setNote] = useState("");
   const [message, setMessage] = useState<Message>(null);
@@ -477,59 +477,22 @@ export function PeoplePanel({
   const summary = peopleSummary(view);
 
   return (
-    <section className="space-y-3">
-      {/* The disclosure trigger sits in the heading band as a SIBLING of the h2,
-          so the h2 stays exactly what the section registry promises it is: the
-          jump target, the focus destination and the pinned magenta header — open
-          or closed. Markup, classes and focus treatment are lifted from
-          !162's "Jump to…" toggle (src/components/nav/section-nav.tsx) rather
-          than invented, so the app has one disclosure dialect and not three. */}
-      <SectionHeading id="settings-people" voice={voice}>
-        <button
-          type="button"
-          aria-expanded={expanded}
-          aria-controls={bodyId}
-          // Visible text is the SUMMARY; the accessible name prefixes the action
-          // and still contains that text, which is what WCAG 2.5.3 (Label in
-          // Name) asks for. A screen-reader user hears what it does, the state,
-          // and the same triage line a sighted user reads.
-          aria-label={`${expanded ? "Hide" : "Show"} people admin: ${summary}`}
-          onClick={() => setExpanded((v) => !v)}
-          // `hover:bg-current/10` rather than the `hover:bg-accent` this was
-          // lifted from. The trigger lives INSIDE the sticky section band, and
-          // while that band is the current section globals.css paints it magenta
-          // and forces `color: currentColor` on every child — so an `--accent`
-          // hover background put white text on light pink at 1.16:1 (and
-          // #1a0f18 on #2a1b3d in dark). Caught by the People-panel contrast
-          // scan added in this MR, and invisible until you hovered. A tint of
-          // currentColor is correct in BOTH contexts by construction: it is
-          // always derived from the text colour actually in force.
-          className="focus-visible:ring-ring focus-visible:ring-offset-background text-muted-foreground -ml-1 inline-flex min-h-11 min-w-0 items-center gap-1.5 rounded-md px-2 text-sm outline-none hover:bg-current/10 focus-visible:ring-2 focus-visible:ring-offset-2"
-        >
-          <svg
-            aria-hidden="true"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={cn(
-              "h-4 w-4 shrink-0 transition-transform",
-              expanded && "rotate-180",
-            )}
-          >
-            <path d="m6 9 6 6 6-6" />
-          </svg>
-          <span className="truncate">{summary}</span>
-        </button>
-      </SectionHeading>
-
-      {/* `hidden` the ATTRIBUTE, not a `display:none` class: it removes the
-          subtree from the accessibility tree and the tab order without depending
-          on a stylesheet, so the collapsed state is honest even before CSS loads.
-          The body stays mounted so `aria-controls` always resolves. */}
-      <div id={bodyId} hidden={!expanded} className="space-y-3">
+    <CollapsibleSection
+      id="settings-people"
+      voice={voice}
+      defaultExpanded={defaultExpanded}
+      // The triage line stays in the heading band, where it was the trigger's
+      // visible text before #101 made every section collapsible: the chevron now
+      // has to sit before the TITLE, so the trigger is the title. The summary is
+      // wired to it as its accessible DESCRIPTION instead of its name, so a
+      // screen-reader user still hears the same line a sighted one reads without
+      // the heading being renamed to it.
+      summary={summary}
+    >
+      {/* A fragment rather than a div: the body's own container comes from
+          <CollapsibleSection>. Kept as a wrapper so #101 did not have to reindent
+          250 lines of unchanged panel and bury the real change in whitespace. */}
+      <>
         {/* The interpolated half of this sentence is ONE JS string, deliberately.
           Written as JSX text around `{windowLabel(…)}` it rendered as
           "rolling 30 dayswindow" in the production build: the space sat at the
@@ -640,7 +603,7 @@ export function PeoplePanel({
             />
           ))}
         </ul>
-      </div>
-    </section>
+      </>
+    </CollapsibleSection>
   );
 }
