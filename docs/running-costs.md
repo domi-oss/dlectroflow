@@ -85,7 +85,8 @@ you'd rather pay nothing.
   home IP address when your ISP changes it. [duckdns.org](https://duckdns.org)
 
 **The bill:** electricity only. A mini PC idling around 10 W is roughly
-7 kWh/month — about £2 at UK rates. Add ~$12/year if you want a real domain
+7 kWh/month — about $2–3 (£2 at UK rates; electricity price varies more by
+country than anything else in this guide). Add ~$12/year if you want a real domain
 instead of a free DuckDNS hostname.
 
 **You get:** total control, no vendor, no recurring cloud bill, as much disk as

@@ -429,8 +429,7 @@ practice, or $0 if you point it at a model you run yourself.
 > recipe. **If you run dlectroflow somewhere, please contribute what it actually
 > cost.**
 
-**Full breakdown — eight options, every tool explained, line-item costs:
-[docs/running-costs.md](docs/running-costs.md).**
+**Full breakdown — eight options, every tool explained, line-item costs: [docs/running-costs.md](docs/running-costs.md).**
 
 ---
 
