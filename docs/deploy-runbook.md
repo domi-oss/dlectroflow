@@ -160,6 +160,9 @@ ingress `X-Forwarded-Proto` header and Task 3's `requestOrigin`.
 ## 10. Cost guardrails
 - Confirm the free Autopilot/zonal cluster credit on the billing account.
 - Set a GCP budget alert (Billing → Budgets & alerts).
+- For what this deploy costs per month — and seven cheaper ways to self-host —
+  see [running-costs.md](running-costs.md). The ingress-nginx + cert-manager
+  figure there is an **estimate**; if you can read the real invoice line, correct it.
 
 ## 11. Verify
 - `kubectl -n dlectroflow-prod get pods` → app + postgres Running.
