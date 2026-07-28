@@ -213,6 +213,35 @@ export async function disconnectGoogle(): Promise<void> {
 
 // ── Google Tasks API ──────────────────────────────────────────────────────
 
+/**
+ * Percent-encode one identifier so it can only ever be a single path segment.
+ *
+ * `encodeURIComponent` neutralises `/`, `\`, `?`, `#` and everything else that
+ * could add structure to the URL. It cannot neutralise a bare `.` or `..`:
+ * dots are unreserved, so they survive encoding and the URL parser inside
+ * `fetch` still resolves the segment as a directory hop. Encoding the dots
+ * does not help either — `%2e%2e` is treated as a double-dot segment too. A
+ * Google identifier is never empty, `.` or `..`, so reject those rather than
+ * send a request to a path we did not mean to call.
+ */
+function pathSegment(value: string): string {
+  if (value === "" || value === "." || value === "..") {
+    throw new Error(
+      `Invalid Google Tasks identifier: ${JSON.stringify(value)}`,
+    );
+  }
+  return encodeURIComponent(value);
+}
+
+/**
+ * Build a Google Tasks API URL. Every segment is encoded, so the invariant
+ * ("an identifier cannot change the path or graft on a query") holds for new
+ * endpoints too, instead of depending on each call site remembering to encode.
+ */
+function tasksUrl(...segments: string[]): string {
+  return `${TASKS_API}/${segments.map(pathSegment).join("/")}`;
+}
+
 type TaskList = { id: string; title: string };
 
 export async function listTaskLists(token: string): Promise<TaskList[]> {
@@ -239,7 +268,7 @@ export async function createGoogleTask(
   listId: string,
   input: { title: string; notes?: string; due?: string },
 ): Promise<{ id: string }> {
-  const res = await fetch(`${TASKS_API}/lists/${listId}/tasks`, {
+  const res = await fetch(tasksUrl("lists", listId, "tasks"), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -258,14 +287,18 @@ export async function createGoogleTask(
   return (await res.json()) as { id: string };
 }
 
-/** PATCH a Google Task (title/status/notes). Best-effort — returns ok. */
+/**
+ * PATCH a Google Task (title/status/notes). Best-effort — returns ok.
+ * Throws only if an identifier is unusable (see {@link pathSegment}); callers
+ * already skip steps with a missing list/task id.
+ */
 export async function patchGoogleTask(
   token: string,
   listId: string,
   taskId: string,
   patch: { title?: string; status?: "needsAction" | "completed" },
 ): Promise<boolean> {
-  const res = await fetch(`${TASKS_API}/lists/${listId}/tasks/${taskId}`, {
+  const res = await fetch(tasksUrl("lists", listId, "tasks", taskId), {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${token}`,
