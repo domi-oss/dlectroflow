@@ -75,8 +75,15 @@ describe("IntegrationsPanel — guest read-only shell (#11)", () => {
   // the line cheaply at the unit level.
   it("never washes the read-only card in an opacity dim (AA)", () => {
     render(<IntegrationsPanel google={null} readOnly voice="plain" />);
-    const card = screen.getByText("Google Tasks").closest("div.rounded-lg")!;
-    expect(card.className).not.toContain("opacity-");
+    const card = screen.getByText("Google Tasks").closest("div.rounded-lg");
+    // Assert the container was found before reading it: a bare `!` would turn a
+    // markup restructure into an unreadable TypeError instead of naming the
+    // cause (Duo review, !176).
+    expect(
+      card,
+      "could not find the card container — has the markup changed?",
+    ).not.toBeNull();
+    expect(card!.className).not.toContain("opacity-");
   });
 
   it("never leaks the owner's real connection status to guests", () => {
