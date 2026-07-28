@@ -64,7 +64,16 @@ export function IntegrationsPanel({
             🔒 {t("settings.ownerOnly", voice)}
           </span>
         </SectionHeading>
-        <div className="rounded-lg border p-4 opacity-70">
+        {/* #90 — this card used to be dimmed with `opacity-70`, which is the
+            exact mechanism #56 fixed on the saved-for-later row: compositing a
+            70% wash over `text-muted-foreground` dropped the description and
+            the owner-only hint to 2.88:1 and the pill to 2.74:1 in light /
+            4.42:1 in dark, all under AA-normal 4.5:1. Nothing caught it because
+            nothing scanned guest UI — see e2e/a11y/axe-guest-surfaces.spec.ts.
+            The "you cannot act on this" read is carried by the two 🔒
+            Owner-only labels, the muted copy and the absence of any control,
+            which is also the only part of it a screen reader can perceive. */}
+        <div className="rounded-lg border p-4">
           <div className="flex items-center gap-3">
             <div className="flex-1">
               <p className="font-medium">{GOOGLE_NAME}</p>

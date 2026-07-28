@@ -1,5 +1,5 @@
-import { test, expect, type Page } from "@playwright/test";
-import { captureItem, needsReviewRow } from "../helpers";
+import { test, expect } from "@playwright/test";
+import { captureItem, needsReviewRow, waitForShell } from "../helpers";
 import { scanA11y } from "./axe-helpers";
 
 // Mechanical accessibility (axe) gate over the core flow (issue #31):
@@ -11,12 +11,6 @@ import { scanA11y } from "./axe-helpers";
 // reducedMotion keeps intro animations from being scanned mid-transition, which
 // makes the axe snapshot deterministic across local + CI runs.
 test.use({ contextOptions: { reducedMotion: "reduce" } });
-
-// Wait for the always-present app shell (the brand link in the shared header)
-// so axe scans a fully-rendered page, not a hydrating one.
-async function waitForShell(page: Page): Promise<void> {
-  await expect(page.getByRole("link", { name: "dlectroflow" })).toBeVisible();
-}
 
 test.describe("accessibility: core-flow routes (axe)", () => {
   // Statically-reachable core routes. inbox = capture, /focus = focus launcher,
