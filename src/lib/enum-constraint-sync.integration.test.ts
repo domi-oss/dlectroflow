@@ -28,6 +28,13 @@ import {
 // constraint migration, or if a managed constraint is dropped/added out of
 // band. It's an *.integration.test.ts — it needs the real Postgres (CI wires
 // one up; locally it uses your DATABASE_URL schema).
+//
+// #78 — the same registry idea, extended to the schema's one NUMERIC-range
+// CHECK constraint (RANGE_REGISTRY, below the enum one). A range bound has no
+// constants.ts value set to mirror, so that block asserts the constraint is
+// applied and pins the bound its migration declares; the behavioural half —
+// that a raw sub-1 insert is actually rejected — lives in
+// src/lib/step-est-minutes-check.integration.test.ts.
 
 // Dedicated client so $disconnect() here can't tear the connection out from
 // under sibling integration tests.
@@ -137,6 +144,29 @@ const REGISTRY: ReadonlyArray<{
   },
 ];
 
+// #78 — numeric-range CHECK constraints. Unlike the pseudo-enum columns above
+// there is no constants.ts object to mirror (the bound is a number, not a
+// value set), so the source of truth is the constraint's own migration and
+// this table pins it: `min` is the inclusive lower bound the SQL must declare.
+// Keeping it here rather than in its own file means one place still answers
+// "which CHECK constraints does this schema manage?".
+const RANGE_REGISTRY: ReadonlyArray<{
+  constraint: string;
+  table: string;
+  column: string;
+  min: number;
+}> = [
+  {
+    // 20260727194512_step_est_minutes_check — every Step must be at least one
+    // whole minute long. Four application writers clamp to this already; the
+    // constraint is what stops a fifth from skipping it.
+    constraint: "Step_estMinutes_check",
+    table: "Step",
+    column: "estMinutes",
+    min: 1,
+  },
+];
+
 // The schema the client is connected to (Prisma's `?schema=` param, default
 // "public"). We scope the pg_constraint query to it explicitly rather than
 // relying on current_schema() / search_path ordering.
@@ -231,6 +261,42 @@ describe("enum CHECK constraints ↔ constants.ts are in sync", () => {
           `${constraint} guards a non-nullable column but unexpectedly contains an "IS NULL" allowance`,
         ).toBe(false);
       }
+    },
+  );
+});
+
+describe("numeric-range CHECK constraints are applied (#78)", () => {
+  it("has exactly the managed range CHECK constraints (no missing, no strays)", () => {
+    const managedNames = new Set(RANGE_REGISTRY.map((r) => r.constraint));
+    const applied = [...checks.keys()]
+      .filter((n) => managedNames.has(n))
+      .sort();
+    const expected = RANGE_REGISTRY.map((r) => r.constraint).sort();
+    expect(applied).toEqual(expected);
+  });
+
+  it.each(RANGE_REGISTRY)(
+    "$constraint pins $table.$column >= $min",
+    ({ constraint, column, min }) => {
+      const def = checks.get(constraint);
+      expect(
+        def,
+        `constraint ${constraint} is not applied to the DB — add the migration`,
+      ).toBeDefined();
+
+      // Postgres normalises `CHECK ("estMinutes" >= 1)` to
+      // `CHECK (("estMinutes" >= 1))`; match the comparison, not the parens.
+      expect(
+        new RegExp(`"${column}"\\s*>=\\s*${min}\\b`).test(def as string),
+        `${constraint} does not pin "${column}" >= ${min} — its definition is: ${def}`,
+      ).toBe(true);
+
+      // A NOT NULL column needs no NULL allowance; one appearing here would
+      // mean the column went nullable without this registry noticing.
+      expect(
+        /IS NULL/i.test(def as string),
+        `${constraint} guards a non-nullable column but unexpectedly contains an "IS NULL" allowance`,
+      ).toBe(false);
     },
   );
 });

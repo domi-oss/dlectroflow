@@ -161,6 +161,11 @@ model Step {
   text            String
   order           Int
   total           Int
+  // #78 — always >= 1 whole minute, enforced in the DB by
+  // Step_estMinutes_check (20260727194512_step_est_minutes_check). Prisma
+  // can't express a CHECK constraint, so this comment is its only trace in
+  // the schema; it is registered alongside the pseudo-enum constraints in
+  // src/lib/enum-constraint-sync.integration.test.ts (RANGE_REGISTRY).
   estMinutes      Int
   subtaskEmoji    String?
   googleTaskId    String? // id of the synced Google Task (Reclaim ingests it downstream)
