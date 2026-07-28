@@ -45,6 +45,41 @@ operators upgrading a self-hosted instance don't get surprised.
     (production 20m, review 15m) are left as they are — they are now headroom
     rather than a requirement.
 
+### Security
+
+- **`brace-expansion` is on the patched 5.0.8 wherever it can go (#82).** This
+  is **CVE-2026-14257** (High) — a DoS via unbounded expansion length that
+  crashes the process with an OOM a `try`/`catch` cannot trap. The advisory
+  widened after #55: the 2.1.2 that #55 landed on is itself affected, and only
+  5.0.8 is clean (`npm audit` range `<=5.0.7`).
+  The `brace-expansion: ^2.0.2` override #55 added had also become the *cause*
+  of two of the three affected copies — `minimatch@10.2.5` already asks for
+  `brace-expansion@^5.0.5`, and the override was pinning it back down to 2.x.
+  Installed affected copies go **3 → 1**.
+  - **This does not clear the finding, and is not claimed to.** GitLab's
+    Dependency Scanning already reported `brace-expansion` as a *single* finding
+    (it reports per package version in `package-lock.json`, and all three copies
+    were the same 2.1.2), so the HIGH stays — now attributed to 2.1.3. What
+    changes is that two of the three installed copies are genuinely patched.
+    Clearing the finding needs the upstream move described below, or a policy
+    decision on #82.
+  - **The one remaining copy is upstream-blocked, not overlooked.** It serves
+    `minimatch@3.1.5`, which does `expand(pattern)` on a default import;
+    5.0.8's CommonJS build exports only `{ expand }`, so forcing it there
+    raises `TypeError: expand is not a function` and takes ESLint down
+    wholesale. `minimatch@3.1.5` is required by `eslint`, `@eslint/eslintrc`
+    and three `eslint-config-next` plugins (`import`, `jsx-a11y`, `react`) —
+    none of which has a release that moved off `minimatch@3`, including with
+    `eslint@10`. It is scoped to 2.1.3 via a nested override until they do.
+  - **Reachability:** **no copy of `brace-expansion` ships in the production
+    image at all** — it is absent from the `output: "standalone"` trace and from
+    the image's isolated `prisma`/`dotenv`/`tsx` install. It reaches the tree
+    only through build and lint tooling, so no request path can feed it
+    untrusted input. The one copy that is nonetheless *declared* under runtime
+    `dependencies` (`shadcn` → `ts-morph` → `@ts-morph/common`) is on 5.0.8
+    anyway; the residual one is `devDependencies`-only.
+  - **Operators:** no action.
+
 ## [0.4.0] - 2026-07-27
 
 **Focus-session depth + bring-your-own-model.** A focus session is now something you
