@@ -85,13 +85,75 @@ include:
   - if: '$CI_COMMIT_BRANCH == "main"'
   - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/'
 
+# ── Docs-only fast path ──────────────────────────────────────────────────────
+# Every path in this repo that is NOT purely documentation. Jobs that compile,
+# test, build an image, scan that image or deploy a review app carry
+# `changes: *code_changes` on their merge-request rule, so a documentation-only
+# MR skips them.
+#
+# Why this is safe on MRs specifically: in a merge-request pipeline `changes:`
+# is evaluated against the diff to the TARGET branch — the whole MR, not the
+# last push. So the fast path engages only when an MR's *entire* diff is docs;
+# an MR that touches one line of `src/` runs the full gate even if a later
+# commit only edits a README. The rule is applied to the merge_request_event
+# rule ONLY: `main`, version tags and the weekly rescan schedule keep running
+# everything, which also avoids leaving `deploy_production` with an unbuildable
+# image.
+#
+# Secret detection deliberately stays UNGATED (see its job below): a secret can
+# absolutely be pasted into a README, and it also guarantees a docs-only
+# pipeline still has at least one job (a pipeline with zero jobs fails to
+# create).
+#
+# Keep this list exhaustive. A top-level path that is neither listed here nor
+# in the docs allow-list would silently skip the whole gate, so
+# `src/lib/ci-docs-only.ts` + its test assert that every top-level entry in the
+# repo is classified by one of the two lists — add a new top-level file or
+# directory and that test fails until you say which side it belongs on.
+.code_changes: &code_changes
+  # Directories that hold source, schema, infra or CI configuration
+  - "src/**/*"
+  - "e2e/**/*"
+  - "prisma/**/*"
+  - "public/**/*"
+  - "charts/**/*"
+  - "scripts/**/*"
+  - ".gitlab/**/*"
+  # Root-level code + config. `*` does not cross `/`, so these match the repo
+  # root only; leading-dot files are listed explicitly because a `*` glob does
+  # not match them.
+  - "*.ts"
+  - "*.mjs"
+  - "*.json"
+  - "*.yml"
+  - "*.yaml"
+  - "Dockerfile*"
+  - ".dockerignore"
+  - ".env.example"
+  - ".gitignore"
+  - ".nvmrc"
+  - ".prettierignore"
+
+# Scanner rules for the analyzers that only tell us something about code.
+# Identical to *scanner_rules except the merge-request rule is gated on
+# *code_changes. container_scanning is included because it needs build_image,
+# which is itself gated — a dangling `needs` would fail pipeline creation.
+.code_scanner_rules: &code_scanner_rules
+  - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'
+    when: never
+  - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    changes: *code_changes
+    allow_failure: false
+  - if: '$CI_COMMIT_BRANCH == "main"'
+  - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/'
+
 # Source-only scanners get needs: [] so they start at pipeline start, in
 # parallel with build_app, instead of waiting behind both build stages.
 # interruptible: true lets a newer pipeline on the same ref cancel them.
 semgrep-sast:
   needs: []          # scans source only — no build output required
   interruptible: true
-  rules: *scanner_rules
+  rules: *code_scanner_rules
 
 # Advanced SAST ships as its own job and (like the others) defaults to
 # branch-only — give it the same overrides so it runs in MR + main pipelines
@@ -99,12 +161,12 @@ semgrep-sast:
 gitlab-advanced-sast:
   needs: []          # scans source only — no build output required
   interruptible: true
-  rules: *scanner_rules
+  rules: *code_scanner_rules
 
 gemnasium-dependency_scanning:
   needs: []          # scans package-lock.json only — no build output required
   interruptible: true
-  rules: *scanner_rules
+  rules: *code_scanner_rules
 
 # #53 (dedupe secret detection): this template job (from the
 # Jobs/Secret-Detection.gitlab-ci.yml include above) is the single AUTHORITATIVE
@@ -126,7 +188,7 @@ container_scanning:
   # build_app + build_image). needs it so the image exists before scanning.
   needs: ["build_image"]
   interruptible: true
-  rules: *scanner_rules
+  rules: *code_scanner_rules
 
 # ── Build: compile (build_app) then assemble image (build_image) ─────────────
 # Runs npm ci + next build in a standard Node runner with GitLab file cache.
@@ -173,6 +235,7 @@ build_app:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'
       when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *code_changes
     - if: '$CI_COMMIT_BRANCH == "main"'
     # Version tag: compile so build_image can assemble the release image.
     - if: '$CI_COMMIT_TAG'
@@ -237,6 +300,7 @@ test_app:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'
       when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *code_changes
     - if: '$CI_COMMIT_BRANCH == "main"'
     # Version tag: gate the release image on a green suite too (build_image needs this).
     - if: '$CI_COMMIT_TAG'
@@ -292,6 +356,7 @@ e2e_test:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'
       when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *code_changes
     - if: '$CI_COMMIT_BRANCH == "main"'
     # Version tag: build_image publishes the release image on tags and now
     # needs e2e_test, so the gate MUST exist on tag pipelines too (mirrors
@@ -353,6 +418,7 @@ build_image:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'
       when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *code_changes
     - if: '$CI_COMMIT_BRANCH == "main"'
     # Version tag: assemble + push the versioned release image and :latest.
     # Release-gate guard (#53): rules:needs REPLACES the job-level needs when this
@@ -452,9 +518,16 @@ deploy_review:
     name: review/$CI_MERGE_REQUEST_IID
     url: https://mr-$CI_MERGE_REQUEST_IID.35-246-93-255.sslip.io
     on_stop: stop_review
-    auto_stop_in: 2 days
+    # Review apps are looked at within minutes of the pipeline going green, or
+    # not at all — but every one that stays up holds an app pod + a Postgres pod
+    # on billable Autopilot capacity until it is stopped. 12 hours covers a full
+    # working day of review while cutting the idle tail (it was 2 days). Stopping
+    # is not destructive to the MR: GitLab keeps the environment, and re-running
+    # deploy_review from the pipeline brings it straight back.
+    auto_stop_in: 12 hours
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *code_changes
 
 stop_review:
   extends: .deploy_base
@@ -467,6 +540,7 @@ stop_review:
     action: stop
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *code_changes
       when: manual
   allow_failure: true
 

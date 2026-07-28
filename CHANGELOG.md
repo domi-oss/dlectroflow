@@ -21,6 +21,29 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Changed
 
+- **Documentation-only merge requests no longer run the full build gate.** A
+  three-file README change was spending ~18 minutes of runner time compiling the
+  app, running unit + Playwright suites, building and scanning a container image,
+  and deploying a review app to the cluster. The expensive merge-request jobs are
+  now gated on `changes: *code_changes`, so a docs-only MR runs secret detection
+  alone (~19s) and deploys nothing.
+  - **Secret detection stays ungated deliberately** — a credential can be pasted
+    into a README, and it also keeps a docs-only pipeline from having zero jobs.
+  - **`main`, version tags and the weekly rescan schedule are untouched** and
+    still run everything, so `deploy_production` can never find itself without
+    an image.
+  - Because `changes:` on a merge-request pipeline is evaluated against the diff
+    to the *target branch*, the fast path engages only when an MR's **entire**
+    diff is documentation — an MR that touches one line of `src/` runs the full
+    gate regardless of what later commits do.
+  - `src/lib/ci-docs-only.ts` + tests guard the list: `rules:changes` is an
+    allow-list, so a top-level path nobody added would silently skip the gate.
+    The test fails until every committed top-level entry is classified as either
+    code or documentation.
+- **Review apps stop after 12 hours instead of 2 days.** Each idle review
+  environment holds an app pod and a Postgres pod on billable Autopilot
+  capacity. Stopping is not destructive — re-running `deploy_review` brings the
+  environment straight back.
 - **The container image is ~4× smaller (#71).** **893 MB → 207 MB** as reported
   by the container registry — the same metric the failed rollout logged
   (`Image size: 893096400 bytes`) — a 77% cut, so a cold pull onto a fresh
