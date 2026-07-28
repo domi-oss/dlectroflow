@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  cleanup,
+  waitFor,
+} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { RowActions, ScheduleControl } from "./row-actions";
 
 afterEach(cleanup);
@@ -112,7 +119,11 @@ describe("RowActions", () => {
     expect(screen.queryByRole("button", { name: /move to/i })).toBeNull();
   });
 
-  it("outside click closes the ▾ popover (dismissable-popover idiom)", () => {
+  // #92 — dismissal is Base UI's now, which treats a mouse outside-press as a
+  // full click rather than a bare pointerdown (a drag that starts outside no
+  // longer dismisses; touch still dismisses on first contact). Hence the real
+  // click here instead of the synthetic `pointerDown`.
+  it("outside click closes the ▾ popover (dismissable-popover idiom)", async () => {
     render(
       <div>
         <RowActions
@@ -127,8 +138,77 @@ describe("RowActions", () => {
     expect(
       screen.getByRole("button", { name: /move to/i }),
     ).toBeInTheDocument();
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Outside" }));
-    expect(screen.queryByRole("button", { name: /move to/i })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Outside" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /move to/i })).toBeNull(),
+    );
+  });
+
+  // ── #92 popup wiring ──────────────────────────────────────────────────────
+  it("the 🔽 popover is a named dialog its trigger points at", () => {
+    render(
+      <RowActions
+        inline={[]}
+        schedule={null}
+        menu={[<button key="m1">Move to…</button>]}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: "All options" });
+    expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(trigger);
+    // A `dialog` with no accessible name is an axe violation, and unusable with
+    // a screen reader — the popup carries its own label since there is no
+    // visible heading to reference.
+    const popup = screen.getByRole("dialog", { name: "All options" });
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(trigger).toHaveAttribute("aria-controls", popup.id);
+    expect(popup).toContainElement(
+      screen.getByRole("button", { name: /move to/i }),
+    );
+  });
+
+  it("the 📅 duration popover is a named dialog, and only exists when there is a duration to pick", () => {
+    const { unmount } = render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{ state: "ready_steps", onScheduleSteps: vi.fn() }}
+      />,
+    );
+    // ready_steps acts immediately — no popup, so nothing to advertise.
+    expect(
+      screen.getByRole("button", { name: /schedule/i }),
+    ).not.toHaveAttribute("aria-haspopup");
+    unmount();
+
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{ state: "needs_duration", onScheduleSingle: vi.fn() }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
+    expect(
+      screen.getByRole("dialog", { name: /schedule — duration/i }),
+    ).toContainElement(screen.getByRole("spinbutton"));
+  });
+
+  // Row popups sit inside the action line's phrasing content; a `<div>` there
+  // is invalid markup (and would close an enclosing `<p>` early).
+  it("renders the 🔽 popover out of phrasing-content elements only", () => {
+    const { container } = render(
+      <RowActions
+        inline={[]}
+        schedule={null}
+        menu={[<button key="m1">Move to…</button>]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "All options" }));
+    const cluster = container.querySelector(".flex-nowrap")!;
+    expect(cluster.querySelectorAll("div")).toHaveLength(0);
   });
 
   it('never renders role="menu", even with the ▾ popover open', () => {
@@ -279,7 +359,7 @@ describe("RowActions", () => {
   // #23 — the clear-on-close used to be a single effect watching `open`, so it
   // covered every dismissal route at once. These pin the two routes the Duo
   // review test above doesn't: clicking away, and re-clicking the trigger.
-  it("clears the custom duration input when the popover is closed by an outside click", () => {
+  it("clears the custom duration input when the popover is closed by an outside click", async () => {
     render(
       <RowActions
         inline={[]}
@@ -291,7 +371,8 @@ describe("RowActions", () => {
     fireEvent.change(screen.getByRole("spinbutton"), {
       target: { value: "99" },
     });
-    fireEvent.pointerDown(document.body); // click away
+    await userEvent.click(document.body); // click away (see #92 note above)
+    await waitFor(() => expect(screen.queryByRole("spinbutton")).toBeNull());
     fireEvent.click(screen.getByRole("button", { name: /schedule/i })); // reopen
     expect(screen.getByRole("spinbutton")).toHaveValue(null);
   });
