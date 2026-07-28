@@ -19,6 +19,23 @@ operators upgrading a self-hosted instance don't get surprised.
 > Shipped to production but not yet tagged. At cut time this becomes
 > `## [X.Y.Z] - <date>` and a fresh empty `## [Unreleased]` is added above it.
 
+### Added
+
+- **An honest self-hosting cost guide — `docs/running-costs.md`.** Eight ways to
+  run dlectroflow, cheapest first ($0 on your own hardware → $105–145/month on
+  GKE Autopilot), with every tool named and explained, whether it's free or open
+  source, where to get it, and per-line costs. Includes what the AI breakdown
+  actually costs per request (~$0.005 on Haiku, ~$0.025 on Sonnet, ~$0.05 on
+  Opus) and the fact that prompt caching isn't enabled yet. The README gains a
+  `💸 What it costs to run` summary linking to it.
+  - **Only the GKE Autopilot numbers come from the real deployment.** The other
+    seven are worked examples from published provider prices, explicitly labelled
+    as untested, with an invitation for self-hosters to contribute corrections
+    and their own setups.
+  - The Autopilot **ingress-nginx + cert-manager line ($40–60/month) is an
+    estimate** derived from Autopilot's per-pod rates and minimums, not read from
+    an invoice — flagged as such in both the guide and the deploy runbook.
+
 ### Changed
 
 - **The container image is ~4× smaller (#71).** **893 MB → 207 MB** as reported

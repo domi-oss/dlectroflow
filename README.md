@@ -32,6 +32,7 @@ to run it locally, or [Deploy](#-deploy) to host your own. (Also a learning proj
 - [🎧 Focus music](#-focus-music)
 - [🗄️ Database & migrations](#️-database--migrations)
 - [🐳 Deploy](#-deploy)
+- [💸 What it costs to run](#-what-it-costs-to-run)
 - [🧯 Troubleshooting](#-troubleshooting)
 - [🗺️ Tech stack](#️-tech-stack)
 - [🤝 Contributing](#-contributing)
@@ -88,6 +89,9 @@ That's it for running locally. Postgres runs via Docker — no manual database s
 | **Resend** | Opt-in end-of-day round-up **email** | Optional | Free tier is plenty. Set `RESEND_API_KEY`, then opt in on the dashboard. In-app + desktop round-up work without it. [resend.com](https://resend.com) |
 
 You can run and demo the whole capture → breakdown flow with **just the Anthropic key**.
+
+For what all of this adds up to per month — hosting included — see
+[What it costs to run](#-what-it-costs-to-run).
 
 ---
 
@@ -396,6 +400,37 @@ docker run -p 3000:3000 \
 > same image — see [docs/deploy-runbook.md](docs/deploy-runbook.md).)
 
 Visit **http://localhost:3000**.
+
+---
+
+## 💸 What it costs to run
+
+Short version: **the cheapest honest way to run dlectroflow 24/7 on your own
+domain is one ~$6/month VPS** with Docker Compose and [Caddy](https://caddyserver.com)
+for automatic HTTPS. The GKE Autopilot deploy above is roughly **$105–145/month**,
+and more than half of that is the ingress controller, cert-manager and the load
+balancer rather than the app.
+
+| Where you run it | Roughly | Notes |
+|---|---|---|
+| Hardware you already own | **$0–3/mo** | Electricity. Uptime is your ISP's problem. |
+| One small VPS + Docker Compose + Caddy | **$6/mo** | Cheapest always-on public site. No HA. |
+| Fly.io / Render | **$10–14/mo** | Hosted; least work. Render's free Postgres expires after 30 days. |
+| Managed Kubernetes (DigitalOcean / Civo) | **~$36/mo** | Runs this repo's Helm chart with real HA. |
+| **GKE Autopilot — what production runs** | **$105–145/mo** | HA, review apps per MR, zero infra work. |
+
+Plus a domain (~$10–15/**year**) and the AI model: about **$0.005 per breakdown**
+on Haiku, **$0.025** on Sonnet, **$0.05** on Opus — so **$1–15/month** in
+practice, or $0 if you point it at a model you run yourself.
+
+> **Only the GKE Autopilot figures are from a real deployment.** Everything else
+> is a worked example from published provider prices, offered because
+> self-hosters arrive with very different budgets and skills — not a tested
+> recipe. **If you run dlectroflow somewhere, please contribute what it actually
+> cost.**
+
+**Full breakdown — eight options, every tool explained, line-item costs:
+[docs/running-costs.md](docs/running-costs.md).**
 
 ---
 
