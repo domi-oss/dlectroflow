@@ -80,7 +80,13 @@ function windowLabel(hours: number): string {
  * How this account's AI is paid for, as one phrase.
  *
  * Mirrors `consumeUserBreakdown`'s resolution order exactly — key first, then
- * uncapped, then the meter — so the panel and enforcement cannot disagree.
+ * uncapped, then the enforced meter — so the panel and enforcement cannot
+ * disagree about who is paying or what is being counted.
+ *
+ * The `uncapped` phrasing is a deliberate product decision (owner, !175): a
+ * REAL COUNT with NO DENOMINATOR. "142 used this window" reads as information;
+ * "142 / 50" reads as somebody who has blown through a limit that does not
+ * apply to them. Uncapped accounts are metered — they simply cannot be refused.
  *
  * `policy` is passed in rather than read off `p` so the caller can hand it the
  * PENDING selection: the dropdown, the quota field's disabled state and this
@@ -89,7 +95,9 @@ function windowLabel(hours: number): string {
  */
 function allowanceLabel(p: PersonView, policy: string): string {
   if (p.hasOwnKey) return "Billed to their own key — not metered";
-  if (policy === AiPolicy.Uncapped) return "Uncapped — not metered";
+  if (policy === AiPolicy.Uncapped) {
+    return `${p.usage.used} used this window — uncapped, never blocked`;
+  }
   return `${p.usage.used} / ${p.usage.quota} breakdowns used`;
 }
 
@@ -151,11 +159,18 @@ function PersonCard({
     });
   };
 
-  // Only a capped account with no key of its own is actually metered. Derived
-  // from the LOCAL `aiPolicy` state — the pending selection — and fed to
-  // allowanceLabel as well, so the phrase, the window line and the quota
-  // field's disabled state are three views of ONE value and cannot drift apart.
-  const metered = !person.hasOwnKey && aiPolicy === AiPolicy.Capped;
+  // Two different questions, and conflating them is what !175's owner decision
+  // untangled:
+  //   • METERED — is usage counted? True for everyone the instance pays for,
+  //     capped or uncapped. Only a present key opts out (their key, their bill).
+  //     This drives the window line, because a recorded count needs a window.
+  //   • ENFORCED — can this account be refused? Only when a quota applies. This
+  //     drives the quota field, because a quota nothing consults is a dead input.
+  // Both derive from the LOCAL `aiPolicy` state — the pending selection — and the
+  // same value feeds allowanceLabel, so the phrase, the window line and the quota
+  // field are three views of ONE state and cannot drift apart.
+  const metered = !person.hasOwnKey;
+  const enforced = metered && aiPolicy !== AiPolicy.Uncapped;
 
   return (
     <li
@@ -234,9 +249,11 @@ function PersonCard({
             aria-label={`Quota for ${person.label}`}
             className="min-h-11 w-24 rounded-md border px-2"
             value={aiQuota}
-            // A quota changes nothing unless the account is metered, so the
-            // field is disabled rather than silently accepting a dead number.
-            disabled={busy || aiPolicy !== AiPolicy.Capped}
+            // A quota changes nothing unless it is ENFORCED, so the field is
+            // disabled rather than silently accepting a dead number. Note this
+            // is `enforced`, not `metered`: an uncapped account IS counted, and
+            // its quota still means nothing.
+            disabled={busy || !enforced}
             onChange={(e) => setAiQuota(e.target.value)}
           />
         </label>
@@ -422,12 +439,18 @@ export function PeoplePanel({
     <section className="space-y-3">
       <SectionHeading id="settings-people" voice={voice} />
 
+      {/* The interpolated half of this sentence is ONE JS string, deliberately.
+          Written as JSX text around `{windowLabel(…)}` it rendered as
+          "rolling 30 dayswindow" in the production build: the space sat at the
+          start of a JSX line right after the expression, and this Next version's
+          JSX transform trimmed it (AGENTS.md — "This is NOT the Next.js you
+          know"). vitest's transform does NOT trim it, so the jsdom suite showed
+          the sentence intact while the built page was wrong. Keeping every
+          interpolation-adjacent space inside a string removes the disagreement. */}
       <p className="text-muted-foreground text-sm">
-        Who can use this instance, and what their AI costs. You see usage
-        numbers and account status only — never anyone&rsquo;s tasks, notes or
-        other content. Allowances are measured over a{" "}
-        {windowLabel(view.windowHours)} window that starts at each
-        person&rsquo;s first breakdown.
+        {`Who can use this instance, and what their AI costs. You see usage numbers and account status only — never anyone’s tasks, notes or other content. Allowances are measured over a ${windowLabel(
+          view.windowHours,
+        )} window that starts at each person’s first breakdown.`}
       </p>
 
       {/* ONE shared live region for every action on the panel — two

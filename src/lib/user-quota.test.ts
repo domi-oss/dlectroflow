@@ -78,7 +78,10 @@ describe("userQuotaConfig", () => {
 });
 
 describe("consumeUserBreakdown — the policy matrix", () => {
-  it("uncapped: instance key, nothing metered", async () => {
+  // Owner decision on !175: "I at least want the owner usage uncapped but
+  // showing how much has been used in the people panel." So uncapped RECORDS
+  // and never blocks — it is not the same thing as "not metered".
+  it("uncapped: instance key, usage RECORDED, never blocked", async () => {
     db.user.findUnique.mockResolvedValue(userRow({ aiPolicy: "uncapped" }));
 
     const access = await consumeUserBreakdown(USER_ID);
@@ -86,11 +89,64 @@ describe("consumeUserBreakdown — the policy matrix", () => {
     expect(access).toEqual({
       policy: "uncapped",
       ownKey: null,
-      metered: false,
+      metered: true,
       blockedReason: null,
     });
-    expect(db.userAiUsage.updateMany).not.toHaveBeenCalled();
-    expect(db.userAiUsage.create).not.toHaveBeenCalled();
+    // First use → the row is created with a single consumed unit, exactly as a
+    // capped account's would be. The panel has something to show.
+    expect(db.userAiUsage.create).toHaveBeenCalledWith({
+      data: { userId: USER_ID, count: 1, windowStartedAt: expect.any(Date) },
+    });
+  });
+
+  it("uncapped: increments an existing row inside the active window", async () => {
+    db.user.findUnique.mockResolvedValue(userRow({ aiPolicy: "uncapped" }));
+    db.userAiUsage.updateMany
+      .mockResolvedValueOnce({ count: 0 }) // no expired window to reset
+      .mockResolvedValueOnce({ count: 1 }); // the increment lands
+
+    const access = await consumeUserBreakdown(USER_ID);
+
+    expect(access.metered).toBe(true);
+    expect(access.blockedReason).toBeNull();
+    // The increment's where-clause carries NO `count < quota` predicate.
+    const incrementCall = db.userAiUsage.updateMany.mock.calls[1][0];
+    expect(incrementCall.data).toEqual({ count: { increment: 1 } });
+    expect(incrementCall.where).not.toHaveProperty("count");
+  });
+
+  it("uncapped: NEVER refused, however far past any plausible quota the count is", async () => {
+    // The guard against implementing "uncapped" as "capped with a big number".
+    db.user.findUnique.mockResolvedValue(
+      userRow({ aiPolicy: "uncapped", aiQuota: 1 }),
+    );
+    db.userAiUsage.findUnique.mockResolvedValue({
+      userId: USER_ID,
+      count: 999_999,
+      windowStartedAt: new Date(),
+    });
+    db.userAiUsage.updateMany
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 });
+
+    const access = await consumeUserBreakdown(USER_ID);
+
+    expect(access.blockedReason).toBeNull();
+    expect(access.metered).toBe(true);
+  });
+
+  it("uncapped ignores aiQuota entirely — even a zero quota cannot block it", async () => {
+    // A capped account with aiQuota 0 is blocked outright (see below). The same
+    // column on an uncapped account must be inert, or "uncapped" would depend on
+    // a number the owner cannot see on that row.
+    db.user.findUnique.mockResolvedValue(
+      userRow({ aiPolicy: "uncapped", aiQuota: 0 }),
+    );
+
+    const access = await consumeUserBreakdown(USER_ID);
+
+    expect(access.blockedReason).toBeNull();
+    expect(access.metered).toBe(true);
   });
 
   it("capped, under quota: instance key, ONE unit metered", async () => {

@@ -33,10 +33,15 @@ export type SlidingWindowStore = {
    */
   resetExpired(now: Date, threshold: Date): Promise<number>;
   /**
-   * Increment inside an ACTIVE window, matching only while `count < quota`.
-   * Returns the rows matched (0 = no room left, or no active window).
+   * Increment inside an ACTIVE window. Returns the rows matched (0 = no room
+   * left, or no active window).
+   *
+   * `quota` is the guard: a number applies `count < quota`, and **`null` omits
+   * the predicate entirely**. `null` is deliberately not "a very large number"
+   * — see `meterRecord`. An implementation MUST leave the clause out rather
+   * than substituting a bound of its own.
    */
-  incrementUnderQuota(quota: number, threshold: Date): Promise<number>;
+  incrementInWindow(quota: number | null, threshold: Date): Promise<number>;
   /** First-use insert of `{ count: 1, windowStartedAt: now }`. */
   createFirstUse(now: Date): Promise<void>;
   /** Does this error mean "a concurrent first use won the insert race"? */
@@ -44,6 +49,58 @@ export type SlidingWindowStore = {
 };
 
 export type MeterResult = { allowed: boolean; remaining: number };
+
+/**
+ * How a unit came to be recorded. `reset` and `created` both leave the row at
+ * `count = 1`, which is the cheap answer the caller wants for "remaining" — the
+ * distinction from `incremented` is what lets `meterConsume` avoid a re-read on
+ * those two paths (and avoid a racy one).
+ */
+type MeterOutcome = "reset" | "created" | "incremented" | "blocked";
+
+/**
+ * The shared body of both modes: reset an expired window, else increment inside
+ * the active one, else create the row on first use.
+ *
+ * `quota` is passed straight through to the store as the increment's guard, so
+ * `null` really does mean "no limit was consulted anywhere" rather than "a limit
+ * nobody expects to reach".
+ *
+ * `"blocked"` is only reachable with a numeric quota — with `null` there is no
+ * condition under which the increment can fail for lack of room.
+ */
+async function applyMeter(
+  store: SlidingWindowStore,
+  quota: number | null,
+  now: Date,
+  windowThreshold: Date,
+): Promise<MeterOutcome> {
+  // 1) Reset an expired window (exactly one caller matches the `lte` predicate).
+  if ((await store.resetExpired(now, windowThreshold)) > 0) return "reset";
+
+  // 2) Increment inside an active window, guarded by `quota` when there is one.
+  if ((await store.incrementInWindow(quota, windowThreshold)) > 0) {
+    return "incremented";
+  }
+
+  // 3) Nothing matched: the row is either absent (first use) or — with a numeric
+  //    quota — the active window is exhausted. Only pay for a create when it is
+  //    genuinely absent, otherwise every blocked request collides on the PK.
+  const existing = await store.find();
+  if (!existing) {
+    try {
+      await store.createFirstUse(now);
+      return "created";
+    } catch (err) {
+      if (!store.isDuplicate(err)) throw err;
+      // Lost the create race — a concurrent first use won; fall through and
+      // increment against the row it created.
+    }
+  }
+  return (await store.incrementInWindow(quota, windowThreshold)) > 0
+    ? "incremented"
+    : "blocked";
+}
 
 /**
  * Has this subject's window lapsed? `null` (never used) is deliberately NOT
@@ -77,36 +134,40 @@ export async function meterConsume(
   now: Date,
   windowThreshold: Date,
 ): Promise<MeterResult> {
-  const reset = await store.resetExpired(now, windowThreshold);
-  if (reset > 0) return { allowed: true, remaining: Math.max(0, quota - 1) };
+  const outcome = await applyMeter(store, quota, now, windowThreshold);
+  if (outcome === "blocked") return { allowed: false, remaining: 0 };
+  // A reset or a first-use create leaves the row at exactly one consumed unit,
+  // so the answer is known without a re-read — which is also the non-racy one.
+  if (outcome !== "incremented") {
+    return { allowed: true, remaining: Math.max(0, quota - 1) };
+  }
+  return {
+    allowed: true,
+    remaining: await remainingInWindow(store, quota, windowThreshold),
+  };
+}
 
-  const inc = await store.incrementUnderQuota(quota, windowThreshold);
-  if (inc > 0) {
-    return {
-      allowed: true,
-      remaining: await remainingInWindow(store, quota, windowThreshold),
-    };
-  }
-
-  const existing = await store.find();
-  if (!existing) {
-    try {
-      await store.createFirstUse(now);
-      return { allowed: true, remaining: Math.max(0, quota - 1) };
-    } catch (err) {
-      if (!store.isDuplicate(err)) throw err;
-      // Lost the create race — a concurrent first use won; fall through and
-      // increment against the row it created.
-    }
-  }
-  const retry = await store.incrementUnderQuota(quota, windowThreshold);
-  if (retry > 0) {
-    return {
-      allowed: true,
-      remaining: await remainingInWindow(store, quota, windowThreshold),
-    };
-  }
-  return { allowed: false, remaining: 0 };
+/**
+ * Record one unit against a subject's rolling window, enforcing NOTHING.
+ *
+ * This is the `uncapped` path (owner decision on !175: "I at least want the
+ * owner usage uncapped but showing how much has been used in the people
+ * panel"). Usage has to be visible, so it must be counted; the account must
+ * never be refused, so nothing may be compared.
+ *
+ * It takes NO quota parameter, on purpose. The tempting shortcut —
+ * `meterConsume(store, Number.MAX_SAFE_INTEGER, …)` — would leave a bound in the
+ * SQL and turn "unlimited" into "limited by a number nobody expects to reach",
+ * which is a cap that silently exists and cannot be raised. With no argument
+ * there is nothing for a later change to start comparing against, and the
+ * increment carries no `count <` clause at all.
+ */
+export async function meterRecord(
+  store: SlidingWindowStore,
+  now: Date,
+  windowThreshold: Date,
+): Promise<void> {
+  await applyMeter(store, null, now, windowThreshold);
 }
 
 /**

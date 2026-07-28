@@ -255,3 +255,41 @@ describe("loadPeopleAdmin — invitations", () => {
     expect(select).not.toHaveProperty("isOwnerSeed");
   });
 });
+
+describe("loadPeopleAdmin — ordering", () => {
+  it("puts the OWNER first, then members oldest-account-first", async () => {
+    // Caught by eyeballing the !175 screenshots: the query ordered by
+    // `role: "asc"`, and "member" sorts before "owner" alphabetically, so the
+    // owner's own row landed at the BOTTOM of the list — while the comment above
+    // the query claimed "owner first". The owner's row is the one they look at
+    // first (it is theirs, and it is the only one they cannot revoke), so it
+    // leads. Sorted in code rather than by `orderBy`, because expressing
+    // "owner first" in SQL means relying on the alphabetical accident that
+    // "owner" > "member", which the next role would break.
+    db.user.findMany.mockResolvedValueOnce([
+      userRow({ id: "u-m1", handle: "grace", role: "member" }),
+      userRow({ id: "u-m2", handle: "ada", role: "member" }),
+      userRow({ id: "u-own", handle: "domi", role: "owner" }),
+    ]);
+
+    const view = await loadPeopleAdmin("u-own");
+
+    expect(view!.people.map((p) => p.label)).toEqual(["domi", "grace", "ada"]);
+  });
+
+  it("keeps the database's order among members", async () => {
+    db.user.findMany.mockResolvedValueOnce([
+      userRow({ id: "u-a", handle: "first", role: "member" }),
+      userRow({ id: "u-b", handle: "second", role: "member" }),
+      userRow({ id: "u-c", handle: "third", role: "member" }),
+    ]);
+
+    const view = await loadPeopleAdmin();
+
+    expect(view!.people.map((p) => p.label)).toEqual([
+      "first",
+      "second",
+      "third",
+    ]);
+  });
+});

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { isOwnerRequest } from "@/lib/workspace";
-import type { UserRole, UserStatus } from "@/lib/constants";
+import { UserRole } from "@/lib/constants";
+import type { UserStatus } from "@/lib/constants";
 import {
   userQuotaConfig,
   usageViewFor,
@@ -87,9 +88,13 @@ export async function loadPeopleAdmin(
 
   const [users, withKeys, invitations] = await Promise.all([
     prisma.user.findMany({
-      // Owner first, then oldest account first — a stable order that does not
-      // shuffle as people sign in.
-      orderBy: [{ role: "asc" }, { createdAt: "asc" }],
+      // Oldest account first — a stable order that does not shuffle as people
+      // sign in. The OWNER is hoisted to the top afterwards, in code: doing it
+      // here would mean `orderBy: { role: "desc" }`, which only works by the
+      // alphabetical accident that "owner" > "member" and would silently break
+      // the moment a third role existed. (It was `role: "asc"` — which sorted
+      // the owner LAST, caught by eyeballing the !175 screenshots.)
+      orderBy: { createdAt: "asc" },
       select: {
         id: true,
         provider: true,
@@ -124,10 +129,17 @@ export async function loadPeopleAdmin(
   ]);
 
   const keyed = new Set(withKeys.map((u) => u.id));
+  // The owner's own row leads: it is theirs, it is the only one they cannot
+  // revoke, and it is the one they look at first. A stable partition, so the
+  // relative order of everybody else is untouched.
+  const ordered = [
+    ...users.filter((u) => u.role === UserRole.Owner),
+    ...users.filter((u) => u.role !== UserRole.Owner),
+  ];
 
   return {
     windowHours,
-    people: users.map((u) => ({
+    people: ordered.map((u) => ({
       id: u.id,
       handle: u.handle,
       label: labelFor(u),

@@ -170,11 +170,15 @@ const OWNER_USER = {
   workspaceId: "owner",
 };
 
-/** An UNCAPPED signed-in account: instance key, nothing metered. */
+/**
+ * An UNCAPPED signed-in account: instance key, usage RECORDED, never blocked.
+ * `metered: true` since the owner decision on !175 — uncapped counts, it just
+ * cannot refuse — so a failed breakdown has a unit to give back.
+ */
 const UNCAPPED_ACCESS = {
   policy: "uncapped",
   ownKey: null,
-  metered: false,
+  metered: true,
   blockedReason: null,
 };
 
@@ -649,22 +653,33 @@ async function requestAs(access: {
 }
 
 describe("POST /api/breakdown — per-user AI policy (#35 Phase B)", () => {
-  it("uncapped: the INSTANCE key, and nothing metered", async () => {
-    const { events } = await requestAs({
-      policy: "uncapped",
-      ownKey: null,
-      metered: false,
-      blockedReason: null,
-    });
+  it("uncapped: the INSTANCE key, usage recorded, and never blocked", async () => {
+    const { events } = await requestAs(UNCAPPED_ACCESS);
 
     expect(consumeUserBreakdownMock).toHaveBeenCalledWith(OWNER_USER.id);
     // No credentials → the instance key.
     expect(lastLLMCredentials.current).toBeUndefined();
+    // Nothing to refund on a SUCCESSFUL breakdown, metered or not.
     expect(refundUserBreakdownMock).not.toHaveBeenCalled();
     expect(events).toContainEqual({
       type: "steps",
       data: { parentEmoji: "🗂️", steps: [] },
     });
+  });
+
+  it("refunds an UNCAPPED account's recorded unit when the LLM call fails", async () => {
+    // Owner decision on !175: the uncapped count is what the owner reads in the
+    // People panel, so a failed breakdown that never produced a plan must not
+    // inflate it — the same reasoning as the guest refund.
+    consumeUserBreakdownMock.mockResolvedValue(UNCAPPED_ACCESS);
+    streamImpl.current = async function* () {
+      throw new Error("provider exploded");
+    };
+
+    const { POST } = await import("./route");
+    await POST(postRequest(REQUEST_BODY));
+
+    expect(refundUserBreakdownMock).toHaveBeenCalledWith(OWNER_USER.id);
   });
 
   it("capped under quota: the INSTANCE key, one unit metered, no refund on success", async () => {

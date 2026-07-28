@@ -90,12 +90,14 @@ function guestMeterStore(ipHash: string): SlidingWindowStore {
           data: { count: 1, windowStartedAt: now },
         })
       ).count,
-    incrementUnderQuota: async (quota, threshold) =>
+    incrementInWindow: async (quota, threshold) =>
       (
         await prisma.guestAiUsage.updateMany({
           where: {
             ipHash,
-            count: { lt: quota },
+            // `null` = no limit was consulted: the clause is OMITTED rather than
+            // given a large bound (see meterRecord).
+            ...(quota === null ? {} : { count: { lt: quota } }),
             windowStartedAt: { gt: threshold },
           },
           data: { count: { increment: 1 } },

@@ -105,15 +105,45 @@ describe("PeoplePanel — what it shows about each person", () => {
     expect(within(card).getByText(/no own key/i)).toBeInTheDocument();
   });
 
-  it("shows an UNCAPPED account as uncapped, NOT as a bar against a quota that does not apply", () => {
-    // Production fact this guards: the instance owner is uncapped, so rendering
-    // "0 / 50" for them would be a number that means nothing.
+  // Owner decision on !175: "I at least want the owner usage uncapped but
+  // showing how much has been used in the people panel." So an uncapped row
+  // shows a REAL COUNT with NO denominator — a bare number reads as
+  // informational, where "142 / 50" reads as blown through a limit.
+  it("shows an uncapped account's real usage as a count with NO denominator", () => {
     renderPanel({
       people: [
         person({
           id: "u-owner",
           label: "domi",
           role: "owner",
+          aiPolicy: "uncapped",
+          usage: {
+            used: 142,
+            quota: 50,
+            remaining: 0,
+            windowStartedAt: new Date(NOW - 5 * 86_400_000),
+            windowEndsAt: new Date(NOW + 25 * 86_400_000),
+          },
+        }),
+      ],
+    });
+    const card = personCard("domi");
+
+    expect(card).toHaveTextContent("142 used this window");
+    expect(card).toHaveTextContent(/uncapped/i);
+    // No denominator anywhere: not the quota, not a remaining figure.
+    expect(card).not.toHaveTextContent("/ 50");
+    expect(card).not.toHaveTextContent("142 / ");
+    // The quota field is inert while uncapped, so it is disabled rather than
+    // silently accepting a number that changes nothing.
+    expect(within(card).getByLabelText(/quota for domi/i)).toBeDisabled();
+  });
+
+  it("shows an uncapped account that has never used AI as a zero count, not a blank", () => {
+    renderPanel({
+      people: [
+        person({
+          label: "domi",
           aiPolicy: "uncapped",
           usage: {
             used: 0,
@@ -125,13 +155,45 @@ describe("PeoplePanel — what it shows about each person", () => {
         }),
       ],
     });
-    const card = personCard("domi");
 
-    expect(card).toHaveTextContent(/uncapped/i);
-    expect(card).not.toHaveTextContent("/ 50");
-    // The quota field is meaningless while uncapped, so it is disabled rather
-    // than silently accepting a number that changes nothing.
-    expect(within(card).getByLabelText(/quota for domi/i)).toBeDisabled();
+    expect(personCard("domi")).toHaveTextContent("0 used this window");
+  });
+
+  it("shows the window start for an uncapped account too — it is metered now", () => {
+    // Uncapped records against the same rolling window, so the owner needs to
+    // see when the count resets, exactly as for a capped account.
+    renderPanel({
+      people: [
+        person({
+          label: "domi",
+          aiPolicy: "uncapped",
+          usage: {
+            used: 12,
+            quota: 50,
+            remaining: 38,
+            windowStartedAt: new Date(NOW - 5 * 86_400_000),
+            windowEndsAt: new Date(NOW + 25 * 86_400_000),
+          },
+        }),
+      ],
+    });
+
+    expect(personCard("domi")).toHaveTextContent(/window began/i);
+  });
+
+  it("switching the dropdown to uncapped drops the denominator immediately", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    const card = personCard("ada");
+    expect(card).toHaveTextContent("12 / 50");
+
+    await user.selectOptions(
+      within(card).getByLabelText(/ai policy for ada/i),
+      "uncapped",
+    );
+
+    expect(card).toHaveTextContent("12 used this window");
+    expect(card).not.toHaveTextContent("12 / 50");
   });
 
   it("shows an account on its OWN key as billed to them, with no meter", () => {
@@ -518,6 +580,8 @@ describe("PeoplePanel — the card is internally consistent mid-edit", () => {
 
     expect(card).toHaveTextContent(/uncapped/i);
     expect(card).not.toHaveTextContent("12 / 50");
+    // Still a count — uncapped is metered, just not enforced (!175).
+    expect(card).toHaveTextContent("12 used this window");
     expect(within(card).getByLabelText(/quota for ada/i)).toBeDisabled();
   });
 
@@ -570,6 +634,28 @@ describe("PeoplePanel — the card is internally consistent mid-edit", () => {
     });
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Invited grace.",
+    );
+  });
+});
+
+describe("PeoplePanel — the intro sentence reads as a sentence", () => {
+  it("keeps a space between the window length and the word 'window'", () => {
+    // Caught by eyeballing the !175 screenshots: the served HTML was
+    // `rolling 30 days<!-- -->window`. The JSX had the space at the START of a
+    // line immediately after `{windowLabel(...)}`, and this Next version's JSX
+    // transform trimmed it (AGENTS.md: "This is NOT the Next.js you know").
+    // Every interpolation-adjacent space now lives inside a JS string, where
+    // nothing can trim it.
+    renderPanel();
+    const intro = screen.getByText(/Who can use this instance/);
+    expect(intro.textContent).toContain("rolling 30 days window");
+    expect(intro.textContent).not.toContain("dayswindow");
+  });
+
+  it("states the window length from the view, not a hardcoded 30 days", () => {
+    renderPanel({ windowHours: 168 });
+    expect(screen.getByText(/Who can use this instance/).textContent).toContain(
+      "rolling 7 days window",
     );
   });
 });

@@ -60,12 +60,16 @@ test.describe("People admin (owner)", () => {
 
     const own = page.locator('[data-person-label="e2e-owner"]');
     await expect(own).toBeVisible();
-    // The instance owner is uncapped by design, so no meaningless "0 / 50".
+    // The instance owner is uncapped by design. Owner decision on !175: their
+    // usage is still COUNTED and shown — as a bare count with no denominator, so
+    // it reads as information rather than as a limit being approached.
     await expect(own).toContainText(/uncapped/i);
+    await expect(own).toContainText(/used this window/i);
+    await expect(own).not.toContainText("/ 50");
     await expect(own).toContainText("Owner");
     await expect(own).toContainText(/this is you/i);
     await expect(own.getByRole("button", { name: /revoke/i })).toHaveCount(0);
-    // The quota field is disabled while the policy is uncapped.
+    // The quota field is inert while uncapped, so it is disabled.
     await expect(own.getByLabel(/quota for e2e-owner/i)).toBeDisabled();
   });
 

@@ -104,14 +104,95 @@ describe("consumeUserBreakdown — per-user atomicity", () => {
     ).toBe(24 * 3600_000);
   });
 
-  it("an uncapped account writes NO usage row at all", async () => {
-    await seedUser({ aiPolicy: "uncapped" });
+  // Owner decision on !175: uncapped RECORDS so the panel can show it, and never
+  // refuses. These are the real-Postgres half of "meter but do not enforce" — the
+  // half that would catch it if the implementation quietly became "enforce with a
+  // large number", because Postgres is where such a bound would actually live.
+  it("an uncapped account records every breakdown and is never refused", async () => {
+    await seedUser({ aiPolicy: "uncapped", aiQuota: QUOTA });
+    const N = QUOTA * 4; // four times the quota on the row
 
-    for (let i = 0; i < QUOTA + 3; i++) await consumeUserBreakdown(USER_ID);
+    const results = [];
+    for (let i = 0; i < N; i++)
+      results.push(await consumeUserBreakdown(USER_ID));
 
+    // Not one refusal, and every single call was counted.
+    expect(results.every((r) => r.blockedReason === null)).toBe(true);
+    expect(results.every((r) => r.metered)).toBe(true);
+    const row = await prisma.userAiUsage.findUnique({
+      where: { userId: USER_ID },
+    });
+    expect(row?.count).toBe(N);
+  });
+
+  it("an uncapped account with aiQuota 0 is still never refused", async () => {
+    // A CAPPED account with quota 0 is blocked outright. The same column must be
+    // completely inert on an uncapped one.
+    await seedUser({ aiPolicy: "uncapped", aiQuota: 0 });
+
+    const first = await consumeUserBreakdown(USER_ID);
+    const second = await consumeUserBreakdown(USER_ID);
+
+    expect(first.blockedReason).toBeNull();
+    expect(second.blockedReason).toBeNull();
     expect(
-      await prisma.userAiUsage.findUnique({ where: { userId: USER_ID } }),
-    ).toBeNull();
+      (await prisma.userAiUsage.findUnique({ where: { userId: USER_ID } }))
+        ?.count,
+    ).toBe(2);
+  });
+
+  it("uncapped usage is reported by peekUserAiUsage, so the panel has a number", async () => {
+    await seedUser({ aiPolicy: "uncapped", aiQuota: QUOTA });
+    for (
+      let i = 0;
+      i < 7; // deliberately > QUOTA
+      i++
+    ) {
+      await consumeUserBreakdown(USER_ID);
+    }
+
+    const usage = await peekUserAiUsage(USER_ID, QUOTA);
+
+    expect(usage.used).toBe(7);
+    expect(usage.windowStartedAt).not.toBeNull();
+  });
+
+  it("uncapped concurrency: every concurrent breakdown is counted, none refused", async () => {
+    // The mirror of the capped race test above. There the invariant is "never
+    // MORE than quota"; here it is "never FEWER than the number of calls" — a
+    // lost increment would under-report the owner's spend.
+    await seedUser({ aiPolicy: "uncapped", aiQuota: 1 });
+    const N = 25;
+
+    const results = await Promise.all(
+      Array.from({ length: N }, () => consumeUserBreakdown(USER_ID)),
+    );
+
+    expect(results.filter((r) => r.blockedReason !== null)).toHaveLength(0);
+    const row = await prisma.userAiUsage.findUnique({
+      where: { userId: USER_ID },
+    });
+    expect(row?.count).toBe(N);
+  });
+
+  it("a CAPPED account still enforces — 'meter but do not enforce' did not leak across", async () => {
+    // Regression guard for the refactor that introduced meterRecord: the two
+    // modes share one body, so this asserts the enforced one still refuses.
+    await seedUser({ aiPolicy: "capped", aiQuota: 2 });
+
+    const a = await consumeUserBreakdown(USER_ID);
+    const b = await consumeUserBreakdown(USER_ID);
+    const c = await consumeUserBreakdown(USER_ID);
+
+    expect([a.blockedReason, b.blockedReason, c.blockedReason]).toEqual([
+      null,
+      null,
+      "quota",
+    ]);
+    expect(
+      (await prisma.userAiUsage.findUnique({ where: { userId: USER_ID } }))
+        ?.count,
+    ).toBe(2);
   });
 
   it("deleting the account cascades its usage row away", async () => {

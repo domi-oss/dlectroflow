@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   meterConsume,
+  meterRecord,
   remainingInWindow,
   windowExpired,
   type SlidingWindowStore,
@@ -24,14 +25,14 @@ function fakeStore(overrides: Partial<SlidingWindowStore> = {}): {
   mocks: {
     find: ReturnType<typeof vi.fn>;
     resetExpired: ReturnType<typeof vi.fn>;
-    incrementUnderQuota: ReturnType<typeof vi.fn>;
+    incrementInWindow: ReturnType<typeof vi.fn>;
     createFirstUse: ReturnType<typeof vi.fn>;
   };
 } {
   const mocks = {
     find: vi.fn().mockResolvedValue(null),
     resetExpired: vi.fn().mockResolvedValue(0),
-    incrementUnderQuota: vi.fn().mockResolvedValue(0),
+    incrementInWindow: vi.fn().mockResolvedValue(0),
     createFirstUse: vi.fn().mockResolvedValue(undefined),
   };
   const store: SlidingWindowStore = {
@@ -79,7 +80,7 @@ describe("meterConsume — step 1: an expired window resets to a fresh one", () 
 
     expect(res).toEqual({ allowed: true, remaining: QUOTA - 1 });
     expect(mocks.resetExpired).toHaveBeenCalledWith(NOW, THRESHOLD);
-    expect(mocks.incrementUnderQuota).not.toHaveBeenCalled();
+    expect(mocks.incrementInWindow).not.toHaveBeenCalled();
     expect(mocks.createFirstUse).not.toHaveBeenCalled();
   });
 });
@@ -87,7 +88,7 @@ describe("meterConsume — step 1: an expired window resets to a fresh one", () 
 describe("meterConsume — step 2: guarded increment inside an active window", () => {
   it("allows the consume and reports the remaining allowance", async () => {
     const { store, mocks } = fakeStore();
-    mocks.incrementUnderQuota.mockResolvedValue(1);
+    mocks.incrementInWindow.mockResolvedValue(1);
     mocks.find.mockResolvedValue({
       count: 2,
       windowStartedAt: new Date(THRESHOLD.getTime() + 1),
@@ -96,7 +97,7 @@ describe("meterConsume — step 2: guarded increment inside an active window", (
     const res = await meterConsume(store, QUOTA, NOW, THRESHOLD);
 
     expect(res).toEqual({ allowed: true, remaining: QUOTA - 2 });
-    expect(mocks.incrementUnderQuota).toHaveBeenCalledWith(QUOTA, THRESHOLD);
+    expect(mocks.incrementInWindow).toHaveBeenCalledWith(QUOTA, THRESHOLD);
     expect(mocks.createFirstUse).not.toHaveBeenCalled();
   });
 });
@@ -131,7 +132,7 @@ describe("meterConsume — step 3: first use", () => {
     const { store, mocks } = fakeStore();
     mocks.createFirstUse.mockRejectedValue(new FakeDuplicate("dup"));
     // The retry increment succeeds against the row the winner created.
-    mocks.incrementUnderQuota
+    mocks.incrementInWindow
       .mockResolvedValueOnce(0) // step 2, before the create attempt
       .mockResolvedValueOnce(1); // the retry after the lost race
     mocks.find
@@ -144,7 +145,7 @@ describe("meterConsume — step 3: first use", () => {
     const res = await meterConsume(store, QUOTA, NOW, THRESHOLD);
 
     expect(res).toEqual({ allowed: true, remaining: QUOTA - 1 });
-    expect(mocks.incrementUnderQuota).toHaveBeenCalledTimes(2);
+    expect(mocks.incrementInWindow).toHaveBeenCalledTimes(2);
   });
 
   it("rethrows a create failure that is NOT a unique violation", async () => {
@@ -176,5 +177,100 @@ describe("remainingInWindow", () => {
       windowStartedAt: new Date(THRESHOLD.getTime() + 1),
     });
     expect(await remainingInWindow(store, QUOTA, THRESHOLD)).toBe(0);
+  });
+});
+
+// ── Owner decision on !175 — record without enforcing ────────────────────────
+//
+// `uncapped` now RECORDS usage so the People panel can show it, but must never
+// refuse a request. The trap this guards against is implementing that as
+// "enforce with a huge quota": `meterRecord` takes no quota argument at all, so
+// there is no number for a future change to accidentally start comparing
+// against, and the increment it issues carries NO guard.
+describe("meterRecord — meters without enforcing anything", () => {
+  it("takes no quota argument, so there is nothing to enforce against", () => {
+    // If this ever gains a second parameter, "meter but don't enforce" has
+    // started to become "enforce with a big number" and this fails on sight.
+    expect(meterRecord).toHaveLength(3); // store, now, windowThreshold
+  });
+
+  it("resets an expired window to a fresh one", async () => {
+    const { store, mocks } = fakeStore();
+    mocks.resetExpired.mockResolvedValue(1);
+
+    await meterRecord(store, NOW, THRESHOLD);
+
+    expect(mocks.resetExpired).toHaveBeenCalledWith(NOW, THRESHOLD);
+    expect(mocks.incrementInWindow).not.toHaveBeenCalled();
+  });
+
+  it("increments inside an active window with NO quota guard", async () => {
+    const { store, mocks } = fakeStore();
+    mocks.incrementInWindow.mockResolvedValue(1);
+
+    await meterRecord(store, NOW, THRESHOLD);
+
+    // `null` is the "no guard" contract — the store omits the `count < quota`
+    // predicate entirely rather than being handed a large number.
+    expect(mocks.incrementInWindow).toHaveBeenCalledWith(null, THRESHOLD);
+  });
+
+  it("creates the row on first use", async () => {
+    const { store, mocks } = fakeStore();
+
+    await meterRecord(store, NOW, THRESHOLD);
+
+    expect(mocks.createFirstUse).toHaveBeenCalledWith(NOW);
+  });
+
+  it("keeps counting well past any plausible quota", async () => {
+    // The point of the feature: an uncapped account's count is informational, so
+    // a count of 9999 must still increment rather than silently stop.
+    const { store, mocks } = fakeStore();
+    mocks.find.mockResolvedValue({
+      count: 9999,
+      windowStartedAt: new Date(THRESHOLD.getTime() + 1),
+    });
+    mocks.incrementInWindow.mockResolvedValue(1);
+
+    await meterRecord(store, NOW, THRESHOLD);
+
+    expect(mocks.incrementInWindow).toHaveBeenCalledWith(null, THRESHOLD);
+    expect(mocks.createFirstUse).not.toHaveBeenCalled();
+  });
+
+  it("recovers from a lost create race", async () => {
+    const { store, mocks } = fakeStore();
+    mocks.createFirstUse.mockRejectedValue(new FakeDuplicate("dup"));
+    mocks.incrementInWindow.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+
+    await expect(meterRecord(store, NOW, THRESHOLD)).resolves.toBeUndefined();
+    expect(mocks.incrementInWindow).toHaveBeenCalledTimes(2);
+  });
+
+  it("rethrows a create failure that is NOT a unique violation", async () => {
+    const { store, mocks } = fakeStore();
+    mocks.createFirstUse.mockRejectedValue(new Error("connection reset"));
+
+    await expect(meterRecord(store, NOW, THRESHOLD)).rejects.toThrow(
+      "connection reset",
+    );
+  });
+});
+
+describe("meterConsume still ENFORCES — the two modes have not merged", () => {
+  it("passes the real quota to the store as the guard", async () => {
+    const { store, mocks } = fakeStore();
+    mocks.incrementInWindow.mockResolvedValue(1);
+    mocks.find.mockResolvedValue({
+      count: 1,
+      windowStartedAt: new Date(THRESHOLD.getTime() + 1),
+    });
+
+    await meterConsume(store, QUOTA, NOW, THRESHOLD);
+
+    // A guarded increment, never `null` — otherwise the capped path would have
+    // quietly become the uncapped one.
+    expect(mocks.incrementInWindow).toHaveBeenCalledWith(QUOTA, THRESHOLD);
   });
 });

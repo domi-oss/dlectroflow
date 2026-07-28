@@ -3,6 +3,7 @@ import { AiPolicy } from "@/lib/constants";
 import { decryptNullable } from "@/lib/crypto/token-cipher";
 import {
   meterConsume,
+  meterRecord,
   usedInWindow,
   type SlidingWindowStore,
 } from "@/lib/sliding-window-meter";
@@ -78,12 +79,14 @@ function userMeterStore(userId: string): SlidingWindowStore {
           data: { count: 1, windowStartedAt: now },
         })
       ).count,
-    incrementUnderQuota: async (quota, threshold) =>
+    incrementInWindow: async (quota, threshold) =>
       (
         await prisma.userAiUsage.updateMany({
           where: {
             userId,
-            count: { lt: quota },
+            // `null` = no limit was consulted: the clause is OMITTED rather than
+            // given a large bound (see meterRecord).
+            ...(quota === null ? {} : { count: { lt: quota } }),
             windowStartedAt: { gt: threshold },
           },
           data: { count: { increment: 1 } },
@@ -105,13 +108,19 @@ function userMeterStore(userId: string): SlidingWindowStore {
  * Resolution order, exactly as the design specifies it:
  *
  *   1. A PRESENT KEY WINS — decrypt `llmKeyEnc`, use their provider/key, no
- *      cap. This is why "capped until you bring your key" needs no fourth
- *      state: bringing a key is what lifts the cap, not a policy change.
- *   2. `uncapped` → instance key, no meter.
+ *      cap and no meter (their key, their bill, not ours to count). This is why
+ *      "capped until you bring your key" needs no fourth state: bringing a key
+ *      is what lifts the cap, not a policy change.
+ *   2. `uncapped` → instance key, usage RECORDED but never enforced. Owner
+ *      decision on !175: "I at least want the owner usage uncapped but showing
+ *      how much has been used in the people panel." So `uncapped` is emphatically
+ *      NOT "unmetered" — it counts, and it can never refuse. `aiQuota` is inert
+ *      on such an account, and `meterRecord` takes no quota argument at all, so
+ *      there is nothing to compare against even by accident.
  *   3. `capped` (and anything else, including a hand-edited value) → instance
- *      key, metered against `UserAiUsage`. Over quota returns the same shaped
- *      `"quota"` block the guest cap returns, so the route's fallback branch
- *      needs no new case.
+ *      key, metered against `UserAiUsage` AND enforced. Over quota returns the
+ *      same shaped `"quota"` block the guest cap returns, so the route's
+ *      fallback branch needs no new case.
  *
  * A user row that cannot be found is blocked rather than served: the caller
  * already holds a verified session, so a missing row means the account was
@@ -147,18 +156,29 @@ export async function consumeUserBreakdown(
     };
   }
 
-  // 2. Uncapped: the instance pays and nothing is counted.
+  // 2. Uncapped: the instance pays, the usage is COUNTED so the People panel can
+  //    show it, and the request can never be refused. Note what is NOT here: no
+  //    quota is read, and `meterRecord` has no parameter to pass one to.
   if (user.aiPolicy === AiPolicy.Uncapped) {
+    const { windowHours } = userQuotaConfig();
+    const now = new Date();
+    await meterRecord(
+      userMeterStore(userId),
+      now,
+      new Date(now.getTime() - windowHours * 3600_000),
+    );
     return {
       policy: user.aiPolicy,
       ownKey: null,
-      metered: false,
+      // TRUE: a unit was recorded, so a failed breakdown must be refunded — the
+      // count is what the owner reads, and an over-count misreports their spend.
+      metered: true,
       blockedReason: null,
     };
   }
 
-  // 3. Metered. Fails CLOSED: `capped`, `own_key`-without-a-key and any value
-  //    the CHECK constraint would reject all land here.
+  // 3. Metered AND enforced. Fails CLOSED: `capped`, `own_key`-without-a-key and
+  //    any value the CHECK constraint would reject all land here.
   const quota = Math.max(0, user.aiQuota);
   if (quota === 0) {
     return {
