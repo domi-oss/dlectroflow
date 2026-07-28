@@ -1,0 +1,179 @@
+# Production Docker Compose stack for a single host (#102).
+#
+# This is the deployment described as the cheapest honest option in
+# docs/running-costs.md: one small VPS, ~$6/month, with automatic HTTPS. It is a
+# deliberate mirror of what charts/dlectroflow/ does in Kubernetes, minus the
+# parts that only make sense in a cluster (replicas, PodDisruptionBudget,
+# cert-manager, per-MR review apps).
+#
+#   Quick start:  docs/self-host-vps.md
+#   Cost context: docs/running-costs.md
+#
+# The startup ORDER matters and is enforced with service_completed_successfully:
+#
+#   db (healthy) → migrate → seed-allowlist → app → caddy
+#
+# `migrate` exists because the image does NOT apply migrations on start — its
+# command is just `node server.js`. `seed-allowlist` exists because sign-in is
+# invite-only (#35): without it the owner is locked out of their own instance on
+# first boot. Both reuse the app image exactly as the chart's initContainers do.
+#
+# Two services are deliberately NOT started by `up`. `backup` and `purge` sit
+# behind profiles because Compose has no scheduler — the host's cron runs them.
+# See docs/self-host-vps.md for the two crontab lines.
+
+# A DISTINCT project name from the dev stack in docker-compose.yml, whose
+# project defaults to the directory name (dlectroflow). Without this they share
+# container names, and bringing this stack up on a machine that also runs the dev
+# database silently takes over the dev container. Found the hard way while
+# testing this file.
+name: dlectroflow-prod
+
+services:
+  db:
+    # Pinned to the same digest as docker-compose.yml and the Helm chart so all
+    # three environments run one Postgres minor. In-major bumps (16.x -> 16.y)
+    # are binary-compatible; a cross-major bump needs a dump/restore.
+    image: postgres:16@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env.prod}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.prod}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env.prod}
+    # No `ports:` on purpose. Postgres is reachable only on the internal Compose
+    # network, so it is never exposed to the internet even if the host firewall
+    # is wide open. Use `docker compose exec db psql` for a shell.
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # Applies pending Prisma migrations, then exits. Equivalent to the chart's
+  # `migrate` initContainer (charts/dlectroflow/templates/deployment.yaml).
+  migrate:
+    image: ${DLECTROFLOW_IMAGE:-dlectroflow:local}
+    command: ["npx", "prisma", "migrate", "deploy"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Composed from the POSTGRES_* vars above so the app's connection string
+      # and the database's own credentials can never drift apart.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
+
+  # Seeds the owner's invitation from OWNER_ALLOWLIST. Idempotent: every start
+  # re-asserts the invitation without releasing an existing claim. Equivalent to
+  # the chart's `seed-allowlist` initContainer.
+  seed-allowlist:
+    image: ${DLECTROFLOW_IMAGE:-dlectroflow:local}
+    command: ["npx", "tsx", "prisma/seed-allowlist.ts"]
+    restart: "no"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      # Composed from the POSTGRES_* vars above so the app's connection string
+      # and the database's own credentials can never drift apart.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
+      AUTH_PROVIDER: ${AUTH_PROVIDER:-gitlab}
+      OWNER_ALLOWLIST: ${OWNER_ALLOWLIST:?set OWNER_ALLOWLIST in .env.prod}
+
+  app:
+    image: ${DLECTROFLOW_IMAGE:-dlectroflow:local}
+    restart: unless-stopped
+    depends_on:
+      seed-allowlist:
+        condition: service_completed_successfully
+    # No `ports:` — Caddy is the only thing the internet talks to. Publishing
+    # 3000 here would bypass HTTPS and the request-size cap.
+    env_file:
+      - .env.prod
+    environment:
+      # Overrides anything in .env.prod — Compose's `environment` beats
+      # `env_file` — so DATABASE_URL is derived in exactly one place.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
+    healthcheck:
+      # /api/health runs `SELECT 1` against Postgres, so a healthy container
+      # means the app can actually serve, not merely that Node started.
+      test:
+        ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  caddy:
+    # Caddy obtains and renews a Let's Encrypt certificate for DLECTROFLOW_DOMAIN
+    # automatically, which is what replaces ingress-nginx + cert-manager here.
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80" # required: ACME HTTP-01 challenge + the HTTP->HTTPS redirect
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    environment:
+      DLECTROFLOW_DOMAIN: ${DLECTROFLOW_DOMAIN:?set DLECTROFLOW_DOMAIN in .env.prod}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # caddy_data holds the issued certificates and the ACME account key. Losing
+      # it means re-issuing certs and can hit Let's Encrypt rate limits, so keep
+      # it as a named volume rather than a bind mount you might clean up.
+      - caddy_data:/data
+      - caddy_config:/config
+
+  # ── Scheduled work: run from the host's cron, not by `up` ──────────────────
+  # Compose has no scheduler, so these carry a profile and stay out of `up`.
+  # docs/self-host-vps.md has the crontab lines.
+
+  # Logical backup to ./backups on the host. Mirrors the chart's backup CronJob,
+  # except the chart uploads to GCS. Keep a copy OFF this machine — a backup that
+  # only exists on the disk you are protecting is not a backup.
+  backup:
+    image: postgres:16@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20
+    profiles: ["tools"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # All three are read by the command below; PGPASSWORD is what lets pg_dump
+      # authenticate without an interactive prompt.
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.prod}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env.prod}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env.prod}
+    volumes:
+      - ./backups:/backups
+    # --clean --if-exists so the dump can be restored over an existing schema.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        set -eu;
+        out="/backups/dlectroflow-$$(date -u +%Y%m%dT%H%M%SZ).sql.gz";
+        pg_dump --clean --if-exists -h db -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+        | gzip -9 > "$$out";
+        echo "wrote $$out";
+        ls -1t /backups/dlectroflow-*.sql.gz | tail -n +15 | xargs -r rm --
+
+  # Deletes expired guest workspaces and stale guest counters (#21). Mirrors the
+  # chart's purge CronJob. Safe to run at any time; it touches no owner data.
+  purge:
+    image: ${DLECTROFLOW_IMAGE:-dlectroflow:local}
+    profiles: ["tools"]
+    command: ["npx", "tsx", "prisma/scheduled-purge.ts"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Composed from the POSTGRES_* vars above so the app's connection string
+      # and the database's own credentials can never drift apart.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

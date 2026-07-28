@@ -150,10 +150,15 @@ Postgres — so 2 GB technically works, 4 GB is comfortable, and you should neve
 run the *build* on a 2 GB box. Check whether this project's container registry
 image is publicly pullable; if not, you'll need registry credentials.
 
-> **Known gap.** The [docker-compose.yml](../docker-compose.yml) in this repo
-> only starts Postgres for local development. A production compose file (app +
-> Postgres + Caddy) does **not** ship yet, so you'd write it yourself. If you do,
-> please contribute it back.
+> **This one is ready to copy.** The repo ships
+> [docker-compose.prod.yml](../docker-compose.prod.yml), a
+> [Caddyfile](../Caddyfile) and [.env.prod.example](../.env.prod.example) for
+> exactly this setup, with a step-by-step walkthrough in
+> **[docs/self-host-vps.md](self-host-vps.md)** — including the nightly backup and
+> guest-purge cron lines, how to restore a dump, and how to upgrade. The stack was
+> verified end-to-end (migrations, owner seeding, app serving through Caddy, both
+> scheduled jobs); the one part not yet exercised on a real public domain is
+> Let's Encrypt issuing the certificate.
 
 ---
 
@@ -532,9 +537,10 @@ tested by us. Contributions that would genuinely help, in rough order of value:
 3. **Add a setup that isn't here.** Oracle Cloud free tier, a Raspberry Pi,
    Hetzner dedicated, AWS Lightsail, Kamal, NixOS, Unraid, a corporate cluster —
    if you got dlectroflow running somewhere, that's worth a section.
-4. **Contribute the missing production Docker Compose file** (see the gap noted
-   in option 2). That would make the cheapest path copy-pasteable rather than an
-   exercise.
+4. **Confirm option 2 end to end on a real domain.** The Compose stack now ships
+   and is verified locally, but nobody has yet watched Let's Encrypt issue a
+   certificate for it on a public host. If you run it, say so — that turns the
+   cheapest option from "verified locally" into "verified in the wild".
 
 Open a merge request against this file, or an issue if you'd rather just report
 the numbers and let someone else write it up. Please include the date you checked

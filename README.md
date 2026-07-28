@@ -381,6 +381,21 @@ The app deploys automatically via **GitLab CI/CD to GKE Autopilot** (europe-west
 
 For the full provisioning walkthrough (cluster, ingress-nginx, cert-manager, GitLab agent, secrets, DNS, OAuth), see **[docs/deploy-runbook.md](docs/deploy-runbook.md)**.
 
+### 🖥️ Or self-host it on one small server (~$6/month)
+
+You don't need Kubernetes. `docker-compose.prod.yml` runs the whole thing —
+app, Postgres and [Caddy](https://caddyserver.com) for automatic HTTPS — on a
+single VPS, with a nightly backup and guest-data purge:
+
+```bash
+cp .env.prod.example .env.prod          # fill in your domain + secrets
+docker compose -f docker-compose.prod.yml build
+docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
+```
+
+Step-by-step walkthrough, cron lines, restore and upgrade steps:
+**[docs/self-host-vps.md](docs/self-host-vps.md)**.
+
 ### Run the container directly
 
 If you want to run the image outside the cluster (e.g. a quick local prod-like test), supply a Postgres `DATABASE_URL`:
