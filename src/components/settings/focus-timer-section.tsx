@@ -17,6 +17,7 @@ import {
   SaveIndicator,
 } from "@/components/settings/use-save-status";
 import { TimerStylePreview } from "@/components/focus/timer-style-preview";
+import { SectionHeading } from "@/components/nav/section-heading";
 
 type Prefs = {
   timerStyle: string | null;
@@ -106,12 +107,9 @@ export function FocusTimerSection({
 
   return (
     <section className="space-y-3">
-      <div className="flex items-center gap-2">
-        <h2 className="text-sm font-semibold">
-          {t("focusSettings.heading", voice)}
-        </h2>
+      <SectionHeading id="settings-focus-timer" voice={voice}>
         <SaveIndicator status={status} voice={voice} />
-      </div>
+      </SectionHeading>
       <p className="text-muted-foreground text-sm">
         {t("focusSettings.intro", voice)}
       </p>

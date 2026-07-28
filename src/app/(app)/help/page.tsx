@@ -2,6 +2,9 @@ import Link from "next/link";
 import { getSettings } from "@/lib/db";
 import { currentWorkspaceId } from "@/lib/workspace";
 import { BackLink } from "@/components/nav/back-link";
+import { SectionNav } from "@/components/nav/section-nav";
+import { SectionHeading } from "@/components/nav/section-heading";
+import { HELP_SECTIONS } from "@/lib/section-nav";
 import { type Voice } from "@/lib/strings";
 
 // DB-backed only for the voice preference; content is static.
@@ -36,8 +39,15 @@ export default async function HelpPage({
         </p>
       </header>
 
+      {/* #72 — the page map. Sticky so it stays reachable on a long scroll. */}
+      <SectionNav
+        sections={HELP_SECTIONS}
+        voice={voice}
+        label="Help sections"
+      />
+
       <section className="space-y-2">
-        <h2 className="text-lg font-semibold">Getting started</h2>
+        <SectionHeading id="help-getting-started" voice={voice} />
         <p className="text-sm">The core loop is five moves:</p>
         <ol className="ml-5 list-decimal space-y-1 text-sm">
           <li>
@@ -66,7 +76,7 @@ export default async function HelpPage({
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-lg font-semibold">The inbox &amp; freshness</h2>
+        <SectionHeading id="help-inbox-freshness" voice={voice} />
         <p className="text-sm">
           Items in <em>Needs review</em> show a freshness pill that ages over
           time: <strong>Recent</strong> → <strong>Aging</strong> →{" "}
@@ -84,7 +94,7 @@ export default async function HelpPage({
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-lg font-semibold">Task breakdown</h2>
+        <SectionHeading id="help-task-breakdown" voice={voice} />
         <p className="text-sm">
           When you break a task down, Claude proposes small steps. In the editor
           you can: ask for <strong>Fewer steps</strong> (consolidate) or{" "}
@@ -102,7 +112,7 @@ export default async function HelpPage({
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-lg font-semibold">The focus session</h2>
+        <SectionHeading id="help-focus-session" voice={voice} />
         <p className="text-sm">
           Opening a step shows one number and one action. Pick how long you want
           from the duration <strong>chips</strong> (the step&rsquo;s own
@@ -150,7 +160,7 @@ export default async function HelpPage({
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-lg font-semibold">Voice &amp; settings</h2>
+        <SectionHeading id="help-voice-settings" voice={voice} />
         <p className="text-sm">
           Switch between the calm <strong>Plain</strong> voice and the playful
           snack-themed voice, set your freshness thresholds, and manage
@@ -163,7 +173,7 @@ export default async function HelpPage({
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-lg font-semibold">Guests &amp; AI limits</h2>
+        <SectionHeading id="help-guests-ai-limits" voice={voice} />
         <p className="text-sm">
           Signed-in guests can try the full flow with a daily cap on AI
           breakdowns; when the cap is reached (or the AI hiccups) you still get

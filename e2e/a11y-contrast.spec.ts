@@ -160,6 +160,9 @@ for (const theme of THEMES) {
     const STATIC_ROUTES = [
       { path: "/", name: "inbox / capture" },
       { path: "/settings", name: "settings" },
+      // #72 — Help now carries the same section nav as Settings (magenta
+      // active pill, muted "where am I" hint), so it joins the gate.
+      { path: "/help", name: "help" },
       { path: "/focus", name: "focus launcher" },
     ] as const;
 

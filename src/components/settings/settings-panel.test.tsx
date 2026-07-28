@@ -262,3 +262,38 @@ describe("SettingsPanel demo: first-run preview toggle", () => {
     expect(updateFirstRunPreview).toHaveBeenCalledWith(false);
   });
 });
+
+describe("SettingsPanel decoy line (#72 follow-up)", () => {
+  it("renders the SAME decoy line on every render of the same props", () => {
+    // It used to roll Math.random() during render, so the server and the client
+    // disagreed and React discarded the hydrated tree — which reset <html>'s
+    // class list and silently dropped dark mode on /settings. The line is now
+    // rolled server-side and handed in as a prop.
+    const line = "a fixed decoy line";
+    const first = render(
+      <SettingsPanel
+        settings={settings}
+        isOwner={false}
+        breakdownModel={null}
+        modelChoices={MODEL_CHOICES}
+        voice="plain"
+        fable={line}
+      />,
+    );
+    expect(screen.getByText(new RegExp(line))).toBeInTheDocument();
+    first.unmount();
+
+    // Same props, fresh render — identical output, no dice roll.
+    render(
+      <SettingsPanel
+        settings={settings}
+        isOwner={false}
+        breakdownModel={null}
+        modelChoices={MODEL_CHOICES}
+        voice="plain"
+        fable={line}
+      />,
+    );
+    expect(screen.getByText(new RegExp(line))).toBeInTheDocument();
+  });
+});

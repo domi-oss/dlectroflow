@@ -19,6 +19,7 @@ import {
   useSaveStatus,
   SaveIndicator,
 } from "@/components/settings/use-save-status";
+import { SectionHeading } from "@/components/nav/section-heading";
 
 type Prefs = {
   notifyRoundup: boolean;
@@ -96,10 +97,9 @@ export function NotificationsSection({
 
   return (
     <section className="space-y-3">
-      <div className="flex items-center gap-3">
-        <h2 className="text-lg font-semibold">{t("notify.heading", voice)}</h2>
+      <SectionHeading id="settings-notifications" voice={voice}>
         <SaveIndicator status={status} voice={voice} />
-      </div>
+      </SectionHeading>
       <p className="text-muted-foreground text-sm">
         {t("notify.intro", voice)}
       </p>

@@ -17,6 +17,7 @@ import {
   SaveIndicator,
 } from "@/components/settings/use-save-status";
 import { cn } from "@/lib/utils";
+import { SectionHeading } from "@/components/nav/section-heading";
 
 type AppearancePrefs = {
   completeStrikethrough: boolean;
@@ -71,12 +72,9 @@ export function AppearanceSection({
 
   return (
     <section className="space-y-3">
-      <div className="flex items-center gap-3">
-        <h2 className="text-lg font-semibold">
-          {t("appearance.heading", voice)}
-        </h2>
+      <SectionHeading id="settings-appearance" voice={voice}>
         <SaveIndicator status={status} voice={voice} />
-      </div>
+      </SectionHeading>
 
       {/* Theme (moved here so Appearance is a single group). */}
       <div className="space-y-1">

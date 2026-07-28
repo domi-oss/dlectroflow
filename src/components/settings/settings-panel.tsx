@@ -11,19 +11,12 @@ import {
 import type { AgingSettings } from "@/lib/aging";
 import { OWNER_BREAKDOWN_MODEL_DEFAULT } from "@/lib/constants";
 import { t, type Voice } from "@/lib/strings";
+import { FABLE_LINES } from "@/lib/fable-lines";
 import {
   useSaveStatus,
   SaveIndicator,
 } from "@/components/settings/use-save-status";
-
-const FABLE_LINES = [
-  "Our most capable model. Also $50/M tokens. To split 'clean the kitchen' into 3 steps? We love you, but no.",
-  "We tried it. It wrote a dissertation on the philosophy of procrastination instead of your task. Disabled for everyone's safety.",
-  "Reserved for problems harder than 'remember to buy milk.' 💸",
-  "Bringing a frontier reasoning model to a to-do list felt… irresponsible.",
-  "It kept trying to solve P vs NP instead of your laundry. Locked.",
-  "Overkill detector tripped. Fable stays in its cage for this one.",
-];
+import { SectionHeading } from "@/components/nav/section-heading";
 
 export function SettingsPanel({
   settings,
@@ -32,6 +25,7 @@ export function SettingsPanel({
   modelChoices,
   activeModelName,
   voice,
+  fable = FABLE_LINES[0],
   autoSaveDelayMs = 600,
 }: {
   settings: AgingSettings & { firstRunPreview: boolean };
@@ -49,6 +43,12 @@ export function SettingsPanel({
   /** The single configured model name, shown read-only when `modelChoices` is null. */
   activeModelName?: string | null;
   voice: Voice;
+  /**
+   * The decoy model's flavour line, rolled server-side so SSR and hydration
+   * agree (see randomFableLine). Defaults to the first line, keeping tests and
+   * any other caller deterministic.
+   */
+  fable?: string;
   /** Debounce for numeric auto-saves. Overridable so tests stay fast + deterministic. */
   autoSaveDelayMs?: number;
 }) {
@@ -70,9 +70,6 @@ export function SettingsPanel({
 
   const [model, setModel] = useState<string>(
     breakdownModel ?? OWNER_BREAKDOWN_MODEL_DEFAULT,
-  );
-  const [fable] = useState(
-    () => FABLE_LINES[Math.floor(Math.random() * FABLE_LINES.length)],
   );
   const [currentVoice, setCurrentVoice] = useState<Voice>(voice);
 
@@ -157,15 +154,14 @@ export function SettingsPanel({
   return (
     <div className="space-y-6 text-sm">
       <section className="space-y-3">
-        <h2 className="flex items-center gap-2 font-semibold">
-          Aging &amp; reminder
+        <SectionHeading id="settings-aging" voice={voice}>
           {settings.demoOverrideSeconds != null && (
             <span className="text-xs font-normal text-amber-600">
               demo override: {settings.demoOverrideSeconds}s
             </span>
           )}
           <SaveIndicator status={status} voice={voice} />
-        </h2>
+        </SectionHeading>
         <div className="flex flex-wrap items-end gap-4">
           <label className="flex flex-col gap-1">
             <span className="text-muted-foreground text-xs">
@@ -251,7 +247,7 @@ export function SettingsPanel({
       </section>
 
       <section className="space-y-2 border-t pt-4">
-        <h2 className="font-semibold">Voice</h2>
+        <SectionHeading id="settings-voice" voice={voice} />
         <div
           className="inline-flex rounded-md border"
           role="group"
@@ -282,14 +278,13 @@ export function SettingsPanel({
           without being able to change it. Server-side, updateBreakdownModel
           already rejects non-owners — this is the matching UI. */}
       <section className="space-y-2 border-t pt-4">
-        <h2 className="flex items-center gap-2 font-semibold">
-          Breakdown model
+        <SectionHeading id="settings-breakdown-model" voice={voice}>
           {!isOwner && (
             <span className="border-input text-muted-foreground rounded-full border px-2 py-0.5 text-xs font-normal">
               🔒 {t("settings.ownerOnly", voice)}
             </span>
           )}
-        </h2>
+        </SectionHeading>
         {modelChoices ? (
           <>
             <div
@@ -349,7 +344,7 @@ export function SettingsPanel({
       </section>
 
       <section className="space-y-2 border-t pt-4">
-        <h2 className="font-semibold">Demo</h2>
+        <SectionHeading id="settings-demo" voice={voice} />
         <label className="flex items-start gap-2 text-sm">
           <input
             type="checkbox"

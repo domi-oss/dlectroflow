@@ -3,12 +3,15 @@ import { getSettings } from "@/lib/db";
 import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
 import { getGoogleStatus } from "@/lib/google";
 import { SettingsPanel } from "@/components/settings/settings-panel";
+import { randomFableLine } from "@/lib/fable-lines";
 import { modelChoicesForProvider, resolveUtilityModel } from "@/lib/models";
 import { NotificationsSection } from "@/components/settings/notifications-section";
 import { AppearanceSection } from "@/components/settings/appearance-section";
 import { FocusTimerSection } from "@/components/settings/focus-timer-section";
 import { IntegrationsPanel } from "@/components/settings/integrations-panel";
 import { BackLink } from "@/components/nav/back-link";
+import { SectionNav } from "@/components/nav/section-nav";
+import { SETTINGS_SECTIONS } from "@/lib/section-nav";
 import { t, type Voice } from "@/lib/strings";
 
 // DB-backed, always fresh.
@@ -28,11 +31,21 @@ export default async function SettingsPage({
   const google = owner ? await getGoogleStatus() : null;
   const voice: Voice = settings.voice === "playful" ? "playful" : "plain";
 
+  // #72 — the nav must list what this render actually put on the page. The
+  // Integrations section is the one conditional one (see the branch below), so
+  // an owner with no status object gets a nav without a dead "Integrations"
+  // anchor rather than a link that jumps nowhere.
+  const showIntegrations = owner ? google != null : true;
+  const sections = SETTINGS_SECTIONS.filter(
+    (section) => section.id !== "settings-integrations" || showIntegrations,
+  );
+
   return (
     <div className="space-y-4">
       <BackLink from={from} voice={voice} />
 
       <h1 className="text-xl font-semibold">{t("nav.settings", voice)}</h1>
+      <SectionNav sections={sections} voice={voice} label="Settings sections" />
       <SettingsPanel
         settings={{
           agingThresholdMinutes: settings.agingThresholdMinutes,
@@ -53,6 +66,8 @@ export default async function SettingsPage({
         // misreports when an owner/guest split (LLM_OWNER_MODEL) is set.
         activeModelName={resolveUtilityModel()}
         voice={voice}
+        // Rolled here, on the server, so SSR and hydration see the same line.
+        fable={randomFableLine()}
       />
       <div className="border-t pt-4">
         <AppearanceSection
