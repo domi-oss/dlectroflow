@@ -62,6 +62,27 @@ async function waitForScrollToSettle(page: Page): Promise<void> {
   );
 }
 
+/**
+ * Scroll well INTO a named section, without touching the nav (the tests below
+ * are the SCROLL cases, not the jump cases).
+ *
+ * Derived from the DOM rather than a magic pixel offset. A fixed offset silently
+ * stops meaning "inside a section" the moment the page gains one above it —
+ * which is exactly what happened when #35 Phase B added the owner-only People
+ * section at the top and pushed everything down.
+ */
+async function scrollIntoSection(page: Page, id: string): Promise<void> {
+  await page.evaluate((sectionId) => {
+    const heading = document.getElementById(sectionId)!;
+    const section = heading.closest("section") ?? heading.parentElement!;
+    const rect = section.getBoundingClientRect();
+    // A third of the way in: past the heading (so its band is stuck), and
+    // comfortably short of the next section's start.
+    window.scrollTo(0, window.scrollY + rect.top + rect.height / 3);
+  }, id);
+  await waitForScrollToSettle(page);
+}
+
 /** The heading must sit BELOW the sticky bar, not underneath it. */
 async function expectClearOfStickyBar(
   nav: Locator,
@@ -118,8 +139,10 @@ test.describe("section nav — desktop", () => {
     await waitForNavHydrated(page);
     const nav = page.locator(SETTINGS_NAV);
 
-    // At the top of the page the first section is current.
-    await expect(nav.locator("a[aria-current]")).toHaveText(/Aging & reminder/);
+    // At the top of the page the first section is current. #35 Phase B put the
+    // owner-only People section first (the design's Account group leads the
+    // page), and this suite runs as the owner.
+    await expect(nav.locator("a[aria-current]")).toHaveText(/People/);
 
     await openPanel(nav);
     await nav.getByRole("link", { name: "Focus timer" }).click();
@@ -227,8 +250,7 @@ test.describe("section nav — desktop", () => {
     const nav = page.locator(SETTINGS_NAV);
 
     // Scroll well into a section (not via the nav — this is the scroll case).
-    await page.evaluate(() => window.scrollTo(0, 1100));
-    await waitForScrollToSettle(page);
+    await scrollIntoSection(page, "settings-focus-timer");
 
     const pinned = page.locator("[data-section-header][data-current]");
     await expect(pinned).toHaveCount(1);
@@ -262,8 +284,7 @@ test.describe("section nav — desktop", () => {
     await page.goto("/settings");
     await waitForShell(page);
     await waitForNavHydrated(page);
-    await page.evaluate(() => window.scrollTo(0, 1100));
-    await waitForScrollToSettle(page);
+    await scrollIntoSection(page, "settings-focus-timer");
 
     // A second sticky layer is a second chance for `opacity < 1` elements later
     // in the page to paint over it (see the bar's z-index note).
@@ -299,8 +320,14 @@ test.describe("section nav — desktop", () => {
     await page.goto("/settings");
     await waitForShell(page);
     await waitForNavHydrated(page);
-    // The first section is current at the top of the page, so its band is lit
-    // and the aging inputs live inside that very section.
+    // Jump to Aging so ITS band is the lit one — the aging inputs live inside
+    // that section, and since #35 Phase B put owner-only People at the top of
+    // the page, Aging is no longer the section that is current on load.
+    await openPanel(page.locator(SETTINGS_NAV));
+    await page
+      .locator(SETTINGS_NAV)
+      .getByRole("link", { name: "Aging & reminder" })
+      .click();
     await expect(
       page.locator("[data-section-header][data-current]"),
     ).toHaveText(/Aging & reminder/);
@@ -447,8 +474,7 @@ test.describe("section nav — mobile budget", () => {
     await page.goto("/settings");
     await waitForShell(page);
     await waitForNavHydrated(page);
-    await page.evaluate(() => window.scrollTo(0, 1100));
-    await waitForScrollToSettle(page);
+    await scrollIntoSection(page, "settings-focus-timer");
 
     const nav = (await page.locator(SETTINGS_NAV).boundingBox())!;
     const band = (await page
@@ -505,8 +531,7 @@ test.describe("section nav — screenshots", () => {
         await page.goto("/settings");
         await waitForShell(page);
         await waitForNavHydrated(page);
-        await page.evaluate(() => window.scrollTo(0, 1100));
-        await waitForScrollToSettle(page);
+        await scrollIntoSection(page, "settings-focus-timer");
         await expect(
           page.locator("[data-section-header][data-current]"),
         ).toBeVisible();

@@ -46,6 +46,23 @@ export class LLMError extends Error {
   }
 }
 
+/**
+ * A per-request credential that overrides the instance's own configuration.
+ *
+ * #35 Phase B — a signed-in account may bring its own LLM key, in which case the
+ * breakdown is billed to that key instead of the instance's and is not metered.
+ * `apiKey` is a DECRYPTED secret: server-only, never logged, never in a response.
+ *
+ * Deliberately narrow. There is no `baseUrl` here: letting a per-user value
+ * choose the endpoint would turn a settings field into an SSRF primitive, and
+ * the deploy's `LLM_BASE_URL` stays authoritative.
+ */
+export type LLMCredentials = {
+  apiKey: string;
+  /** Which adapter to bind the key to; null/unknown → the instance's provider. */
+  provider?: string | null;
+};
+
 export interface LLMProvider {
   readonly id: "anthropic" | "openai-compatible";
   /** Native tool-calling? Drives the tool-less structured-output fallback. */

@@ -180,6 +180,82 @@ describe("workspace-scoping harness", () => {
     expect(offenders).toEqual([]);
   });
 
+  // ── #35 Phase B ──────────────────────────────────────────────────────────
+  //
+  // The People admin is where "the owner sees usage numbers, never content"
+  // either holds or quietly stops holding. The rules above prove that every
+  // query against a content model is workspace-constrained; these two prove the
+  // stronger property the design actually promises about this feature: the People
+  // code touches no content model AT ALL, and the encrypted per-user LLM key is
+  // read in exactly two named places.
+
+  /** Every module behind the owner-only People panel. */
+  const PEOPLE_FILES = [
+    "src/lib/people.ts",
+    "src/app/actions/people.ts",
+    "src/components/settings/people-panel.tsx",
+  ];
+
+  it("the People admin exists where this test thinks it does", () => {
+    // Without this, renaming a People module turns the rule below into a test
+    // that reads no files and passes forever.
+    for (const file of PEOPLE_FILES) {
+      expect(
+        () => readFileSync(file, "utf8"),
+        `${file} is missing`,
+      ).not.toThrow();
+    }
+  });
+
+  it("no People module queries a workspace-scoped model at all", () => {
+    const models = scopedModels();
+    const re = new RegExp(`(?:prisma|tx|db)\\.(?:${models.join("|")})\\.`, "g");
+    const offenders: string[] = [];
+    for (const file of PEOPLE_FILES) {
+      for (const m of readFileSync(file, "utf8").matchAll(re)) {
+        offenders.push(`${file}: ${m[0]}`);
+      }
+    }
+    // A People query against a content model would be a cross-workspace read
+    // path by construction, whatever it filtered by — the panel has no business
+    // reading content even from ONE workspace.
+    expect(offenders).toEqual([]);
+  });
+
+  // The two files allowed to name the ciphertext column, each with its reason.
+  // Adding one is a security decision: Phase C's per-user key UI will need an
+  // entry here, and that is exactly the review conversation this list forces.
+  const KEY_CIPHERTEXT_FILES: Record<string, string> = {
+    "src/lib/user-quota.ts":
+      "decrypts it to bill the request to the user's own key",
+    "src/lib/people.ts":
+      "presence only — `{ llmKeyEnc: { not: null } }`, selecting ids",
+  };
+
+  it("only the two named modules touch the encrypted per-user LLM key", () => {
+    const offenders = sourceFiles().filter((file) => {
+      if (KEY_CIPHERTEXT_FILES[file]) return false;
+      return readFileSync(file, "utf8")
+        .split("\n")
+        .some(
+          (line) =>
+            !line.trimStart().startsWith("//") &&
+            !line.trimStart().startsWith("*") &&
+            line.includes("llmKeyEnc"),
+        );
+    });
+    expect(offenders).toEqual([]);
+  });
+
+  it("the People read never SELECTS the ciphertext, only tests it for presence", () => {
+    // `select: { llmKeyEnc: true }` would pull an encrypted secret into the
+    // object graph the panel's props are built from — one careless spread away
+    // from the client. Presence is answered by a where-clause instead.
+    const src = readFileSync("src/lib/people.ts", "utf8");
+    expect(src).not.toMatch(/llmKeyEnc:\s*true/);
+    expect(src).toMatch(/llmKeyEnc:\s*\{\s*not:\s*null\s*\}/);
+  });
+
   it("no source file references the removed owner-workspace constant", () => {
     // Comments discussing the removal are fine; a live reference is not, so
     // strip line comments before matching.

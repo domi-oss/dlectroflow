@@ -34,10 +34,15 @@ export default async function globalSetup(): Promise<void> {
         handle: "e2e-owner",
         role: "owner",
         status: "active",
+        // #35 Phase B: the instance owner is UNCAPPED by design, and the People
+        // specs assert the panel says so. Set explicitly rather than left to the
+        // schema default (`capped`) — which is exactly the way the live
+        // instance's owner ended up capped after the Phase A deploy.
+        aiPolicy: "uncapped",
       },
       // Re-assert what the suite depends on: an earlier run (or a spec) may
       // have left the row in another state.
-      update: { role: "owner", status: "active" },
+      update: { role: "owner", status: "active", aiPolicy: "uncapped" },
     });
     await prisma.workspace.upsert({
       where: { id: OWNER_WS_ID },

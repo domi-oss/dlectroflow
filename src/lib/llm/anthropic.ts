@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type {
+  LLMCredentials,
   LLMProvider,
   LLMRequest,
   LLMResult,
@@ -8,8 +9,14 @@ import type {
 import { LLMError } from "./types";
 import { withRetry } from "./retry";
 
-function client(): Anthropic {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+/**
+ * #35 Phase B — `creds` is a user's own key, when they brought one. An EMPTY
+ * string is treated as absent rather than passed through: authenticating as ""
+ * would produce a confusing 401 from Anthropic instead of the instance-key
+ * fallback the caller expects.
+ */
+function client(creds?: LLMCredentials): Anthropic {
+  const apiKey = creds?.apiKey || process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     throw new LLMError(
       "auth",
@@ -92,14 +99,21 @@ function extract(content: ContentBlock[], toolChoice?: string): LLMResult {
   };
 }
 
-export function createAnthropicProvider(): LLMProvider {
+/**
+ * `creds` (#35 Phase B) binds this provider to ONE caller's own API key for the
+ * lifetime of the instance it returns. `getLLM()` never caches a credentialed
+ * provider, so one user's key can't be reused for the next request.
+ */
+export function createAnthropicProvider(creds?: LLMCredentials): LLMProvider {
   return {
     id: "anthropic",
     supportsTools: true,
     async generate(req) {
       return withRetry(async () => {
         try {
-          const resp = await client().messages.create(baseParams(req) as never);
+          const resp = await client(creds).messages.create(
+            baseParams(req) as never,
+          );
           return extract(
             (resp as unknown as { content: ContentBlock[] }).content,
             req.toolChoice,
@@ -114,7 +128,7 @@ export function createAnthropicProvider(): LLMProvider {
       // (below) a partial stream can't be safely replayed.
       const ms = await withRetry(async () => {
         try {
-          return client().messages.stream(baseParams(req) as never);
+          return client(creds).messages.stream(baseParams(req) as never);
         } catch (err) {
           throw toLLMError(err);
         }

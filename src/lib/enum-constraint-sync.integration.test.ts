@@ -190,6 +190,16 @@ const RANGE_REGISTRY: ReadonlyArray<{
     column: "estMinutes",
     min: 1,
   },
+  {
+    // 20260728130000_user_ai_quota_check (#35 Phase B) — the per-user AI
+    // allowance became owner-editable, so it is bounded in the DB as well as in
+    // updatePersonAiPolicy. Zero is allowed ("no instance-funded AI");
+    // negative is not, because it reads as an allowance and behaves as a block.
+    constraint: "User_aiQuota_check",
+    table: "User",
+    column: "aiQuota",
+    min: 0,
+  },
 ];
 
 // The schema the client is connected to (Prisma's `?schema=` param, default
@@ -354,6 +364,14 @@ describe("identity CHECK constraints actually reject out-of-set values", () => {
       column: "Workspace.kind",
       bad: "shared",
       sql: `INSERT INTO "Workspace" (id, kind) VALUES ('check-bite-ws','shared')`,
+    },
+    {
+      // #35 Phase B — the range constraint's behavioural half. A negative quota
+      // reads as an allowance and behaves as a permanent block, so the DB
+      // refuses it even though `updatePersonAiPolicy` already clamps.
+      column: "User.aiQuota",
+      bad: "-1",
+      sql: `INSERT INTO "User" (id, provider, "providerSub", "aiQuota") VALUES ('check-bite-quota','gitlab','check-bite-4',-1)`,
     },
   ];
 

@@ -1,10 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const create = vi.fn();
+// #35 Phase B — the client's constructor options are part of the contract now:
+// a user who brought their own key must be billed against THEIR key, so the
+// tests have to see which one the adapter handed to the SDK.
+const ctor: { last?: { apiKey?: string; baseURL?: string } } = {};
 vi.mock("openai", () => ({
   default: class {
     chat = { completions: { create } };
-    constructor(public opts: unknown) {}
+    constructor(public opts: { apiKey?: string; baseURL?: string }) {
+      ctor.last = opts;
+    }
   },
 }));
 
@@ -588,5 +594,47 @@ describe("openai-compatible bounded retry (#59 Task 8)", () => {
       type: "final",
       result: { text: "ok", toolCall: undefined },
     });
+  });
+});
+
+// ── #35 Phase B — per-user key (bring your own) ──────────────────────────────
+describe("openai-compatible credentials", () => {
+  beforeEach(() => {
+    ctor.last = undefined;
+    create.mockResolvedValue({ choices: [{ message: { content: "ok" } }] });
+  });
+
+  async function callWith(creds?: { apiKey: string }) {
+    const p = createOpenAICompatibleProvider(creds);
+    await p.generate({
+      model: "m",
+      messages: [{ role: "user", content: "x" }],
+      maxTokens: 10,
+    });
+  }
+
+  it("uses the caller's key when one is supplied, not LLM_API_KEY", async () => {
+    process.env.LLM_API_KEY = "sk-instance";
+    await callWith({ apiKey: "sk-the-users-own" });
+    expect(ctor.last?.apiKey).toBe("sk-the-users-own");
+  });
+
+  it("falls back to LLM_API_KEY, then to the local-runner placeholder", async () => {
+    process.env.LLM_API_KEY = "sk-instance";
+    await callWith();
+    expect(ctor.last?.apiKey).toBe("sk-instance");
+
+    delete process.env.LLM_API_KEY;
+    await callWith();
+    expect(ctor.last?.apiKey).toBe("not-needed");
+  });
+
+  it("keeps the endpoint on the DEPLOY's LLM_BASE_URL — a user key never redirects traffic", async () => {
+    // There is no per-user base URL column (Phase C owns the per-user model +
+    // endpoint), and a request body that could aim the adapter at an arbitrary
+    // host would be an SSRF surface. The key is the only thing a user supplies.
+    process.env.LLM_BASE_URL = "http://localhost:11434/v1";
+    await callWith({ apiKey: "sk-the-users-own" });
+    expect(ctor.last?.baseURL).toBe("http://localhost:11434/v1");
   });
 });

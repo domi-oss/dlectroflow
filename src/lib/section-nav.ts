@@ -28,10 +28,16 @@ export function sectionLabel(section: SectionDef, voice: Voice): string {
 }
 
 /**
- * Settings sections, in the order the page renders them. The first four live
- * inside `<SettingsPanel>`; the rest are their own components.
+ * Settings sections, in the order the page renders them. `settings-people` and
+ * `settings-integrations` are the two OWNER-ONLY entries — the page filters both
+ * out of this list for anyone else, so a guest never gets a nav link to a section
+ * that is not on their page (see `(app)/settings/page.tsx`).
+ *
+ * People leads the list because the design puts the Account group at the TOP of
+ * /settings; Phase C fills in the rest of that group around it.
  */
 export const SETTINGS_SECTIONS = [
+  { id: "settings-people", heading: { text: "People" } },
   { id: "settings-aging", heading: { text: "Aging & reminder" } },
   { id: "settings-voice", heading: { text: "Voice" } },
   { id: "settings-breakdown-model", heading: { text: "Breakdown model" } },

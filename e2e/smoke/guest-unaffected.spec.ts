@@ -60,6 +60,23 @@ test("a guest is refused an authenticated-only path", async ({ page }) => {
   await expect(page).toHaveURL(/\/login/);
 });
 
+test("a guest sees no People admin, and no nav link to one", async ({
+  page,
+}) => {
+  // #35 Phase B — the People panel is owner-only, and the gate is checked in
+  // three places: the page renders nothing, the section nav lists nothing, and
+  // loadPeopleAdmin returns null for a non-owner regardless of the caller.
+  await page.goto("/settings");
+
+  await expect(page.locator("#settings-people")).toHaveCount(0);
+  await expect(page.getByLabel(/invite a username or email/i)).toHaveCount(0);
+  await expect(page.getByRole("list", { name: /accounts/i })).toHaveCount(0);
+
+  const nav = page.locator('nav[aria-label="Settings sections"]');
+  await nav.getByRole("button", { name: /jump to/i }).click();
+  await expect(nav.getByRole("link", { name: "People" })).toHaveCount(0);
+});
+
 test("a guest's sandbox is separate from the signed-in account's workspace", async ({
   page,
 }) => {

@@ -2,9 +2,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const create = vi.fn();
 const streamFn = vi.fn();
+// #35 Phase B — the client's constructor options are now part of the contract:
+// a user who brought their own key must be billed against THEIR key, so the
+// tests have to see which one the adapter handed to the SDK.
+const ctor: { last?: { apiKey?: string } } = {};
 vi.mock("@anthropic-ai/sdk", () => ({
   default: class {
     messages = { create, stream: streamFn };
+    constructor(opts: { apiKey?: string }) {
+      ctor.last = opts;
+    }
   },
 }));
 
@@ -308,5 +315,72 @@ describe("anthropic adapter bounded retry (#59 Task 8)", () => {
       type: "final",
       result: { text: "ok", toolCall: undefined },
     });
+  });
+});
+
+// ── #35 Phase B — per-user key (bring your own) ──────────────────────────────
+describe("anthropic adapter credentials", () => {
+  beforeEach(() => {
+    ctor.last = undefined;
+  });
+
+  it("uses the caller's key when one is supplied, not the instance key", async () => {
+    process.env.ANTHROPIC_API_KEY = "sk-instance";
+    create.mockResolvedValue({ content: [{ type: "text", text: "ok" }] });
+
+    const p = createAnthropicProvider({ apiKey: "sk-the-users-own" });
+    await p.generate({
+      model: "m",
+      messages: [{ role: "user", content: "x" }],
+      maxTokens: 10,
+    });
+
+    expect(ctor.last?.apiKey).toBe("sk-the-users-own");
+  });
+
+  it("falls back to the instance key when no credentials are supplied", async () => {
+    process.env.ANTHROPIC_API_KEY = "sk-instance";
+    create.mockResolvedValue({ content: [{ type: "text", text: "ok" }] });
+
+    const p = createAnthropicProvider();
+    await p.generate({
+      model: "m",
+      messages: [{ role: "user", content: "x" }],
+      maxTokens: 10,
+    });
+
+    expect(ctor.last?.apiKey).toBe("sk-instance");
+  });
+
+  it("a caller's key works even with NO instance key configured at all", async () => {
+    // The point of bring-your-own: a self-host with no ANTHROPIC_API_KEY can
+    // still serve a user who supplied one, instead of the auth error the
+    // instance-key path raises.
+    delete process.env.ANTHROPIC_API_KEY;
+    create.mockResolvedValue({ content: [{ type: "text", text: "ok" }] });
+
+    const p = createAnthropicProvider({ apiKey: "sk-the-users-own" });
+    await expect(
+      p.generate({
+        model: "m",
+        messages: [{ role: "user", content: "x" }],
+        maxTokens: 10,
+      }),
+    ).resolves.toMatchObject({ text: "ok" });
+    expect(ctor.last?.apiKey).toBe("sk-the-users-own");
+  });
+
+  it('an empty caller key is not a key — it falls back rather than authenticating as ""', async () => {
+    process.env.ANTHROPIC_API_KEY = "sk-instance";
+    create.mockResolvedValue({ content: [{ type: "text", text: "ok" }] });
+
+    const p = createAnthropicProvider({ apiKey: "" });
+    await p.generate({
+      model: "m",
+      messages: [{ role: "user", content: "x" }],
+      maxTokens: 10,
+    });
+
+    expect(ctor.last?.apiKey).toBe("sk-instance");
   });
 });

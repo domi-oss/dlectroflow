@@ -262,6 +262,67 @@ describe("provisionFromProfile", () => {
     expect(r.role).toBe("member");
   });
 
+  // #35 Phase B — the owner's own account is UNCAPPED by the owner's own design
+  // decision ("who pays for AI": the owner is uncapped, members are capped until
+  // they bring a key). Phase A left this to the schema default, so the live
+  // instance's owner was provisioned `capped` — harmless only for as long as
+  // nothing enforced the cap. Phase B is what makes it bite, so the default has
+  // to be right at the moment the account is created, not fixed up afterwards.
+  it("provisions the owner UNCAPPED, so enforcement never meters the instance owner", async () => {
+    await prisma.allowlist.create({
+      data: { provider: PROVIDER, identity: "1234567", isOwnerSeed: true },
+    });
+
+    const r = await provisionFromProfile(PROVIDER, { subject: "1234567" });
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(
+      (await prisma.user.findUnique({ where: { id: r.userId } }))?.aiPolicy,
+    ).toBe("uncapped");
+  });
+
+  it("provisions a MEMBER capped — the invited-member default is unchanged", async () => {
+    await prisma.allowlist.create({
+      data: { provider: PROVIDER, identity: "member-policy" },
+    });
+
+    const r = await provisionFromProfile(PROVIDER, {
+      subject: "52",
+      username: "member-policy",
+    });
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(
+      (await prisma.user.findUnique({ where: { id: r.userId } }))?.aiPolicy,
+    ).toBe("capped");
+  });
+
+  it("does NOT re-assert the policy on a repeat sign-in — an owner-set policy sticks", async () => {
+    // The owner may deliberately cap a member, or uncap one. Recomputing the
+    // policy on every sign-in would silently undo that on their next visit.
+    await prisma.allowlist.create({
+      data: { provider: PROVIDER, identity: "sticky" },
+    });
+    const first = await provisionFromProfile(PROVIDER, {
+      subject: "53",
+      username: "sticky",
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    await prisma.user.update({
+      where: { id: first.userId },
+      data: { aiPolicy: "uncapped", aiQuota: 7 },
+    });
+
+    await provisionFromProfile(PROVIDER, { subject: "53", username: "sticky" });
+
+    const row = await prisma.user.findUnique({ where: { id: first.userId } });
+    expect(row?.aiPolicy).toBe("uncapped");
+    expect(row?.aiQuota).toBe(7);
+  });
+
   // Privilege escalation regression. An earlier draft of the plan keyed the
   // owner role off `note === "seeded from OWNER_ALLOWLIST"`. A free-text field
   // deciding a privilege level means any row that happens to carry the string —
