@@ -45,6 +45,31 @@ operators upgrading a self-hosted instance don't get surprised.
     (production 20m, review 15m) are left as they are — they are now headroom
     rather than a requirement.
 
+### Security
+
+- **`brace-expansion` is on the patched 5.0.8 wherever it can go (#82).** This
+  is **CVE-2026-14257** (High) — a DoS via unbounded expansion length that
+  crashes the process with an OOM a `try`/`catch` cannot trap. The advisory
+  widened after #55: the 2.1.2 that #55 landed on is itself affected, and only
+  5.0.8 is clean (`npm audit` range `<=5.0.7`).
+  The `brace-expansion: ^2.0.2` override #55 added had also become the *cause*
+  of two of the three findings — `minimatch@10.2.5` already asks for
+  `brace-expansion@^5.0.5`, and the override was pinning it back down to 2.x.
+  Reported copies go **3 → 1**.
+  - **The one remaining copy is upstream-blocked, not overlooked.** It serves
+    `minimatch@3.1.5`, which does `expand(pattern)` on a default import;
+    5.0.8's CommonJS build exports only `{ expand }`, so forcing it there
+    raises `TypeError: expand is not a function` and takes ESLint down
+    wholesale. `minimatch@3.1.5` is required by `eslint`, `@eslint/eslintrc`
+    and three `eslint-config-next` plugins (`import`, `jsx-a11y`, `react`) —
+    none of which has a release that moved off `minimatch@3`, including with
+    `eslint@10`. It is scoped to 2.1.3 via a nested override until they do.
+  - **Reachability:** the only production-reachable copy (via
+    `shadcn` → `ts-morph` → `@ts-morph/common`) **is** now on 5.0.8. The
+    residual copy is reachable only from lint tooling in `devDependencies`, so
+    it cannot be fed untrusted input by a request path.
+  - **Operators:** no action.
+
 ## [0.4.0] - 2026-07-27
 
 **Focus-session depth + bring-your-own-model.** A focus session is now something you
