@@ -314,3 +314,47 @@
   border-radius: 9999px;
   background-color: currentColor;
 }
+
+/* #89 — the paced breathing guide on a PAUSED focus session's ring. The ring
+ * graphic (src/components/focus/timer-visual.tsx) carries [data-breathing] for
+ * exactly as long as the session is paused; see that component for why the
+ * pacer is scoped to the paused ring and nothing else.
+ *
+ * A real breathing cadence, not an arbitrary pulse: a 10s cycle whose single
+ * intermediate stop sits at 40%, so the ring grows for 4s and settles back over
+ * 6s — the longer exhale is what makes it usable as a guide. `ease-in-out` at
+ * both turning points, because a breath has no linear edges.
+ *
+ * Only `scale` and `opacity` animate. Both are compositor-only, so the breath
+ * can never reflow the controls beneath it or the readout inside it (the
+ * remaining time is a sibling overlay and stays perfectly still and legible),
+ * and the peak is the ring's RESTING size — it breathes *into* its normal
+ * dimensions rather than past the glow field it sits on.
+ *
+ * `scale` as the standalone property rather than `transform: scale()`: the ring
+ * already carries Tailwind's -rotate-90 to start the arc at twelve o'clock, and
+ * keeping the two on separate individual transform properties means neither can
+ * overwrite the other.
+ *
+ * Reduced motion is honoured in JS (the component drops the attribute, so there
+ * is no animation at all) rather than relying on the global clamp above — which
+ * would leave a 0.01ms one-shot animation instead of none. No fill-mode, so
+ * even that clamped case would end at the resting size. */
+@keyframes focus-breathe {
+  from {
+    scale: 0.9;
+    opacity: 0.8;
+  }
+  40% {
+    scale: 1;
+    opacity: 1;
+  }
+  to {
+    scale: 0.9;
+    opacity: 0.8;
+  }
+}
+
+[data-breathing] {
+  animation: focus-breathe 10s ease-in-out infinite;
+}

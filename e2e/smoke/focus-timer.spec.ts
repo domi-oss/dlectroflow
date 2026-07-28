@@ -49,7 +49,101 @@ test("focus timer starts and pauses", async ({ page }) => {
   await page.getByRole("button", { name: "Pause", exact: true }).click();
   // The ring/countdown are animated and time-dependent — assert only the
   // stable post-pause control state, relying on Playwright auto-waiting.
+  const resume = page.getByRole("button", { name: "Resume", exact: true });
+  await expect(resume).toBeVisible();
+
+  // ── #89: the paused ring is a paced breathing guide ───────────────────────
+  // Unit tests cover the marker attribute; only a real browser can show that
+  // the CSS actually reaches the element and moves it.
+  const ring = page.locator(
+    "[data-testid='timer-visual-ring'] svg[data-breathing]",
+  );
+  await expect(ring).toBeVisible();
+
+  // The cadence, read off the running animation itself. A CSS animation's
+  // `animation-timing-function` lands on each KEYFRAME (the effect's own easing
+  // stays "linear"), so the per-stop easing below is where "eased at both
+  // turning points" is actually asserted.
+  const pacer = await ring.evaluate((el) => {
+    const anim = el.getAnimations()[0] as CSSAnimation | undefined;
+    // getKeyframes() is KeyframeEffect's, not the base AnimationEffect's.
+    const effect = anim?.effect as KeyframeEffect | undefined;
+    const timing = effect?.getTiming();
+    return {
+      name: anim?.animationName ?? null,
+      state: anim?.playState ?? null,
+      duration: timing?.duration ?? null,
+      iterations: timing?.iterations ?? null,
+      // No fill-mode: nothing can leave the ring frozen mid-breath.
+      fill: timing?.fill ?? null,
+      frames: (effect?.getKeyframes() ?? []).map((f) => ({
+        offset: f.offset,
+        easing: f.easing,
+        scale: f.scale,
+        opacity: f.opacity,
+      })),
+    };
+  });
+  expect(pacer).toEqual({
+    name: "focus-breathe",
+    state: "running",
+    duration: 10_000,
+    iterations: Infinity,
+    fill: "none",
+    // 10s split at 0.4 = a 4s inhale and a 6s exhale, growing INTO the ring's
+    // resting size (scale 1) and back. Nothing else animates, so the pacer
+    // cannot reflow the screen around it.
+    frames: [
+      { offset: 0, easing: "ease-in-out", scale: "0.9", opacity: "0.8" },
+      { offset: 0.4, easing: "ease-in-out", scale: "1", opacity: "1" },
+      { offset: 1, easing: "ease-in-out", scale: "0.9", opacity: "0.8" },
+    ],
+  });
+
+  // …and it genuinely moves. Polls the ring's rendered width in-page and
+  // resolves as soon as the spread proves a real expansion/contraction, so a
+  // pacer that renders but never animates fails here instead of passing.
+  await page.waitForFunction(
+    (minSpread) => {
+      const el = document.querySelector(
+        "[data-testid='timer-visual-ring'] svg[data-breathing]",
+      );
+      if (!el) return false;
+      const w = window as unknown as { __ringWidths?: number[] };
+      const seen = (w.__ringWidths ??= []);
+      seen.push(el.getBoundingClientRect().width);
+      return Math.max(...seen) - Math.min(...seen) > minSpread;
+    },
+    10,
+    { polling: 200, timeout: 15_000 },
+  );
+
+  // The remaining time stays exactly where it is throughout the cycle: the
+  // readout is a sibling overlay, not part of what breathes. (The clock is
+  // frozen while paused, so this box is stable unless the pacer moves it.)
+  const readout = page
+    .locator("[data-testid='timer-visual-ring']")
+    .getByText(/^\d{1,2}:\d{2}$/);
+  const readoutBox = await readout.boundingBox();
+  // A deliberate wall-clock wait: the assertion is about what a >10%-of-cycle
+  // slice of a running animation does to a neighbouring box, so there is no
+  // state to wait for instead.
+  await page.waitForTimeout(1_200);
+  expect(await readout.boundingBox()).toEqual(readoutBox);
+
+  // prefers-reduced-motion switches the pacer OFF outright (not down): the
+  // component drops the element's marker, and usePrefersReducedMotion subscribes
+  // to the media query, so it happens live.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(ring).toHaveCount(0);
+  await expect(resume).toBeVisible(); // …and Resume is untouched either way
+  await page.emulateMedia({ reducedMotion: null });
+  await expect(ring).toBeVisible();
+
+  // Leaving the paused state ends the breath.
+  await resume.click();
   await expect(
-    page.getByRole("button", { name: "Resume", exact: true }),
+    page.getByRole("button", { name: "Pause", exact: true }),
   ).toBeVisible();
+  await expect(ring).toHaveCount(0);
 });
