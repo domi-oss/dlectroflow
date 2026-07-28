@@ -363,6 +363,21 @@ export const STRINGS = {
     plain: "Stop preview",
     playful: "Stop preview",
   },
+  // #65 — the opt-in music↔timer pause coupling. The label gets a playful glyph
+  // anchor (same convention as the alarm toggle) and the hint spells out the
+  // CONSEQUENCE in both directions, including what off means: someone reaching
+  // for the player's pause button normally just wants quiet, so "this also
+  // stops your session" has to be on screen before they turn it on.
+  "focusSettings.pauseTogether": {
+    plain: "Pause music and timer together",
+    playful: "⏸️ Pause music and timer together",
+  },
+  "focusSettings.pauseTogetherHint": {
+    plain:
+      "Pausing the music in the player also pauses the timer, and playing it again resumes both. Off, the music pauses on its own and the timer keeps running.",
+    playful:
+      "Pausing the music in the player also pauses the timer, and playing it again resumes both. Off, the music pauses on its own and the timer keeps running.",
+  },
   // #43 — in-timer mini-player controls (aria labels + visible now-playing text).
   "focus.sound.region": { plain: "Focus sound", playful: "🎧 Focus sound" },
   "focus.sound.nowPlaying": { plain: "Now playing", playful: "Now playing" },
@@ -388,6 +403,19 @@ export const STRINGS = {
   // is never conveyed by colour alone.
   "focus.sound.shuffle": { plain: "Shuffle tracks", playful: "Shuffle tracks" },
   "focus.sound.shuffled": { plain: "Shuffled", playful: "Shuffled" },
+  // #65 — the mini-player's transport labels WHEN the pause coupling is on. The
+  // button then stops the session as well as the audio, so the accessible name
+  // has to say both; "Pause focus sound" would under-promise what pressing it
+  // costs. Functional control ⇒ identical in both voices, and the state itself
+  // is still carried by aria-pressed.
+  "focus.sound.pauseTogether": {
+    plain: "Pause music and timer",
+    playful: "Pause music and timer",
+  },
+  "focus.sound.resumeTogether": {
+    plain: "Resume music and timer",
+    playful: "Resume music and timer",
+  },
 
   // ── Breakdown confirm ──────────────────────────────────────────────────────
   "breakdown.looksRight": { plain: "Looks right", playful: "👍 Looks right" },

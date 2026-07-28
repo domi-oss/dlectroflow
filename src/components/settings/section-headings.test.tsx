@@ -69,6 +69,7 @@ function AllSections({ voice = "plain" as Voice }) {
         keepAwake={false}
         alarmEnabled={false}
         sound="chime"
+        pauseTogether={false}
         voice={voice}
       />
       <IntegrationsPanel

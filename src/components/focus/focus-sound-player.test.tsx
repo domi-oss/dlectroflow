@@ -147,6 +147,101 @@ describe("FocusSoundPlayer", () => {
     expect(screen.queryByText(/shuffled/i)).not.toBeInTheDocument();
   });
 
+  // #65 — when the workspace opted into the pause coupling, the timer hands the
+  // player a session-level toggle. The button then pauses BOTH, so its
+  // accessible name must say so: "Pause focus sound" would under-promise what
+  // pressing it costs.
+  describe("#65 — coupled transport (onPauseTogether)", () => {
+    it("routes the transport press to the session instead of the audio, and relabels it", async () => {
+      const user = userEvent.setup();
+      const c = controls({ playing: true });
+      const onPauseTogether = vi.fn();
+      render(
+        <FocusSoundPlayer
+          controls={c}
+          voice="plain"
+          onPauseTogether={onPauseTogether}
+        />,
+      );
+      const btn = screen.getByRole("button", {
+        name: /^pause music and timer$/i,
+      });
+      expect(btn).toHaveAttribute("aria-pressed", "true");
+      expect(
+        screen.queryByRole("button", { name: /pause focus sound/i }),
+      ).not.toBeInTheDocument();
+      await user.click(btn);
+      expect(onPauseTogether).toHaveBeenCalledTimes(1);
+      expect(c.toggle).not.toHaveBeenCalled();
+    });
+
+    it("offers to resume both when playback is stopped", () => {
+      render(
+        <FocusSoundPlayer
+          controls={controls({ playing: false })}
+          voice="plain"
+          onPauseTogether={vi.fn()}
+        />,
+      );
+      const btn = screen.getByRole("button", {
+        name: /^resume music and timer$/i,
+      });
+      expect(btn).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("disables itself while the session round-trip is in flight (no double-fire)", async () => {
+      const user = userEvent.setup();
+      const onPauseTogether = vi.fn();
+      render(
+        <FocusSoundPlayer
+          controls={controls({ playing: true })}
+          voice="plain"
+          onPauseTogether={onPauseTogether}
+          pauseTogetherPending
+        />,
+      );
+      const btn = screen.getByRole("button", {
+        name: /^pause music and timer$/i,
+      });
+      expect(btn).toBeDisabled();
+      await user.click(btn);
+      expect(onPauseTogether).not.toHaveBeenCalled();
+    });
+
+    it("couples ONLY the transport — skip, shuffle and volume still touch the audio alone", async () => {
+      const user = userEvent.setup();
+      const c = controls();
+      const onPauseTogether = vi.fn();
+      render(
+        <FocusSoundPlayer
+          controls={c}
+          voice="plain"
+          onPauseTogether={onPauseTogether}
+        />,
+      );
+      await user.click(screen.getByRole("button", { name: /next track/i }));
+      await user.click(screen.getByRole("button", { name: /previous track/i }));
+      await user.click(screen.getByRole("button", { name: /shuffle tracks/i }));
+      await user.click(screen.getByRole("button", { name: /^volume$/i }));
+      fireEvent.change(screen.getByRole("slider"), { target: { value: "0" } });
+      expect(c.next).toHaveBeenCalled();
+      expect(c.prev).toHaveBeenCalled();
+      expect(c.toggleShuffle).toHaveBeenCalled();
+      expect(c.setVolume).toHaveBeenCalledWith(0);
+      expect(onPauseTogether).not.toHaveBeenCalled();
+    });
+
+    it("keeps the audio-only labels + behaviour when the prop is absent (default)", async () => {
+      const user = userEvent.setup();
+      const c = controls({ playing: true });
+      render(<FocusSoundPlayer controls={c} voice="plain" />);
+      const btn = screen.getByRole("button", { name: /^pause focus sound$/i });
+      expect(btn).toBeEnabled();
+      await user.click(btn);
+      expect(c.toggle).toHaveBeenCalled();
+    });
+  });
+
   it("every control button meets the ≥44px touch target", () => {
     render(<FocusSoundPlayer controls={controls()} voice="plain" />);
     for (const name of [

@@ -91,6 +91,10 @@ export type TimerSettings = {
    * column defaults false, so a caller that predates the pref (or a test that
    * doesn't care) simply gets in-order playback. */
   shuffle?: boolean;
+  /** #65 — persisted music↔timer pause coupling (Settings.focusPauseTogether).
+   * Optional and false by default: omitted means the #43 one-directional
+   * behaviour, where pausing the music leaves the countdown running. */
+  pauseTogether?: boolean;
 };
 
 export type NextStepPeek = {
@@ -196,6 +200,12 @@ export function FocusTimer({
   // disclosure toggle — see the effect below.
   const setupCtaRef = useRef<HTMLButtonElement | null>(null);
   const disclosureMounted = useRef(false);
+  // #65 — the live session's primary control (Pause/Resume, or the time's-up
+  // CTA once the clock runs out; the two blocks are mutually exclusive, so only
+  // one is ever mounted). Focus lands here when a coupled resume from the
+  // mini-player unmounts the button that was pressed — see the effect below.
+  const sessionCtaRef = useRef<HTMLButtonElement | null>(null);
+  const pauseHandoffRef = useRef(false);
   // #23 — the celebration line is rolled when the step is actually completed
   // (an event), not during render into a ref: Math.random() in render is impure
   // (react-hooks/purity) and reading a ref during render is unsafe
@@ -225,6 +235,8 @@ export function FocusTimer({
   });
   const { play: playSound, pause: pauseSound, stop: stopSound } = sound;
   const soundOff = settings.sound === FocusSound.Off;
+  // #65 — did this workspace opt into the second direction of the coupling?
+  const pauseTogether = Boolean(settings.pauseTogether);
 
   const inc = Math.max(1, addTimeIncrementMin || 5);
   const durationMin = () => Math.max(0, Math.round(elapsedRef.current / 60));
@@ -271,6 +283,11 @@ export function FocusTimer({
   // it). Session end / unmount still fully stop it (finishComplete / cleanup).
   // No-op when sound is off. The mini-player reflects the paused state via the
   // hook's `playing` flag, which pause()/play() here keep truthful.
+  //
+  // #65 — this stays the ONLY thing that pauses/resumes the audio during a
+  // session, in both coupling modes: the opt-in second direction routes the
+  // mini-player's press through togglePause() (→ phase → here), so the two can
+  // never end up disagreeing about who is paused.
   useEffect(() => {
     if (phase === "running") {
       if (!soundOff) playSound();
@@ -360,7 +377,14 @@ export function FocusTimer({
   // rather than showing a phase it doesn't (Duo review) — same fail-safe
   // shape either way: stay "running", the one state both sides always agree
   // a live session is in.
-  const togglePause = async () => {
+  //
+  // #65 — memoised because togglePauseFromPlayer (below) is handed to the
+  // mini-player, and a useCallback whose own dependency is recreated on every
+  // render would be theatre: it would be invalidated by the per-second tick
+  // anyway. The deps are everything this reads — none of which changes on a
+  // tick (`remainingSec` is not read here, and elapsedRef is a ref), so the
+  // identity is genuinely stable while the countdown runs.
+  const togglePause = useCallback(async () => {
     if (phase === "running") {
       if (!sessionId) {
         goToPhase("paused");
@@ -384,7 +408,49 @@ export function FocusTimer({
     setRemainingSec(res.remainingSec);
     elapsedRef.current = Math.max(0, res.totalSec - res.remainingSec);
     goToPhase(res.remainingSec <= 0 ? "timeup" : "running");
-  };
+  }, [phase, sessionId, totalSec, goToPhase]);
+
+  /**
+   * #65 — the mini-player's transport press, WHEN this workspace opted into the
+   * pause coupling. It drives the session, not the audio: togglePause() persists
+   * the pause/resume and the phase effect above is what then pauses/resumes the
+   * music. Going through the session (rather than pausing both by hand) is what
+   * keeps the two from disagreeing, and keeps #43's promise that the track
+   * resumes from where it stopped.
+   *
+   * Deliberately the ONLY audio-side event wired to the timer: a track ending,
+   * an autoplay block, an interrupted element or a volume change never reach
+   * here. Those are things the audio does, not things the user asked of their
+   * focus session — and the element's own `pause` event can't tell them apart
+   * from the pauses this timer itself issues, which would feed back on itself.
+   *
+   * Memoised (Duo review): it is the one handler this component hands to a
+   * child, so its identity is part of that child's props. Nothing re-renders
+   * needlessly today — FocusSoundPlayer is not React.memo-wrapped, so it
+   * re-renders with its parent regardless — but that makes a future memo() on
+   * the player a trap, where a handler rebuilt on every countdown tick would
+   * silently defeat it. Stable now, and stable if that changes.
+   */
+  const togglePauseFromPlayer = useCallback(async () => {
+    // A coupled RESUME can unmount the player (minimal mode hides it while
+    // running; a resume landing on time's-up hides it outright), so flag the
+    // focus hand-off before the phase moves. A coupled pause keeps it mounted.
+    //
+    // The `sessionId` half matters (Duo review): arm this ONLY when togglePause
+    // is certain to move the phase, because the effect that disarms it is keyed
+    // on `phase`. Every other route out of a paused session changes phase — a
+    // rejected resume falls back to "running", a successful one lands on
+    // running/timeup — but `phase === "paused"` with no session id returns
+    // immediately, which would leave the flag armed for the next, unrelated
+    // transition to consume as a focus jump the user never asked for.
+    //
+    // NOT done by resetting the flag after the await: `goToPhase` inside
+    // togglePause schedules a React update, so the disarm would win the race
+    // against the commit and the hand-off would silently stop happening. That
+    // exact suggestion was tried and it fails the minimal-mode focus test.
+    pauseHandoffRef.current = phase === "paused" && sessionId != null;
+    await togglePause();
+  }, [phase, sessionId, togglePause]);
 
   const changeTime = (mins: number) => {
     const next = applyTimeDelta({ totalSec, remainingSec }, mins * 60);
@@ -444,6 +510,19 @@ export function FocusTimer({
   const sessionActive = phase === "running" || phase === "paused";
   const showSoundPlayer =
     sessionActive && !soundOff && !(settings.minimalMode && running);
+  // #65 a11y (WCAG 2.4.3) — pressing the mini-player's coupled transport can
+  // unmount that very button (minimal mode hides the player again the moment the
+  // timer is running), which would drop a keyboard/screen-reader user's focus to
+  // <body> mid-session. Hand it to whichever session control is now primary,
+  // exactly as the #66 setup disclosure does. Declared here because it reads
+  // showSoundPlayer — the post-transition value, since effects run after commit
+  // — so there is no second copy of that condition to drift. Unconditional and
+  // above every early return, so hook order is stable.
+  useEffect(() => {
+    if (!pauseHandoffRef.current) return;
+    pauseHandoffRef.current = false;
+    if (!showSoundPlayer) sessionCtaRef.current?.focus();
+  }, [phase, showSoundPlayer]);
   const remainingInTask = steps
     .filter((s) => !s.done)
     .reduce((n, s) => n + s.estMinutes, 0);
@@ -784,6 +863,7 @@ export function FocusTimer({
             {stripLeadingGlyph(t("focus.timer.completeStep", voice))}
           </button>
           <button
+            ref={sessionCtaRef}
             onClick={togglePause}
             disabled={pending}
             className="hover:bg-accent inline-flex min-h-[44px] items-center gap-1.5 rounded-md border px-4 disabled:opacity-50"
@@ -824,7 +904,11 @@ export function FocusTimer({
         <div className="space-y-3 text-center">
           <p className="text-lg font-medium">{t("focus.timesUp", voice)}</p>
           <div className="flex flex-wrap justify-center gap-2">
+            {/* Shares sessionCtaRef with the Pause/Resume control above: the two
+                blocks are mutually exclusive, so a coupled resume that lands
+                straight on time's-up still has somewhere to put focus (#65). */}
             <button
+              ref={sessionCtaRef}
               onClick={finishComplete}
               disabled={pending}
               className="inline-flex min-h-[44px] items-center gap-1.5 rounded-md bg-green-600 px-4 font-medium text-white disabled:opacity-50"
@@ -889,8 +973,18 @@ export function FocusTimer({
       {!setup && taskTotalLine}
 
       {/* #43 — embedded lo-fi mini-player (play/pause · prev/next · volume ·
-          now-playing). Hidden when sound is off or minimal-mode-while-running. */}
-      {showSoundPlayer && <FocusSoundPlayer controls={sound} voice={voice} />}
+          now-playing). Hidden when sound is off or minimal-mode-while-running.
+          #65 — when the workspace opted in, its transport button drives the
+          SESSION (and says so in its label); otherwise it stays audio-only and
+          the countdown is untouched, exactly as #43 shipped it. */}
+      {showSoundPlayer && (
+        <FocusSoundPlayer
+          controls={sound}
+          voice={voice}
+          onPauseTogether={pauseTogether ? togglePauseFromPlayer : undefined}
+          pauseTogetherPending={pending}
+        />
+      )}
 
       {/* Next-step peek (below controls). Shown for any multi-step active/setup
           phase; hidden by minimal mode while running (via showContext) and on the

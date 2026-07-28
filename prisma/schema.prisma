@@ -159,6 +159,12 @@ model Settings {
   // persists across sessions. Plain Boolean: no pseudo-enum, hence no CHECK
   // constraint to mirror in src/lib/constants.ts.
   focusShuffle             Boolean   @default(false)
+  // #65 — make the #43 music↔timer coupling bidirectional: pausing the music
+  // from the mini-player also pauses the timer (and playing it resumes both).
+  // Opt-in, so it defaults false — the timer→music direction is unconditional,
+  // but stopping a focus session is never something to infer from "quiet,
+  // please". Plain Boolean, like focusShuffle: no CHECK constraint to mirror.
+  focusPauseTogether       Boolean   @default(false)
   focusTimerTipDismissedAt DateTime?
   // MR ③ — app-wide completion style (Appearance). completeTickColor mirrors
   // CompleteTickColor in src/lib/constants.ts + Settings_completeTickColor_check.

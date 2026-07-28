@@ -40,6 +40,7 @@ describe("updateFocusTimerSettings", () => {
           focusKeepAwake: false,
           focusAlarmEnabled: true,
           focusSound: "lofi_calm",
+          focusPauseTogether: false,
         },
       }),
     );
@@ -74,6 +75,56 @@ describe("updateFocusTimerSettings", () => {
           focusTimerStyle: null,
           focusSound: "off",
         }),
+      }),
+    );
+  });
+
+  // #65 — the music↔timer pause coupling. A plain Boolean column (the
+  // focusShuffle precedent), so coercion is the only validation it needs, and
+  // it must default OFF: the coupling stops the timer, which nobody who only
+  // wanted to silence their music should get by accident.
+  it("persists the pause-together coupling when asked for", async () => {
+    await updateFocusTimerSettings({
+      timerStyle: "ring",
+      minimalMode: false,
+      keepAwake: true,
+      alarmEnabled: true,
+      sound: "lofi_calm",
+      pauseTogether: true,
+    });
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ focusPauseTogether: true }),
+        create: expect.objectContaining({ focusPauseTogether: true }),
+      }),
+    );
+  });
+
+  it("defaults to false when omitted; coerces any truthy junk to a real boolean (NOT NULL column)", async () => {
+    await updateFocusTimerSettings({
+      timerStyle: "ring",
+      minimalMode: false,
+      keepAwake: true,
+      alarmEnabled: true,
+      sound: "lofi_calm",
+    });
+    expect(upsert).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ focusPauseTogether: false }),
+      }),
+    );
+    await updateFocusTimerSettings({
+      timerStyle: "ring",
+      minimalMode: false,
+      keepAwake: true,
+      alarmEnabled: true,
+      sound: "lofi_calm",
+      pauseTogether: "yes" as unknown as boolean,
+    });
+    // Truthy junk still coerces to a real boolean — the column is NOT NULL.
+    expect(upsert).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ focusPauseTogether: true }),
       }),
     );
   });

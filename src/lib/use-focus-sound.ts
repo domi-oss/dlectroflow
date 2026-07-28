@@ -23,6 +23,12 @@ import {
  * (from position) when it resumes, and it stops on session end / unmount. The
  * mini-player can still pause/resume on its own without touching the timer.
  *
+ * #65 — that second direction is now available as an opt-in
+ * (Settings.focusPauseTogether), but it is NOT implemented here: this hook has
+ * no idea a session exists. The timer intercepts the mini-player's transport
+ * press instead, so only a deliberate press couples — never an `ended`, a
+ * rejected play() or any other thing the element does on its own.
+ *
  * #68 — it is a real playlist now, not one looped file. The element does not
  * loop; when a track ends we advance to the next entry of the current PASS (see
  * buildPlayOrder) and only wrap to its head once every track has been heard, so

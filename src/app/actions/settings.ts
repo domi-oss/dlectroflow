@@ -174,6 +174,11 @@ export async function updateFirstRunPreview(enabled: boolean) {
  * constraints); an unknown style falls back to null (→ resolve by voice) and an
  * unknown sound falls back to "off". The timer route is force-dynamic (reads
  * settings fresh on load); we revalidate /settings so the section re-seeds.
+ *
+ * #65 — pauseTogether (the opt-in music→timer pause coupling) is OPTIONAL here:
+ * a caller that predates it, or one that only means to change the style, must
+ * never silently switch a workspace's focus session over to "the music can stop
+ * my timer". Omitted ⇒ false, same as the column default.
  */
 export async function updateFocusTimerSettings(input: {
   timerStyle: string | null;
@@ -181,6 +186,7 @@ export async function updateFocusTimerSettings(input: {
   keepAwake: boolean;
   alarmEnabled: boolean;
   sound: string;
+  pauseTogether?: boolean;
 }) {
   const workspaceId = await currentWorkspaceId();
   const styles = Object.values(FocusTimerStyle) as string[];
@@ -198,6 +204,7 @@ export async function updateFocusTimerSettings(input: {
     focusKeepAwake: Boolean(input.keepAwake),
     focusAlarmEnabled: Boolean(input.alarmEnabled),
     focusSound,
+    focusPauseTogether: Boolean(input.pauseTogether),
   };
   await prisma.settings.upsert({
     where: { workspaceId },

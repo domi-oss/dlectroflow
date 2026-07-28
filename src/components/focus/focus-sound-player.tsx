@@ -23,6 +23,9 @@ import type { FocusSoundControls } from "@/lib/use-focus-sound";
  * (aria-hidden), and the current track + times are shown as text (not
  * colour-only). Width is capped to roughly the timer button row above it.
  *
+ * #65 — the transport button is the ONE control that can be coupled to the
+ * focus session (see onPauseTogether). Everything else here stays audio-only.
+ *
  * Layout note: exact pixel width/popover placement still wants the owner's
  * eyeball — this is the cleanest sensible version (see MR discussion).
  */
@@ -36,9 +39,27 @@ function formatTime(seconds: number): string {
 export function FocusSoundPlayer({
   controls,
   voice,
+  onPauseTogether,
+  pauseTogetherPending = false,
 }: {
   controls: FocusSoundControls;
   voice: Voice;
+  /**
+   * #65 — supplied only when the workspace opted into the music↔timer pause
+   * coupling. The transport button then pauses/resumes the whole SESSION (the
+   * timer pauses the audio itself, through the #43 one-directional coupling)
+   * instead of the audio alone, and says so in its accessible name. Absent =
+   * the default: the transport touches audio only, and the timer runs on.
+   *
+   * Only this one button is ever coupled. Skipping a track, shuffling and
+   * changing the volume stay audio-only in both modes — none of them is the
+   * user saying "stop my focus session".
+   */
+  onPauseTogether?: () => void;
+  /** True while that session round-trip is in flight, so the coupled button
+   * can't be double-fired (mirrors the timer's own Pause/Resume being
+   * disabled). Meaningless — and ignored — without onPauseTogether. */
+  pauseTogetherPending?: boolean;
 }) {
   const {
     track,
@@ -108,6 +129,14 @@ export function FocusSoundPlayer({
 
   const btn =
     "hover:bg-accent inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border";
+  // #65 — one press, one meaning: either the audio (default) or the whole
+  // session (coupled). Resolved once so the handler, the label and the disabled
+  // state can never describe different buttons.
+  const coupled = Boolean(onPauseTogether);
+  const onTransport = onPauseTogether ?? toggle;
+  const transportLabel = playing
+    ? t(coupled ? "focus.sound.pauseTogether" : "focus.sound.pause", voice)
+    : t(coupled ? "focus.sound.resumeTogether" : "focus.sound.play", voice);
   const pct =
     pos.duration > 0
       ? Math.min(100, Math.max(0, (pos.currentTime / pos.duration) * 100))
@@ -129,14 +158,11 @@ export function FocusSoundPlayer({
         </button>
         <button
           type="button"
-          onClick={toggle}
-          className={btn}
+          onClick={onTransport}
+          disabled={coupled && pauseTogetherPending}
+          className={cn(btn, "disabled:opacity-50")}
           aria-pressed={playing}
-          aria-label={
-            playing
-              ? t("focus.sound.pause", voice)
-              : t("focus.sound.play", voice)
-          }
+          aria-label={transportLabel}
         >
           {playing ? (
             <Pause aria-hidden="true" className="h-5 w-5" />

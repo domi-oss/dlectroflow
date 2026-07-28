@@ -42,6 +42,7 @@ const base = {
   keepAwake: true,
   alarmEnabled: true,
   sound: "off",
+  pauseTogether: false,
   voice: "plain" as const,
 };
 
@@ -106,6 +107,7 @@ describe("FocusTimerSection", () => {
         keepAwake: true,
         alarmEnabled: true,
         sound: "off",
+        pauseTogether: false,
       }),
     );
   });
@@ -141,6 +143,34 @@ describe("FocusTimerSection", () => {
     await waitFor(() =>
       expect(updateFocusTimerSettings).toHaveBeenCalledWith(
         expect.objectContaining({ sound: "lofi_calm" }),
+      ),
+    );
+  });
+
+  // #65 — the music↔timer pause coupling is opt-in, and its label has to spell
+  // out the consequence (the timer stops), because someone reaching for the
+  // player's pause button usually only means "quiet, please".
+  it("offers the pause-together toggle, OFF by default, with a hint naming the consequence", () => {
+    render(<FocusTimerSection {...base} />);
+    const toggle = screen.getByLabelText(/pause music and timer together/i);
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByText(/also pauses the timer/i)).toBeInTheDocument();
+  });
+
+  it("seeds the pause-together toggle from the stored preference", () => {
+    render(<FocusTimerSection {...base} pauseTogether />);
+    expect(
+      screen.getByLabelText(/pause music and timer together/i),
+    ).toBeChecked();
+  });
+
+  it("toggling pause-together auto-saves it with the rest of the pref set", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimerSection {...base} />);
+    await user.click(screen.getByLabelText(/pause music and timer together/i));
+    await waitFor(() =>
+      expect(updateFocusTimerSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ pauseTogether: true, sound: "off" }),
       ),
     );
   });

@@ -110,13 +110,30 @@ vi.mock("@/lib/use-focus-sound", () => ({
 }));
 // The mini-player's own behaviour is covered in focus-sound-player.test.tsx;
 // stub it here so its real play/pause labels don't collide with the timer's
-// controls. The stub forwards controls.toggle via a uniquely-named button so we
-// can assert the coupling is one-directional (mini-player → audio only).
+// controls. The stub resolves the transport press exactly as the real component
+// does — the #65 session-coupled handler when the timer supplies one, otherwise
+// controls.toggle — so these tests see which one the timer wired up. The volume
+// button is here to prove what #65 deliberately does NOT couple.
 vi.mock("@/components/focus/focus-sound-player", () => ({
-  FocusSoundPlayer: ({ controls }: { controls: { toggle: () => void } }) => (
+  FocusSoundPlayer: ({
+    controls,
+    onPauseTogether,
+    pauseTogetherPending,
+  }: {
+    controls: { toggle: () => void; setVolume: (v: number) => void };
+    onPauseTogether?: () => void;
+    pauseTogetherPending?: boolean;
+  }) => (
     <div data-testid="focus-sound-player">
-      <button type="button" onClick={() => controls.toggle()}>
+      <button
+        type="button"
+        disabled={pauseTogetherPending}
+        onClick={() => (onPauseTogether ?? controls.toggle)()}
+      >
         mini sound toggle
+      </button>
+      <button type="button" onClick={() => controls.setVolume(0)}>
+        mini volume zero
       </button>
     </div>
   ),
@@ -512,11 +529,13 @@ describe("FocusTimer — device effects behind the boundary", () => {
       screen.getByRole("button", { name: /mini sound toggle/i }),
     );
     expect(soundControls.toggle).toHaveBeenCalled();
-    // The timer phase is unchanged — still running (Pause shown, no Resume).
+    // The timer phase is unchanged — still running (Pause shown, no Resume) —
+    // and nothing was persisted: #65 must stay invisible until opted into.
     expect(screen.getByRole("button", { name: /pause/i })).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /resume/i }),
     ).not.toBeInTheDocument();
+    expect(pauseFocus).not.toHaveBeenCalled();
   });
 
   it("hides the mini-player in minimal mode while running", async () => {
@@ -571,6 +590,193 @@ describe("FocusTimer — device effects behind the boundary", () => {
   it("defaults shuffle to off when Settings has never stored it", () => {
     render(<FocusTimer {...base()} />);
     expect((soundHookArgs[1] as { shuffle?: boolean }).shuffle).toBe(false);
+  });
+});
+
+// #65 — the OPT-IN second direction of the #43 coupling. Off, the timer drives
+// the music and nothing else (covered above). On, an explicit press of the
+// mini-player's transport pauses/resumes the whole session — and nothing else
+// does: the coupling is wired to that button, never to the audio element's
+// state, so a finished track, a blocked autoplay or a volume change can't stop
+// a focus session the user never asked to stop.
+describe("FocusTimer — music↔timer pause coupling (#65)", () => {
+  const lofi = (extra: Record<string, unknown> = {}) => ({
+    timerStyle: null,
+    minimalMode: false,
+    keepAwake: false,
+    alarmEnabled: false,
+    sound: "lofi_calm",
+    ...extra,
+  });
+  const miniToggle = () =>
+    screen.getByRole("button", { name: /mini sound toggle/i });
+
+  it("ON: pausing from the mini-player pauses the timer (and still the music)", async () => {
+    const user = userEvent.setup();
+    render(
+      <FocusTimer {...base({ settings: lofi({ pauseTogether: true }) })} />,
+    );
+    await start(user);
+    expect(screen.getByRole("button", { name: /pause/i })).toBeInTheDocument();
+
+    await user.click(miniToggle());
+
+    // The session is genuinely paused server-side, not just visually.
+    expect(pauseFocus).toHaveBeenCalledWith("session-1", { totalSec: 60 });
+    expect(
+      await screen.findByRole("button", { name: /resume/i }),
+    ).toBeInTheDocument();
+    // The music stops too — that was the user's actual intent.
+    expect(soundControls.pause).toHaveBeenCalled();
+    // The audio-only path is bypassed: the session drives the audio via phase.
+    expect(soundControls.toggle).not.toHaveBeenCalled();
+  });
+
+  it("ON: playing from the mini-player resumes the timer", async () => {
+    const user = userEvent.setup();
+    render(
+      <FocusTimer {...base({ settings: lofi({ pauseTogether: true }) })} />,
+    );
+    await start(user);
+    await user.click(miniToggle()); // → paused
+    await screen.findByRole("button", { name: /resume/i });
+    soundControls.play.mockClear();
+
+    await user.click(miniToggle()); // → resume both
+
+    expect(resumeFocus).toHaveBeenCalledWith("session-1");
+    expect(
+      await screen.findByRole("button", { name: /pause/i }),
+    ).toBeInTheDocument();
+    expect(soundControls.play).toHaveBeenCalled();
+  });
+
+  it("ON: the timer's own Pause/Resume still works (the other direction is unchanged)", async () => {
+    const user = userEvent.setup();
+    render(
+      <FocusTimer {...base({ settings: lofi({ pauseTogether: true }) })} />,
+    );
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /pause/i }));
+    expect(soundControls.pause).toHaveBeenCalled();
+    expect(
+      await screen.findByRole("button", { name: /resume/i }),
+    ).toBeInTheDocument();
+  });
+
+  // The excluded cases. The timer never reads the hook's `playing` flag, so a
+  // track ending (the playlist auto-advances), a browser autoplay block (play()
+  // rejects and is swallowed) or the OS pausing the element cannot pause the
+  // countdown. Only the button does.
+  it("ON: a track ending / blocked autoplay does NOT pause the timer", async () => {
+    const user = userEvent.setup();
+    const props = base({ settings: lofi({ pauseTogether: true }) });
+    const { rerender } = render(<FocusTimer {...props} />);
+    await start(user);
+    try {
+      soundControls.playing = true;
+      rerender(<FocusTimer {...props} />);
+      expect(
+        screen.getByRole("button", { name: /pause/i }),
+      ).toBeInTheDocument();
+      // Audio stopped by itself (ended / blocked / interrupted) — the session
+      // must ride straight through it.
+      soundControls.playing = false;
+      rerender(<FocusTimer {...props} />);
+      expect(
+        screen.getByRole("button", { name: /pause/i }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /resume/i }),
+      ).not.toBeInTheDocument();
+      expect(pauseFocus).not.toHaveBeenCalled();
+    } finally {
+      soundControls.playing = false; // shared mock — leave it as found
+    }
+  });
+
+  it("ON: silencing the music with the volume slider is not a pause", async () => {
+    const user = userEvent.setup();
+    render(
+      <FocusTimer {...base({ settings: lofi({ pauseTogether: true }) })} />,
+    );
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /mini volume zero/i }));
+    expect(soundControls.setVolume).toHaveBeenCalledWith(0);
+    expect(screen.getByRole("button", { name: /pause/i })).toBeInTheDocument();
+    expect(pauseFocus).not.toHaveBeenCalled();
+  });
+
+  // Minimal mode hides the mini-player while running, so a coupled resume
+  // unmounts the very button that was just pressed. Focus must land on the
+  // timer's own control, not on <body> (the #66 disclosure precedent).
+  it("ON + minimal mode: a coupled resume hands focus to the timer's own control", async () => {
+    const user = userEvent.setup();
+    render(
+      <FocusTimer
+        {...base({
+          settings: lofi({ pauseTogether: true, minimalMode: true }),
+        })}
+      />,
+    );
+    await start(user);
+    // Player is hidden while running; pause the timer to reveal it.
+    expect(screen.queryByTestId("focus-sound-player")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /pause/i }));
+    const mini = await screen.findByRole("button", {
+      name: /mini sound toggle/i,
+    });
+
+    await user.click(mini);
+
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("focus-sound-player"),
+      ).not.toBeInTheDocument(),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /pause/i })).toHaveFocus(),
+    );
+  });
+
+  // The failure path has to hand focus over too, and consume the flag doing it.
+  // A rejected resume falls back to "running" (#27), which IS a phase change, so
+  // the effect fires, focus lands somewhere real, and nothing is left armed for
+  // a later transition to spend as a focus jump (Duo review). The one route that
+  // would leave it armed — a paused session with no session id — is unreachable
+  // from the UI, which is why `togglePauseFromPlayer` guards on `sessionId`
+  // rather than this being testable here.
+  it("ON + minimal mode: a REJECTED coupled resume still hands focus over, not to <body>", async () => {
+    const user = userEvent.setup();
+    vi.mocked(resumeFocus).mockResolvedValueOnce({
+      ok: false,
+    } as unknown as Awaited<ReturnType<typeof resumeFocus>>);
+    render(
+      <FocusTimer
+        {...base({
+          settings: lofi({ pauseTogether: true, minimalMode: true }),
+        })}
+      />,
+    );
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /pause/i }));
+    await user.click(
+      await screen.findByRole("button", { name: /mini sound toggle/i }),
+    );
+
+    // Server said no → back to running (the #27 fail-safe), player unmounted,
+    // focus handed over rather than dropped.
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("focus-sound-player"),
+      ).not.toBeInTheDocument(),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /pause/i })).toHaveFocus(),
+    );
+    // The session really did fall back to running, so this is the fail-safe
+    // path and not a successful resume in disguise.
+    expect(resumeFocus).toHaveBeenCalledWith("session-1");
   });
 });
 

@@ -47,6 +47,37 @@ describe("focus-timer redesign strings (MR ②)", () => {
     }
   });
 
+  it("#65 — the pause-coupling setting names its consequence and keeps plain emoji-free", () => {
+    expect(t("focusSettings.pauseTogether", "plain")).toBe(
+      "Pause music and timer together",
+    );
+    // Same behavioural-toggle convention as the alarm: playful gets a glyph
+    // anchor, plain stays plain.
+    expect(t("focusSettings.pauseTogether", "playful")).toBe(
+      "⏸️ Pause music and timer together",
+    );
+    for (const voice of ["plain", "playful"] as const) {
+      // The hint must say what it costs you, not just what it does.
+      expect(t("focusSettings.pauseTogetherHint", voice)).toMatch(
+        /also pauses the timer/i,
+      );
+      expect(t("focusSettings.pauseTogetherHint", voice)).toMatch(
+        /keeps running/i,
+      );
+    }
+  });
+
+  it("#65 — the coupled transport labels resolve identically in both voices (functional control)", () => {
+    for (const voice of ["plain", "playful"] as const) {
+      expect(t("focus.sound.pauseTogether", voice)).toBe(
+        "Pause music and timer",
+      );
+      expect(t("focus.sound.resumeTogether", voice)).toBe(
+        "Resume music and timer",
+      );
+    }
+  });
+
   it("#68 — shuffle label + state text resolve identically in both voices (functional control)", () => {
     expect(t("focus.sound.shuffle", "plain")).toBe("Shuffle tracks");
     expect(t("focus.sound.shuffle", "playful")).toBe("Shuffle tracks");
