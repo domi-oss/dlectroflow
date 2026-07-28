@@ -21,7 +21,7 @@ vi.mock("@/lib/db", () => ({ prisma: prismaMock }));
 // not a comparison against a magic id. These specs already express intent
 // through the workspace id they pass in, so map that id back to a kind: the
 // signed-in account's workspace here is "owner", everything else is a sandbox.
-// The lookup itself is covered by src/lib/ai-scope.test.ts.
+// The lookup itself is covered by src/lib/workspace-kind.test.ts.
 vi.mock("@/lib/workspace-kind", () => ({
   isGuestWorkspace: (id: string) => Promise.resolve(id !== "owner"),
 }));
