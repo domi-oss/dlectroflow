@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
 import { getLLM } from "@/lib/llm";
-import type { LLMTool } from "@/lib/llm/types";
+import type { LLMCredentials, LLMProvider, LLMTool } from "@/lib/llm/types";
 import {
   buildUserPrompt,
   localBreakdown,
@@ -11,7 +11,11 @@ import {
   type StreamEvent,
 } from "@/lib/breakdown";
 import { gatherBreakdownContext } from "@/lib/breakdown-context";
-import { isOwnerRequest, currentWorkspaceId } from "@/lib/workspace";
+import {
+  isOwnerRequest,
+  currentWorkspaceId,
+  currentUser,
+} from "@/lib/workspace";
 import { getSettings } from "@/lib/settings-read";
 import { resolveBreakdownModel, breakdownParamsFor } from "@/lib/models";
 import {
@@ -19,6 +23,7 @@ import {
   consumeGuestBreakdown,
   refundGuestBreakdown,
 } from "@/lib/guest-quota";
+import { consumeUserBreakdown, refundUserBreakdown } from "@/lib/user-quota";
 import { recordLLMFailure } from "@/lib/observability";
 import { isGuestWorkspace } from "@/lib/workspace-kind";
 
@@ -137,6 +142,7 @@ export async function POST(req: Request): Promise<Response> {
   // ── Role + allowance resolution ────────────────────────────────────────────
   const owner = await isOwnerRequest();
   const wsId = await currentWorkspaceId();
+  const user = await currentUser();
   // #35 Phase A: "guest" is a property of the workspace, not of its id. Every
   // signed-in account now has an opaque workspace id, so the old
   // `wsId !== OWNER_WORKSPACE_ID` test would have metered every member against
@@ -145,6 +151,14 @@ export async function POST(req: Request): Promise<Response> {
 
   let blockedReason: "quota" | "global_cap" | null = null;
   let guestIpHash: string | null = null;
+  // #35 Phase B — the two allowances are mutually exclusive by construction: a
+  // guest has no account to meter, and a signed-in account is never billed to
+  // whoever happens to share its IP. `userMetered` — not the policy name — is
+  // what the refund path keys off: an own-key or uncapped account spent no
+  // allowance, so there is none to give back.
+  let userMetered = false;
+  let llmCredentials: LLMCredentials | undefined;
+
   if (isGuest) {
     const hdrs = await headers();
     guestIpHash = clientIpHash(hdrs);
@@ -155,6 +169,25 @@ export async function POST(req: Request): Promise<Response> {
       const res = await consumeGuestBreakdown(guestIpHash);
       if (!res.allowed) blockedReason = res.reason ?? "quota";
     }
+  } else if (user) {
+    // The resolution order lives in consumeUserBreakdown (see its doc comment):
+    // a present key wins → uncapped → capped-and-metered. Over quota comes back
+    // as the same `"quota"` reason a blocked guest gets, so the fallback branch
+    // below needs no new case.
+    const access = await consumeUserBreakdown(user.id);
+    userMetered = access.metered;
+    blockedReason = access.blockedReason;
+    if (access.ownKey) {
+      llmCredentials = {
+        apiKey: access.ownKey.apiKey,
+        provider: access.ownKey.provider,
+      };
+    }
+  } else {
+    // Neither a guest sandbox nor a signed-in account: a workspace whose row
+    // went missing mid-request. Fail CLOSED onto the canned plan rather than
+    // spend the instance's key on a caller nobody can bill or meter.
+    blockedReason = "quota";
   }
 
   // Resolve the model tier and gather the coach's live context in ONE round
@@ -182,9 +215,10 @@ export async function POST(req: Request): Promise<Response> {
 
   // The LLM call failed to produce a usable breakdown — either it threw, or
   // it streamed to completion with no parsed tool call (tool-less/local
-  // models, a malformed response). Either way the guest didn't get a real AI
-  // breakdown, so refund the quota unit exactly as a blocked guest would
-  // never have spent it. No-op for the owner / already-blocked guests.
+  // models, a malformed response). Either way the caller didn't get a real AI
+  // breakdown, so refund the metered unit exactly as a blocked caller would
+  // never have spent it. No-op for anyone who was not metered (#35 Phase B:
+  // uncapped and own-key accounts, and the owner) or already blocked.
   //
   // Idempotency guard: both call sites below (the soft-failure branch and
   // the catch block) live in the SAME try, so if `send()` throws after the
@@ -192,10 +226,14 @@ export async function POST(req: Request): Promise<Response> {
   // controller.enqueue() throws), control falls into the catch, which would
   // otherwise refund a second time. `refunded` makes a second call a no-op.
   let refunded = false;
-  async function refundGuestOnLLMFailure(): Promise<void> {
-    if (isGuest && guestIpHash && !blockedReason && !refunded) {
+  async function refundOnLLMFailure(): Promise<void> {
+    if (blockedReason || refunded) return;
+    if (isGuest && guestIpHash) {
       refunded = true;
       await refundGuestBreakdown(guestIpHash);
+    } else if (user && userMetered) {
+      refunded = true;
+      await refundUserBreakdown(user.id);
     }
   }
 
@@ -205,7 +243,7 @@ export async function POST(req: Request): Promise<Response> {
       const send = (e: StreamEvent) =>
         controller.enqueue(encoder.encode(JSON.stringify(e) + "\n"));
 
-      // Blocked guest → non-silent canned fallback, NO Claude call.
+      // Blocked caller → non-silent canned fallback, NO LLM call.
       if (blockedReason) {
         send({
           type: "fallback",
@@ -217,8 +255,17 @@ export async function POST(req: Request): Promise<Response> {
         return;
       }
 
+      // The provider id is captured as soon as it is known so the catch below
+      // can log against the RIGHT provider without calling getLLM() a second
+      // time — with per-user credentials that would construct a second client,
+      // and if the construction itself is what threw, the catch would throw
+      // again and abandon the stream mid-flight.
+      let llmId: LLMProvider["id"] = "anthropic";
       try {
-        const llm = getLLM();
+        // #35 Phase B — `llmCredentials` is set only when this account brought
+        // its own key; undefined means the instance key, exactly as before.
+        const llm = getLLM(llmCredentials);
+        llmId = llm.id;
         for await (const ev of llm.stream({
           system: SYSTEM,
           messages: [
@@ -242,8 +289,8 @@ export async function POST(req: Request): Promise<Response> {
               // the stream with no parsed tool call (see #59 Task 7's
               // structured-output fallback). Never leave the user with a
               // dead stream — degrade to the same canned plan as an error,
-              // and refund a guest exactly as the thrown-error path below.
-              await refundGuestOnLLMFailure();
+              // and refund a metered unit exactly as the thrown-error path below.
+              await refundOnLLMFailure();
               send({
                 type: "fallback",
                 reason: "error",
@@ -256,9 +303,10 @@ export async function POST(req: Request): Promise<Response> {
       } catch (err) {
         // #21 P4: fallback mode must be visible — one structured log line +
         // the per-pod counter on /api/livez (was a silent bare catch).
-        recordLLMFailure(getLLM().id, "breakdown", err);
-        // The LLM call failed → refund the guest's quota so a transient error doesn't burn an allowance.
-        await refundGuestOnLLMFailure();
+        recordLLMFailure(llmId, "breakdown", err);
+        // The LLM call failed → refund the metered unit so a transient error
+        // doesn't burn a guest's or an account's allowance.
+        await refundOnLLMFailure();
         // Canned fallback rather than a dead end.
         send({
           type: "fallback",

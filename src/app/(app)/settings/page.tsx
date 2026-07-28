@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { getSettings } from "@/lib/db";
-import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
+import { currentWorkspaceId, currentUser } from "@/lib/workspace";
 import { getGoogleStatus } from "@/lib/google";
+import { loadPeopleAdmin } from "@/lib/people";
+import { PeoplePanel } from "@/components/settings/people-panel";
 import { SettingsPanel } from "@/components/settings/settings-panel";
 import { randomFableLine } from "@/lib/fable-lines";
 import { modelChoicesForProvider, resolveUtilityModel } from "@/lib/models";
@@ -24,20 +26,37 @@ export default async function SettingsPage({
 }) {
   const workspaceId = await currentWorkspaceId();
   const { from } = await searchParams;
-  const [settings, owner] = await Promise.all([
+  // #35 Phase B — one identity resolution for the whole render. `currentUser()`
+  // is what isOwnerRequest() is implemented in terms of, so reading it directly
+  // gives the role AND the id the People panel needs to mark the owner's own row
+  // without a second database round trip.
+  const [settings, me] = await Promise.all([
     getSettings(workspaceId),
-    isOwnerRequest(),
+    currentUser(),
   ]);
-  const google = owner ? await getGoogleStatus() : null;
+  const owner = me?.role === "owner";
+  // Both owner-only reads. loadPeopleAdmin re-checks the role itself and returns
+  // null for anyone else, so the panel cannot render for a member even if this
+  // call site were ever changed to drop the gate.
+  const [google, people] = await Promise.all([
+    owner ? getGoogleStatus() : Promise.resolve(null),
+    owner ? loadPeopleAdmin(me?.id) : Promise.resolve(null),
+  ]);
   const voice: Voice = settings.voice === "playful" ? "playful" : "plain";
+  // Relative times ("2h ago") are rendered from ONE timestamp so the server and
+  // the client agree — the convention library-row-meta.tsx follows.
+  // eslint-disable-next-line react-hooks/purity -- async Server Component: this runs once per request on the server, not in a compiler-memoised client render.
+  const now = Date.now();
 
-  // #72 — the nav must list what this render actually put on the page. The
-  // Integrations section is the one conditional one (see the branch below), so
-  // an owner with no status object gets a nav without a dead "Integrations"
-  // anchor rather than a link that jumps nowhere.
+  // #72 — the nav must list what this render actually put on the page. Two
+  // sections are conditional (see the branches below): an owner with no status
+  // object gets a nav without a dead "Integrations" anchor, and People is
+  // owner-only, so a guest never gets a link that jumps nowhere.
   const showIntegrations = owner ? google != null : true;
   const sections = SETTINGS_SECTIONS.filter(
-    (section) => section.id !== "settings-integrations" || showIntegrations,
+    (section) =>
+      (section.id !== "settings-integrations" || showIntegrations) &&
+      (section.id !== "settings-people" || people != null),
   );
 
   return (
@@ -46,6 +65,9 @@ export default async function SettingsPage({
 
       <h1 className="text-xl font-semibold">{t("nav.settings", voice)}</h1>
       <SectionNav sections={sections} voice={voice} label="Settings sections" />
+      {/* The Account group leads the page (design §4). People is its owner-only
+          half; Phase C adds the per-user half around it. */}
+      {people && <PeoplePanel view={people} now={now} voice={voice} />}
       <SettingsPanel
         settings={{
           agingThresholdMinutes: settings.agingThresholdMinutes,

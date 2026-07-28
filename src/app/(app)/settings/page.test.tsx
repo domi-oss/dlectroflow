@@ -38,9 +38,18 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/workspace", () => ({
   currentWorkspaceId: vi.fn().mockResolvedValue("ws-test"),
   isOwnerRequest: () => isOwnerRequest(),
+  // #35 Phase B — the page resolves the identity once and derives `owner` from
+  // its role, so the mock has to answer with a user, not just a boolean.
+  currentUser: async () =>
+    (await isOwnerRequest())
+      ? { id: "u-owner", role: "owner", workspaceId: "ws-test" }
+      : null,
 }));
 vi.mock("@/lib/google", () => ({
   getGoogleStatus: vi.fn().mockResolvedValue(null),
+}));
+vi.mock("@/lib/people", () => ({
+  loadPeopleAdmin: vi.fn().mockResolvedValue(null),
 }));
 
 // --- Heavy child components: stubbed to keep the test on the page footer ---
@@ -58,6 +67,9 @@ vi.mock("@/components/settings/focus-timer-section", () => ({
 }));
 vi.mock("@/components/settings/integrations-panel", () => ({
   IntegrationsPanel: () => null,
+}));
+vi.mock("@/components/settings/people-panel", () => ({
+  PeoplePanel: () => null,
 }));
 vi.mock("@/components/nav/back-link", () => ({ BackLink: () => null }));
 

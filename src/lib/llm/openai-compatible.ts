@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type {
+  LLMCredentials,
   LLMProvider,
   LLMRequest,
   LLMResult,
@@ -13,7 +14,12 @@ import {
 } from "./structured-output";
 import { withRetry } from "./retry";
 
-function client(): OpenAI {
+/**
+ * #35 Phase B — `creds` is a user's own key, when they brought one. The base URL
+ * stays the DEPLOY's: a per-user endpoint would let a settings field aim the
+ * server at an arbitrary host (SSRF), so only the key is caller-supplied.
+ */
+function client(creds?: LLMCredentials): OpenAI {
   const baseURL = process.env.LLM_BASE_URL;
   if (!baseURL) {
     throw new LLMError(
@@ -27,7 +33,7 @@ function client(): OpenAI {
   // SDK requires a non-empty string — send a harmless placeholder.
   return new OpenAI({
     baseURL,
-    apiKey: process.env.LLM_API_KEY || "not-needed",
+    apiKey: creds?.apiKey || process.env.LLM_API_KEY || "not-needed",
   });
 }
 
@@ -178,7 +184,14 @@ type StreamChunk = {
   }>;
 };
 
-export function createOpenAICompatibleProvider(): LLMProvider {
+/**
+ * `creds` (#35 Phase B) binds this provider to ONE caller's own API key for the
+ * lifetime of the instance it returns. `getLLM()` never caches a credentialed
+ * provider, so one user's key can't be reused for the next request.
+ */
+export function createOpenAICompatibleProvider(
+  creds?: LLMCredentials,
+): LLMProvider {
   return {
     id: "openai-compatible",
     get supportsTools() {
@@ -190,7 +203,7 @@ export function createOpenAICompatibleProvider(): LLMProvider {
           const fallback = structuredFallback(req);
           const effective = fallback?.req ?? req;
           const useTools = supportsTools() && !!req.tools?.length;
-          const resp = await client().chat.completions.create({
+          const resp = await client(creds).chat.completions.create({
             model: req.model,
             max_tokens: req.maxTokens,
             ...(req.temperature != null
@@ -231,7 +244,7 @@ export function createOpenAICompatibleProvider(): LLMProvider {
       // below, a partial stream can't be safely replayed.
       const s = await withRetry(async () => {
         try {
-          return (await client().chat.completions.create({
+          return (await client(creds).chat.completions.create({
             model: req.model,
             max_tokens: req.maxTokens,
             stream: true,

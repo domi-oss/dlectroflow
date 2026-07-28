@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import type { AuthProfile } from "@/lib/auth/providers";
-import { UserRole, UserStatus, WorkspaceKind } from "@/lib/constants";
+import { AiPolicy, UserRole, UserStatus, WorkspaceKind } from "@/lib/constants";
 import type { UserRole as UserRoleValue } from "@/lib/constants";
 
 /**
@@ -144,6 +144,15 @@ async function provision(
           // The ONLY path that mints an owner, and it reads a dedicated
           // boolean set solely by the deploy-time OWNER_ALLOWLIST seed.
           role: invite.isOwnerSeed ? UserRole.Owner : UserRole.Member,
+          // #35 Phase B — set explicitly rather than left to the schema default.
+          // The owner's own account is UNCAPPED by the owner's design decision;
+          // invited members are capped until they bring their own key. Phase A
+          // left this to the `capped` column default, which quietly provisioned
+          // the live instance's owner with a 50-breakdown cap — invisible for as
+          // long as nothing enforced it, and Phase B is what enforces it. Only
+          // set on CREATE: a policy the owner later changes by hand must not be
+          // recomputed on their next sign-in.
+          aiPolicy: invite.isOwnerSeed ? AiPolicy.Uncapped : AiPolicy.Capped,
         },
         select: { id: true, role: true },
       });

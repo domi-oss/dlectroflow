@@ -19,6 +19,12 @@ vi.mock("@/app/actions/settings", () => ({
 vi.mock("@/app/actions/google-schedule", () => ({
   disconnectGoogleTasks: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("@/app/actions/people", () => ({
+  invitePerson: vi.fn().mockResolvedValue({ ok: true }),
+  withdrawInvitation: vi.fn().mockResolvedValue({ ok: true }),
+  updatePersonAiPolicy: vi.fn().mockResolvedValue({ ok: true }),
+  revokePerson: vi.fn().mockResolvedValue({ ok: true }),
+}));
 vi.mock("@/lib/notifications", () => ({
   registerServiceWorker: vi.fn().mockResolvedValue(null),
   notificationPermission: () => "default",
@@ -31,11 +37,28 @@ import { AppearanceSection } from "@/components/settings/appearance-section";
 import { NotificationsSection } from "@/components/settings/notifications-section";
 import { FocusTimerSection } from "@/components/settings/focus-timer-section";
 import { IntegrationsPanel } from "@/components/settings/integrations-panel";
+import { PeoplePanel } from "@/components/settings/people-panel";
 
-/** Every Settings section, rendered the way the page renders them. */
+/**
+ * Every Settings section, rendered the way the page renders them.
+ *
+ * People (#35 Phase B) is owner-only on the real page; it is rendered here
+ * because this suite's contract is "every REGISTERED section has a real jump
+ * target", and the registry is what the nav is built from.
+ */
+// A fixed clock rather than Date.now(): this helper renders like a component, so
+// reading the real clock here trips react-hooks/purity, and nothing in the suite
+// depends on the value.
+const NOW = new Date("2026-07-28T12:00:00.000Z").getTime();
+
 function AllSections({ voice = "plain" as Voice }) {
   return (
     <>
+      <PeoplePanel
+        view={{ people: [], invitations: [], windowHours: 720 }}
+        now={NOW}
+        voice={voice}
+      />
       <SettingsPanel
         settings={{
           agingThresholdMinutes: 45,
