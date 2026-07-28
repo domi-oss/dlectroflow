@@ -17,7 +17,7 @@ import {
   SaveIndicator,
 } from "@/components/settings/use-save-status";
 import { TimerStylePreview } from "@/components/focus/timer-style-preview";
-import { SectionHeading } from "@/components/nav/section-heading";
+import { CollapsibleSection } from "@/components/nav/collapsible-section";
 
 type Prefs = {
   timerStyle: string | null;
@@ -48,7 +48,8 @@ export function FocusTimerSection({
   sound,
   pauseTogether,
   voice,
-}: Prefs & { voice: Voice }) {
+  defaultExpanded,
+}: Prefs & { voice: Voice; defaultExpanded?: boolean }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const { status, markSaving, markSaved, markError } = useSaveStatus();
@@ -110,10 +111,12 @@ export function FocusTimerSection({
   const selectedStyle = resolveTimerStyle(prefs.timerStyle, voice);
 
   return (
-    <section className="space-y-3">
-      <SectionHeading id="settings-focus-timer" voice={voice}>
-        <SaveIndicator status={status} voice={voice} />
-      </SectionHeading>
+    <CollapsibleSection
+      id="settings-focus-timer"
+      voice={voice}
+      defaultExpanded={defaultExpanded}
+      headingExtras={<SaveIndicator status={status} voice={voice} />}
+    >
       <p className="text-muted-foreground text-sm">
         {t("focusSettings.intro", voice)}
       </p>
@@ -230,7 +233,7 @@ export function FocusTimerSection({
         checked={prefs.pauseTogether}
         onChange={(v) => set("pauseTogether", v)}
       />
-    </section>
+    </CollapsibleSection>
   );
 }
 

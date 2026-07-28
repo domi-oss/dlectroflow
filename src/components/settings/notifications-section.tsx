@@ -19,7 +19,7 @@ import {
   useSaveStatus,
   SaveIndicator,
 } from "@/components/settings/use-save-status";
-import { SectionHeading } from "@/components/nav/section-heading";
+import { CollapsibleSection } from "@/components/nav/collapsible-section";
 
 type Prefs = {
   notifyRoundup: boolean;
@@ -42,7 +42,8 @@ export function NotificationsSection({
   notifyDailyReview,
   dailyReviewNudgeTime,
   voice,
-}: Prefs & { voice: Voice }) {
+  defaultExpanded,
+}: Prefs & { voice: Voice; defaultExpanded?: boolean }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const { status, markSaving, markSaved, markError } = useSaveStatus();
@@ -96,10 +97,12 @@ export function NotificationsSection({
   };
 
   return (
-    <section className="space-y-3">
-      <SectionHeading id="settings-notifications" voice={voice}>
-        <SaveIndicator status={status} voice={voice} />
-      </SectionHeading>
+    <CollapsibleSection
+      id="settings-notifications"
+      voice={voice}
+      defaultExpanded={defaultExpanded}
+      headingExtras={<SaveIndicator status={status} voice={voice} />}
+    >
       <p className="text-muted-foreground text-sm">
         {t("notify.intro", voice)}
       </p>
@@ -153,7 +156,7 @@ export function NotificationsSection({
           </label>
         </div>
       </div>
-    </section>
+    </CollapsibleSection>
   );
 }
 

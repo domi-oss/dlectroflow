@@ -5,6 +5,7 @@ import {
   needsReviewRow,
   setTheme,
   waitForShell,
+  expandAllSections,
   THEMES,
 } from "./helpers";
 import {
@@ -144,6 +145,20 @@ for (const theme of THEMES) {
         expectNoContrastViolations(await scanColorContrast(page));
       });
     }
+
+    // #101 — /settings is now nine disclosures with one open, so the scan above
+    // sees nine triggers and one section's worth of controls. Everything else is
+    // behind a `hidden` attribute, which axe correctly skips: without this second
+    // pass the gate would be quietly narrower than the one it replaced. Same
+    // lesson as #90, arrived at from the other direction.
+    test(`zero color-contrast violations: settings with every section expanded (${theme})`, async ({
+      page,
+    }) => {
+      await page.goto("/settings");
+      await waitForShell(page);
+      await expandAllSections(page);
+      expectNoContrastViolations(await scanColorContrast(page));
+    });
 
     // #48: the Library hub's active tab-count chip. It rendered white
     // `text-primary-foreground` on a translucent `bg-primary-foreground/20`

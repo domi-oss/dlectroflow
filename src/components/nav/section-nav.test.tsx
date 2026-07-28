@@ -1,10 +1,20 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  cleanup,
+  act,
+  fireEvent,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SectionNav } from "@/components/nav/section-nav";
 import { SectionHeading } from "@/components/nav/section-heading";
-import { HELP_SECTIONS, sectionLabel } from "@/lib/section-nav";
+import {
+  HELP_SECTIONS,
+  SECTION_ACTIVATE_EVENT,
+  sectionLabel,
+} from "@/lib/section-nav";
 import type { Voice } from "@/lib/strings";
 
 // ── IntersectionObserver stub ────────────────────────────────────────────────
@@ -252,6 +262,165 @@ describe("SectionNav (#72)", () => {
     expect(
       screen.getByRole("link", { name: "The inbox & freshness" }),
     ).toHaveAttribute("aria-current", "true");
+  });
+
+  // ── #101: an EXPLICIT choice outranks the scroll-spy ──────────────────────
+  //
+  // Two callers name a section outright: a nav jump, and (new in #101) a click on
+  // a collapsible section's own header. "Topmost section in the tracking band
+  // wins" is the right answer for scrolling and the wrong answer for both of
+  // those — the section you just asked for is frequently NOT the topmost one on
+  // screen, and near the bottom of the page the end-of-page rule would hand the
+  // highlight to the last section instead.
+  describe("explicitly activated sections (#101)", () => {
+    /** Put a section's rect on or off screen for `stillOnScreen`. */
+    function stubRect(id: string, top: number, bottom: number) {
+      const section = document.getElementById(id)!.closest("section")!;
+      vi.spyOn(section, "getBoundingClientRect").mockReturnValue({
+        top,
+        bottom,
+        left: 0,
+        right: 0,
+        width: 100,
+        height: bottom - top,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      } as DOMRect);
+      return section;
+    }
+
+    /** What a header click publishes (see announceSectionActive). */
+    function activate(id: string) {
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent(SECTION_ACTIVATE_EVENT, { detail: { id } }),
+        );
+      });
+    }
+
+    it("highlights the section whose header was clicked", () => {
+      render(<Page />);
+      activate("help-task-breakdown");
+
+      // Reuses !162's cues wholesale: the pill, its non-colour marker dot and
+      // the pinned magenta band on that section's own heading.
+      const link = screen.getByRole("link", { name: "Task breakdown" });
+      expect(link).toHaveAttribute("aria-current", "true");
+      expect(link.querySelector("[data-current-marker]")).not.toBeNull();
+      expect(
+        document
+          .getElementById("help-task-breakdown")!
+          .closest("[data-section-header]"),
+      ).toHaveAttribute("data-current");
+      expect(document.querySelectorAll("[data-current]")).toHaveLength(1);
+    });
+
+    it("is not stolen by the topmost section in the band", () => {
+      // Clicking a header lower down the page expands it and moves everything
+      // below — which fires the observer, whose topmost-wins verdict is some
+      // section ABOVE the one just clicked.
+      render(<Page />);
+      const io = FakeIntersectionObserver.instances.at(-1)!;
+      const clicked = stubRect("help-task-breakdown", 300, 600);
+      const above = stubRect("help-getting-started", 0, 300);
+      activate("help-task-breakdown");
+
+      io.fire([
+        { target: above, isIntersecting: true },
+        { target: clicked, isIntersecting: true },
+      ]);
+
+      expect(
+        screen.getByRole("link", { name: "Task breakdown" }),
+      ).toHaveAttribute("aria-current", "true");
+      expect(document.querySelectorAll("a[aria-current]")).toHaveLength(1);
+    });
+
+    it("hands control back to the spy once that section is scrolled away", () => {
+      render(<Page />);
+      const io = FakeIntersectionObserver.instances.at(-1)!;
+      const clicked = stubRect("help-task-breakdown", 300, 600);
+      const above = stubRect("help-getting-started", 0, 300);
+      activate("help-task-breakdown");
+      io.fire([{ target: clicked, isIntersecting: true }]);
+      expect(
+        screen.getByRole("link", { name: "Task breakdown" }),
+      ).toHaveAttribute("aria-current", "true");
+
+      // Scrolled clean past it (rect now entirely above the viewport).
+      vi.spyOn(clicked, "getBoundingClientRect").mockReturnValue({
+        top: -400,
+        bottom: -100,
+        height: 300,
+        left: 0,
+        right: 0,
+        width: 100,
+        x: 0,
+        y: -400,
+        toJSON: () => ({}),
+      } as DOMRect);
+      io.fire([
+        { target: clicked, isIntersecting: false },
+        { target: above, isIntersecting: true },
+      ]);
+
+      // The override released itself — no sticky highlight left behind.
+      expect(
+        screen.getByRole("link", { name: "Getting started" }),
+      ).toHaveAttribute("aria-current", "true");
+    });
+
+    it("is not stolen by the end-of-page rule either", () => {
+      // The end-of-page rule exists because the LAST section can never reach the
+      // top of the viewport. Applied to an explicit choice it hands the highlight
+      // to the wrong section for anything near the bottom — which is exactly
+      // where #101's reorder put Integrations and Demo.
+      render(<Page />);
+      const io = FakeIntersectionObserver.instances.at(-1)!;
+      Object.defineProperty(document.documentElement, "scrollHeight", {
+        value: 2000,
+        configurable: true,
+      });
+      Object.defineProperty(window, "scrollY", {
+        value: 2000 - window.innerHeight,
+        configurable: true,
+      });
+      const clicked = stubRect("help-voice-settings", 200, 500);
+      activate("help-voice-settings");
+
+      io.fire([{ target: clicked, isIntersecting: true }]);
+
+      expect(
+        screen.getByRole("link", { name: "Voice & settings" }),
+      ).toHaveAttribute("aria-current", "true");
+    });
+
+    it("still lets a nav jump name a section the page cannot scroll to the top", () => {
+      // Same rule, reached the other way: the jump handler names its target, so
+      // jumping to the second-to-last section lights THAT one rather than the
+      // last one the end-of-page rule would pick.
+      render(<Page />);
+      const io = FakeIntersectionObserver.instances.at(-1)!;
+      Object.defineProperty(document.documentElement, "scrollHeight", {
+        value: 2000,
+        configurable: true,
+      });
+      Object.defineProperty(window, "scrollY", {
+        value: 2000 - window.innerHeight,
+        configurable: true,
+      });
+      const target = stubRect("help-voice-settings", 200, 500);
+
+      fireEvent.click(screen.getByRole("link", { name: "Voice & settings" }), {
+        button: 0,
+      });
+      io.fire([{ target, isIntersecting: true }]);
+
+      expect(
+        screen.getByRole("link", { name: "Voice & settings" }),
+      ).toHaveAttribute("aria-current", "true");
+    });
   });
 
   it("on a narrow viewport, picking a section closes the list and focuses the heading", async () => {

@@ -4,7 +4,10 @@ import { currentWorkspaceId, currentUser } from "@/lib/workspace";
 import { getGoogleStatus } from "@/lib/google";
 import { loadPeopleAdmin } from "@/lib/people";
 import { PeoplePanel } from "@/components/settings/people-panel";
-import { SettingsPanel } from "@/components/settings/settings-panel";
+import { AgingSection } from "@/components/settings/aging-section";
+import { VoiceSection } from "@/components/settings/voice-section";
+import { BreakdownModelSection } from "@/components/settings/breakdown-model-section";
+import { DemoSection } from "@/components/settings/demo-section";
 import { randomFableLine } from "@/lib/fable-lines";
 import { modelChoicesForProvider, resolveUtilityModel } from "@/lib/models";
 import { NotificationsSection } from "@/components/settings/notifications-section";
@@ -65,32 +68,29 @@ export default async function SettingsPage({
 
       <h1 className="text-xl font-semibold">{t("nav.settings", voice)}</h1>
       <SectionNav sections={sections} voice={voice} label="Settings sections" />
-      {/* The Account group leads the page (design §4). People is its owner-only
-          half; Phase C adds the per-user half around it. */}
-      {people && <PeoplePanel view={people} now={now} voice={voice} />}
-      <SettingsPanel
-        settings={{
-          agingThresholdMinutes: settings.agingThresholdMinutes,
-          demoOverrideSeconds: settings.demoOverrideSeconds,
-          agingHours: settings.agingHours,
-          overdueHours: settings.overdueHours,
-          wayOverdueHours: settings.wayOverdueHours,
-          firstRunPreview: settings.firstRunPreview,
-        }}
-        isOwner={owner}
-        breakdownModel={settings.breakdownModel ?? null}
-        // #59 — env-driven (LLM_PROVIDER); must be resolved server-side and
-        // passed as a prop so SSR and client hydration see the same value
-        // (a client component can't safely read non-NEXT_PUBLIC_ env vars).
-        modelChoices={modelChoicesForProvider()}
-        // Resolve via the same owner-model path resolveBreakdownModel/
-        // resolveUtilityModel use, not a raw env read — LLM_MODEL alone
-        // misreports when an owner/guest split (LLM_OWNER_MODEL) is set.
-        activeModelName={resolveUtilityModel()}
-        voice={voice}
-        // Rolled here, on the server, so SSR and hydration see the same line.
-        fable={randomFableLine()}
-      />
+      {/* #101 — frequency of use descending, administration last, and every
+          section is a disclosure (see <CollapsibleSection>). The order here and
+          the order in SETTINGS_SECTIONS are the same list twice over: the nav is
+          built from the registry, so a section moved in one place and not the
+          other shows up as a nav that jumps backwards.
+          ONE section arrives expanded — the first. The owner's call: the page
+          should read as a scannable list of titles, but not as an empty page. It
+          is stated here, at the composition site, because "which section greets
+          you" is a fact about page ORDER rather than about the timer. */}
+      {/* No `border-t` on the first section only: the nav bar above already draws
+          a `border-b`, and the two rules 16px apart read as a mistake. */}
+      <div>
+        <FocusTimerSection
+          timerStyle={settings.focusTimerStyle}
+          minimalMode={settings.focusMinimalMode}
+          keepAwake={settings.focusKeepAwake}
+          alarmEnabled={settings.focusAlarmEnabled}
+          sound={settings.focusSound}
+          pauseTogether={settings.focusPauseTogether}
+          voice={voice}
+          defaultExpanded
+        />
+      </div>
       <div className="border-t pt-4">
         <AppearanceSection
           completeStrikethrough={settings.completeStrikethrough}
@@ -109,18 +109,41 @@ export default async function SettingsPage({
         />
       </div>
       <div className="border-t pt-4">
-        <FocusTimerSection
-          timerStyle={settings.focusTimerStyle}
-          minimalMode={settings.focusMinimalMode}
-          keepAwake={settings.focusKeepAwake}
-          alarmEnabled={settings.focusAlarmEnabled}
-          sound={settings.focusSound}
-          pauseTogether={settings.focusPauseTogether}
+        <VoiceSection voice={voice} />
+      </div>
+      <div className="border-t pt-4">
+        <AgingSection
+          settings={{
+            agingThresholdMinutes: settings.agingThresholdMinutes,
+            demoOverrideSeconds: settings.demoOverrideSeconds,
+            agingHours: settings.agingHours,
+            overdueHours: settings.overdueHours,
+            wayOverdueHours: settings.wayOverdueHours,
+          }}
           voice={voice}
         />
       </div>
+      <div className="border-t pt-4">
+        <BreakdownModelSection
+          isOwner={owner}
+          breakdownModel={settings.breakdownModel ?? null}
+          // #59 — env-driven (LLM_PROVIDER); must be resolved server-side and
+          // passed as a prop so SSR and client hydration see the same value
+          // (a client component can't safely read non-NEXT_PUBLIC_ env vars).
+          modelChoices={modelChoicesForProvider()}
+          // Resolve via the same owner-model path resolveBreakdownModel/
+          // resolveUtilityModel use, not a raw env read — LLM_MODEL alone
+          // misreports when an owner/guest split (LLM_OWNER_MODEL) is set.
+          activeModelName={resolveUtilityModel()}
+          voice={voice}
+          // Rolled here, on the server, so SSR and hydration see the same line.
+          fable={randomFableLine()}
+        />
+      </div>
       {owner && google ? (
-        <IntegrationsPanel google={google} />
+        <div className="border-t pt-4">
+          <IntegrationsPanel google={google} voice={voice} />
+        </div>
       ) : !owner ? (
         // #11 — guests see the integrations section as a read-only owner-only
         // shell (no owner status fetched or shown).
@@ -131,6 +154,17 @@ export default async function SettingsPage({
       // returns one) — render nothing, matching the pre-#11 behaviour rather
       // than showing an owner the guest shell.
       null}
+      <div className="border-t pt-4">
+        <DemoSection firstRunPreview={settings.firstRunPreview} voice={voice} />
+      </div>
+      {/* Administration closes the page: it is not what should greet you on your
+          own settings page (#101). Owner-only — loadPeopleAdmin returns null for
+          anyone else, so a guest gets no section and no nav entry. */}
+      {people && (
+        <div className="border-t pt-4">
+          <PeoplePanel view={people} now={now} voice={voice} />
+        </div>
+      )}
       <div className="flex gap-4 text-sm">
         <Link href="/help?from=settings" className="underline">
           {t("settings.helpDocs", voice)}

@@ -6,6 +6,8 @@ import {
   setTheme,
   expectThemeApplied,
   waitForShell,
+  expandSection,
+  expandAllSections,
 } from "../helpers";
 
 // #72 — the collapsible sticky "Jump to…" section nav on the two long pages.
@@ -97,63 +99,131 @@ async function expectClearOfStickyBar(
   expect(headingBox!.y).toBeGreaterThanOrEqual(navBox!.y + navBox!.height - 1);
 }
 
+// #101 made every /settings section collapsible, which changes section HEIGHTS
+// constantly — and heights are what the nav derives `scroll-margin-top` and its
+// scroll-spy band from. This is the class of bug #72 already had to fix twice, so
+// the four interaction checks that depend on geometry run in BOTH states: the
+// page as it lands (one section open, eight closed, so several sections are ~56px
+// bands) and with everything open (the pre-#101 page, thousands of pixels tall).
+for (const state of ["as it lands", "all expanded"] as const) {
+  test.describe(`section nav — desktop (${state})`, () => {
+    test.use({ viewport: DESKTOP });
+
+    test.beforeEach(async ({ page }) => {
+      await page.goto("/settings");
+      await waitForShell(page);
+      await waitForNavHydrated(page);
+      if (state === "all expanded") await expandAllSections(page);
+    });
+
+    test("collapsed by default, and a jump lands the heading clear of the sticky bar", async ({
+      page,
+    }) => {
+      const nav = page.locator(SETTINGS_NAV);
+      await openPanel(nav);
+
+      // One entry per section that is actually on the page.
+      const links = nav.getByRole("link");
+      await expect(links).toHaveCount(
+        await page.locator("h2[data-section-target]").count(),
+      );
+
+      // Jump to the LAST section — the one that needs the most scrolling, and the
+      // one where a wrong scroll-margin is most obvious. #101 moved People here
+      // (administration last); this suite runs as the owner, so it is on the page.
+      await nav.getByRole("link", { name: "People" }).click();
+      const heading = page.locator("#settings-people");
+      await expect(heading).toBeFocused();
+      // Actually ON SCREEN — toBeVisible() alone passes on an unscrolled page.
+      await expect(heading).toBeInViewport();
+      await expectClearOfStickyBar(nav, heading);
+
+      // …and the bar is still stuck to the top of the viewport after the scroll.
+      expect((await nav.boundingBox())!.y).toBeLessThan(4);
+      // The destination lights up, including at the end of the page, where it can
+      // never reach the top of the viewport and "topmost wins" would strand it.
+      await expect(nav.locator("a[aria-current]")).toHaveText(/People/);
+    });
+
+    test("a jump to a section the page cannot scroll to the top still lights THAT one", async ({
+      page,
+    }) => {
+      // #101 — the end-of-page rule used to steal this: jumping to the
+      // second-to-last section scrolls the page to its limit, and "at the end of
+      // the document ⇒ the last section" then overrode the reader's explicit
+      // choice. Collapsing eight sections made the page short enough that this is
+      // the common case rather than a corner.
+      const nav = page.locator(SETTINGS_NAV);
+      await openPanel(nav);
+      await nav.getByRole("link", { name: "Demo" }).click();
+      await expect(nav.locator("a[aria-current]")).toHaveText(/Demo/);
+      await expect(
+        page.locator("[data-section-header][data-current]"),
+      ).toContainText("Demo");
+    });
+
+    test("aria-current follows the section you scrolled to", async ({
+      page,
+    }) => {
+      const nav = page.locator(SETTINGS_NAV);
+
+      // At the top of the page the FIRST section is current — #101 made that the
+      // Focus timer (frequency of use descending; People moved to the end). In
+      // the all-expanded state this also proves the spy took back over after
+      // expandAllSections clicked its way down the page: each header click names
+      // its own section, and scrolling home has to release that.
+      await expect(nav.locator("a[aria-current]")).toHaveText(/Focus timer/);
+
+      await openPanel(nav);
+      await nav.getByRole("link", { name: "Notifications" }).click();
+      await expect(nav.locator("a[aria-current]")).toHaveText(/Notifications/);
+      // Exactly one, always.
+      await expect(nav.locator("a[aria-current]")).toHaveCount(1);
+      // The cue is not colour alone.
+      await expect(
+        nav.locator("a[aria-current] [data-current-marker]"),
+      ).toBeVisible();
+    });
+
+    test("the current section's heading pins below the bar, highlighted", async ({
+      page,
+    }) => {
+      const nav = page.locator(SETTINGS_NAV);
+      // Scroll well into a section (not via the nav — this is the SCROLL case).
+      await scrollIntoSection(page, "settings-focus-timer");
+
+      const pinned = page.locator("[data-section-header][data-current]");
+      await expect(pinned).toHaveCount(1);
+
+      const navBox = (await nav.boundingBox())!;
+      const pinnedBox = (await pinned.boundingBox())!;
+      // Pinned directly below the bar — iOS-style, not scrolled away with the
+      // content and not hidden underneath the bar.
+      expect(Math.round(pinnedBox.y)).toBe(
+        Math.round(navBox.y + navBox.height),
+      );
+
+      // The nav entry for that same section is the one marked current, so the two
+      // layers can never tell the reader two different things.
+      const pinnedId = await pinned.locator("h2").getAttribute("id");
+      const currentHref = await nav
+        .locator("a[aria-current]")
+        .getAttribute("href");
+      expect(currentHref).toBe(`#${pinnedId}`);
+
+      // Not colour alone: the pinned position plus a marker dot (::before) plus
+      // aria-current on the nav entry. Assert the dot actually renders.
+      const dot = await pinned.evaluate(
+        (el) => getComputedStyle(el, "::before").width,
+      );
+      expect(dot).not.toBe("auto");
+      expect(dot).not.toBe("0px");
+    });
+  });
+}
+
 test.describe("section nav — desktop", () => {
   test.use({ viewport: DESKTOP });
-
-  test("collapsed by default, and a jump lands the heading clear of the sticky bar", async ({
-    page,
-  }) => {
-    await page.goto("/settings");
-    await waitForShell(page);
-
-    await waitForNavHydrated(page);
-
-    const nav = page.locator(SETTINGS_NAV);
-    await openPanel(nav);
-
-    // One entry per section that is actually on the page.
-    const links = nav.getByRole("link");
-    await expect(links).toHaveCount(
-      await page.locator("h2[data-section-target]").count(),
-    );
-
-    // Jump to the LAST section — the one that needs the most scrolling, and the
-    // one where a wrong scroll-margin is most obvious.
-    await nav.getByRole("link", { name: "Integrations" }).click();
-    const heading = page.locator("#settings-integrations");
-    await expect(heading).toBeFocused();
-    // Actually ON SCREEN — toBeVisible() alone passes on an unscrolled page.
-    await expect(heading).toBeInViewport();
-    await expectClearOfStickyBar(nav, heading);
-
-    // …and the bar is still stuck to the top of the viewport after the scroll.
-    expect((await nav.boundingBox())!.y).toBeLessThan(4);
-    // The last entry lights up at the end of the page (it can never reach the
-    // top of the viewport, so plain "topmost wins" would strand it).
-    await expect(nav.locator("a[aria-current]")).toHaveText(/Integrations/);
-  });
-
-  test("aria-current follows the section you scrolled to", async ({ page }) => {
-    await page.goto("/settings");
-    await waitForShell(page);
-    await waitForNavHydrated(page);
-    const nav = page.locator(SETTINGS_NAV);
-
-    // At the top of the page the first section is current. #35 Phase B put the
-    // owner-only People section first (the design's Account group leads the
-    // page), and this suite runs as the owner.
-    await expect(nav.locator("a[aria-current]")).toHaveText(/People/);
-
-    await openPanel(nav);
-    await nav.getByRole("link", { name: "Focus timer" }).click();
-    await expect(nav.locator("a[aria-current]")).toHaveText(/Focus timer/);
-    // Exactly one, always.
-    await expect(nav.locator("a[aria-current]")).toHaveCount(1);
-    // The cue is not colour alone.
-    await expect(
-      nav.locator("a[aria-current] [data-current-marker]"),
-    ).toBeVisible();
-  });
 
   test("keyboard only: tab into the nav, Enter jumps, focus lands on the heading", async ({
     page,
@@ -226,6 +296,10 @@ test.describe("section nav — desktop", () => {
     await waitForShell(page);
     await waitForNavHydrated(page);
     const nav = page.locator(SETTINGS_NAV);
+    // The elements this regression is about (the disabled model radios, the
+    // guest integrations shell) live INSIDE sections, so #101's collapse would
+    // otherwise take the repro off the page.
+    await expandAllSections(page);
     await openPanel(nav);
     await nav.getByRole("link", { name: "Appearance" }).click();
     await waitForScrollToSettle(page);
@@ -241,49 +315,13 @@ test.describe("section nav — desktop", () => {
     expect(onTop).toBe(true);
   });
 
-  test("the current section's heading pins below the bar, highlighted", async ({
-    page,
-  }) => {
-    await page.goto("/settings");
-    await waitForShell(page);
-    await waitForNavHydrated(page);
-    const nav = page.locator(SETTINGS_NAV);
-
-    // Scroll well into a section (not via the nav — this is the scroll case).
-    await scrollIntoSection(page, "settings-focus-timer");
-
-    const pinned = page.locator("[data-section-header][data-current]");
-    await expect(pinned).toHaveCount(1);
-
-    const navBox = (await nav.boundingBox())!;
-    const pinnedBox = (await pinned.boundingBox())!;
-    // Pinned directly below the bar — iOS-style, not scrolled away with the
-    // content and not hidden underneath the bar.
-    expect(Math.round(pinnedBox.y)).toBe(Math.round(navBox.y + navBox.height));
-
-    // The nav entry for that same section is the one marked current, so the two
-    // layers can never tell the reader two different things.
-    const pinnedId = await pinned.locator("h2").getAttribute("id");
-    const currentHref = await nav
-      .locator("a[aria-current]")
-      .getAttribute("href");
-    expect(currentHref).toBe(`#${pinnedId}`);
-
-    // Not colour alone: the pinned position plus a marker dot (::before) plus
-    // aria-current on the nav entry. Assert the dot actually renders.
-    const dot = await pinned.evaluate(
-      (el) => getComputedStyle(el, "::before").width,
-    );
-    expect(dot).not.toBe("auto");
-    expect(dot).not.toBe("0px");
-  });
-
   test("the pinned header is opaque and above the page's content", async ({
     page,
   }) => {
     await page.goto("/settings");
     await waitForShell(page);
     await waitForNavHydrated(page);
+    await expandAllSections(page);
     await scrollIntoSection(page, "settings-focus-timer");
 
     // A second sticky layer is a second chance for `opacity < 1` elements later
@@ -321,13 +359,16 @@ test.describe("section nav — desktop", () => {
     await waitForShell(page);
     await waitForNavHydrated(page);
     // Jump to Aging so ITS band is the lit one — the aging inputs live inside
-    // that section, and since #35 Phase B put owner-only People at the top of
-    // the page, Aging is no longer the section that is current on load.
+    // that section, and it is not the section that is current on load (#101 put
+    // the Focus timer first). Open it too: since #101 the inputs are behind the
+    // section's own disclosure, and this test is about what a save looks like
+    // INSIDE a highlighted band.
     await openPanel(page.locator(SETTINGS_NAV));
     await page
       .locator(SETTINGS_NAV)
       .getByRole("link", { name: "Aging & reminder" })
       .click();
+    await expandSection(page, "settings-aging");
     await expect(
       page.locator("[data-section-header][data-current]"),
     ).toHaveText(/Aging & reminder/);
@@ -482,9 +523,11 @@ test.describe("section nav — mobile budget", () => {
       .boundingBox())!;
     const combined = nav.height + band.height;
 
-    // Measured at 390x844: 61px bar + 40px header = 101px, 12% of the viewport.
-    // Budget it at 20% so a future change that doubles it fails here rather
-    // than quietly eating the screen.
+    // Measured at 390x844: 61px bar + 56px header = 117px, 14% of the viewport.
+    // (#101 grew the header from 40px: its title is now a 44px-tall disclosure
+    // trigger, because a 16px chevron is not a touch target.) Budget it at 20% so
+    // a future change that doubles it fails here rather than quietly eating the
+    // screen.
     expect(combined).toBeLessThan(MOBILE.height * 0.2);
   });
 });

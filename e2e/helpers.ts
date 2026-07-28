@@ -75,3 +75,49 @@ export async function expectThemeApplied(
 export async function waitForShell(page: Page): Promise<void> {
   await expect(page.getByRole("link", { name: "dlectroflow" })).toBeVisible();
 }
+
+// ── #101: every /settings section is a disclosure ───────────────────────────
+
+/**
+ * One section's disclosure trigger, by the stable hook `<SectionHeading>` puts on
+ * it. Located by attribute rather than by accessible name on purpose: the name is
+ * now the section's title, which the "Jump to…" nav also renders as a link, so a
+ * by-name locator would be ambiguous.
+ */
+export function sectionToggle(page: Page, id: string) {
+  return page.locator(`[data-section-toggle="${id}"]`);
+}
+
+/** Open one section and wait for its body to actually be on screen. */
+export async function expandSection(page: Page, id: string): Promise<void> {
+  const toggle = sectionToggle(page, id);
+  if ((await toggle.getAttribute("aria-expanded")) === "true") return;
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+}
+
+/**
+ * Open EVERY section on /settings.
+ *
+ * The contrast and a11y gates need this: collapsing eight of nine sections takes
+ * most of the page's controls out of the scanned DOM (axe correctly skips a
+ * `hidden` subtree), so a scan of the resting page would be quietly narrower
+ * than the one it replaced — the #90 lesson, arrived at from the other direction.
+ */
+export async function expandAllSections(page: Page): Promise<void> {
+  const toggles = page.locator("[data-section-toggle]");
+  const count = await toggles.count();
+  expect(count, "no collapsible sections found").toBeGreaterThan(1);
+  for (let i = 0; i < count; i++) {
+    const toggle = toggles.nth(i);
+    if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+      await toggle.click();
+    }
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  }
+  // Clicking the last section's header scrolled the page down to reach it, and
+  // (#101) named that section the current one. Leave the page where the caller
+  // found it — at the top, with the scroll-spy back in charge — so "expand
+  // everything" is a change of STATE and not also a change of scroll position.
+  await page.evaluate(() => window.scrollTo(0, 0));
+}

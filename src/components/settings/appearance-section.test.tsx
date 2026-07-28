@@ -33,11 +33,16 @@ beforeEach(() => {
   });
 });
 
+// #101 — every settings section is a disclosure now, so the specs below open it
+// first. The disclosure MECHANISM is tested once, in
+// src/components/nav/collapsible-section.test.tsx; that this section is one of
+// them is asserted at the bottom of this file.
 const base = {
   completeStrikethrough: true,
   completeTickColor: "green",
   typeface: "figtree",
   voice: "plain" as const,
+  defaultExpanded: true,
 };
 
 describe("AppearanceSection", () => {
@@ -151,5 +156,31 @@ describe("AppearanceSection", () => {
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     // The failed save leaves the control interactive for a retry.
     expect(screen.getByLabelText(/strike through completed/i)).toBeEnabled();
+  });
+});
+
+describe("AppearanceSection — the disclosure (#101)", () => {
+  const trigger = () =>
+    document.querySelector('[data-section-toggle="settings-appearance"]')!;
+
+  it("rests collapsed, and its controls leave the page with it", () => {
+    render(<AppearanceSection {...base} defaultExpanded={false} />);
+    expect(trigger()).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByLabelText("Green")).not.toBeVisible();
+  });
+
+  it("reports a save that lands after the section was closed again", async () => {
+    // The save indicator is a sibling of the h2 in the heading band, not part of
+    // the body — so closing a section mid-save does not hide the outcome.
+    const user = userEvent.setup();
+    render(<AppearanceSection {...base} />);
+    await user.click(screen.getByLabelText("Black"));
+    await user.click(trigger()); // close it while the write is in flight
+    await waitFor(() =>
+      expect(document.querySelector("[data-save-status]")).not.toBeNull(),
+    );
+    expect(trigger().closest("[data-section-header]")).toContainElement(
+      document.querySelector("[data-save-status]"),
+    );
   });
 });

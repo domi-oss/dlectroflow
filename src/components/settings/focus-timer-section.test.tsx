@@ -36,7 +36,12 @@ beforeEach(() => {
   vi.stubGlobal("Audio", FakeAudio as unknown as typeof Audio);
 });
 
+// #101 — every settings section is a disclosure now. Focus timer is the ONE the
+// page opens on arrival (owner's call: most-tuned surface in the app), so these
+// specs render it the way /settings does. The mechanism itself is tested in
+// src/components/nav/collapsible-section.test.tsx.
 const base = {
+  defaultExpanded: true,
   timerStyle: null as string | null,
   minimalMode: false,
   keepAwake: true,
@@ -210,5 +215,16 @@ describe("FocusTimerSection", () => {
     expect(
       screen.getByRole("button", { name: /^preview — aurora on mute/i }),
     ).toHaveAttribute("aria-pressed", "false");
+  });
+});
+
+describe("FocusTimerSection — the disclosure (#101)", () => {
+  it("can be closed, taking its long control list out of the page", () => {
+    render(<FocusTimerSection {...base} defaultExpanded={false} />);
+    const trigger = document.querySelector(
+      '[data-section-toggle="settings-focus-timer"]',
+    )!;
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("radio", { name: /ring/i })).toBeNull();
   });
 });

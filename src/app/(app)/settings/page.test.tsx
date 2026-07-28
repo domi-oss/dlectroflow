@@ -52,24 +52,46 @@ vi.mock("@/lib/people", () => ({
   loadPeopleAdmin: vi.fn().mockResolvedValue(null),
 }));
 
-// --- Heavy child components: stubbed to keep the test on the page footer ---
-vi.mock("@/components/settings/settings-panel", () => ({
-  SettingsPanel: () => null,
+// --- Heavy child components: stubbed down to a marker each ---------------
+// The markers keep the footer assertions cheap AND make the page's own job
+// testable: it composes nine sections in ONE order, and #101 made that order
+// (and which single section arrives expanded) a decision worth locking down.
+function stub(id: string) {
+  const Stub = ({ defaultExpanded }: { defaultExpanded?: boolean }) => (
+    <div
+      data-stub={id}
+      data-default-expanded={String(Boolean(defaultExpanded))}
+    />
+  );
+  Stub.displayName = `Stub(${id})`;
+  return Stub;
+}
+vi.mock("@/components/settings/aging-section", () => ({
+  AgingSection: stub("settings-aging"),
+}));
+vi.mock("@/components/settings/voice-section", () => ({
+  VoiceSection: stub("settings-voice"),
+}));
+vi.mock("@/components/settings/breakdown-model-section", () => ({
+  BreakdownModelSection: stub("settings-breakdown-model"),
+}));
+vi.mock("@/components/settings/demo-section", () => ({
+  DemoSection: stub("settings-demo"),
 }));
 vi.mock("@/components/settings/notifications-section", () => ({
-  NotificationsSection: () => null,
+  NotificationsSection: stub("settings-notifications"),
 }));
 vi.mock("@/components/settings/appearance-section", () => ({
-  AppearanceSection: () => null,
+  AppearanceSection: stub("settings-appearance"),
 }));
 vi.mock("@/components/settings/focus-timer-section", () => ({
-  FocusTimerSection: () => null,
+  FocusTimerSection: stub("settings-focus-timer"),
 }));
 vi.mock("@/components/settings/integrations-panel", () => ({
-  IntegrationsPanel: () => null,
+  IntegrationsPanel: stub("settings-integrations"),
 }));
 vi.mock("@/components/settings/people-panel", () => ({
-  PeoplePanel: () => null,
+  PeoplePanel: stub("settings-people"),
 }));
 vi.mock("@/components/nav/back-link", () => ({ BackLink: () => null }));
 
@@ -91,6 +113,25 @@ vi.mock("next/link", () => ({
 }));
 
 import SettingsPage from "@/app/(app)/settings/page";
+import { SETTINGS_SECTIONS } from "@/lib/section-nav";
+import { getGoogleStatus } from "@/lib/google";
+import { loadPeopleAdmin } from "@/lib/people";
+
+/** Render the page as the owner of a fully-populated instance: all nine sections. */
+async function renderWholePage() {
+  vi.mocked(getGoogleStatus).mockResolvedValueOnce({
+    configured: true,
+    connected: false,
+    needsReconnect: false,
+  });
+  vi.mocked(loadPeopleAdmin).mockResolvedValueOnce({
+    people: [],
+    invitations: [],
+    windowHours: 720,
+  });
+  render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+  return Array.from(document.querySelectorAll("[data-stub]"));
+}
 
 afterEach(() => {
   cleanup();
@@ -116,5 +157,33 @@ describe("SettingsPage footer help link", () => {
 
     const link = screen.getByRole("link", { name: /docs/i });
     expect(link.textContent).toBe("🆘 Help & Docs");
+  });
+});
+
+describe("SettingsPage section composition (#101)", () => {
+  it("renders every section in the REGISTRY's order — the nav is built from it", async () => {
+    // The nav's entries come from SETTINGS_SECTIONS; the page renders the
+    // components. Reorder one and not the other and the nav jumps backwards,
+    // which is the drift #101 had to correct in the first place (People was
+    // listed first because it WAS first).
+    const stubs = await renderWholePage();
+    expect(stubs.map((el) => el.getAttribute("data-stub"))).toEqual(
+      SETTINGS_SECTIONS.map((s) => s.id),
+    );
+  });
+
+  it("opens exactly ONE section on arrival, and it is the first", async () => {
+    // Owner's call: a scannable list of titles, but not an empty page.
+    const stubs = await renderWholePage();
+    const expanded = stubs
+      .filter((el) => el.getAttribute("data-default-expanded") === "true")
+      .map((el) => el.getAttribute("data-stub"));
+    expect(expanded).toEqual([SETTINGS_SECTIONS[0].id]);
+    expect(expanded).toEqual(["settings-focus-timer"]);
+  });
+
+  it("closes the page with administration, not with it", async () => {
+    const stubs = await renderWholePage();
+    expect(stubs.at(-1)!.getAttribute("data-stub")).toBe("settings-people");
   });
 });

@@ -33,19 +33,24 @@ export function sectionLabel(section: SectionDef, voice: Voice): string {
  * out of this list for anyone else, so a guest never gets a nav link to a section
  * that is not on their page (see `(app)/settings/page.tsx`).
  *
- * People leads the list because the design puts the Account group at the TOP of
- * /settings; Phase C fills in the rest of that group around it.
+ * #101 — the order is FREQUENCY OF USE descending, with administration last
+ * (owner-approved). Focus timer leads because it is the most-tuned surface in the
+ * app; People closes the page because instance administration should not be what
+ * greets you on your own settings page — it used to lead, which is what made the
+ * reorder necessary. The page renders these top to bottom in exactly this order
+ * (locked by src/app/(app)/settings/page.test.tsx), and every one of them is a
+ * collapsible section.
  */
 export const SETTINGS_SECTIONS = [
-  { id: "settings-people", heading: { text: "People" } },
-  { id: "settings-aging", heading: { text: "Aging & reminder" } },
-  { id: "settings-voice", heading: { text: "Voice" } },
-  { id: "settings-breakdown-model", heading: { text: "Breakdown model" } },
-  { id: "settings-demo", heading: { text: "Demo" } },
+  { id: "settings-focus-timer", heading: { key: "focusSettings.heading" } },
   { id: "settings-appearance", heading: { key: "appearance.heading" } },
   { id: "settings-notifications", heading: { key: "notify.heading" } },
-  { id: "settings-focus-timer", heading: { key: "focusSettings.heading" } },
+  { id: "settings-voice", heading: { text: "Voice" } },
+  { id: "settings-aging", heading: { text: "Aging & reminder" } },
+  { id: "settings-breakdown-model", heading: { text: "Breakdown model" } },
   { id: "settings-integrations", heading: { text: "Integrations" } },
+  { id: "settings-demo", heading: { text: "Demo" } },
+  { id: "settings-people", heading: { text: "People" } },
 ] as const satisfies readonly SectionDef[];
 
 /** Help sections, in page order. */
@@ -77,4 +82,32 @@ export function sectionById(id: SectionId): SectionDef {
   const section = BY_ID.get(id);
   if (!section) throw new Error(`Unknown page section id: ${id}`);
   return section;
+}
+
+/**
+ * #101 — "I am working in this section now", published on `window`.
+ *
+ * Owner request: clicking a section header must highlight that section's title.
+ * The highlight is !162's existing magenta current-section treatment, and the
+ * only component that can apply it is `<SectionNav>` — it owns the `current`
+ * state, and the headings live OUTSIDE its React tree (Help renders them from a
+ * server component, Settings from nine separate client components). There is no
+ * shared React state to thread a click through, so the click is published as one
+ * DOM event the nav subscribes to. Same reasoning as the `data-current` attribute
+ * the nav already writes onto the heading band: across that boundary, the DOM
+ * *is* the channel.
+ */
+export const SECTION_ACTIVATE_EVENT = "dlectroflow:section-activate";
+
+/** Payload of {@link SECTION_ACTIVATE_EVENT}: the id of the section clicked. */
+export type SectionActivateDetail = { readonly id: string };
+
+/** Publish {@link SECTION_ACTIVATE_EVENT}. No-op outside the browser. */
+export function announceSectionActive(id: string): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent<SectionActivateDetail>(SECTION_ACTIVATE_EVENT, {
+      detail: { id },
+    }),
+  );
 }
