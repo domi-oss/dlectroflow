@@ -68,6 +68,33 @@ async function waitForChevronSettled(page: Page, id: string): Promise<void> {
     .toBe(180);
 }
 
+/**
+ * Wait for a (smooth) scroll to come to rest.
+ *
+ * The nav opts the document into `scroll-smooth` while it is mounted, so a
+ * `window.scrollTo` ANIMATES — a screenshot taken straight after it catches the
+ * page still at the top. Found by looking at a shot that had not moved.
+ */
+async function waitForScrollToSettle(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () =>
+      new Promise<boolean>((resolve) => {
+        let last = window.scrollY;
+        let still = 0;
+        const tick = () => {
+          if (window.scrollY === last) {
+            if (++still > 3) return resolve(true);
+          } else {
+            still = 0;
+            last = window.scrollY;
+          }
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
+}
+
 async function waitForNavHydrated(page: Page): Promise<void> {
   await expect
     .poll(() =>
@@ -450,12 +477,27 @@ test.describe("settings disclosure — screenshots", () => {
           fullPage: true,
         });
 
-        // 2. The chevron, both states, side by side in one shot of the band.
-        await expandSection(page, "settings-appearance");
-        await waitForChevronSettled(page, "settings-appearance");
+        // 2. The chevron in BOTH states in one frame: the open section's header
+        //    pinned at the top (pointing up) above the next section's closed
+        //    header (pointing down). Scrolled to the seam between the two rather
+        //    than expanding anything, so the comparison is like for like.
+        await page.evaluate(() => {
+          const heading = document.getElementById("settings-appearance")!;
+          const section = heading.closest("section")!;
+          const rect = section.getBoundingClientRect();
+          // Put the closed header a third of the way down the viewport, with the
+          // open section's pinned header still above it.
+          window.scrollTo(
+            0,
+            window.scrollY + rect.top - window.innerHeight / 3,
+          );
+        });
+        await waitForScrollToSettle(page);
         await page.screenshot({
           path: `${SHOTS}/${size}-${theme}-chevron-both-states.png`,
         });
+        await page.evaluate(() => window.scrollTo(0, 0));
+        await waitForScrollToSettle(page);
 
         // 3. Mid-expand, and with the clicked header pinned + magenta, which is
         //    where the chevron has to inherit `currentColor` legibly (!175 found
