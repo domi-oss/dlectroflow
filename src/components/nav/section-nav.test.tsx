@@ -371,6 +371,25 @@ describe("SectionNav (#72)", () => {
       ).toHaveAttribute("aria-current", "true");
     });
 
+    it("releases a section that has left the PAGE, rather than freezing", () => {
+      // A save calls router.refresh(), and Settings renders a different section
+      // set for owner vs guest — so the section a reader named can disappear
+      // before the scroll reaches it. Holding the highlight for it would freeze
+      // the spy for the rest of the visit.
+      render(<Page />);
+      const io = FakeIntersectionObserver.instances.at(-1)!;
+      const first = document
+        .getElementById("help-getting-started")!
+        .closest("section")!;
+      activate("help-a-section-that-is-not-here");
+
+      io.fire([{ target: first, isIntersecting: true }]);
+
+      expect(
+        screen.getByRole("link", { name: "Getting started" }),
+      ).toHaveAttribute("aria-current", "true");
+    });
+
     it("is not stolen by the end-of-page rule either", () => {
       // The end-of-page rule exists because the LAST section can never reach the
       // top of the viewport. Applied to an explicit choice it hands the highlight

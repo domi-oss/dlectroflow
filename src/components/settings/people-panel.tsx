@@ -431,6 +431,11 @@ export function PeoplePanel({
   /** Server-render timestamp, so relative times survive hydration. */
   now: number;
   voice: Voice;
+  /**
+   * Every section takes this (#101), for one uniform disclosure API — but the
+   * settings page deliberately never passes it here: administration is not what
+   * should greet the owner on their own settings page.
+   */
   defaultExpanded?: boolean;
 }) {
   const router = useRouter();

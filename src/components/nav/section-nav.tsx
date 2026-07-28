@@ -219,9 +219,14 @@ export function SectionNav({
             return;
           }
           // Never got there yet: a smooth scroll is still in flight, so hold
-          // rather than lighting up everything it flies past.
-          if (!explicitArmedRef.current) return;
-          // Reached, read, and now scrolled away — the spy takes over again.
+          // rather than lighting up everything it flies past. Unless the section
+          // is not on the PAGE any more (a save calls router.refresh(), and
+          // Settings renders a different set for owner vs guest) — holding for a
+          // section that no longer exists would freeze the highlight for good.
+          if (!explicitArmedRef.current && document.getElementById(explicit)) {
+            return;
+          }
+          // Reached and scrolled away, or gone — the spy takes over again.
           explicitRef.current = null;
           explicitArmedRef.current = false;
         }
