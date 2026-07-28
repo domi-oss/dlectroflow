@@ -78,7 +78,7 @@ DATABASE_URL="postgresql://x"
   it("ignores prose comments that are not KEY=value lines", () => {
     const example = `
 # This is a comment explaining the section below.
-#   cp .env.example .env.local
+#   cp .env.example .env
 # Get a key at https://console.anthropic.com -> API keys.
 REAL_KEY=value
 `;
