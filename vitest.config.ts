@@ -14,9 +14,11 @@ import path from "node:path";
 // hand, which is documented nowhere.
 //
 // Both local conventions are honoured, in Next.js's own precedence order
-// (`.env.local` beats `.env`): `.env` is where Prisma reads DATABASE_URL from
-// and where .env.example documents it, while the README points contributors at
-// `.env.local` for values they want to persist.
+// (`.env.local` beats `.env`): `.env` is where Prisma reads DATABASE_URL from,
+// and since #91 it is also the file `.env.example` and the README tell you to
+// create (`cp .env.example .env`), while `.env.local` stays the Next-only
+// override a contributor may keep runtime values in — see README → "Which
+// file: .env vs .env.local".
 //
 // A real env file in this repo also holds API keys and the token-encryption
 // key, so this deliberately forwards ONLY DATABASE_URL, and parses into a

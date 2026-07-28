@@ -66,10 +66,11 @@ vi.mock("@/lib/workspace", () => ({
 //
 // No coverage is lost: the real guest-vs-user branch — including the fail-closed
 // unknown-workspace case and the query shape — is asserted against a mocked
-// prisma in src/lib/ai-scope.test.ts, which is where that unit belongs. Against
-// a real database this file never exercised the distinction anyway: neither
-// sentinel id resolves to a `kind:"user"` row, so isGuestWorkspace() returned
-// true for both, and the "owner" default silently ran the *guest* path.
+// prisma in src/lib/workspace-kind.test.ts (renamed from ai-scope.test.ts in
+// #91), which is where that unit belongs. Against a real database this file
+// never exercised the distinction anyway: neither sentinel id resolves to a
+// `kind:"user"` row, so isGuestWorkspace() returned true for both, and the
+// "owner" default silently ran the *guest* path.
 vi.mock("@/lib/workspace-kind", () => ({
   isGuestWorkspace: (id: string) => Promise.resolve(id !== "owner"),
 }));

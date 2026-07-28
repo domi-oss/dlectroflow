@@ -146,8 +146,8 @@ trap in local setup:
 
 | File | Who reads it | What to put there |
 |---|---|---|
-| **`.env`** | The **Prisma CLI** (`npm run setup`, `npm run db:migrate`, `npm run db:studio` — via `prisma.config.ts`) **and** `next dev` / `next start`. | **`DATABASE_URL`**, plus anything else you want persisted. A single `.env` is enough to run everything locally — that's what `cp .env.example .env` gives you. |
-| **`.env.local`** | **Next.js only**, and it *overrides* `.env`. Prisma never reads it. | Optional. Runtime-only values you'd rather keep out of `.env`. Don't put `DATABASE_URL` *only* here — migrations will fail with *"Environment variable not found: DATABASE_URL"*. |
+| **`.env`** | The **Prisma CLI** (`npm run setup`, `npm run db:migrate`, `npm run db:studio` — via `prisma.config.ts`), `next dev` / `next start`, and **`npm test`** (`vitest.config.ts` forwards `DATABASE_URL` from it — Prisma *Client* never reads env files itself). | **`DATABASE_URL`**, plus anything else you want persisted. A single `.env` is enough to run everything locally — that's what `cp .env.example .env` gives you. |
+| **`.env.local`** | **Next.js**, and `npm test` for `DATABASE_URL`; it *overrides* `.env`. The **Prisma CLI** never reads it. | Optional. Runtime-only values you'd rather keep out of `.env`. Don't put `DATABASE_URL` *only* here — migrations will fail with *"Environment variable not found: DATABASE_URL"*. |
 
 Both are gitignored. If you only ever create `.env`, nothing is missing.
 
