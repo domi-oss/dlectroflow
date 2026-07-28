@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useId, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   invitePerson,
@@ -99,6 +99,34 @@ function allowanceLabel(p: PersonView, policy: string): string {
     return `${p.usage.used} used this window — uncapped, never blocked`;
   }
   return `${p.usage.used} / ${p.usage.quota} breakdowns used`;
+}
+
+/** "1 account" / "5 accounts" — a count that never reads like a bug. */
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/**
+ * The one line the collapsed panel gets, and it has to answer "is anything up?".
+ *
+ * Owner decision on !175: account count, plus only the things that would make
+ * you open it — revocations and invitations still waiting to be claimed. Zero
+ * clauses are omitted rather than shown as "0 revoked", so a quiet instance
+ * reads as one line and a noisy one reads as three. Deliberately NO usage
+ * totals: this is triage, not a dashboard, and a running total would invite
+ * reading the collapsed row as a spend report.
+ */
+export function peopleSummary(view: PeopleAdminView): string {
+  const revoked = view.people.filter(
+    (p) => p.status === UserStatus.Revoked,
+  ).length;
+  const pending = view.invitations.filter((i) => !i.claimed).length;
+  const parts = [plural(view.people.length, "account", "accounts")];
+  if (revoked > 0) parts.push(`${revoked} revoked`);
+  if (pending > 0) {
+    parts.push(`${plural(pending, "invitation", "invitations")} pending`);
+  }
+  return parts.join(" · ");
 }
 
 function StatusPill({ status }: { status: string }) {
@@ -404,6 +432,17 @@ export function PeoplePanel({
   voice: Voice;
 }) {
   const router = useRouter();
+  const bodyId = useId();
+  // Collapsed on load, EVERY visit. Following !162's precedent: the section nav
+  // deliberately defaults collapsed rather than restoring a state the reader has
+  // forgotten they left. Reopening is remembered for the rest of this visit and
+  // nothing is persisted across visits.
+  //
+  // Plain `useState(false)` — server and client agree, so `aria-expanded` is
+  // honest from the first byte and there is no expanded-then-collapsed flash on
+  // hydration. Deliberately NOT synced from an effect: the react-hooks rules are
+  // at `error` here, and a set-state-in-effect would be the flash.
+  const [expanded, setExpanded] = useState(false);
   const [identity, setIdentity] = useState("");
   const [note, setNote] = useState("");
   const [message, setMessage] = useState<Message>(null);
@@ -435,11 +474,54 @@ export function PeoplePanel({
     });
   };
 
+  const summary = peopleSummary(view);
+
   return (
     <section className="space-y-3">
-      <SectionHeading id="settings-people" voice={voice} />
+      {/* The disclosure trigger sits in the heading band as a SIBLING of the h2,
+          so the h2 stays exactly what the section registry promises it is: the
+          jump target, the focus destination and the pinned magenta header — open
+          or closed. Markup, classes and focus treatment are lifted from
+          !162's "Jump to…" toggle (src/components/nav/section-nav.tsx) rather
+          than invented, so the app has one disclosure dialect and not three. */}
+      <SectionHeading id="settings-people" voice={voice}>
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={bodyId}
+          // Visible text is the SUMMARY; the accessible name prefixes the action
+          // and still contains that text, which is what WCAG 2.5.3 (Label in
+          // Name) asks for. A screen-reader user hears what it does, the state,
+          // and the same triage line a sighted user reads.
+          aria-label={`${expanded ? "Hide" : "Show"} people admin: ${summary}`}
+          onClick={() => setExpanded((v) => !v)}
+          className="hover:bg-accent focus-visible:ring-ring focus-visible:ring-offset-background text-muted-foreground -ml-1 inline-flex min-h-11 min-w-0 items-center gap-1.5 rounded-md px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+        >
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={cn(
+              "h-4 w-4 shrink-0 transition-transform",
+              expanded && "rotate-180",
+            )}
+          >
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+          <span className="truncate">{summary}</span>
+        </button>
+      </SectionHeading>
 
-      {/* The interpolated half of this sentence is ONE JS string, deliberately.
+      {/* `hidden` the ATTRIBUTE, not a `display:none` class: it removes the
+          subtree from the accessibility tree and the tab order without depending
+          on a stylesheet, so the collapsed state is honest even before CSS loads.
+          The body stays mounted so `aria-controls` always resolves. */}
+      <div id={bodyId} hidden={!expanded} className="space-y-3">
+        {/* The interpolated half of this sentence is ONE JS string, deliberately.
           Written as JSX text around `{windowLabel(…)}` it rendered as
           "rolling 30 dayswindow" in the production build: the space sat at the
           start of a JSX line right after the expression, and this Next version's
@@ -447,103 +529,109 @@ export function PeoplePanel({
           know"). vitest's transform does NOT trim it, so the jsdom suite showed
           the sentence intact while the built page was wrong. Keeping every
           interpolation-adjacent space inside a string removes the disagreement. */}
-      <p className="text-muted-foreground text-sm">
-        {`Who can use this instance, and what their AI costs. You see usage numbers and account status only — never anyone’s tasks, notes or other content. Allowances are measured over a ${windowLabel(
-          view.windowHours,
-        )} window that starts at each person’s first breakdown.`}
-      </p>
-
-      {/* ONE shared live region for every action on the panel — two
-          simultaneous announcements would talk over each other. */}
-      {message && (
-        <p
-          role={message.tone === "error" ? "alert" : "status"}
-          className={cn(
-            "text-sm",
-            message.tone === "error"
-              ? "text-red-700 dark:text-red-400"
-              : "text-green-700 dark:text-green-400",
-          )}
-        >
-          {message.text}
-        </p>
-      )}
-
-      <form onSubmit={submitInvite} className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted-foreground text-xs">
-            Invite a username or email
-          </span>
-          <input
-            type="text"
-            aria-label="Invite a username or email"
-            className="min-h-11 rounded-md border px-2"
-            value={identity}
-            disabled={pending}
-            onChange={(e) => setIdentity(e.target.value)}
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-muted-foreground text-xs">Note (optional)</span>
-          <input
-            type="text"
-            aria-label="Note (optional)"
-            className="min-h-11 rounded-md border px-2"
-            value={note}
-            disabled={pending}
-            onChange={(e) => setNote(e.target.value)}
-          />
-        </label>
-        <button
-          type="submit"
-          className="bg-primary text-primary-foreground min-h-11 rounded-md px-3 text-sm font-medium disabled:opacity-50"
-          disabled={pending}
-        >
-          Send invitation
-        </button>
-      </form>
-
-      <h3 className="text-sm font-semibold" id="people-invitations-heading">
-        Invitations
-      </h3>
-      {view.invitations.length === 0 ? (
         <p className="text-muted-foreground text-sm">
-          No invitations yet. Invite someone above to let them sign in.
+          {`Who can use this instance, and what their AI costs. You see usage numbers and account status only — never anyone’s tasks, notes or other content. Allowances are measured over a ${windowLabel(
+            view.windowHours,
+          )} window that starts at each person’s first breakdown.`}
         </p>
-      ) : (
+
+        {/* ONE shared live region for every action on the panel — two
+          simultaneous announcements would talk over each other. */}
+        {message && (
+          <p
+            role={message.tone === "error" ? "alert" : "status"}
+            className={cn(
+              "text-sm",
+              message.tone === "error"
+                ? "text-red-700 dark:text-red-400"
+                : "text-green-700 dark:text-green-400",
+            )}
+          >
+            {message.text}
+          </p>
+        )}
+
+        <form
+          onSubmit={submitInvite}
+          className="flex flex-wrap items-end gap-3"
+        >
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-muted-foreground text-xs">
+              Invite a username or email
+            </span>
+            <input
+              type="text"
+              aria-label="Invite a username or email"
+              className="min-h-11 rounded-md border px-2"
+              value={identity}
+              disabled={pending}
+              onChange={(e) => setIdentity(e.target.value)}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-muted-foreground text-xs">
+              Note (optional)
+            </span>
+            <input
+              type="text"
+              aria-label="Note (optional)"
+              className="min-h-11 rounded-md border px-2"
+              value={note}
+              disabled={pending}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </label>
+          <button
+            type="submit"
+            className="bg-primary text-primary-foreground min-h-11 rounded-md px-3 text-sm font-medium disabled:opacity-50"
+            disabled={pending}
+          >
+            Send invitation
+          </button>
+        </form>
+
+        <h3 className="text-sm font-semibold" id="people-invitations-heading">
+          Invitations
+        </h3>
+        {view.invitations.length === 0 ? (
+          <p className="text-muted-foreground text-sm">
+            No invitations yet. Invite someone above to let them sign in.
+          </p>
+        ) : (
+          <ul
+            aria-labelledby="people-invitations-heading"
+            className="list-none space-y-2 pl-0"
+          >
+            {view.invitations.map((invitation) => (
+              <InvitationRow
+                key={invitation.id}
+                invitation={invitation}
+                now={now}
+                onResult={setMessage}
+                disabled={pending}
+              />
+            ))}
+          </ul>
+        )}
+
+        <h3 className="text-sm font-semibold" id="people-accounts-heading">
+          Accounts
+        </h3>
         <ul
-          aria-labelledby="people-invitations-heading"
+          aria-labelledby="people-accounts-heading"
           className="list-none space-y-2 pl-0"
         >
-          {view.invitations.map((invitation) => (
-            <InvitationRow
-              key={invitation.id}
-              invitation={invitation}
+          {view.people.map((person) => (
+            <PersonCard
+              key={person.id}
+              person={person}
               now={now}
               onResult={setMessage}
               disabled={pending}
             />
           ))}
         </ul>
-      )}
-
-      <h3 className="text-sm font-semibold" id="people-accounts-heading">
-        Accounts
-      </h3>
-      <ul
-        aria-labelledby="people-accounts-heading"
-        className="list-none space-y-2 pl-0"
-      >
-        {view.people.map((person) => (
-          <PersonCard
-            key={person.id}
-            person={person}
-            now={now}
-            onResult={setMessage}
-            disabled={pending}
-          />
-        ))}
-      </ul>
+      </div>
     </section>
   );
 }

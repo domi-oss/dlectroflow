@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, within } from "@testing-library/react";
+import {
+  render,
+  screen,
+  cleanup,
+  within,
+  fireEvent,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 // #35 Phase B — the owner-only People panel.
@@ -63,7 +69,29 @@ function view(over: Partial<PeopleAdminView> = {}): PeopleAdminView {
   };
 }
 
+/** The disclosure trigger — the panel's whole resting UI when collapsed. */
+function toggle() {
+  return screen.getByRole("button", { name: /people admin/i });
+}
+
+/**
+ * Render the panel and OPEN it.
+ *
+ * The panel is collapsed by default (owner decision on !175 — it is ~1900px of
+ * instance administration sitting above every other setting). Every test that
+ * asserts on its contents needs it open, so the helper opens it. `fireEvent` so
+ * the helper can stay synchronous and the existing tests keep their shape.
+ */
 function renderPanel(over: Partial<PeopleAdminView> = {}) {
+  const result = render(
+    <PeoplePanel view={view(over)} now={NOW} voice="plain" />,
+  );
+  fireEvent.click(toggle());
+  return result;
+}
+
+/** Render and leave it in its resting, collapsed state. */
+function renderCollapsed(over: Partial<PeopleAdminView> = {}) {
   return render(<PeoplePanel view={view(over)} now={NOW} voice="plain" />);
 }
 
@@ -657,5 +685,203 @@ describe("PeoplePanel — the intro sentence reads as a sentence", () => {
     expect(screen.getByText(/Who can use this instance/).textContent).toContain(
       "rolling 7 days window",
     );
+  });
+});
+
+// ── Owner decision on !175 — the panel is a disclosure ───────────────────────
+//
+// Expanded, this is ~1900px of instance administration sitting at the very top
+// of /settings, before the timer style and every other personal preference.
+// Someone coming to Settings to change their own timer should not scroll past
+// people management to reach it. So: collapsed by default, every visit, with a
+// summary in the collapsed row that answers "is anything up?".
+describe("PeoplePanel — collapsed by default", () => {
+  it("renders collapsed, with the body hidden and the trigger saying so", () => {
+    renderCollapsed();
+
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    const body = document.getElementById(
+      toggle().getAttribute("aria-controls")!,
+    );
+    expect(body).not.toBeNull();
+    expect(body).not.toBeVisible();
+  });
+
+  it("hides every control behind the disclosure while collapsed", () => {
+    renderCollapsed();
+
+    // `getByRole` walks the accessibility tree, so a `hidden` subtree is gone
+    // from it — which is exactly what a collapsed disclosure must be.
+    expect(
+      screen.queryByRole("button", { name: /send invitation/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("list", { name: /accounts/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /revoke ada/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("still renders the section heading as the jump target when collapsed", () => {
+    // The nav must be able to jump to it whether or not it is open.
+    renderCollapsed();
+    const heading = document.getElementById("settings-people");
+    expect(heading).not.toBeNull();
+    expect(heading!.tagName).toBe("H2");
+  });
+
+  it("opens on click and closes again, keeping aria-expanded honest", async () => {
+    const user = userEvent.setup();
+    renderCollapsed();
+
+    await user.click(toggle());
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+    expect(
+      screen.getByRole("button", { name: /send invitation/i }),
+    ).toBeInTheDocument();
+
+    await user.click(toggle());
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByRole("button", { name: /send invitation/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("is operable from the keyboard, with a visible focus treatment", async () => {
+    const user = userEvent.setup();
+    renderCollapsed();
+
+    await user.tab();
+    expect(toggle()).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(toggle()).toHaveAttribute("aria-expanded", "true");
+    await user.keyboard(" ");
+    expect(toggle()).toHaveAttribute("aria-expanded", "false");
+    // The shared focus-visible ring the rest of the app uses.
+    expect(toggle().className).toContain("focus-visible:ring-2");
+  });
+
+  it("points aria-controls at the element it actually controls", () => {
+    renderCollapsed();
+    const id = toggle().getAttribute("aria-controls");
+    expect(id).toBeTruthy();
+    expect(document.getElementById(id!)).not.toBeNull();
+  });
+});
+
+describe("PeoplePanel — the collapsed row earns its space", () => {
+  it("summarises accounts, revocations and pending invitations", () => {
+    renderCollapsed({
+      people: [
+        person({ id: "u-1", label: "domi", role: "owner" }),
+        person({ id: "u-2", label: "grace" }),
+        person({ id: "u-3", label: "ada" }),
+        person({ id: "u-4", label: "linus" }),
+        person({ id: "u-5", label: "hopper", status: "revoked" }),
+      ],
+      invitations: [
+        {
+          id: "a-1",
+          provider: "gitlab",
+          identity: "mary",
+          note: null,
+          invitedAt: new Date(NOW),
+          claimed: false,
+        },
+        {
+          id: "a-2",
+          provider: "gitlab",
+          identity: "kate",
+          note: null,
+          invitedAt: new Date(NOW),
+          claimed: false,
+        },
+        {
+          id: "a-3",
+          provider: "gitlab",
+          identity: "grace",
+          note: null,
+          invitedAt: new Date(NOW),
+          claimed: true,
+        },
+      ],
+    });
+
+    expect(toggle()).toHaveTextContent(
+      "5 accounts · 1 revoked · 2 invitations pending",
+    );
+  });
+
+  it("omits the clauses that are zero — the summary is for triage, not a dashboard", () => {
+    renderCollapsed({
+      people: [person({ id: "u-1", label: "domi", role: "owner" })],
+      invitations: [],
+    });
+
+    expect(toggle()).toHaveTextContent("1 account");
+    expect(toggle()).not.toHaveTextContent(/revoked/);
+    expect(toggle()).not.toHaveTextContent(/pending/);
+  });
+
+  it("counts only UNCLAIMED invitations as pending", () => {
+    renderCollapsed({
+      invitations: [
+        {
+          id: "a-1",
+          provider: "gitlab",
+          identity: "grace",
+          note: null,
+          invitedAt: new Date(NOW),
+          claimed: true,
+        },
+      ],
+    });
+    expect(toggle()).not.toHaveTextContent(/pending/);
+  });
+
+  it("pluralises properly, so the row never reads like a bug", () => {
+    renderCollapsed({
+      people: [person({ id: "u-1", status: "revoked" })],
+      invitations: [
+        {
+          id: "a-1",
+          provider: "gitlab",
+          identity: "mary",
+          note: null,
+          invitedAt: new Date(NOW),
+          claimed: false,
+        },
+      ],
+    });
+    expect(toggle()).toHaveTextContent(
+      "1 account · 1 revoked · 1 invitation pending",
+    );
+  });
+
+  it("carries NO usage totals — the collapsed row is triage, not a dashboard", () => {
+    renderCollapsed();
+    // The default fixture has a person with 12/50 used; none of it belongs here.
+    expect(toggle()).not.toHaveTextContent(/used/);
+    expect(toggle()).not.toHaveTextContent(/\d+ \/ \d+/);
+  });
+
+  it("gives the trigger an accessible name that says what it DOES, summary included", () => {
+    renderCollapsed({ people: [person()], invitations: [] });
+    // Visible text is the summary; the accessible name prefixes the action, and
+    // contains the visible text (WCAG 2.5.3 Label in Name).
+    const name = toggle().getAttribute("aria-label")!;
+    expect(name).toMatch(/^Show people admin/i);
+    expect(name).toContain("1 account");
+
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute("aria-label")).toMatch(/^Hide people admin/i);
+  });
+
+  it("keeps the summary visible while expanded, so the row does not jump", () => {
+    renderCollapsed();
+    const before = toggle().textContent;
+    fireEvent.click(toggle());
+    expect(toggle().textContent).toBe(before);
   });
 });
