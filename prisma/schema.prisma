@@ -16,13 +16,90 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ── Workspaces (owner = private singleton "owner"; guests = ephemeral) ─────
+// ── Accounts (#35 Phase A) ────────────────────────────────────────────────
+// Invite-only identity. A User owns exactly one Workspace; content lives on the
+// workspace, never on the user, so "the owner sees usage, never content" stays
+// structurally true. role/status/aiPolicy are pseudo-enums mirrored in
+// src/lib/constants.ts + CHECK constraints (see the accounts_identity migration).
+model User {
+  id          String    @id @default(cuid())
+  provider    String // "gitlab" — see #74 for more providers
+  providerSub String // stable subject from the provider, never the email
+  email       String?
+  handle      String? // provider username, lowercased
+  role        String    @default("member") // owner | member
+  status      String    @default("active") // active | revoked
+  aiPolicy    String    @default("capped") // uncapped | capped | own_key
+  aiQuota     Int       @default(50) // breakdowns per rolling window when capped
+  llmProvider String? // null = instance default (Phase C)
+  llmKeyEnc   String? // token-cipher ciphertext, never returned to a client (Phase C)
+  revokedAt   DateTime?
+  purgeAfter  DateTime?
+  createdAt   DateTime  @default(now())
+  lastSeenAt  DateTime  @default(now())
+
+  workspace    Workspace?
+  aiUsage      UserAiUsage?
+  allowlistRow Allowlist?
+  googleAuth   GoogleAuth?
+
+  @@unique([provider, providerSub])
+  @@index([status, purgeAfter])
+}
+
+// An invitation. `identity` is whatever the owner typed — a provider username,
+// an email, or the provider's numeric subject — lowercased at the boundary.
+model Allowlist {
+  id          String    @id @default(cuid())
+  provider    String
+  identity    String
+  // Does claiming this invitation make the claimer the instance owner?
+  //
+  // A dedicated boolean, NOT a sentinel value in `note`: a free-text field
+  // deciding a privilege level is a privilege-escalation hole, because any row
+  // that happens to carry the magic string — set by accident, by a future
+  // People admin UI, or by copy-paste — would silently mint an owner.
+  //
+  // Only prisma/seed-allowlist.ts sets it, from the deploy-time OWNER_ALLOWLIST.
+  // Deliberately narrower than a general `role` column: the People UI (Phase B)
+  // invites members, and should not be able to grant ownership at all.
+  isOwnerSeed Boolean   @default(false)
+  note        String?
+  invitedAt   DateTime  @default(now())
+  claimedAt   DateTime?
+  claimedById String?   @unique
+  // A bare `claimedById String?` would be a plain column with no foreign key,
+  // so a claim pointing at a deleted user would silently dangle. SetNull keeps
+  // the allowlist row (the invitation is still a fact) but drops the pointer.
+  claimedBy   User?     @relation(fields: [claimedById], references: [id], onDelete: SetNull)
+
+  @@unique([provider, identity])
+}
+
+// Mirrors the mechanism GuestAiUsage already uses — a single row per subject
+// carrying a sliding window, NOT one row per day — so consumeGuestBreakdown's
+// atomic-increment pattern transfers unchanged in Phase B.
+model UserAiUsage {
+  userId          String   @id
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  count           Int      @default(0)
+  windowStartedAt DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ── Workspaces (user = one per account; guests = ephemeral) ────────────────
 model Workspace {
   id        String   @id @default(uuid())
-  kind      String   @default("guest") // owner | guest
+  kind      String   @default("guest") // user | guest ("owner" = legacy pre-#35 row
+  //                                       kept only so the CHECK still validates it)
   createdAt DateTime @default(now())
   lastSeenAt DateTime @default(now())
-  expiresAt DateTime? // guest sandbox TTL (null = owner / no expiry)
+  expiresAt DateTime? // guest sandbox TTL (null = user workspace / no expiry)
+
+  // 1:1 with the account that owns it. Nullable because guest workspaces have
+  // no user; Cascade so deleting an account destroys its content in one step.
+  userId    String?  @unique
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   settings       Settings?
   streak         Streak?
@@ -95,10 +172,18 @@ model Settings {
   workspace             Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
-// ── Google Tasks OAuth (single-user demo; tokens obtained at runtime) ──────
+// ── Google Tasks OAuth (tokens obtained at runtime) ───────────────────────
 // client_id/secret come from env (GOOGLE_CLIENT_ID/SECRET); only tokens here.
+//
+// #35 Phase A: the `@default("singleton")` id is GONE and the accounts
+// migration DELETEs every row, so the tokens that belonged to the pre-accounts
+// "owner" workspace are destroyed rather than left sitting behind a guard that
+// no longer means what it did. `userId` is nullable ONLY because Phase C is
+// what writes it; Google Tasks sync is deliberately down until then.
 model GoogleAuth {
-  id             String    @id @default("singleton")
+  id             String    @id @default(cuid())
+  userId         String?   @unique
+  user           User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
   accessToken    String?
   refreshToken   String?
   expiresAt      DateTime?

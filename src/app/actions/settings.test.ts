@@ -27,6 +27,15 @@ const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
 );
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/lib/db", () => ({ prisma: prismaMock }));
+// #35 Phase A — "is this a guest?" is a database lookup on Workspace.kind now,
+// not a comparison against a magic id. These specs already express intent
+// through the workspace id they pass in, so map that id back to a kind: the
+// signed-in account's workspace here is "owner", everything else is a sandbox.
+// The lookup itself is covered by src/lib/ai-scope.test.ts.
+vi.mock("@/lib/workspace-kind", () => ({
+  isGuestWorkspace: (id: string) => Promise.resolve(id !== "owner"),
+}));
+
 vi.mock("@/lib/workspace", () => ({
   currentWorkspaceId: currentWorkspaceIdMock,
   isOwnerRequest: vi.fn().mockResolvedValue(true),

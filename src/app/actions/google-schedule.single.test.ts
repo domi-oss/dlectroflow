@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const {
   workspaceMock,
+  isOwnerMock,
   revalidatePathMock,
   configuredMock,
   tokenMock,
@@ -14,6 +15,7 @@ const {
   taskUpdateMock,
 } = vi.hoisted(() => ({
   workspaceMock: vi.fn(),
+  isOwnerMock: vi.fn(),
   revalidatePathMock: vi.fn(),
   configuredMock: vi.fn(),
   tokenMock: vi.fn(),
@@ -57,24 +59,35 @@ vi.mock("@/lib/google", () => ({
   getGoogleStatus: statusMock,
   disconnectGoogle: vi.fn(),
 }));
-vi.mock("@/lib/workspace", () => ({ currentWorkspaceId: workspaceMock }));
+vi.mock("@/lib/workspace", () => ({
+  currentWorkspaceId: workspaceMock,
+  isOwnerRequest: isOwnerMock,
+}));
 
-import { OWNER_WORKSPACE_ID, RewardType, BadgeKey } from "@/lib/constants";
+import { RewardType, BadgeKey } from "@/lib/constants";
 import { logReward, awardBadge } from "@/lib/rewards";
 import { scheduleSingleTask } from "./google-schedule";
+
+// #35 Phase A — the owner's workspace is a real per-account id now, not the
+// "owner" constant. Ownership is asserted through isOwnerRequest (the role
+// check the action actually makes); this id is just the workspace that
+// account happens to own.
+const OWNER_WS = "ws-owner";
 
 beforeEach(() => vi.clearAllMocks());
 
 describe("scheduleSingleTask", () => {
   it("rejects non-owner", async () => {
     workspaceMock.mockResolvedValue("guest-ws");
+    isOwnerMock.mockResolvedValue(false);
     await expect(scheduleSingleTask("item-1", 30)).rejects.toThrow(
       "owner only",
     );
   });
 
   it("rejects a duration outside 1..480 minutes (server clamp) without touching Google", async () => {
-    workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
+    workspaceMock.mockResolvedValue(OWNER_WS);
+    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
 
@@ -88,7 +101,8 @@ describe("scheduleSingleTask", () => {
   });
 
   it("returns reconnect_required when tokens are dead", async () => {
-    workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
+    workspaceMock.mockResolvedValue(OWNER_WS);
+    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue(null);
     statusMock.mockResolvedValue({
@@ -103,7 +117,8 @@ describe("scheduleSingleTask", () => {
   });
 
   it("creates one Google task titled with the duration convention and stores ids", async () => {
-    workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
+    workspaceMock.mockResolvedValue(OWNER_WS);
+    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
     itemFindFirstMock.mockResolvedValue({
@@ -138,7 +153,8 @@ describe("scheduleSingleTask", () => {
   });
 
   it("returns no_reclaim_list when no matching Google Tasks list exists", async () => {
-    workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
+    workspaceMock.mockResolvedValue(OWNER_WS);
+    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
     itemFindFirstMock.mockResolvedValue({
@@ -157,7 +173,8 @@ describe("scheduleSingleTask", () => {
   });
 
   it("lazily creates a Task row when the item has none yet, then schedules it", async () => {
-    workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
+    workspaceMock.mockResolvedValue(OWNER_WS);
+    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
     itemFindFirstMock.mockResolvedValue({
@@ -193,7 +210,8 @@ describe("scheduleSingleTask", () => {
   });
 
   it("sets the provider-agnostic scheduled marker (scheduledVia='google') on success", async () => {
-    workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
+    workspaceMock.mockResolvedValue(OWNER_WS);
+    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
     itemFindFirstMock.mockResolvedValue({
@@ -220,7 +238,8 @@ describe("scheduleSingleTask", () => {
 
   // ── reward parity with the steps path (#25) ──────────────────────────────
   it("awards Scheduled (+10) and the FirstSchedule badge on a successful single-task schedule", async () => {
-    workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
+    workspaceMock.mockResolvedValue(OWNER_WS);
+    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
     itemFindFirstMock.mockResolvedValue({
@@ -236,18 +255,13 @@ describe("scheduleSingleTask", () => {
 
     expect(res).toEqual({ ok: true });
     // Same helpers, same args as pushStepsToGoogleTasks (google-schedule.ts).
-    expect(logReward).toHaveBeenCalledWith(
-      OWNER_WORKSPACE_ID,
-      RewardType.Scheduled,
-    );
-    expect(awardBadge).toHaveBeenCalledWith(
-      OWNER_WORKSPACE_ID,
-      BadgeKey.FirstSchedule,
-    );
+    expect(logReward).toHaveBeenCalledWith(OWNER_WS, RewardType.Scheduled);
+    expect(awardBadge).toHaveBeenCalledWith(OWNER_WS, BadgeKey.FirstSchedule);
   });
 
   it("awards Scheduled + FirstSchedule for a lazily-created task (first-ever schedule)", async () => {
-    workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
+    workspaceMock.mockResolvedValue(OWNER_WS);
+    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
     itemFindFirstMock.mockResolvedValue({
@@ -263,18 +277,13 @@ describe("scheduleSingleTask", () => {
     const res = await scheduleSingleTask("item-2", 15);
 
     expect(res).toEqual({ ok: true });
-    expect(logReward).toHaveBeenCalledWith(
-      OWNER_WORKSPACE_ID,
-      RewardType.Scheduled,
-    );
-    expect(awardBadge).toHaveBeenCalledWith(
-      OWNER_WORKSPACE_ID,
-      BadgeKey.FirstSchedule,
-    );
+    expect(logReward).toHaveBeenCalledWith(OWNER_WS, RewardType.Scheduled);
+    expect(awardBadge).toHaveBeenCalledWith(OWNER_WS, BadgeKey.FirstSchedule);
   });
 
   it("does not re-award when the task was already scheduled (idempotency — task has a scheduledAt marker)", async () => {
-    workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
+    workspaceMock.mockResolvedValue(OWNER_WS);
+    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
     // S0 (#29): idempotency moved from googleTaskId → the provider-agnostic
@@ -303,7 +312,8 @@ describe("scheduleSingleTask", () => {
   });
 
   it("does not award when the Google push fails", async () => {
-    workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
+    workspaceMock.mockResolvedValue(OWNER_WS);
+    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
     itemFindFirstMock.mockResolvedValue({
@@ -322,7 +332,8 @@ describe("scheduleSingleTask", () => {
   });
 
   it("revalidates / after the lazy Task-create even when the Google push fails (Duo review)", async () => {
-    workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
+    workspaceMock.mockResolvedValue(OWNER_WS);
+    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
     itemFindFirstMock.mockResolvedValue({
@@ -343,7 +354,8 @@ describe("scheduleSingleTask", () => {
   });
 
   it("still returns ok when a reward call fails — reward errors must not fail scheduling (Duo !77)", async () => {
-    workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
+    workspaceMock.mockResolvedValue(OWNER_WS);
+    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
     itemFindFirstMock.mockResolvedValue({
@@ -363,10 +375,7 @@ describe("scheduleSingleTask", () => {
 
     expect(res).toEqual({ ok: true });
     // allSettled: a logReward failure must NOT skip the idempotent awardBadge.
-    expect(awardBadge).toHaveBeenCalledWith(
-      OWNER_WORKSPACE_ID,
-      BadgeKey.FirstSchedule,
-    );
+    expect(awardBadge).toHaveBeenCalledWith(OWNER_WS, BadgeKey.FirstSchedule);
     expect(taskUpdateMock).toHaveBeenCalled();
     expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });

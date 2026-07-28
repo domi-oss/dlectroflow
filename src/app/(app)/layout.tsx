@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { headers } from "next/headers";
 import { prisma, getSettings } from "@/lib/db";
-import { isOwnerRequest, currentWorkspaceId } from "@/lib/workspace";
+import { currentUser, currentWorkspaceId } from "@/lib/workspace";
 import {
   clientIpHash,
   guestQuotaConfig,
@@ -11,6 +11,7 @@ import { GuestIndicator } from "@/components/guest/guest-indicator";
 import { VoiceProvider } from "@/components/voice-provider";
 import { ReviewNudge } from "@/components/dashboard/review-nudge";
 import { AppMenu } from "@/components/nav/app-menu";
+import { AuthActions } from "@/components/nav/auth-actions";
 import { BrandMark } from "@/components/brand/brand-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { completionRootAttrs } from "@/lib/completion-style";
@@ -20,13 +21,17 @@ import { type Voice } from "@/lib/strings";
 export default async function AppLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const owner = await isOwnerRequest();
+  // #35 Phase A: the guest banner is about being a GUEST, not about being the
+  // owner. Those were the same question before accounts; now an invited member
+  // is signed in but not an owner, and would otherwise be shown the sandbox
+  // banner and a guest AI allowance for a workspace that is really theirs.
+  const signedIn = (await currentUser()) !== null;
 
   const wsId = await currentWorkspaceId();
 
   let guest: { remaining: number; quota: number; expiresAt: string } | null =
     null;
-  if (!owner) {
+  if (!signedIn) {
     const ws = await prisma.workspace.findUnique({
       where: { id: wsId },
       select: { expiresAt: true },
@@ -78,26 +83,11 @@ export default async function AppLayout({
           </Link>
           <div className="text-muted-foreground flex items-center gap-4 text-sm">
             {/* #49 — theme toggle lives in the header, immediately left of the
-                owner sign-in / sign-out action so it's always reachable (light
-                + dark). It's a self-contained client control; it renders the
-                same for guest and owner. */}
+                sign-in / account action so it's always reachable (light +
+                dark). It's a self-contained client control; it renders the
+                same whether or not you are signed in. */}
             <ThemeToggle />
-            {owner ? (
-              // Logout is a state change → POST-only (CSRF-safe), so it's a
-              // small form/button rather than a GET link. See #21 (P5 batch B).
-              <form action="/api/auth/logout" method="post" className="flex">
-                <button
-                  type="submit"
-                  className="text-xs text-muted-foreground hover:underline"
-                >
-                  Sign out
-                </button>
-              </form>
-            ) : (
-              <a href="/login" className="text-xs text-muted-foreground">
-                Owner sign in
-              </a>
-            )}
+            <AuthActions signedIn={signedIn} />
             <AppMenu voice={voice} />
           </div>
         </div>

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const {
   workspaceMock,
+  isOwnerMock,
   revalidatePathMock,
   configuredMock,
   tokenMock,
@@ -18,6 +19,7 @@ const {
   getSettingsMock,
 } = vi.hoisted(() => ({
   workspaceMock: vi.fn(),
+  isOwnerMock: vi.fn(),
   revalidatePathMock: vi.fn(),
   configuredMock: vi.fn(),
   tokenMock: vi.fn(),
@@ -55,10 +57,19 @@ vi.mock("@/lib/google", () => ({
   getGoogleStatus: statusMock,
   disconnectGoogle: vi.fn(),
 }));
-vi.mock("@/lib/workspace", () => ({ currentWorkspaceId: workspaceMock }));
+vi.mock("@/lib/workspace", () => ({
+  currentWorkspaceId: workspaceMock,
+  isOwnerRequest: isOwnerMock,
+}));
 
-import { OWNER_WORKSPACE_ID, RewardType, BadgeKey } from "@/lib/constants";
+import { RewardType, BadgeKey } from "@/lib/constants";
 import { pushStepsToGoogleTasks } from "./google-schedule";
+
+// #35 Phase A — the owner's workspace is a real per-account id now, not the
+// "owner" constant. Ownership is asserted through isOwnerRequest (the role
+// check the action actually makes); this id is just the workspace that
+// account happens to own.
+const OWNER_WS = "ws-owner";
 
 const baseTask = (over: Record<string, unknown> = {}) => ({
   id: "task-1",
@@ -82,7 +93,8 @@ beforeEach(() => {
   tokenMock.mockResolvedValue("tok");
   findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
   createGoogleTaskMock.mockResolvedValue({ id: "g1" });
-  workspaceMock.mockResolvedValue(OWNER_WORKSPACE_ID);
+  workspaceMock.mockResolvedValue(OWNER_WS);
+  isOwnerMock.mockResolvedValue(true);
   getSettingsMock.mockResolvedValue({ voice: "plain" });
 });
 
@@ -97,12 +109,9 @@ describe("pushStepsToGoogleTasks — provider-agnostic marker + reward-once", ()
         data: expect.objectContaining({ scheduledVia: "google" }),
       }),
     );
-    expect(logRewardMock).toHaveBeenCalledWith(
-      OWNER_WORKSPACE_ID,
-      RewardType.Scheduled,
-    );
+    expect(logRewardMock).toHaveBeenCalledWith(OWNER_WS, RewardType.Scheduled);
     expect(awardBadgeMock).toHaveBeenCalledWith(
-      OWNER_WORKSPACE_ID,
+      OWNER_WS,
       BadgeKey.FirstSchedule,
     );
   });
@@ -146,7 +155,7 @@ describe("pushStepsToGoogleTasks — provider-agnostic marker + reward-once", ()
     expect(res.ok).toBe(true);
     // allSettled: a logReward failure must NOT skip the idempotent awardBadge.
     expect(awardBadgeMock).toHaveBeenCalledWith(
-      OWNER_WORKSPACE_ID,
+      OWNER_WS,
       BadgeKey.FirstSchedule,
     );
   });

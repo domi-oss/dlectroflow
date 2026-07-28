@@ -3,7 +3,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import type { ReactNode } from "react";
 import AppLayout from "./layout";
-import { isOwnerRequest } from "@/lib/workspace";
+import { currentUser } from "@/lib/workspace";
 
 // next/link → plain <a> (same idiom as help.test.tsx) so the header's links
 // resolve under vitest (no Next compiler).
@@ -36,9 +36,14 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/lib/workspace", () => ({
-  isOwnerRequest: vi.fn(),
+  currentUser: vi.fn(),
   currentWorkspaceId: vi.fn().mockResolvedValue("owner"),
 }));
+
+// #35 Phase A — the header's auth affordance moved into its own component so
+// it is unit-testable (src/components/nav/auth-actions.test.tsx). These specs
+// stay about PLACEMENT within the header, so the real component renders.
+const SIGNED_IN = { id: "u1", role: "owner" as const, workspaceId: "owner" };
 
 vi.mock("@/lib/guest-quota", () => ({
   clientIpHash: vi.fn().mockReturnValue("hash"),
@@ -70,19 +75,19 @@ const child = <div>child</div>;
 
 describe("AppLayout — header theme toggle (#49)", () => {
   it("renders the theme toggle inside the app header", async () => {
-    vi.mocked(isOwnerRequest).mockResolvedValue(false);
+    vi.mocked(currentUser).mockResolvedValue(null);
     render(await AppLayout({ children: child }));
 
     const toggle = screen.getByRole("button", { name: /mode/i });
     expect(toggle.closest("header")).not.toBeNull();
   });
 
-  it("places the toggle immediately left of the guest 'Owner sign in' action", async () => {
-    vi.mocked(isOwnerRequest).mockResolvedValue(false);
+  it("places the toggle immediately left of the guest 'Sign in' action", async () => {
+    vi.mocked(currentUser).mockResolvedValue(null);
     render(await AppLayout({ children: child }));
 
     const toggle = screen.getByRole("button", { name: /mode/i });
-    const signIn = screen.getByRole("link", { name: /owner sign in/i });
+    const signIn = screen.getByRole("link", { name: /sign in/i });
 
     // Both are direct children of the same header right-cluster …
     expect(toggle.parentElement).toBe(signIn.parentElement);
@@ -91,21 +96,41 @@ describe("AppLayout — header theme toggle (#49)", () => {
     expect(toggle.nextElementSibling).toBe(signIn);
   });
 
-  it("places the toggle immediately left of the owner 'Sign out' action", async () => {
-    vi.mocked(isOwnerRequest).mockResolvedValue(true);
+  it("places the toggle immediately left of the signed-in 'Account' action", async () => {
+    vi.mocked(currentUser).mockResolvedValue(SIGNED_IN);
     render(await AppLayout({ children: child }));
 
     const toggle = screen.getByRole("button", { name: /mode/i });
-    const signOut = screen.getByRole("button", { name: /sign out/i });
+    const account = screen.getByRole("link", { name: /account/i });
+    expect(toggle.parentElement).toBe(account.parentElement);
+    expect(toggle.nextElementSibling).toBe(account);
+  });
+
+  it("keeps sign out in the same header cluster, after Account", async () => {
+    vi.mocked(currentUser).mockResolvedValue(SIGNED_IN);
+    render(await AppLayout({ children: child }));
+
+    const toggle = screen.getByRole("button", { name: /mode/i });
+    const account = screen.getByRole("link", { name: /account/i });
     // Sign out is a POST-only <form> button; the form is the cluster child.
-    const signOutForm = signOut.closest("form");
+    const signOutForm = screen
+      .getByRole("button", { name: /sign out/i })
+      .closest("form");
     expect(signOutForm).not.toBeNull();
     expect(toggle.parentElement).toBe(signOutForm!.parentElement);
-    expect(toggle.nextElementSibling).toBe(signOutForm);
+    expect(account.nextElementSibling).toBe(signOutForm);
+  });
+
+  it("shows a guest no sign-out control", async () => {
+    vi.mocked(currentUser).mockResolvedValue(null);
+    render(await AppLayout({ children: child }));
+    expect(
+      screen.queryByRole("button", { name: /sign out/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps the toggle keyboard-operable with a visible focus ring", async () => {
-    vi.mocked(isOwnerRequest).mockResolvedValue(false);
+    vi.mocked(currentUser).mockResolvedValue(null);
     render(await AppLayout({ children: child }));
 
     const toggle = screen.getByRole("button", { name: /mode/i });

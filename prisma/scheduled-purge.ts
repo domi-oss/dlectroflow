@@ -13,14 +13,17 @@
  * production image contains only prisma/ + the traced node_modules; it has NO
  * app source (src/) and NO `@/` path-alias resolver. So this file imports only
  * `@prisma/client` (traced into the image because the app depends on it) and
- * inlines its own purge logic + OWNER_WORKSPACE_ID guard. An import that
+ * inlines its own purge logic + legacy-owner-workspace guard. An import that
  * reached into src/ would make the CronJob dead-on-arrival in prod; the guard
  * tests in src/lib/scheduled-purge.test.ts enforce that.
  */
 import { PrismaClient } from "@prisma/client";
 
-// Inlined from src/lib/constants.ts — cannot import app source here (see header).
-const OWNER_WORKSPACE_ID = "owner";
+// The pre-accounts singleton workspace (#35 Phase A deleted the constant from
+// app source; this file cannot import src/ anyway — see header). The row still
+// exists in production until it is exported and purged by hand in Phase D, and
+// this job must never be the thing that deletes it.
+const LEGACY_OWNER_WORKSPACE_ID = "owner";
 
 /** How many expired guest workspaces to sweep per findMany batch. */
 const PURGE_BATCH = 25;
@@ -43,14 +46,20 @@ export type PurgeClient = {
 };
 
 /** Delete a guest workspace. All workspace-scoped rows cascade via their
- * workspaceId FKs (Step/BreakdownTurn cascade transitively through Task). */
+ * workspaceId FKs (Step/BreakdownTurn cascade transitively through Task).
+ *
+ * #35 Phase A: `kind: "guest"` is part of the delete FILTER, not just something
+ * the caller queried for. Since accounts landed, a signed-in user's workspace
+ * has an opaque id exactly like a guest sandbox does, so an id-only guard can
+ * no longer tell them apart — the database has to. If the id names anything
+ * other than a guest workspace, the delete matches nothing and throws. */
 export async function purgeWorkspace(
   db: PurgeClient,
   id: string,
 ): Promise<void> {
-  if (id === OWNER_WORKSPACE_ID)
+  if (id === LEGACY_OWNER_WORKSPACE_ID)
     throw new Error("refusing to purge the owner workspace");
-  await db.workspace.delete({ where: { id } });
+  await db.workspace.delete({ where: { id, kind: "guest" } });
 }
 
 /** Purge one bounded batch of guest workspaces past their TTL. Best-effort:

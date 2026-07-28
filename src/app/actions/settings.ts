@@ -5,12 +5,12 @@ import { prisma } from "@/lib/db";
 import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
 import {
   OWNER_BREAKDOWN_ALLOWLIST,
-  isGuestWorkspace,
   FocusTimerStyle,
   FocusSound,
   CompleteTickColor,
   Typeface,
 } from "@/lib/constants";
+import { isGuestWorkspace } from "@/lib/workspace-kind";
 import { isValidHHmm } from "@/lib/daily-review-nudge";
 
 export async function updateAgingSettings(input: {
@@ -70,7 +70,7 @@ export async function updateRoundupSettings(input: {
     : "17:00";
   // Outbound email is owner-only: a guest sandbox may tune the demo knobs but
   // must never aim Resend at an arbitrary address (#20).
-  const isGuest = isGuestWorkspace(workspaceId);
+  const isGuest = await isGuestWorkspace(workspaceId);
   const roundupEmail = isGuest ? null : input.roundupEmail?.trim() || null;
   const data = {
     workdayEndTime,

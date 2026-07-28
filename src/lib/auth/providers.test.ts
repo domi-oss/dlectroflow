@@ -1,23 +1,81 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { isOwner, getAuthProvider } from "./providers";
+import { getAuthProvider } from "./providers";
 import { assertAuthConfig } from "./config";
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
-describe("isOwner", () => {
-  it("matches an allowlisted id", () => {
-    expect(isOwner("1234567", ["1234567"])).toBe(true);
+// #35 Phase A — the callback needs more than an opaque subject now: invites are
+// typed as a username (owner decision), so the normalized profile has to carry
+// one. The ACCOUNT still keys on `subject`, because usernames can be changed
+// and reused; the typed value only has to match the invite once.
+describe("gitlab provider fetchProfile", () => {
+  function stubUserResponse(body: unknown, status = 200) {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify(body), { status }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("returns subject, username and email from the GitLab profile", async () => {
+    stubUserResponse({ id: 42, username: "Domi", email: "d@example.com" });
+    const profile = await getAuthProvider().fetchProfile("tok");
+    expect(profile).toEqual({
+      subject: "42",
+      username: "domi",
+      email: "d@example.com",
+    });
   });
-  it("is case-insensitive and trims", () => {
-    expect(isOwner("  Me@x.com ", ["me@x.com"])).toBe(true);
+
+  it("tolerates a profile with no email (GitLab may withhold it)", async () => {
+    stubUserResponse({ id: 42, username: "Domi" });
+    const profile = await getAuthProvider().fetchProfile("tok");
+    expect(profile).toEqual({
+      subject: "42",
+      username: "domi",
+      email: undefined,
+    });
   });
-  it("rejects a non-listed identity", () => {
-    expect(isOwner("999", ["1234567"])).toBe(false);
+
+  it("normalises surrounding whitespace and case on both identity fields", async () => {
+    stubUserResponse({ id: 7, username: "  MiXeD  ", email: " A@B.COM " });
+    const profile = await getAuthProvider().fetchProfile("tok");
+    expect(profile).toEqual({
+      subject: "7",
+      username: "mixed",
+      email: "a@b.com",
+    });
   });
-  it("rejects empty identity", () => {
-    expect(isOwner("", ["1234567"])).toBe(false);
+
+  it("drops an empty-string username rather than matching an empty invite", async () => {
+    stubUserResponse({ id: 7, username: "   ", email: "" });
+    const profile = await getAuthProvider().fetchProfile("tok");
+    expect(profile).toEqual({
+      subject: "7",
+      username: undefined,
+      email: undefined,
+    });
+  });
+
+  it("sends the bearer token to the GitLab user endpoint", async () => {
+    const fetchMock = stubUserResponse({ id: 1, username: "x" });
+    await getAuthProvider().fetchProfile("tok-123");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://gitlab.com/api/v4/user",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok-123" },
+      }),
+    );
+  });
+
+  it("throws on a non-ok profile response", async () => {
+    stubUserResponse({ message: "401 Unauthorized" }, 401);
+    await expect(getAuthProvider().fetchProfile("tok")).rejects.toThrow(
+      /GitLab user fetch failed \(401\)/,
+    );
   });
 });
 

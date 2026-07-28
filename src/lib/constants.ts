@@ -93,17 +93,58 @@ export const DASHBOARD_BADGE_KEYS: readonly BadgeKey[] = [
 
 export const SINGLETON_ID = "singleton";
 
-export const OWNER_WORKSPACE_ID = "owner";
-
-export function isGuestWorkspace(workspaceId: string): boolean {
-  return workspaceId !== OWNER_WORKSPACE_ID;
-}
+// #35 Phase A: OWNER_WORKSPACE_ID and the synchronous isGuestWorkspace() that
+// compared against it are GONE. Workspaces belong to User records now, so
+// "is this the owner?" is a role question (isOwnerRequest) and "is this a guest
+// sandbox?" is a database question (src/lib/workspace-kind.ts). The scoping
+// harness asserts the constant cannot come back.
 
 export const WorkspaceKind = {
+  // Legacy (#35 Phase A): the pre-accounts singleton workspace, id "owner".
+  // Kept in the value set ONLY so the Workspace_kind_check constraint still
+  // validates the row that already exists in production — `ALTER TABLE … ADD
+  // CONSTRAINT` re-validates every existing row, so dropping "owner" here would
+  // make the accounts migration fail on deploy. Nothing writes it any more; the
+  // row is exported + purged by hand in Phase D, and this value goes with it.
   Owner: "owner",
+  // A real signed-in account's workspace (1:1 with a User row).
+  User: "user",
   Guest: "guest",
 } as const;
 export type WorkspaceKind = (typeof WorkspaceKind)[keyof typeof WorkspaceKind];
+
+// ── #35 Phase A — accounts / per-user identity ─────────────────────────────
+// User.role / User.status / User.aiPolicy and Allowlist.role are String columns
+// guarded by Postgres CHECK constraints (User_role_check, User_status_check,
+// User_aiPolicy_check, Allowlist_role_check). These objects are the single
+// source of truth for the allowed sets; the CHECK migration + the
+// enum-constraint-sync integration test mirror them.
+
+/** `owner` manages people + policy; `member` is an ordinary invited account. */
+export const UserRole = {
+  Owner: "owner",
+  Member: "member",
+} as const;
+export type UserRole = (typeof UserRole)[keyof typeof UserRole];
+
+/** `revoked` freezes sign-in immediately; the data is purged later (Phase D). */
+export const UserStatus = {
+  Active: "active",
+  Revoked: "revoked",
+} as const;
+export type UserStatus = (typeof UserStatus)[keyof typeof UserStatus];
+
+/**
+ * Who pays for this account's AI. `own_key` = they brought their own LLM key;
+ * `capped` = instance key, metered against UserAiUsage; `uncapped` = instance
+ * key, no meter. Enforcement lands in Phase B — Phase A only stores the value.
+ */
+export const AiPolicy = {
+  Uncapped: "uncapped",
+  Capped: "capped",
+  OwnKey: "own_key",
+} as const;
+export type AiPolicy = (typeof AiPolicy)[keyof typeof AiPolicy];
 
 // ── Phase 2 — breakdown model selection (anthropic provider) ────────────────
 // Owner-selectable models for the `anthropic` LLM_PROVIDER (validated

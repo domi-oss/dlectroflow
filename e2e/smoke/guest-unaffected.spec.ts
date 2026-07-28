@@ -1,0 +1,71 @@
+import { test, expect } from "@playwright/test";
+import { CAPTURE_PLACEHOLDER, captureItem, needsReviewRow } from "../helpers";
+
+// #35 Phase A — guests must be completely unaffected by the accounts change.
+//
+// Every other spec in this suite runs with the forged signed-in storageState,
+// so nothing else would notice if the guest path regressed. These run with NO
+// cookies at all: the middleware mints a fresh guest sandbox exactly as it does
+// for a first-time visitor in production.
+//
+// This matters because Phase A touched every seam a guest passes through — the
+// session payload, guest minting in the middleware, the workspace resolver, the
+// guest/AI banner gate in the layout, and the "is this a guest?" predicate that
+// used to be a string comparison against a magic workspace id.
+test.use({ storageState: { cookies: [], origins: [] } });
+
+test("a guest still gets a sandbox and can capture into it", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  // The app shell renders for an anonymous visitor — no redirect to /login.
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("link", { name: "dlectroflow" })).toBeVisible();
+
+  // And the sandbox is writable: this is a real workspace, lazily created.
+  await captureItem(page, "guest sandbox still works");
+  await expect(needsReviewRow(page, "guest sandbox still works")).toBeVisible();
+});
+
+test("a guest still sees the sandbox banner with its AI allowance", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  const banner = page.getByText(/you're in guest mode/i);
+  await expect(banner).toBeVisible();
+  // The allowance is interpolated from the enforced quota, so its presence is
+  // what proves the guest AI cap is still wired up for guests.
+  await expect(banner).toContainText(/AI assisted task breakdowns/i);
+});
+
+test("a guest is offered sign-in, never Account or Sign out", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  await expect(page.getByRole("link", { name: /^sign in$/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: /^account$/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /sign out/i })).toHaveCount(0);
+});
+
+test("a guest is refused an authenticated-only path", async ({ page }) => {
+  // AUTHENTICATED_PREFIXES is new in Phase A: a valid GUEST session must not be
+  // enough. The route itself does not exist yet (Phase C/D add /api/account/*),
+  // so what is asserted is the middleware decision — redirected to /login,
+  // never a 404 from the route layer, which would mean the gate did not run.
+  const res = await page.goto("/api/account/export");
+  expect(res?.status()).toBe(200); // followed the redirect
+  await expect(page).toHaveURL(/\/login/);
+});
+
+test("a guest's sandbox is separate from the signed-in account's workspace", async ({
+  page,
+}) => {
+  // The signed-in specs seed content into the e2e account's workspace. A guest
+  // must see none of it — the capture bar is present and the board is theirs.
+  await page.goto("/");
+  await expect(page.getByPlaceholder(CAPTURE_PLACEHOLDER)).toBeVisible();
+  await expect(page.getByText("a11y-lib-pill 0")).toHaveCount(0);
+});

@@ -10,8 +10,8 @@ import {
   FocusOutcome,
   RewardType,
   TaskStatus,
-  isGuestWorkspace,
 } from "@/lib/constants";
+import { isGuestWorkspace } from "@/lib/workspace-kind";
 import { awardBadge, logReward, rewardStepDone } from "@/lib/rewards";
 import { currentWorkspaceId } from "@/lib/workspace";
 import { remainingSecForSession } from "@/lib/focus-timer-clock";
@@ -157,7 +157,11 @@ async function closeSession(
   addedMin: number,
 ) {
   return prisma.focusSession.update({
-    where: { id: sessionId },
+    // #35 — `workspaceId` is in the FILTER, not just a parameter this helper
+    // happens to receive. Every caller verifies ownership first, but a private
+    // helper that ignores the scope it was handed is one careless call away
+    // from closing somebody else's session (found by the scoping harness).
+    where: { id: sessionId, workspaceId },
     data: {
       endedAt: new Date(),
       durationMin: Math.max(0, Math.round(durationMin)),
@@ -171,7 +175,9 @@ async function closeSession(
 /** Mark a task and its linked inbox item(s) completed, and award the task-complete reward+badge. */
 async function markTaskCompleted(workspaceId: string, taskId: string) {
   await prisma.task.update({
-    where: { id: taskId },
+    // Scoped for the same reason as closeSession above: the helper is given a
+    // workspaceId, so it must filter on it rather than trust its callers.
+    where: { id: taskId, workspaceId },
     data: { status: TaskStatus.Done },
   });
   await prisma.brainDumpItem.updateMany({
@@ -435,7 +441,7 @@ export async function proposeNewEstimate(stepId: string): Promise<number> {
     where: { id: stepId, task: { workspaceId } },
   });
   if (!step) return 15;
-  if (isGuestWorkspace(workspaceId)) return step.estMinutes + 10;
+  if (await isGuestWorkspace(workspaceId)) return step.estMinutes + 10;
   try {
     const { text } = await getLLM().generate({
       model: resolveUtilityModel(),

@@ -4,6 +4,13 @@ import { SESSION_SECRET, STORAGE_STATE, BASE_URL } from "./e2e/constants";
 // Test dummies for the production boot guard (next start ⇒ NODE_ENV=production).
 // AUTH_SESSION_SECRET MUST equal the value global-setup signs with.
 const bootGuardEnv = {
+  // requestOrigin() refuses to derive an origin from request headers under
+  // NODE_ENV=production (which `next start` sets), and the middleware calls it
+  // on the guest-minting path to decide the cookie's Secure flag. Nothing
+  // exercised that path until #35 added a guest spec — every other spec carries
+  // the forged signed-in cookie and short-circuits before guest minting — so
+  // the suite booted without this and never noticed.
+  PUBLIC_ORIGIN: BASE_URL,
   AUTH_PROVIDER: "gitlab",
   OWNER_ALLOWLIST: "1",
   AUTH_SESSION_SECRET: SESSION_SECRET,

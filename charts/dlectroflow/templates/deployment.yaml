@@ -104,6 +104,48 @@ spec:
           # ResourceQuota (limits required) is satisfied and Prisma has headroom.
           resources:
             {{- include "dlectroflow.resources" (dict "cpu" .Values.resources.app.cpu "memory" .Values.resources.app.memory "env" .Values.env) | nindent 12 }}
+        # #35 Phase A — seed the owner's invitation from OWNER_ALLOWLIST.
+        # Sign-in is invite-only from the accounts migration onward, so without
+        # this the owner is locked out of their own instance on the first deploy.
+        # It runs HERE, after `migrate` and before the app container starts, so
+        # the invitation exists before any sign-in can be attempted.
+        #
+        # A script rather than SQL in the migration: `prisma migrate deploy` runs
+        # with only DATABASE_URL and offers no hook to set the Postgres GUC the
+        # plan suggested reading, so the SQL version would have silently seeded
+        # zero rows. See the header of prisma/seed-allowlist.ts.
+        #
+        # Idempotent — every deploy re-asserts the invitation without releasing
+        # an existing claim. Exits non-zero on a real DB failure so a broken
+        # deploy is visible rather than producing a silently locked-out app.
+        - name: seed-allowlist
+          image: "{{ .Values.image.repository }}:{{ required "image.tag must be set (CI passes $CI_COMMIT_SHA)" .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["npx", "tsx", "prisma/seed-allowlist.ts"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: dlectroflow-secrets
+                  key: DATABASE_URL
+            - name: AUTH_PROVIDER
+              valueFrom:
+                secretKeyRef:
+                  name: dlectroflow-secrets
+                  key: AUTH_PROVIDER
+            - name: OWNER_ALLOWLIST
+              valueFrom:
+                secretKeyRef:
+                  name: dlectroflow-secrets
+                  key: OWNER_ALLOWLIST
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          # Sized like `migrate`; initContainers run sequentially, so this does
+          # not raise the pod's effective resource request.
+          resources:
+            {{- include "dlectroflow.resources" (dict "cpu" .Values.resources.app.cpu "memory" .Values.resources.app.memory "env" .Values.env) | nindent 12 }}
         {{- if eq .Values.env "review" }}
         # Review apps ONLY (#25): seed a small demo data set so the review app
         # has content across the inbox buckets instead of an empty sandbox. Runs
