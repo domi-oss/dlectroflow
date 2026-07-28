@@ -43,6 +43,36 @@ describe("parseCodeChangeGlobs", () => {
     expect(parseCodeChangeGlobs(yml)).toEqual(["src/**/*", "*.ts"]);
   });
 
+  it("accepts every quoting style GitLab accepts, plus inline comments", () => {
+    const yml = [
+      ".code_changes: &code_changes",
+      '  - "double/**/*"',
+      "  - 'single/**/*'",
+      "  - bare/**/*",
+      '  - "with-comment/**/*"   # why this path matters',
+      "next_key: x",
+    ].join("\n");
+    expect(parseCodeChangeGlobs(yml)).toEqual([
+      "double/**/*",
+      "single/**/*",
+      "bare/**/*",
+      "with-comment/**/*",
+    ]);
+  });
+
+  it("throws on an unreadable list item instead of truncating the list", () => {
+    // Silently stopping here would drop `scripts/**/*` and send the developer
+    // off to fix a coverage gap that does not exist.
+    const yml = [
+      ".code_changes: &code_changes",
+      '  - "src/**/*"',
+      "  - [flow, syntax]",
+      '  - "scripts/**/*"',
+      "next_key: x",
+    ].join("\n");
+    expect(() => parseCodeChangeGlobs(yml)).toThrow(/cannot read/);
+  });
+
   it("throws if the anchor is missing, rather than silently passing", () => {
     expect(() => parseCodeChangeGlobs("workflow:\n  rules: []\n")).toThrow(
       /\.code_changes/,

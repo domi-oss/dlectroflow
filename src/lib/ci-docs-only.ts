@@ -49,12 +49,27 @@ export const DOCS_ONLY_PATHS = [
 export type PathClass = "code" | "docs" | "unclassified";
 
 /**
+ * One `- …` item of the `.code_changes` sequence: a double-quoted,
+ * single-quoted or bare scalar, with an optional trailing inline comment (the
+ * repo's YAML uses those elsewhere). All three quoting styles are valid YAML and
+ * GitLab honours all three, so the parser accepts all three rather than
+ * imposing a house style the pipeline itself does not care about.
+ */
+const LIST_ITEM = /^- (?:"([^"]+)"|'([^']+)'|(\S+?))\s*(?:#.*)?$/;
+
+/**
  * Extract the `.code_changes` glob list from `.gitlab-ci.yml`.
  *
  * Line-based on purpose: the repo has no YAML parser dependency, and the block
- * is a flat sequence of quoted scalars with comments, which is trivial to read
- * exactly. Stops at the first line that is neither a comment nor a `- "…"`
- * item, i.e. the end of the anchor's block.
+ * is a flat sequence of scalars with comments, which is trivial to read exactly.
+ * A line that is not a comment and does not start with `- ` ends the block —
+ * that is the next top-level key.
+ *
+ * A line that *does* start with `- ` but cannot be read as a scalar throws
+ * instead of ending the block. Silently stopping there would truncate the glob
+ * list, and the caller would then report the paths those dropped globs covered
+ * as "unclassified" — sending whoever added the line off to fix an imaginary
+ * coverage gap instead of the malformed item in front of them.
  */
 export function parseCodeChangeGlobs(gitlabCiYml: string): string[] {
   const lines = gitlabCiYml.split("\n");
@@ -69,9 +84,16 @@ export function parseCodeChangeGlobs(gitlabCiYml: string): string[] {
   for (const line of lines.slice(start + 1)) {
     const trimmed = line.trim();
     if (trimmed === "" || trimmed.startsWith("#")) continue;
-    const item = /^- "(.+)"$/.exec(trimmed);
-    if (!item) break; // start of the next key — block finished
-    globs.push(item[1]);
+    if (!trimmed.startsWith("- ")) break; // next key — block finished
+
+    const item = LIST_ITEM.exec(trimmed);
+    if (!item) {
+      throw new Error(
+        `\`.code_changes:\` has an item this guard cannot read: ${trimmed}\n` +
+          `Expected one glob per line as a plain scalar, e.g. - "src/**/*"`,
+      );
+    }
+    globs.push(item[1] ?? item[2] ?? item[3]);
   }
 
   if (globs.length === 0) {
