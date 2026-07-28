@@ -137,7 +137,10 @@ test("focus timer starts and pauses", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await expect(ring).toHaveCount(0);
   await expect(resume).toBeVisible(); // …and Resume is untouched either way
-  await page.emulateMedia({ reducedMotion: null });
+  // "no-preference", not null: null resets emulation to the SYSTEM default, so
+  // on a host with OS "Reduce motion" on, the pacer would legitimately stay
+  // away and the assertion below would fail for the wrong reason (Duo review).
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   await expect(ring).toBeVisible();
 
   // Leaving the paused state ends the breath.
