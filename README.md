@@ -98,19 +98,30 @@ You can run and demo the whole capture → breakdown flow with **just the Anthro
 git clone https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow.git
 cd dlectroflow
 
-# 2. Start Postgres, install deps + create the database (one command)
+# 2. Create your env file — copy it as-is, there's nothing to edit
+cp .env.example .env
+
+# 3. Start Postgres, install deps + create the database (one command)
 npm run setup        # = docker compose up -d db && npm install && prisma migrate dev
 
-# 3. Add your Claude API key (see options below), e.g. for this shell session:
+# 4. Add your Claude API key (see options below), e.g. for this shell session:
 #    (or point the app at a model of your own instead — see "Bring your own LLM")
 export ANTHROPIC_API_KEY='sk-ant-...'
 
-# 4. Run it
+# 5. Run it
 npm run dev
 ```
 
 Open **http://localhost:3000** — it redirects to your inbox. Capture a thought,
 hit **Break down →**, and watch Claude stream a plan. 🎉
+
+> **Why step 2 comes first:** `npm run setup` ends in `prisma migrate dev`, which
+> reads `DATABASE_URL` from **`.env`** — so `.env` has to exist before you run it,
+> or setup stops at *"Environment variable not found: DATABASE_URL"*. The copied
+> file needs no editing: its `DATABASE_URL` is already the local Compose database
+> (`dlectroflow` / `dlectroflow`, matching `docker-compose.yml`), which `npm run setup`
+> starts for you. Note it's `.env`, **not** `.env.local` — Prisma only reads the
+> former ([which file?](#which-file-env-vs-envlocal)).
 
 > **No key yet?** The app still runs — you just get a friendly error when you try
 > a breakdown instead of a plan.
@@ -126,7 +137,19 @@ it doesn't care *how* the value got there.
 
 **Local dev — pick whichever suits you:**
 - **Quickest:** `export ANTHROPIC_API_KEY='sk-ant-...'` in your terminal before `npm run dev`.
-- **Persistent:** `cp .env.example .env.local` and fill it in. `.env.local` is gitignored.
+- **Persistent:** put it in `.env` (`cp .env.example .env` if you skipped step 2). `.env.local` works for this one too — [which file?](#which-file-env-vs-envlocal). Both are gitignored.
+
+### Which file: `.env` vs `.env.local`
+
+Two filenames are in play and they are **not** interchangeable — this is the one
+trap in local setup:
+
+| File | Who reads it | What to put there |
+|---|---|---|
+| **`.env`** | The **Prisma CLI** (`npm run setup`, `npm run db:migrate`, `npm run db:studio` — via `prisma.config.ts`), `next dev` / `next start`, and **`npm test`** (`vitest.config.ts` forwards `DATABASE_URL` from it — Prisma *Client* never reads env files itself). | **`DATABASE_URL`**, plus anything else you want persisted. A single `.env` is enough to run everything locally — that's what `cp .env.example .env` gives you. |
+| **`.env.local`** | **Next.js**, and `npm test` for `DATABASE_URL`; it *overrides* `.env`. The **Prisma CLI** never reads it. | Optional. Runtime-only values you'd rather keep out of `.env`. Don't put `DATABASE_URL` *only* here — migrations will fail with *"Environment variable not found: DATABASE_URL"*. |
+
+Both are gitignored. If you only ever create `.env`, nothing is missing.
 
 **CI/CD + production — use a real secrets manager.** This project targets
 **GitLab Secrets Manager** (keeps secrets out of both the repo *and* project
@@ -280,6 +303,8 @@ Streaming a bigger catalogue is a later release (#61); this is the bundled set.
 ## 🗄️ Database & migrations
 
 Postgres — runs locally via Docker Compose. Start it with `docker compose up -d db`.
+Every command below takes its connection string from `DATABASE_URL` in **`.env`**
+(see [which file?](#which-file-env-vs-envlocal)).
 
 ```bash
 docker compose up -d db   # start local Postgres (idempotent — safe to re-run)
@@ -379,7 +404,11 @@ Visit **http://localhost:3000**.
 | Symptom | Fix |
 |---|---|
 | `command not found: node` | Node isn't installed / not on PATH. Install it (see Prerequisites), reopen your terminal. |
-| Breakdown returns *"ANTHROPIC_API_KEY is not set"* | Export the key (or put it in `.env.local`) **and restart** `npm run dev`. Env is read at server start. |
+| `npm run setup` stops at *"Environment variable not found: DATABASE_URL"* | There's no `.env` yet — or your `DATABASE_URL` is in `.env.local`, which Prisma doesn't read. `cp .env.example .env`, then re-run ([which file?](#which-file-env-vs-envlocal)). |
+| `P1000: Authentication failed against database server` | Your `DATABASE_URL` password doesn't match `docker-compose.yml` (it's `dlectroflow`). Re-copy the template: `cp .env.example .env`. |
+| `P1001: Can't reach database server at localhost:5432` | Postgres isn't running. `docker compose up -d db` (or just re-run `npm run setup`, which starts it). |
+| First-ever page load logs `prisma:error … Unique constraint failed on the fields: (id)` | Harmless, and only on a brand-new database: two concurrent first-use reads race to create your Settings/Streak row, and the loser re-fetches it (see the docblock in `src/lib/db.ts`). The page still renders; you won't see it again. |
+| Breakdown returns *"ANTHROPIC_API_KEY is not set"* | Export the key (or put it in `.env`, or `.env.local` — either works for runtime values) **and restart** `npm run dev`. Env is read at server start. |
 | DB error mentioning a table/model that should exist | You ran a migration while `npm run dev` was running. **Restart the dev server.** |
 | `Port 3000 is already in use` | Another server is running: `npm run dev -- -p 3001`, or stop the other one. |
 | Boot fails: *LLM provider "openai-compatible" misconfigured — refusing to boot* | In production both `LLM_BASE_URL` and `LLM_MODEL` are required. Set them — see [BYO-LLM](#-bring-your-own-llm-byo-llm). |
@@ -431,7 +460,8 @@ Have an idea or hit a bug? [Open an issue](https://gitlab.com/gl-demo-ultimate-d
 
 This app is built the way it helps *me* think, and the setup is meant to respect that:
 
-- **One command to start** (`npm run setup`) — fewer decisions, less friction.
+- **Two lines to start** (`cp .env.example .env && npm run setup`) — fewer decisions,
+  less friction, and the template needs no editing.
 - **Copy-pasteable steps** — no "figure out the obvious bit" gaps.
 - **Honest status** above — so you're never chasing a feature that isn't wired yet.
 - **Nothing hard-fails** — no Claude key? App still runs. Haven't connected Google
