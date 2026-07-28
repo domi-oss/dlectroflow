@@ -497,3 +497,79 @@ describe("PeoplePanel — accessibility", () => {
     expect(await screen.findByRole("alert")).toBeInTheDocument();
   });
 });
+
+// ── Duo review on !175 ───────────────────────────────────────────────────────
+describe("PeoplePanel — the card is internally consistent mid-edit", () => {
+  it("updates the AI line when the policy dropdown changes, before saving", async () => {
+    // Duo review finding, verified against the code: `metered` (which disables
+    // the quota field and hides the window line) read the LOCAL dropdown state
+    // while the AI line read the SAVED prop, so picking "Uncapped" left a
+    // disabled quota field sitting next to "12 / 50 breakdowns used".
+    const user = userEvent.setup();
+    renderPanel();
+    const card = personCard("ada");
+
+    expect(card).toHaveTextContent("12 / 50");
+
+    await user.selectOptions(
+      within(card).getByLabelText(/ai policy for ada/i),
+      "uncapped",
+    );
+
+    expect(card).toHaveTextContent(/uncapped/i);
+    expect(card).not.toHaveTextContent("12 / 50");
+    expect(within(card).getByLabelText(/quota for ada/i)).toBeDisabled();
+  });
+
+  it("goes back to the meter when the policy is switched back to capped", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    const card = personCard("ada");
+    const select = within(card).getByLabelText(/ai policy for ada/i);
+
+    await user.selectOptions(select, "uncapped");
+    await user.selectOptions(select, "capped");
+
+    expect(card).toHaveTextContent("12 / 50");
+    expect(within(card).getByLabelText(/quota for ada/i)).toBeEnabled();
+  });
+
+  it("keeps 'billed to their own key' whatever the dropdown says — a present key wins", async () => {
+    // Matches consumeUserBreakdown: the key is checked BEFORE the policy, so no
+    // dropdown selection can make an own-key account look metered.
+    const user = userEvent.setup();
+    renderPanel({
+      people: [
+        person({ label: "grace", aiPolicy: "own_key", hasOwnKey: true }),
+      ],
+    });
+    const card = personCard("grace");
+
+    await user.selectOptions(
+      within(card).getByLabelText(/ai policy for grace/i),
+      "capped",
+    );
+
+    expect(within(card).getByText(/own key set/i)).toBeInTheDocument();
+    expect(card).not.toHaveTextContent("12 / 50");
+  });
+
+  it("sends the TRIMMED identity to the server action, matching what it reports", async () => {
+    // Duo review finding: the action trims server-side either way, but sending
+    // the raw value while reporting the trimmed one meant the client and the
+    // server disagreed about what was just invited.
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.type(screen.getByLabelText(/username or email/i), "  grace  ");
+    await user.click(screen.getByRole("button", { name: /send invitation/i }));
+
+    expect(invitePerson).toHaveBeenCalledWith({
+      identity: "grace",
+      note: undefined,
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Invited grace.",
+    );
+  });
+});

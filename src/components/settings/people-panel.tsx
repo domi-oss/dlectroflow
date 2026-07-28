@@ -81,10 +81,15 @@ function windowLabel(hours: number): string {
  *
  * Mirrors `consumeUserBreakdown`'s resolution order exactly — key first, then
  * uncapped, then the meter — so the panel and enforcement cannot disagree.
+ *
+ * `policy` is passed in rather than read off `p` so the caller can hand it the
+ * PENDING selection: the dropdown, the quota field's disabled state and this
+ * phrase must all describe the same policy, or the card contradicts itself
+ * mid-edit (Duo review on !175 — it did).
  */
-function allowanceLabel(p: PersonView): string {
+function allowanceLabel(p: PersonView, policy: string): string {
   if (p.hasOwnKey) return "Billed to their own key — not metered";
-  if (p.aiPolicy === AiPolicy.Uncapped) return "Uncapped — not metered";
+  if (policy === AiPolicy.Uncapped) return "Uncapped — not metered";
   return `${p.usage.used} / ${p.usage.quota} breakdowns used`;
 }
 
@@ -146,9 +151,10 @@ function PersonCard({
     });
   };
 
-  // Only a capped account with no key of its own is actually metered — the same
-  // condition allowanceLabel resolves, kept in one expression so the window line
-  // and the enabled quota field can never disagree with the phrase above them.
+  // Only a capped account with no key of its own is actually metered. Derived
+  // from the LOCAL `aiPolicy` state — the pending selection — and fed to
+  // allowanceLabel as well, so the phrase, the window line and the quota
+  // field's disabled state are three views of ONE value and cannot drift apart.
   const metered = !person.hasOwnKey && aiPolicy === AiPolicy.Capped;
 
   return (
@@ -175,7 +181,7 @@ function PersonCard({
           </time>
         </dd>
         <dt>AI</dt>
-        <dd>{allowanceLabel(person)}</dd>
+        <dd>{allowanceLabel(person, aiPolicy)}</dd>
         <dt>Own key</dt>
         <dd>{person.hasOwnKey ? "Own key set" : "No own key"}</dd>
         {metered && person.usage.windowStartedAt && (
@@ -392,9 +398,13 @@ export function PeoplePanel({
     // an error the person can already see is their own blank field.
     if (!identity.trim()) return;
     startTransition(async () => {
+      // Trim once and use that value for BOTH the request and the report. The
+      // action trims server-side too, but sending the raw string while reporting
+      // the trimmed one meant the two disagreed about what was invited (Duo
+      // review on !175).
       const typed = identity.trim();
       const res = await invitePerson({
-        identity,
+        identity: typed,
         note: note.trim() || undefined,
       });
       if (res.ok) {
