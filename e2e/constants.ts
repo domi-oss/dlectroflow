@@ -20,5 +20,17 @@ export const OWNER_SUB = "1";
 export const OWNER_USER_ID = "e2e-owner-user";
 export const OWNER_WS_ID = "e2e-owner-ws";
 
+/**
+ * A second, ordinary account (#35 Phase B). The People panel is unreviewable with
+ * one row: the owner's own card deliberately has no Revoke control, so with only
+ * the owner seeded there is nothing to exercise the revoke confirmation or the
+ * capped-quota presentation against, and "the owner's row is FIRST" is a claim
+ * about a list of one. Seeded active and capped; specs may open its revoke
+ * confirmation but must not confirm it.
+ */
+export const MEMBER_USER_ID = "e2e-member-user";
+export const MEMBER_WS_ID = "e2e-member-ws";
+export const MEMBER_HANDLE = "e2e-member";
+
 export const STORAGE_STATE = "playwright/.auth/owner.json";
 export const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";

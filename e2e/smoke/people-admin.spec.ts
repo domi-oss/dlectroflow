@@ -1,4 +1,16 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
+import {
+  DESKTOP,
+  MOBILE,
+  THEMES,
+  setTheme,
+  expectThemeApplied,
+  waitForShell,
+} from "../helpers";
+import {
+  scanColorContrast,
+  expectNoContrastViolations,
+} from "../a11y/axe-helpers";
 
 // #35 Phase B — the owner-only People panel, end to end.
 //
@@ -16,10 +28,6 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 
 const PEOPLE = "#settings-people";
 const SETTINGS_NAV = 'nav[aria-label="Settings sections"]';
-
-async function waitForShell(page: Page): Promise<void> {
-  await expect(page.getByRole("link", { name: "dlectroflow" })).toBeVisible();
-}
 
 /**
  * The nav only gains its scroll-spy and its measured height after hydration, so
@@ -155,7 +163,7 @@ test.describe("People admin — the disclosure", () => {
   }) => {
     // The whole point of the owner's request — instance administration must not
     // sit between them and their own timer settings.
-    await page.setViewportSize({ width: 390, height: 844 });
+    await page.setViewportSize(MOBILE);
     await page.goto("/settings");
     await waitForShell(page);
 
@@ -395,7 +403,7 @@ test.describe("People admin (owner)", () => {
   test("every control in the panel clears the 44px touch-target minimum", async ({
     page,
   }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
+    await page.setViewportSize(MOBILE);
     await page.goto("/settings");
     await waitForShell(page);
 
@@ -432,3 +440,69 @@ test.describe("People admin (owner)", () => {
     expect(html).not.toMatch(/sk-[A-Za-z0-9]/);
   });
 });
+
+// ── The coverage hole collapsing the panel opened ─────────────────────────────
+//
+// `e2e/a11y-contrast.spec.ts` scans owner `/settings` with ZERO tolerance, and
+// until this MR that scan saw the whole People panel. Collapsing it by default
+// took ~1900px of controls out of the scanned DOM: the selects, the number
+// inputs, the status pills and the destructive Revoke button are all now behind
+// a `hidden` attribute, which axe correctly skips.
+//
+// So the panel's expanded state gets its own scan here, on the same
+// zero-tolerance footing and using the same helpers #90 established. Both themes,
+// because that is the axis contrast actually varies on — and the lesson from #90
+// is that a surface nothing looks at is where the 2.7:1 text lives.
+for (const theme of THEMES) {
+  test.describe(`accessibility: People panel color-contrast (axe) — ${theme}`, () => {
+    test.use({ viewport: DESKTOP });
+
+    test.beforeEach(async ({ page }) => {
+      await setTheme(page, theme);
+    });
+
+    test(`zero color-contrast violations: collapsed (${theme})`, async ({
+      page,
+    }) => {
+      await page.goto("/settings");
+      await waitForShell(page);
+      await expectThemeApplied(page, theme);
+      // The resting state: the trigger and its summary line are the only People
+      // UI on the page, and they are `text-muted-foreground` at `text-sm`.
+      await expect(peopleToggle(page)).toBeVisible();
+      expectNoContrastViolations(await scanColorContrast(page));
+    });
+
+    test(`zero color-contrast violations: expanded (${theme})`, async ({
+      page,
+    }) => {
+      await page.goto("/settings");
+      await waitForShell(page);
+      await expectThemeApplied(page, theme);
+      await openPeople(page);
+      expectNoContrastViolations(await scanColorContrast(page));
+    });
+
+    test(`zero color-contrast violations: mid-revoke confirmation (${theme})`, async ({
+      page,
+    }) => {
+      // The destructive branch renders copy no other state does, on a
+      // `bg-destructive` button — the one place in this panel where colour is
+      // carrying meaning, and the state a scan of the resting page never reaches.
+      await page.goto("/settings");
+      await waitForShell(page);
+      await expectThemeApplied(page, theme);
+      await openPeople(page);
+      // The seeded member (e2e/constants.ts) — the owner's own card carries no
+      // revoke control by design, so this needs the OTHER account. Opening the
+      // confirmation is enough; deliberately never confirmed, so the shared
+      // fixture is not mutated for the specs that run after this one.
+      const target = page.locator('[data-person-label="e2e-member"]');
+      await target.getByRole("button", { name: "Revoke e2e-member" }).click();
+      await expect(
+        target.getByRole("button", { name: "Yes, revoke e2e-member" }),
+      ).toBeVisible();
+      expectNoContrastViolations(await scanColorContrast(page));
+    });
+  });
+}

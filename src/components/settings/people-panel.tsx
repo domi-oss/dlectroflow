@@ -495,7 +495,16 @@ export function PeoplePanel({
           // and the same triage line a sighted user reads.
           aria-label={`${expanded ? "Hide" : "Show"} people admin: ${summary}`}
           onClick={() => setExpanded((v) => !v)}
-          className="hover:bg-accent focus-visible:ring-ring focus-visible:ring-offset-background text-muted-foreground -ml-1 inline-flex min-h-11 min-w-0 items-center gap-1.5 rounded-md px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+          // `hover:bg-current/10` rather than the `hover:bg-accent` this was
+          // lifted from. The trigger lives INSIDE the sticky section band, and
+          // while that band is the current section globals.css paints it magenta
+          // and forces `color: currentColor` on every child — so an `--accent`
+          // hover background put white text on light pink at 1.16:1 (and
+          // #1a0f18 on #2a1b3d in dark). Caught by the People-panel contrast
+          // scan added in this MR, and invisible until you hovered. A tint of
+          // currentColor is correct in BOTH contexts by construction: it is
+          // always derived from the text colour actually in force.
+          className="focus-visible:ring-ring focus-visible:ring-offset-background text-muted-foreground -ml-1 inline-flex min-h-11 min-w-0 items-center gap-1.5 rounded-md px-2 text-sm outline-none hover:bg-current/10 focus-visible:ring-2 focus-visible:ring-offset-2"
         >
           <svg
             aria-hidden="true"

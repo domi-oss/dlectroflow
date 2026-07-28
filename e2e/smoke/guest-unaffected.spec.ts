@@ -60,21 +60,66 @@ test("a guest is refused an authenticated-only path", async ({ page }) => {
   await expect(page).toHaveURL(/\/login/);
 });
 
-test("a guest sees no People admin, and no nav link to one", async ({
+test("a guest sees NOTHING of the People admin — no card, no heading, no empty section", async ({
   page,
 }) => {
-  // #35 Phase B — the People panel is owner-only, and the gate is checked in
-  // three places: the page renders nothing, the section nav lists nothing, and
-  // loadPeopleAdmin returns null for a non-owner regardless of the caller.
+  // #35 Phase B — the People panel is owner-only administration UI, and this is
+  // the design's "usage numbers only, never content" guarantee from the other
+  // direction: a guest glimpsing account handles would be a leak of a different
+  // kind. Three independent gates: the page renders nothing, the section nav
+  // lists nothing, and loadPeopleAdmin returns null for a non-owner whatever the
+  // caller does.
+  //
+  // Asserted EXPLICITLY rather than left to #90's guest contrast gate to notice.
+  // That gate now scans guest /settings, so if a guest could see this panel the
+  // gate would be quietly scanning owner administration UI and passing.
   await page.goto("/settings");
 
+  // Not the section, not the heading, and not a collapsed shell of either.
   await expect(page.locator("#settings-people")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "People" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /people admin/i })).toHaveCount(
+    0,
+  );
+  // No summary line either — "N accounts" is itself information about the
+  // instance that a guest has no business reading.
+  await expect(page.getByText(/\d+ account/)).toHaveCount(0);
+  await expect(page.getByText(/invitations? pending/i)).toHaveCount(0);
+
+  // None of the controls, whether or not a disclosure is hiding them.
   await expect(page.getByLabel(/invite a username or email/i)).toHaveCount(0);
   await expect(page.getByRole("list", { name: /accounts/i })).toHaveCount(0);
+  await expect(page.getByRole("list", { name: /invitations/i })).toHaveCount(0);
+  await expect(page.locator("[data-person-label]")).toHaveCount(0);
+
+  // And nothing about the accounts that DO exist: both handles are seeded by
+  // global-setup, so this would catch a leak of real identity data.
+  await expect(page.getByText("e2e-owner")).toHaveCount(0);
+  await expect(page.getByText("e2e-member")).toHaveCount(0);
 
   const nav = page.locator('nav[aria-label="Settings sections"]');
   await nav.getByRole("button", { name: /jump to/i }).click();
   await expect(nav.getByRole("link", { name: "People" })).toHaveCount(0);
+});
+
+test("a guest's /settings HTML never carries the People panel at all", async ({
+  page,
+}) => {
+  // The stronger version of the assertion above. `hidden` markup is still IN the
+  // document, so "not visible" would not prove the panel was never SENT — and
+  // since the panel became a collapsed disclosure, "not visible" is exactly what
+  // an owner's own page looks like too. For a guest it must not be in the
+  // response at all: loadPeopleAdmin returns null before it queries anything, so
+  // the component is never rendered.
+  const res = await page.request.get("/settings");
+  const html = await res.text();
+
+  expect(html).not.toContain("settings-people");
+  expect(html).not.toContain("people admin");
+  expect(html).not.toContain("data-person-label");
+  // The seeded handles, straight out of the database.
+  expect(html).not.toContain("e2e-owner");
+  expect(html).not.toContain("e2e-member");
 });
 
 test("a guest's sandbox is separate from the signed-in account's workspace", async ({

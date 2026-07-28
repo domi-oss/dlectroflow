@@ -75,30 +75,32 @@ vi.mock("@/lib/workspace", () => ({
   currentUser: currentUserMock,
 }));
 
-// #84 — Phase A turned isGuestWorkspace() into a DB lookup, which silently made
-// this unit test require Postgres (46 failures on a fresh checkout). Mocking it
-// here restores the *.integration.test.ts naming convention's only job, and the
-// guest-vs-user branch it decides is asserted explicitly below instead of being
-// exercised by accident against whatever rows the local database happens to hold.
-vi.mock("@/lib/workspace-kind", () => ({
-  isGuestWorkspace: isGuestWorkspaceMock,
-}));
-
 // #84 — keeps this file a real unit test. #35 Phase A turned isGuestWorkspace()
 // into a `prisma.workspace.findUnique()` call, which silently made these route
 // tests require a live Postgres. Mocked here exactly as every other call-site
-// unit test does (focus, settings, rollup, spark, ai-scope-guards), with
-// "owner" as this file's existing non-guest sentinel id.
+// unit test does (focus, settings, rollup, spark, ai-scope-guards).
 //
 // No coverage is lost: the real guest-vs-user branch — including the fail-closed
 // unknown-workspace case and the query shape — is asserted against a mocked
 // prisma in src/lib/workspace-kind.test.ts (renamed from ai-scope.test.ts in
 // #91), which is where that unit belongs. Against a real database this file
-// never exercised the distinction anyway: neither sentinel id resolves to a
+// never exercised the distinction anyway: neither sentinel id resolved to a
 // `kind:"user"` row, so isGuestWorkspace() returned true for both, and the
 // "owner" default silently ran the *guest* path.
+//
+// #35 Phase B: a per-test MOCK FUNCTION rather than main's `id !== "owner"`
+// rule. Phase B added a third caller — a signed-in MEMBER, whose workspace id is
+// neither sentinel — and a rule keyed off the id would classify them as a guest,
+// which is precisely the bug the per-user allowance exists to avoid. `asGuest()`
+// below moves this and the identity mocks together, so a request is a guest's or
+// an account's and never half of each.
+//
+// NOTE for the next rebase: this file briefly carried TWO `vi.mock` calls for
+// this module after main and this branch each fixed #84. Git merged them without
+// a conflict and the SECOND silently won, leaving `isGuestWorkspaceMock` inert
+// while the tests still passed. One mock per module, always.
 vi.mock("@/lib/workspace-kind", () => ({
-  isGuestWorkspace: (id: string) => Promise.resolve(id !== "owner"),
+  isGuestWorkspace: isGuestWorkspaceMock,
 }));
 
 vi.mock("@/lib/settings-read", () => ({

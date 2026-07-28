@@ -6,6 +6,9 @@ import {
   OWNER_SUB,
   OWNER_USER_ID,
   OWNER_WS_ID,
+  MEMBER_USER_ID,
+  MEMBER_WS_ID,
+  MEMBER_HANDLE,
   STORAGE_STATE,
   BASE_URL,
 } from "./constants";
@@ -55,6 +58,43 @@ export default async function globalSetup(): Promise<void> {
         expiresAt: null,
       },
       update: { kind: "user", userId: OWNER_USER_ID, expiresAt: null },
+    });
+
+    // #35 Phase B — a second, ordinary account so the People panel has a row
+    // that is NOT the owner's: one the owner may revoke, one that shows a capped
+    // quota, and one that makes "the owner's row comes first" a real assertion.
+    // Re-asserted every run, so a spec that revoked it cannot leak into the next.
+    await prisma.user.upsert({
+      where: { id: MEMBER_USER_ID },
+      create: {
+        id: MEMBER_USER_ID,
+        provider: "gitlab",
+        providerSub: "e2e-member-sub",
+        handle: MEMBER_HANDLE,
+        role: "member",
+        status: "active",
+        aiPolicy: "capped",
+        aiQuota: 50,
+      },
+      update: {
+        role: "member",
+        status: "active",
+        aiPolicy: "capped",
+        aiQuota: 50,
+        // Revocation sets these; clear them so a re-run starts clean.
+        revokedAt: null,
+        purgeAfter: null,
+      },
+    });
+    await prisma.workspace.upsert({
+      where: { id: MEMBER_WS_ID },
+      create: {
+        id: MEMBER_WS_ID,
+        kind: "user",
+        userId: MEMBER_USER_ID,
+        expiresAt: null,
+      },
+      update: { kind: "user", userId: MEMBER_USER_ID, expiresAt: null },
     });
   } finally {
     await prisma.$disconnect();
