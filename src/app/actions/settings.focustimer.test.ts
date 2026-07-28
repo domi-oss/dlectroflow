@@ -100,7 +100,7 @@ describe("updateFocusTimerSettings", () => {
     );
   });
 
-  it("leaves the coupling OFF when the caller omits it or sends junk (opt-in only)", async () => {
+  it("defaults to false when omitted; coerces any truthy junk to a real boolean (NOT NULL column)", async () => {
     await updateFocusTimerSettings({
       timerStyle: "ring",
       minimalMode: false,
