@@ -62,6 +62,27 @@ describe("HelpPage", () => {
     expect(text).toMatch(/lo-?fi|music/i);
   });
 
+  // #89 — the paused ring's breathing pacer has no setting and no on-screen
+  // instructions (deliberately: it must not add a decision or compete with
+  // Resume), so this page is the one place that names it. #65 shipped the
+  // opt-in reverse pause coupling without updating this section, which still
+  // described only the original one-way behaviour.
+  it("documents the paused breathing pacer (#89) and the two-way pause coupling (#65)", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    const section = screen
+      .getByRole("heading", { name: /The focus session/i, level: 2 })
+      .closest("section");
+    const text = section!.textContent ?? "";
+    // The pacer: what it is, and that it is a real cadence you can follow.
+    expect(text).toMatch(/breath/i);
+    expect(text).toMatch(/four seconds/i);
+    expect(text).toMatch(/six/i);
+    // …and that reduced motion switches it off rather than slowing it.
+    expect(text).toMatch(/reduced motion/i);
+    // #65 — the player's pause button can drive the session, if asked to.
+    expect(text).toMatch(/Pause music and timer together/i);
+  });
+
   it("routes from the focus section to the Settings page that owns the track picker", async () => {
     render(await HelpPage({ searchParams: Promise.resolve({}) }));
     const section = screen
