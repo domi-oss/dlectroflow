@@ -45,6 +45,29 @@ operators upgrading a self-hosted instance don't get surprised.
     (production 20m, review 15m) are left as they are — they are now headroom
     rather than a requirement.
 
+### Fixed
+
+- **The documented quick start now works on a fresh clone (#91).** Following the
+  README could not get a new checkout running, and three faults compounded:
+  `.env.example` shipped a `CHANGEME` database password while
+  `docker-compose.yml` uses `dlectroflow` (so a copy-paste failed with Prisma
+  `P1000: Authentication failed`); the README said to copy the template to
+  `.env.local`, but the Prisma CLI reads `.env` (so `npm run setup` stopped at
+  *"Environment variable not found: DATABASE_URL"* even when followed exactly);
+  and nothing stated that `.env` has to exist **before** `npm run setup`, whose
+  last step is `prisma migrate dev`. The template now carries the local Compose
+  credentials and copies with no edit, that copy is an explicit step before
+  setup in both the README and CONTRIBUTING, and a new README section documents
+  which file each variable belongs in — `.env` for the Prisma CLI, Next.js and
+  `npm test`; `.env.local` as the Next-only override that Prisma never reads.
+  Verified by walking a real fresh clone from `git clone` to a green
+  `npm test` and a serving app with no manual env editing.
+  - **Operators:** no action — nothing about a deployed instance changes. The
+    Compose password now in `.env.example` is local-only and was already
+    published in the committed `docker-compose.yml`; it reaches nothing outside
+    a developer's own machine, and production credentials still come from
+    GitLab Secrets Manager.
+
 ### Security
 
 - **`brace-expansion` is on the patched 5.0.8 wherever it can go (#82).** This
