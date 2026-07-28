@@ -435,9 +435,22 @@ export function FocusTimer({
     // A coupled RESUME can unmount the player (minimal mode hides it while
     // running; a resume landing on time's-up hides it outright), so flag the
     // focus hand-off before the phase moves. A coupled pause keeps it mounted.
-    pauseHandoffRef.current = phase === "paused";
+    //
+    // The `sessionId` half matters (Duo review): arm this ONLY when togglePause
+    // is certain to move the phase, because the effect that disarms it is keyed
+    // on `phase`. Every other route out of a paused session changes phase — a
+    // rejected resume falls back to "running", a successful one lands on
+    // running/timeup — but `phase === "paused"` with no session id returns
+    // immediately, which would leave the flag armed for the next, unrelated
+    // transition to consume as a focus jump the user never asked for.
+    //
+    // NOT done by resetting the flag after the await: `goToPhase` inside
+    // togglePause schedules a React update, so the disarm would win the race
+    // against the commit and the hand-off would silently stop happening. That
+    // exact suggestion was tried and it fails the minimal-mode focus test.
+    pauseHandoffRef.current = phase === "paused" && sessionId != null;
     await togglePause();
-  }, [phase, togglePause]);
+  }, [phase, sessionId, togglePause]);
 
   const changeTime = (mins: number) => {
     const next = applyTimeDelta({ totalSec, remainingSec }, mins * 60);

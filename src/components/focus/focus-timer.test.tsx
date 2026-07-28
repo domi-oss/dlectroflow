@@ -738,6 +738,46 @@ describe("FocusTimer — music↔timer pause coupling (#65)", () => {
       expect(screen.getByRole("button", { name: /pause/i })).toHaveFocus(),
     );
   });
+
+  // The failure path has to hand focus over too, and consume the flag doing it.
+  // A rejected resume falls back to "running" (#27), which IS a phase change, so
+  // the effect fires, focus lands somewhere real, and nothing is left armed for
+  // a later transition to spend as a focus jump (Duo review). The one route that
+  // would leave it armed — a paused session with no session id — is unreachable
+  // from the UI, which is why `togglePauseFromPlayer` guards on `sessionId`
+  // rather than this being testable here.
+  it("ON + minimal mode: a REJECTED coupled resume still hands focus over, not to <body>", async () => {
+    const user = userEvent.setup();
+    vi.mocked(resumeFocus).mockResolvedValueOnce({
+      ok: false,
+    } as unknown as Awaited<ReturnType<typeof resumeFocus>>);
+    render(
+      <FocusTimer
+        {...base({
+          settings: lofi({ pauseTogether: true, minimalMode: true }),
+        })}
+      />,
+    );
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /pause/i }));
+    await user.click(
+      await screen.findByRole("button", { name: /mini sound toggle/i }),
+    );
+
+    // Server said no → back to running (the #27 fail-safe), player unmounted,
+    // focus handed over rather than dropped.
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("focus-sound-player"),
+      ).not.toBeInTheDocument(),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /pause/i })).toHaveFocus(),
+    );
+    // The session really did fall back to running, so this is the fail-safe
+    // path and not a successful resume in disguise.
+    expect(resumeFocus).toHaveBeenCalledWith("session-1");
+  });
 });
 
 describe("FocusTimer — alarm + auto-expand at time's-up (fake timers)", () => {
