@@ -132,6 +132,15 @@ export default async function HelpPage({
           out with <strong>Keep my paused session</strong>.
         </p>
         <p className="text-sm">
+          From the moment you start, the ring is also a slow breathing pacer:
+          four seconds growing, six seconds settling back. It runs for the whole
+          session — through a pause and out the other side — and stops when time
+          is up. Follow it if you want something to steady yourself against,
+          ignore it the rest of the time; it never moves the clock or the
+          buttons, and there is nothing to switch on. If your system asks for
+          reduced motion, the ring simply holds still.
+        </p>
+        <p className="text-sm">
           <strong>Focus music</strong>: ten lo-fi tracks are bundled with the
           app, so nothing is streamed from anywhere else. Choose one under{" "}
           <strong>Focus timer → Focus sounds</strong> on the{" "}
@@ -145,7 +154,9 @@ export default async function HelpPage({
           ends and only starts over once every track has played, so you should
           not hear the same thing twice in a row. It follows the timer: pausing
           pauses the music, resuming resumes it, and ending the session stops
-          it.
+          it. Turn on <strong>Pause music and timer together</strong> in
+          settings and it works both ways round — the player&rsquo;s own pause
+          button then stops your session too, and playing again resumes both.
         </p>
         <p className="text-sm">
           Also in <strong>Focus timer</strong> settings: four timer styles,{" "}

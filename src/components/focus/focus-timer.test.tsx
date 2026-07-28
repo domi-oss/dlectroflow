@@ -50,8 +50,11 @@ vi.mock("@/app/actions/settings", () => ({
   dismissFocusTimerTip: vi.fn().mockResolvedValue(undefined),
   updateFocusShuffle: vi.fn().mockResolvedValue(undefined),
 }));
+// #89 — the paused ring's breathing pacer must be absent entirely under reduced
+// motion, so this is per-test switchable (the mockVoice pattern below).
+let mockReducedMotion = false;
 vi.mock("@/lib/use-prefers-reduced-motion", () => ({
-  usePrefersReducedMotion: () => false,
+  usePrefersReducedMotion: () => mockReducedMotion,
 }));
 // The Celebration confetti isn't under test here.
 vi.mock("@/components/focus/celebration", () => ({
@@ -202,6 +205,7 @@ async function start(user: ReturnType<typeof userEvent.setup>) {
 beforeEach(() => {
   vi.clearAllMocks();
   mockVoice = "plain";
+  mockReducedMotion = false;
 });
 afterEach(cleanup);
 
@@ -777,6 +781,150 @@ describe("FocusTimer — music↔timer pause coupling (#65)", () => {
     // The session really did fall back to running, so this is the fail-safe
     // path and not a successful resume in disguise.
     expect(resumeFocus).toHaveBeenCalledWith("session-1");
+  });
+});
+
+// #89 — the ring is a paced breathing guide for the whole live session: it
+// starts with the session, runs through any pause, and stops when the clock
+// does. (Built pause-only first; the owner widened the scope after seeing it
+// working, and named reduced motion as the one off switch.) The pacer keys off
+// the timer PHASE, never off which control was pressed, so #65's coupled player
+// transport can neither start nor stop it out of step with the session.
+// (The cadence itself is CSS — see globals.breathe.test.ts.)
+describe("FocusTimer — breathing pacer through the live session (#89)", () => {
+  const ringSvg = () =>
+    screen.getByTestId("timer-visual-ring").querySelector("svg");
+  const lofiCoupled = {
+    timerStyle: null,
+    minimalMode: false,
+    keepAwake: false,
+    alarmEnabled: false,
+    sound: "lofi_calm",
+    pauseTogether: true,
+  };
+
+  it("setup is still; Start begins the pacer; it carries on through a pause and a resume", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimer {...base()} />);
+    // The setup screen is a decision, not a session.
+    expect(ringSvg()).not.toHaveAttribute("data-breathing");
+
+    await start(user);
+    expect(ringSvg()).toHaveAttribute("data-breathing");
+
+    await user.click(screen.getByRole("button", { name: /pause/i }));
+    const resume = await screen.findByRole("button", { name: /resume/i });
+    expect(ringSvg()).toHaveAttribute("data-breathing");
+    // The breath must never be in the way of getting back to work.
+    expect(resume).toBeVisible();
+    expect(resume).toBeEnabled();
+
+    await user.click(resume);
+    expect(
+      await screen.findByRole("button", { name: /pause/i }),
+    ).toBeInTheDocument();
+    expect(ringSvg()).toHaveAttribute("data-breathing");
+  });
+
+  // "Keep going until the timer is up" (owner) — so time's-up is where it stops.
+  // That screen asks a question and turns the ring amber to ask it.
+  it("stops when the clock runs out", async () => {
+    vi.useFakeTimers();
+    try {
+      render(<FocusTimer {...base()} />); // step estMinutes = 1 → 60s
+      await act(async () => {
+        screen.getByRole("button", { name: /start focusing/i }).click();
+      });
+      expect(ringSvg()).toHaveAttribute("data-breathing");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(screen.getByText(/time's up/i)).toBeInTheDocument();
+      expect(ringSvg()).not.toHaveAttribute("data-breathing");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Minimal mode strips the screen back to the countdown and its controls; it is
+  // not a motion preference, and the owner's instruction carries no exception for
+  // it (flagged on !177 so it can be overridden). Reduced motion is the off
+  // switch, and it works in minimal mode like anywhere else.
+  it("keeps running in focusMinimalMode (which strips controls, not motion)", async () => {
+    const user = userEvent.setup();
+    render(
+      <FocusTimer
+        {...base({
+          settings: {
+            timerStyle: null,
+            minimalMode: true,
+            keepAwake: false,
+            alarmEnabled: false,
+            sound: "off",
+          },
+        })}
+      />,
+    );
+    await start(user);
+    expect(screen.queryByRole("button", { name: /steps/i })).toBeNull();
+    expect(ringSvg()).toHaveAttribute("data-breathing");
+  });
+
+  // #65 gave the pause path a second entrance. The pacer reads the phase, and
+  // the phase is all a coupled press changes — so the breath is untouched by
+  // either entrance, exactly as it is untouched by the timer's own button.
+  it("#65 ON: a coupled pause and resume leave the pacer running", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimer {...base({ settings: lofiCoupled })} />);
+    await start(user);
+    expect(ringSvg()).toHaveAttribute("data-breathing");
+
+    await user.click(
+      screen.getByRole("button", { name: /mini sound toggle/i }),
+    );
+    expect(
+      await screen.findByRole("button", { name: /resume/i }),
+    ).toBeInTheDocument();
+    expect(ringSvg()).toHaveAttribute("data-breathing");
+
+    await user.click(
+      screen.getByRole("button", { name: /mini sound toggle/i }),
+    );
+    expect(
+      await screen.findByRole("button", { name: /pause/i }),
+    ).toBeInTheDocument();
+    expect(ringSvg()).toHaveAttribute("data-breathing");
+  });
+
+  // Reduced motion is the ONLY off switch — there is no in-app setting (owner).
+  it("reduced motion: no pacer at any point in the session", async () => {
+    mockReducedMotion = true;
+    const user = userEvent.setup();
+    render(<FocusTimer {...base()} />);
+    await start(user);
+    expect(ringSvg()).not.toHaveAttribute("data-breathing");
+    await user.click(screen.getByRole("button", { name: /pause/i }));
+    await screen.findByRole("button", { name: /resume/i });
+    expect(ringSvg()).not.toHaveAttribute("data-breathing");
+  });
+
+  // A session has to be STARTED. The setup screen's resumable-session offer
+  // (#27/#66) is a decision screen — the session behind it is not live yet.
+  it("the setup screen's resumable session does not breathe", () => {
+    render(
+      <FocusTimer
+        {...base({
+          existingSession: {
+            id: "sess-1",
+            plannedMin: 10,
+            totalSec: 600,
+            remainingSec: 300,
+          },
+        })}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /resume/i })).toBeInTheDocument();
+    expect(ringSvg()).not.toHaveAttribute("data-breathing");
   });
 });
 

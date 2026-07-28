@@ -203,6 +203,40 @@ export function TimerVisual({
   const R = 110;
   const C = 2 * Math.PI * R;
   const gradientStroke = neon && !timeup;
+  // #89 — the ring doubles as a paced breathing guide for as long as the session
+  // is live: it starts with the session, runs through any pause, and stops when
+  // the clock does (4s in / 6s out; the cadence and the animation itself are the
+  // `focus-breathe` keyframes in globals.css, which this marker attribute opts
+  // into). Built pause-only first — the worry being ambient motion on the screen
+  // you stare at while concentrating — and widened by the owner after seeing it
+  // working: "I also want it when the user clicks 'start focusing', it should
+  // keep going until the timer is up."
+  //
+  // Deliberate boundaries:
+  //
+  //  • The LIVE session, which is exactly the window that already earns the neon
+  //    hero treatment — hence `neon` rather than a second copy of the same
+  //    condition. Setup is a decision screen, and time's-up switches the ring to
+  //    its amber "answer me" semantic; neither is a moment to breathe through.
+  //  • Keyed off the PHASE, not off whichever control was pressed, so #65's
+  //    coupled mini-player transport can neither start nor stop the breath out of
+  //    step with the session it belongs to.
+  //  • Reduced motion removes it outright rather than slowing it, and is the ONLY
+  //    off switch (owner: "the animation can be turned off by enabling the reduced
+  //    motion setting" — so no in-app toggle). The caller has already resolved
+  //    the OS setting, so there is simply no animation to reduce.
+  //  • Minimal mode keeps it: that setting strips CONTROLS from the screen, not
+  //    motion, and the instruction above carries no exception for it.
+  //
+  // Ring style only: a breathing bar, mug or set of digits is a different and
+  // worse idea, and the ring is the one shape a breath maps onto. The animated
+  // element is this `svg` alone — the readout is a sibling overlay, so the
+  // remaining time neither moves nor fades at any point in the cycle, and since
+  // only `scale`/`opacity` animate inside a fixed 16rem frame, nothing it shares
+  // the screen with can be reflowed. Running and paused render identical ring
+  // markup, so React reconciles the same element and a pause carries the breath
+  // on mid-cycle rather than restarting it.
+  const breathing = neon && !reducedMotion;
   return (
     <div data-testid="timer-visual-ring" className="flex justify-center">
       <div
@@ -215,6 +249,7 @@ export function TimerVisual({
             which is the figure AT exposes (#66). */}
         <svg
           aria-hidden="true"
+          data-breathing={breathing ? "" : undefined}
           viewBox="0 0 240 240"
           className="h-full w-full -rotate-90"
         >
