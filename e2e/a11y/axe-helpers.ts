@@ -124,3 +124,36 @@ export async function scanA11y(page: Page, routeKey: string): Promise<void> {
       "  A11Y_UPDATE_BASELINE=1 npx playwright test e2e/a11y",
   ).toEqual([]);
 }
+
+// ── Zero-tolerance color-contrast gate ──────────────────────────────────────
+// The other half of the a11y suite: only the `color-contrast` rule, asserted at
+// ZERO violations with no allowlist, so every real contrast issue on a gated
+// surface must be fixed rather than grandfathered into the baseline above.
+// Extracted from e2e/a11y-contrast.spec.ts for #90 so the guest pass
+// (e2e/a11y/axe-guest-surfaces.spec.ts) gates on exactly the same primitives.
+
+/** Scan the current page for `color-contrast` violations only. */
+export async function scanColorContrast(page: Page): Promise<Violation[]> {
+  const results = await new AxeBuilder({ page })
+    .withRules(["color-contrast"])
+    .analyze();
+  return results.violations;
+}
+
+/** Assert ZERO contrast violations, with an actionable per-node report. */
+export function expectNoContrastViolations(violations: Violation[]): void {
+  // Named `detail` rather than `report` so it does not shadow the
+  // baseline-relative report() above.
+  const detail = violations
+    .map(
+      (v) =>
+        `[${v.impact}] ${v.id} — ${v.help}\n` +
+        v.nodes
+          .map(
+            (n) => `    at: ${n.target.join(" >>> ")}\n    ${n.failureSummary}`,
+          )
+          .join("\n"),
+    )
+    .join("\n");
+  expect(violations, `color-contrast violations found:\n${detail}`).toEqual([]);
+}

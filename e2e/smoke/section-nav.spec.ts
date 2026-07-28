@@ -1,4 +1,12 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
+import {
+  DESKTOP,
+  MOBILE,
+  THEMES,
+  setTheme,
+  expectThemeApplied,
+  waitForShell,
+} from "../helpers";
 
 // #72 — the collapsible sticky "Jump to…" section nav on the two long pages.
 // The things worth an end-to-end test are the ones jsdom cannot see: real
@@ -8,13 +16,6 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 const SETTINGS_NAV = 'nav[aria-label="Settings sections"]';
 const HELP_NAV = 'nav[aria-label="Help sections"]';
 const SHOTS = "test-results/section-nav";
-
-const MOBILE = { width: 390, height: 844 }; // iPhone 14-ish
-const DESKTOP = { width: 1280, height: 900 };
-
-async function waitForShell(page: Page): Promise<void> {
-  await expect(page.getByRole("link", { name: "dlectroflow" })).toBeVisible();
-}
 
 /**
  * The bar is server-rendered, so it is on screen BEFORE React hydrates — and
@@ -470,18 +471,11 @@ test.describe("section nav — screenshots", () => {
     ["desktop", DESKTOP],
     ["mobile", MOBILE],
   ] as const) {
-    for (const theme of ["light", "dark"] as const) {
+    for (const theme of THEMES) {
       test(`captures ${size} / ${theme}`, async ({ page }) => {
         await page.setViewportSize(viewport);
-        // Matches the app's own inline bootstrap (see src/app/layout.tsx) and
-        // e2e/a11y-contrast.spec.ts. addInitScript must run before goto.
-        await page.addInitScript((value: string) => {
-          try {
-            localStorage.setItem("df-theme", value);
-          } catch {
-            /* private mode — matches the app's best-effort persistence */
-          }
-        }, theme);
+        // setTheme's addInitScript must run before the first goto.
+        await setTheme(page, theme);
 
         for (const route of ["settings", "help"] as const) {
           await page.goto(`/${route}`);
@@ -489,11 +483,7 @@ test.describe("section nav — screenshots", () => {
           await waitForNavHydrated(page);
           // Guard the precondition: a silently-light "dark" screenshot is worse
           // than no screenshot, because it looks like it was reviewed.
-          expect(
-            await page.evaluate(() =>
-              document.documentElement.classList.contains("dark"),
-            ),
-          ).toBe(theme === "dark");
+          await expectThemeApplied(page, theme);
           const nav = page.locator(`nav[aria-label$="sections"]`);
 
           // 1. resting state: the collapsed one-line bar.

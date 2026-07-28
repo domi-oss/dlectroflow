@@ -1,7 +1,16 @@
-import { test, expect, type Page } from "@playwright/test";
-import AxeBuilder from "@axe-core/playwright";
+import { test, expect } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
-import { captureItem, needsReviewRow } from "./helpers";
+import {
+  captureItem,
+  needsReviewRow,
+  setTheme,
+  waitForShell,
+  THEMES,
+} from "./helpers";
+import {
+  scanColorContrast,
+  expectNoContrastViolations,
+} from "./a11y/axe-helpers";
 import { OWNER_WS_ID } from "./constants";
 
 // Dedicated color-contrast gate for the #40 visual-identity-refresh palette
@@ -10,38 +19,11 @@ import { OWNER_WS_ID } from "./constants";
 // checks only the `color-contrast` rule and asserts ZERO violations, with no
 // allowlist — every real contrast issue on these routes must be fixed, not
 // grandfathered in.
-
-type Theme = "light" | "dark";
-const THEMES: readonly Theme[] = ["light", "dark"];
-
-// Sets df-theme in localStorage before the app's own scripts run, matching
-// the inline bootstrap in src/app/layout.tsx
-// (`localStorage.getItem('df-theme') === 'dark'`) and the toggle in
-// src/components/theme-toggle.tsx. addInitScript re-runs on every subsequent
-// navigation in this page, so it survives page.goto() calls after this.
-async function setTheme(page: Page, theme: Theme): Promise<void> {
-  await page.addInitScript((value: Theme) => {
-    try {
-      localStorage.setItem("df-theme", value);
-    } catch {
-      /* private mode etc. — matches the app's own best-effort persistence */
-    }
-  }, theme);
-}
-
-// Wait for the always-present app shell (the brand link in the shared
-// header) so axe scans a fully-rendered page, not a hydrating one — mirrors
-// e2e/a11y/axe-core-flow.spec.ts's waitForShell.
-async function waitForShell(page: Page): Promise<void> {
-  await expect(page.getByRole("link", { name: "dlectroflow" })).toBeVisible();
-}
-
-async function scanColorContrast(page: Page) {
-  const results = await new AxeBuilder({ page })
-    .withRules(["color-contrast"])
-    .analyze();
-  return results.violations;
-}
+//
+// Everything here runs as the OWNER — the forged storageState in
+// playwright.config.ts. The guest-session half of the same gate lives in
+// e2e/a11y/axe-guest-surfaces.spec.ts (#90); guest-only UI is never in this
+// file's DOM.
 
 // #48 seeding. The Library hub's active tab-count chip only fails as an axe
 // *violation* once its count reaches two digits: axe skips single-character
@@ -136,23 +118,6 @@ async function cleanupSeed(
     where: { text: { startsWith: marker } },
   });
   await prisma.$disconnect();
-}
-
-function expectNoContrastViolations(
-  violations: Awaited<ReturnType<typeof scanColorContrast>>,
-): void {
-  const report = violations
-    .map(
-      (v) =>
-        `[${v.impact}] ${v.id} — ${v.help}\n` +
-        v.nodes
-          .map(
-            (n) => `    at: ${n.target.join(" >>> ")}\n    ${n.failureSummary}`,
-          )
-          .join("\n"),
-    )
-    .join("\n");
-  expect(violations, `color-contrast violations found:\n${report}`).toEqual([]);
 }
 
 for (const theme of THEMES) {
