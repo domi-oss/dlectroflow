@@ -29,9 +29,16 @@ truth. The short version:
 ```bash
 git clone https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow.git
 cd dlectroflow
-npm run setup   # starts Postgres in Docker, installs deps, runs migrations
+cp .env.example .env   # copy as-is — DATABASE_URL already matches docker-compose.yml
+npm run setup          # starts Postgres in Docker, installs deps, runs migrations
 npm run dev
 ```
+
+**`.env` before `npm run setup`, and `.env` not `.env.local`.** Setup's last step is
+`prisma migrate dev`, which reads `DATABASE_URL` from **`.env`** — the Prisma CLI
+does not read `.env.local` (Next.js reads both, `.env.local` winning). So if `.env`
+is missing, setup stops at *"Environment variable not found: DATABASE_URL"*. See
+[Which file: `.env` vs `.env.local`](README.md#which-file-env-vs-envlocal).
 
 The app is designed so nothing hard-fails on a missing piece — no Claude API key
 or Google connection needed to run it locally.
