@@ -267,7 +267,13 @@ test_app:
     # password (avoids a "password in URL" secret-detection hit; DRY).
     DATABASE_URL: "postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@postgres:5432/$POSTGRES_DB?schema=public"
   before_script:
-    - apk add --no-cache openssl   # Prisma engine libssl (postinstall runs prisma generate)
+    # openssl: Prisma engine libssl (postinstall runs prisma generate).
+    # git: node:22-alpine ships without it, and src/lib/ci-docs-only.test.ts
+    # shells out to `git ls-tree` to enumerate committed top-level paths — that
+    # is the source of truth for "what is in the repo", and reading the working
+    # directory instead would drag in node_modules/, ci-dist/ and every local
+    # artefact. ~2 MB, under a second.
+    - apk add --no-cache openssl git
   script:
     - npm ci --cache .npm --prefer-offline --no-audit --no-fund
     - npx tsc --noEmit

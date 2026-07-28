@@ -15,6 +15,13 @@
  *
  * So this module re-derives the classification from the committed tree and the
  * test asserts every top-level entry is deliberately on one side or the other.
+ *
+ * The test enumerates that tree with `git ls-tree`, which is why the `test_app`
+ * job installs `git` — `node:22-alpine` ships without it, and the first run of
+ * this guard failed in CI with `spawnSync git ENOENT` while passing locally.
+ * Reading the working directory instead would be worse: it would pick up
+ * `node_modules/`, `ci-dist/` and whatever else is lying around, so the ignore
+ * list would become the thing that rots.
  * Add a top-level file or directory and the test fails until you either list it
  * in `.code_changes` (it affects the app) or in `DOCS_ONLY_PATHS` below (it does
  * not). The parser is intentionally minimal — it understands only the glob
