@@ -265,12 +265,12 @@ describe.each([["Dockerfile"], ["Dockerfile.ci"]])(
     // container runs migrations/scripts on a different Prisma or tsx than the
     // one the app and its lockfile were tested with.
     //
-    // dotenv is included (Duo review on !159) even though package.json never
-    // declares it: prisma.config.ts imports `dotenv/config`, and it resolves
-    // because the Prisma CLI's own tree hoists it to the top of the lockfile.
-    // If it ever vanishes from there this test fails loudly — which is right,
-    // because prisma.config.ts would be broken locally and in CI too, not just
-    // in the image.
+    // dotenv is included (Duo review on !159) because prisma.config.ts imports
+    // `dotenv/config`. It used to reach the top of the lockfile only because
+    // the Prisma CLI's own tree hoisted it there, which made this pin track a
+    // package nothing in the repo owned; package.json declares it outright as
+    // of #76, so the lookup below now reads a first-class root dependency.
+    // src/lib/manifest-hygiene.test.ts guards the declaration itself.
     it("pins prisma, tsx and dotenv to the versions in package-lock.json", () => {
       const lock = JSON.parse(
         readFileSync(join(process.cwd(), "package-lock.json"), "utf8"),
@@ -280,7 +280,13 @@ describe.each([["Dockerfile"], ["Dockerfile.ci"]])(
       for (const pkg of ["prisma", "tsx", "dotenv"]) {
         const locked = lock.packages[`node_modules/${pkg}`]?.version;
         expect(locked, `${pkg} missing from package-lock.json`).toBeDefined();
-        expect(installed).toContain(`${pkg}@${locked}`);
+        expect(
+          installed,
+          `${filename} must install ${pkg}@${locked} to match package-lock.json. ` +
+            `The cluster runs migrations and scripts from this image, so a pin ` +
+            `that drifts from the lockfile means the container runs them on a ` +
+            `different ${pkg} than the app was built and tested against`,
+        ).toContain(`${pkg}@${locked}`);
       }
     });
   },
