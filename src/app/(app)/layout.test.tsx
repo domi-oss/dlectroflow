@@ -253,7 +253,12 @@ describe("AppLayout — header identity (#100)", () => {
       id: "cuid-secret-1234",
     });
     const cluster = await headerCluster();
+    // The id is checked against the MARKUP (it could hide in an attribute);
+    // "no email" is checked against the rendered TEXT, because Tailwind v4's
+    // container-query variants put a literal `@` in class names and asserting
+    // on innerHTML would start failing the day one is used here — a false
+    // positive on a security assertion is worse than no assertion.
     expect(cluster.innerHTML).not.toContain("cuid-secret-1234");
-    expect(cluster.innerHTML).not.toContain("@");
+    expect(cluster.textContent).not.toContain("@");
   });
 });
