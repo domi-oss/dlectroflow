@@ -150,8 +150,8 @@ trap in local setup:
 
 | File | Who reads it | What to put there |
 |---|---|---|
-| **`.env`** | The **Prisma CLI** (`npm run setup`, `npm run db:migrate`, `npm run db:studio` — via `prisma.config.ts`), `next dev` / `next start`, and **`npm test`** (`vitest.config.ts` forwards `DATABASE_URL` from it — Prisma *Client* never reads env files itself). | **`DATABASE_URL`**, plus anything else you want persisted. A single `.env` is enough to run everything locally — that's what `cp .env.example .env` gives you. |
-| **`.env.local`** | **Next.js**, and `npm test` for `DATABASE_URL`; it *overrides* `.env`. The **Prisma CLI** never reads it. | Optional. Runtime-only values you'd rather keep out of `.env`. Don't put `DATABASE_URL` *only* here — migrations will fail with *"Environment variable not found: DATABASE_URL"*. |
+| **`.env`** | The **Prisma CLI** (`npm run setup`, `npm run db:migrate`, `npm run db:studio` — via `prisma.config.ts`), `next dev`, **`npm test`** (`vitest.config.ts` forwards `DATABASE_URL` from it) and **`npm run test:e2e`** (`playwright.config.ts` does the same, because the standalone server it boots reads a *build-time copy* of this file — see #97). | **`DATABASE_URL`**, plus anything else you want persisted. A single `.env` is enough to run everything locally — that's what `cp .env.example .env` gives you. |
+| **`.env.local`** | **Next.js**, and `npm test` / `npm run test:e2e` for `DATABASE_URL`; it *overrides* `.env`. The **Prisma CLI** never reads it. | Optional. Runtime-only values you'd rather keep out of `.env`. Don't put `DATABASE_URL` *only* here — migrations will fail with *"Environment variable not found: DATABASE_URL"*. |
 
 Both are gitignored. If you only ever create `.env`, nothing is missing.
 
@@ -332,7 +332,9 @@ npx playwright install chromium
 # Ensure the DB schema exists (uses your DATABASE_URL)
 npm run db:deploy
 
-# Build once (Playwright serves the app via `next start`)
+# Build once — Playwright boots the *standalone* output (`node
+# .next/standalone/server.js`), the same entrypoint the deployed image runs,
+# so the suite exercises the artefact that ships (#97)
 npm run build
 
 # Run the smoke suite

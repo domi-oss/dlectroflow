@@ -337,8 +337,18 @@ test_app:
     # Version tag: gate the release image on a green suite too (build_image needs this).
     - if: '$CI_COMMIT_TAG'
 
-# ── E2E gate (#37): Playwright smoke suite against a real Postgres, real
-# `next build` + `next start` ─────────────────────────────────────────────────
+# ── E2E gate (#37): Playwright smoke suite against a real Postgres and the
+# real shipped artefact — `next build`, then the standalone `server.js` ───────
+# #97: the suite used to boot `next start`, which Next 16 warns is unsupported
+# with `output: "standalone"` and which is not what any environment runs. It now
+# boots `node .next/standalone/server.js` — the same entrypoint as the deployed
+# image's `CMD` — with `public/` and `.next/static` grafted on the way
+# Dockerfile.ci grafts them (the bundle omits both; skip the copy and every HTML
+# route still answers 200 while every stylesheet and client chunk 404s).
+# playwright.config.ts owns that assembly, so this job is unchanged: the
+# `npm run build` below already produced `.next/standalone`, and the copy costs
+# ~0.2s for 31 MB. src/lib/dockerfile-hygiene.test.ts keeps the two sides in
+# lock-step.
 # The Playwright image is Debian/glibc (required for the bundled browsers) and
 # ships Node, so no apk/openssl before_script is needed here (unlike test_app's
 # alpine image) — npm ci's postinstall (`prisma generate`) downloads the

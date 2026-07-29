@@ -291,3 +291,120 @@ describe.each([["Dockerfile"], ["Dockerfile.ci"]])(
     });
   },
 );
+
+/**
+ * #97 — the e2e suite must exercise the artefact that ships.
+ *
+ * `output: "standalone"` means production runs `node server.js` out of the
+ * standalone bundle (`CMD ["node", "server.js"]` in both Dockerfiles). The
+ * Playwright suite used to boot `next start` instead, so 130-odd specs — the
+ * a11y gates included — validated a server nobody deploys. Two ways that
+ * diverges, both measured on #97:
+ *
+ *  - `server.js` calls `process.chdir(__dirname)`, so Next reads
+ *    `.next/standalone/.env` (copied at build time) rather than the live `.env`
+ *    in the project root. Point the root file at a database that does not
+ *    exist, restart without rebuilding: `next start` serves /api/health 503,
+ *    the standalone server serves 200.
+ *  - the bundle omits `public/` and `.next/static`, so without the copy the
+ *    runtime image performs, every HTML route still answers 200 while every
+ *    stylesheet, client chunk and public file 404s.
+ *
+ * That second point is why this guard exists rather than a comment: the asset
+ * trees the standalone server needs grafted on live in TWO places now — the
+ * runtime image and playwright.config.ts — and a tree added to one and not the
+ * other is precisely the invisible drift #97 was about.
+ */
+describe("e2e webServer boots the artefact that ships (#97)", () => {
+  // Comments are dropped before asserting: the config explains at length what
+  // `next start` did differently, and a guard that tripped over its own
+  // rationale would only teach the next person to delete the rationale.
+  const playwrightConfig = readFileSync(
+    join(process.cwd(), "playwright.config.ts"),
+    "utf8",
+  )
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("//"))
+    .join("\n");
+
+  it("runs the standalone server.js, not `next start`", () => {
+    expect(playwrightConfig).toContain("node .next/standalone/server.js");
+    // `next start` is unsupported with `output: "standalone"` (Next 16 warns on
+    // every boot) and is not what any environment runs.
+    expect(playwrightConfig).not.toMatch(/\bnext start\b/);
+    expect(playwrightConfig).not.toMatch(/npm run start/);
+  });
+
+  // Keyed by the destination inside the standalone tree so the message can name
+  // what the server would fail to serve.
+  const assetTrees = [
+    { source: "public", dest: ".next/standalone/public", serves: "public/" },
+    {
+      source: ".next/static",
+      dest: ".next/standalone/.next/static",
+      serves: "stylesheets and client chunks",
+    },
+  ];
+
+  it.each(assetTrees)(
+    "copies $source into the standalone tree before booting",
+    ({ source, dest, serves }) => {
+      expect(
+        playwrightConfig,
+        `playwright.config.ts must copy ${source} to ${dest} before booting ` +
+          `the standalone server, or the suite runs against an app that 404s ` +
+          `${serves} while every HTML route still answers 200`,
+      ).toContain(`cp -R ${source} ${dest}`);
+      // A merge onto a surviving tree would keep files deleted upstream.
+      expect(playwrightConfig).toMatch(
+        new RegExp(`rm -rf[^"']*${dest.replace(/[.]/g, "\\.")}`),
+      );
+    },
+  );
+
+  // The bind address is the one divergence that took CI down rather than just
+  // making the suite less truthful: `server.js` honours HOSTNAME, `next start`
+  // ignores it, and Docker sets HOSTNAME to the container id on every container
+  // — so the standalone server binds the container's own address and nothing
+  // answers on localhost. Both Dockerfiles carry `ENV HOSTNAME=0.0.0.0` for
+  // exactly that reason; the e2e config has to agree or the gate cannot boot.
+  it("pins the same bind address the runtime image does", () => {
+    expect(playwrightConfig).toMatch(/HOSTNAME:\s*"0\.0\.0\.0"/);
+  });
+
+  it.each([["Dockerfile"], ["Dockerfile.ci"]])(
+    "%s grafts on the same asset trees and bind address the e2e server does",
+    (filename) => {
+      const runner = stageInstructions(
+        parseDockerfile(readFileSync(join(process.cwd(), filename), "utf8")),
+        "runner",
+      );
+      const copies = runner
+        .filter((i) => i.instruction === "COPY")
+        .map((i) => i.args);
+
+      expect(
+        runner.some(
+          (i) =>
+            i.instruction === "ENV" && /^HOSTNAME=0\.0\.0\.0$/.test(i.args),
+        ),
+        `${filename} runner stage must set ENV HOSTNAME=0.0.0.0: the standalone ` +
+          `entrypoint binds whatever HOSTNAME says, and Docker sets it to the ` +
+          `container id, so without this the server answers on the container's ` +
+          `own address and the readiness probe never passes (#97)`,
+      ).toBe(true);
+
+      // Destinations, not sources: the CI file stages the build output under
+      // ci-dist/ (.dockerignore excludes .next), so only the left-hand side
+      // differs between the two Dockerfiles.
+      for (const dest of ["./public", "./.next/static"]) {
+        expect(
+          copies.some((c) => c.endsWith(` ${dest}`)),
+          `${filename} runner stage must COPY ${dest}: the standalone bundle ` +
+            `omits it, and playwright.config.ts copies it in so the e2e suite ` +
+            `and the deployed image serve the same asset set (#97)`,
+        ).toBe(true);
+      }
+    },
+  );
+});
