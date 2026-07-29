@@ -67,12 +67,35 @@ environment file to a published tag instead.
 > **The published tags are currently larger than a local build.** `latest` and
 > `v0.4.0` are the same image, and it is **~892 MB** — the release was tagged
 > hours before the change that took the runtime image down to ~207 MB (#71), so
-> it predates the shrink. Production runs the small one; the newest *release*
+> it predates the shrink. Production runs the small one; the newest _release_
 > does not. Pulling therefore costs about four times the disk of building, which
-> is the wrong trade on the small box this guide recommends. This corrects itself
-> at the next release, whose tag pipeline builds post-shrink and moves `latest`
-> to it — so prefer the build above until then, and check the tag's size if you
-> do pull.
+> is the wrong trade on the small box this guide recommends, so prefer the build
+> above for now.
+>
+> This corrects itself at the next release, whose tag pipeline builds
+> post-shrink and moves `latest` to it. **Removing this note is tracked as part
+> of #113** — it is deliberately time-limited, and once `latest` is the small
+> image this paragraph would mislead in the opposite direction.
+>
+> To check a tag's size before pulling: the project's **Deploy → Container
+> Registry** page lists every tag with its size, which needs no tooling. From
+> the command line it takes two calls, because the repository listing does not
+> include sizes — only the per-tag endpoint does:
+>
+> ```bash
+> PROJ=gl-demo-ultimate-dtop%2Fdomi-oss%2Fdlectroflow
+>
+> # 1. find the repository id
+> glab api "projects/$PROJ/registry/repositories" | jq -r '.[] | "\(.id)\t\(.path)"'
+>
+> # 2. read one tag's size (substitute the id from above)
+> glab api "projects/$PROJ/registry/repositories/11826214/tags/latest" \
+>   | jq -r '"\(.name)  \(.total_size / 1048576 | round) MiB"'
+> # latest  851 MiB
+> ```
+>
+> `docker manifest inspect` can also do it, but it needs a registry login and
+> reports each layer separately, leaving you to add them up.
 
 ## 3. Create your environment file
 
