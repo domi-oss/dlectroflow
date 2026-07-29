@@ -2811,7 +2811,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 `resolveBreakdownModel` only knows owner-vs-not. Before accounts that was a true binary. An invited `member` is now a third thing and lands in the `!isOwner` branch, so every member gets Haiku — the tier chosen as a **guest cost lever** — including a member **paying for their own API calls**. Nothing is insecure; it is a quality-of-service bug that bites the first time somebody is invited.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `src/lib/models.test.ts` (read its existing env-stubbing style first — these functions read `process.env` on every call):
 
@@ -2896,12 +2896,12 @@ And in `src/app/api/breakdown/route.test.ts`:
   });
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `npx vitest run src/lib/models.test.ts src/app/api/breakdown/route.test.ts`
 Expected: FAIL — `tier` is not a parameter.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `src/lib/models.ts`:
 
@@ -2982,7 +2982,7 @@ export function resolveBreakdownModel(opts: {
 
 Check the `owner` and `user` locals' names against the real file before writing this — `grep -n "const owner\|const user" src/app/api/breakdown/route.ts`.
 
-- [ ] **Step 4: Run the tests and the whole suite**
+- [x] **Step 4: Run the tests and the whole suite**
 
 ```bash
 npx vitest run src/lib/models.test.ts src/app/api/breakdown/route.test.ts
@@ -2991,7 +2991,7 @@ npm test && npx tsc --noEmit
 
 `tsc` will point at every remaining `{ isOwner: ... }` call site — that is the point of replacing the parameter rather than adding to it.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/lib/models.ts src/lib/models.test.ts src/app/api/breakdown/route.ts \

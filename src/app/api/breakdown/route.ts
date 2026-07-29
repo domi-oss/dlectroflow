@@ -17,7 +17,11 @@ import {
   currentUser,
 } from "@/lib/workspace";
 import { getSettings } from "@/lib/settings-read";
-import { resolveBreakdownModel, breakdownParamsFor } from "@/lib/models";
+import {
+  resolveBreakdownModel,
+  breakdownParamsFor,
+  type ModelTier,
+} from "@/lib/models";
 import {
   clientIpHash,
   consumeGuestBreakdown,
@@ -202,15 +206,25 @@ export async function POST(req: Request): Promise<Response> {
   // Blocked guests never reach the LLM, so they do no context work either; and
   // a context failure degrades to no context rather than failing the request
   // (the breakdown path was DB-light before #14 and must stay resilient).
+  // #96 — a NAMED tier. `owner` is still the owner; a signed-in member is a
+  // member, not a not-owner; anyone else is a guest.
+  const tier: ModelTier = owner ? "owner" : user ? "member" : "guest";
   const [settings, breakdownContext] = await Promise.all([
-    owner ? getSettings(wsId) : Promise.resolve(null),
+    // #96 — a member gets a model preference to read. This was gated on `owner`,
+    // so even with the tier fixed a member had no ownerSetting to follow. It is
+    // the requester's OWN Settings row either way — wsId is their own workspace —
+    // and a guest keeps null, because the guest tier ignores it anyway.
+    user ? getSettings(wsId) : Promise.resolve(null),
     blockedReason
       ? Promise.resolve<BreakdownContext>({})
       : gatherBreakdownContext(wsId).catch(() => ({}) as BreakdownContext),
   ]);
   const model = resolveBreakdownModel({
-    isOwner: owner,
+    tier,
     ownerSetting: settings?.breakdownModel ?? null,
+    // `access.ownKey` is the DECRYPTED credential — this passes only WHETHER one
+    // exists. The key itself never leaves llmCredentials.
+    hasOwnKey: llmCredentials != null,
   });
 
   // The LLM call failed to produce a usable breakdown — either it threw, or

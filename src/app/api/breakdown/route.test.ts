@@ -50,10 +50,12 @@ const {
     // Reassigned per-test to control what the fake provider's stream() does.
     streamImpl: { current: undefined as unknown },
     // Captures the LLMRequest the route actually put on the wire, so the
-    // SYSTEM prompt and the user turn can be asserted without exporting them.
+    // SYSTEM prompt, the user turn and the resolved MODEL (#96) can be asserted
+    // without exporting them.
     lastLLMRequest: {
       current: undefined as
-        { system?: string; messages?: { content: string }[] } | undefined,
+        | { model?: string; system?: string; messages?: { content: string }[] }
+        | undefined,
     },
     // #35 Phase B — WHICH key the route billed this breakdown to. `undefined`
     // means the instance key (getLLM called with no credentials at all).
@@ -878,5 +880,79 @@ describe("POST /api/breakdown — per-user AI policy (#35 Phase B)", () => {
     });
 
     expect(JSON.stringify(events)).not.toContain("sk-super-secret-value");
+  });
+});
+
+// ── #96 — a member is not a guest for MODEL selection ──────────────────────
+//
+// resolveBreakdownModel took { isOwner: boolean }, so a signed-in member landed
+// in the guest branch and got Haiku: the tier chosen as a GUEST COST LEVER. The
+// model is observed through the real resolver (this file does not mock
+// @/lib/models), so these assertions cover the route's tier decision AND the
+// resolver's answer to it.
+describe("POST /api/breakdown — model tier (#96)", () => {
+  const MEMBER_USER = {
+    id: "user-member",
+    role: "member" as const,
+    workspaceId: "ws-member",
+  };
+
+  function asMember(): void {
+    isOwnerRequestMock.mockResolvedValue(false);
+    currentUserMock.mockResolvedValue(MEMBER_USER);
+    isGuestWorkspaceMock.mockResolvedValue(false);
+    currentWorkspaceIdMock.mockResolvedValue("ws-member");
+  }
+
+  it("a guest still gets the cheap tier — the cost lever survives", async () => {
+    asGuest();
+    const { req } = await captureRequest();
+    expect(req.model).toBe("claude-haiku-4-5");
+  });
+
+  it("a MEMBER on their own key gets the owner-grade tier, not Haiku", async () => {
+    asMember();
+    consumeUserBreakdownMock.mockResolvedValue({
+      policy: "own_key",
+      ownKey: { apiKey: "sk-member", provider: null },
+      metered: false,
+      blockedReason: null,
+    });
+
+    const { req } = await captureRequest();
+
+    // Billed to their own key and handed the cheapest model anyway was the
+    // wrong way round — that is the sharp end of #96.
+    expect(req.model).toBe("claude-sonnet-4-6");
+    expect(req.model).not.toBe("claude-haiku-4-5");
+  });
+
+  it("a member on the instance key follows the OWNER's configured tier", async () => {
+    // getSettings was gated on `owner`, so a member had no ownerSetting to
+    // follow even once the tier existed.
+    asMember();
+    getSettingsMock.mockResolvedValue({ breakdownModel: "claude-opus-4-8" });
+
+    const { req } = await captureRequest();
+
+    expect(getSettingsMock).toHaveBeenCalledWith("ws-member");
+    expect(req.model).toBe("claude-opus-4-8");
+  });
+
+  it("a member never picks up GUEST_BREAKDOWN_MODEL", async () => {
+    asMember();
+    process.env.GUEST_BREAKDOWN_MODEL = "claude-haiku-4-5";
+    try {
+      const { req } = await captureRequest();
+      expect(req.model).not.toBe("claude-haiku-4-5");
+    } finally {
+      delete process.env.GUEST_BREAKDOWN_MODEL;
+    }
+  });
+
+  it("the owner is unchanged: their configured tier still wins", async () => {
+    getSettingsMock.mockResolvedValue({ breakdownModel: "claude-opus-4-8" });
+    const { req } = await captureRequest();
+    expect(req.model).toBe("claude-opus-4-8");
   });
 });
