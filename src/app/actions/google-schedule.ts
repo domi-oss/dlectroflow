@@ -7,7 +7,6 @@ import {
   googleConfigured,
   findReclaimList,
   listTaskLists,
-  createGoogleTask,
   upsertGoogleTask,
   getGoogleStatus,
   disconnectGoogle,
@@ -280,8 +279,39 @@ export async function scheduleSingleTask(
     const list = await findReclaimList(token);
     if (!list) return { ok: false, reason: "no_reclaim_list" };
 
-    const title = `${item.text} (duration:${minutes}m)`;
-    const created = await createGoogleTask(token, list.id, { title });
+    const encode = pickEncoder(list.title);
+    const unit: ScheduleUnit = {
+      id: taskId,
+      order: 1,
+      total: 1,
+      text: item.text,
+      emoji: null,
+      // The caller's clamped duration IS the estimate for a stepless to-do.
+      estMinutes: minutes,
+    };
+    const intent = defaultIntentFor([unit]);
+    const { windows } = deriveWindows(intent);
+    const settings = await getSettings(workspaceId);
+    const voice: Voice = settings.voice === "playful" ? "playful" : "plain";
+    const encoded = encode({
+      unit,
+      window: windows[0],
+      intent,
+      taskTitle: item.text,
+      parentEmoji: null,
+      origin: publicOrigin(),
+      voice,
+    });
+    const existing = await prisma.task.findFirst({
+      where: { id: taskId, workspaceId },
+      select: { googleTaskId: true },
+    });
+    const created = await upsertGoogleTask(
+      token,
+      list.id,
+      existing?.googleTaskId ?? null,
+      encoded,
+    );
 
     await prisma.task.update({
       where: { id: taskId },
