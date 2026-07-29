@@ -125,6 +125,12 @@ describe("Privacy Policy page: the disclosures UK GDPR requires", () => {
     expect(text).toMatch(/Data Protection Act 2018/);
   });
 
+  it("explains why no DPO is required, rather than just asserting it", () => {
+    // Art. 37(1) is a closed list; "at this scale" alone invited the reader to
+    // take it on trust.
+    expect(pageText()).toMatch(/Article 37 requires one only for/i);
+  });
+
   it("gives a specific lawful basis per purpose, with articles cited", () => {
     const text = pageText();
     for (const article of [
@@ -255,6 +261,60 @@ describe("Privacy Policy page: the disclosures UK GDPR requires", () => {
     expect(text).toContain("dlectroflow.dev");
     expect(text).toMatch(/AGPL-3\.0/);
     expect(text).toMatch(/you.{0,5} are its controller/i);
+  });
+});
+
+// ── The non-commercial framing, and the exemption that does NOT apply ───────
+//
+// The controller is an individual running a NON-COMMERCIAL HOBBY PROJECT: no
+// company, no trade, no business, nothing charged for. An earlier draft said
+// "trading as a sole trader", asserting a commercial undertaking that does not
+// exist.
+//
+// The dangerous half is the follow-on reasoning. UK GDPR Art. 2(2)(c) exempts
+// processing by an individual "in the course of a purely personal or household
+// activity", so a reader — or a future maintainer — who learns this is a hobby
+// may conclude the Regulation does not apply. It does. The page has to close
+// that door explicitly, and these tests keep it closed.
+describe("Privacy Policy page: non-commercial framing", () => {
+  it("describes the controller as a non-commercial hobby project", () => {
+    const text = pageText();
+    expect(text).toMatch(/personal, non-commercial hobby project/i);
+    expect(text).toMatch(/no company, no business and no trade behind it/i);
+  });
+
+  it("never claims to trade, and never calls the controller a sole trader", () => {
+    // The regression guard. This wording reads professional, which is precisely
+    // why a template or a find-and-replace can reintroduce it unchallenged.
+    const text = pageText();
+    expect(text).not.toMatch(/sole trader/i);
+    expect(text).not.toMatch(/trading as/i);
+  });
+
+  it("confronts the purely-personal-or-household exemption head-on", () => {
+    // Citing the Article matters: a reader who already knows Art. 2(2)(c) exists
+    // is the one most likely to assume it applies here. Naming it and rejecting
+    // it is stronger than silence, which reads like an oversight — or a claim.
+    const text = pageText();
+    expect(text).toMatch(/purely personal or household activity/i);
+    expect(text).toMatch(/Article 2\(2\)\(c\)/);
+    expect(text).toMatch(/does not cover this, and I am not claiming it/i);
+  });
+
+  it("gives both independent reasons the exemption is unavailable", () => {
+    const text = pageText();
+    // 1. Offered over the public internet, processing OTHER people's data.
+    expect(text).toMatch(/offered over the public internet to other people/i);
+    // 2. Recital 18: the Regulation applies to whoever provides the MEANS, even
+    //    where the end user's own purpose is purely personal.
+    expect(text).toMatch(/Recital 18/);
+    expect(text).toMatch(/provides the means/i);
+  });
+
+  it("says being unpaid does not reduce anyone's rights", () => {
+    expect(pageText()).toMatch(
+      /Being unpaid changes what this project can afford; it does not change what you are entitled to/i,
+    );
   });
 });
 

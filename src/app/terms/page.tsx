@@ -35,7 +35,7 @@ import {
 export const metadata: Metadata = {
   title: "Terms of Service · dlectroflow",
   description:
-    "The terms for using dlectroflow.dev: a free personal project provided as is, with no warranty or uptime guarantee. What you can expect, what is expected of you, and the limits of liability under the law of England and Wales.",
+    "The terms for using dlectroflow.dev: a free, non-commercial hobby project provided as is, with no warranty or uptime guarantee. What you can expect, what is expected of you, and the limits of liability under the law of England and Wales.",
 };
 
 const SECTIONS = [
@@ -90,12 +90,13 @@ export default function TermsPage() {
       summary={
         <>
           <p>
-            <strong>The short version.</strong> dlectroflow is a free personal
-            project. It comes with no warranty, no uptime promise and no support
-            desk, so please do not make it the only place something important
-            lives. What you write stays yours. The AI suggests steps — it is not
-            advice, and you are always allowed to ignore it. Use it decently, do
-            not attack it, and we will get along fine.
+            <strong>The short version.</strong> dlectroflow is a non-commercial
+            hobby project, given away for nothing. It comes with no warranty, no
+            uptime promise and no support desk, so please do not make it the
+            only place something important lives. What you write stays yours.
+            The AI suggests steps — it is not advice, and you are always allowed
+            to ignore it. Use it decently, do not attack it, and we will get
+            along fine.
           </p>
           <p className="text-muted-foreground">
             That summary is here so this page gets read. The sections below are
@@ -127,22 +128,41 @@ export default function TermsPage() {
       <LegalSection {...s("agreement")}>
         <p>
           The agreement is between you and <strong>{CONTROLLER_NAME}</strong>,
-          an individual trading as a sole trader in the United Kingdom. In these
-          Terms, &ldquo;I&rdquo; and &ldquo;me&rdquo; mean that person, and
+          an individual in the United Kingdom running dlectroflow as a{" "}
+          <strong>personal, non-commercial hobby project</strong> — not a
+          company, not a business, and not a trade. In these Terms,
+          &ldquo;I&rdquo; and &ldquo;me&rdquo; mean that person, and
           &ldquo;you&rdquo; means you.
+        </p>
+        <p>
+          Because nothing is charged for,{" "}
+          <strong>this is not a sale and you are not a customer</strong>. It is
+          closer to being handed something someone made in their spare time —
+          which is also why the sections on warranty and liability below read
+          the way they do. It is not a disclaimer strategy; it is what an unpaid
+          side project can honestly promise.
+        </p>
+        <p>
+          None of that reduces what I owe you about your data. See{" "}
+          <Link href="/privacy" className="underline">
+            the Privacy Policy
+          </Link>
+          , which explains why being a hobby project does not exempt me from UK
+          data protection law.
         </p>
         <p>
           By using dlectroflow you accept these Terms. That applies whether you
           have an account or are using it as a guest — there is no separate
-          tick-box, and using the service is the acceptance. If you do not
-          accept them, please do not use it.
+          tick-box, and using it is the acceptance. If you do not accept them,
+          please do not use it.
         </p>
       </LegalSection>
 
       <LegalSection {...s("free")}>
         <p>
-          dlectroflow costs nothing. There is no paid tier, no trial that turns
-          into a subscription, and nothing to cancel.
+          dlectroflow is given away. There is no charge, no paid tier, no trial
+          that turns into a subscription, and nothing to cancel — it is a hobby
+          project, not a product.
         </p>
         <p>
           What follows from that, stated plainly rather than hidden in a
@@ -157,8 +177,10 @@ export default function TermsPage() {
           </li>
           <li>
             There is{" "}
-            <strong>no service level agreement and no uptime guarantee</strong>.
-            None. It is one small deployment looked after by one person.
+            <strong>no uptime guarantee and no service level commitment</strong>
+            . None. It is one small deployment looked after by one person, and
+            there is no commercial arrangement here for a service level to hang
+            off.
           </li>
           <li>
             There is no committed support. I will usually answer an email, but
@@ -399,9 +421,9 @@ export default function TermsPage() {
           anything here.
         </p>
         <p>
-          <strong>Subject to that</strong>, and because this is a free service
-          provided as is, to the fullest extent the law allows I am not liable
-          for:
+          <strong>Subject to that</strong>, and because this is software given
+          away as is rather than sold to you, to the fullest extent the law
+          allows I am not liable for:
         </p>
         <ul className="ml-5 list-disc space-y-1">
           <li>
@@ -427,10 +449,19 @@ export default function TermsPage() {
           Where liability cannot be excluded but can lawfully be limited, my
           total liability to you for all claims combined is limited to{" "}
           <strong>£100</strong>. A nominal cap rather than a pretence of none:
-          you have paid nothing, and a free personal project cannot carry
-          open-ended exposure — but a clause claiming total immunity would
-          deserve to be struck out, and I would rather write one that means what
-          it says.
+          this is software written by one person in their spare time and given
+          away, and open-ended exposure would simply end the project. A clause
+          claiming total immunity would be worth nothing to either of us, so I
+          would rather write one that means what it says.
+        </p>
+        <p>
+          <strong>And one argument I am deliberately not making.</strong>{" "}
+          Several of the rules that forbid excluding liability for death,
+          personal injury or fraud are written to catch businesses and traders,
+          and whether an unpaid hobby project counts as either is genuinely
+          arguable. I am not going to run that argument. The carve-outs at the
+          top of this section are stated flatly, they are not conditional on my
+          status, and they stand whether or not those rules reach me.
         </p>
       </LegalSection>
 
@@ -486,11 +517,16 @@ export default function TermsPage() {
           <strong>law of England and Wales</strong>.
         </p>
         <p>
-          The courts of England and Wales have jurisdiction. If you are a
-          consumer resident in Scotland or Northern Ireland, you may also bring
-          proceedings in the courts of the part of the UK where you live, and
-          you keep the benefit of any mandatory consumer protections that apply
-          there.
+          The courts of England and Wales have jurisdiction. If you live in
+          Scotland or Northern Ireland you may also bring proceedings in the
+          courts of the part of the UK where you live, and nothing in these
+          Terms takes away any mandatory legal protection you have there.
+        </p>
+        <p className="text-muted-foreground">
+          Deliberately written without leaning on whether you count as a
+          &ldquo;consumer&rdquo; and I count as a &ldquo;trader&rdquo;. Nothing
+          is charged for here, so those labels sit awkwardly — and your right to
+          sue where you live should not depend on how that argument comes out.
         </p>
       </LegalSection>
 

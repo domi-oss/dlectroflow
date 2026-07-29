@@ -109,7 +109,12 @@ describe("Terms of Service page: the substantive terms", () => {
     expect(text).toMatch(/as is/i);
     expect(text).toMatch(/as available/i);
     expect(text).toMatch(/no warranties/i);
-    expect(text).toMatch(/no service level agreement and no uptime guarantee/i);
+    // "Service level AGREEMENT" was the original wording and is a commercial
+    // artefact — there is no commercial arrangement here for one to attach to.
+    // The substance (no uptime promise) is what has to survive, not the phrase.
+    expect(text).toMatch(
+      /no uptime guarantee and no service level commitment/i,
+    );
   });
 
   it("frames AI output as a suggestion and not professional advice", () => {
@@ -150,8 +155,7 @@ describe("Terms of Service page: the substantive terms", () => {
   });
 
   it("limits liability WITHOUT purporting to exclude what cannot be excluded", () => {
-    // The clause that would be struck out if written greedily. The carve-outs are
-    // the part that makes the rest of it stand up.
+    // The carve-outs are the part that makes the rest of the clause stand up.
     const text = pageText();
     expect(text).toMatch(/death or personal injury caused by my negligence/i);
     expect(text).toMatch(/fraud or fraudulent misrepresentation/i);
@@ -164,6 +168,20 @@ describe("Terms of Service page: the substantive terms", () => {
     );
   });
 
+  it("does not make the carve-outs conditional on being a business or trader", () => {
+    // The analysis that actually changed when "sole trader" came out. The rules
+    // forbidding exclusion of death/personal-injury and fraud liability are
+    // largely aimed at businesses and traders (CRA 2015 binds a "trader"; UCTA
+    // 1977 ss.2-7 reach "business liability"), and whether an unpaid hobby
+    // project is either is genuinely arguable. The page must NOT reason its way
+    // out of the carve-outs on that basis — it says so explicitly instead, so
+    // the clause holds however that argument would come out.
+    const text = pageText();
+    expect(text).toMatch(/one argument I am deliberately not making/i);
+    expect(text).toMatch(/not conditional on my status/i);
+    expect(text).toMatch(/whether or not those rules reach me/i);
+  });
+
   it("states the AGPL position for the code versus the hosted service", () => {
     const text = pageText();
     expect(text).toMatch(/GNU Affero General Public License v3\.0/);
@@ -171,12 +189,15 @@ describe("Terms of Service page: the substantive terms", () => {
     expect(text).toMatch(/section 13/i);
   });
 
-  it("sets governing law to England and Wales, with the consumer carve-out", () => {
+  it("sets governing law to England and Wales, without a where-you-live trap", () => {
     const text = pageText();
     expect(text).toMatch(/law of England and Wales/);
     expect(text).toMatch(/courts of England and Wales/i);
-    // A consumer in Scotland or NI cannot be forced into English courts.
+    // Someone in Scotland or NI can still sue where they live. Phrased WITHOUT
+    // resting on "consumer"/"trader" status, because nothing is charged for here
+    // and those labels are arguable — the right should not depend on the label.
     expect(text).toMatch(/Scotland or Northern Ireland/);
+    expect(text).toMatch(/mandatory legal protection you have there/i);
   });
 
   it("explains how changes are notified", () => {
@@ -196,5 +217,50 @@ describe("Terms of Service page: the substantive terms", () => {
     const text = pageText();
     expect(text).toMatch(/at least 13/i);
     expect(text).toMatch(/invite-only/i);
+  });
+});
+
+// ── The non-commercial framing ──────────────────────────────────────────────
+//
+// The controller is an individual running a NON-COMMERCIAL HOBBY PROJECT: no
+// company, no trade, no business, nothing charged for. An earlier draft of this
+// page described them as "trading as a sole trader", which asserted a commercial
+// undertaking that does not exist — actively misleading, and it dragged a
+// consumer-sale analysis in behind it.
+//
+// These tests exist because that wording is exactly the kind of thing a template,
+// a fork, or a well-meaning find-and-replace reintroduces silently: it reads
+// professional, so nobody questions it.
+describe("Terms of Service page: non-commercial framing", () => {
+  it("describes the controller as a non-commercial hobby project", () => {
+    const text = pageText();
+    expect(text).toMatch(/personal, non-commercial hobby project/i);
+    expect(text).toMatch(/not a company, not a business, and not a trade/i);
+  });
+
+  it("says plainly that this is not a sale and the user is not a customer", () => {
+    // Load-bearing for the warranty and liability sections, which are written for
+    // a free gift of software rather than for a purchase.
+    const text = pageText();
+    expect(text).toMatch(/this is not a sale and you are not a customer/i);
+    expect(text).toMatch(/given away/i);
+  });
+
+  it("never claims to trade, and never calls the controller a sole trader", () => {
+    const text = pageText();
+    expect(text).not.toMatch(/sole trader/i);
+    expect(text).not.toMatch(/trading as/i);
+    // The bare word "trader" survives in exactly one place: the clause explaining
+    // that the governing-law wording deliberately does NOT rest on that label. So
+    // assert on the assertive phrasings rather than banning the word outright.
+    expect(text).not.toMatch(/\bI am a trader\b/i);
+  });
+
+  it("still points at the Privacy Policy for why data law applies anyway", () => {
+    // Non-commercial is a real fact about the project. It is NOT a data
+    // protection exemption, and these Terms must not leave that impression.
+    expect(pageText()).toMatch(
+      /does not exempt me from UK data protection law/i,
+    );
   });
 });

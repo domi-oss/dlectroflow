@@ -103,7 +103,8 @@ export default function PrivacyPage() {
             of a task you ask to be broken down is sent to Anthropic in the
             United States, because that is what produces the breakdown.
             Connecting Google Tasks is optional and off unless you choose it.
-            Nobody sells anything here, because there is nothing to sell.
+            Nothing is sold, because this is a hobby project with nothing to
+            sell — but every obligation below is still a real one.
           </p>
           <p className="text-muted-foreground">
             That summary is here so this page gets read. The sections below are
@@ -117,11 +118,50 @@ export default function PrivacyPage() {
           {CONTROLLER_NAME} is the <strong>data controller</strong> for the
           hosted dlectroflow instance at{" "}
           <Ext href="https://dlectroflow.dev">dlectroflow.dev</Ext> — an
-          individual, trading as a sole trader, based in the United Kingdom.
-          That means I am the person legally answerable for how your data is
-          handled here, under the <strong>UK GDPR</strong> and the{" "}
+          individual in the United Kingdom, running it as a{" "}
+          <strong>personal, non-commercial hobby project</strong>. There is no
+          company, no business and no trade behind it: nothing is charged for,
+          nothing is sold, and there is nothing to buy.
+        </p>
+        <p>
+          Being the controller means I am the person legally answerable for how
+          your data is handled here, under the <strong>UK GDPR</strong> and the{" "}
           <strong>Data Protection Act 2018</strong>.
         </p>
+
+        <LegalSubheading>
+          Being a hobby project does not make it exempt
+        </LegalSubheading>
+        <p>
+          This is worth saying out loud, because it is the obvious thing to
+          wonder and the obvious thing for me to try to hide behind. The UK GDPR
+          does not apply to processing by an individual &ldquo;in the course of
+          a purely personal or household activity&rdquo; (Article 2(2)(c)).{" "}
+          <strong>
+            That exemption does not cover this, and I am not claiming it.
+          </strong>
+        </p>
+        <p>Two reasons, and either on its own is enough:</p>
+        <ul className="ml-5 list-disc space-y-1">
+          <li>
+            dlectroflow is offered over the public internet to other people, and
+            it processes <em>their</em> data on infrastructure I control. That
+            is not my personal or household activity, whatever my motive for
+            building it.
+          </li>
+          <li>
+            Even where someone uses it for purely personal purposes of their
+            own, Recital 18 says the Regulation still applies to whoever{" "}
+            <em>provides the means</em> for that processing. That is me.
+          </li>
+        </ul>
+        <p>
+          So every obligation in this notice is a real one, and every right
+          below is a real right. Being unpaid changes what this project can
+          afford; it does not change what you are entitled to.
+        </p>
+
+        <LegalSubheading>Getting hold of me</LegalSubheading>
         <p>
           For anything to do with privacy, your data, or your rights, write to{" "}
           <ContactLink />. That address is monitored and it is the right route
@@ -129,10 +169,11 @@ export default function PrivacyPage() {
           one.
         </p>
         <p className="text-muted-foreground">
-          dlectroflow is a personal project, not a company. There is no data
-          protection officer, because the law does not require one for
-          processing at this scale. The person reading that inbox is the same
-          person who wrote the code.
+          There is no data protection officer: Article 37 requires one only for
+          public authorities, for large-scale regular monitoring of people, or
+          for large-scale processing of special category data, and this is none
+          of those. The person reading that inbox is the same person who wrote
+          the code.
         </p>
       </LegalSection>
 

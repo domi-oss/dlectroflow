@@ -34,6 +34,78 @@ the build rather than quietly going stale.
 
 ---
 
+## Who the controller is — and why UK GDPR applies at all
+
+**Read this before editing the controller section of either page.** It is the
+single easiest thing in this repo to reason wrongly about, and the wrong
+conclusion is one a maintainer would reach while trying to be accurate.
+
+The controller is **an individual in the United Kingdom running dlectroflow as a
+personal, non-commercial hobby project.** No company, no business, no trade,
+nothing charged for.
+
+> [!WARNING]
+> **Do not describe the controller as a sole trader, a business, or as "trading
+> as" anything.** An earlier draft did, and it was wrong: it asserted a commercial
+> undertaking that does not exist. It reads professional, which is exactly why a
+> template or a find-and-replace can reintroduce it unchallenged. Both page test
+> suites assert the phrases are absent.
+
+### Non-commercial is NOT a data protection exemption
+
+Here is the trap. UK GDPR **Article 2(2)(c)** disapplies the Regulation for
+processing by a natural person "in the course of a purely personal or household
+activity". Learn that this is a hobby project, and it is a short step to
+concluding the whole regime is optional here.
+
+**It is not, for two independent reasons — either is sufficient:**
+
+1. dlectroflow is **offered over the public internet to other people**, and it
+   processes *their* personal data on infrastructure the controller runs. That is
+   not the controller's own personal or household activity, whatever the motive
+   for building it. (This is the Lindqvist/Ryneš line of reasoning: making
+   personal data available to an indefinite number of people over the internet
+   takes processing outside the household exemption.)
+2. **Recital 18** says the Regulation applies to controllers and processors that
+   *provide the means* for processing, even where the end user's own activity is
+   purely personal. Providing the means is precisely what this instance does.
+
+So the full set of obligations attaches: lawful basis per purpose, the Article 13
+notice, data-subject rights, Article 32 security, the lot. Being unpaid changes
+what the project can afford, not what a user is entitled to. Both pages say this
+explicitly, and `src/app/privacy/page.test.tsx` pins the wording.
+
+### Where non-commercial status *does* legitimately change the analysis
+
+Being non-commercial is a real fact with real consequences — just not that one:
+
+- **Consumer Rights Act 2015** binds a **"trader"** (someone acting for purposes
+  relating to a trade, business, craft or profession). An unpaid hobbyist giving
+  software away is likely outside it, so the Terms are **not** written as a
+  consumer sale, and their liability clause does not rest on CRA unfair-terms
+  reasoning.
+- **UCTA 1977** ss.2–7 reach **"business liability"** (s.1(3)) — same doubt.
+- **But the Terms deliberately do not exploit either point.** Whether an unpaid
+  hobby project counts as a business or a trader is genuinely arguable, and the
+  Terms say outright that they are not running that argument: the carve-outs for
+  death or personal injury from negligence and for fraud are stated flatly and
+  unconditionally, so the clause stands however that question resolves. A test
+  (`does not make the carve-outs conditional on being a business or trader`)
+  keeps it that way. **Do not "tighten" that clause by adding a trader-status
+  condition.**
+- **The ICO data protection fee** genuinely turns on the nature of the
+  processing — see *Still to confirm with a human* below, and do not assume the
+  answer in either direction.
+- **The jurisdiction clause** is phrased without leaning on
+  "consumer"/"trader" labels, so a user in Scotland or Northern Ireland keeps the
+  right to sue where they live regardless of how that argument would come out.
+
+**If dlectroflow ever starts charging** — donations tied to features, a paid tier,
+anything traded — every bullet above is reopened, along with the controller
+description on both pages.
+
+---
+
 ## The effective-date bump rule
 
 `LEGAL_EFFECTIVE_DATE` in `src/lib/legal.ts` is the **version identifier** of both
@@ -76,6 +148,7 @@ thing in the left column, the pages are wrong until you fix them.
 | **Sign-in providers** (GitLab only, `read_user`) | "GitLab is the only sign-in method", and what is stored from the provider | `src/lib/auth/providers.ts`; Privacy → *If you have an account* |
 | **New Prisma model holding personal data** | The *What I collect* list. An incomplete notice is the failure mode here | `prisma/schema.prisma`; Privacy → *What I collect, and why* |
 | **Controller identity** | `CONTROLLER_NAME` **and** the Google consent screen, which must match | `legal.ts`; both pages |
+| **The project ever charging for anything** (a paid tier, donations tied to features, any trade) | The non-commercial framing on both pages, the "not a sale / not a customer" clause, the liability rationale, CRA/UCTA trader status, and the ICO fee answer. See *Who the controller is* above — this reopens all of it | both pages; `docs/legal.md` |
 
 ### The four places text is sent to the LLM
 
@@ -155,8 +228,8 @@ consent screen for review.
 | `src/lib/legal.test.ts` | An unnamed or placeholder controller (Art. 13(1)(a)); a malformed effective date; the two contact inboxes collapsing into one |
 | `src/lib/auth/gate.test.ts` | The legal paths losing their public exemption, and lookalike paths gaining one |
 | `src/proxy.test.ts` | The **middleware** redirecting the pages even while the classifier says public — the failure that silently breaks Google verification |
-| `src/app/privacy/page.test.tsx` | Missing required disclosures; contents/heading drift; hardcoded copies of `legal.ts` values; unshipped features creeping into the text |
-| `src/app/terms/page.test.tsx` | Missing "as is"/no-SLA wording; the liability carve-outs disappearing; governing law changing by accident |
+| `src/app/privacy/page.test.tsx` | Missing required disclosures; contents/heading drift; hardcoded copies of `legal.ts` values; unshipped features creeping into the text; the non-commercial framing being lost, or the Art. 2(2)(c) rebuttal being dropped |
+| `src/app/terms/page.test.tsx` | Missing "as is"/no-uptime-guarantee wording; the liability carve-outs disappearing or becoming conditional on trader status; "sole trader"/"trading as" returning; governing law changing by accident |
 | `src/components/legal/legal-footer.test.tsx` | The links that make the pages reachable |
 | `e2e/a11y/axe-legal-pages.spec.ts` | WCAG A/AA and colour-contrast regressions on both pages, in both themes, with no session |
 | `e2e/smoke/legal-pages.spec.ts` | The deployed pages being unreachable, or the footer link being broken, end to end |
@@ -168,11 +241,19 @@ consent screen for review.
 Not blockers for publishing, but they are assertions with real-world paperwork
 behind them:
 
-- **ICO registration / data protection fee.** A sole trader processing personal
-  data usually has to pay the annual fee unless an exemption applies. The pages
-  make no claim about registration, deliberately — check
-  [ico.org.uk/for-organisations](https://ico.org.uk/for-organisations/) and
-  register if required.
+- **ICO registration / the data protection fee — do not assume, either way.**
+  An earlier draft of this doc said a sole trader "usually has to pay the annual
+  fee". That was wrong twice: the controller is not a sole trader, and "usually
+  has to" overstates it. The **Data Protection (Charges and Information)
+  Regulations 2018** contain exemptions, and a non-commercial personal project may
+  or may not fall inside one — that cannot be determined from this repository, and
+  neither the pages nor this doc make any claim about it.
+  - **Settle it with the ICO's own self-assessment**, on
+    [ico.org.uk/for-organisations/data-protection-fee](https://ico.org.uk/for-organisations/data-protection-fee/) —
+    a short questionnaire that gives a definitive answer for a specific setup.
+  - Do **not** assume the fee is owed, and do **not** assume it is exempt.
+    Guessing in the reassuring direction is the worse of the two failures: the
+    cost of checking is a few minutes, and the cost of being wrong is a penalty.
 - **Processor terms actually in place.** The Privacy Policy relies on Article 46
   safeguards (standard contractual clauses + the UK International Data Transfer
   Addendum) for Anthropic and Resend. Confirm the DPA is accepted on each account
