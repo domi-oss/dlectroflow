@@ -64,6 +64,16 @@ If you have registry access and would rather skip the build, run
 `docker login registry.gitlab.com` and set `DLECTROFLOW_IMAGE` in your
 environment file to a published tag instead.
 
+> **The published tags are currently larger than a local build.** `latest` and
+> `v0.4.0` are the same image, and it is **~892 MB** — the release was tagged
+> hours before the change that took the runtime image down to ~207 MB (#71), so
+> it predates the shrink. Production runs the small one; the newest *release*
+> does not. Pulling therefore costs about four times the disk of building, which
+> is the wrong trade on the small box this guide recommends. This corrects itself
+> at the next release, whose tag pipeline builds post-shrink and moves `latest`
+> to it — so prefer the build above until then, and check the tag's size if you
+> do pull.
+
 ## 3. Create your environment file
 
 ```bash
