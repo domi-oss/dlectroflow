@@ -2,17 +2,20 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { exchangeCode } from "@/lib/google";
 import { requestOrigin } from "@/lib/origin";
-import { isOwnerRequest } from "@/lib/workspace";
+import { currentUser } from "@/lib/workspace";
+import { UserRole } from "@/lib/constants";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request): Promise<Response> {
-  // #119 — same handler-layer owner gate as /start, and it matters more here:
-  // this is the route that WRITES credentials (exchangeCode → storeTokens → the
-  // instance-wide GoogleAuth row). Gating on the role rather than on the
-  // cookies means a member who somehow holds a state + verifier pair still
-  // cannot complete an exchange. First, before the cookie jar is read.
-  if (!(await isOwnerRequest())) {
+  // #119's owner gate, now reading the identity it needs anyway: the exchange
+  // binds tokens to THIS account's row (#118), so the id and the role come from
+  // one lookup. Still 403, still before the cookie jar is read, so a rejected
+  // caller holding a state + verifier pair completes nothing. #118's next commit
+  // relaxes the ROLE test; the "acting on your own credential" part does not
+  // move, because there is no id parameter to move it to.
+  const me = await currentUser();
+  if (me?.role !== UserRole.Owner) {
     return new NextResponse("Forbidden", { status: 403 });
   }
 
@@ -42,7 +45,12 @@ export async function GET(req: Request): Promise<Response> {
   if (state !== expectedState) return fail("state_mismatch");
 
   try {
-    await exchangeCode(code, verifier, `${origin}/api/google/oauth/callback`);
+    await exchangeCode(
+      me.id,
+      code,
+      verifier,
+      `${origin}/api/google/oauth/callback`,
+    );
   } catch (err) {
     return fail(err instanceof Error ? err.message : "token_exchange_failed");
   }

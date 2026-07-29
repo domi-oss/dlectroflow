@@ -11,8 +11,8 @@ import {
   getGoogleStatus,
   disconnectGoogle,
 } from "@/lib/google";
-import { TaskSource, TaskStatus } from "@/lib/constants";
-import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
+import { TaskSource, TaskStatus, UserRole } from "@/lib/constants";
+import { currentWorkspaceId, currentUser } from "@/lib/workspace";
 import { awardFirstSchedule } from "@/lib/scheduling/award";
 import { SchedulingMethod } from "@/lib/scheduling/types";
 import type { ScheduleIntent, ScheduleUnit } from "@/lib/scheduling/types";
@@ -47,15 +47,18 @@ export async function pushStepsToGoogleTasks(
   suppliedIntent?: ScheduleIntent,
 ): Promise<GoogleScheduleResult> {
   const workspaceId = await currentWorkspaceId();
-  // #35 Phase A: an explicit role check replaces the workspace-id comparison.
-  // Google is still a single instance-level connection until Phase C makes it
-  // per user, so it stays owner-only rather than any-signed-in-member.
-  if (!(await isOwnerRequest())) throw new Error("owner only");
+  // #118 Phase C — the acting USER, not just their role: their id is what keys
+  // their own GoogleAuth row. This is the same query isOwnerRequest() made
+  // (it is implemented in terms of currentUser()), so it costs nothing extra.
+  // The gate itself is UNCHANGED here on purpose: this commit moves the
+  // credential, it does not widen who may use it. That is #118's next commit.
+  const me = await currentUser();
+  if (me?.role !== UserRole.Owner) throw new Error("owner only");
 
   if (!googleConfigured()) return { ok: false, reason: "not_configured" };
-  const token = await getValidAccessToken();
+  const token = await getValidAccessToken(me.id);
   if (!token) {
-    const status = await getGoogleStatus();
+    const status = await getGoogleStatus(me.id);
     return {
       ok: false,
       reason: status.needsReconnect ? "reconnect_required" : "not_connected",
@@ -212,10 +215,13 @@ export async function scheduleSingleTask(
   estMinutes: number,
 ): Promise<GoogleScheduleSingleResult> {
   const workspaceId = await currentWorkspaceId();
-  // #35 Phase A: an explicit role check replaces the workspace-id comparison.
-  // Google is still a single instance-level connection until Phase C makes it
-  // per user, so it stays owner-only rather than any-signed-in-member.
-  if (!(await isOwnerRequest())) throw new Error("owner only");
+  // #118 Phase C — the acting USER, not just their role: their id is what keys
+  // their own GoogleAuth row. This is the same query isOwnerRequest() made
+  // (it is implemented in terms of currentUser()), so it costs nothing extra.
+  // The gate itself is UNCHANGED here on purpose: this commit moves the
+  // credential, it does not widen who may use it. That is #118's next commit.
+  const me = await currentUser();
+  if (me?.role !== UserRole.Owner) throw new Error("owner only");
 
   // Server-side clamp (final-review fix): the client popover already refuses
   // out-of-range custom durations, but this action is the single source of
@@ -231,9 +237,9 @@ export async function scheduleSingleTask(
   }
 
   if (!googleConfigured()) return { ok: false, reason: "not_configured" };
-  const token = await getValidAccessToken();
+  const token = await getValidAccessToken(me.id);
   if (!token) {
-    const status = await getGoogleStatus();
+    const status = await getGoogleStatus(me.id);
     return {
       ok: false,
       reason: status.needsReconnect ? "reconnect_required" : "not_connected",
@@ -354,14 +360,16 @@ export async function scheduleSingleTask(
 }
 
 export async function googleStatus() {
-  if (!(await isOwnerRequest()))
+  const me = await currentUser();
+  if (me?.role !== UserRole.Owner)
     return { configured: false, connected: false, needsReconnect: false };
-  return getGoogleStatus();
+  return getGoogleStatus(me.id);
 }
 
 export async function disconnectGoogleTasks(): Promise<{ ok: true }> {
-  if (!(await isOwnerRequest())) throw new Error("owner only");
-  await disconnectGoogle();
+  const me = await currentUser();
+  if (me?.role !== UserRole.Owner) throw new Error("owner only");
+  await disconnectGoogle(me.id);
   revalidatePath("/settings");
   return { ok: true };
 }

@@ -15,7 +15,7 @@ const {
   findFirstMock,
   getSettingsMock,
   currentWorkspaceIdMock,
-  isOwnerRequestMock,
+  currentUserMock,
   getGoogleStatusMock,
   pushStepsToGoogleTasksMock,
   scheduleViaIcsMock,
@@ -25,7 +25,7 @@ const {
   findFirstMock: vi.fn(),
   getSettingsMock: vi.fn(),
   currentWorkspaceIdMock: vi.fn(),
-  isOwnerRequestMock: vi.fn(),
+  currentUserMock: vi.fn(),
   getGoogleStatusMock: vi.fn(),
   pushStepsToGoogleTasksMock: vi.fn(),
   scheduleViaIcsMock: vi.fn(),
@@ -54,11 +54,22 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/workspace", () => ({
   currentWorkspaceId: currentWorkspaceIdMock,
-  isOwnerRequest: isOwnerRequestMock,
+  currentUser: currentUserMock,
 }));
 vi.mock("@/lib/google", () => ({
   getGoogleStatus: getGoogleStatusMock,
 }));
+
+// #118 Phase C — identity for this page is one currentUser() read, and the
+// Google status is resolved for THAT id.
+const OWNER_ID = "user-owner";
+const OWNER_USER = {
+  id: OWNER_ID,
+  role: "owner" as const,
+  workspaceId: "owner",
+  provider: "gitlab",
+  handle: "owner",
+};
 // BreakdownChat (the `editing` branch) pulls in a heavy tree of its own server
 // actions (breakdown / anthropic) — none of our scenarios exercise it (task
 // always has steps, `edit` is never "1"), so stub it like the Library hub test
@@ -116,7 +127,9 @@ beforeEach(() => {
   findFirstMock.mockResolvedValue(task());
   getSettingsMock.mockResolvedValue({ voice: "plain" });
   currentWorkspaceIdMock.mockResolvedValue("owner");
-  isOwnerRequestMock.mockResolvedValue(true);
+  // #118 Phase C — the page reads currentUser() rather than isOwnerRequest():
+  // it needs the acting account's id to resolve THEIR OWN Google status.
+  currentUserMock.mockResolvedValue(OWNER_USER);
   getGoogleStatusMock.mockResolvedValue({
     configured: true,
     connected: true,
@@ -203,7 +216,7 @@ describe("TaskPage — Refine breakdown / Schedule split (#8 follow-up, Fix 2)",
   });
 
   it("guest workspaces get the ICS 'Add to calendar' control, never a live Google one", async () => {
-    isOwnerRequestMock.mockResolvedValue(false);
+    currentUserMock.mockResolvedValue(null);
     await renderPage();
     expect(
       screen.getByRole("button", { name: /add to calendar/i }),

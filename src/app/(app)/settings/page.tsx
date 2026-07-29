@@ -38,11 +38,16 @@ export default async function SettingsPage({
     currentUser(),
   ]);
   const owner = me?.role === "owner";
+  // #118 Phase C — getGoogleStatus() resolves ONE account's connection, so it
+  // needs the acting account's id. A narrowed local rather than `me!`: the
+  // signature already accepts null (a caller with no account is answered without
+  // a query), so no non-null assertion is needed at all.
+  const meId = me?.id ?? null;
   // Both owner-only reads. loadPeopleAdmin re-checks the role itself and returns
   // null for anyone else, so the panel cannot render for a member even if this
   // call site were ever changed to drop the gate.
   const [google, people] = await Promise.all([
-    owner ? getGoogleStatus() : Promise.resolve(null),
+    owner ? getGoogleStatus(meId) : Promise.resolve(null),
     owner ? loadPeopleAdmin(me?.id) : Promise.resolve(null),
   ]);
   const voice: Voice = settings.voice === "playful" ? "playful" : "plain";

@@ -1,5 +1,4 @@
 import { prisma } from "@/lib/db";
-import { SINGLETON_ID } from "@/lib/constants";
 import { createPkce, randomState } from "@/lib/oauth-pkce";
 import { encryptToken, decryptNullable } from "@/lib/crypto/token-cipher";
 
@@ -36,12 +35,21 @@ export function googleConfigured(): boolean {
   return Boolean(clientId && clientSecret);
 }
 
-async function getAuth() {
-  return prisma.googleAuth.upsert({
-    where: { id: SINGLETON_ID },
-    create: { id: SINGLETON_ID },
-    update: {},
-  });
+/**
+ * One user's Google credential, or null.
+ *
+ * #118 Phase C: a genuine `findUnique`, not the `upsert` it used to be. The old
+ * version MATERIALISED a row on every read, so the unconditional
+ * `getGoogleStatus()` on the inbox page created a credential row for anonymous
+ * guests — and a read that writes cannot answer "is there a row?" honestly.
+ *
+ * `userId` is a unique column, so this is a primary-key-grade lookup. There is
+ * no `id` parameter anywhere in this file's public surface: the row is reached
+ * BY the acting user, so there is nothing a caller could point somewhere else.
+ * `src/lib/__tests__/scoping.harness.test.ts` asserts that structurally.
+ */
+async function getAuth(userId: string) {
+  return prisma.googleAuth.findUnique({ where: { userId } });
 }
 
 export function buildAuthorizeUrl(params: {
@@ -71,16 +79,23 @@ type TokenResponse = {
   scope?: string;
 };
 
-async function storeTokens(t: TokenResponse) {
+async function storeTokens(userId: string, t: TokenResponse) {
   const expiresAt = t.expires_in
     ? new Date(Date.now() + t.expires_in * 1000)
     : null;
   const scope = t.scope ?? SCOPE;
-  // upsert (not update): the singleton row may not exist on the first connect.
+  // upsert (not update): this user may be connecting for the first time.
+  //
+  // `userId` is in `create` and deliberately NOT in `update`. The unique index
+  // sits on a NULLABLE column, so Postgres will happily hold many
+  // `userId IS NULL` rows — a create that forgot the binding would accumulate
+  // orphaned credentials silently instead of failing. And an update that wrote
+  // `userId` could RE-KEY an existing row, which is precisely how one account's
+  // connection becomes another's (#119).
   await prisma.googleAuth.upsert({
-    where: { id: SINGLETON_ID },
+    where: { userId },
     create: {
-      id: SINGLETON_ID,
+      userId,
       accessToken: encryptToken(t.access_token),
       refreshToken: t.refresh_token ? encryptToken(t.refresh_token) : null,
       expiresAt,
@@ -89,6 +104,8 @@ async function storeTokens(t: TokenResponse) {
     },
     update: {
       accessToken: encryptToken(t.access_token),
+      // Google omits refresh_token on a re-consent; overwriting it with null
+      // would silently end the grant at the next expiry.
       ...(t.refresh_token
         ? { refreshToken: encryptToken(t.refresh_token) }
         : {}),
@@ -100,6 +117,7 @@ async function storeTokens(t: TokenResponse) {
 }
 
 export async function exchangeCode(
+  userId: string,
   code: string,
   codeVerifier: string,
   redirectUri: string,
@@ -121,12 +139,12 @@ export async function exchangeCode(
   if (!res.ok) {
     throw new Error(`Google token exchange failed (${res.status})`);
   }
-  await storeTokens((await res.json()) as TokenResponse);
+  await storeTokens(userId, (await res.json()) as TokenResponse);
 }
 
-async function refreshAccessToken(): Promise<string | null> {
-  const auth = await getAuth();
-  const refreshToken = decryptNullable(auth.refreshToken);
+async function refreshAccessToken(userId: string): Promise<string | null> {
+  const auth = await getAuth(userId);
+  const refreshToken = decryptNullable(auth?.refreshToken);
   if (!refreshToken) return null;
   const { clientId, clientSecret } = googleClient();
   const body = new URLSearchParams({
@@ -151,7 +169,7 @@ async function refreshAccessToken(): Promise<string | null> {
       // The refresh token is dead (revoked/expired). Presence of stale tokens
       // is what makes `connected` lie — clear them and flag for reconnect.
       await prisma.googleAuth.update({
-        where: { id: SINGLETON_ID },
+        where: { userId },
         data: {
           accessToken: null,
           refreshToken: null,
@@ -163,45 +181,69 @@ async function refreshAccessToken(): Promise<string | null> {
     return null;
   }
   const data = (await res.json()) as TokenResponse;
-  await storeTokens(data);
+  await storeTokens(userId, data);
   return data.access_token;
 }
 
-export async function getValidAccessToken(): Promise<string | null> {
-  const auth = await getAuth();
+export async function getValidAccessToken(
+  userId: string,
+): Promise<string | null> {
+  const auth = await getAuth(userId);
+  if (!auth) return null;
   const accessToken = decryptNullable(auth.accessToken);
   if (!accessToken) return null;
   const soon = Date.now() + 60_000;
   if (auth.expiresAt && auth.expiresAt.getTime() <= soon) {
-    return (await refreshAccessToken()) ?? null;
+    return (await refreshAccessToken(userId)) ?? null;
   }
   return accessToken;
 }
 
-export async function getGoogleStatus(): Promise<{
+/**
+ * One user's connection status, or the instance-level answer for nobody.
+ *
+ * `userId === null` means "no signed-in account" (a guest, or an anonymous
+ * request) and short-circuits BEFORE any query: a guest has no credential to
+ * report and must learn nothing about anyone else's.
+ *
+ * `connected` is derived from DECRYPTABILITY, not from ciphertext presence. The
+ * old `Boolean(auth.accessToken)` meant that after a TOKEN_ENC_KEY rotation the
+ * UI said "Connected" while every push returned "not connected". An unreadable
+ * credential also sets `needsReconnect`, because reconnecting is exactly the
+ * action that fixes it — a bare "Not connected" tells the user nothing about a
+ * row that is sitting right there.
+ */
+export async function getGoogleStatus(userId: string | null): Promise<{
   configured: boolean;
   connected: boolean;
   needsReconnect: boolean;
 }> {
-  const auth = await getAuth();
+  const configured = googleConfigured();
+  if (!userId) return { configured, connected: false, needsReconnect: false };
+  const auth = await getAuth(userId);
+  if (!auth) return { configured, connected: false, needsReconnect: false };
+  const connected = Boolean(decryptNullable(auth.accessToken));
   return {
-    configured: googleConfigured(),
-    connected: Boolean(auth.accessToken),
-    needsReconnect: Boolean(auth.needsReconnect),
+    configured,
+    connected,
+    needsReconnect:
+      Boolean(auth.needsReconnect) || (Boolean(auth.accessToken) && !connected),
   };
 }
 
 const REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke";
 
 /**
- * Disconnect Google: best-effort server-side revoke (refresh token preferred —
- * revoking it kills the whole grant), then delete the stored row regardless.
- * Idempotent; revoke failures must never keep dead tokens around.
+ * Disconnect ONE user's Google account: best-effort server-side revoke (refresh
+ * token preferred — revoking it kills the whole grant), then delete that user's
+ * row regardless. Idempotent; revoke failures must never keep dead tokens
+ * around. `deleteMany` rather than `delete` so a user with no row is a no-op
+ * instead of a thrown `RecordNotFound`.
  */
-export async function disconnectGoogle(): Promise<void> {
-  const auth = await getAuth();
+export async function disconnectGoogle(userId: string): Promise<void> {
+  const auth = await getAuth(userId);
   const token =
-    decryptNullable(auth.refreshToken) ?? decryptNullable(auth.accessToken);
+    decryptNullable(auth?.refreshToken) ?? decryptNullable(auth?.accessToken);
   if (token) {
     try {
       await fetch(REVOKE_ENDPOINT, {
@@ -213,7 +255,7 @@ export async function disconnectGoogle(): Promise<void> {
       // Best-effort: the row still gets deleted below.
     }
   }
-  await prisma.googleAuth.deleteMany({ where: { id: SINGLETON_ID } });
+  await prisma.googleAuth.deleteMany({ where: { userId } });
 }
 
 // ── Google Tasks API ──────────────────────────────────────────────────────

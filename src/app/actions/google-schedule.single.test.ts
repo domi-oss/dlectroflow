@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const {
   workspaceMock,
   isOwnerMock,
+  currentUserMock,
   revalidatePathMock,
   configuredMock,
   tokenMock,
@@ -19,6 +20,7 @@ const {
 } = vi.hoisted(() => ({
   workspaceMock: vi.fn(),
   isOwnerMock: vi.fn(),
+  currentUserMock: vi.fn(),
   revalidatePathMock: vi.fn(),
   configuredMock: vi.fn(),
   tokenMock: vi.fn(),
@@ -71,6 +73,7 @@ vi.mock("@/lib/google", () => ({
 vi.mock("@/lib/workspace", () => ({
   currentWorkspaceId: workspaceMock,
   isOwnerRequest: isOwnerMock,
+  currentUser: currentUserMock,
 }));
 
 import { RewardType, BadgeKey } from "@/lib/constants";
@@ -83,8 +86,30 @@ import { scheduleSingleTask } from "./google-schedule";
 // account happens to own.
 const OWNER_WS = "ws-owner";
 
+// #118 Phase C — the action reads currentUser() now, because the acting user's
+// id is what keys their own GoogleAuth row. isOwnerRequest() is no longer called
+// by the action; its mock stays only until #118 retires it in the next commit.
+// The two must always describe the SAME person — two mocks answering one
+// question is how a test ends up proving something about nobody.
+const OWNER_ID = "user-owner";
+const ownerUser = () => ({
+  id: OWNER_ID,
+  role: "owner" as const,
+  workspaceId: OWNER_WS,
+  provider: "gitlab",
+  handle: "owner",
+});
+const memberUser = () => ({
+  id: "user-member",
+  role: "member" as const,
+  workspaceId: "ws-member",
+  provider: "gitlab",
+  handle: "member",
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
+  currentUserMock.mockResolvedValue(ownerUser());
   getSettingsMock.mockResolvedValue({ voice: "plain" });
   taskFindFirstMock.mockResolvedValue(null);
   upsertGoogleTaskMock.mockResolvedValue({ id: "gtask-9", created: true });
@@ -94,9 +119,31 @@ describe("scheduleSingleTask", () => {
   it("rejects non-owner", async () => {
     workspaceMock.mockResolvedValue("guest-ws");
     isOwnerMock.mockResolvedValue(false);
+    // Kept in sync with isOwnerMock — the action gates on currentUser().role
+    // now (#118), so the member has to be the one asking.
+    currentUserMock.mockResolvedValue(memberUser());
     await expect(scheduleSingleTask("item-1", 30)).rejects.toThrow(
       "owner only",
     );
+  });
+
+  it("resolves the token for the ACTING user, never a fixed id", async () => {
+    // #118 — no id parameter exists on this action; the credential is reached BY
+    // the acting account, so there is no other row to point at.
+    workspaceMock.mockResolvedValue(OWNER_WS);
+    isOwnerMock.mockResolvedValue(true);
+    configuredMock.mockReturnValue(true);
+    tokenMock.mockResolvedValue("tok");
+    itemFindFirstMock.mockResolvedValue({
+      id: "item-1",
+      text: "todo",
+      taskId: "task-1",
+      task: { scheduledAt: null },
+    });
+    findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
+    taskUpdateMock.mockResolvedValue({});
+    await scheduleSingleTask("item-1", 30);
+    expect(tokenMock).toHaveBeenCalledWith(OWNER_ID);
   });
 
   it("rejects a duration outside 1..480 minutes (server clamp) without touching Google", async () => {

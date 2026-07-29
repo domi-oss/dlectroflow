@@ -4,13 +4,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // (exchangeCode → storeTokens → the instance-wide GoogleAuth row), so the owner
 // gate matters even more here than on /start: a member who already holds PKCE
 // cookies must not be able to complete an exchange.
-const { isOwnerMock, exchangeCodeMock, cookiesMock } = vi.hoisted(() => ({
-  isOwnerMock: vi.fn(),
+const { currentUserMock, exchangeCodeMock, cookiesMock } = vi.hoisted(() => ({
+  currentUserMock: vi.fn(),
   exchangeCodeMock: vi.fn(),
   cookiesMock: vi.fn(),
 }));
 
-vi.mock("@/lib/workspace", () => ({ isOwnerRequest: isOwnerMock }));
+vi.mock("@/lib/workspace", () => ({ currentUser: currentUserMock }));
 vi.mock("@/lib/google", () => ({ exchangeCode: exchangeCodeMock }));
 vi.mock("next/headers", () => ({ cookies: cookiesMock }));
 vi.mock("@/lib/origin", () => ({
@@ -21,6 +21,25 @@ import { GET } from "./route";
 
 const CALLBACK_URL =
   "https://dlectroflow.test/api/google/oauth/callback?code=c&state=st";
+
+// #118 — the handler reads currentUser() rather than isOwnerRequest(): it needs
+// the acting account's ID as well as its role, because the exchange binds tokens
+// to THAT account's row and there is no id parameter to pass instead.
+const OWNER_ID = "user-owner";
+const ownerUser = () => ({
+  id: OWNER_ID,
+  role: "owner" as const,
+  workspaceId: "ws-owner",
+  provider: "gitlab",
+  handle: "owner",
+});
+const memberUser = () => ({
+  id: "user-member",
+  role: "member" as const,
+  workspaceId: "ws-member",
+  provider: "gitlab",
+  handle: "member",
+});
 
 /** A jar carrying a matching state + verifier, i.e. everything the callback
  *  needs before it gets as far as the authorization decision. */
@@ -45,7 +64,7 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("google oauth callback — owner gate (#119)", () => {
   it("rejects a signed-in non-owner with 403 and exchanges no code", async () => {
-    isOwnerMock.mockResolvedValue(false);
+    currentUserMock.mockResolvedValue(memberUser());
 
     const res = await GET(new Request(CALLBACK_URL));
 
@@ -63,7 +82,7 @@ describe("google oauth callback — owner gate (#119)", () => {
     // the whole point of this case is that a VALID state + verifier pair is
     // present, so it should be visible in the test rather than inherited.
     cookiesMock.mockResolvedValue(validJar());
-    isOwnerMock.mockResolvedValue(false);
+    currentUserMock.mockResolvedValue(memberUser());
 
     const res = await GET(new Request(CALLBACK_URL));
 
@@ -72,11 +91,14 @@ describe("google oauth callback — owner gate (#119)", () => {
   });
 
   it("still completes the exchange for the owner", async () => {
-    isOwnerMock.mockResolvedValue(true);
+    currentUserMock.mockResolvedValue(ownerUser());
 
     const res = await GET(new Request(CALLBACK_URL));
 
+    // #118 — the exchange is bound to the ACTING user: their id is the first
+    // argument, and it is the only thing that decides which row is written.
     expect(exchangeCodeMock).toHaveBeenCalledWith(
+      OWNER_ID,
       "c",
       "ver",
       "https://dlectroflow.test/api/google/oauth/callback",
@@ -87,7 +109,7 @@ describe("google oauth callback — owner gate (#119)", () => {
   });
 
   it("still rejects a state mismatch for the owner (gate added, checks kept)", async () => {
-    isOwnerMock.mockResolvedValue(true);
+    currentUserMock.mockResolvedValue(ownerUser());
 
     const res = await GET(
       new Request(

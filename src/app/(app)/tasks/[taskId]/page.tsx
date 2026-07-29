@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma, getSettings } from "@/lib/db";
-import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
+import { currentWorkspaceId, currentUser } from "@/lib/workspace";
 import { BreakdownChat } from "@/components/breakdown/breakdown-chat";
 import { TaskSteps } from "@/components/breakdown/task-steps";
 import { TaskSchedule } from "@/components/breakdown/task-schedule";
@@ -12,6 +12,7 @@ import { BackLink } from "@/components/nav/back-link";
 import { withFrom } from "@/lib/nav/back";
 import type { SchedulingContext } from "@/lib/scheduling/types";
 import type { Proposal } from "@/lib/breakdown";
+import { UserRole } from "@/lib/constants";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,12 @@ export default async function TaskPage({
   // component: one query in parallel with the others, so the menu opens with what
   // the owner chose last time and never flashes the defaults first. Returns null
   // for a guest (and for a task in another workspace), which keeps 📅 immediate.
-  const [task, google, owner, settings, scheduleIntent] = await Promise.all([
+  //
+  // #118 — ONE identity resolution, awaited inside the batch, with the status
+  // chained off it. isOwnerRequest() was implemented in terms of currentUser(),
+  // so this is the same query it made and the batch stays one round of I/O.
+  const mePromise = currentUser();
+  const [task, google, me, settings, scheduleIntent] = await Promise.all([
     prisma.task.findFirst({
       where: { id: taskId, workspaceId },
       include: {
@@ -48,12 +54,15 @@ export default async function TaskPage({
         },
       },
     }),
-    getGoogleStatus(),
-    isOwnerRequest(),
+    // The ACTING user's own status; null for a caller with no account, which
+    // short-circuits before any query (#118).
+    mePromise.then((u) => getGoogleStatus(u ? u.id : null)),
+    mePromise,
     getSettings(workspaceId),
     loadScheduleIntent(taskId),
   ]);
   if (!task) notFound();
+  const owner = me?.role === UserRole.Owner;
 
   // Scheduling context resolved once at the server boundary (S1 seam, #34):
   // `ctx.isOwner` drives the guest/owner control choice and `ctx.google` is the

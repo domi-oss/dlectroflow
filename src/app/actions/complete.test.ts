@@ -46,6 +46,16 @@ vi.mock("@/lib/db", () => ({ prisma: prismaMock }));
 vi.mock("@/lib/workspace", () => ({
   currentWorkspaceId: currentWorkspaceIdMock,
   isOwnerRequest: vi.fn().mockResolvedValue(true),
+  // #118 Phase C — the best-effort Google sync resolves the ACTING account's own
+  // credential now (focus.ts's actingUserGoogleToken), so this file needs a
+  // signed-in account rather than an instance-wide one.
+  currentUser: vi.fn().mockResolvedValue({
+    id: "user-owner",
+    role: "owner",
+    workspaceId: "owner",
+    provider: "gitlab",
+    handle: "owner",
+  }),
   MissingWorkspaceError: class extends Error {},
 }));
 // keep reward side-effects simple + observable

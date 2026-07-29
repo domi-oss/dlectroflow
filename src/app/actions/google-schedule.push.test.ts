@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const {
   workspaceMock,
   isOwnerMock,
+  currentUserMock,
   revalidatePathMock,
   configuredMock,
   tokenMock,
@@ -21,6 +22,7 @@ const {
 } = vi.hoisted(() => ({
   workspaceMock: vi.fn(),
   isOwnerMock: vi.fn(),
+  currentUserMock: vi.fn(),
   revalidatePathMock: vi.fn(),
   configuredMock: vi.fn(),
   tokenMock: vi.fn(),
@@ -63,6 +65,7 @@ vi.mock("@/lib/google", () => ({
 vi.mock("@/lib/workspace", () => ({
   currentWorkspaceId: workspaceMock,
   isOwnerRequest: isOwnerMock,
+  currentUser: currentUserMock,
 }));
 
 import { RewardType, BadgeKey } from "@/lib/constants";
@@ -75,6 +78,27 @@ import { pushStepsToGoogleTasks } from "./google-schedule";
 // check the action actually makes); this id is just the workspace that
 // account happens to own.
 const OWNER_WS = "ws-owner";
+
+// #118 Phase C — the action reads currentUser() now, because the acting user's
+// id is what keys their own GoogleAuth row. isOwnerRequest() is no longer called
+// by the action; its mock stays only until #118 retires it in the next commit.
+// The two must always describe the SAME person — two mocks answering one
+// question is how a test ends up proving something about nobody.
+const OWNER_ID = "user-owner";
+const ownerUser = () => ({
+  id: OWNER_ID,
+  role: "owner" as const,
+  workspaceId: OWNER_WS,
+  provider: "gitlab",
+  handle: "owner",
+});
+const memberUser = () => ({
+  id: "user-member",
+  role: "member" as const,
+  workspaceId: "ws-member",
+  provider: "gitlab",
+  handle: "member",
+});
 
 const baseTask = (over: Record<string, unknown> = {}) => ({
   id: "task-1",
@@ -108,6 +132,7 @@ beforeEach(() => {
   upsertGoogleTaskMock.mockResolvedValue({ id: "g1", created: true });
   workspaceMock.mockResolvedValue(OWNER_WS);
   isOwnerMock.mockResolvedValue(true);
+  currentUserMock.mockResolvedValue(ownerUser());
   getSettingsMock.mockResolvedValue({ voice: "plain" });
 });
 
@@ -120,6 +145,10 @@ describe("pushStepsToGoogleTasks — provider-agnostic marker + reward-once", ()
   // what "allowed" means here, and this is the test it has to keep passing.
   it("rejects a non-owner without touching Google", async () => {
     isOwnerMock.mockResolvedValue(false);
+    // Both identity mocks describe the SAME member: the action gates on
+    // currentUser().role now (#118), and leaving currentUserMock as the owner
+    // here would make this test pass for the wrong reason.
+    currentUserMock.mockResolvedValue(memberUser());
     taskFindFirstMock.mockResolvedValue(baseTask());
     await expect(pushStepsToGoogleTasks("task-1")).rejects.toThrow(
       "owner only",
@@ -128,6 +157,14 @@ describe("pushStepsToGoogleTasks — provider-agnostic marker + reward-once", ()
     expect(createGoogleTaskMock).not.toHaveBeenCalled();
     expect(taskUpdateMock).not.toHaveBeenCalled();
     expect(logRewardMock).not.toHaveBeenCalled();
+  });
+
+  it("resolves the token for the ACTING user, never a fixed id", async () => {
+    // #118 — the credential is looked up BY the acting account. No id parameter
+    // exists on this action, so there is no other row it could reach.
+    taskFindFirstMock.mockResolvedValue(baseTask());
+    await pushStepsToGoogleTasks("task-1");
+    expect(tokenMock).toHaveBeenCalledWith(OWNER_ID);
   });
 
   it("marks the task scheduled + awards once on first push", async () => {

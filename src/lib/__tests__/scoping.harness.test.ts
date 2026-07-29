@@ -429,6 +429,19 @@ describe("workspace-scoping harness", () => {
     expect(scanUserScope(good, ["googleAuth"])).toEqual([]);
   });
 
+  it("every prisma call against a user-keyed model names userId", () => {
+    const models = userKeyedModels();
+    const offenders: string[] = [];
+    for (const file of sourceFiles()) {
+      for (const call of scanUserScope(readFileSync(file, "utf8"), models)) {
+        offenders.push(`${file}: ${call}`);
+      }
+    }
+    // A credential row that a call can reach without naming its owner is an
+    // IDOR waiting for a second account (#21, #119).
+    expect(offenders).toEqual([]);
+  });
+
   // The only modules allowed to touch a user-keyed model, each with its reason.
   // #118's recon found both of these were already the sole touchers; pinning it
   // is what keeps the blast radius one file per model FOREVER, instead of one

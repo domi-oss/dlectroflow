@@ -1,7 +1,7 @@
 import { prisma, getSettings } from "@/lib/db";
-import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
+import { currentWorkspaceId, currentUser } from "@/lib/workspace";
 import { getGoogleStatus } from "@/lib/google";
-import { BrainDumpStatus } from "@/lib/constants";
+import { BrainDumpStatus, UserRole } from "@/lib/constants";
 import { InboxView } from "@/components/inbox/inbox-view";
 import { firstResumableStep } from "@/components/inbox/resume-step";
 import { openSessionRemainingSec } from "@/lib/focus-timer-clock";
@@ -24,7 +24,11 @@ export default async function InboxPage({
   // time (#27 follow-up), matching the Library page's same-request approach.
   // eslint-disable-next-line react-hooks/purity -- async Server Component: this runs once per request on the server, not in a compiler-memoised client render.
   const now = Date.now();
-  const [rawItems, settings, sp, owner, googleStatus] = await Promise.all([
+  // #118 — ONE identity resolution, awaited inside the batch. isOwnerRequest()
+  // is implemented in terms of currentUser(), so this is the same query it made,
+  // and chaining the status off it keeps page-load latency flat.
+  const mePromise = currentUser();
+  const [rawItems, settings, sp, me, googleStatus] = await Promise.all([
     prisma.brainDumpItem.findMany({
       where: { workspaceId, status: { not: BrainDumpStatus.Archived } },
       orderBy: { createdAt: "desc" },
@@ -61,15 +65,18 @@ export default async function InboxPage({
     }),
     getSettings(workspaceId),
     searchParams,
-    isOwnerRequest(),
-    // Fetched in parallel and discarded for guests, so owner page-load latency
-    // stays flat (Duo review: was a serial round-trip after the Promise.all).
-    getGoogleStatus(),
+    mePromise,
+    // Resolved for the ACTING user, in parallel so page-load latency stays flat
+    // (Duo review: this was once a serial round-trip after the Promise.all). A
+    // guest/anonymous caller is passed null, which short-circuits before any
+    // query at all — getAuth() used to be an upsert, so an anonymous page load
+    // MATERIALISED the credential row (#118).
+    mePromise.then((u) => getGoogleStatus(u ? u.id : null)),
   ]);
-  // The owner's Google status (null for guests, same as the settings
-  // Integrations panel) — resolved once at the server boundary (S1 seam, #34).
-  // When F (#35) makes Google per-user, only this owner-gate + the provider's
-  // isAvailable() change, not the InboxView call site.
+  const owner = me?.role === UserRole.Owner;
+  // Resolved once at the server boundary (S1 seam, #34). Task 5 of #118 changes
+  // this line to `me ? googleStatus : null`; it is left owner-gated here so this
+  // commit ships no behaviour change and a member still falls back to .ics.
   const google = owner ? googleStatus : null;
 
   const items = rawItems.map(({ task, ...item }) => ({

@@ -91,7 +91,9 @@ export const DASHBOARD_BADGE_KEYS: readonly BadgeKey[] = [
   BadgeKey.BeatBestStreak,
 ];
 
-export const SINGLETON_ID = "singleton";
+// #118 Phase C: SINGLETON_ID is GONE. GoogleAuth is one row per User, keyed on
+// `userId` (src/lib/google.ts) — there is no instance-wide credential left for a
+// magic id to name. The scoping harness asserts every call names its user.
 
 // #35 Phase A: OWNER_WORKSPACE_ID and the synchronous isGuestWorkspace() that
 // compared against it are GONE. Workspaces belong to User records now, so
