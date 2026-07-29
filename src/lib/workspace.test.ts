@@ -284,7 +284,18 @@ describe("isOwnerRequest", () => {
       SECRET,
     );
     cookiesMock.mockResolvedValue(jarWith(token));
-    userFindUniqueMock.mockResolvedValue({ id: "u1", role, status });
+    // provider/handle are carried even though `isOwnerRequest` only reads
+    // `role`: `CurrentUser` declares `provider: string` non-optional (#100), so
+    // a mock without them describes a row that cannot exist. The test would
+    // still pass — which is exactly why it is worth keeping the fixture honest,
+    // rather than leaving the next reader to infer the field is optional.
+    userFindUniqueMock.mockResolvedValue({
+      id: "u1",
+      role,
+      status,
+      provider: "gitlab",
+      handle: "owner-handle",
+    });
   }
 
   it("treats the owner role as owner", async () => {
