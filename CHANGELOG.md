@@ -43,9 +43,10 @@ operators upgrading a self-hosted instance don't get surprised.
   under `dependencies` meant `npm ci --omit=dev` resolved **412 packages instead
   of 103** — 309 packages of CLI subtree (`ts-morph`, `@dotenvx/dotenvx`, a second
   `dotenv@17.4.2`) described as production supply-chain surface that never reached
-  the image. The `output: "standalone"` trace is unchanged at 13 packages and the
-  built image is byte-identical, so this changes what the dependency graph
-  *claims*, not what ships. It is not removable: `src/app/globals.css` still
+  the image. The `output: "standalone"` trace is unchanged at 13 packages, the
+  compiled stylesheet is bit-identical, and `find / -name 'shadcn*'` in the built
+  image returns nothing — so this changes what the dependency graph *claims*, not
+  what ships. It is not removable: `src/app/globals.css` still
   `@import`s `shadcn/tailwind.css`, so the build fails outright without it — but
   that CSS is compiled into `.next/static` before the image is assembled.
   `npx shadcn add …` still works, since dev dependencies are installed locally.
