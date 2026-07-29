@@ -21,6 +21,34 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Added
 
+- **You can self-host dlectroflow on one small server without Kubernetes (#102).**
+  `docker-compose.prod.yml`, a `Caddyfile` and `.env.prod.example` now ship, with
+  a walkthrough in `docs/self-host-vps.md`. That is roughly **$6/month** on a
+  small VPS, versus $105–145 for the GKE Autopilot deploy — and until now the
+  cost guide recommended that path while the repo's only Compose file started
+  Postgres alone, for local development.
+  - **Mirrors what the Helm chart does**, minus the cluster-only parts: the
+    startup order `db (healthy) → migrate → seed-allowlist → app → caddy` is
+    enforced, so migrations are applied before the app starts and the owner's
+    invitation is seeded — without that step you would be locked out of your own
+    invite-only instance on first boot.
+  - **Caddy replaces ingress-nginx and cert-manager**, obtaining and renewing a
+    Let's Encrypt certificate on its own. It also enforces the same 2 MB request
+    body cap as the Kubernetes Ingress. Per-IP rate limiting is the one Ingress
+    feature not carried over, and that is called out in both the Caddyfile and
+    the runbook.
+  - **Backup and guest-purge jobs are included** behind a Compose profile, with
+    the two crontab lines in the runbook, plus restore and upgrade procedures.
+  - **`DATABASE_URL` is composed from the `POSTGRES_*` values** in one place, so
+    the app's connection string and the database's own credentials cannot drift
+    apart, and the stack uses its own Compose project name (`dlectroflow-prod`)
+    so it can never take over a local development database.
+  - **Verified end-to-end before shipping** — 30 migrations applied, owner
+    invitation seeded, `/api/health` green through Caddy, purge and backup both
+    producing correct output, and the boot guard confirmed to refuse a
+    half-configured instance. The one thing not yet exercised is Let's Encrypt
+    issuing a certificate on a real public domain, which needs public DNS and
+    port 80; both the runbook and the cost guide say so plainly.
 - **An honest self-hosting cost guide — `docs/running-costs.md`.** Eight ways to
   run dlectroflow, cheapest first ($0 on your own hardware → $105–145/month on
   GKE Autopilot), with every tool named and explained, whether it's free or open

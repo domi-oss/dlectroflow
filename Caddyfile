@@ -1,0 +1,56 @@
+# Caddy config for the single-host production stack (#102).
+#
+# Caddy's job here is the one ingress-nginx + cert-manager do in the Kubernetes
+# deploy: terminate HTTPS on your domain and forward to the app. It obtains and
+# renews a Let's Encrypt certificate on its own — there is nothing to run, no
+# cron, and no certbot. The HTTP->HTTPS redirect is automatic.
+#
+# Both variables come from .env.prod via docker-compose.prod.yml.
+
+# OPTIONAL: register an ACME account email, which is how Let's Encrypt warns you
+# about certificate problems. Uncomment BOTH lines and put your address in
+# literally. Do not wire this to an environment variable that might be blank —
+# Caddy treats `email` with no argument as a syntax error and crash-loops, which
+# looks exactly like a networking problem from the outside.
+#
+# {
+# 	email you@example.com
+# }
+
+{$DLECTROFLOW_DOMAIN} {
+	# Cap request bodies at 2 MB, matching the Kubernetes Ingress
+	# (nginx.ingress.kubernetes.io/proxy-body-size: 2m). The AI breakdown
+	# endpoint validates at 10,000 characters in application code; this is the
+	# infrastructure backstop in front of it.
+	request_body {
+		max_size 2MB
+	}
+
+	encode zstd gzip
+
+	reverse_proxy app:3000 {
+		# The app pins OAuth redirect URIs and the Secure cookie flag to
+		# PUBLIC_ORIGIN rather than trusting these, so a spoofed header cannot
+		# redirect a sign-in. They are still forwarded because Next.js uses them
+		# for request-level details like the client IP behind the proxy.
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+	}
+
+	# Security response headers are set by the application (next.config.ts) —
+	# HSTS, CSP, frame options and the rest. Setting them here too would risk
+	# them drifting out of sync with the app, so this file deliberately does not.
+
+	log {
+		output stderr
+		format console
+	}
+}
+
+# NOTE — one thing the Kubernetes Ingress does that this does not: per-IP rate
+# limiting (limit-rps / limit-connections). Caddy's rate limiter is a plugin that
+# is not in the base image, so adding it means building a custom Caddy. If your
+# instance is public and you want that backstop, either build Caddy with
+# github.com/mholt/caddy-ratelimit or put Cloudflare's free tier in front. The
+# app's own guest AI quotas (GUEST_AI_QUOTA_PER_WINDOW,
+# GUEST_GLOBAL_DAILY_GUEST_CAP) still cap the expensive path either way.

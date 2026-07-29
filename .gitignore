@@ -35,6 +35,9 @@ yarn-error.log*
 .env
 .env*.local
 .env.local
+# Single-host production stack (#102): real secrets + local dump destination
+.env.prod
+/backups/
 
 # Prisma / local database
 /prisma/*.db

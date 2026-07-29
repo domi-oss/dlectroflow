@@ -128,8 +128,13 @@ include:
   - "*.yml"
   - "*.yaml"
   - "Dockerfile*"
+  # Single-host deployment stack (#102). Not exercised by CI, but it is
+  # deployment configuration rather than documentation, so a change to it runs
+  # the gate rather than taking the docs-only fast path.
+  - "Caddyfile"
   - ".dockerignore"
   - ".env.example"
+  - ".env.prod.example"
   - ".gitignore"
   - ".nvmrc"
   - ".prettierignore"
