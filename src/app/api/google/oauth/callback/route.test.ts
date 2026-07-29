@@ -59,6 +59,10 @@ describe("google oauth callback — owner gate (#119)", () => {
   it("rejects a non-owner holding a valid state + verifier", async () => {
     // A member who obtained cookies before this gate existed (or from a shared
     // browser) must still be refused: the gate is on the ROLE, not the cookies.
+    // The jar is set explicitly here even though beforeEach already does it —
+    // the whole point of this case is that a VALID state + verifier pair is
+    // present, so it should be visible in the test rather than inherited.
+    cookiesMock.mockResolvedValue(validJar());
     isOwnerMock.mockResolvedValue(false);
 
     const res = await GET(new Request(CALLBACK_URL));
