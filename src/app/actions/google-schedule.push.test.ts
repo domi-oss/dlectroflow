@@ -10,6 +10,7 @@ const {
   findReclaimListMock,
   listTaskListsMock,
   createGoogleTaskMock,
+  upsertGoogleTaskMock,
   taskFindFirstMock,
   taskUpdateMock,
   stepFindFirstMock,
@@ -27,6 +28,7 @@ const {
   findReclaimListMock: vi.fn(),
   listTaskListsMock: vi.fn(),
   createGoogleTaskMock: vi.fn(),
+  upsertGoogleTaskMock: vi.fn(),
   taskFindFirstMock: vi.fn(),
   taskUpdateMock: vi.fn(),
   stepFindFirstMock: vi.fn(),
@@ -54,6 +56,7 @@ vi.mock("@/lib/google", () => ({
   findReclaimList: findReclaimListMock,
   listTaskLists: listTaskListsMock,
   createGoogleTask: createGoogleTaskMock,
+  upsertGoogleTask: upsertGoogleTaskMock,
   getGoogleStatus: statusMock,
   disconnectGoogle: vi.fn(),
 }));
@@ -77,7 +80,14 @@ const baseTask = (over: Record<string, unknown> = {}) => ({
   parentEmoji: "🚀",
   scheduledAt: null,
   steps: [
-    { id: "s1", order: 1, text: "a", estMinutes: 10, subtaskEmoji: null },
+    {
+      id: "s1",
+      order: 1,
+      text: "a",
+      estMinutes: 10,
+      subtaskEmoji: null,
+      googleTaskId: null,
+    },
   ],
   ...over,
 });
@@ -93,6 +103,7 @@ beforeEach(() => {
   tokenMock.mockResolvedValue("tok");
   findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
   createGoogleTaskMock.mockResolvedValue({ id: "g1" });
+  upsertGoogleTaskMock.mockResolvedValue({ id: "g1", created: true });
   workspaceMock.mockResolvedValue(OWNER_WS);
   isOwnerMock.mockResolvedValue(true);
   getSettingsMock.mockResolvedValue({ voice: "plain" });
@@ -116,25 +127,121 @@ describe("pushStepsToGoogleTasks — provider-agnostic marker + reward-once", ()
     );
   });
 
-  it("attaches a voice-aware focus deep-link note (first step) to each Google Task (#39)", async () => {
+  // #104: the deep link used to be built ONCE from steps[0] and reused, so
+  // every event opened the timer on step 1. It is now built per step.
+  it("attaches a voice-aware focus deep-link note pointing at ITS OWN step (#104)", async () => {
     process.env.PUBLIC_ORIGIN = "https://app.example";
     getSettingsMock.mockResolvedValue({ voice: "playful" });
     taskFindFirstMock.mockResolvedValue(
       baseTask({
         steps: [
-          { id: "s1", order: 1, text: "a", estMinutes: 10, subtaskEmoji: null },
-          { id: "s2", order: 2, text: "b", estMinutes: 10, subtaskEmoji: null },
+          {
+            id: "s1",
+            order: 1,
+            text: "a",
+            estMinutes: 10,
+            subtaskEmoji: null,
+            googleTaskId: null,
+          },
+          {
+            id: "s2",
+            order: 2,
+            text: "b",
+            estMinutes: 10,
+            subtaskEmoji: null,
+            googleTaskId: null,
+          },
         ],
       }),
     );
     await pushStepsToGoogleTasks("task-1");
-    // Every created task carries the note; the deep-link targets the FIRST step.
-    for (const call of createGoogleTaskMock.mock.calls) {
-      const input = call[2];
-      expect(input.notes).toContain("https://app.example/focus/s1");
-      expect(input.notes).toContain("🍽️");
+
+    expect(upsertGoogleTaskMock).toHaveBeenCalledTimes(2);
+    const notesFor = (stepId: string) =>
+      upsertGoogleTaskMock.mock.calls.find((c) =>
+        (c[3] as { notes: string }).notes.includes(`/focus/${stepId}`),
+      )?.[3] as { notes: string } | undefined;
+    expect(notesFor("s1")?.notes).toContain("https://app.example/focus/s1");
+    expect(notesFor("s2")?.notes).toContain("https://app.example/focus/s2");
+    // Voice still resolved from settings, on every note.
+    for (const call of upsertGoogleTaskMock.mock.calls) {
+      expect((call[3] as { notes: string }).notes).toContain("🍽️");
     }
     delete process.env.PUBLIC_ORIGIN;
+  });
+
+  // #104: the sequence Reclaim needs in order to stop inverting the steps.
+  it("briefs Reclaim with disjoint windows, the 30-minute floor and the hours category", async () => {
+    taskFindFirstMock.mockResolvedValue(
+      baseTask({
+        steps: [
+          {
+            id: "s1",
+            order: 1,
+            text: "a",
+            estMinutes: 10,
+            subtaskEmoji: null,
+            googleTaskId: null,
+          },
+          {
+            id: "s2",
+            order: 2,
+            text: "b",
+            estMinutes: 10,
+            subtaskEmoji: null,
+            googleTaskId: null,
+          },
+        ],
+      }),
+    );
+    await pushStepsToGoogleTasks("task-1");
+
+    const titles = upsertGoogleTaskMock.mock.calls.map(
+      (c) => (c[3] as { title: string }).title,
+    );
+    expect(titles[0]).toContain("[1/2]");
+    expect(titles[1]).toContain("[2/2]");
+    // The first unit may start immediately; later ones may not.
+    expect(titles[0]).not.toContain("not before");
+    expect(titles[1]).toContain("(not before ");
+    for (const title of titles) {
+      expect(title).toContain("(duration:30m)"); // 10m estimate, floored
+      expect(title).toContain("(nosplit)");
+      expect(title).toContain("(priority:P2)");
+      expect(title).toContain("(type work)");
+      expect(title).toContain("(due ");
+    }
+  });
+
+  // #104: Step.googleTaskId was persisted and never read, so a re-schedule
+  // POSTed a second task and Reclaim booked a second block.
+  it("updates the existing Google Task on a re-schedule instead of creating another", async () => {
+    taskFindFirstMock.mockResolvedValue(
+      baseTask({
+        steps: [
+          {
+            id: "s1",
+            order: 1,
+            text: "a",
+            estMinutes: 10,
+            subtaskEmoji: null,
+            googleTaskId: "gtask-existing",
+          },
+        ],
+      }),
+    );
+    upsertGoogleTaskMock.mockResolvedValue({
+      id: "gtask-existing",
+      created: false,
+    });
+    await pushStepsToGoogleTasks("task-1");
+    expect(upsertGoogleTaskMock).toHaveBeenCalledWith(
+      "tok",
+      "list-9",
+      "gtask-existing",
+      expect.objectContaining({ title: expect.any(String) }),
+    );
+    expect(createGoogleTaskMock).not.toHaveBeenCalled();
   });
 
   it("does not re-award when the task is already scheduled (idempotent)", async () => {

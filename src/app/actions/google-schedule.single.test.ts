@@ -9,10 +9,13 @@ const {
   statusMock,
   findReclaimListMock,
   createGoogleTaskMock,
+  upsertGoogleTaskMock,
   itemFindFirstMock,
   itemUpdateMock,
   taskCreateMock,
+  taskFindFirstMock,
   taskUpdateMock,
+  getSettingsMock,
 } = vi.hoisted(() => ({
   workspaceMock: vi.fn(),
   isOwnerMock: vi.fn(),
@@ -22,14 +25,18 @@ const {
   statusMock: vi.fn(),
   findReclaimListMock: vi.fn(),
   createGoogleTaskMock: vi.fn(),
+  upsertGoogleTaskMock: vi.fn(),
   itemFindFirstMock: vi.fn(),
   itemUpdateMock: vi.fn(),
   taskCreateMock: vi.fn(),
+  taskFindFirstMock: vi.fn(),
   taskUpdateMock: vi.fn(),
+  getSettingsMock: vi.fn(),
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/lib/db", () => {
+  // getSettings is read for the voice of the focus deep-link note (#104).
   const prisma: Record<string, unknown> = {
     brainDumpItem: {
       findFirst: itemFindFirstMock,
@@ -37,6 +44,7 @@ vi.mock("@/lib/db", () => {
     },
     task: {
       create: taskCreateMock,
+      findFirst: taskFindFirstMock,
       update: taskUpdateMock,
     },
     // Interactive transaction: run the callback with the same mock client, so
@@ -44,7 +52,7 @@ vi.mock("@/lib/db", () => {
     // taskCreateMock / itemUpdateMock.
     $transaction: (fn: (tx: unknown) => unknown) => fn(prisma),
   };
-  return { prisma };
+  return { prisma, getSettings: getSettingsMock };
 });
 vi.mock("@/lib/rewards", () => ({
   logReward: vi.fn().mockResolvedValue(undefined),
@@ -56,6 +64,7 @@ vi.mock("@/lib/google", () => ({
   findReclaimList: findReclaimListMock,
   listTaskLists: vi.fn(),
   createGoogleTask: createGoogleTaskMock,
+  upsertGoogleTask: upsertGoogleTaskMock,
   getGoogleStatus: statusMock,
   disconnectGoogle: vi.fn(),
 }));
@@ -74,7 +83,12 @@ import { scheduleSingleTask } from "./google-schedule";
 // account happens to own.
 const OWNER_WS = "ws-owner";
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  getSettingsMock.mockResolvedValue({ voice: "plain" });
+  taskFindFirstMock.mockResolvedValue(null);
+  upsertGoogleTaskMock.mockResolvedValue({ id: "gtask-9", created: true });
+});
 
 describe("scheduleSingleTask", () => {
   it("rejects non-owner", async () => {
@@ -97,7 +111,7 @@ describe("scheduleSingleTask", () => {
       message: "Duration must be 1-480 minutes",
     });
     expect(itemFindFirstMock).not.toHaveBeenCalled();
-    expect(createGoogleTaskMock).not.toHaveBeenCalled();
+    expect(upsertGoogleTaskMock).not.toHaveBeenCalled();
   });
 
   it("returns reconnect_required when tokens are dead", async () => {
@@ -128,14 +142,15 @@ describe("scheduleSingleTask", () => {
       task: { id: "task-1", title: "Call the dentist" },
     });
     findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
-    createGoogleTaskMock.mockResolvedValue({ id: "gtask-9" });
+    upsertGoogleTaskMock.mockResolvedValue({ id: "gtask-9", created: true });
 
     const res = await scheduleSingleTask("item-1", 45);
 
     expect(res).toEqual({ ok: true });
-    expect(createGoogleTaskMock).toHaveBeenCalledWith(
+    expect(upsertGoogleTaskMock).toHaveBeenCalledWith(
       "tok",
       "list-9",
+      null, // no stored id yet -> POST
       expect.objectContaining({
         title: expect.stringContaining("(duration:45m)"),
       }),
@@ -150,6 +165,76 @@ describe("scheduleSingleTask", () => {
       }),
     );
     expect(revalidatePathMock).toHaveBeenCalledWith("/");
+  });
+
+  // #104: one code path for the format, so a to-do and a step cannot drift.
+  it("sends the full intent for a stepless to-do — floor, priority, hours, due, no (not before)", async () => {
+    process.env.PUBLIC_ORIGIN = "https://app.example";
+    workspaceMock.mockResolvedValue(OWNER_WS);
+    isOwnerMock.mockResolvedValue(true);
+    configuredMock.mockReturnValue(true);
+    tokenMock.mockResolvedValue("tok");
+    itemFindFirstMock.mockResolvedValue({
+      id: "item-1",
+      text: "Call the dentist",
+      taskId: "task-1",
+      task: { id: "task-1", title: "Call the dentist" },
+    });
+    findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
+
+    await scheduleSingleTask("item-1", 10);
+
+    const body = upsertGoogleTaskMock.mock.calls[0][3] as {
+      title: string;
+      notes: string;
+    };
+    expect(body.title).toContain("(duration:30m)"); // 10m clamped by the floor
+    expect(body.title).toContain("(priority:P2)");
+    expect(body.title).toContain("(type work)");
+    expect(body.title).toContain("(due ");
+    // Nothing to sequence, so no badge, no (nosplit) and no (not before).
+    expect(body.title).not.toContain("not before");
+    expect(body.title).not.toContain("(nosplit)");
+    expect(body.title).not.toContain("[1/1]");
+    // And it still carries the focus deep-link (the to-do's own task id).
+    expect(body.notes).toContain("https://app.example/focus/task-1");
+    delete process.env.PUBLIC_ORIGIN;
+  });
+
+  // #104: re-scheduling used to POST a second task, so Reclaim booked a
+  // second block. The stored Task.googleTaskId is now read and PATCHed.
+  it("updates the stored Google Task on a re-schedule instead of creating a second one", async () => {
+    workspaceMock.mockResolvedValue(OWNER_WS);
+    isOwnerMock.mockResolvedValue(true);
+    configuredMock.mockReturnValue(true);
+    tokenMock.mockResolvedValue("tok");
+    itemFindFirstMock.mockResolvedValue({
+      id: "item-1",
+      text: "Call the dentist",
+      taskId: "task-1",
+      task: { id: "task-1", title: "Call the dentist" },
+    });
+    findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
+    taskFindFirstMock.mockResolvedValue({ googleTaskId: "gtask-existing" });
+    upsertGoogleTaskMock.mockResolvedValue({
+      id: "gtask-existing",
+      created: false,
+    });
+
+    expect(await scheduleSingleTask("item-1", 30)).toEqual({ ok: true });
+    expect(upsertGoogleTaskMock).toHaveBeenCalledWith(
+      "tok",
+      "list-9",
+      "gtask-existing",
+      expect.objectContaining({ title: expect.any(String) }),
+    );
+    // The lookup is workspace-scoped, so another workspace's id is unreachable.
+    expect(taskFindFirstMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "task-1", workspaceId: OWNER_WS },
+      }),
+    );
+    expect(createGoogleTaskMock).not.toHaveBeenCalled();
   });
 
   it("returns no_reclaim_list when no matching Google Tasks list exists", async () => {
@@ -169,7 +254,7 @@ describe("scheduleSingleTask", () => {
       ok: false,
       reason: "no_reclaim_list",
     });
-    expect(createGoogleTaskMock).not.toHaveBeenCalled();
+    expect(upsertGoogleTaskMock).not.toHaveBeenCalled();
   });
 
   it("lazily creates a Task row when the item has none yet, then schedules it", async () => {
@@ -185,7 +270,7 @@ describe("scheduleSingleTask", () => {
     });
     taskCreateMock.mockResolvedValue({ id: "task-2" });
     findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
-    createGoogleTaskMock.mockResolvedValue({ id: "gtask-3" });
+    upsertGoogleTaskMock.mockResolvedValue({ id: "gtask-3", created: true });
 
     const res = await scheduleSingleTask("item-2", 15);
 
@@ -221,7 +306,7 @@ describe("scheduleSingleTask", () => {
       task: { id: "task-1", scheduledAt: null },
     });
     findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
-    createGoogleTaskMock.mockResolvedValue({ id: "gtask-9" });
+    upsertGoogleTaskMock.mockResolvedValue({ id: "gtask-9", created: true });
 
     await scheduleSingleTask("item-1", 30);
 
@@ -249,7 +334,7 @@ describe("scheduleSingleTask", () => {
       task: { id: "task-1", title: "Call the dentist", googleTaskId: null },
     });
     findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
-    createGoogleTaskMock.mockResolvedValue({ id: "gtask-9" });
+    upsertGoogleTaskMock.mockResolvedValue({ id: "gtask-9", created: true });
 
     const res = await scheduleSingleTask("item-1", 30);
 
@@ -272,7 +357,7 @@ describe("scheduleSingleTask", () => {
     });
     taskCreateMock.mockResolvedValue({ id: "task-2" });
     findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
-    createGoogleTaskMock.mockResolvedValue({ id: "gtask-3" });
+    upsertGoogleTaskMock.mockResolvedValue({ id: "gtask-3", created: true });
 
     const res = await scheduleSingleTask("item-2", 15);
 
@@ -299,13 +384,13 @@ describe("scheduleSingleTask", () => {
       },
     });
     findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
-    createGoogleTaskMock.mockResolvedValue({ id: "gtask-9" });
+    upsertGoogleTaskMock.mockResolvedValue({ id: "gtask-9", created: true });
 
     const res = await scheduleSingleTask("item-1", 30);
 
     expect(res).toEqual({ ok: true });
     // Re-scheduling still performs the Google push + update — only the reward is skipped.
-    expect(createGoogleTaskMock).toHaveBeenCalled();
+    expect(upsertGoogleTaskMock).toHaveBeenCalled();
     expect(taskUpdateMock).toHaveBeenCalled();
     expect(logReward).not.toHaveBeenCalled();
     expect(awardBadge).not.toHaveBeenCalled();
@@ -365,7 +450,7 @@ describe("scheduleSingleTask", () => {
       task: { id: "task-1", title: "Call the dentist", googleTaskId: null },
     });
     findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
-    createGoogleTaskMock.mockResolvedValue({ id: "gtask-9" });
+    upsertGoogleTaskMock.mockResolvedValue({ id: "gtask-9", created: true });
     // The Google task + task.update have already committed by the time rewards run;
     // a reward failure must NOT return { ok: false } (a retry would duplicate the
     // Google task). The reward calls are isolated in their own try/catch.

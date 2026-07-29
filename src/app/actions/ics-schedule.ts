@@ -42,27 +42,32 @@ export async function scheduleViaIcs(
     ? Math.min(480, Math.max(1, raw))
     : DEFAULT_ICS_DURATION_MIN;
 
-  // Focus deep-link note (#39): voice-aware prompt + absolute URL into /focus for
-  // this task's first step (else the launcher). Embedded in every VEVENT so tapping
-  // the calendar event drops the user straight into focusing.
+  // Focus deep-link note (#39): voice-aware prompt + absolute URL into /focus.
+  // Built PER STEP (#104) — it used to be built once from steps[0] and reused for
+  // every VEVENT, so a downloaded calendar sent all of a task's events to step
+  // 1's timer. Guests have no other scheduling method, so this was their bug too.
   const settings = await getSettings(workspaceId);
   const voice: Voice = settings.voice === "playful" ? "playful" : "plain";
-  const description = buildScheduleNote({
-    origin: publicOrigin(),
-    voice,
-    stepId: task.steps[0]?.id ?? null,
-  });
+  const origin = publicOrigin();
+  const steps = task.steps.map((s) => ({
+    text: s.text,
+    estMinutes: s.estMinutes,
+    subtaskEmoji: s.subtaskEmoji,
+    description: buildScheduleNote({ origin, voice, stepId: s.id }),
+  }));
+  // The stepless (fallback) event has no step to link to, so it keeps the
+  // launcher URL — which is what `buildTaskIcs`'s shared `description` is for.
+  const description = buildScheduleNote({ origin, voice, stepId: null });
 
   const ics = buildTaskIcs({
     title: task.title,
     parentEmoji: task.parentEmoji,
-    steps: task.steps.map((s) => ({
-      text: s.text,
-      estMinutes: s.estMinutes,
-      subtaskEmoji: s.subtaskEmoji,
-    })),
+    steps,
     fallbackDurationMin: durationMin,
     description,
+    // The owner asked for the time to be defended, and unlike the Reclaim path
+    // an .ics can say so (#104).
+    busy: true,
   });
 
   // Mark + reward once (idempotent on scheduledAt). Re-downloads skip both.

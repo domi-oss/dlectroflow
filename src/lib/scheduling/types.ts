@@ -82,3 +82,53 @@ export interface SchedulingProvider {
     opts?: ScheduleOpts,
   ): Promise<ScheduleResult>;
 }
+
+/**
+ * What the user asked for when they scheduled something (#104). Provider-agnostic
+ * on purpose: the Reclaim encoder renders it as title parameters, the plain
+ * Google Tasks encoder as a native due date, the ICS builder as VEVENT
+ * properties. One vocabulary, three renderings.
+ */
+export const SchedulePriority = {
+  Critical: "critical", // → Reclaim P1
+  High: "high", // → P2. Reclaim's own default, and therefore ours.
+  Normal: "normal", // → P3
+  Low: "low", // → P4
+} as const;
+export type SchedulePriority =
+  (typeof SchedulePriority)[keyof typeof SchedulePriority];
+
+/** Which of Reclaim's scheduling-hours categories the work belongs to. */
+export const ScheduleHours = { Work: "work", Personal: "personal" } as const;
+export type ScheduleHours = (typeof ScheduleHours)[keyof typeof ScheduleHours];
+
+/** One thing to place: a step of a task, or a single to-do. */
+export type ScheduleUnit = {
+  /** `Step.id`, or `Task.id` for a stepless to-do. */
+  id: string;
+  /** 1-based position in the sequence that must be preserved. */
+  order: number;
+  total: number;
+  text: string;
+  /** `Step.subtaskEmoji` — kept out of `text` so encoders can place it. */
+  emoji?: string | null;
+  /** The honest estimate, BEFORE the 30-minute floor. */
+  estMinutes: number;
+  /** Per-unit deadline override (sub-project C); derived when absent. */
+  dueAt?: Date | null;
+};
+
+export type ScheduleIntent = {
+  /** Deadline for the whole task. */
+  dueAt: Date;
+  priority: SchedulePriority;
+  hours: ScheduleHours;
+  /**
+   * Whether the time should be defended. Honoured literally by ICS
+   * (`TRANSP:OPAQUE`); for Reclaim it is advisory only — Reclaim decides free
+   * vs busy itself as the deadline approaches, and exposes no parameter for it.
+   */
+  busy: boolean;
+  /** Ordered by `order`, ascending. */
+  units: ScheduleUnit[];
+};

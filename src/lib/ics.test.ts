@@ -93,6 +93,54 @@ describe("buildTaskIcs", () => {
   });
 });
 
+describe("buildTaskIcs — per-step descriptions (#104)", () => {
+  it("gives each VEVENT its own DESCRIPTION when one is supplied", () => {
+    const ics = buildTaskIcs({
+      title: "do flex training",
+      steps: [
+        { text: "one", estMinutes: 30, description: "link to step one" },
+        { text: "two", estMinutes: 30, description: "link to step two" },
+      ],
+    });
+    expect(ics).toContain("link to step one");
+    expect(ics).toContain("link to step two");
+  });
+
+  it("falls back to the shared description when a step has none", () => {
+    const ics = buildTaskIcs({
+      title: "t",
+      steps: [{ text: "one", estMinutes: 30 }],
+      description: "shared",
+    });
+    expect(ics).toContain("shared");
+  });
+
+  it("marks events busy when asked, and free otherwise", () => {
+    const steps = [{ text: "one", estMinutes: 30 }];
+    expect(buildTaskIcs({ title: "t", steps, busy: true })).toContain(
+      "TRANSP:OPAQUE",
+    );
+    expect(buildTaskIcs({ title: "t", steps })).not.toContain("TRANSP:OPAQUE");
+  });
+
+  it("still lays steps back-to-back from the same start — placement is unchanged", () => {
+    // Local-time construction (month 0-indexed: 6 = July), matching the top of
+    // this file: `floating()` reads LOCAL accessors, so an offset-anchored
+    // literal would assert 10:00 only on a +01:00 host and fail on UTC CI.
+    const start = new Date(2026, 6, 29, 10, 0, 0);
+    const ics = buildTaskIcs({
+      title: "t",
+      start,
+      steps: [
+        { text: "one", estMinutes: 30 },
+        { text: "two", estMinutes: 30 },
+      ],
+    });
+    expect(ics).toContain("20260729T100000");
+    expect(ics).toContain("20260729T103000");
+  });
+});
+
 describe("icsFilename", () => {
   it("slugifies the title and prefixes dlectroflow-", () => {
     expect(icsFilename("Ship the thing")).toBe(

@@ -7,7 +7,7 @@ import {
   googleConfigured,
   findReclaimList,
   listTaskLists,
-  createGoogleTask,
+  upsertGoogleTask,
   getGoogleStatus,
   disconnectGoogle,
 } from "@/lib/google";
@@ -15,7 +15,10 @@ import { TaskSource, TaskStatus } from "@/lib/constants";
 import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
 import { awardFirstSchedule } from "@/lib/scheduling/award";
 import { SchedulingMethod } from "@/lib/scheduling/types";
-import { buildScheduleNote } from "@/lib/scheduling/note";
+import type { ScheduleUnit } from "@/lib/scheduling/types";
+import { defaultIntentFor } from "@/lib/scheduling/intent";
+import { deriveWindows } from "@/lib/scheduling/windows";
+import { pickEncoder } from "@/lib/scheduling/encoder";
 import { publicOrigin } from "@/lib/origin";
 import type { Voice } from "@/lib/strings";
 
@@ -32,26 +35,6 @@ export type GoogleScheduleResult =
         | "error";
       message?: string;
     };
-
-/**
- * Build the Google Task title with Reclaim's parsing syntax appended in parens.
- * Reclaim ingests the task from the synced list, reads `duration:Nm`, then strips
- * the parenthetical — leaving a clean, auto-scheduled task.
- *   e.g. "🎬 Prep demo: 2 of 5 🎤 Practice run-through (duration:20m)"
- */
-function reclaimTitle(
-  parentEmoji: string,
-  taskTitle: string,
-  order: number,
-  total: number,
-  subtaskEmoji: string,
-  text: string,
-  estMinutes: number,
-): string {
-  const emoji = parentEmoji ? `${parentEmoji} ` : "";
-  const sub = subtaskEmoji ? `${subtaskEmoji} ` : "";
-  return `${emoji}${taskTitle}: ${order} of ${total} ${sub}${text} (duration:${estMinutes}m)`;
-}
 
 /**
  * Push a task's steps into the Reclaim-synced Google Tasks list. Reclaim then
@@ -90,44 +73,56 @@ export async function pushStepsToGoogleTasks(
       return {
         ok: false,
         reason: "no_reclaim_list",
-        message: `Couldn't find a Google Tasks list matching "Reclaim". Available: ${names || "none"}. Make sure Reclaim's Google Tasks integration is set up (it creates a 🗓 Reclaim list).`,
+        message: `Couldn't find the "🗓 Reclaim" Google Tasks list. Available: ${names || "none"}. Reclaim only syncs from that list — create it in Google Tasks, or set GOOGLE_TASKS_LIST_NAME if you use a different scheduler.`,
       };
     }
 
-    const parentEmoji = task.parentEmoji ?? "🗂️";
-    const total = task.steps.length;
-
-    // Focus deep-link note (#39): voice-aware prompt + absolute URL into /focus for
-    // this task's first step. Attached to each Google Task's notes so tapping the
-    // Reclaim-synced task drops the user straight into focusing.
     const settings = await getSettings(workspaceId);
     const voice: Voice = settings.voice === "playful" ? "playful" : "plain";
-    const notes = buildScheduleNote({
-      origin: publicOrigin(),
-      voice,
-      stepId: task.steps[0]?.id ?? null,
-    });
+    const origin = publicOrigin();
+    const encode = pickEncoder(list.title);
+
+    const units: ScheduleUnit[] = task.steps.map((s) => ({
+      id: s.id,
+      order: s.order,
+      total: task.steps.length,
+      text: s.text,
+      emoji: s.subtaskEmoji,
+      estMinutes: s.estMinutes,
+      dueAt: null,
+    }));
+    const intent = defaultIntentFor(units);
+    const { windows } = deriveWindows(intent);
+    const byUnit = new Map(windows.map((w) => [w.unitId, w]));
 
     let scheduled = 0;
-    for (const s of task.steps) {
-      const title = reclaimTitle(
-        parentEmoji,
-        task.title,
-        s.order,
-        total,
-        s.subtaskEmoji ?? "",
-        s.text,
-        s.estMinutes,
+    for (const unit of intent.units) {
+      const window = byUnit.get(unit.id);
+      if (!window) continue;
+      const encoded = encode({
+        unit,
+        window,
+        intent,
+        taskTitle: task.title,
+        parentEmoji: task.parentEmoji ?? "🗂️",
+        origin,
+        voice,
+      });
+      const step = task.steps.find((s) => s.id === unit.id)!;
+      const { id } = await upsertGoogleTask(
+        token,
+        list.id,
+        step.googleTaskId,
+        encoded,
       );
-      const created = await createGoogleTask(token, list.id, { title, notes });
-      // Guard step ownership before update
+      // Guard step ownership before update (unchanged from before).
       const stepCheck = await prisma.step.findFirst({
-        where: { id: s.id, task: { workspaceId } },
+        where: { id: unit.id, task: { workspaceId } },
       });
       if (stepCheck) {
         await prisma.step.update({
-          where: { id: s.id },
-          data: { googleTaskId: created.id, googleTaskListId: list.id },
+          where: { id: unit.id },
+          data: { googleTaskId: id, googleTaskListId: list.id },
         });
       }
       scheduled++;
@@ -261,8 +256,39 @@ export async function scheduleSingleTask(
     const list = await findReclaimList(token);
     if (!list) return { ok: false, reason: "no_reclaim_list" };
 
-    const title = `${item.text} (duration:${minutes}m)`;
-    const created = await createGoogleTask(token, list.id, { title });
+    const encode = pickEncoder(list.title);
+    const unit: ScheduleUnit = {
+      id: taskId,
+      order: 1,
+      total: 1,
+      text: item.text,
+      emoji: null,
+      // The caller's clamped duration IS the estimate for a stepless to-do.
+      estMinutes: minutes,
+    };
+    const intent = defaultIntentFor([unit]);
+    const { windows } = deriveWindows(intent);
+    const settings = await getSettings(workspaceId);
+    const voice: Voice = settings.voice === "playful" ? "playful" : "plain";
+    const encoded = encode({
+      unit,
+      window: windows[0],
+      intent,
+      taskTitle: item.text,
+      parentEmoji: null,
+      origin: publicOrigin(),
+      voice,
+    });
+    const existing = await prisma.task.findFirst({
+      where: { id: taskId, workspaceId },
+      select: { googleTaskId: true },
+    });
+    const created = await upsertGoogleTask(
+      token,
+      list.id,
+      existing?.googleTaskId ?? null,
+      encoded,
+    );
 
     await prisma.task.update({
       where: { id: taskId },
