@@ -1,6 +1,9 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { Moon, Sun } from "lucide-react";
+
+import { cn, touchTarget } from "@/lib/utils";
 
 // #23 — the `dark` class on <html> is the theme's single source of truth (the
 // pre-hydration inline script sets it, and every toggle writes it), so read it
@@ -27,7 +30,25 @@ function getServerSnapshot(): boolean {
   return false;
 }
 
-export function ThemeToggle({ onPersist }: { onPersist?: () => void }) {
+/**
+ * How the control presents itself (#103).
+ *
+ * - `text` — icon + words ("Dark mode" / "Light mode"). The default, so a call
+ *   site can never silently lose its label. Used in Settings > Appearance,
+ *   where a bare icon in a settings row would be worse than the label it
+ *   replaced.
+ * - `icon` — glyph only, for the header menu bar, where the words are dead
+ *   weight and crowd the bar at 390px.
+ */
+type ThemeToggleVariant = "text" | "icon";
+
+export function ThemeToggle({
+  onPersist,
+  variant = "text",
+}: {
+  onPersist?: () => void;
+  variant?: ThemeToggleVariant;
+}) {
   const dark = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   const toggle = () => {
@@ -45,14 +66,53 @@ export function ThemeToggle({ onPersist }: { onPersist?: () => void }) {
     } catch {}
   };
 
+  // #103 — lucide, not 🌙/☀️: the rest of the app moved to lucide in !141, and
+  // emoji render differently on every platform (the VS16 variation selector
+  // also makes their advance width unpredictable, which is part of why the
+  // header button was so wide). Decorative in both variants — the accessible
+  // name comes from the visible words or the aria-label, never the glyph.
+  const Icon = dark ? Sun : Moon;
+
+  const shared =
+    "hover:bg-accent hover:border-primary/40 rounded-md border outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+
+  if (variant === "icon") {
+    // Dropping the visible words drops the button's accessible name with them,
+    // so it is spelled out here. It names the ACTION the click performs ("switch
+    // to …"), not the current state — and `title` gives a pointer user the same
+    // string on hover. aria-pressed still carries the state for AT.
+    const label = dark ? "Switch to light mode" : "Switch to dark mode";
+    return (
+      <button
+        type="button"
+        onClick={toggle}
+        // A bare 20px glyph is far short of a hit target, so square it up to
+        // the shared 44px minimum (WCAG 2.5.5) — the same size as the header's
+        // menu trigger next to it, so the two line up.
+        className={cn(shared, touchTarget)}
+        aria-pressed={dark}
+        aria-label={label}
+        title={label}
+      >
+        <Icon aria-hidden="true" className="h-5 w-5" />
+      </button>
+    );
+  }
+
   return (
     <button
       type="button"
       onClick={toggle}
-      className="hover:bg-accent hover:border-primary/40 rounded-md border px-3 py-1.5 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      className={cn(
+        shared,
+        "inline-flex items-center gap-1.5 px-3 py-1.5 text-sm",
+      )}
       aria-pressed={dark}
     >
-      {dark ? "☀️ Light mode" : "🌙 Dark mode"}
+      {/* No aria-label on this variant: it would override the visible text and
+          break WCAG 2.5.3 (Label in Name) for voice-control users. */}
+      <Icon aria-hidden="true" className="h-4 w-4" />
+      {dark ? "Light mode" : "Dark mode"}
     </button>
   );
 }

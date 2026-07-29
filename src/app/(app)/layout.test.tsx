@@ -140,4 +140,21 @@ describe("AppLayout — header theme toggle (#49)", () => {
     expect(toggle.className).toContain("focus-visible:ring-2");
     expect(toggle).toHaveAttribute("aria-pressed");
   });
+
+  // #103 — the header takes the icon-only variant: in a menu bar the words are
+  // dead weight and widen the button enough to crowd the bar at 390px. The
+  // variant is a prop, so this asserts the header actually asks for it.
+  it("takes the icon-only variant, with the name carried by aria-label", async () => {
+    vi.mocked(currentUser).mockResolvedValue(null);
+    render(await AppLayout({ children: child }));
+
+    const toggle = screen.getByRole("button", { name: "Switch to dark mode" });
+    expect(toggle.textContent).toBe("");
+    expect(toggle.querySelector("svg")).not.toBeNull();
+    expect(toggle).toHaveAttribute("title", "Switch to dark mode");
+    // ≥44px both ways, so an icon button is no harder to hit than the old text
+    // one (WCAG 2.5.5).
+    expect(toggle.className).toContain("min-h-11");
+    expect(toggle.className).toContain("min-w-11");
+  });
 });

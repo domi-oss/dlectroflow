@@ -85,8 +85,11 @@ export default async function AppLayout({
             {/* #49 — theme toggle lives in the header, immediately left of the
                 sign-in / account action so it's always reachable (light +
                 dark). It's a self-contained client control; it renders the
-                same whether or not you are signed in. */}
-            <ThemeToggle />
+                same whether or not you are signed in.
+                #103 — icon-only here: in a menu bar "Dark mode"/"Light mode"
+                is dead weight, and the extra width crowded the bar at 390px.
+                Settings > Appearance keeps the words (its default variant). */}
+            <ThemeToggle variant="icon" />
             <AuthActions signedIn={signedIn} />
             <AppMenu voice={voice} />
           </div>
