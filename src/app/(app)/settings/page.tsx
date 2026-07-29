@@ -10,7 +10,11 @@ import { VoiceSection } from "@/components/settings/voice-section";
 import { BreakdownModelSection } from "@/components/settings/breakdown-model-section";
 import { DemoSection } from "@/components/settings/demo-section";
 import { randomFableLine } from "@/lib/fable-lines";
-import { modelChoicesForProvider, resolveUtilityModel } from "@/lib/models";
+import {
+  modelChoicesForProvider,
+  resolveUtilityModel,
+  resolveBreakdownModel,
+} from "@/lib/models";
 import { NotificationsSection } from "@/components/settings/notifications-section";
 import { AppearanceSection } from "@/components/settings/appearance-section";
 import { FocusTimerSection } from "@/components/settings/focus-timer-section";
@@ -175,7 +179,16 @@ export default async function SettingsPage({
             handle={me.handle}
             provider={me.provider}
             keyPresent={keyPresent}
-            activeModelName={resolveUtilityModel()}
+            // #118 — the model a member's OWN-KEY breakdown actually resolves
+            // to, not resolveUtilityModel(). The utility model (Opus on
+            // anthropic) serves the spark/rollup calls; llmKeyEnc pays for
+            // BREAKDOWNS, which #96 resolves to the owner-grade default for an
+            // account on its own key. Naming the utility model here would put a
+            // model id on screen that no request of theirs ever uses.
+            activeModelName={resolveBreakdownModel({
+              tier: "member",
+              hasOwnKey: true,
+            })}
             voice={voice}
           />
         </div>

@@ -41,8 +41,9 @@ export function AccountPanel({
   provider: string;
   /** Presence only. Never the key, never its ciphertext. */
   keyPresent: boolean;
-  /** The instance's configured model, resolved server-side (env is not readable
-   *  from this client bundle) so a user knows what their key is billed against. */
+  /** The model a breakdown paid for with this key actually resolves to (#96's
+   *  own-key tier), resolved server-side because env is not readable from this
+   *  client bundle. Shown read-only: there is nothing per-user to choose. */
   activeModelName: string;
   voice?: Voice;
   defaultExpanded?: boolean;
@@ -171,10 +172,11 @@ export function AccountPanel({
             </button>
           </div>
           {/* Read-only, because there is no per-user provider or base URL to
-              choose — only the instance's. */}
+              choose — only the instance's (a per-user endpoint would be an SSRF
+              primitive; see src/lib/llm/types.ts). */}
           <p className="text-muted-foreground text-sm">
-            Your key is used with this instance&apos;s configured provider and
-            model: <code>{activeModelName}</code>
+            Your key pays for your AI breakdowns, on this instance&apos;s
+            configured provider, with the model <code>{activeModelName}</code>.
           </p>
         </div>
 

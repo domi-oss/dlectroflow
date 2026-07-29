@@ -162,7 +162,7 @@ export function IntegrationsPanel({
             <code>GOOGLE_CLIENT_SECRET</code> to enable (see the README).
           </p>
         )}
-        <div className="mt-3 flex items-center gap-3">
+        <div className="mt-3 flex flex-wrap items-center gap-3">
           {d.connectHref && (
             <a
               href={d.connectHref}
@@ -194,7 +194,12 @@ export function IntegrationsPanel({
                   silently is one they never hear. The visible text stays; it is
                   not replaced by an aria-label, so sighted and non-sighted
                   users read the same question. */}
-              <span className="text-sm" role="status" id={confirmId}>
+              {/* `basis-full` so the question takes its own line and the two
+                  buttons wrap beneath it. At 390px all three in one row squeezed
+                  "Yes, disconnect" into a two-line label breaking mid-phrase —
+                  legible, but not what a destructive confirmation should read
+                  like on the device most of this app is used on. */}
+              <span className="basis-full text-sm" role="status" id={confirmId}>
                 Remove access to your Google account and delete the tokens
                 stored for you?
               </span>

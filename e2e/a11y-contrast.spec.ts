@@ -380,17 +380,20 @@ for (const theme of THEMES) {
       expectNoContrastViolations(await scanColorContrast(page));
     });
 
-    // NOT covered here, deliberately: the settings "Yes, disconnect" confirm
-    // CTA (src/components/settings/integrations-panel.tsx) — also
-    // bg-destructive + text-destructive-foreground, same token pairing fixed
-    // above — only renders when Google Tasks is both configured AND
-    // connected (`canDisconnect = google.connected`). The e2e boot env (see
-    // bootGuardEnv in playwright.config.ts) sets no GOOGLE_CLIENT_ID/SECRET,
-    // so `google.configured` is always false here and IntegrationsPanel never
-    // renders a Disconnect control at all — reaching the confirm state would
-    // need a live OAuth connection seeded in the DB, out of scope for this
-    // gate. It shares the exact same --destructive / --destructive-foreground
-    // pairing as the inbox CTA above, so the fix verified there applies here
-    // too.
+    // NOT covered here: the settings "Yes, disconnect" confirm CTA
+    // (src/components/settings/integrations-panel.tsx) — also bg-destructive +
+    // text-destructive-foreground, the same token pairing fixed above — only
+    // renders when Google Tasks is both configured AND connected
+    // (`canDisconnect = google.connected`). THIS project's boot env (see
+    // bootGuardEnv in playwright.config.ts) sets no GOOGLE_CLIENT_ID/SECRET, so
+    // `google.configured` is false here and IntegrationsPanel renders no
+    // Disconnect control at all.
+    //
+    // #118 Phase C made it reachable, in the `member-google` project: that
+    // server has a dummy Google client and global-setup seeds the member an
+    // encrypted credential, so e2e/smoke/member-google.spec.ts opens the confirm
+    // state and measures the CTA's touch target at 390px. It still shares the
+    // exact --destructive / --destructive-foreground pairing as the inbox CTA
+    // above, so the contrast fix verified there applies to it as well.
   });
 }

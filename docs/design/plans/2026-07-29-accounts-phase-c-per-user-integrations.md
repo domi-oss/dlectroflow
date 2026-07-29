@@ -3045,7 +3045,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 **Why a second Playwright project rather than a global env flag.** Setting `GOOGLE_CLIENT_ID` in `bootGuardEnv` would flip the 📅 control's label from *"Add to calendar (.ics)"* to *"Schedule"* for **every** existing spec, and `schedule-ics.spec.ts` depends on that label to find the `.ics` entry in the ▾ menu. A second project with its own `webServer` keeps the default suite's behaviour byte-identical.
 
-- [ ] **Step 1: Add the connected-member fixture**
+- [x] **Step 1: Add the connected-member fixture**
 
 `e2e/constants.ts` — the member needs their own storage state and a stable id for the credential row:
 
@@ -3136,7 +3136,7 @@ and its own `webServer` entry (or extend the existing one) carrying:
 
 Playwright's `webServer` is global, not per-project. If two servers on two ports is more machinery than this is worth, the acceptable alternative is **one** server with the Google env set plus a `testIgnore`-free audit of the label-dependent specs — but then `schedule-ics.spec.ts` and `row-menu-viewport-fit.spec.ts` must be updated to pin `.ics` explicitly, and the MR must say which specs changed and why. **Try two ports first**; fall back only if the config fights you, and record the decision in the MR either way.
 
-- [ ] **Step 2: Write the spec**
+- [x] **Step 2: Write the spec**
 
 Create `e2e/smoke/member-google.spec.ts`:
 
@@ -3225,7 +3225,7 @@ test("the disconnect confirmation is reachable and reads correctly at 390px", as
 });
 ```
 
-- [ ] **Step 3: Run the full E2E suite, both projects**
+- [x] **Step 3: Run the full E2E suite, both projects**
 
 ```bash
 npm run build && npm run test:e2e
@@ -3233,7 +3233,7 @@ npm run build && npm run test:e2e
 
 Expected: all green. If a **pre-existing** spec fails because a 📅 label changed, the Google env leaked out of the `member-google` project — fix the config, not the spec. If a spec fails because a section was added to `/settings`, update that spec's expectation and say so in the MR.
 
-- [ ] **Step 4: Write down what the Google Cloud console needs**
+- [x] **Step 4: Write down what the Google Cloud console needs**
 
 The app requests `https://www.googleapis.com/auth/tasks` (`src/lib/google.ts:12`), which Google classifies as **sensitive**. Two console states produce failures that look exactly like bugs in our refresh code. Add to the self-hosting docs (find the file: `grep -rln "GOOGLE_CLIENT_ID" docs/ README.md`):
 
@@ -3255,7 +3255,7 @@ can work around it.
 
 Then add a line to the MR description flagging the **post-deploy verification**: connect Google with a real non-owner allowlisted account and check back after **7+ days** that sync still works. If it breaks on roughly that schedule, the fix is in the console, not in the code.
 
-- [ ] **Step 5: Run every gate**
+- [x] **Step 5: Run every gate**
 
 ```bash
 npm test
@@ -3267,11 +3267,11 @@ npm run build && npm run test:e2e
 
 Expected: all green. Pre-existing `.next/` validator errors from a stale build are pre-existing.
 
-- [ ] **Step 6: Screenshot the member's `/settings` in both themes, at 390px and desktop**
+- [x] **Step 6: Screenshot the member's `/settings` in both themes, at 390px and desktop**
 
 Save to `/Users/gitlab_dlectronique/workdev/118-member-shots/` and attach to #118. The owner reviews visual work by eye; a green suite is not the same evidence. Include: the member's Integrations panel connected, the Account section empty and with a key stored, and the disconnect confirmation at 390px.
 
-- [ ] **Step 7: Commit and open the MR**
+- [x] **Step 7: Commit and open the MR**
 
 ```bash
 git add e2e playwright.config.ts docs README.md
@@ -3315,18 +3315,18 @@ The description must state:
 
 ## Final verification
 
-- [ ] `npm test` green, count up
-- [ ] `npx tsc --noEmit` clean
-- [ ] `npm run lint`, `npm run format:check` clean
-- [ ] `npm run build && npm run test:e2e` green — **both** Playwright projects
-- [ ] `src/lib/__tests__/scoping.harness.test.ts` green, and its user-scope offender list empty
-- [ ] `src/lib/enum-constraint-sync.integration.test.ts` green — it fails loudly if `User_llmProvider_check` and the `REGISTRY` disagree
-- [ ] Migration applied cleanly; `src/lib/google-auth-orphan.integration.test.ts` green
-- [ ] `grep -rn "SINGLETON_ID" src/` returns nothing but comments
-- [ ] `grep -rn "isGuest" src/components/breakdown/` returns nothing
-- [ ] `grep -rn "isOwner:" src/lib/models.ts src/app/api/breakdown/route.ts` returns nothing
-- [ ] axe clean on both Integrations presentations and both Account states (asserted in the component tests, not eyeballed)
-- [ ] Screenshots attached to #118
+- [x] `npm test` green, count up
+- [x] `npx tsc --noEmit` clean
+- [x] `npm run lint`, `npm run format:check` clean
+- [x] `npm run build && npm run test:e2e` green — **both** Playwright projects
+- [x] `src/lib/__tests__/scoping.harness.test.ts` green, and its user-scope offender list empty
+- [x] `src/lib/enum-constraint-sync.integration.test.ts` green — it fails loudly if `User_llmProvider_check` and the `REGISTRY` disagree
+- [x] Migration applied cleanly; `src/lib/google-auth-orphan.integration.test.ts` green
+- [x] `grep -rn "SINGLETON_ID" src/` returns nothing but comments
+- [x] `grep -rn "isGuest" src/components/breakdown/` returns nothing
+- [x] `grep -rn "isOwner:" src/lib/models.ts src/app/api/breakdown/route.ts` returns nothing
+- [x] axe clean on both Integrations presentations and both Account states (asserted in the component tests, not eyeballed)
+- [x] Screenshots attached to #118
 - [ ] #118 and #96 status set to **Done**; MR open with @GitLabDuo as reviewer, **not merged**
 
 ## Post-deploy (release steps, not code)

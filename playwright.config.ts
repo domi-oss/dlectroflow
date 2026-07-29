@@ -1,6 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
 import { config as readDotenvFile } from "dotenv";
-import { SESSION_SECRET, STORAGE_STATE, BASE_URL } from "./e2e/constants";
+import {
+  SESSION_SECRET,
+  STORAGE_STATE,
+  BASE_URL,
+  MEMBER_STORAGE_STATE,
+  MEMBER_BASE_URL,
+  TOKEN_ENC_KEY,
+} from "./e2e/constants";
 
 // ── The server under test is the artefact that ships (#97) ───────────────────
 // `next.config.ts` sets `output: "standalone"`, so production runs
@@ -54,6 +61,15 @@ const standaloneServerCommand = [
   "cp -R .next/static .next/standalone/.next/static",
   "exec node .next/standalone/server.js",
 ].join(" && ");
+
+// #118 — the SECOND server (see `webServer` below) boots the SAME assembled
+// bundle on another port, so it deliberately does NOT repeat the assembly.
+// Playwright starts webServer entries as sequential setup tasks, so by the time
+// this one runs the first server is already listening and serving out of
+// `.next/standalone/public` — re-running `rm -rf` on those files would blank the
+// running server's assets mid-suite, which is a far worse failure than a slow
+// boot (a suite of 200s and no CSS).
+const memberServerCommand = "exec node .next/standalone/server.js";
 
 // #84's problem one layer out. `DATABASE_URL` lives in `.env`, and under the
 // standalone server that file resolves to the build-time snapshot inside
@@ -109,8 +125,11 @@ const bootGuardEnv = {
   GOOGLE_CLIENT_ID: "e2e-google-client-id",
   GOOGLE_CLIENT_SECRET: "e2e-google-client-secret",
   GUEST_IP_HASH_SALT: "e2e-guest-ip-hash-salt-000",
-  TOKEN_ENC_KEY:
-    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  // Read from e2e/constants.ts, not restated: global-setup encrypts the member's
+  // seeded Google token with the same value from a DIFFERENT PROCESS (#118), and
+  // a drift between the two would decrypt to null and quietly test the
+  // "reconnect needed" state instead of a connected one.
+  TOKEN_ENC_KEY,
   // What Dockerfile and Dockerfile.ci both set, and for the same reason: the
   // standalone entrypoint reads HOSTNAME, Docker sets HOSTNAME to the container
   // id on every container, and a server bound to the container's own address
@@ -120,6 +139,28 @@ const bootGuardEnv = {
   // Only when there is one to forward — otherwise leave the key unset rather
   // than handing the server an empty connection string.
   ...(DATABASE_URL ? { DATABASE_URL } : {}),
+};
+
+// #118 Phase C — the member project's server. A dummy Google OAuth client is what
+// makes the Google Tasks method OFFERED (`googleConfigured()`), which is the only
+// way a member's own connect/disconnect controls are reachable at all.
+//
+// Its own port and its own env, rather than adding these two variables to
+// `bootGuardEnv`: setting GOOGLE_CLIENT_ID globally flips the inbox 📅 control
+// from "Add to calendar (.ics)" to "Schedule" for EVERY spec, and
+// schedule-ics.spec.ts finds the .ics entry in the ▾ menu BY that label. Two
+// servers keep the default suite's behaviour byte-identical.
+//
+// Deliberately not a working credential: no spec here pushes, so no request
+// leaves the machine.
+const memberServerEnv = {
+  ...bootGuardEnv,
+  // PUBLIC_ORIGIN must name THIS server, or requestOrigin() sends every redirect
+  // (the OAuth start route included) at the other port.
+  PUBLIC_ORIGIN: MEMBER_BASE_URL,
+  PORT: String(new URL(MEMBER_BASE_URL).port),
+  GOOGLE_CLIENT_ID: "e2e-google-client-id",
+  GOOGLE_CLIENT_SECRET: "e2e-google-client-secret",
 };
 
 export default defineConfig({
@@ -138,12 +179,43 @@ export default defineConfig({
     storageState: STORAGE_STATE,
     trace: "on-first-retry",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: {
-    command: standaloneServerCommand,
-    url: `${BASE_URL}/api/health`,
-    reuseExistingServer: !process.env.CI,
-    timeout: 180_000,
-    env: bootGuardEnv,
-  },
+  projects: [
+    {
+      name: "chromium",
+      // The member specs need the Google-configured server, so they are excluded
+      // here rather than skipped inside the spec: a spec that silently passes
+      // against the wrong server is worse than one that does not run.
+      testIgnore: /member-google\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "member-google",
+      testMatch: /member-google\.spec\.ts/,
+      use: {
+        ...devices["Desktop Chrome"],
+        baseURL: MEMBER_BASE_URL,
+        storageState: MEMBER_STORAGE_STATE,
+      },
+    },
+  ],
+  // Two entries, started SEQUENTIALLY by Playwright (each webServer is its own
+  // setup task, awaited in turn) — which is what makes it safe for the second to
+  // reuse the bundle the first assembled. `baseURL` is set explicitly on both
+  // projects because an array of webServers does not derive one.
+  webServer: [
+    {
+      command: standaloneServerCommand,
+      url: `${BASE_URL}/api/health`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 180_000,
+      env: bootGuardEnv,
+    },
+    {
+      command: memberServerCommand,
+      url: `${MEMBER_BASE_URL}/api/health`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 180_000,
+      env: memberServerEnv,
+    },
+  ],
 });

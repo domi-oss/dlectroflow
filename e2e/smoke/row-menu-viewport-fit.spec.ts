@@ -310,10 +310,12 @@ test.describe("#92 row-action popups fit the phone viewport", () => {
 });
 
 // The 📅 duration popover shares the exact shape of the two above
-// (`absolute right-0` on its own trigger). For the OWNER it only appears with
-// Google connected, which this environment has no way to be — but a GUEST's
-// primary 📅 is the .ics control in its `needs_duration` form, so the same
-// popup is reachable with no cookies at all.
+// (`absolute right-0` on its own trigger). For a SIGNED-IN account it only
+// appears with Google connected, which this project's environment has no way to
+// be — its server boots with no GOOGLE_CLIENT_ID (#118 put the Google-configured
+// server behind the separate `member-google` project) — but a GUEST's primary 📅
+// is the .ics control in its `needs_duration` form, so the same popup is
+// reachable with no cookies at all.
 test.describe("#92 the 📅 duration popover fits the phone viewport", () => {
   test.use({ viewport: MOBILE, storageState: { cookies: [], origins: [] } });
 
