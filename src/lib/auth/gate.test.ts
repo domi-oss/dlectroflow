@@ -27,6 +27,22 @@ describe("gate paths", () => {
     expect(isPublicPath("/api/health")).toBe(true);
     expect(isPublicPath("/api/auth/gitlab/start")).toBe(true);
   });
+  // #123 — the published Privacy Policy and Terms of Service.
+  //
+  // These MUST be public. Google's OAuth verification reviewers fetch both URLs
+  // with no session at all; the middleware redirects anything unmatched to
+  // /login, so leaving them out means the reviewer sees a sign-in wall and
+  // verification fails with nothing in the app looking broken.
+  it("the legal pages are public (#123)", () => {
+    expect(isPublicPath("/privacy")).toBe(true);
+    expect(isPublicPath("/terms")).toBe(true);
+  });
+  it("does not treat lookalike legal paths as public (#123)", () => {
+    // The match is exact-or-`prefix + "/"`, so a hostile sibling route must not
+    // inherit the exemption.
+    expect(isPublicPath("/privacyhack")).toBe(false);
+    expect(isPublicPath("/terms-and-conditions-evil")).toBe(false);
+  });
   it("integration oauth is NOT owner-only any more (#118 Phase C)", () => {
     // Google is per-user now: a member connecting their OWN account is the
     // intended behaviour, not a hijack. See AUTHENTICATED_PREFIXES below.
