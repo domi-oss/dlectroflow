@@ -740,7 +740,16 @@ prune_registry:
     GIT_DEPTH: 0
     # SHIPS AS A DRY RUN (#114). The job prints the plan it would carry out and
     # deletes nothing. Flipping this to "false" is a deliberate decision to be
-    # taken AFTER reading a real dry run's output in this job's log.
+    # taken AFTER reading a real dry run's output in this job's log — and it
+    # needs a credential this job does not have yet:
+    #
+    # CI_JOB_TOKEN can READ the registry API (verified 2026-07-29: GET
+    # registry/repositories and GET .../tags both 200, so the dry run needs
+    # nothing extra) but CANNOT delete — DELETE .../tags/<name> returns 403,
+    # not 404, even for a tag that does not exist, so authorization fails
+    # before the lookup. Enabling deletion therefore also means adding a
+    # masked + protected REGISTRY_PRUNE_TOKEN (Maintainer, `api` scope); the
+    # script warns if PRUNE_DRY_RUN=false without it.
     PRUNE_DRY_RUN: "true"
   script:
     # The helm-kubectl image carries most of these, but the runner clones in a
@@ -750,18 +759,3 @@ prune_registry:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'
 
-# TEMPORARY (#114) — answers "can CI_JOB_TOKEN delete a registry tag in this
-# GitLab version?" empirically. Manual, MR-only, removed once it has answered.
-registry_token_probe:
-  stage: maintenance
-  image: alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
-  needs: []
-  interruptible: false
-  before_script:
-    - apk add --no-cache curl jq bash
-  script:
-    - bash probe-token.sh
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      when: manual
-  allow_failure: true

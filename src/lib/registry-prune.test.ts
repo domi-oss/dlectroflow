@@ -695,6 +695,35 @@ describe("the prune_registry CI job", () => {
   });
 });
 
+describe("which credential", () => {
+  // Measured on gitlab.com 2026-07-29 (#114, pipeline 2715681240): with
+  // CI_JOB_TOKEN, GET registry/repositories and GET …/tags both return 200, but
+  // DELETE …/tags/<anything> returns 403 {"message":"403 Forbidden"} — and 403
+  // rather than 404 on a tag that does not exist means the authorization check
+  // fails before the lookup, so it is not permitted, full stop.
+  it("warns up front when asked to delete with only the job token", () => {
+    const r = run({ env: { PRUNE_DRY_RUN: "false" } });
+    expect(r.stderr).toMatch(/CI_JOB_TOKEN/);
+    expect(r.stderr).toMatch(/403/);
+    // A warning, not a hard failure: GitLab could permit this in a later
+    // version, and the delete loop's own 401/403 handler is the backstop.
+    expect(r.status).toBe(0);
+  });
+
+  it("stays quiet about it in a dry run, which needs no delete rights", () => {
+    const r = run();
+    expect(r.stderr).not.toMatch(/cannot delete registry tags/);
+  });
+
+  it("stays quiet when a stored token is supplied", () => {
+    const r = run({
+      env: { PRUNE_DRY_RUN: "false", REGISTRY_PRUNE_TOKEN: "stored-token" },
+    });
+    expect(r.stdout).toMatch(/REGISTRY_PRUNE_TOKEN/);
+    expect(r.stderr).not.toMatch(/cannot delete registry tags/);
+  });
+});
+
 describe("delete failures", () => {
   it("exits non-zero when a delete is rejected", () => {
     const r = run({ deleteStatus: 500, env: { PRUNE_DRY_RUN: "false" } });

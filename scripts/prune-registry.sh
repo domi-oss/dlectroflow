@@ -61,11 +61,17 @@
 #   PRUNE_NAMESPACE / PRUNE_DEPLOYMENT / PRUNE_CONTAINER / PRUNE_POD_SELECTOR
 #   PRUNE_PER_PAGE=100 / PRUNE_MAX_PAGES=200
 #
-# WHICH CREDENTIAL. `DELETE /projects/:id/registry/repositories/:rid/tags/:name`
-# requires Maintainer plus `api` scope. If `CI_JOB_TOKEN` is not accepted the
-# delete loop stops on the first 401/403 and says so explicitly rather than
-# retrying 200 times; supplying a stored token (`REGISTRY_PRUNE_TOKEN`) is an
-# owner decision, not something this script should paper over.
+# WHICH CREDENTIAL — answered empirically on gitlab.com 2026-07-29 (#114):
+#   * `CI_JOB_TOKEN` CAN read the registry API (`GET registry/repositories` and
+#     `GET …/tags` both 200), so the dry run this ships as needs NO new
+#     credential.
+#   * `CI_JOB_TOKEN` CANNOT delete: `DELETE …/tags/<name>` returns 403
+#     {"message":"403 Forbidden"} — and 403 rather than 404 on a tag that does
+#     not exist means authorization fails before the lookup, so it is not
+#     permitted rather than merely missing.
+# Actually deleting therefore needs `REGISTRY_PRUNE_TOKEN`: a Maintainer token
+# with `api` scope, stored as a masked+protected CI variable. That is an owner
+# decision, so this script warns about it and never papers over it.
 #
 # Requires bash (not POSIX sh) plus curl, jq, git and kubectl — see the
 # `prune_registry` job in .gitlab-ci.yml, which installs whatever the deploy
@@ -172,6 +178,18 @@ header_value() { # header_file name → prints the value (case-insensitive)
 }
 
 log "prune-registry: authenticating with ${AUTH_KIND}"
+
+# Measured on gitlab.com 2026-07-29 (#114, pipeline 2715681240): with
+# CI_JOB_TOKEN, `GET registry/repositories` and `GET …/tags` both return 200 —
+# so a DRY RUN needs no extra credential at all — but `DELETE …/tags/<name>`
+# returns 403 {"message":"403 Forbidden"}. It is 403 rather than 404 on a tag
+# that does not exist, i.e. authorization fails before the lookup: not
+# permitted, full stop. Say so BEFORE doing several minutes of work.
+# Deliberately a warning, not an abort: GitLab may permit this in a later
+# version, and the delete loop's own 401/403 handler is the backstop.
+if [ "$DRY_RUN" = "false" ] && [ -z "${REGISTRY_PRUNE_TOKEN:-}" ]; then
+  warn "PRUNE_DRY_RUN=false but the only credential is CI_JOB_TOKEN, which cannot delete registry tags (verified 2026-07-29: HTTP 403 on the tag-delete endpoint). Expect the delete loop to stop on its first call. Set REGISTRY_PRUNE_TOKEN to a Maintainer token with 'api' scope."
+fi
 
 # ── 1. Which registry repository? There are THREE ────────────────────────────
 # `…/dlectroflow` (SHA + main-* builds), `…/dlectroflow/cache` (Kaniko layer
