@@ -88,7 +88,8 @@ environment file to a published tag instead.
 > # 1. find the repository id
 > glab api "projects/$PROJ/registry/repositories" | jq -r '.[] | "\(.id)\t\(.path)"'
 >
-> # 2. read one tag's size (substitute the id from above)
+> # 2. read one tag's size. 11826214 is this project's registry id, so step 1
+> #    should hand you the same number back — swap it only for a fork.
 > glab api "projects/$PROJ/registry/repositories/11826214/tags/latest" \
 >   | jq -r '"\(.name)  \(.total_size / 1048576 | round) MiB"'
 > # latest  851 MiB
