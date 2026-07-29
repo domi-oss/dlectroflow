@@ -109,8 +109,10 @@ The 30-minute floor is deliberate: a 15-minute sliver is not worth a context swi
 
 | Profile | Default |
 |---|---|
-| `work` | Mon–Fri, 09:00–17:00, in the workspace timezone |
+| `work` | Mon–Fri, 08:30–18:00, in the workspace timezone |
 | `personal` | Mon–Fri 18:00–22:00, Sat–Sun 09:00–22:00 |
+
+These are the owner's actual hours, confirmed 2026-07-29 — 9.5 working hours a day, not the 8 a generic default would assume, which matters because it is the denominator every window share is computed from. The two profiles abut at 18:00 by design: work ending exactly where personal begins means a task cannot fall into a gap between them.
 
 Fixed constants in this milestone, exported so Settings can adopt them later (non-goal above). They only need to be *approximately* right: they place the boundaries and drive the feasibility warning, while Reclaim does the real placing against the owner's actual hours.
 
