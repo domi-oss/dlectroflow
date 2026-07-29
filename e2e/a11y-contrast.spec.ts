@@ -44,6 +44,8 @@ import { OWNER_WS_ID } from "./constants";
 const SEED_MARKER = "a11y-lib-pill";
 // #56 seeding marker (see seedSavedLaterItem below).
 const SAVED_MARKER = "a11y-saved-idle";
+// #95 seeding marker (see seedAgedPlatedItem below).
+const AGED_MARKER = "a11y-lib-aged";
 // #35 Phase A: seed into the SAME workspace the forged session resolves to.
 // Pre-accounts this was the constant "owner"; now the suite has a real account
 // (see e2e/global-setup.ts) and its workspace id comes from e2e/constants.ts.
@@ -101,6 +103,37 @@ async function seedSavedLaterItem(marker: string): Promise<PrismaClient> {
         text: marker,
         status: "inbox", // BrainDumpStatus.Inbox …
         snoozedUntil: new Date(Date.now() + 24 * 3600_000), // … + future snooze → savedLater
+        workspaceId: OWNER_WS,
+      },
+    });
+  } catch (err) {
+    await prisma.$disconnect();
+    throw err;
+  }
+  return prisma;
+}
+
+// #95 seeding. The Library row's "added Xh ago" label only turns amber once
+// `isAging()` is true (src/lib/aging.ts — age >= agingThresholdMinutes, default
+// 240). CI's database is recreated every run, so no row is ever old enough and
+// BOTH /library a11y gates pass while the amber state is broken: a gated route
+// with an ungated state, the same blind spot as #48/#56/#89. Backdating
+// `createdAt` puts that state inside the gate's reach. 13h is deliberately
+// between the aging threshold (4h) and the 24h "still needed?" prompt boundary
+// (shouldPrompt24h), so the row renders aging and nothing else changes.
+async function seedAgedPlatedItem(marker: string): Promise<PrismaClient> {
+  const prisma = new PrismaClient();
+  try {
+    await prisma.workspace.upsert({
+      where: { id: OWNER_WS },
+      create: { id: OWNER_WS, kind: "user" },
+      update: {},
+    });
+    await prisma.brainDumpItem.create({
+      data: {
+        text: marker,
+        status: "triaged", // BrainDumpStatus.Triaged → singleTask/plated bucket
+        createdAt: new Date(Date.now() - 13 * 3600_000), // > 4h aging, < 24h prompt
         workspaceId: OWNER_WS,
       },
     });
@@ -217,6 +250,74 @@ for (const theme of THEMES) {
       } finally {
         await cleanupSeed(prisma, marker);
       }
+    });
+
+    // #95: the Library row's aging "added Xh ago" label. It rendered a flat
+    // `text-amber-600` (#e17100) — 3.01:1 on the light --background (#fdf6fa) at
+    // 12px, where AA-normal needs 4.5:1 — with no dark variant at all. The fix
+    // adopts the amber pair #57 already settled on for the identical `aging`
+    // semantic (status-pill.tsx's FRESHNESS_TIER_STYLE): amber-700 in light
+    // (4.73:1), amber-400 in dark (11.40:1). Seed a backdated row so the amber
+    // state actually exists during the scan (see seedAgedPlatedItem).
+    test(`zero color-contrast violations: library hub aging row age label (${theme})`, async ({
+      page,
+    }) => {
+      const marker = `${AGED_MARKER}-${theme}`;
+      const prisma = await seedAgedPlatedItem(marker);
+      try {
+        // Default hub tab is "Single-task" (plated), which is where a triaged,
+        // task-less item lands and the only tab that renders AgeLabel per row.
+        await page.goto("/library");
+        await waitForShell(page);
+        const row = page.getByRole("listitem").filter({ hasText: marker });
+        await expect(row).toBeVisible();
+        // Guard the repro precondition: the label must be in its AMBER state, or
+        // this scan is a no-op that cannot catch #95. Matched loosely on the
+        // amber family so the guard survives the weight change it is guarding.
+        await expect(row.getByText(/^added /)).toHaveClass(/text-amber-/);
+        expectNoContrastViolations(await scanColorContrast(page));
+      } finally {
+        await cleanupSeed(prisma, marker);
+      }
+    });
+
+    // #99: the live focus session's two green confirm CTAs (white on
+    // `bg-green-600` = 3.22:1, AA-normal needs 4.5:1). The *setup* screen was
+    // gated all along, but the running session is a different surface with its
+    // own control set — #89 added it to the baseline-relative gate
+    // (e2e/a11y/axe-core-flow.spec.ts), which runs in one theme only. The bug
+    // was present in BOTH themes, so the zero-tolerance both-themes gate is
+    // where it belongs. Triage a fresh item into a single to-do, start focusing,
+    // and scan the running controls.
+    test(`zero color-contrast violations: running focus session controls (${theme})`, async ({
+      page,
+    }) => {
+      const label = `A11y contrast focus-run ${theme} ${Date.now()}`;
+      await page.goto("/");
+      await waitForShell(page);
+      await captureItem(page, label);
+
+      const row = needsReviewRow(page, label);
+      await expect(row).toBeVisible();
+      await row.getByRole("button", { name: "Add to-do" }).click();
+
+      const todoRow = page
+        .locator('[data-bucket="singleTask"]')
+        .getByRole("listitem")
+        .filter({ hasText: label });
+      await expect(todoRow).toBeVisible();
+      await todoRow.getByRole("button", { name: /Start Focus/ }).click();
+
+      await page.waitForURL("**/focus/**");
+      await waitForShell(page);
+      await page.getByRole("button", { name: "Start focusing" }).click();
+      // Guard the repro precondition: the green CTA must be on screen, or the
+      // scan is a no-op that cannot catch #99.
+      const completeStep = page.getByRole("button", {
+        name: /complete step/i,
+      });
+      await expect(completeStep).toBeVisible();
+      expectNoContrastViolations(await scanColorContrast(page));
     });
 
     // The "Break into steps now?" CTA (bg-destructive + text-destructive-

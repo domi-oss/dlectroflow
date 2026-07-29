@@ -8,8 +8,18 @@ import type { FreshnessTier } from "@/lib/aging";
  * the old hardcoded hex greens/ambers failed AA in one theme or the other.
  * Colour is never the only signal: every tier also renders a dot glyph AND a
  * word label (see `dot` + `t("freshness.*")`).
+ *
+ * Exported (#95) because it is the app's one definition of what each freshness
+ * tier looks like, and a second render site had drifted off it: the Library
+ * row's age label used a flat `text-amber-600` (3.01:1 on the light
+ * `--background` at 12px — a real AA failure) for the very same `aging`
+ * meaning. Anything painting a freshness tier reads it from here rather than
+ * re-deciding the shade, so "attention, not alarm" is one colour, not two.
  */
-const TIER_META: Record<FreshnessTier, { dot: string; color: string }> = {
+export const FRESHNESS_TIER_STYLE: Record<
+  FreshnessTier,
+  { dot: string; color: string }
+> = {
   recent: { dot: "🟢", color: "text-green-700 dark:text-green-400" },
   aging: { dot: "🟡", color: "text-amber-700 dark:text-amber-400" },
   overdue: { dot: "🟠", color: "text-orange-700 dark:text-orange-400" },
@@ -35,7 +45,7 @@ export function StatusPill({
   voice: Voice;
   size?: "default" | "meta";
 }) {
-  const { dot, color } = TIER_META[tier];
+  const { dot, color } = FRESHNESS_TIER_STYLE[tier];
   const label = t(`freshness.${tier}`, voice);
   return (
     <span

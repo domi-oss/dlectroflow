@@ -1,10 +1,14 @@
-import { describe, it, expect } from "vitest";
+// @vitest-environment jsdom
+import { describe, it, expect, afterEach } from "vitest";
+import { render, screen, cleanup } from "@testing-library/react";
 import {
   nextStepText,
   remainingMinutes,
   singleTaskEstimate,
   rowEmoji,
+  AgeLabel,
 } from "./library-row-meta";
+import type { AgingSettings } from "@/lib/aging";
 import type { Item } from "@/components/inbox/bucket";
 
 const base: Item = {
@@ -90,5 +94,60 @@ describe("meta helpers", () => {
         steps: base.steps.map((s) => ({ ...s, done: true })),
       }),
     ).toBe("🍳");
+  });
+});
+
+// #95 — the aging age label. `text-amber-600` (#e17100) is only 3.01:1 on the
+// #40 light `--background` (#fdf6fa) at 12px, where AA-normal needs 4.5:1, and
+// the class carried no dark variant at all. The repo already solved this exact
+// pairing for the identical semantic in #57 (the Inbox's own captured-ago label
+// and status-pill.tsx's `aging` tier): `text-amber-700 dark:text-amber-400`,
+// 4.73:1 light / 11.40:1 dark. The Library hub was simply missed by that pass,
+// so it keeps its own regression test rather than trusting the Inbox's.
+//
+// Only reachable once `isAging()` is true — which is why neither /library a11y
+// gate ever saw it (CI's database is always fresh). These tests pin the state
+// directly; the e2e half seeds a real aged row (e2e/a11y-contrast.spec.ts).
+describe("AgeLabel — aging accent (#95 a11y)", () => {
+  afterEach(cleanup);
+
+  const settings: AgingSettings = {
+    agingThresholdMinutes: 240,
+    demoOverrideSeconds: null,
+    agingHours: 4,
+    overdueHours: 24,
+    wayOverdueHours: 72,
+  };
+  const now = Date.now();
+  const aged = { ...base, createdAt: new Date(now - 13 * 3600_000) };
+  const fresh = { ...base, createdAt: new Date(now - 60_000) };
+
+  function label(item: Item): HTMLElement {
+    render(
+      <AgeLabel item={item} now={now} voice="plain" settings={settings} />,
+    );
+    return screen.getByText(/added/).closest("span")!;
+  }
+
+  it("uses the AA-tuned amber pair, not the sub-AA flat text-amber-600", () => {
+    const el = label(aged);
+    expect(el.className).toContain("text-amber-700");
+    expect(el.className).toContain("dark:text-amber-400");
+    expect(el.className).not.toContain("text-amber-600");
+  });
+
+  it("matches the amber the Inbox + status-pill already use for `aging`", async () => {
+    // One "attention, not alarm" colour across the app, so a future tweak has a
+    // single place to happen. Asserted against the real source of truth rather
+    // than a duplicated literal.
+    const { FRESHNESS_TIER_STYLE } =
+      await import("@/components/inbox/status-pill");
+    expect(label(aged).className).toContain(FRESHNESS_TIER_STYLE.aging.color);
+  });
+
+  it("stays muted (no amber at all) while the item is still fresh", () => {
+    const el = label(fresh);
+    expect(el.className).toContain("text-muted-foreground");
+    expect(el.className).not.toMatch(/amber/);
   });
 });

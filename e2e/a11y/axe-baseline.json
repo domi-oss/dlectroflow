@@ -9,7 +9,5 @@
     "color-contrast::span[data-badge=\"streak_5\"]",
     "color-contrast::span[data-badge=\"task_complete\"]",
     "color-contrast::span[data-badge=\"ten_steps_day\"]"
-  ],
-  "/focus/[stepId] running": ["color-contrast::.bg-green-600"],
-  "/focus/[stepId] running (breathing)": ["color-contrast::.bg-green-600"]
+  ]
 }
