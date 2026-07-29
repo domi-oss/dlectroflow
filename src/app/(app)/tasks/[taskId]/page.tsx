@@ -6,6 +6,7 @@ import { BreakdownChat } from "@/components/breakdown/breakdown-chat";
 import { TaskSteps } from "@/components/breakdown/task-steps";
 import { TaskSchedule } from "@/components/breakdown/task-schedule";
 import { getGoogleStatus } from "@/lib/google";
+import { loadScheduleIntent } from "@/app/actions/schedule-intent";
 import { t, type Voice } from "@/lib/strings";
 import { BackLink } from "@/components/nav/back-link";
 import { withFrom } from "@/lib/nav/back";
@@ -24,7 +25,11 @@ export default async function TaskPage({
   const workspaceId = await currentWorkspaceId();
   const { taskId } = await params;
   const { edit, manual, from } = await searchParams;
-  const [task, google, owner, settings] = await Promise.all([
+  // #106 — the Schedule menu's prefill, resolved here rather than in the client
+  // component: one query in parallel with the others, so the menu opens with what
+  // the owner chose last time and never flashes the defaults first. Returns null
+  // for a guest (and for a task in another workspace), which keeps 📅 immediate.
+  const [task, google, owner, settings, scheduleIntent] = await Promise.all([
     prisma.task.findFirst({
       where: { id: taskId, workspaceId },
       include: {
@@ -46,6 +51,7 @@ export default async function TaskPage({
     getGoogleStatus(),
     isOwnerRequest(),
     getSettings(workspaceId),
+    loadScheduleIntent(taskId),
   ]);
   if (!task) notFound();
 
@@ -155,7 +161,9 @@ export default async function TaskPage({
               Inbox's ScheduleControl + owner/guest wiring verbatim. */}
           <TaskSchedule
             taskId={task.id}
+            taskTitle={task.title}
             scheduledAt={task.scheduledAt}
+            scheduleIntent={scheduleIntent}
             google={ctx.google}
             voice={voice}
           />

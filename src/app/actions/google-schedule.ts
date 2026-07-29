@@ -15,7 +15,7 @@ import { TaskSource, TaskStatus } from "@/lib/constants";
 import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
 import { awardFirstSchedule } from "@/lib/scheduling/award";
 import { SchedulingMethod } from "@/lib/scheduling/types";
-import type { ScheduleUnit } from "@/lib/scheduling/types";
+import type { ScheduleIntent, ScheduleUnit } from "@/lib/scheduling/types";
 import { defaultIntentFor } from "@/lib/scheduling/intent";
 import { deriveWindows } from "@/lib/scheduling/windows";
 import { pickEncoder } from "@/lib/scheduling/encoder";
@@ -42,6 +42,9 @@ export type GoogleScheduleResult =
  */
 export async function pushStepsToGoogleTasks(
   taskId: string,
+  /** #106 — what the owner chose in the Schedule menu. Optional, so every call
+   *  site written before the menu existed keeps its defaults-only behaviour. */
+  suppliedIntent?: ScheduleIntent,
 ): Promise<GoogleScheduleResult> {
   const workspaceId = await currentWorkspaceId();
   // #35 Phase A: an explicit role check replaces the workspace-id comparison.
@@ -91,7 +94,13 @@ export async function pushStepsToGoogleTasks(
       estMinutes: s.estMinutes,
       dueAt: null,
     }));
-    const intent = defaultIntentFor(units);
+    // The menu (#106) supplies an intent; the bare 📅 path does not and gets the
+    // defaults. `units` ALWAYS comes from the database rather than from the
+    // supplied intent, so a client cannot smuggle in steps that do not exist —
+    // or drop ones that do — and have us schedule work the task never contained.
+    const intent: ScheduleIntent = suppliedIntent
+      ? { ...suppliedIntent, units }
+      : defaultIntentFor(units);
     const { windows } = deriveWindows(intent);
     const byUnit = new Map(windows.map((w) => [w.unitId, w]));
 
@@ -133,14 +142,34 @@ export async function pushStepsToGoogleTasks(
     // + committed above, so a reward failure must not return { ok: false } and
     // prompt a retry (which would duplicate the Google tasks) — the shared
     // helper keeps rewards best-effort (#34).
-    if (task.scheduledAt == null) {
+    //
+    // #106 folds the chosen intent into this same update. The three schedule
+    // columns are written ONLY when an intent was actually supplied: a
+    // defaults-only push must not quietly overwrite what the owner picked last
+    // time, which is the whole point of persisting them. And the marker stays a
+    // FIRST-schedule fact, so a re-push records the new intent without
+    // restamping scheduledAt or re-awarding.
+    if (task.scheduledAt == null || suppliedIntent) {
       await prisma.task.update({
         where: { id: task.id },
         data: {
-          scheduledAt: new Date(),
-          scheduledVia: SchedulingMethod.GoogleTasks,
+          ...(task.scheduledAt == null
+            ? {
+                scheduledAt: new Date(),
+                scheduledVia: SchedulingMethod.GoogleTasks,
+              }
+            : {}),
+          ...(suppliedIntent
+            ? {
+                scheduleDueAt: suppliedIntent.dueAt,
+                schedulePriority: suppliedIntent.priority,
+                scheduleHours: suppliedIntent.hours,
+              }
+            : {}),
         },
       });
+    }
+    if (task.scheduledAt == null) {
       // Pass the captured pre-write state (false inside this guard, but robust to
       // the guard being removed) rather than a hardcoded literal — matches
       // awardFirstSchedule's contract + scheduleSingleTask's pattern (#34).

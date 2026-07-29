@@ -223,3 +223,53 @@ export function advanceWorkingMinutes(
 export function snapIntoHours(d: Date, p: HoursProfile): Date {
   return advanceWorkingMinutes(d, 0, p);
 }
+
+// ── The Schedule menu's date field (#106) ────────────────────────────────────
+// `<input type="date">` speaks YYYY-MM-DD and nothing else, so the menu needs a
+// pair of conversions. They live here rather than in the component because the
+// zoned arithmetic they need — `zonedParts` and the two-pass `zonedTime` above —
+// is already here, and a second hand-rolled copy in a component is how a
+// DST-transition bug gets written twice.
+
+/** `YYYY-MM-DD` as the scheduling zone's calendar reads `d` — never UTC's. */
+export function toZonedDateInput(
+  d: Date,
+  timeZone: string = schedulingTimeZone(),
+): string {
+  const { y, m, d: day } = zonedParts(d, timeZone);
+  return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/**
+ * The instant at which the scheduling zone's wall clock reads `dateInput`'s
+ * calendar date at `keepTimeFrom`'s time of day.
+ *
+ * The time of day is preserved deliberately: the menu asks for a DAY, not an
+ * hour, and silently snapping the deadline to midnight would shrink the last
+ * window by a working day.
+ *
+ * `null` for anything that is not a real YYYY-MM-DD date — an `<input
+ * type="date">` is empty mid-edit and can be typed into by hand, and a caller
+ * that gets `null` can disable its own button instead of pushing an Invalid Date.
+ */
+export function fromZonedDateInput(
+  dateInput: string,
+  keepTimeFrom: Date,
+  timeZone: string = schedulingTimeZone(),
+): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateInput.trim());
+  if (!match) return null;
+  const [, ys, ms, ds] = match;
+  const y = Number(ys);
+  const m = Number(ms);
+  const d = Number(ds);
+  // Reject impossible calendar dates ("2026-02-30", "2026-13-01") rather than
+  // letting Date.UTC roll them over into a different day than the one typed.
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const probe = new Date(Date.UTC(y, m - 1, d));
+  if (probe.getUTCMonth() !== m - 1 || probe.getUTCDate() !== d) return null;
+
+  const { minuteOfDay, second } = zonedParts(keepTimeFrom, timeZone);
+  const at = zonedTime(y, m, d, minuteOfDay, timeZone);
+  return new Date(at.getTime() + second * 1000);
+}

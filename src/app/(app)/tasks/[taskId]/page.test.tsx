@@ -6,6 +6,7 @@ import {
   cleanup,
   fireEvent,
   waitFor,
+  within,
 } from "@testing-library/react";
 import TaskPage from "./page";
 
@@ -173,17 +174,31 @@ describe("TaskPage — Refine breakdown / Schedule split (#8 follow-up, Fix 2)",
     expect(screen.queryByText(/refine breakdown \/ schedule/i)).toBeNull();
   });
 
-  it("renders a SEPARATE Schedule control (owner + Google connected → 📅 pushes steps to Google Tasks)", async () => {
+  // #106 — the page resolves the Schedule menu's prefill server-side, so 📅 opens
+  // the menu and the push carries what the owner chose. The whole path in one
+  // test: page → loadScheduleIntent → ScheduleControl → ScheduleMenu → action.
+  it("renders a SEPARATE Schedule control whose 📅 opens the prefilled Schedule menu (owner + Google connected)", async () => {
     pushStepsToGoogleTasksMock.mockResolvedValue({
       ok: true,
       scheduled: 2,
       listTitle: "Reclaim",
     });
     await renderPage();
-    const scheduleButton = screen.getByRole("button", { name: /schedule/i });
-    fireEvent.click(scheduleButton);
+    fireEvent.click(screen.getByRole("button", { name: "Schedule" }));
+
+    const dialog = screen.getByRole("dialog", { name: /plan the offsite/i });
+    expect(pushStepsToGoogleTasksMock).not.toHaveBeenCalled();
+    // Prefilled from the task's own (unset) columns, i.e. the shared defaults.
+    expect(within(dialog).getByLabelText(/priority/i)).toHaveValue("high");
+
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: /^schedule$/i }),
+    );
     await waitFor(() =>
-      expect(pushStepsToGoogleTasksMock).toHaveBeenCalledWith("t1"),
+      expect(pushStepsToGoogleTasksMock).toHaveBeenCalledWith(
+        "t1",
+        expect.objectContaining({ priority: "high", hours: "work" }),
+      ),
     );
   });
 

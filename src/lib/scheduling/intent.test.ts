@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defaultIntentFor } from "./intent";
+import { defaultIntentFor, mergePersistedIntent } from "./intent";
 import { ScheduleHours, SchedulePriority } from "./types";
 import { deriveWindows } from "./windows";
 
@@ -31,6 +31,69 @@ describe("defaultIntentFor — what the no-menu path sends", () => {
     expect(defaultIntentFor(units, now).units.map((u) => u.order)).toEqual([
       1, 2,
     ]);
+  });
+});
+
+describe("mergePersistedIntent — what the Schedule menu opens with (#106)", () => {
+  const now = new Date("2026-07-29T09:00:00.000+01:00");
+  const units = [
+    { id: "s1", order: 1, total: 2, text: "a", estMinutes: 15 },
+    { id: "s2", order: 2, total: 2, text: "b", estMinutes: 45 },
+  ];
+  const nothingPersisted = {
+    scheduleDueAt: null,
+    schedulePriority: null,
+    scheduleHours: null,
+  };
+
+  it("falls back to the defaults when nothing has ever been persisted", () => {
+    const i = mergePersistedIntent(units, nothingPersisted, now);
+    expect(i).toEqual(defaultIntentFor(units, now));
+  });
+
+  it("prefers every persisted field over the default", () => {
+    const dueAt = new Date("2026-08-07T16:00:00.000Z");
+    const i = mergePersistedIntent(
+      units,
+      {
+        scheduleDueAt: dueAt,
+        schedulePriority: "critical",
+        scheduleHours: "personal",
+      },
+      now,
+    );
+    expect(i.dueAt.toISOString()).toBe(dueAt.toISOString());
+    expect(i.priority).toBe(SchedulePriority.Critical);
+    expect(i.hours).toBe(ScheduleHours.Personal);
+  });
+
+  it("mixes persisted and default fields independently", () => {
+    const i = mergePersistedIntent(
+      units,
+      { ...nothingPersisted, schedulePriority: "low" },
+      now,
+    );
+    expect(i.priority).toBe(SchedulePriority.Low);
+    expect(i.hours).toBe(ScheduleHours.Work);
+    expect(i.dueAt.getTime()).toBe(now.getTime() + 3 * 24 * 60 * 60_000);
+  });
+
+  // A CHECK constraint makes this unreachable, but this output goes straight
+  // into a Reclaim title parameter: "trust the database" is how one bad row
+  // becomes a malformed schedule.
+  it("ignores values the columns should never have held", () => {
+    const i = mergePersistedIntent(
+      units,
+      { scheduleDueAt: null, schedulePriority: "urgent", scheduleHours: "" },
+      now,
+    );
+    expect(i.priority).toBe(SchedulePriority.High);
+    expect(i.hours).toBe(ScheduleHours.Work);
+  });
+
+  it("carries the units through in order", () => {
+    const i = mergePersistedIntent([units[1], units[0]], nothingPersisted, now);
+    expect(i.units.map((u) => u.id)).toEqual(["s1", "s2"]);
   });
 });
 

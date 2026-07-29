@@ -5,6 +5,8 @@ import { BrainDumpStatus } from "@/lib/constants";
 import { InboxView } from "@/components/inbox/inbox-view";
 import { firstResumableStep } from "@/components/inbox/resume-step";
 import { openSessionRemainingSec } from "@/lib/focus-timer-clock";
+import { mergePersistedIntent } from "@/lib/scheduling/intent";
+import type { ScheduleIntent } from "@/lib/scheduling/types";
 
 // DB-backed, always fresh.
 export const dynamic = "force-dynamic";
@@ -94,6 +96,35 @@ export default async function InboxPage({
       }) ?? [],
   }));
 
+  // #106 — the Schedule menu's prefill for every row that can open it, built
+  // HERE rather than fetched per row: `rawItems` already carries each task's
+  // three intent columns and its steps, so the alternative is one server-action
+  // round trip per multi-step row on every inbox load. Only tasks WITH steps can
+  // reach `ready_steps`, so nothing else needs an entry. Owner-only, mirroring
+  // `google` above: a guest never sees the Google control at all.
+  //
+  // Built on the same mergePersistedIntent as loadScheduleIntent, so "what the
+  // menu opens with" has one definition, not two that agree today.
+  const scheduleIntents: Record<string, ScheduleIntent> = {};
+  if (owner) {
+    for (const { task } of rawItems) {
+      if (!task || task.steps.length === 0) continue;
+      scheduleIntents[task.id] = mergePersistedIntent(
+        task.steps.map((s) => ({
+          id: s.id,
+          order: s.order,
+          total: task.steps.length,
+          text: s.text,
+          emoji: s.subtaskEmoji,
+          estMinutes: s.estMinutes,
+          dueAt: null,
+        })),
+        task,
+        new Date(now),
+      );
+    }
+  }
+
   // Phase 5 (#8): the demo/first-run preview override shows the Inbox as a
   // brand-new workspace would see it (empty, welcome card, no resume banner)
   // without touching real data. welcomeVisible otherwise reflects whether the
@@ -128,6 +159,7 @@ export default async function InboxPage({
           wayOverdueHours: settings.wayOverdueHours,
         }}
         google={google}
+        scheduleIntents={scheduleIntents}
         welcomeVisible={welcomeVisible}
         resumeStep={firstRun ? null : resumeStep}
         notifyAging={settings.notifyAging}

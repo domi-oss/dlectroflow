@@ -5,6 +5,8 @@ import {
   workingMinutesBetween,
   advanceWorkingMinutes,
   snapIntoHours,
+  toZonedDateInput,
+  fromZonedDateInput,
 } from "./hours";
 
 /** A London wall-clock instant, built without depending on the host timezone. */
@@ -202,4 +204,70 @@ describe("snapIntoHours", () => {
       snapIntoHours(bst("2026-08-01T12:00"), WORK_HOURS).toISOString(),
     ).toBe(bst("2026-08-03T08:30").toISOString());
   });
+});
+
+// ── #106 — the Schedule menu's date field ────────────────────────────────────
+// The menu edits a DEADLINE with an `<input type="date">`, which speaks
+// YYYY-MM-DD and nothing else. Both directions have to go through the scheduling
+// zone, not the host's: the owner's "31 July" is a London date, and a server (or
+// a CI runner) in UTC−5 would otherwise render and parse it a day out.
+
+describe("toZonedDateInput — a Date as the date field sees it", () => {
+  it("renders the scheduling zone's calendar date, not UTC's", () => {
+    // 23:30 UTC on 31 July is already 00:30 on 1 August in London (BST).
+    expect(toZonedDateInput(new Date("2026-07-31T23:30:00.000Z"))).toBe(
+      "2026-08-01",
+    );
+  });
+
+  it("renders a winter (GMT) date unchanged", () => {
+    expect(toZonedDateInput(new Date("2026-01-15T10:00:00.000Z"))).toBe(
+      "2026-01-15",
+    );
+  });
+
+  it("zero-pads month and day so the value is always valid for the input", () => {
+    expect(toZonedDateInput(new Date("2026-03-04T12:00:00.000Z"))).toBe(
+      "2026-03-04",
+    );
+  });
+});
+
+describe("fromZonedDateInput — a new date, the same time of day", () => {
+  it("keeps the time of day the deadline already had", () => {
+    // 16:00Z = 17:00 BST. Moving to 7 August must stay at 17:00 BST.
+    const moved = fromZonedDateInput(
+      "2026-08-07",
+      new Date("2026-07-31T16:00:00.000Z"),
+    );
+    expect(moved?.toISOString()).toBe("2026-08-07T16:00:00.000Z");
+    expect(toZonedDateInput(moved as Date)).toBe("2026-08-07");
+  });
+
+  it("carries a wall-clock time across a DST boundary", () => {
+    // 12:00 BST → 12:00 GMT in November: the same wall clock, a different offset.
+    const moved = fromZonedDateInput(
+      "2026-11-05",
+      new Date("2026-07-31T11:00:00.000Z"),
+    );
+    expect(moved?.toISOString()).toBe("2026-11-05T12:00:00.000Z");
+  });
+
+  it("round-trips through toZonedDateInput", () => {
+    const from = new Date("2026-07-31T16:00:00.000Z");
+    const same = fromZonedDateInput(toZonedDateInput(from), from);
+    expect(same?.toISOString()).toBe(from.toISOString());
+  });
+
+  // An `<input type="date">` is empty while it is being edited, and a hand-typed
+  // value can be nonsense. Returning null (rather than an Invalid Date that
+  // renders as "NaN") is what lets the menu disable its own button instead.
+  it.each(["", "   ", "not-a-date", "2026-13-01", "2026-02-30", "26-07-31"])(
+    "returns null for the unusable value %o",
+    (bad) => {
+      expect(
+        fromZonedDateInput(bad, new Date("2026-07-31T16:00:00.000Z")),
+      ).toBeNull();
+    },
+  );
 });

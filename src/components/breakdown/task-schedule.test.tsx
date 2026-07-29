@@ -38,6 +38,7 @@ describe("TaskSchedule — scheduled indicator (driven by scheduledAt)", () => {
     render(
       <TaskSchedule
         taskId="t1"
+        taskTitle="Ship the thing"
         scheduledAt={new Date()}
         google={connected}
         voice="plain"
@@ -50,6 +51,7 @@ describe("TaskSchedule — scheduled indicator (driven by scheduledAt)", () => {
     render(
       <TaskSchedule
         taskId="t1"
+        taskTitle="Ship the thing"
         scheduledAt={null}
         google={connected}
         voice="plain"
@@ -71,14 +73,18 @@ describe("TaskSchedule — owner with Google connected", () => {
     render(
       <TaskSchedule
         taskId="t1"
+        taskTitle="Ship the thing"
         scheduledAt={null}
         google={connected}
         voice="plain"
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
+    // No `scheduleIntent` prop, so 📅 keeps its pre-#106 immediate behaviour and
+    // the action falls back to the defaults — the second argument is the absence
+    // of a choice, not a choice.
     await waitFor(() =>
-      expect(pushStepsToGoogleTasks).toHaveBeenCalledWith("t1"),
+      expect(pushStepsToGoogleTasks).toHaveBeenCalledWith("t1", undefined),
     );
     await waitFor(() => expect(refresh).toHaveBeenCalled());
   });
@@ -93,6 +99,7 @@ describe("TaskSchedule — owner with Google connected", () => {
     render(
       <TaskSchedule
         taskId="t1"
+        taskTitle="Ship the thing"
         scheduledAt={null}
         google={connected}
         voice="plain"
@@ -114,6 +121,7 @@ describe("TaskSchedule — owner with Google connected", () => {
     render(
       <TaskSchedule
         taskId="t1"
+        taskTitle="Ship the thing"
         scheduledAt={null}
         google={connected}
         voice="plain"
@@ -131,6 +139,7 @@ describe("TaskSchedule — owner without a finished Google connection", () => {
     render(
       <TaskSchedule
         taskId="t1"
+        taskTitle="Ship the thing"
         scheduledAt={null}
         google={{ configured: false, connected: false, needsReconnect: false }}
         voice="plain"
@@ -146,6 +155,7 @@ describe("TaskSchedule — owner without a finished Google connection", () => {
     render(
       <TaskSchedule
         taskId="t1"
+        taskTitle="Ship the thing"
         scheduledAt={null}
         google={{ configured: true, connected: false, needsReconnect: true }}
         voice="plain"
@@ -167,6 +177,7 @@ describe("TaskSchedule — guest / no Google (google=null)", () => {
     render(
       <TaskSchedule
         taskId="t1"
+        taskTitle="Ship the thing"
         scheduledAt={null}
         google={null}
         voice="plain"
@@ -184,6 +195,7 @@ describe("TaskSchedule — guest / no Google (google=null)", () => {
     render(
       <TaskSchedule
         taskId="t1"
+        taskTitle="Ship the thing"
         scheduledAt={null}
         google={null}
         voice="plain"
@@ -207,6 +219,7 @@ describe("TaskSchedule — guest / no Google (google=null)", () => {
     render(
       <TaskSchedule
         taskId="t1"
+        taskTitle="Ship the thing"
         scheduledAt={null}
         google={null}
         voice="plain"

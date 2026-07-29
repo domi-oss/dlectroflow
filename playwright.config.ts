@@ -95,6 +95,19 @@ const bootGuardEnv = {
   AUTH_SESSION_SECRET: SESSION_SECRET,
   GITLAB_OAUTH_CLIENT_ID: "e2e-client-id",
   GITLAB_OAUTH_CLIENT_SECRET: "e2e-client-secret",
+  // #106: makes the Google Tasks method CONFIGURED, which is the first of the two
+  // conditions `scheduleState` needs before a row offers "Schedule" instead of
+  // "Connect Google →". The second — a stored token, i.e. `connected` — is seeded
+  // and torn down by e2e/smoke/schedule-menu.spec.ts alone, because it changes
+  // every row's control for the whole run and only that spec wants it.
+  //
+  // Deliberately NOT a working credential. Nothing here can reach Google: the
+  // menu spec opens the popover and reads it, and never presses Schedule, so no
+  // token is exchanged and no request leaves the machine. On its own this pair
+  // changes nothing visible either — with no token, `scheduleState` resolves to
+  // "connect" exactly as it did when the id was absent.
+  GOOGLE_CLIENT_ID: "e2e-google-client-id",
+  GOOGLE_CLIENT_SECRET: "e2e-google-client-secret",
   GUEST_IP_HASH_SALT: "e2e-guest-ip-hash-salt-000",
   TOKEN_ENC_KEY:
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",

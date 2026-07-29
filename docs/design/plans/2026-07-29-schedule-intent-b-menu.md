@@ -1,6 +1,6 @@
 # Schedule intent B — the Schedule menu Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Let the owner say **when a task must be done and how urgent it is** before it is pushed to Reclaim, in a popover that remembers what they said last time.
 
@@ -53,7 +53,7 @@ The split matters: `summary.ts` holds the only logic worth testing without a DOM
 **Interfaces:**
 - Produces: `Task.scheduleDueAt: DateTime?`, `Task.schedulePriority: String?`, `Task.scheduleHours: String?`
 
-- [ ] **Step 1: Write the failing integration test**
+- [x] **Step 1: Write the failing integration test**
 
 Read `src/lib/step-est-minutes-check.integration.test.ts` first — it is the template for how this repo proves a constraint behaviourally (raw SQL insert, expect rejection). Create `src/lib/task-schedule-intent-check.integration.test.ts` in the same shape:
 
@@ -111,12 +111,12 @@ describe("Task schedule-intent CHECK constraints", () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `npx vitest run src/lib/task-schedule-intent-check.integration.test.ts`
 Expected: FAIL — `column "schedulePriority" of relation "Task" does not exist`.
 
-- [ ] **Step 3: Add the columns to the schema**
+- [x] **Step 3: Add the columns to the schema**
 
 In `prisma/schema.prisma`, inside `model Task`, add:
 
@@ -133,7 +133,7 @@ In `prisma/schema.prisma`, inside `model Task`, add:
 
 The enum values live in `src/lib/scheduling/types.ts` (added by #104) — do **not** duplicate them into `src/lib/constants.ts`, and do not create a new constants file. The registry entry in Step 5 imports them from there.
 
-- [ ] **Step 4: Write the migration**
+- [x] **Step 4: Write the migration**
 
 Create `prisma/migrations/<timestamp>_task_schedule_intent/migration.sql` — use a timestamp later than `20260727230000`:
 
@@ -173,7 +173,7 @@ ALTER TABLE "Task"
   CHECK ("scheduleHours" IS NULL OR "scheduleHours" IN ('work', 'personal'));
 ```
 
-- [ ] **Step 5: Register the constraints**
+- [x] **Step 5: Register the constraints**
 
 In `src/lib/enum-constraint-sync.integration.test.ts`, import the two const objects and append to `REGISTRY`:
 
@@ -197,7 +197,7 @@ import { SchedulePriority, ScheduleHours } from "@/lib/scheduling/types";
   },
 ```
 
-- [ ] **Step 6: Apply and run both tests**
+- [x] **Step 6: Apply and run both tests**
 
 ```bash
 npx prisma migrate dev --name task_schedule_intent
@@ -206,7 +206,7 @@ npx vitest run src/lib/task-schedule-intent-check.integration.test.ts src/lib/en
 
 Expected: PASS. If the sync test reports an unmanaged constraint, the name in the migration and the name in `REGISTRY` disagree — fix the registry, not the SQL, since the SQL name follows the convention.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add prisma/schema.prisma prisma/migrations src/lib/enum-constraint-sync.integration.test.ts src/lib/task-schedule-intent-check.integration.test.ts
@@ -239,7 +239,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
   - `formatBlockMinutes(total: number): string` — `"45m"`, `"3h30m"`, `"2h"`
   - `scheduleSummary(plan: WindowPlan, unitCount: number, dueAt: Date): { text: string; warning: boolean }`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `src/lib/scheduling/summary.test.ts`:
 
@@ -327,12 +327,12 @@ describe("scheduleSummary — the warning case", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `npx vitest run src/lib/scheduling/summary.test.ts`
 Expected: FAIL — module not found.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Create `src/lib/scheduling/summary.ts`:
 
@@ -397,12 +397,12 @@ export function scheduleSummary(
 }
 ```
 
-- [ ] **Step 4: Run to verify they pass**
+- [x] **Step 4: Run to verify they pass**
 
 Run: `npx vitest run src/lib/scheduling/summary.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/lib/scheduling/summary.ts src/lib/scheduling/summary.test.ts
@@ -431,7 +431,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 - Consumes: `defaultIntentFor` from `@/lib/scheduling/intent` (#104 — NOT from the action file; see Global Constraints), `prisma`, `currentWorkspaceId`, `isOwnerRequest`.
 - Produces: `loadScheduleIntent(taskId: string): Promise<ScheduleIntent | null>` — `null` when the task is not visible to the caller.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `src/app/actions/schedule-intent.test.ts`. Follow the mocking style already used by the repo's action tests — read `src/app/actions/google-schedule.test.ts` (created by #104) first and mirror it:
 
@@ -517,12 +517,12 @@ describe("loadScheduleIntent", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `npx vitest run src/app/actions/schedule-intent.test.ts`
 Expected: FAIL — module not found.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Create `src/app/actions/schedule-intent.ts`:
 
@@ -595,12 +595,12 @@ export async function loadScheduleIntent(
 }
 ```
 
-- [ ] **Step 4: Run to verify they pass**
+- [x] **Step 4: Run to verify they pass**
 
 Run: `npx vitest run src/app/actions/schedule-intent.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/app/actions/schedule-intent.ts src/app/actions/schedule-intent.test.ts
@@ -644,7 +644,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 **Read first:** `src/components/inbox/row-actions.tsx:250–283`. That is the popover pattern this repo uses — `Popover.Root` with every close route funnelled through one `close()`, `Popover.Portal` with `container={rootRef}`, `ANCHORED_POSITIONER`, and `aria-label` on `Popover.Popup` because there is no visible heading for `aria-labelledby` to point at (axe's `aria-dialog-name`). Copy that structure; do not invent a second popover idiom.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `src/components/scheduling/schedule-menu.test.tsx`:
 
@@ -781,12 +781,12 @@ describe("ScheduleMenu", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `npx vitest run src/components/scheduling/schedule-menu.test.tsx`
 Expected: FAIL — module not found.
 
-- [ ] **Step 3: Implement the component**
+- [x] **Step 3: Implement the component**
 
 Create `src/components/scheduling/schedule-menu.tsx`. It is presentational: it owns only the draft intent, computes the summary on every change, and calls back. No server actions, no fetching.
 
@@ -800,12 +800,12 @@ Requirements the tests above pin down, so build to them:
 - `Cancel` closes without calling back. `Schedule` calls `onSchedule(draft)` and closes.
 - When `showReclaimFields` is false, the priority and hours controls are **not rendered** — not disabled, not hidden with CSS. A control that provably has no effect on the active method should not be in the tab order.
 
-- [ ] **Step 4: Run to verify they pass**
+- [x] **Step 4: Run to verify they pass**
 
 Run: `npx vitest run src/components/scheduling/schedule-menu.test.tsx`
 Expected: PASS, including the axe assertion.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/components/scheduling/schedule-menu.tsx src/components/scheduling/schedule-menu.test.tsx
@@ -838,7 +838,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 **Interfaces:**
 - Changes: `pushStepsToGoogleTasks(taskId: string, intent?: ScheduleIntent): Promise<GoogleScheduleResult>` — the parameter is optional so #104's call sites keep working unchanged.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `src/app/actions/google-schedule.test.ts`:
 
@@ -902,12 +902,12 @@ describe("pushStepsToGoogleTasks — persisting what the owner chose (#106)", ()
 
 `taskUpdate`, `createOrPatchCalls` and `awardFirstSchedule` are whatever #104's harness names them — read that file and reuse its mocks rather than adding a second set.
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `npx vitest run src/app/actions/google-schedule.test.ts`
 Expected: FAIL on all three.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `src/app/actions/google-schedule.ts`:
 
@@ -958,12 +958,12 @@ Then extend the existing marker update so a menu push records what was chosen:
 
 Keep the reward call's existing argument and comment — its idempotency reasoning is unchanged, and it must still fire only on a first schedule.
 
-- [ ] **Step 4: Run the tests, then the whole suite**
+- [x] **Step 4: Run the tests, then the whole suite**
 
 Run: `npx vitest run src/app/actions/google-schedule.test.ts && npm test`
 Expected: PASS, and #104's existing action tests still green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/app/actions/google-schedule.ts src/app/actions/google-schedule.test.ts
@@ -992,7 +992,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 **Interfaces:** no new exports. `ScheduleControlProps` gains `scheduleIntent?: ScheduleIntent | null` and `onScheduleSteps` widens to `(intent?: ScheduleIntent) => void`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `src/components/inbox/row-actions.test.tsx`:
 
@@ -1026,23 +1026,23 @@ it("still fires the .ics path immediately — no menu, no regression for guests"
 
 Read the file's existing `ready_steps` tests for the exact prop set before writing this — do not guess the props.
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `npx vitest run src/components/inbox/row-actions.test.tsx`
 Expected: FAIL — no dialog appears; the click fires the callback directly.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `row-actions.tsx`, the `!needsDuration` branch currently fires `onScheduleSteps?.()` on click for `ready_steps`. Wrap that branch's button in `ScheduleMenu` when `scheduleIntent` is present, passing the 📅 button as `trigger` and `showReclaimFields={!isIcs}`. Leave the `ics_ready_steps` path calling `onScheduleIcs?.()` directly — a guest with no Reclaim has nothing to choose that the menu could offer beyond a deadline, and changing their one-click download into a two-step dialog is a regression.
 
 When `scheduleIntent` is null (not yet loaded), keep today's immediate behaviour so the control is never dead.
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `npx vitest run src/components/inbox/row-actions.test.tsx && npm test`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/components/inbox/row-actions.tsx src/components/inbox/row-actions.test.tsx
@@ -1065,7 +1065,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 **Files:**
 - Create: `e2e/smoke/schedule-menu.spec.ts`
 
-- [ ] **Step 1: Make the Google path reachable in e2e**
+- [x] **Step 1: Make the Google path reachable in e2e**
 
 #104's plan said the Google path was unreachable in e2e. That was true for *pushing*, and it is **not** true for *opening the menu* — which is the part worth verifying in a real build, because `"rolling 30 dayswindow"` was exactly this class of bug: text assembled from JSX that vitest and `next build` disagree about.
 
@@ -1084,7 +1084,7 @@ In `playwright.config.ts`, add to `bootGuardEnv` alongside the existing GitLab d
 
 Then confirm nothing else changes behaviour on that flag: run the full e2e suite before writing the new spec. If a pre-existing spec starts failing because the 📅 control's label changed, that spec was asserting the `.ics` label — decide per spec whether it should pin `.ics` explicitly or follow the new default, and say which in the MR.
 
-- [ ] **Step 2: Write the spec**
+- [x] **Step 2: Write the spec**
 
 Create `e2e/smoke/schedule-menu.spec.ts`:
 
@@ -1122,7 +1122,7 @@ test("the Schedule menu opens, reads correctly, and closes on Escape", async ({ 
 });
 ```
 
-- [ ] **Step 3: Run the full gate set**
+- [x] **Step 3: Run the full gate set**
 
 ```bash
 npm test
@@ -1134,11 +1134,11 @@ npm run build && npm run test:e2e
 
 Expected: all green. `.next/` validator errors from a stale build are pre-existing.
 
-- [ ] **Step 4: Screenshot the menu in both themes, at 390px and desktop**
+- [x] **Step 4: Screenshot the menu in both themes, at 390px and desktop**
 
 Save to `/Users/gitlab_dlectronique/workdev/106-menu-shots/` and attach to #106. The owner reviews visual work by eye; a green suite is not the same evidence.
 
-- [ ] **Step 5: Commit and open the MR**
+- [x] **Step 5: Commit and open the MR**
 
 ```bash
 git add e2e/smoke/schedule-menu.spec.ts
@@ -1152,14 +1152,14 @@ MR: `--reviewer GitLabDuo --milestone v0.5.0 --assignee gitlab_dlectronique`, de
 
 ## Final verification
 
-- [ ] `npm test` green, count up
-- [ ] `npx tsc --noEmit` clean under `src/`
-- [ ] `npm run lint`, `npm run format:check` clean
-- [ ] `npm run build && npm run test:e2e` green
-- [ ] Migration applied cleanly **and** `enum-constraint-sync.integration.test.ts` passes — that test fails loudly if the constraints and the registry disagree
-- [ ] Screenshots attached to #106
-- [ ] axe clean on the open popover (asserted in the component test, not just eyeballed)
-- [ ] #106 status set to Done; MR open, not merged
+- [x] `npm test` green, count up
+- [x] `npx tsc --noEmit` clean under `src/`
+- [x] `npm run lint`, `npm run format:check` clean
+- [x] `npm run build && npm run test:e2e` green
+- [x] Migration applied cleanly **and** `enum-constraint-sync.integration.test.ts` passes — that test fails loudly if the constraints and the registry disagree
+- [ ] Screenshots attached to #106 — captured to `/Users/gitlab_dlectronique/workdev/106-menu-shots/` (and `test-results/schedule-menu/`); attaching is the controller's step
+- [x] axe clean on the open popover (asserted in the component test, not just eyeballed)
+- [ ] #106 status set to Done; MR open, not merged — the controller's step (this branch stops at green, unpushed)
 
 ## Spec-coverage map (self-review)
 
@@ -1177,3 +1177,75 @@ MR: `--reviewer GitLabDuo --milestone v0.5.0 --assignee gitlab_dlectronique`, de
 | Production-build verification | Task 7 |
 
 **Deliberately not here:** `Step.scheduleDueAt` and the per-step expander — those are #107. The `▸ Set per step` disclosure is **not** rendered by this plan; adding a disclosure that expands to nothing would be worse than not having it yet.
+
+---
+
+## Deviations from this plan, as built (#106)
+
+The plan held up; four things in it did not survive contact with the repo, and one
+piece of wiring it left open needed a decision. Recorded here because the next
+reader of this file should not re-derive them.
+
+1. **`vitest-axe` is not a dependency**, and "no new npm dependencies" is one of
+   this plan's own constraints. The repo's actual convention is that mechanical
+   axe scanning lives in Playwright (`e2e/a11y/axe-helpers.ts`, `@axe-core/playwright`)
+   while component tests assert accessible names, labels, roles and touch targets
+   directly. So Task 4's axe assertion became explicit a11y assertions in
+   `schedule-menu.test.tsx` (dialog name, labelled controls, tab order, focus
+   restoration, 44px targets) plus a REAL `scanA11y` of the open popover in
+   `e2e/smoke/schedule-menu.spec.ts` — a real accessibility tree rather than
+   jsdom's approximation, which is the stronger gate.
+
+2. **There is no `src/app/actions/google-schedule.test.ts`.** #104 split it three
+   ways; Task 5's tests went into `google-schedule.push.test.ts` and reuse its
+   hoisted mocks (`taskUpdateMock`, `upsertGoogleTaskMock`, `logRewardMock`,
+   `awardBadgeMock` — there is no `awardFirstSchedule` mock).
+
+3. **Task 7 Step 1 was wrong about the two env vars being enough.**
+   `scheduleState` (inbox-view.tsx) returns `"connect"` unless Google is
+   configured AND connected, and `getGoogleStatus().connected` is
+   `Boolean(auth.accessToken)` — a database fact, not an env one. Adding
+   `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` alone changes nothing observable
+   (verified: 166 e2e tests passed identically before and after). The new spec
+   therefore seeds and tears down the `GoogleAuth` token row itself, which also
+   keeps the blast radius to one file instead of the whole suite via
+   `global-setup.ts`.
+
+   The plan's spec body was also unreachable as written: it captured a fresh
+   brain-dump item, which has no steps and so gets the `needs_duration` duration
+   popover, not this menu. Only a **Multi-step** row (triaged, >1 step) reaches
+   `ready_steps`, so the spec seeds one.
+
+4. **Two extra source files, both in service of Task 6.**
+   * `src/lib/scheduling/intent.ts` gained `mergePersistedIntent` — the pure
+     persisted-or-default merge. The plan had it inline in the `"use server"`
+     action, but the inbox needs the same merge without a per-row round trip (see
+     below), and two copies of "what does the menu open with?" would agree only
+     today.
+   * `src/lib/scheduling/hours.ts` gained `toZonedDateInput` /
+     `fromZonedDateInput`. An `<input type="date">` speaks `YYYY-MM-DD`, both
+     directions have to go through the scheduling zone, and changing the DAY must
+     keep the deadline's hour. The two-pass DST-safe `zonedTime` those need is
+     already private to that file; a second hand-rolled copy in a component is how
+     the same DST bug gets written twice.
+
+5. **Task 6's "whichever parent passes `onScheduleSteps`" is two parents, and
+   both resolve the prefill on the SERVER** so the menu never flashes the defaults
+   before the persisted values arrive:
+   * `tasks/[taskId]/page.tsx` awaits `loadScheduleIntent(taskId)` in its existing
+     `Promise.all` and passes it to `<TaskSchedule>`.
+   * `(app)/page.tsx` builds one intent per multi-step row from the task rows it
+     has **already fetched** — the three columns and the steps are in that payload
+     already — and passes them to `<InboxView>` as `scheduleIntents`. The
+     alternative was one server-action round trip per multi-step row on every
+     inbox load.
+
+6. **Deliberately not wired: the ▾ dropdown's "Schedule" mirror.** It keeps
+   firing immediately, for the same reason its duration presets expand inline
+   rather than in a popup (#92) — nesting a floating popup inside the 🔽 popup is
+   the shape that plan was written to avoid. Reversible; noted rather than done.
+
+7. **`prisma format` was NOT run.** It reformats the whole checked-in schema
+   (108 insertions / 93 deletions of pure alignment churn), which re-fingerprints
+   unrelated SAST findings. The new columns are aligned by hand to match their
+   neighbours instead.

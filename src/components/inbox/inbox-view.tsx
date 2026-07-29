@@ -56,7 +56,7 @@ import {
 } from "@/app/actions/google-schedule";
 import { scheduleViaIcs } from "@/app/actions/ics-schedule";
 import { downloadIcs } from "@/lib/download-ics";
-import type { GoogleConnStatus } from "@/lib/scheduling/types";
+import type { GoogleConnStatus, ScheduleIntent } from "@/lib/scheduling/types";
 import { StatusPill } from "@/components/inbox/status-pill";
 import { TaskSteps } from "@/components/breakdown/task-steps";
 import {
@@ -145,6 +145,7 @@ export function InboxView({
   initialItems,
   settings,
   google = null,
+  scheduleIntents,
   welcomeVisible,
   resumeStep,
   notifyAging = true,
@@ -153,6 +154,13 @@ export function InboxView({
   initialItems: Item[];
   settings: AgingSettings;
   google?: GoogleConnStatus | null;
+  /**
+   * #106 — the Schedule menu's prefill per taskId (persisted-or-default),
+   * resolved once on the server for every row that can reach `ready_steps`. A
+   * missing entry keeps that row's 📅 firing immediately, so the control is never
+   * dead; guests get none, exactly as they get no Google control.
+   */
+  scheduleIntents?: Record<string, ScheduleIntent>;
   /** First-run welcome card (Phase 5, #8) — shown above everything else until
    * the workspace dismisses it (or while previewing the demo first-run state). */
   welcomeVisible: boolean;
@@ -833,13 +841,20 @@ export function InboxView({
                                 effectiveGoogle,
                                 "ready_steps",
                               ),
-                              onScheduleSteps: () => {
+                              taskTitle: item.text,
+                              // #106 — present → 📅 opens the Schedule menu;
+                              // absent → it keeps firing immediately.
+                              scheduleIntent:
+                                (item.taskId &&
+                                  scheduleIntents?.[item.taskId]) ||
+                                null,
+                              onScheduleSteps: (intent?: ScheduleIntent) => {
                                 // Guard taskId instead of asserting it — a data
                                 // inconsistency should no-op, not POST undefined (Duo review).
                                 const tid = item.taskId;
                                 if (tid)
                                   runSchedule(item.id, () =>
-                                    pushStepsToGoogleTasks(tid),
+                                    pushStepsToGoogleTasks(tid, intent),
                                   );
                               },
                               pending,
