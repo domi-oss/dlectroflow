@@ -301,7 +301,13 @@ export async function patchGoogleTask(
   token: string,
   listId: string,
   taskId: string,
-  patch: { title?: string; status?: "needsAction" | "completed" },
+  patch: {
+    title?: string;
+    notes?: string;
+    /** RFC 3339. Google Tasks stores date-only precision but accepts a timestamp. */
+    due?: string;
+    status?: "needsAction" | "completed";
+  },
 ): Promise<boolean> {
   const res = await fetch(tasksUrl("lists", listId, "tasks", taskId), {
     method: "PATCH",
@@ -312,4 +318,57 @@ export async function patchGoogleTask(
     body: JSON.stringify(patch),
   });
   return res.ok;
+}
+
+/**
+ * Create-or-update one Google Task (#104).
+ *
+ * Both scheduling call sites used to POST unconditionally, so every re-schedule
+ * added a second task and Reclaim dutifully booked a second block. `Step`
+ * already persists `googleTaskId`; this is the function that finally reads it.
+ * Reclaim two-way-syncs title/duration/due edits, so a PATCH MOVES the existing
+ * calendar block rather than leaving a stale twin behind.
+ *
+ * A 404 means the task was deleted in Google since we stored the id — recreate
+ * rather than fail, since the user's intent is "this should be scheduled".
+ * Anything else throws: silently dropping a schedule is worse than an error.
+ */
+export async function upsertGoogleTask(
+  token: string,
+  listId: string,
+  existingTaskId: string | null,
+  body: { title: string; notes?: string; due?: string },
+): Promise<{ id: string; created: boolean }> {
+  const payload = {
+    title: body.title,
+    ...(body.notes != null ? { notes: body.notes } : {}),
+    ...(body.due ? { due: body.due } : {}),
+  };
+
+  if (existingTaskId) {
+    const res = await fetch(
+      tasksUrl("lists", listId, "tasks", existingTaskId),
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+    );
+    if (res.ok) return { id: existingTaskId, created: false };
+    if (res.status !== 404) {
+      const detail = await res.text().catch(() => "");
+      throw new Error(`Google Tasks update failed (${res.status}) ${detail}`);
+    }
+    // Fall through: it is gone in Google, so create a replacement.
+  }
+
+  const created = await createGoogleTask(token, listId, {
+    title: body.title,
+    notes: body.notes,
+    due: body.due,
+  });
+  return { id: created.id, created: true };
 }
