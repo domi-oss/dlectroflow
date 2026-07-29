@@ -37,7 +37,10 @@ export async function proxy(req: NextRequest) {
   // from "guest" — telling an OWNER from a MEMBER needs the database, which the
   // Edge runtime has no client for, so role checks stay in isOwnerRequest() at
   // the route/action layer. OWNER_ONLY_PREFIXES therefore means "signed in" at
-  // this layer and "role = owner" at the handler; both gates run.
+  // this layer and "role = owner" at the handler; both gates run. The partner
+  // gate is named, not assumed: #119 found this promise unkept on the Google
+  // OAuth routes, so the handlers now call isOwnerRequest() themselves — see
+  // src/app/api/google/oauth/{start,callback}/route.ts.
   const isSignedIn = sessionPayload?.kind === "user";
 
   // Owner-only paths: block guests.
