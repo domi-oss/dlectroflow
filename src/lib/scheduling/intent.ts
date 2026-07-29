@@ -30,3 +30,48 @@ export function defaultIntentFor(
     units: [...units].sort((a, b) => a.order - b.order),
   };
 }
+
+/** The three nullable `Task` columns #106 added, exactly as Prisma returns them. */
+export type PersistedIntentColumns = {
+  scheduleDueAt: Date | null;
+  schedulePriority: string | null;
+  scheduleHours: string | null;
+};
+
+const PRIORITIES = new Set<string>(Object.values(SchedulePriority));
+const HOURS = new Set<string>(Object.values(ScheduleHours));
+
+/**
+ * The intent the Schedule menu opens with (#106): what the owner said last time,
+ * or `defaultIntentFor`'s fallback for anything they have never said.
+ *
+ * Built on `defaultIntentFor` rather than restating the defaults, so the menu path
+ * and the bare-📅 path cannot drift. Pure and client-safe, so the two read sites
+ * that already hold the task row (the inbox page) and the one that does not
+ * (`loadScheduleIntent`) share one merge instead of two that agree today.
+ *
+ * Both pseudo-enum columns are re-validated even though a CHECK constraint makes
+ * an illegal value unreachable: this output goes straight into a Reclaim title
+ * parameter, and "trust the database" is how one bad row becomes a malformed
+ * schedule.
+ */
+export function mergePersistedIntent(
+  units: ScheduleUnit[],
+  persisted: PersistedIntentColumns,
+  now: Date = new Date(),
+): ScheduleIntent {
+  const base = defaultIntentFor(units, now);
+  const { scheduleDueAt, schedulePriority, scheduleHours } = persisted;
+  return {
+    ...base,
+    dueAt: scheduleDueAt ?? base.dueAt,
+    priority:
+      schedulePriority && PRIORITIES.has(schedulePriority)
+        ? (schedulePriority as SchedulePriority)
+        : base.priority,
+    hours:
+      scheduleHours && HOURS.has(scheduleHours)
+        ? (scheduleHours as ScheduleHours)
+        : base.hours,
+  };
+}
