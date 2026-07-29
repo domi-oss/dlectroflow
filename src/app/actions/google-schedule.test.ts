@@ -1,0 +1,34 @@
+import { describe, it, expect } from "vitest";
+import { defaultIntentFor } from "./google-schedule";
+import { ScheduleHours, SchedulePriority } from "@/lib/scheduling/types";
+
+describe("defaultIntentFor — what the no-menu path sends", () => {
+  const now = new Date("2026-07-29T09:00:00.000+01:00");
+  const units = [
+    { id: "s1", order: 1, total: 2, text: "a", estMinutes: 15 },
+    { id: "s2", order: 2, total: 2, text: "b", estMinutes: 45 },
+  ];
+
+  it("defaults the deadline to three days out, matching Reclaim's own default", () => {
+    const i = defaultIntentFor(units, now);
+    expect(i.dueAt.getTime()).toBe(now.getTime() + 3 * 24 * 60 * 60_000);
+  });
+
+  it("defaults to HIGH priority, because sending nothing already meant P2", () => {
+    expect(defaultIntentFor(units, now).priority).toBe(SchedulePriority.High);
+  });
+
+  it("defaults to work hours", () => {
+    expect(defaultIntentFor(units, now).hours).toBe(ScheduleHours.Work);
+  });
+
+  it("defaults to wanting the time defended", () => {
+    expect(defaultIntentFor(units, now).busy).toBe(true);
+  });
+
+  it("keeps the units in order", () => {
+    expect(defaultIntentFor(units, now).units.map((u) => u.order)).toEqual([
+      1, 2,
+    ]);
+  });
+});
