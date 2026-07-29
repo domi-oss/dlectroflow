@@ -109,7 +109,9 @@ services:
   caddy:
     # Caddy obtains and renews a Let's Encrypt certificate for DLECTROFLOW_DOMAIN
     # automatically, which is what replaces ingress-nginx + cert-manager here.
-    image: caddy:2-alpine
+    # Pinned by digest like every other image here: a floating tag would let a
+    # `pull` on a new host bring in a different Caddy than the one tested.
+    image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
     restart: unless-stopped
     depends_on:
       - app
@@ -149,13 +151,18 @@ services:
     volumes:
       - ./backups:/backups
     # --clean --if-exists so the dump can be restored over an existing schema.
-    entrypoint: ["/bin/sh", "-c"]
+    # bash, not sh: pipefail is what makes a failed pg_dump fail the command.
+    # Without it `pg_dump | gzip` exits 0 on a dump error, gzip writes a
+    # truncated file, and a broken backup is kept as if it had worked.
+    entrypoint: ["/bin/bash", "-c"]
     command:
       - >
-        set -eu;
+        set -euo pipefail;
         out="/backups/dlectroflow-$$(date -u +%Y%m%dT%H%M%SZ).sql.gz";
+        trap 'rm -f "$$out.partial"' EXIT;
         pg_dump --clean --if-exists -h db -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
-        | gzip -9 > "$$out";
+        | gzip -9 > "$$out.partial";
+        mv "$$out.partial" "$$out";
         echo "wrote $$out";
         ls -1t /backups/dlectroflow-*.sql.gz | tail -n +15 | xargs -r rm --
 
