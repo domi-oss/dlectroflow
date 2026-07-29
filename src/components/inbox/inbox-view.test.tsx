@@ -196,6 +196,7 @@ describe("InboxView — capture confirm", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[]}
         settings={settings}
         welcomeVisible={false}
@@ -217,6 +218,7 @@ describe("InboxView — capture confirm", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[]}
         settings={settings}
         welcomeVisible={false}
@@ -236,6 +238,7 @@ describe("InboxView — capture confirm", () => {
     vi.useFakeTimers();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[]}
         settings={settings}
         welcomeVisible={false}
@@ -269,6 +272,7 @@ describe("InboxView — inline delete confirm", () => {
     const item = makeItem({ id: "abc", text: "delete me" });
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[item]}
         settings={settings}
         welcomeVisible={false}
@@ -308,6 +312,7 @@ describe("InboxView — 24h still-needed prompt", () => {
     });
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[stale]}
         settings={settings}
         welcomeVisible={false}
@@ -333,6 +338,7 @@ describe("InboxView — 24h still-needed prompt", () => {
     });
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[stale]}
         settings={settings}
         welcomeVisible={false}
@@ -357,6 +363,7 @@ describe("InboxView — 24h still-needed prompt", () => {
     });
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[stale]}
         settings={settings}
         welcomeVisible={false}
@@ -377,6 +384,7 @@ describe("InboxView — row hierarchy (#50/#51/#52)", () => {
   it("#51: the task title is the dominant row text (text-lg font-semibold)", () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem({ id: "h1", text: "buy oat milk" })]}
         settings={settings}
         welcomeVisible={false}
@@ -396,6 +404,7 @@ describe("InboxView — row hierarchy (#50/#51/#52)", () => {
   it("design revision: the drag grip stays an adequate hit target (≥24px wide, 44px tall)", () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem({ id: "g1", text: "grip row" })]}
         settings={settings}
         welcomeVisible={false}
@@ -412,6 +421,7 @@ describe("InboxView — row hierarchy (#50/#51/#52)", () => {
   it("#52: the age/status pill sits on the metadata line with captured-ago, not on the title line", () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[
           makeItem({
             id: "h2",
@@ -442,6 +452,7 @@ describe("InboxView — row hierarchy (#50/#51/#52)", () => {
   it("#57: an aging row's captured-ago label uses AA-tuned amber (not sub-AA text-amber-600)", () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[
           makeItem({
             id: "age1",
@@ -466,6 +477,7 @@ describe("InboxView — row hierarchy (#50/#51/#52)", () => {
   it("#57: the NavBadge aging count uses AA-tuned amber (not sub-AA text-amber-600)", () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[
           makeItem({
             id: "age2",
@@ -495,6 +507,7 @@ describe("InboxView — row hierarchy (#50/#51/#52)", () => {
   it("#57: the stale-reminder is a tinted amber notification chip (clock icon + readable text), still subordinate + keyboard-usable", () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[
           makeItem({
             id: "h3",
@@ -545,6 +558,7 @@ describe("InboxView — inbox zero copy", () => {
   it("renders the voice-aware inbox.zero string with no items", () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[]}
         settings={settings}
         welcomeVisible={false}
@@ -561,6 +575,7 @@ describe("InboxView — settings panel moved to /settings", () => {
   it("no longer renders the aging & reminder settings panel on the inbox", () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem()]}
         settings={settings}
         welcomeVisible={false}
@@ -581,6 +596,7 @@ describe("InboxView — complete + completed bucket", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "do it" })]}
         settings={settings}
         welcomeVisible={false}
@@ -597,6 +613,7 @@ describe("InboxView — complete + completed bucket", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[
           makeItem({ id: "st1", text: "single todo", status: "triaged" }),
         ]}
@@ -615,6 +632,7 @@ describe("InboxView — complete + completed bucket", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
         welcomeVisible={false}
@@ -637,6 +655,7 @@ describe("InboxView — complete + completed bucket", () => {
     });
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[done]}
         settings={settings}
         welcomeVisible={false}
@@ -699,6 +718,7 @@ describe("InboxView — per-step Undo picker (completed multi-step)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[doneMulti()]}
         settings={settings}
         welcomeVisible={false}
@@ -721,6 +741,7 @@ describe("InboxView — per-step Undo picker (completed multi-step)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[doneMulti()]}
         settings={settings}
         welcomeVisible={false}
@@ -741,6 +762,7 @@ describe("InboxView — per-step Undo picker (completed multi-step)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[doneMulti()]}
         settings={settings}
         welcomeVisible={false}
@@ -761,6 +783,7 @@ describe("InboxView — per-step Undo picker (completed multi-step)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[doneMulti()]}
         settings={settings}
         welcomeVisible={false}
@@ -781,6 +804,7 @@ describe("InboxView — per-step Undo picker (completed multi-step)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[doneMulti()]}
         settings={settings}
         welcomeVisible={false}
@@ -801,6 +825,7 @@ describe("InboxView — always-visible bucket board", () => {
   it("shows all four To-Do buckets with empty states when there are no to-dos", () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[]}
         settings={settings}
         welcomeVisible={false}
@@ -822,6 +847,7 @@ describe("InboxView — always-visible bucket board", () => {
     const todo = makeItem({ id: "t1", text: "a todo", status: "triaged" });
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[todo]}
         settings={settings}
         welcomeVisible={false}
@@ -841,6 +867,7 @@ describe("InboxView — multi-step step count + expand", () => {
   it("shows a step-count indicator", () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
         welcomeVisible={false}
@@ -855,6 +882,7 @@ describe("InboxView — multi-step step count + expand", () => {
   it("shows the task-total remaining (not-done steps' full estimates, no open session)", () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
         welcomeVisible={false}
@@ -875,6 +903,7 @@ describe("InboxView — multi-step step count + expand", () => {
     ); // s2: 20m estimate, paused with 6m left
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[paused]}
         settings={settings}
         welcomeVisible={false}
@@ -891,6 +920,7 @@ describe("InboxView — multi-step step count + expand", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
         welcomeVisible={false}
@@ -911,6 +941,7 @@ describe("InboxView — multi-step ▾ menu: view list + focus (v6)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
         welcomeVisible={false}
@@ -930,6 +961,7 @@ describe("InboxView — multi-step ▾ menu: view list + focus (v6)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
         welcomeVisible={false}
@@ -955,6 +987,7 @@ describe("InboxView — multi-step ▾ menu: view list + focus (v6)", () => {
     });
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[awaiting]}
         settings={settings}
         welcomeVisible={false}
@@ -977,6 +1010,7 @@ describe("InboxView — tap multi-step row body to expand (v6)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
         welcomeVisible={false}
@@ -995,6 +1029,7 @@ describe("InboxView — multi-step row primary CTA (v6 fix)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
         welcomeVisible={false}
@@ -1025,6 +1060,7 @@ describe("InboxView — multi-step row primary CTA (v6 fix)", () => {
     });
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[awaiting]}
         settings={settings}
         welcomeVisible={false}
@@ -1101,6 +1137,7 @@ describe("DragGhostRow — mobile drag preview (#62)", () => {
     // otherwise render as, proving the override is wired through).
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem({ id: "d1", text: "draggable row" })]}
         settings={settings}
         welcomeVisible={false}
@@ -1142,6 +1179,7 @@ describe("InboxView — Move to… menu dispatch", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem({ id: "s1", text: "todo", status: "triaged" })]}
         settings={settings}
         welcomeVisible={false}
@@ -1165,6 +1203,7 @@ describe("InboxView — Move to… menu dispatch", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem({ id: "s1", text: "todo", status: "triaged" })]}
         settings={settings}
         welcomeVisible={false}
@@ -1194,6 +1233,7 @@ describe("InboxView — Move to… menu dispatch", () => {
     });
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[done]}
         settings={settings}
         welcomeVisible={false}
@@ -1216,6 +1256,7 @@ describe("InboxView — Move to… menu dispatch", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "big thing" })]}
         settings={settings}
         welcomeVisible={false}
@@ -1255,6 +1296,7 @@ describe("InboxView — Move to… menu dispatch", () => {
     });
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[done]}
         settings={settings}
         welcomeVisible={false}
@@ -1284,6 +1326,7 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
   it("renders an awaiting-breakdown item in the Multi-step bucket with a 'Break into steps now?' CTA", () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[awaiting()]}
         settings={settings}
         welcomeVisible={false}
@@ -1305,6 +1348,7 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[awaiting()]}
         settings={settings}
         welcomeVisible={false}
@@ -1323,6 +1367,7 @@ describe("InboxView — awaiting-breakdown row (red CTA)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[awaiting()]}
         settings={settings}
         welcomeVisible={false}
@@ -1347,6 +1392,7 @@ describe("InboxView — ✎ edit title", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem({ id: "r1", text: "old name" })]}
         settings={settings}
         welcomeVisible={false}
@@ -1369,6 +1415,7 @@ describe("InboxView — ✎ edit title", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem({ id: "r1", text: "old name" })]}
         settings={settings}
         welcomeVisible={false}
@@ -1406,6 +1453,7 @@ describe("InboxView — ✎ edit title", () => {
     ];
     render(
       <InboxView
+        now={Date.now()}
         initialItems={items}
         settings={settings}
         welcomeVisible={false}
@@ -1429,6 +1477,7 @@ describe("InboxView — ✎ edit title", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem({ id: "r1", text: "review item" })]}
         settings={settings}
         welcomeVisible={false}
@@ -1454,6 +1503,7 @@ describe("InboxView — ✎ edit title", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem({ id: "r1", text: "same" })]}
         settings={settings}
         welcomeVisible={false}
@@ -1474,6 +1524,7 @@ describe("InboxView — single to-do ▶ Focus", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[
           makeItem({ id: "s1", text: "focusable todo", status: "triaged" }),
         ]}
@@ -1496,6 +1547,7 @@ describe("InboxView — single to-do ▶ Focus", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[
           makeItem({ id: "s1", text: "focusable todo", status: "triaged" }),
         ]}
@@ -1517,6 +1569,7 @@ describe("InboxView — single to-do ▶ Focus", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[
           makeItem({ id: "s1", text: "focusable todo", status: "triaged" }),
         ]}
@@ -1548,6 +1601,7 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[saved()]}
         settings={settings}
         welcomeVisible={false}
@@ -1584,6 +1638,7 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[saved()]}
         settings={settings}
         welcomeVisible={false}
@@ -1632,6 +1687,7 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[saved()]}
         settings={settings}
         welcomeVisible={false}
@@ -1652,6 +1708,7 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[saved()]}
         settings={settings}
         welcomeVisible={false}
@@ -1670,6 +1727,7 @@ describe("InboxView — saved-for-later inline sorting options", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[saved()]}
         settings={settings}
         welcomeVisible={false}
@@ -1705,6 +1763,7 @@ describe("InboxView — saved-for-later idle CTA contrast (#56)", () => {
   it("keeps the idle 'Review now' CTA free of any ancestor opacity dim", () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[saved()]}
         settings={settings}
         welcomeVisible={false}
@@ -1731,6 +1790,7 @@ describe("InboxView — saved-for-later idle CTA contrast (#56)", () => {
   it("still dims the idle title line so the row reads as 'asleep'", () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[saved()]}
         settings={settings}
         welcomeVisible={false}
@@ -1757,6 +1817,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
         google={connected}
@@ -1778,6 +1839,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[
           makeItem({ id: "st1", text: "single todo", status: "triaged" }),
         ]}
@@ -1806,6 +1868,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     });
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[awaiting]}
         settings={settings}
         google={connected}
@@ -1826,6 +1889,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
         google={connected}
@@ -1852,6 +1916,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
         google={connected}
@@ -1870,6 +1935,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
   it("S0 guest (google={null}): rows show an ENABLED 'Add to calendar' control per row (not hidden, not disabled)", () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[
           makeMultiStep(),
           makeItem({ id: "st1", text: "single todo", status: "triaged" }),
@@ -1895,6 +1961,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[
           makeItem({ id: "st1", text: "single todo", status: "triaged" }),
         ]}
@@ -1921,6 +1988,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     };
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[
           makeMultiStep(),
           makeItem({ id: "st1", text: "single todo", status: "triaged" }),
@@ -1945,6 +2013,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     };
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[
           makeItem({ id: "st1", text: "single todo", status: "triaged" }),
         ]}
@@ -1967,6 +2036,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     };
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[
           makeItem({ id: "st1", text: "single todo", status: "triaged" }),
         ]}
@@ -1992,6 +2062,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
         google={connected}
@@ -2020,6 +2091,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[
           makeItem({ id: "st1", text: "single todo", status: "triaged" }),
           makeMultiStep(),
@@ -2057,6 +2129,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[
           makeItem({ id: "st1", text: "single todo", status: "triaged" }),
         ]}
@@ -2086,6 +2159,7 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeMultiStep()]}
         settings={settings}
         google={connected}
@@ -2110,6 +2184,7 @@ describe("InboxView — ICS 'Add to calendar' (S0 #29)", () => {
   it("guest single-task row shows an enabled 'Add to calendar' that schedules via ICS + downloads", async () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[
           makeItem({
             id: "s1",
@@ -2144,6 +2219,7 @@ describe("InboxView — ICS 'Add to calendar' (S0 #29)", () => {
   it("owner ▾ menu offers 'Add to calendar (.ics)' as an alternative to Google", async () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[
           makeItem({
             id: "s1",
@@ -2168,6 +2244,7 @@ describe("InboxView — ICS 'Add to calendar' (S0 #29)", () => {
   it("shows a 'Scheduled ✓' indicator on a row whose task has been scheduled", () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[
           makeItem({
             id: "s1",
@@ -2188,6 +2265,7 @@ describe("InboxView — ICS 'Add to calendar' (S0 #29)", () => {
   it("no 'Scheduled ✓' indicator when scheduledAt is null", () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[
           makeItem({
             id: "s1",
@@ -2210,6 +2288,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
   it("renders SHORT inline buttons: Break into steps, Add to-do, Save, Complete (full labels live in ▾)", () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
         welcomeVisible={false}
@@ -2239,6 +2318,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
         welcomeVisible={false}
@@ -2267,6 +2347,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     };
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
         google={connected}
@@ -2289,6 +2370,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
         welcomeVisible={false}
@@ -2305,6 +2387,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
         welcomeVisible={false}
@@ -2324,6 +2407,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
         welcomeVisible={false}
@@ -2346,6 +2430,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
         welcomeVisible={false}
@@ -2363,6 +2448,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
         welcomeVisible={false}
@@ -2398,6 +2484,7 @@ describe("InboxView — needs-review rows adopt the v6 inline-actions frame", ()
     const user = userEvent.setup();
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[makeItem({ id: "n1", text: "capture me" })]}
         settings={settings}
         welcomeVisible={false}
@@ -2418,6 +2505,7 @@ describe("InboxView — welcome card (Task 3, #8)", () => {
   it("welcomeVisible=true renders the WelcomeCard above the rest of the inbox", () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[]}
         settings={settings}
         welcomeVisible={true}
@@ -2433,6 +2521,7 @@ describe("InboxView — welcome card (Task 3, #8)", () => {
   it("welcomeVisible=false renders no WelcomeCard", () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[]}
         settings={settings}
         welcomeVisible={false}
@@ -2452,6 +2541,7 @@ describe("InboxView — resume banner (Task 3, #8)", () => {
   it("resumeStep set renders a status banner with the step text + a resume link to /focus/<id>", () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[]}
         settings={settings}
         welcomeVisible={false}
@@ -2472,6 +2562,7 @@ describe("InboxView — resume banner (Task 3, #8)", () => {
   it("resumeStep=null renders no resume banner", () => {
     render(
       <InboxView
+        now={Date.now()}
         initialItems={[]}
         settings={settings}
         welcomeVisible={false}
