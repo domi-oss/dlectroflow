@@ -105,9 +105,10 @@ describe("proxy: authenticated-only paths", () => {
     expect(res.headers.get("location")).toBeNull();
   });
 
-  // #119 — the guest leg of the OWNER_ONLY_PREFIXES gate. The role half now
-  // lives in the handlers (isOwnerRequest), and this asserts the middleware half
-  // it is paired with still turns a guest away before any handler runs.
+  // #119 — the guest leg of the Google OAuth gate. #118 moved these routes from
+  // OWNER_ONLY_PREFIXES into AUTHENTICATED_PREFIXES, which is the whole risk of
+  // opening them up: the guest leg has to keep biting from the OTHER category.
+  // The role half now lives in the handlers (currentUser).
   it("keeps stopping a guest session at the Google OAuth routes", async () => {
     const guest = await signGuestSession("g-1", SECRET, 3600);
     for (const path of [
@@ -119,6 +120,32 @@ describe("proxy: authenticated-only paths", () => {
       );
       expect(res.headers.get("location")).toBe("https://dlectroflow.dev/login");
     }
+  });
+
+  it("still redirects an ANONYMOUS request away from the Google OAuth start (#118)", async () => {
+    // No cookie at all — the other half of "moving out of owner-only must not
+    // make this guest-reachable".
+    const res = await proxy(reqWith("/api/google/oauth/start"));
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe("https://dlectroflow.dev/login");
+  });
+
+  it("lets a signed-in member through to the Google OAuth start (#118)", async () => {
+    // A member's session is a USER session; the middleware cannot tell a member
+    // from an owner (no Prisma client on the Edge runtime) and no longer needs
+    // to — the handler decides, and after #118 the answer is "any account".
+    const user = await signUserSession(
+      { kind: "user", userId: "u-member", wsId: "ws-member" },
+      SECRET,
+    );
+    const res = await proxy(
+      reqWith("/api/google/oauth/start", {
+        name: OWNER_COOKIE,
+        value: user,
+      }),
+    );
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.status).toBe(200);
   });
 });
 

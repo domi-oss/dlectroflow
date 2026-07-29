@@ -1494,7 +1494,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 **This is the security-relevant commit.** Everything before it moved the credential without widening access. Read #119's three test files in full before writing anything here: this task **evolves** their assertions and must not delete the negative coverage that made a missing gate visible in the first place.
 
-- [ ] **Step 1: Write the failing tests — the route category**
+- [x] **Step 1: Write the failing tests — the route category**
 
 In `src/lib/auth/gate.test.ts`, replace the two owner-only OAuth cases (`:29-34`) and extend the authenticated-only block:
 
@@ -1543,7 +1543,7 @@ In `src/proxy.test.ts`, add to the `describe("proxy: authenticated-only paths")`
   });
 ```
 
-- [ ] **Step 2: Write the failing tests — the action gates**
+- [x] **Step 2: Write the failing tests — the action gates**
 
 In `src/app/actions/google-schedule.push.test.ts`, **replace** #119's `"rejects a non-owner without touching Google"` with the evolved trio. Keep its comment history — the note about *why* that test exists is the most valuable line in the file:
 
@@ -1616,7 +1616,7 @@ Mirror the "member allowed / no-account refused / own id only" trio in `google-s
   });
 ```
 
-- [ ] **Step 3: Write the failing tests — the seam predicate**
+- [x] **Step 3: Write the failing tests — the seam predicate**
 
 In `src/lib/scheduling/providers.test.ts`, replace the owner-predicate cases:
 
@@ -1652,7 +1652,7 @@ In `src/lib/scheduling/providers.test.ts`, replace the owner-predicate cases:
   });
 ```
 
-- [ ] **Step 4: Write the failing test — the OAuth start gate**
+- [x] **Step 4: Write the failing test — the OAuth start gate**
 
 In `src/app/api/google/oauth/start/route.test.ts` (#119's), swap the `@/lib/workspace` mock from `isOwnerRequest` to `currentUser`, then evolve:
 
@@ -1684,7 +1684,7 @@ describe("google oauth start — authenticated gate (#118, was owner-only in #11
 
 Do the same in `callback/route.test.ts`: keep #119's `"rejects a non-owner holding a valid state + verifier"` case but retarget it to a **null** user, and add a member-completes-the-exchange case asserting `exchangeCodeMock` was called with the **member's** id.
 
-- [ ] **Step 5: Run them all to verify they fail**
+- [x] **Step 5: Run them all to verify they fail**
 
 ```bash
 npx vitest run src/lib/auth/gate.test.ts src/proxy.test.ts \
@@ -1694,7 +1694,7 @@ npx vitest run src/lib/auth/gate.test.ts src/proxy.test.ts \
 
 Expected: FAIL across the board — the OAuth prefix is still owner-only, the actions still throw `"owner only"` for a member, `isAvailable` still requires `ctx.isOwner`.
 
-- [ ] **Step 6: Implement**
+- [x] **Step 6: Implement**
 
 `src/lib/auth/gate.ts`:
 
@@ -1794,7 +1794,7 @@ Update `leadSchedulingMethod`'s doc comment (`providers.ts:104-118`), which says
  * Google control too.
 ```
 
-- [ ] **Step 7: Run the tests and the whole suite**
+- [x] **Step 7: Run the tests and the whole suite**
 
 ```bash
 npx vitest run src/lib/auth/gate.test.ts src/proxy.test.ts \
@@ -1804,7 +1804,7 @@ npm test && npx tsc --noEmit
 
 Expected: PASS. `npm test` will also surface any component test that assumed `isAvailable` needs an owner — fix those assumptions rather than the predicate.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/lib/auth/gate.ts src/lib/auth/gate.test.ts src/proxy.test.ts \

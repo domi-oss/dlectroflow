@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const {
   workspaceMock,
-  isOwnerMock,
   currentUserMock,
   revalidatePathMock,
   configuredMock,
@@ -21,7 +20,6 @@ const {
   getSettingsMock,
 } = vi.hoisted(() => ({
   workspaceMock: vi.fn(),
-  isOwnerMock: vi.fn(),
   currentUserMock: vi.fn(),
   revalidatePathMock: vi.fn(),
   configuredMock: vi.fn(),
@@ -64,7 +62,6 @@ vi.mock("@/lib/google", () => ({
 }));
 vi.mock("@/lib/workspace", () => ({
   currentWorkspaceId: workspaceMock,
-  isOwnerRequest: isOwnerMock,
   currentUser: currentUserMock,
 }));
 
@@ -74,16 +71,14 @@ import type { ScheduleIntent } from "@/lib/scheduling/types";
 import { pushStepsToGoogleTasks } from "./google-schedule";
 
 // #35 Phase A — the owner's workspace is a real per-account id now, not the
-// "owner" constant. Ownership is asserted through isOwnerRequest (the role
-// check the action actually makes); this id is just the workspace that
-// account happens to own.
+// "owner" constant; this id is just the workspace that account happens to own.
 const OWNER_WS = "ws-owner";
 
-// #118 Phase C — the action reads currentUser() now, because the acting user's
-// id is what keys their own GoogleAuth row. isOwnerRequest() is no longer called
-// by the action; its mock stays only until #118 retires it in the next commit.
-// The two must always describe the SAME person — two mocks answering one
-// question is how a test ends up proving something about nobody.
+// #118 Phase C — currentUser() is the ONE identity mock in this file. The action
+// no longer calls isOwnerRequest() at all: the acting user's id is what keys
+// their own GoogleAuth row, and "signed in" is the whole gate. Two mocks
+// answering one question is how a test ends up describing two different people,
+// so isOwnerRequest is gone from the factory rather than left inert.
 const OWNER_ID = "user-owner";
 const ownerUser = () => ({
   id: OWNER_ID,
@@ -92,8 +87,9 @@ const ownerUser = () => ({
   provider: "gitlab",
   handle: "owner",
 });
+const MEMBER_ID = "user-member";
 const memberUser = () => ({
-  id: "user-member",
+  id: MEMBER_ID,
   role: "member" as const,
   workspaceId: "ws-member",
   provider: "gitlab",
@@ -131,28 +127,50 @@ beforeEach(() => {
   createGoogleTaskMock.mockResolvedValue({ id: "g1" });
   upsertGoogleTaskMock.mockResolvedValue({ id: "g1", created: true });
   workspaceMock.mockResolvedValue(OWNER_WS);
-  isOwnerMock.mockResolvedValue(true);
   currentUserMock.mockResolvedValue(ownerUser());
   getSettingsMock.mockResolvedValue({ voice: "plain" });
 });
 
 describe("pushStepsToGoogleTasks — provider-agnostic marker + reward-once", () => {
-  // #119 — this file's beforeEach pins isOwnerRequest → true, so until now every
-  // test here ran as the owner and NOTHING asserted the rejection. That absent
-  // negative case is why the missing owner gate on the OAuth routes went
-  // unnoticed: the guard was covered on the paths that USE the credential
-  // (single/disconnect) and nowhere on the push path. Phase C (#118) will change
-  // what "allowed" means here, and this is the test it has to keep passing.
-  it("rejects a non-owner without touching Google", async () => {
-    isOwnerMock.mockResolvedValue(false);
-    // Both identity mocks describe the SAME member: the action gates on
-    // currentUser().role now (#118), and leaving currentUserMock as the owner
-    // here would make this test pass for the wrong reason.
+  // #119 added a non-owner rejection here because this file's beforeEach pins
+  // ownership true, so nothing asserted a rejection and a missing gate on the
+  // OAuth routes went unnoticed. #118 Phase C changes what "allowed" means: the
+  // credential is per user, so a MEMBER acting on THEIR OWN row is the intended
+  // behaviour. The negative case is not deleted, it MOVES — from "wrong role" to
+  // "wrong person" and "no account at all", which are the two failures that can
+  // still happen.
+  it("lets a MEMBER push against their OWN credential (was 403 in #119)", async () => {
     currentUserMock.mockResolvedValue(memberUser());
     taskFindFirstMock.mockResolvedValue(baseTask());
+
+    const res = await pushStepsToGoogleTasks("task-1");
+
+    expect(res.ok).toBe(true);
+    // Their own row, resolved by their own id. This assertion is the isolation
+    // guarantee: there is no id parameter, so there is no other row to reach.
+    expect(tokenMock).toHaveBeenCalledWith(MEMBER_ID);
+  });
+
+  it("never resolves another account's credential", async () => {
+    currentUserMock.mockResolvedValue(memberUser());
+    taskFindFirstMock.mockResolvedValue(baseTask());
+    await pushStepsToGoogleTasks("task-1");
+    for (const [arg] of tokenMock.mock.calls) {
+      expect(arg).toBe(MEMBER_ID);
+    }
+    expect(tokenMock).not.toHaveBeenCalledWith(OWNER_ID);
+  });
+
+  it("refuses a caller with no signed-in account, touching Google not at all", async () => {
+    // A guest, or a revoked account (currentUser() returns null for status
+    // revoked, so revocation takes effect on the NEXT request).
+    currentUserMock.mockResolvedValue(null);
+    taskFindFirstMock.mockResolvedValue(baseTask());
+
     await expect(pushStepsToGoogleTasks("task-1")).rejects.toThrow(
-      "owner only",
+      /sign in required/,
     );
+    expect(tokenMock).not.toHaveBeenCalled();
     expect(upsertGoogleTaskMock).not.toHaveBeenCalled();
     expect(createGoogleTaskMock).not.toHaveBeenCalled();
     expect(taskUpdateMock).not.toHaveBeenCalled();

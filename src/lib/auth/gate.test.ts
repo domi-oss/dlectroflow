@@ -4,6 +4,7 @@ import {
   isOwnerOnlyPath,
   isAuthenticatedOnlyPath,
   AUTHENTICATED_PREFIXES,
+  OWNER_ONLY_PREFIXES,
 } from "./gate";
 
 describe("gate paths", () => {
@@ -26,8 +27,19 @@ describe("gate paths", () => {
     expect(isPublicPath("/api/health")).toBe(true);
     expect(isPublicPath("/api/auth/gitlab/start")).toBe(true);
   });
-  it("integration oauth is owner-only", () => {
-    expect(isOwnerOnlyPath("/api/google/oauth/start")).toBe(true);
+  it("integration oauth is NOT owner-only any more (#118 Phase C)", () => {
+    // Google is per-user now: a member connecting their OWN account is the
+    // intended behaviour, not a hijack. See AUTHENTICATED_PREFIXES below.
+    expect(isOwnerOnlyPath("/api/google/oauth/start")).toBe(false);
+  });
+
+  it("owner-only is deliberately empty, not accidentally so", () => {
+    // Kept as a named category rather than deleted: Phase D's revoke/purge
+    // routes may need it, and at the MIDDLEWARE layer it means exactly what
+    // AUTHENTICATED_PREFIXES means ("signed in") — the role half has to live in
+    // the handler because the Edge runtime has no Prisma client (src/proxy.ts).
+    // #119 is what happens when that handler half is assumed instead of written.
+    expect(OWNER_ONLY_PREFIXES).toEqual([]);
   });
   it("the removed Reclaim oauth path is no longer owner-only (#36)", () => {
     expect(isOwnerOnlyPath("/api/reclaim/oauth/callback")).toBe(false);
@@ -60,6 +72,11 @@ describe("authenticated-only paths", () => {
     for (const prefix of AUTHENTICATED_PREFIXES) {
       expect(isAuthenticatedOnlyPath(`${prefix}anything/deeper`)).toBe(true);
     }
+  });
+
+  it("integration oauth is authenticated-only — members yes, guests no", () => {
+    expect(isAuthenticatedOnlyPath("/api/google/oauth/start")).toBe(true);
+    expect(isAuthenticatedOnlyPath("/api/google/oauth/callback")).toBe(true);
   });
 
   it("declares every prefix with a trailing slash", () => {

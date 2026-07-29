@@ -6,20 +6,20 @@ import {
   buildAuthorizeUrl,
 } from "@/lib/google";
 import { requestOrigin } from "@/lib/origin";
-import { isOwnerRequest } from "@/lib/workspace";
+import { currentUser } from "@/lib/workspace";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request): Promise<Response> {
-  // #119 — the handler half of the two-gate design described in src/proxy.ts.
-  // The middleware can only prove "signed in" (no Prisma client on the Edge
-  // runtime), and Google is ONE instance-wide credential row until #118 makes it
-  // per user, so a signed-in member reaching this route could hand their own
-  // account the owner's task pushes. 403 rather than a redirect: this is an API
-  // route, and bouncing a member into Google's consent screen would walk them
-  // through the very flow being denied. The check is first so a rejected caller
-  // is minted no PKCE verifier or state cookie to replay at the callback.
-  if (!(await isOwnerRequest())) {
+  // #118 Phase C — any signed-in account may connect THEIR OWN Google account.
+  // The middleware already rejects guests (AUTHENTICATED_PREFIXES); this is the
+  // handler half of the two-gate design in src/proxy.ts, and it is not redundant:
+  // a REVOKED account still holds a valid signed cookie and passes the
+  // middleware, while currentUser() resolves it to null (src/lib/workspace.ts).
+  // 403 rather than a redirect — bouncing a rejected caller into Google's consent
+  // screen walks them through the very flow being denied. First, so a rejected
+  // caller is minted no PKCE verifier or state cookie to replay at the callback.
+  if (!(await currentUser())) {
     return new NextResponse("Forbidden", { status: 403 });
   }
 

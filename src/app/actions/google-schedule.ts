@@ -11,7 +11,7 @@ import {
   getGoogleStatus,
   disconnectGoogle,
 } from "@/lib/google";
-import { TaskSource, TaskStatus, UserRole } from "@/lib/constants";
+import { TaskSource, TaskStatus } from "@/lib/constants";
 import { currentWorkspaceId, currentUser } from "@/lib/workspace";
 import { awardFirstSchedule } from "@/lib/scheduling/award";
 import { SchedulingMethod } from "@/lib/scheduling/types";
@@ -47,13 +47,14 @@ export async function pushStepsToGoogleTasks(
   suppliedIntent?: ScheduleIntent,
 ): Promise<GoogleScheduleResult> {
   const workspaceId = await currentWorkspaceId();
-  // #118 Phase C — the acting USER, not just their role: their id is what keys
-  // their own GoogleAuth row. This is the same query isOwnerRequest() made
-  // (it is implemented in terms of currentUser()), so it costs nothing extra.
-  // The gate itself is UNCHANGED here on purpose: this commit moves the
-  // credential, it does not widen who may use it. That is #118's next commit.
+  // #118 Phase C — "signed in, acting on their own credential" replaces the
+  // owner check. Note what is NOT here and never will be: an id parameter. The
+  // credential is looked up BY me.id, so there is no other row to reach — which
+  // is the whole isolation argument, and why the scoping harness can assert it.
+  // Also covers revocation: a revoked account resolves to null on its very next
+  // request, without waiting for a 30-day cookie to expire.
   const me = await currentUser();
-  if (me?.role !== UserRole.Owner) throw new Error("owner only");
+  if (!me) throw new Error("sign in required");
 
   if (!googleConfigured()) return { ok: false, reason: "not_configured" };
   const token = await getValidAccessToken(me.id);
@@ -215,13 +216,14 @@ export async function scheduleSingleTask(
   estMinutes: number,
 ): Promise<GoogleScheduleSingleResult> {
   const workspaceId = await currentWorkspaceId();
-  // #118 Phase C — the acting USER, not just their role: their id is what keys
-  // their own GoogleAuth row. This is the same query isOwnerRequest() made
-  // (it is implemented in terms of currentUser()), so it costs nothing extra.
-  // The gate itself is UNCHANGED here on purpose: this commit moves the
-  // credential, it does not widen who may use it. That is #118's next commit.
+  // #118 Phase C — "signed in, acting on their own credential" replaces the
+  // owner check. Note what is NOT here and never will be: an id parameter. The
+  // credential is looked up BY me.id, so there is no other row to reach — which
+  // is the whole isolation argument, and why the scoping harness can assert it.
+  // Also covers revocation: a revoked account resolves to null on its very next
+  // request, without waiting for a 30-day cookie to expire.
   const me = await currentUser();
-  if (me?.role !== UserRole.Owner) throw new Error("owner only");
+  if (!me) throw new Error("sign in required");
 
   // Server-side clamp (final-review fix): the client popover already refuses
   // out-of-range custom durations, but this action is the single source of
@@ -359,16 +361,16 @@ export async function scheduleSingleTask(
   }
 }
 
-export async function googleStatus() {
-  const me = await currentUser();
-  if (me?.role !== UserRole.Owner)
-    return { configured: false, connected: false, needsReconnect: false };
-  return getGoogleStatus(me.id);
-}
+// #118 — the `googleStatus()` server action is GONE. It was owner-gated with
+// zero non-test callers and still a reachable RPC endpoint; every real caller
+// reads getGoogleStatus() at the server boundary instead. Deleted rather than
+// re-gated: carrying a live endpoint forward for nobody is how a surface grows.
 
 export async function disconnectGoogleTasks(): Promise<{ ok: true }> {
+  // #118 Phase C — you disconnect YOUR OWN connection. No id parameter, so
+  // there is no other account's credential this could revoke.
   const me = await currentUser();
-  if (me?.role !== UserRole.Owner) throw new Error("owner only");
+  if (!me) throw new Error("sign in required");
   await disconnectGoogle(me.id);
   revalidatePath("/settings");
   return { ok: true };

@@ -1,18 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const {
-  disconnectMock,
-  workspaceMock,
-  isOwnerMock,
-  currentUserMock,
-  revalidatePathMock,
-} = vi.hoisted(() => ({
-  disconnectMock: vi.fn(),
-  workspaceMock: vi.fn(),
-  isOwnerMock: vi.fn(),
-  currentUserMock: vi.fn(),
-  revalidatePathMock: vi.fn(),
-}));
+const { disconnectMock, workspaceMock, currentUserMock, revalidatePathMock } =
+  vi.hoisted(() => ({
+    disconnectMock: vi.fn(),
+    workspaceMock: vi.fn(),
+    currentUserMock: vi.fn(),
+    revalidatePathMock: vi.fn(),
+  }));
 
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/lib/db", () => ({ prisma: {} }));
@@ -31,23 +25,20 @@ vi.mock("@/lib/google", () => ({
 }));
 vi.mock("@/lib/workspace", () => ({
   currentWorkspaceId: workspaceMock,
-  isOwnerRequest: isOwnerMock,
   currentUser: currentUserMock,
 }));
 
 import { disconnectGoogleTasks } from "./google-schedule";
 
 // #35 Phase A — the owner's workspace is a real per-account id now, not the
-// "owner" constant. Ownership is asserted through isOwnerRequest (the role
-// check the action actually makes); this id is just the workspace that
-// account happens to own.
+// "owner" constant; this id is just the workspace that account happens to own.
 const OWNER_WS = "ws-owner";
 
-// #118 Phase C — the action reads currentUser() now, because the acting user's
-// id is what keys their own GoogleAuth row. isOwnerRequest() is no longer called
-// by the action; its mock stays only until #118 retires it in the next commit.
-// The two must always describe the SAME person — two mocks answering one
-// question is how a test ends up proving something about nobody.
+// #118 Phase C — currentUser() is the ONE identity mock in this file. The action
+// no longer calls isOwnerRequest() at all: the acting user's id is what keys
+// their own GoogleAuth row, and "signed in" is the whole gate. Two mocks
+// answering one question is how a test ends up describing two different people,
+// so isOwnerRequest is gone from the factory rather than left inert.
 const OWNER_ID = "user-owner";
 const ownerUser = () => ({
   id: OWNER_ID,
@@ -56,8 +47,9 @@ const ownerUser = () => ({
   provider: "gitlab",
   handle: "owner",
 });
+const MEMBER_ID = "user-member";
 const memberUser = () => ({
-  id: "user-member",
+  id: MEMBER_ID,
   role: "member" as const,
   workspaceId: "ws-member",
   provider: "gitlab",
@@ -72,7 +64,6 @@ beforeEach(() => {
 describe("disconnectGoogleTasks", () => {
   it("disconnects for the owner and revalidates /settings", async () => {
     workspaceMock.mockResolvedValue(OWNER_WS);
-    isOwnerMock.mockResolvedValue(true);
     await expect(disconnectGoogleTasks()).resolves.toEqual({ ok: true });
     // #118 — the ACTING account's own connection, reached by their own id.
     expect(disconnectMock).toHaveBeenCalledWith(OWNER_ID);
@@ -80,13 +71,20 @@ describe("disconnectGoogleTasks", () => {
     expect(revalidatePathMock).toHaveBeenCalledWith("/settings");
   });
 
-  it("rejects guests without touching tokens", async () => {
-    workspaceMock.mockResolvedValue("guest-ws");
-    isOwnerMock.mockResolvedValue(false);
-    // Kept in sync with isOwnerMock — the action gates on currentUser().role
-    // now (#118).
+  // #118 Phase C — the credential is per user, so a member disconnecting is
+  // disconnecting THEIRS. #119's role negative moves to "no account at all".
+  it("disconnects the ACTING user's connection, never another's", async () => {
+    workspaceMock.mockResolvedValue("ws-member");
     currentUserMock.mockResolvedValue(memberUser());
-    await expect(disconnectGoogleTasks()).rejects.toThrow("owner only");
+    await expect(disconnectGoogleTasks()).resolves.toEqual({ ok: true });
+    expect(disconnectMock).toHaveBeenCalledWith(MEMBER_ID);
+    expect(disconnectMock).not.toHaveBeenCalledWith(OWNER_ID);
+  });
+
+  it("rejects a caller with no signed-in account without touching tokens", async () => {
+    workspaceMock.mockResolvedValue("guest-ws");
+    currentUserMock.mockResolvedValue(null);
+    await expect(disconnectGoogleTasks()).rejects.toThrow(/sign in required/);
     expect(disconnectMock).not.toHaveBeenCalled();
     expect(revalidatePathMock).not.toHaveBeenCalled();
   });

@@ -49,13 +49,13 @@ export const icsProvider: SchedulingProvider = {
 export const googleTasksProvider: SchedulingProvider = {
   id: "googleTasks",
   labelKey: "action.schedule",
-  // Owner-only TODAY because Google is the singleton owner connection guests
-  // must never touch. When F (#35) lands this predicate becomes per-user (a
-  // ctx.google resolved for any user with their own connection) — the ONLY
-  // change, no call-site churn. Gates on `configured`, not `connected`: the
+  // #118 Phase C — per-user. `ctx.google` is resolved for the ACTING user at the
+  // server boundary and is `null` only when there is no signed-in account, so a
+  // non-null status IS the "this person has an account" signal and the `isOwner`
+  // term is gone. Gates on `configured`, not `connected`: the
   // connect/reconnect/needsReconnect nuances stay in `scheduleState`; this
   // answers only "is the method offered at all."
-  isAvailable: (ctx) => ctx.isOwner && (ctx.google?.configured ?? false),
+  isAvailable: (ctx) => ctx.google?.configured ?? false,
   // Google Tasks are date-based, so `opts.durationMin` doesn't apply and `ctx`
   // isn't needed today — both are declared with a `_` prefix so the interface
   // contract is satisfied explicitly and the omission is intentional, not silent
@@ -103,10 +103,13 @@ export function isProviderAvailable(
 
 /**
  * The method a workspace's schedule *control* leads with (the rest go in the ▾
- * overflow), given the owner's resolved Google status (`null` = guest / non-owner,
- * mirroring the page's `owner ? googleStatus : null`). Owners lead with Google
- * Tasks — rendered as a Connect/Reconnect affordance by `scheduleState` until it
- * is actually usable — and keep ICS as the universal alternative; guests get ICS.
+ * overflow), given the ACTING ACCOUNT's resolved Google status.
+ *
+ * `null` now means "no signed-in account" (a guest) rather than "not the owner"
+ * — #118 Phase C gave members their own connection, so a member leads with the
+ * Google control too. Signed-in accounts lead with Google Tasks — rendered as a
+ * Connect/Reconnect affordance by `scheduleState` until it is actually usable —
+ * and keep ICS as the universal alternative; guests get ICS.
  *
  * This is the UI's control-visibility choice, deliberately distinct from
  * {@link isProviderAvailable} (which gates whether a method can run *right now*,
