@@ -326,11 +326,27 @@ function run(scenario: Scenario = {}): Result {
       ? `${PRIMARY_LOCATION}:${ELEVEN_MAIN_TAGS[0]}`
       : scenario.prodImage;
 
+  // The script decides what to do from its environment, so anything ambient
+  // that it reads has to be stripped rather than merely overridden — a real
+  // value inherited from the runner would silently satisfy the condition a
+  // scenario exists to prove is ABSENT, and the test would pass by luck or fail
+  // for a reason that has nothing to do with the code. This is not theoretical:
+  // `REGISTRY_PRUNE_TOKEN` is a protected CI variable, so it is present on
+  // `main` and absent on MR branches, which is exactly the shape that turns a
+  // green MR pipeline into a red default branch after the merge (#120).
+  // Scenarios opt a value back in explicitly via `scenario.env`.
+  const {
+    REGISTRY_PRUNE_TOKEN: _ambientPruneToken,
+    PRUNE_DRY_RUN: _ambientDryRun,
+    REGISTRY_PRUNE: _ambientPruneFlag,
+    ...ambientEnv
+  } = process.env;
+
   const proc = spawnSync("bash", [SCRIPT], {
     cwd: scenario.cwd ?? HISTORY.dir,
     encoding: "utf8",
     env: {
-      ...process.env,
+      ...ambientEnv,
       PATH: `${bin}:${process.env.PATH}`,
       STUB_LOG: log,
       STUB_ROUTES: routesFile,
