@@ -19,6 +19,10 @@ export const OWNER_SUB = "1";
 // session resolves to.
 export const OWNER_USER_ID = "e2e-owner-user";
 export const OWNER_WS_ID = "e2e-owner-ws";
+/** The forged owner's provider handle. #100 puts it on screen in the header, so
+ *  it stops being an incidental fixture value and becomes something specs
+ *  assert on — hence a named constant rather than a literal in global-setup. */
+export const OWNER_HANDLE = "e2e-owner";
 
 /**
  * A second, ordinary account (#35 Phase B). The People panel is unreviewable with

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { prisma, getSettings } from "@/lib/db";
 import { currentUser, currentWorkspaceId } from "@/lib/workspace";
+import { identityFor } from "@/lib/identity";
 import {
   clientIpHash,
   guestQuotaConfig,
@@ -25,7 +26,14 @@ export default async function AppLayout({
   // owner. Those were the same question before accounts; now an invited member
   // is signed in but not an owner, and would otherwise be shown the sandbox
   // banner and a guest AI allowance for a workspace that is really theirs.
-  const signedIn = (await currentUser()) !== null;
+  //
+  // #100: ONE identity resolution for the whole shell (the convention
+  // /settings already follows). The header needs to say WHO, not just whether,
+  // so the resolved account is kept rather than collapsed to a boolean — and
+  // `identityFor` decides what of it may cross into a client component.
+  const me = await currentUser();
+  const signedIn = me !== null;
+  const identity = me ? identityFor(me) : null;
 
   const wsId = await currentWorkspaceId();
 
@@ -90,7 +98,12 @@ export default async function AppLayout({
                 is dead weight, and the extra width crowded the bar at 390px.
                 Settings > Appearance keeps the words (its default variant). */}
             <ThemeToggle variant="icon" />
-            <AuthActions signedIn={signedIn} />
+            {/* #100 — the middle slot NAMES the account: a guest gets the
+                "Sign in" link, a signed-in account gets its handle, which opens
+                the identity popover that absorbed "Account" and "Sign out". So
+                this cluster is three controls in both states, not five in one of
+                them — the bar measured wider than a 390px viewport before. */}
+            <AuthActions identity={identity} />
             <AppMenu voice={voice} />
           </div>
         </div>

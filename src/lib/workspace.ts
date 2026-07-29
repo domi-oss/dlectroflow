@@ -29,6 +29,14 @@ export type CurrentUser = {
   id: string;
   role: UserRole;
   workspaceId: string;
+  /** Which provider authenticated this session — `User.provider`. #74 requires
+   *  it to be stated wherever identity is shown, so it travels with the
+   *  identity rather than being re-derived from `AUTH_PROVIDER` (which is the
+   *  CURRENT setting, not the one this account was provisioned under). */
+  provider: string;
+  /** Provider username, lowercased at the boundary; `null` when the provider
+   *  withheld one (`AuthProfile.username` is optional). */
+  handle: string | null;
 };
 
 export async function resolveWorkspace(input: {
@@ -106,6 +114,11 @@ export async function currentWorkspaceId(): Promise<string> {
  * REQUEST, not whenever a 30-day cookie happens to expire. `status` is checked
  * here for the same reason — a revoked account stops being able to act
  * immediately, not at its next sign-in attempt.
+ *
+ * #100 adds `provider` and `handle` to the SAME select. Naming the signed-in
+ * account in the header therefore costs no extra round trip, and — more to the
+ * point — the handle shown can never belong to a different session than the role
+ * being enforced, which a second lookup could allow.
  */
 export async function currentUser(): Promise<CurrentUser | null> {
   const jar = await cookies();
@@ -115,13 +128,24 @@ export async function currentUser(): Promise<CurrentUser | null> {
   if (p?.kind !== "user") return null;
   const user = await prisma.user.findUnique({
     where: { id: p.userId },
-    select: { id: true, role: true, status: true },
+    // `email` is deliberately NOT selected: nothing in the app displays it (see
+    // people.ts and identity.ts), so it never enters the object graph a page's
+    // props are built from.
+    select: {
+      id: true,
+      role: true,
+      status: true,
+      provider: true,
+      handle: true,
+    },
   });
   if (!user || user.status !== UserStatus.Active) return null;
   return {
     id: user.id,
     role: user.role as UserRole,
     workspaceId: p.wsId,
+    provider: user.provider,
+    handle: user.handle,
   };
 }
 
