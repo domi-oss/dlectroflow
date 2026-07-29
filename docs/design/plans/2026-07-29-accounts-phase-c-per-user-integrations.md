@@ -92,7 +92,7 @@ Nothing in this list is over ~200 lines of change. The largest single-file diff 
 
 This task ships the **mechanism plus its proof** (a fixture the scanner must flag) and the one repo-wide rule that is already true today (confinement to a single file). The repo-wide *user-scope* rule is deliberately left switched off until Task 2, where turning it on is the failing test that drives the rewrite. Doing it that way keeps `npm test` green at every task boundary without adding a debt allow-list.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Read the whole existing file first. Note in particular the module comment at `:6-32` (why the "obvious" version of this test was rejected as tautological), the `REVIEWED_UNSCOPED` allow-map idiom at `:34-36`, and the "guards against silently matching nothing" test at `:169-172` — the new block mirrors all three.
 
@@ -287,7 +287,7 @@ Append to `src/lib/__tests__/scoping.harness.test.ts`, inside the existing `desc
   });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `npx vitest run src/lib/__tests__/scoping.harness.test.ts`
 
@@ -295,7 +295,7 @@ Expected: FAIL — `callArgs is not defined` is possible if the new block was pa
 
 The two repo-wide tests ("the credential module exists", "only the named module touches") must **PASS** once the block compiles — #118's recon verified `src/lib/google.ts` is already the only file touching `prisma.googleAuth`. If either fails, a second file has appeared since the recon: stop and report it, because it changes the blast radius this whole plan is sized against.
 
-- [ ] **Step 3: Confirm the model list is exactly what the code assumes**
+- [x] **Step 3: Confirm the model list is exactly what the code assumes**
 
 The raw DMMF filter (before `NOT_USER_SCOPED`) returns **three** models on `main` @ 6845bfb, verified:
 
@@ -317,13 +317,13 @@ Expected: PASS with `["googleAuth", "userAiUsage"]`. **If a third name appears, 
 
 Also verified for `USER_KEYED_OWNERS`: `prisma.googleAuth.*` appears only in `src/lib/google.ts`, and `prisma.userAiUsage.*` only in `src/lib/user-quota.ts`. `src/lib/people.ts` reads usage through a **relation include** (`aiUsage: { select: … }` inside `user.findMany`), never as `prisma.userAiUsage.`, so it needs no entry.
 
-- [ ] **Step 4: Run the full harness and the whole suite**
+- [x] **Step 4: Run the full harness and the whole suite**
 
 Run: `npx vitest run src/lib/__tests__/scoping.harness.test.ts && npm test`
 
 Expected: PASS. The repo-wide *user-scope* assertion is not written yet — that is Task 2, Step 1.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/lib/__tests__/scoping.harness.test.ts
