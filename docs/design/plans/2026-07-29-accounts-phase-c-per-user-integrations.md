@@ -1176,7 +1176,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 **Why `User_llmProvider_check` rides along.** Task 7 makes `llmKeyEnc` writable, which makes `llmProvider`'s null-vs-value distinction load-bearing for the first time: `user-quota.ts:153` hands it to `getLLM`, which picks an *adapter* from it. An unconstrained pseudo-enum feeding an adapter factory is the gap the repo's `#38` convention exists to close, and the same migration is the cheapest place to close it.
 
-- [ ] **Step 1: Write the failing integration test**
+- [x] **Step 1: Write the failing integration test**
 
 Read `src/lib/step-est-minutes-check.integration.test.ts` first — it is the template for how this repo proves a migration behaviourally.
 
@@ -1269,13 +1269,13 @@ describe("User.llmProvider CHECK constraint", () => {
 });
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `npx vitest run src/lib/google-auth-orphan.integration.test.ts`
 
 Expected: the `llmProvider` rejection test FAILS (no constraint yet — the raw insert succeeds). Clean up the row it leaves behind: `npx prisma db execute --stdin <<< 'DELETE FROM "User" WHERE id = '"'"'u_bad_prov'"'"';'`. The orphan-count test may pass locally (a dev database may hold no NULL row) — that is fine; it is production this migration is for, and the cascade test is the one that proves the mechanism.
 
-- [ ] **Step 3: Add the `LlmProvider` constant**
+- [x] **Step 3: Add the `LlmProvider` constant**
 
 In `src/lib/constants.ts`, next to the other pseudo-enum objects:
 
@@ -1308,7 +1308,7 @@ const PROVIDER_IDS = Object.values(LlmProvider);
 
 Keep `type ProviderId = (typeof PROVIDER_IDS)[number]` working — if `Object.values` widens it to `string`, use `const PROVIDER_IDS = [LlmProvider.Anthropic, LlmProvider.OpenAICompatible] as const;` instead and let the constraint test be the thing that catches a value added to one and not the other.
 
-- [ ] **Step 4: Write the migration**
+- [x] **Step 4: Write the migration**
 
 Create `prisma/migrations/<timestamp>_google_auth_orphan_purge/migration.sql` with a timestamp later than `20260728130100`:
 
@@ -1386,7 +1386,7 @@ ALTER TABLE "User"
   CHECK ("llmProvider" IS NULL OR "llmProvider" IN ('anthropic', 'openai-compatible'));
 ```
 
-- [ ] **Step 5: Register the constraint**
+- [x] **Step 5: Register the constraint**
 
 In `src/lib/enum-constraint-sync.integration.test.ts`, add `LlmProvider` to the `@/lib/constants` import and append to `REGISTRY` after the `User_aiPolicy_check` entry:
 
@@ -1402,7 +1402,7 @@ In `src/lib/enum-constraint-sync.integration.test.ts`, add `LlmProvider` to the 
   },
 ```
 
-- [ ] **Step 6: Correct the schema comment**
+- [x] **Step 6: Correct the schema comment**
 
 `prisma/schema.prisma`'s `model GoogleAuth` comment. #119 already rewrote it to say the shared row is *not* gone; Phase C makes that stale in the other direction. **Read what #119 actually left there before editing** — if #119 has not merged, its version is the base you are amending:
 
@@ -1429,7 +1429,7 @@ In `src/lib/enum-constraint-sync.integration.test.ts`, add `LlmProvider` to the 
 model GoogleAuth {
 ```
 
-- [ ] **Step 7: Apply and verify**
+- [x] **Step 7: Apply and verify**
 
 ```bash
 npx prisma migrate dev --name google_auth_orphan_purge
@@ -1440,7 +1440,7 @@ npm test && npx tsc --noEmit
 
 Expected: PASS. If the sync test reports an unmanaged constraint, the name in the migration and the name in `REGISTRY` disagree — fix the registry, since the SQL name follows the `<Table>_<column>_check` convention.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add prisma/schema.prisma prisma/migrations src/lib/constants.ts \

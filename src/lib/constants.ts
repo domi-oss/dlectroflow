@@ -148,6 +148,22 @@ export const AiPolicy = {
 } as const;
 export type AiPolicy = (typeof AiPolicy)[keyof typeof AiPolicy];
 
+/**
+ * Which LLM adapter serves a request — `LLM_PROVIDER` for the instance, or a
+ * user's `User.llmProvider` for an account that brought its own key (#35 Phase
+ * B/C). Mirrored by the `User_llmProvider_check` constraint; NULL on a User
+ * means "use the instance default".
+ *
+ * Lives here rather than in src/lib/llm/index.ts because constants.ts is the
+ * single source of truth the CHECK-constraint sync test reads, and importing
+ * llm/index.ts into a test would pull the provider SDKs in with it.
+ */
+export const LlmProvider = {
+  Anthropic: "anthropic",
+  OpenAICompatible: "openai-compatible",
+} as const;
+export type LlmProvider = (typeof LlmProvider)[keyof typeof LlmProvider];
+
 // ── Phase 2 — breakdown model selection (anthropic provider) ────────────────
 // Owner-selectable models for the `anthropic` LLM_PROVIDER (validated
 // server-side). claude-fable-5 is shown in the UI but deliberately NOT
