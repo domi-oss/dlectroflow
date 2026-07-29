@@ -1,11 +1,23 @@
 import type { LLMCredentials, LLMProvider } from "./types";
 import { createAnthropicProvider } from "./anthropic";
 import { createOpenAICompatibleProvider } from "./openai-compatible";
+import { LlmProvider } from "@/lib/constants";
 
 let cached: LLMProvider | undefined;
 
-/** The adapter ids `LLM_PROVIDER` (and a user's `llmProvider`) may name. */
-const PROVIDER_IDS = ["anthropic", "openai-compatible"] as const;
+/**
+ * The adapter ids `LLM_PROVIDER` (and a user's `llmProvider`) may name.
+ *
+ * #118 Phase C — derived from the constant rather than restated, because
+ * `User.llmProvider` is now constrained in the database against the same set
+ * (`User_llmProvider_check`, mirroring `LlmProvider` in constants.ts). Two
+ * hand-maintained lists of the same adapter ids is how the column ends up
+ * accepting a value no adapter can serve.
+ */
+const PROVIDER_IDS = [
+  LlmProvider.Anthropic,
+  LlmProvider.OpenAICompatible,
+] as const;
 
 type ProviderId = (typeof PROVIDER_IDS)[number];
 

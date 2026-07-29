@@ -13,7 +13,8 @@ import {
   scanColorContrast,
   expectNoContrastViolations,
 } from "../a11y/axe-helpers";
-import { OWNER_WS_ID } from "../constants";
+import { OWNER_WS_ID, OWNER_USER_ID } from "../constants";
+import { encryptToken } from "../../src/lib/crypto/token-cipher";
 
 /**
  * The Schedule menu in a production build (#106).
@@ -45,7 +46,10 @@ import { OWNER_WS_ID } from "../constants";
 const MARKER = "e2e-schedule-menu";
 const TASK_ID = "e2e-schedule-menu-task";
 const ITEM_ID = "e2e-schedule-menu-item";
-const GOOGLE_AUTH_ID = "singleton"; // SINGLETON_ID — what getAuth() upserts.
+// #118 Phase C — the credential is keyed on the ACTING USER, not on a singleton
+// row id. `userId` is the only handle on it: the row's own id is a generated cuid,
+// so `where: { id: "singleton" }` no longer matches anything and this spec's 📅
+// silently rendered "Connect Google" instead of "Schedule".
 const SHOTS = "test-results/schedule-menu";
 
 // 30 + 45 + 60 = 135 working minutes, none of them below the 30-minute floor, so
@@ -64,7 +68,7 @@ async function removeFixtures(client: PrismaClient): Promise<void> {
   await client.task.deleteMany({ where: { id: TASK_ID } });
   // Back to "configured but not connected" — the state every other spec expects.
   await client.googleAuth.updateMany({
-    where: { id: GOOGLE_AUTH_ID },
+    where: { userId: OWNER_USER_ID },
     data: { accessToken: null, refreshToken: null, expiresAt: null },
   });
 }
@@ -117,15 +121,19 @@ test.beforeAll(async () => {
         workspaceId: OWNER_WS_ID,
       },
     });
+    // Encrypted, matching global-setup.ts: the app decrypts on read, so a
+    // plaintext token would satisfy the `connected` check (which only tests for
+    // presence) and then fail the moment anything actually used it.
     await prisma.googleAuth.upsert({
-      where: { id: GOOGLE_AUTH_ID },
+      where: { userId: OWNER_USER_ID },
       create: {
-        id: GOOGLE_AUTH_ID,
-        accessToken: "e2e-not-a-real-google-token",
+        userId: OWNER_USER_ID,
+        accessToken: encryptToken("e2e-not-a-real-google-token"),
+        scope: "https://www.googleapis.com/auth/tasks",
         needsReconnect: false,
       },
       update: {
-        accessToken: "e2e-not-a-real-google-token",
+        accessToken: encryptToken("e2e-not-a-real-google-token"),
         needsReconnect: false,
       },
     });

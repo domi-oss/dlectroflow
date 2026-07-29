@@ -37,6 +37,9 @@ const SECTION_IDS = [
   "settings-aging",
   "settings-breakdown-model",
   "settings-integrations",
+  // #118 Phase C — your own account (the per-user LLM key). Signed-in only, and
+  // this suite runs as the owner, so it is on the page.
+  "settings-account",
   "settings-demo",
   "settings-people",
 ] as const;

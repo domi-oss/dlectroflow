@@ -261,13 +261,31 @@ Reclaim-synced list is scheduled automatically from there.
    (see [Third-party services](#-third-party-services)).
 2. Go to **Settings → Integrations** and click **Connect Google →** (or connect
    inline: break down a task, hit **👍 Looks right**, then **Connect Google Tasks →**
-   right there).
+   right there). Any signed-in account can do this for themselves — the
+   connection is per user, not per instance.
 3. Log in and approve. Back on a task, hit **📅 Send to Google Tasks**.
 
 Tokens are stored in your database (never the repo) and auto-refresh. If Google
 revokes access, **Settings → Integrations** shows **Reconnect needed** and a task's
 schedule button degrades to a reconnect link instead — click it, nothing is lost.
 Settings → Integrations is also where you disconnect.
+
+### Publish your OAuth consent screen before inviting anyone
+
+The Google Tasks scope (`.../auth/tasks`) is **sensitive**, and two
+consent-screen states break sync in ways that look exactly like application bugs:
+
+| Google Cloud console state | What your users actually see |
+| --- | --- |
+| Consent screen in **Testing**, user type External | Connecting works, then sync dies **about seven days later** — Google expires refresh tokens for testing apps after 7 days. `Settings → Integrations` starts showing **Reconnect needed** and it reads exactly like a token-refresh bug in the app. |
+| **Production** but unverified, on a sensitive scope | A *"Google hasn't verified this app"* interstitial before consent, and a hard cap of **100 users**. Not a blocker at small scale, but it is an alarming screen to hand somebody you just invited. |
+
+**Publish the consent screen** (Google Cloud console → *APIs & Services* → *OAuth
+consent screen*) before inviting anyone. Full verification is only needed above
+100 users. This is a console setting — nothing in the app can work around it.
+
+Each person connects their **own** Google account: credentials are stored per
+user, and no account (the instance owner included) can see or use another's.
 
 ### No Google account? `.ics` still works
 

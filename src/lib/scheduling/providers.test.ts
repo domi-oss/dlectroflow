@@ -41,6 +41,18 @@ const ownerNotConfigured = ctx({
   isOwner: true,
   google: { configured: false, connected: false, needsReconnect: false },
 });
+// #118 Phase C — an invited MEMBER with their own connection. `isOwner: false`
+// and a non-null status is exactly the combination that used to be impossible.
+const memberConfigured = ctx({
+  workspaceId: "ws-member",
+  isOwner: false,
+  google: { configured: true, connected: false, needsReconnect: false },
+});
+const memberNotConfigured = ctx({
+  workspaceId: "ws-member",
+  isOwner: false,
+  google: { configured: false, connected: false, needsReconnect: false },
+});
 
 describe("icsProvider.isAvailable — universal, zero-OAuth baseline", () => {
   it("is always available (guest, owner, self-hoster)", () => {
@@ -54,9 +66,19 @@ describe("icsProvider.isAvailable — universal, zero-OAuth baseline", () => {
   });
 });
 
-describe("googleTasksProvider.isAvailable — owner + configured truth table", () => {
-  it("guest → false", () => {
+describe("googleTasksProvider.isAvailable — configured truth table (#118)", () => {
+  it("does not offer it to a guest — a null status is the guest signal", () => {
     expect(googleTasksProvider.isAvailable(guest)).toBe(false);
+  });
+
+  it("offers Google Tasks to a MEMBER with a configured instance (#118)", () => {
+    // Was false before Phase C: the predicate required ctx.isOwner, so a member
+    // with their own connection was still handed the .ics fallback.
+    expect(googleTasksProvider.isAvailable(memberConfigured)).toBe(true);
+  });
+
+  it("does not offer it to a member when the instance has no OAuth client", () => {
+    expect(googleTasksProvider.isAvailable(memberNotConfigured)).toBe(false);
   });
   it("owner + not configured → false", () => {
     expect(googleTasksProvider.isAvailable(ownerNotConfigured)).toBe(false);
@@ -75,6 +97,12 @@ describe("googleTasksProvider.isAvailable — owner + configured truth table", (
 describe("availableProviders — the single 'which methods?' answer", () => {
   it("guest → [ics] only", () => {
     expect(availableProviders(guest).map((p) => p.id)).toEqual(["ics"]);
+  });
+  it("configured MEMBER → [ics, googleTasks] (#118)", () => {
+    expect(availableProviders(memberConfigured).map((p) => p.id)).toEqual([
+      "ics",
+      "googleTasks",
+    ]);
   });
   it("configured owner → [ics, googleTasks]", () => {
     expect(availableProviders(ownerConfigured).map((p) => p.id)).toEqual([

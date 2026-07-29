@@ -3,17 +3,23 @@ import { getSettings } from "@/lib/db";
 import { currentWorkspaceId, currentUser } from "@/lib/workspace";
 import { getGoogleStatus } from "@/lib/google";
 import { loadPeopleAdmin } from "@/lib/people";
+import { ownLlmKeyPresent } from "@/app/actions/account";
 import { PeoplePanel } from "@/components/settings/people-panel";
 import { AgingSection } from "@/components/settings/aging-section";
 import { VoiceSection } from "@/components/settings/voice-section";
 import { BreakdownModelSection } from "@/components/settings/breakdown-model-section";
 import { DemoSection } from "@/components/settings/demo-section";
 import { randomFableLine } from "@/lib/fable-lines";
-import { modelChoicesForProvider, resolveUtilityModel } from "@/lib/models";
+import {
+  modelChoicesForProvider,
+  resolveUtilityModel,
+  resolveBreakdownModel,
+} from "@/lib/models";
 import { NotificationsSection } from "@/components/settings/notifications-section";
 import { AppearanceSection } from "@/components/settings/appearance-section";
 import { FocusTimerSection } from "@/components/settings/focus-timer-section";
 import { IntegrationsPanel } from "@/components/settings/integrations-panel";
+import { AccountPanel } from "@/components/settings/account-panel";
 import { BackLink } from "@/components/nav/back-link";
 import { SectionNav } from "@/components/nav/section-nav";
 import { SETTINGS_SECTIONS } from "@/lib/section-nav";
@@ -38,12 +44,24 @@ export default async function SettingsPage({
     currentUser(),
   ]);
   const owner = me?.role === "owner";
-  // Both owner-only reads. loadPeopleAdmin re-checks the role itself and returns
-  // null for anyone else, so the panel cannot render for a member even if this
-  // call site were ever changed to drop the gate.
-  const [google, people] = await Promise.all([
-    owner ? getGoogleStatus() : Promise.resolve(null),
+  // #118 Phase C — getGoogleStatus() resolves ONE account's connection, so it
+  // needs the acting account's id. A narrowed local rather than `me!`: the
+  // signature already accepts null (a caller with no account is answered without
+  // a query), so no non-null assertion is needed at all.
+  const meId = me?.id ?? null;
+  const [google, people, keyPresent] = await Promise.all([
+    // #118 Phase C — every signed-in account has its own connection, so this is
+    // resolved for whoever is asking. A caller with no account is passed null
+    // and getGoogleStatus() answers without a query.
+    getGoogleStatus(meId),
+    // Still owner-only. loadPeopleAdmin re-checks the role itself and returns
+    // null for anyone else, so the panel cannot render for a member even if this
+    // call site were ever changed to drop the gate.
     owner ? loadPeopleAdmin(me?.id) : Promise.resolve(null),
+    // #118 — PRESENCE only, and it derives the account from the session itself:
+    // there is no id to pass, which is why the ciphertext can never be read for
+    // somebody else. Answers false without a query for a caller with no account.
+    ownLlmKeyPresent(),
   ]);
   const voice: Voice = settings.voice === "playful" ? "playful" : "plain";
   // Relative times ("2h ago") are rendered from ONE timestamp so the server and
@@ -51,15 +69,15 @@ export default async function SettingsPage({
   // eslint-disable-next-line react-hooks/purity -- async Server Component: this runs once per request on the server, not in a compiler-memoised client render.
   const now = Date.now();
 
-  // #72 — the nav must list what this render actually put on the page. Two
-  // sections are conditional (see the branches below): an owner with no status
-  // object gets a nav without a dead "Integrations" anchor, and People is
-  // owner-only, so a guest never gets a link that jumps nowhere.
-  const showIntegrations = owner ? google != null : true;
+  // #72 + #118 — the nav lists what this render actually put on the page. Both
+  // presentations of the Integrations section render something now (your own
+  // panel, or the signed-out shell), so it is always listed; People remains
+  // owner-only and Account needs an account, so a caller without either never
+  // gets a link that jumps nowhere.
   const sections = SETTINGS_SECTIONS.filter(
     (section) =>
-      (section.id !== "settings-integrations" || showIntegrations) &&
-      (section.id !== "settings-people" || people != null),
+      (section.id !== "settings-people" || people != null) &&
+      (section.id !== "settings-account" || me != null),
   );
 
   return (
@@ -140,20 +158,41 @@ export default async function SettingsPage({
           fable={randomFableLine()}
         />
       </div>
-      {owner && google ? (
-        <div className="border-t pt-4">
+      <div className="border-t pt-4">
+        {me ? (
+          // #118 Phase C — YOUR OWN connection, owner or member alike. Was
+          // `owner && google`, with a member falling into the guest shell below
+          // and no way to reach the connect flow from the UI at all.
           <IntegrationsPanel google={google} voice={voice} />
-        </div>
-      ) : !owner ? (
-        // #11 — guests see the integrations section as a read-only owner-only
-        // shell (no owner status fetched or shown).
-        <div className="border-t pt-4">
+        ) : (
+          // #11 — a caller with no account sees the section EXISTS, read-only,
+          // with no status fetched and none shown.
           <IntegrationsPanel google={null} readOnly voice={voice} />
+        )}
+      </div>
+      {/* #118 Phase C — your own account: the per-user LLM key. Signed-in only;
+          there is nothing here for a caller with no account to see or set, and
+          the section is filtered out of the nav to match. */}
+      {me && (
+        <div className="border-t pt-4">
+          <AccountPanel
+            handle={me.handle}
+            provider={me.provider}
+            keyPresent={keyPresent}
+            // #118 — the model a member's OWN-KEY breakdown actually resolves
+            // to, not resolveUtilityModel(). The utility model (Opus on
+            // anthropic) serves the spark/rollup calls; llmKeyEnc pays for
+            // BREAKDOWNS, which #96 resolves to the owner-grade default for an
+            // account on its own key. Naming the utility model here would put a
+            // model id on screen that no request of theirs ever uses.
+            activeModelName={resolveBreakdownModel({
+              tier: "member",
+              hasOwnKey: true,
+            })}
+            voice={voice}
+          />
         </div>
-      ) : // Owner but no status object (shouldn't happen; getGoogleStatus always
-      // returns one) — render nothing, matching the pre-#11 behaviour rather
-      // than showing an owner the guest shell.
-      null}
+      )}
       <div className="border-t pt-4">
         <DemoSection firstRunPreview={settings.firstRunPreview} voice={voice} />
       </div>

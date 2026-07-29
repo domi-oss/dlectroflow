@@ -30,12 +30,39 @@ const ANTHROPIC_MODEL_LABELS: Record<
   "claude-opus-4-8": "Opus 4.8 — deepest reasoning, slower",
 };
 
-function resolveAnthropicModel(opts: {
-  isOwner: boolean;
+/**
+ * Which model tier serves this request.
+ *
+ * #96 — this was `{ isOwner: boolean }`. Before accounts that was a true binary:
+ * you were the owner or you were a guest, so "not the owner" meaning "cheapest
+ * tier" was correct. An invited member is a third thing, and it landed in the
+ * guest branch — so every member got Haiku, the tier chosen as a GUEST COST
+ * LEVER, including a member paying for their own API calls. A named tier is what
+ * stops the next role inheriting the same default silently, and replacing the
+ * boolean (rather than adding to it) is what makes tsc enumerate the call sites.
+ */
+export type ModelTier = "owner" | "member" | "guest";
+
+type BreakdownModelOpts = {
+  tier: ModelTier;
   ownerSetting?: string | null;
-}): string {
-  if (!opts.isOwner) {
+  /** Does this account pay for its own API calls? See `hasOwnKey` below. */
+  hasOwnKey?: boolean;
+};
+
+function resolveAnthropicModel(opts: BreakdownModelOpts): string {
+  // A guest is the only tier the cost lever applies to. `hasOwnKey` cannot be
+  // true here — a guest has no account to hold a key on — but the ordering makes
+  // that explicit rather than incidental.
+  if (opts.tier === "guest") {
     return process.env.GUEST_BREAKDOWN_MODEL || GUEST_BREAKDOWN_MODEL_DEFAULT;
+  }
+  // A member paying with their own key gets the owner-grade default rather than
+  // whatever the owner set for instance-funded work — it is not the owner's
+  // spend to economise on. Their own explicit preference, if the settings UI
+  // ever grows one, would slot in here.
+  if (opts.tier === "member" && opts.hasOwnKey) {
+    return OWNER_BREAKDOWN_MODEL_DEFAULT;
   }
   if (isAllowlisted(opts.ownerSetting)) return opts.ownerSetting as string;
   const envDefault = process.env.OWNER_BREAKDOWN_MODEL;
@@ -59,10 +86,12 @@ function anthropicHintsFor(model: string): ModelHints {
 // "valid" just means "what the deploy is configured with" — and no hint
 // tuning: hints are Anthropic-specific knobs that no-op on other providers.
 
-function resolveOpenAICompatibleModel(opts: { isOwner: boolean }): string {
-  const split = opts.isOwner
-    ? process.env.LLM_OWNER_MODEL
-    : process.env.LLM_GUEST_MODEL;
+function resolveOpenAICompatibleModel(opts: { tier: ModelTier }): string {
+  // #96 — only a guest gets the guest split. A member is not a guest.
+  const split =
+    opts.tier === "guest"
+      ? process.env.LLM_GUEST_MODEL
+      : process.env.LLM_OWNER_MODEL;
   const model = split || process.env.LLM_MODEL;
   if (!model) {
     // Env validation (assertLLMConfig) catches this at boot; this guard stops
@@ -78,14 +107,14 @@ function resolveOpenAICompatibleModel(opts: { isOwner: boolean }): string {
 // ── public API ───────────────────────────────────────────────────────────────
 
 /**
- * Pick the breakdown model by role for the active `LLM_PROVIDER`. Guests get
- * the cheapest tier available: Haiku on `anthropic` (cost lever), or
- * `LLM_GUEST_MODEL`/`LLM_MODEL` on `openai-compatible`.
+ * Pick the breakdown model by TIER for the active `LLM_PROVIDER`. Guests get the
+ * cheapest tier available: Haiku on `anthropic` (cost lever), or
+ * `LLM_GUEST_MODEL`/`LLM_MODEL` on `openai-compatible`. A member on the
+ * instance's key follows the owner's configured tier — that is the owner's cost
+ * decision, and they already have a control for it — while a member paying with
+ * their own key gets the owner-grade default (#96).
  */
-export function resolveBreakdownModel(opts: {
-  isOwner: boolean;
-  ownerSetting?: string | null;
-}): string {
+export function resolveBreakdownModel(opts: BreakdownModelOpts): string {
   if (activeProvider() === "openai-compatible") {
     return resolveOpenAICompatibleModel(opts);
   }
@@ -116,7 +145,7 @@ export function breakdownParamsFor(model: string): {
  */
 export function resolveUtilityModel(): string {
   if (activeProvider() === "openai-compatible") {
-    return resolveOpenAICompatibleModel({ isOwner: true });
+    return resolveOpenAICompatibleModel({ tier: "owner" });
   }
   return BREAKDOWN_MODEL;
 }

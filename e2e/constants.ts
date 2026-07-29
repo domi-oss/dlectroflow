@@ -38,3 +38,45 @@ export const MEMBER_HANDLE = "e2e-member";
 
 export const STORAGE_STATE = "playwright/.auth/owner.json";
 export const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
+
+/**
+ * #118 Phase C — the member fixture becomes a CONNECTED, SIGNED-IN member.
+ *
+ * Phase B seeded MEMBER_USER_ID so the People panel had a row that is not the
+ * owner's. Phase C needs that same account signed IN, with its own GoogleAuth
+ * row, because "a member uses their own connection" is the whole feature and the
+ * owner's session cannot exercise it.
+ */
+export const MEMBER_STORAGE_STATE = "playwright/.auth/member.json";
+
+/**
+ * The member's server runs on its own port with its own env, because
+ * `GOOGLE_CLIENT_ID` is what makes the Google method OFFERED and setting it
+ * globally would flip the 📅 control's label for EVERY existing spec —
+ * schedule-ics.spec.ts finds the .ics entry in the ▾ menu BY that label.
+ * Playwright's `webServer` is global rather than per-project, but the entries are
+ * started SEQUENTIALLY, which is what makes two servers over one standalone
+ * bundle safe (see playwright.config.ts).
+ */
+export const MEMBER_BASE_URL =
+  process.env.E2E_MEMBER_BASE_URL ?? "http://localhost:3100";
+
+/**
+ * The token-encryption key the server under test runs with.
+ *
+ * Exported rather than restated in playwright.config.ts because global-setup
+ * runs in a DIFFERENT PROCESS and has to encrypt the member's access token with
+ * the same key: if the two ever drifted, the ciphertext would decrypt to null,
+ * `getGoogleStatus` would report "reconnect needed", and the member specs would
+ * quietly test the wrong state instead of failing.
+ */
+export const TOKEN_ENC_KEY =
+  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+/**
+ * A fake but well-formed access token for the member's credential. Encrypted by
+ * global-setup with the app's own cipher, so `connected` reads true. Deliberately
+ * NOT a working credential: the member specs read status and open controls, they
+ * never push, so no request ever leaves the machine.
+ */
+export const MEMBER_GOOGLE_ACCESS_TOKEN = "e2e-member-google-access-token";

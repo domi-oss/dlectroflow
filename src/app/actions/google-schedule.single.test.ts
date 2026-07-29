@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const {
   workspaceMock,
-  isOwnerMock,
+  currentUserMock,
   revalidatePathMock,
   configuredMock,
   tokenMock,
@@ -18,7 +18,7 @@ const {
   getSettingsMock,
 } = vi.hoisted(() => ({
   workspaceMock: vi.fn(),
-  isOwnerMock: vi.fn(),
+  currentUserMock: vi.fn(),
   revalidatePathMock: vi.fn(),
   configuredMock: vi.fn(),
   tokenMock: vi.fn(),
@@ -70,7 +70,7 @@ vi.mock("@/lib/google", () => ({
 }));
 vi.mock("@/lib/workspace", () => ({
   currentWorkspaceId: workspaceMock,
-  isOwnerRequest: isOwnerMock,
+  currentUser: currentUserMock,
 }));
 
 import { RewardType, BadgeKey } from "@/lib/constants";
@@ -78,30 +78,95 @@ import { logReward, awardBadge } from "@/lib/rewards";
 import { scheduleSingleTask } from "./google-schedule";
 
 // #35 Phase A — the owner's workspace is a real per-account id now, not the
-// "owner" constant. Ownership is asserted through isOwnerRequest (the role
-// check the action actually makes); this id is just the workspace that
-// account happens to own.
+// "owner" constant; this id is just the workspace that account happens to own.
 const OWNER_WS = "ws-owner";
+
+// #118 Phase C — currentUser() is the ONE identity mock in this file. The action
+// no longer calls isOwnerRequest() at all: the acting user's id is what keys
+// their own GoogleAuth row, and "signed in" is the whole gate. Two mocks
+// answering one question is how a test ends up describing two different people,
+// so isOwnerRequest is gone from the factory rather than left inert.
+const OWNER_ID = "user-owner";
+const ownerUser = () => ({
+  id: OWNER_ID,
+  role: "owner" as const,
+  workspaceId: OWNER_WS,
+  provider: "gitlab",
+  handle: "owner",
+});
+const MEMBER_ID = "user-member";
+const memberUser = () => ({
+  id: MEMBER_ID,
+  role: "member" as const,
+  workspaceId: "ws-member",
+  provider: "gitlab",
+  handle: "member",
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
+  currentUserMock.mockResolvedValue(ownerUser());
   getSettingsMock.mockResolvedValue({ voice: "plain" });
   taskFindFirstMock.mockResolvedValue(null);
   upsertGoogleTaskMock.mockResolvedValue({ id: "gtask-9", created: true });
 });
 
 describe("scheduleSingleTask", () => {
-  it("rejects non-owner", async () => {
+  // #118 Phase C — a member scheduling a single to-do against THEIR OWN Google
+  // connection is the intended behaviour now. #119's role negative is not
+  // deleted, it moves to "no account at all" (a guest, or a revoked account).
+  it("lets a MEMBER schedule against their OWN credential (was 403 in #119)", async () => {
+    workspaceMock.mockResolvedValue("ws-member");
+    currentUserMock.mockResolvedValue(memberUser());
+    configuredMock.mockReturnValue(true);
+    tokenMock.mockResolvedValue("tok");
+    itemFindFirstMock.mockResolvedValue({
+      id: "item-1",
+      text: "todo",
+      taskId: "task-1",
+      task: { scheduledAt: null },
+    });
+    findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
+    taskUpdateMock.mockResolvedValue({});
+
+    expect(await scheduleSingleTask("item-1", 30)).toEqual({ ok: true });
+    // Their own row, by their own id — and never the owner's.
+    expect(tokenMock).toHaveBeenCalledWith(MEMBER_ID);
+    expect(tokenMock).not.toHaveBeenCalledWith(OWNER_ID);
+  });
+
+  it("refuses a caller with no signed-in account, touching Google not at all", async () => {
     workspaceMock.mockResolvedValue("guest-ws");
-    isOwnerMock.mockResolvedValue(false);
+    currentUserMock.mockResolvedValue(null);
+    configuredMock.mockReturnValue(true);
     await expect(scheduleSingleTask("item-1", 30)).rejects.toThrow(
-      "owner only",
+      /sign in required/,
     );
+    expect(tokenMock).not.toHaveBeenCalled();
+    expect(itemFindFirstMock).not.toHaveBeenCalled();
+    expect(upsertGoogleTaskMock).not.toHaveBeenCalled();
+  });
+
+  it("resolves the token for the ACTING user, never a fixed id", async () => {
+    // #118 — no id parameter exists on this action; the credential is reached BY
+    // the acting account, so there is no other row to point at.
+    workspaceMock.mockResolvedValue(OWNER_WS);
+    configuredMock.mockReturnValue(true);
+    tokenMock.mockResolvedValue("tok");
+    itemFindFirstMock.mockResolvedValue({
+      id: "item-1",
+      text: "todo",
+      taskId: "task-1",
+      task: { scheduledAt: null },
+    });
+    findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
+    taskUpdateMock.mockResolvedValue({});
+    await scheduleSingleTask("item-1", 30);
+    expect(tokenMock).toHaveBeenCalledWith(OWNER_ID);
   });
 
   it("rejects a duration outside 1..480 minutes (server clamp) without touching Google", async () => {
     workspaceMock.mockResolvedValue(OWNER_WS);
-    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
 
@@ -116,7 +181,6 @@ describe("scheduleSingleTask", () => {
 
   it("returns reconnect_required when tokens are dead", async () => {
     workspaceMock.mockResolvedValue(OWNER_WS);
-    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue(null);
     statusMock.mockResolvedValue({
@@ -132,7 +196,6 @@ describe("scheduleSingleTask", () => {
 
   it("creates one Google task titled with the duration convention and stores ids", async () => {
     workspaceMock.mockResolvedValue(OWNER_WS);
-    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
     itemFindFirstMock.mockResolvedValue({
@@ -171,7 +234,6 @@ describe("scheduleSingleTask", () => {
   it("sends the full intent for a stepless to-do — floor, priority, hours, due, no (not before)", async () => {
     process.env.PUBLIC_ORIGIN = "https://app.example";
     workspaceMock.mockResolvedValue(OWNER_WS);
-    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
     itemFindFirstMock.mockResolvedValue({
@@ -205,7 +267,6 @@ describe("scheduleSingleTask", () => {
   // second block. The stored Task.googleTaskId is now read and PATCHed.
   it("updates the stored Google Task on a re-schedule instead of creating a second one", async () => {
     workspaceMock.mockResolvedValue(OWNER_WS);
-    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
     itemFindFirstMock.mockResolvedValue({
@@ -239,7 +300,6 @@ describe("scheduleSingleTask", () => {
 
   it("returns no_reclaim_list when no matching Google Tasks list exists", async () => {
     workspaceMock.mockResolvedValue(OWNER_WS);
-    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
     itemFindFirstMock.mockResolvedValue({
@@ -259,7 +319,6 @@ describe("scheduleSingleTask", () => {
 
   it("lazily creates a Task row when the item has none yet, then schedules it", async () => {
     workspaceMock.mockResolvedValue(OWNER_WS);
-    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
     itemFindFirstMock.mockResolvedValue({
@@ -296,7 +355,6 @@ describe("scheduleSingleTask", () => {
 
   it("sets the provider-agnostic scheduled marker (scheduledVia='google') on success", async () => {
     workspaceMock.mockResolvedValue(OWNER_WS);
-    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
     itemFindFirstMock.mockResolvedValue({
@@ -324,7 +382,6 @@ describe("scheduleSingleTask", () => {
   // ── reward parity with the steps path (#25) ──────────────────────────────
   it("awards Scheduled (+10) and the FirstSchedule badge on a successful single-task schedule", async () => {
     workspaceMock.mockResolvedValue(OWNER_WS);
-    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
     itemFindFirstMock.mockResolvedValue({
@@ -346,7 +403,6 @@ describe("scheduleSingleTask", () => {
 
   it("awards Scheduled + FirstSchedule for a lazily-created task (first-ever schedule)", async () => {
     workspaceMock.mockResolvedValue(OWNER_WS);
-    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
     itemFindFirstMock.mockResolvedValue({
@@ -368,7 +424,6 @@ describe("scheduleSingleTask", () => {
 
   it("does not re-award when the task was already scheduled (idempotency — task has a scheduledAt marker)", async () => {
     workspaceMock.mockResolvedValue(OWNER_WS);
-    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
     // S0 (#29): idempotency moved from googleTaskId → the provider-agnostic
@@ -398,7 +453,6 @@ describe("scheduleSingleTask", () => {
 
   it("does not award when the Google push fails", async () => {
     workspaceMock.mockResolvedValue(OWNER_WS);
-    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
     itemFindFirstMock.mockResolvedValue({
@@ -418,7 +472,6 @@ describe("scheduleSingleTask", () => {
 
   it("revalidates / after the lazy Task-create even when the Google push fails (Duo review)", async () => {
     workspaceMock.mockResolvedValue(OWNER_WS);
-    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
     itemFindFirstMock.mockResolvedValue({
@@ -440,7 +493,6 @@ describe("scheduleSingleTask", () => {
 
   it("still returns ok when a reward call fails — reward errors must not fail scheduling (Duo !77)", async () => {
     workspaceMock.mockResolvedValue(OWNER_WS);
-    isOwnerMock.mockResolvedValue(true);
     configuredMock.mockReturnValue(true);
     tokenMock.mockResolvedValue("tok");
     itemFindFirstMock.mockResolvedValue({

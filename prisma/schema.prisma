@@ -181,16 +181,22 @@ model Settings {
 // ── Google Tasks OAuth (tokens obtained at runtime) ───────────────────────
 // client_id/secret come from env (GOOGLE_CLIENT_ID/SECRET); only tokens here.
 //
-// #35 Phase A dropped the `@default("singleton")` id and DELETEd every row, so
-// the tokens that belonged to the pre-accounts "owner" workspace are destroyed.
-// The SHARED ROW ITSELF IS NOT GONE: src/lib/google.ts still passes
-// `id: SINGLETON_ID` explicitly on every read (getAuth's upsert) and write
-// (storeTokens), so one instance-wide row is re-created on demand and sync kept
-// working — only the database default moved into application code. `userId` is
-// nullable because nothing writes it yet; Phase C (#118) is what keys the row on
-// a user. Until it does, both OAuth routes are owner-gated at the handler (#119)
-// — a shared credential row plus an ungated writer is how a member ends up
-// receiving the owner's tasks.
+// #118 Phase C: ONE ROW PER USER, keyed on `userId`. src/lib/google.ts is the
+// only module that touches this table, every function there takes the acting
+// user's id, and none of them accepts a row id — so there is nothing a caller
+// could point at another account's credential.
+//
+// History, because two earlier comments here were wrong and the wrong one was
+// load-bearing: Phase A dropped the `@default("singleton")` id and DELETEd every
+// row, but application code kept supplying `id: "singleton"` explicitly, so one
+// instance-wide row was re-created on demand and sync never went down (#119).
+// Phase C's migration destroys that orphan (userId IS NULL) rather than adopting
+// it, and the owner reconnects once.
+//
+// `userId` is still NULLABLE, deliberately: the code this release replaces wrote
+// a NULL userId on every page load, so SET NOT NULL during a rolling update
+// would 500 the inbox. src/lib/__tests__/scoping.harness.test.ts is the guard —
+// it fails CI if any prisma.googleAuth.* call does not name userId.
 model GoogleAuth {
   id             String    @id @default(cuid())
   userId         String?   @unique

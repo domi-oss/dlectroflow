@@ -260,10 +260,13 @@ test.describe("#100 header identity — member", () => {
     await page.goto("/settings");
     await waitForShell(page);
 
-    // Positive control: the page really rendered (the owner gets nine sections,
-    // a member eight — People is owner-only).
-    await expect(page.locator("[data-section-toggle]")).toHaveCount(8);
+    // Positive control: the page really rendered (the owner gets ten sections,
+    // a member nine — People is owner-only; #118 Phase C added Account, which a
+    // member DOES get, and #118 also made Integrations per-user so a member now
+    // gets the real panel rather than the 🔒 shell).
+    await expect(page.locator("[data-section-toggle]")).toHaveCount(9);
     await expect(page.locator("#settings-people")).toHaveCount(0);
+    await expect(page.locator("#settings-account")).toHaveCount(1);
     expect(await page.locator("body").innerText()).not.toContain(OWNER_HANDLE);
   });
 

@@ -28,10 +28,12 @@ export function sectionLabel(section: SectionDef, voice: Voice): string {
 }
 
 /**
- * Settings sections, in the order the page renders them. `settings-people` and
- * `settings-integrations` are the two OWNER-ONLY entries — the page filters both
- * out of this list for anyone else, so a guest never gets a nav link to a section
- * that is not on their page (see `(app)/settings/page.tsx`).
+ * Settings sections, in the order the page renders them. `settings-people` is the
+ * one OWNER-ONLY entry and `settings-account` needs a signed-in account — the
+ * page filters each out of this list for anyone who does not get it, so nobody
+ * ever gets a nav link to a section that is not on their page (see
+ * `(app)/settings/page.tsx`). `settings-integrations` used to be owner-only too;
+ * #118 Phase C made it per-user, and both of its presentations render something.
  *
  * #101 — the order is FREQUENCY OF USE descending, with administration last
  * (owner-approved). Focus timer leads because it is the most-tuned surface in the
@@ -49,6 +51,9 @@ export const SETTINGS_SECTIONS = [
   { id: "settings-aging", heading: { text: "Aging & reminder" } },
   { id: "settings-breakdown-model", heading: { text: "Breakdown model" } },
   { id: "settings-integrations", heading: { text: "Integrations" } },
+  // #118 Phase C — your own account: the per-user LLM key. After Integrations
+  // (both are "things you connect") and before administration, which stays last.
+  { id: "settings-account", heading: { key: "settings.accountHeading" } },
   { id: "settings-demo", heading: { text: "Demo" } },
   { id: "settings-people", heading: { text: "People" } },
 ] as const satisfies readonly SectionDef[];

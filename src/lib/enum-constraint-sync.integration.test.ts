@@ -17,6 +17,7 @@ import {
   UserRole,
   UserStatus,
   AiPolicy,
+  LlmProvider,
 } from "@/lib/constants";
 // #106 — the scheduling vocabulary lives in its own client-safe module (both the
 // server actions and the Schedule menu import it), so these two value sets are
@@ -187,6 +188,15 @@ const REGISTRY: ReadonlyArray<{
     table: "Task",
     column: "scheduleHours",
     values: ScheduleHours,
+    nullable: true,
+  },
+  {
+    // #118 Phase C — the column feeds getLLM()'s adapter choice for an account
+    // paying with its own key. NULL = the instance default.
+    constraint: "User_llmProvider_check",
+    table: "User",
+    column: "llmProvider",
+    values: LlmProvider,
     nullable: true,
   },
 ];

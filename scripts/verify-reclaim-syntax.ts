@@ -5,7 +5,11 @@
  * NOT part of CI — it writes to the owner's real Google Tasks list. Run it once,
  * read the result, delete the task it created.
  *
- *   npx tsx scripts/verify-reclaim-syntax.ts
+ * #118 Phase C: Google credentials are per USER now, so this needs to be told
+ * WHOSE connection to probe — there is no instance-wide credential left, and a
+ * script has no session to derive one from. Pass the acting account's User id:
+ *
+ *   PROBE_USER_ID=<User.id> npx tsx scripts/verify-reclaim-syntax.ts
  */
 import {
   getValidAccessToken,
@@ -14,7 +18,12 @@ import {
 } from "../src/lib/google";
 
 async function main() {
-  const token = await getValidAccessToken();
+  const userId = process.env.PROBE_USER_ID;
+  if (!userId)
+    throw new Error(
+      "set PROBE_USER_ID to the User.id whose Google connection to probe (#118)",
+    );
+  const token = await getValidAccessToken(userId);
   if (!token) throw new Error("no Google token — connect in Settings first");
   const list = await findReclaimList(token);
   if (!list) throw new Error("no 🗓 Reclaim list found");

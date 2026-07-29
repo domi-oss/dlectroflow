@@ -1,9 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { decryptToken, encryptToken } from "@/lib/crypto/token-cipher";
 
+// #118 Phase C — GoogleAuth is one row per USER, keyed on `userId`. Every test
+// below asserts the `where` clause, not just the outcome: the outcome of a
+// correctly-keyed read and of a read that reaches somebody else's row look
+// identical from the return value, and only one of them is acceptable.
+//
+// getAuth() is a genuine `findUnique` now, not an `upsert`. That is a real
+// behaviour change worth naming: the old version MATERIALISED a credential row
+// on every read, so an anonymous guest page load created one (via the
+// unconditional getGoogleStatus() at src/app/(app)/page.tsx:65). A read that
+// writes is also a read that cannot answer "is there a row?" honestly.
 const { prismaMock } = vi.hoisted(() => ({
   prismaMock: {
     googleAuth: {
+      findUnique: vi.fn(),
       upsert: vi.fn(),
       update: vi.fn().mockResolvedValue({}),
       deleteMany: vi.fn(),
@@ -12,41 +23,74 @@ const { prismaMock } = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/db", () => ({ prisma: prismaMock }));
 
+const USER = "user_alice";
+const OTHER = "user_mallory";
+
+/** A connected row for USER. `expiresAt` in the past forces the refresh path. */
+function connectedRow(over: Record<string, unknown> = {}) {
+  return {
+    id: "ga_1",
+    userId: USER,
+    accessToken: encryptToken("stale-at"),
+    refreshToken: encryptToken("dead-rt"),
+    expiresAt: new Date(Date.now() - 1000),
+    needsReconnect: false,
+    ...over,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  prismaMock.googleAuth.update.mockResolvedValue({});
+  process.env.GOOGLE_CLIENT_ID = "google-cid";
+  process.env.GOOGLE_CLIENT_SECRET = "google-csecret";
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("google token encryption", () => {
-  it("getValidAccessToken decrypts a stored (encrypted) access token", async () => {
-    const { encryptToken } = await import("@/lib/crypto/token-cipher");
-    prismaMock.googleAuth.upsert.mockResolvedValue({
-      id: "singleton",
-      accessToken: encryptToken("google-access-token"),
-      refreshToken: null,
-      expiresAt: null,
-    });
+describe("reads are keyed on the acting user", () => {
+  it("getValidAccessToken looks the row up BY userId and nothing else", async () => {
+    prismaMock.googleAuth.findUnique.mockResolvedValue(
+      connectedRow({ expiresAt: null, accessToken: encryptToken("live-at") }),
+    );
     const { getValidAccessToken } = await import("./google");
-    expect(await getValidAccessToken()).toBe("google-access-token");
+    expect(await getValidAccessToken(USER)).toBe("live-at");
+    expect(prismaMock.googleAuth.findUnique).toHaveBeenCalledWith({
+      where: { userId: USER },
+    });
   });
 
-  it("returns null when no token stored", async () => {
-    prismaMock.googleAuth.upsert.mockResolvedValue({
-      id: "singleton",
-      accessToken: null,
-      refreshToken: null,
-      expiresAt: null,
-    });
+  it("returns null for a user with no row — not connected, not an error", async () => {
+    prismaMock.googleAuth.findUnique.mockResolvedValue(null);
     const { getValidAccessToken } = await import("./google");
-    expect(await getValidAccessToken()).toBeNull();
+    expect(await getValidAccessToken(OTHER)).toBeNull();
   });
 
-  it("exchangeCode persists encrypted tokens in both upsert branches", async () => {
-    process.env.GOOGLE_CLIENT_ID = "google-cid";
-    process.env.GOOGLE_CLIENT_SECRET = "google-csecret";
+  it("returns null when the row exists but holds no token", async () => {
+    prismaMock.googleAuth.findUnique.mockResolvedValue(
+      connectedRow({ accessToken: null, refreshToken: null, expiresAt: null }),
+    );
+    const { getValidAccessToken } = await import("./google");
+    expect(await getValidAccessToken(USER)).toBeNull();
+  });
+
+  it("never reads without a userId in the where clause", async () => {
+    prismaMock.googleAuth.findUnique.mockResolvedValue(null);
+    const { getValidAccessToken, getGoogleStatus, disconnectGoogle } =
+      await import("./google");
+    await getValidAccessToken(USER);
+    await getGoogleStatus(USER);
+    await disconnectGoogle(USER);
+    for (const call of prismaMock.googleAuth.findUnique.mock.calls) {
+      expect(call[0].where).toEqual({ userId: USER });
+    }
+  });
+});
+
+describe("writes are bound to the acting user", () => {
+  function stubTokenExchange() {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -58,37 +102,85 @@ describe("google token encryption", () => {
         }),
       }),
     );
-    const { exchangeCode } = await import("./google");
-    await exchangeCode("code", "verifier", "https://app/cb");
+  }
 
-    expect(prismaMock.googleAuth.upsert).toHaveBeenCalled();
-    const { create, update } = prismaMock.googleAuth.upsert.mock.calls[0][0];
-    expect(create.accessToken).toMatch(/^v1:/);
-    expect(decryptToken(create.accessToken)).toBe("g-at");
-    expect(create.refreshToken).toMatch(/^v1:/);
-    expect(decryptToken(create.refreshToken)).toBe("g-rt");
-    expect(update.accessToken).toMatch(/^v1:/);
-    expect(decryptToken(update.accessToken)).toBe("g-at");
-    expect(update.refreshToken).toMatch(/^v1:/);
-    expect(decryptToken(update.refreshToken)).toBe("g-rt");
+  it("exchangeCode upserts on userId and encrypts both tokens", async () => {
+    stubTokenExchange();
+    prismaMock.googleAuth.upsert.mockResolvedValue(connectedRow());
+    const { exchangeCode } = await import("./google");
+    await exchangeCode(USER, "code", "verifier", "https://app/cb");
+
+    const call = prismaMock.googleAuth.upsert.mock.calls[0][0];
+    expect(call.where).toEqual({ userId: USER });
+    // The CREATE branch must bind the row to the user. Without this the unique
+    // index on a nullable column lets Postgres hold many userId IS NULL rows,
+    // so a forgotten userId accumulates orphans silently instead of failing.
+    expect(call.create.userId).toBe(USER);
+    expect(call.create.accessToken).toMatch(/^v1:/);
+    expect(decryptToken(call.create.accessToken)).toBe("g-at");
+    expect(decryptToken(call.create.refreshToken)).toBe("g-rt");
+    expect(decryptToken(call.update.accessToken)).toBe("g-at");
+    expect(decryptToken(call.update.refreshToken)).toBe("g-rt");
+  });
+
+  it("never lets the UPDATE branch move a row to another user", async () => {
+    stubTokenExchange();
+    prismaMock.googleAuth.upsert.mockResolvedValue(connectedRow());
+    const { exchangeCode } = await import("./google");
+    await exchangeCode(USER, "code", "verifier", "https://app/cb");
+    // Re-keying an existing row is how one account's connection becomes
+    // another's. The update branch writes tokens, never ownership.
+    expect(
+      prismaMock.googleAuth.upsert.mock.calls[0][0].update,
+    ).not.toHaveProperty("userId");
+  });
+
+  it("resets needsReconnect on a successful connect", async () => {
+    stubTokenExchange();
+    prismaMock.googleAuth.upsert.mockResolvedValue(connectedRow());
+    const { exchangeCode } = await import("./google");
+    await exchangeCode(USER, "code", "verifier", "https://app/cb");
+    const call = prismaMock.googleAuth.upsert.mock.calls.at(-1)![0];
+    expect(call.create.needsReconnect).toBe(false);
+    expect(call.update.needsReconnect).toBe(false);
+  });
+
+  it("keeps an existing refresh token when Google returns none", async () => {
+    // Google omits refresh_token on a re-consent. Overwriting it with null
+    // would silently end the grant on the next expiry.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ access_token: "g-at2", expires_in: 3600 }),
+      }),
+    );
+    prismaMock.googleAuth.upsert.mockResolvedValue(connectedRow());
+    const { exchangeCode } = await import("./google");
+    await exchangeCode(USER, "code", "verifier", "https://app/cb");
+    expect(
+      prismaMock.googleAuth.upsert.mock.calls[0][0].update,
+    ).not.toHaveProperty("refreshToken");
+  });
+
+  it("throws, and writes nothing, when Google refuses the exchange", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue({ ok: false, status: 400, text: async () => "" }),
+    );
+    const { exchangeCode } = await import("./google");
+    await expect(
+      exchangeCode(USER, "code", "verifier", "https://app/cb"),
+    ).rejects.toThrow(/Google token exchange failed \(400\)/);
+    expect(prismaMock.googleAuth.upsert).not.toHaveBeenCalled();
   });
 });
 
-describe("invalid_grant handling", () => {
-  function connectedRow() {
-    return {
-      id: "singleton",
-      accessToken: encryptToken("stale-at"),
-      refreshToken: encryptToken("dead-rt"),
-      expiresAt: new Date(Date.now() - 1000), // forces refresh path
-      needsReconnect: false,
-    };
-  }
-
-  it("clears tokens and sets needsReconnect on invalid_grant", async () => {
-    process.env.GOOGLE_CLIENT_ID = "google-cid";
-    process.env.GOOGLE_CLIENT_SECRET = "google-csecret";
-    prismaMock.googleAuth.upsert.mockResolvedValue(connectedRow());
+describe("invalid_grant handling stays scoped to the acting user", () => {
+  it("clears that user's tokens and flags them for reconnect", async () => {
+    prismaMock.googleAuth.findUnique.mockResolvedValue(connectedRow());
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -98,9 +190,9 @@ describe("invalid_grant handling", () => {
       }),
     );
     const { getValidAccessToken } = await import("./google");
-    expect(await getValidAccessToken()).toBeNull();
+    expect(await getValidAccessToken(USER)).toBeNull();
     expect(prismaMock.googleAuth.update).toHaveBeenCalledWith({
-      where: { id: "singleton" },
+      where: { userId: USER },
       data: {
         accessToken: null,
         refreshToken: null,
@@ -110,10 +202,8 @@ describe("invalid_grant handling", () => {
     });
   });
 
-  it("leaves stored tokens untouched on transient refresh errors", async () => {
-    process.env.GOOGLE_CLIENT_ID = "google-cid";
-    process.env.GOOGLE_CLIENT_SECRET = "google-csecret";
-    prismaMock.googleAuth.upsert.mockResolvedValue(connectedRow());
+  it("leaves stored tokens untouched on a transient refresh error", async () => {
+    prismaMock.googleAuth.findUnique.mockResolvedValue(connectedRow());
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -123,100 +213,161 @@ describe("invalid_grant handling", () => {
       }),
     );
     const { getValidAccessToken } = await import("./google");
-    expect(await getValidAccessToken()).toBeNull();
+    expect(await getValidAccessToken(USER)).toBeNull();
+    expect(prismaMock.googleAuth.update).not.toHaveBeenCalled();
+  });
+
+  it("treats a non-JSON error body as transient rather than fatal", async () => {
+    prismaMock.googleAuth.findUnique.mockResolvedValue(connectedRow());
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 502,
+        json: async () => {
+          throw new Error("not json");
+        },
+      }),
+    );
+    const { getValidAccessToken } = await import("./google");
+    expect(await getValidAccessToken(USER)).toBeNull();
     expect(prismaMock.googleAuth.update).not.toHaveBeenCalled();
   });
 });
 
-describe("status + reconnect healing", () => {
-  it("getGoogleStatus surfaces needsReconnect", async () => {
-    prismaMock.googleAuth.upsert.mockResolvedValue({
-      id: "singleton",
-      accessToken: null,
-      refreshToken: null,
-      expiresAt: null,
-      needsReconnect: true,
-    });
+describe("getGoogleStatus", () => {
+  it("answers a guest WITHOUT touching the database", async () => {
+    // The old getAuth() was an upsert, so an anonymous page load materialised a
+    // credential row. A guest has no account, so there is nothing to look up -
+    // and a guest must never learn anything about anyone's connection.
     const { getGoogleStatus } = await import("./google");
-    expect(await getGoogleStatus()).toMatchObject({
+    expect(await getGoogleStatus(null)).toEqual({
+      configured: true,
+      connected: false,
+      needsReconnect: false,
+    });
+    expect(prismaMock.googleAuth.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("reports not-connected for a signed-in user with no row", async () => {
+    prismaMock.googleAuth.findUnique.mockResolvedValue(null);
+    const { getGoogleStatus } = await import("./google");
+    expect(await getGoogleStatus(USER)).toEqual({
+      configured: true,
+      connected: false,
+      needsReconnect: false,
+    });
+  });
+
+  it("surfaces needsReconnect", async () => {
+    prismaMock.googleAuth.findUnique.mockResolvedValue(
+      connectedRow({
+        accessToken: null,
+        refreshToken: null,
+        expiresAt: null,
+        needsReconnect: true,
+      }),
+    );
+    const { getGoogleStatus } = await import("./google");
+    expect(await getGoogleStatus(USER)).toMatchObject({
       connected: false,
       needsReconnect: true,
     });
   });
 
-  it("storeTokens resets needsReconnect", async () => {
-    process.env.GOOGLE_CLIENT_ID = "google-cid";
-    process.env.GOOGLE_CLIENT_SECRET = "google-csecret";
-    prismaMock.googleAuth.upsert.mockResolvedValue({ id: "singleton" });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          access_token: "g-at",
-          refresh_token: "g-rt",
-          expires_in: 3600,
-        }),
+  it("reports configured:false when the instance has no OAuth client", async () => {
+    delete process.env.GOOGLE_CLIENT_ID;
+    prismaMock.googleAuth.findUnique.mockResolvedValue(null);
+    const { getGoogleStatus } = await import("./google");
+    expect(await getGoogleStatus(USER)).toMatchObject({ configured: false });
+  });
+
+  it("says NOT connected when the ciphertext cannot be decrypted", async () => {
+    // `connected` used to be Boolean(auth.accessToken) - ciphertext PRESENCE.
+    // After a TOKEN_ENC_KEY rotation the UI read "Connected" while every push
+    // failed with "not connected", which is the worst of both answers.
+    prismaMock.googleAuth.findUnique.mockResolvedValue(
+      connectedRow({
+        accessToken: "v1:not-a-real-envelope",
+        refreshToken: null,
+        expiresAt: null,
       }),
     );
-    const { exchangeCode } = await import("./google");
-    await exchangeCode("code", "verifier", "https://app/cb");
-    const call = prismaMock.googleAuth.upsert.mock.calls.at(-1)![0];
-    expect(call.update.needsReconnect).toBe(false);
-    expect(call.create.needsReconnect).toBe(false);
+    const { getGoogleStatus } = await import("./google");
+    expect(await getGoogleStatus(USER)).toMatchObject({
+      connected: false,
+      // And it is actionable: an unreadable credential is exactly the state a
+      // reconnect fixes, so say so rather than showing a bare "Not connected".
+      needsReconnect: true,
+    });
   });
 });
 
 describe("disconnectGoogle", () => {
-  it("revokes the refresh token then deletes the row", async () => {
-    const { encryptToken } = await import("@/lib/crypto/token-cipher");
-    prismaMock.googleAuth.upsert.mockResolvedValue({
-      id: "singleton",
-      accessToken: encryptToken("at"),
-      refreshToken: encryptToken("rt"),
-      expiresAt: null,
-      needsReconnect: false,
-    });
+  it("revokes the refresh token then deletes that user's row only", async () => {
+    prismaMock.googleAuth.findUnique.mockResolvedValue(
+      connectedRow({
+        accessToken: encryptToken("at"),
+        refreshToken: encryptToken("rt"),
+        expiresAt: null,
+      }),
+    );
     const fetchMock = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("fetch", fetchMock);
     const { disconnectGoogle } = await import("./google");
-    await disconnectGoogle();
+    await disconnectGoogle(USER);
+
     expect(fetchMock).toHaveBeenCalledWith(
       "https://oauth2.googleapis.com/revoke",
       expect.objectContaining({ method: "POST" }),
     );
+    // The refresh token is preferred: revoking it kills the whole grant.
     expect(String(fetchMock.mock.calls[0][1].body)).toContain("token=rt");
-    expect(prismaMock.googleAuth.deleteMany).toHaveBeenCalled();
+    expect(prismaMock.googleAuth.deleteMany).toHaveBeenCalledWith({
+      where: { userId: USER },
+    });
   });
 
-  it("still deletes when revoke fails", async () => {
-    const { encryptToken } = await import("@/lib/crypto/token-cipher");
-    prismaMock.googleAuth.upsert.mockResolvedValue({
-      id: "singleton",
-      accessToken: encryptToken("at"),
-      refreshToken: null,
-      expiresAt: null,
-      needsReconnect: false,
-    });
+  it("falls back to the access token when there is no refresh token", async () => {
+    prismaMock.googleAuth.findUnique.mockResolvedValue(
+      connectedRow({
+        accessToken: encryptToken("at"),
+        refreshToken: null,
+        expiresAt: null,
+      }),
+    );
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    const { disconnectGoogle } = await import("./google");
+    await disconnectGoogle(USER);
+    expect(String(fetchMock.mock.calls[0][1].body)).toContain("token=at");
+  });
+
+  it("still deletes when revoke fails — a dead token must not survive", async () => {
+    prismaMock.googleAuth.findUnique.mockResolvedValue(
+      connectedRow({
+        accessToken: encryptToken("at"),
+        refreshToken: null,
+        expiresAt: null,
+      }),
+    );
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net down")));
     const { disconnectGoogle } = await import("./google");
-    await expect(disconnectGoogle()).resolves.toBeUndefined();
-    expect(prismaMock.googleAuth.deleteMany).toHaveBeenCalled();
+    await expect(disconnectGoogle(USER)).resolves.toBeUndefined();
+    expect(prismaMock.googleAuth.deleteMany).toHaveBeenCalledWith({
+      where: { userId: USER },
+    });
   });
 
-  it("is a no-op-safe delete when nothing is stored", async () => {
-    prismaMock.googleAuth.upsert.mockResolvedValue({
-      id: "singleton",
-      accessToken: null,
-      refreshToken: null,
-      expiresAt: null,
-      needsReconnect: false,
-    });
+  it("is idempotent for a user with no row and calls no revoke", async () => {
+    prismaMock.googleAuth.findUnique.mockResolvedValue(null);
     vi.stubGlobal("fetch", vi.fn());
     const { disconnectGoogle } = await import("./google");
-    await disconnectGoogle();
+    await expect(disconnectGoogle(USER)).resolves.toBeUndefined();
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
-    expect(prismaMock.googleAuth.deleteMany).toHaveBeenCalled();
+    expect(prismaMock.googleAuth.deleteMany).toHaveBeenCalledWith({
+      where: { userId: USER },
+    });
   });
 });
 

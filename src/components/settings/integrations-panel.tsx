@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { disconnectGoogleTasks } from "@/app/actions/google-schedule";
 import { t, type Voice } from "@/lib/strings";
 import { CollapsibleSection } from "@/components/nav/collapsible-section";
+import { cn, touchTarget } from "@/lib/utils";
 
 type GoogleStatus = {
   configured: boolean;
@@ -11,10 +12,14 @@ type GoogleStatus = {
   needsReconnect: boolean;
 };
 
-// Shared copy so the owner card and the guest read-only shell never drift.
+// Shared copy so the panel and the signed-out shell never drift.
 const GOOGLE_NAME = "Google Tasks";
+// #118 Phase C — "your own", not the instance's. A member reading about "the
+// owner's Google account" would reasonably assume Disconnect affects somebody
+// else's connection, which is the opposite of true: the credential is keyed on
+// the acting user, so this card is only ever about the reader's own connection.
 const GOOGLE_DESCRIPTION =
-  "Schedule steps and tasks into Google Tasks — a Reclaim-synced list is scheduled automatically.";
+  "Schedule your steps and tasks into your own Google Tasks — a Reclaim-synced list is scheduled automatically.";
 
 /** Descriptor list = the extension point: future integrations add an entry here. */
 function googleDescriptor(g: GoogleStatus) {
@@ -43,21 +48,41 @@ export function IntegrationsPanel({
   voice = "plain",
   defaultExpanded,
 }: {
-  /** Owner status. `null` in the guest read-only shell (no status is fetched). */
+  /** The ACTING account's own status (#118). `null` in the signed-out read-only
+   *  shell, where no status is fetched at all. */
   google: GoogleStatus | null;
-  /** #11 — guest read-only presentation: show the shell, never real status. */
+  /** #11 — signed-out read-only presentation: show the shell, never real
+   *  status. #118 changed WHO gets it (a caller with no account, not any
+   *  non-owner), not what it withholds. */
   readOnly?: boolean;
   voice?: Voice;
   defaultExpanded?: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [pending, startTransition] = useTransition();
+  // Stable id so the destructive button can point at the confirmation question
+  // it is answering (aria-describedby) rather than merely sitting beside it.
+  const confirmId = useId();
+  // Focus must not fall to <body> when the confirmation row unmounts — the
+  // control that had focus is gone, and a keyboard user is left with no position
+  // on the page and a Tab that restarts from the top. Returning focus to
+  // Disconnect is the standard "dismissing returns you to the trigger"
+  // behaviour, and it covers both exits (Cancel, and a completed disconnect).
+  const disconnectRef = useRef<HTMLButtonElement | null>(null);
+  const returnFocus = useRef(false);
+  useEffect(() => {
+    if (!confirming && returnFocus.current) {
+      returnFocus.current = false;
+      disconnectRef.current?.focus();
+    }
+  }, [confirming]);
 
-  // Guest view: a disabled shell so guests can see the integration EXISTS,
-  // labelled owner-only. Deliberately renders no real connection status and no
-  // connect/disconnect affordances — nothing about the owner's account leaks.
-  // Gated on the explicit `readOnly` flag alone (not `!google`) so a future
-  // caller can't accidentally get the guest UI by passing a null status.
+  // Signed-out view: a disabled shell so a visitor can see the integration
+  // EXISTS, labelled "Sign in". Deliberately renders no real connection status
+  // and no connect/disconnect affordances — nothing about anyone's account
+  // leaks. Gated on the explicit `readOnly` flag alone (not `!google`) so a
+  // future caller can't accidentally get the signed-out UI by passing a null
+  // status.
   if (readOnly) {
     return (
       <CollapsibleSection
@@ -66,7 +91,7 @@ export function IntegrationsPanel({
         defaultExpanded={defaultExpanded}
         headingExtras={
           <span className="border-input text-muted-foreground rounded-full border px-2 py-0.5 text-xs font-medium">
-            🔒 {t("settings.ownerOnly", voice)}
+            🔒 {t("settings.integrationsSignedOut", voice)}
           </span>
         }
       >
@@ -77,7 +102,7 @@ export function IntegrationsPanel({
             4.42:1 in dark, all under AA-normal 4.5:1. Nothing caught it because
             nothing scanned guest UI — see e2e/a11y/axe-guest-surfaces.spec.ts.
             The "you cannot act on this" read is carried by the two 🔒
-            Owner-only labels, the muted copy and the absence of any control,
+            Sign-in labels, the muted copy and the absence of any control,
             which is also the only part of it a screen reader can perceive. */}
         <div className="rounded-lg border p-4">
           <div className="flex items-center gap-3">
@@ -88,19 +113,21 @@ export function IntegrationsPanel({
               </p>
             </div>
             <span className="bg-muted text-muted-foreground rounded-full px-2.5 py-0.5 text-xs font-medium">
-              {t("settings.ownerOnly", voice)}
+              {t("settings.integrationsSignedOut", voice)}
             </span>
           </div>
           <p className="text-muted-foreground mt-3 text-sm">
-            {t("settings.integrationsOwnerHint", voice)}
+            {t("settings.integrationsSignInHint", voice)}
           </p>
         </div>
       </CollapsibleSection>
     );
   }
 
-  // Owner path: a real status object is required. If it's somehow missing,
-  // render nothing rather than silently falling back to the guest shell.
+  // Signed-in path: a real status object is required. If it's somehow missing,
+  // render nothing rather than silently falling back to the signed-out shell —
+  // showing a member "Sign in" while they are signed in is worse than showing
+  // them nothing.
   if (!google) return null;
 
   const d = googleDescriptor(google);
@@ -135,7 +162,7 @@ export function IntegrationsPanel({
             <code>GOOGLE_CLIENT_SECRET</code> to enable (see the README).
           </p>
         )}
-        <div className="mt-3 flex items-center gap-3">
+        <div className="mt-3 flex flex-wrap items-center gap-3">
           {d.connectHref && (
             <a
               href={d.connectHref}
@@ -147,21 +174,43 @@ export function IntegrationsPanel({
           {d.canDisconnect && !confirming && (
             <button
               type="button"
-              className="text-destructive rounded-md border px-3 py-2 text-sm font-medium"
-              onClick={() => setConfirming(true)}
+              ref={disconnectRef}
+              className={cn(
+                "text-destructive rounded-md border px-3 py-2 text-sm font-medium",
+                touchTarget,
+              )}
+              onClick={() => {
+                returnFocus.current = true;
+                setConfirming(true);
+              }}
             >
               Disconnect
             </button>
           )}
           {d.canDisconnect && confirming && (
             <>
-              <span className="text-sm">
-                Remove access and delete stored tokens?
+              {/* role="status" so a screen-reader user learns the confirmation
+                  appeared at all — a destructive step that materialises
+                  silently is one they never hear. The visible text stays; it is
+                  not replaced by an aria-label, so sighted and non-sighted
+                  users read the same question. */}
+              {/* `basis-full` so the question takes its own line and the two
+                  buttons wrap beneath it. At 390px all three in one row squeezed
+                  "Yes, disconnect" into a two-line label breaking mid-phrase —
+                  legible, but not what a destructive confirmation should read
+                  like on the device most of this app is used on. */}
+              <span className="basis-full text-sm" role="status" id={confirmId}>
+                Remove access to your Google account and delete the tokens
+                stored for you?
               </span>
               <button
                 type="button"
                 disabled={pending}
-                className="bg-destructive text-destructive-foreground rounded-md px-3 py-2 text-sm font-medium disabled:opacity-50"
+                aria-describedby={confirmId}
+                className={cn(
+                  "bg-destructive text-destructive-foreground rounded-md px-3 py-2 text-sm font-medium disabled:opacity-50",
+                  touchTarget,
+                )}
                 onClick={() =>
                   startTransition(async () => {
                     await disconnectGoogleTasks();
@@ -173,7 +222,10 @@ export function IntegrationsPanel({
               </button>
               <button
                 type="button"
-                className="rounded-md border px-3 py-2 text-sm"
+                className={cn(
+                  "rounded-md border px-3 py-2 text-sm",
+                  touchTarget,
+                )}
                 onClick={() => setConfirming(false)}
               >
                 Cancel

@@ -22,8 +22,9 @@ describe("section registries (#72)", () => {
   it("covers every section that exists on each page today", () => {
     // Guards silent shrinkage: dropping a section from the registry without
     // dropping it from the page would leave an unlisted, unreachable section.
-    // 9 since #35 Phase B added the owner-only People section.
-    expect(SETTINGS_SECTIONS.length).toBe(9);
+    // 10 since #118 Phase C added the signed-in-only Account section (9 after
+    // #35 Phase B's owner-only People section).
+    expect(SETTINGS_SECTIONS.length).toBe(10);
     expect(HELP_SECTIONS.length).toBe(6);
   });
 

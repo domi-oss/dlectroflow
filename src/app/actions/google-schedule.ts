@@ -12,7 +12,7 @@ import {
   disconnectGoogle,
 } from "@/lib/google";
 import { TaskSource, TaskStatus } from "@/lib/constants";
-import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
+import { currentWorkspaceId, currentUser } from "@/lib/workspace";
 import { awardFirstSchedule } from "@/lib/scheduling/award";
 import { SchedulingMethod } from "@/lib/scheduling/types";
 import type { ScheduleIntent, ScheduleUnit } from "@/lib/scheduling/types";
@@ -47,15 +47,19 @@ export async function pushStepsToGoogleTasks(
   suppliedIntent?: ScheduleIntent,
 ): Promise<GoogleScheduleResult> {
   const workspaceId = await currentWorkspaceId();
-  // #35 Phase A: an explicit role check replaces the workspace-id comparison.
-  // Google is still a single instance-level connection until Phase C makes it
-  // per user, so it stays owner-only rather than any-signed-in-member.
-  if (!(await isOwnerRequest())) throw new Error("owner only");
+  // #118 Phase C — "signed in, acting on their own credential" replaces the
+  // owner check. Note what is NOT here and never will be: an id parameter. The
+  // credential is looked up BY me.id, so there is no other row to reach — which
+  // is the whole isolation argument, and why the scoping harness can assert it.
+  // Also covers revocation: a revoked account resolves to null on its very next
+  // request, without waiting for a 30-day cookie to expire.
+  const me = await currentUser();
+  if (!me) throw new Error("sign in required");
 
   if (!googleConfigured()) return { ok: false, reason: "not_configured" };
-  const token = await getValidAccessToken();
+  const token = await getValidAccessToken(me.id);
   if (!token) {
-    const status = await getGoogleStatus();
+    const status = await getGoogleStatus(me.id);
     return {
       ok: false,
       reason: status.needsReconnect ? "reconnect_required" : "not_connected",
@@ -212,10 +216,14 @@ export async function scheduleSingleTask(
   estMinutes: number,
 ): Promise<GoogleScheduleSingleResult> {
   const workspaceId = await currentWorkspaceId();
-  // #35 Phase A: an explicit role check replaces the workspace-id comparison.
-  // Google is still a single instance-level connection until Phase C makes it
-  // per user, so it stays owner-only rather than any-signed-in-member.
-  if (!(await isOwnerRequest())) throw new Error("owner only");
+  // #118 Phase C — "signed in, acting on their own credential" replaces the
+  // owner check. Note what is NOT here and never will be: an id parameter. The
+  // credential is looked up BY me.id, so there is no other row to reach — which
+  // is the whole isolation argument, and why the scoping harness can assert it.
+  // Also covers revocation: a revoked account resolves to null on its very next
+  // request, without waiting for a 30-day cookie to expire.
+  const me = await currentUser();
+  if (!me) throw new Error("sign in required");
 
   // Server-side clamp (final-review fix): the client popover already refuses
   // out-of-range custom durations, but this action is the single source of
@@ -231,9 +239,9 @@ export async function scheduleSingleTask(
   }
 
   if (!googleConfigured()) return { ok: false, reason: "not_configured" };
-  const token = await getValidAccessToken();
+  const token = await getValidAccessToken(me.id);
   if (!token) {
-    const status = await getGoogleStatus();
+    const status = await getGoogleStatus(me.id);
     return {
       ok: false,
       reason: status.needsReconnect ? "reconnect_required" : "not_connected",
@@ -353,15 +361,17 @@ export async function scheduleSingleTask(
   }
 }
 
-export async function googleStatus() {
-  if (!(await isOwnerRequest()))
-    return { configured: false, connected: false, needsReconnect: false };
-  return getGoogleStatus();
-}
+// #118 — the `googleStatus()` server action is GONE. It was owner-gated with
+// zero non-test callers and still a reachable RPC endpoint; every real caller
+// reads getGoogleStatus() at the server boundary instead. Deleted rather than
+// re-gated: carrying a live endpoint forward for nobody is how a surface grows.
 
 export async function disconnectGoogleTasks(): Promise<{ ok: true }> {
-  if (!(await isOwnerRequest())) throw new Error("owner only");
-  await disconnectGoogle();
+  // #118 Phase C — you disconnect YOUR OWN connection. No id parameter, so
+  // there is no other account's credential this could revoke.
+  const me = await currentUser();
+  if (!me) throw new Error("sign in required");
+  await disconnectGoogle(me.id);
   revalidatePath("/settings");
   return { ok: true };
 }

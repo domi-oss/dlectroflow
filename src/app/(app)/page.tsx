@@ -1,5 +1,5 @@
 import { prisma, getSettings } from "@/lib/db";
-import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
+import { currentWorkspaceId, currentUser } from "@/lib/workspace";
 import { getGoogleStatus } from "@/lib/google";
 import { BrainDumpStatus } from "@/lib/constants";
 import { InboxView } from "@/components/inbox/inbox-view";
@@ -24,7 +24,11 @@ export default async function InboxPage({
   // time (#27 follow-up), matching the Library page's same-request approach.
   // eslint-disable-next-line react-hooks/purity -- async Server Component: this runs once per request on the server, not in a compiler-memoised client render.
   const now = Date.now();
-  const [rawItems, settings, sp, owner, googleStatus] = await Promise.all([
+  // #118 — ONE identity resolution, awaited inside the batch. isOwnerRequest()
+  // is implemented in terms of currentUser(), so this is the same query it made,
+  // and chaining the status off it keeps page-load latency flat.
+  const mePromise = currentUser();
+  const [rawItems, settings, sp, me, googleStatus] = await Promise.all([
     prisma.brainDumpItem.findMany({
       where: { workspaceId, status: { not: BrainDumpStatus.Archived } },
       orderBy: { createdAt: "desc" },
@@ -61,16 +65,21 @@ export default async function InboxPage({
     }),
     getSettings(workspaceId),
     searchParams,
-    isOwnerRequest(),
-    // Fetched in parallel and discarded for guests, so owner page-load latency
-    // stays flat (Duo review: was a serial round-trip after the Promise.all).
-    getGoogleStatus(),
+    mePromise,
+    // Resolved for the ACTING user, in parallel so page-load latency stays flat
+    // (Duo review: this was once a serial round-trip after the Promise.all). A
+    // guest/anonymous caller is passed null, which short-circuits before any
+    // query at all — getAuth() used to be an upsert, so an anonymous page load
+    // MATERIALISED the credential row (#118).
+    mePromise.then((u) => getGoogleStatus(u ? u.id : null)),
   ]);
-  // The owner's Google status (null for guests, same as the settings
-  // Integrations panel) — resolved once at the server boundary (S1 seam, #34).
-  // When F (#35) makes Google per-user, only this owner-gate + the provider's
-  // isAvailable() change, not the InboxView call site.
-  const google = owner ? googleStatus : null;
+  // #118 Phase C — the ACTING ACCOUNT's own status, resolved once at the server
+  // boundary (S1 seam, #34). Was `owner ? googleStatus : null`, which is what
+  // made a member's 📅 fall back to .ics even when they had their own
+  // connection. getGoogleStatus() already returns the not-connected shape
+  // without a query for a caller with no account, so `null` here means exactly
+  // one thing: nobody is signed in.
+  const google = me ? googleStatus : null;
 
   const items = rawItems.map(({ task, ...item }) => ({
     ...item,
@@ -100,13 +109,18 @@ export default async function InboxPage({
   // HERE rather than fetched per row: `rawItems` already carries each task's
   // three intent columns and its steps, so the alternative is one server-action
   // round trip per multi-step row on every inbox load. Only tasks WITH steps can
-  // reach `ready_steps`, so nothing else needs an entry. Owner-only, mirroring
-  // `google` above: a guest never sees the Google control at all.
+  // reach `ready_steps`, so nothing else needs an entry.
+  //
+  // Gated on `me`, mirroring `google` above rather than on the role: #118 Phase C
+  // gave members their own Google connection, so a member reaches the Schedule
+  // menu too and needs the same prefill. Keeping this owner-only would have left
+  // a member's menu opening on the defaults while their choice sat in the
+  // database. A guest has no account, so never sees the Google control at all.
   //
   // Built on the same mergePersistedIntent as loadScheduleIntent, so "what the
   // menu opens with" has one definition, not two that agree today.
   const scheduleIntents: Record<string, ScheduleIntent> = {};
-  if (owner) {
+  if (me) {
     for (const { task } of rawItems) {
       if (!task || task.steps.length === 0) continue;
       scheduleIntents[task.id] = mergePersistedIntent(
