@@ -2080,7 +2080,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 **Files:**
 - Create: `scripts/verify-reclaim-syntax.ts`
-- Create: `e2e/smoke/schedule-order.spec.ts`
+- Create: `e2e/smoke/schedule-ics.spec.ts`
 
 **Interfaces:** none — this task consumes everything and exports nothing.
 
