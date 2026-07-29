@@ -70,12 +70,25 @@ const OWNER_USER = {
   provider: "gitlab",
   handle: "owner",
 };
+const MEMBER_ID = "user-member";
+const MEMBER_USER = {
+  id: MEMBER_ID,
+  role: "member" as const,
+  workspaceId: "ws-member",
+  provider: "gitlab",
+  handle: "member",
+};
 // BreakdownChat (the `editing` branch) pulls in a heavy tree of its own server
-// actions (breakdown / anthropic) — none of our scenarios exercise it (task
-// always has steps, `edit` is never "1"), so stub it like the Library hub test
-// stubs the equally heavy <TaskSteps>.
+// actions (breakdown / anthropic), so it is stubbed like the Library hub test
+// stubs the equally heavy <TaskSteps>. The stub RECORDS its props: #118's rule
+// is about what crosses into the RSC payload, and a prop is serialised whether
+// or not the component renders it — so "the section was hidden" is not the same
+// assertion as "the status was never sent".
 vi.mock("@/components/breakdown/breakdown-chat", () => ({
-  BreakdownChat: () => <div data-testid="breakdown-chat" />,
+  BreakdownChat: (props: Record<string, unknown>) => {
+    chatProps = props;
+    return <div data-testid="breakdown-chat" />;
+  },
 }));
 vi.mock("@/components/breakdown/task-steps", () => ({
   TaskSteps: ({ taskId }: { taskId: string }) => (
@@ -115,15 +128,24 @@ function task(overrides: Partial<{ scheduledAt: Date | null }> = {}) {
   };
 }
 
-const renderPage = async (opts: { from?: string; taskId?: string } = {}) =>
+/** The last props <BreakdownChat> was handed — see the stub above. */
+let chatProps: Record<string, unknown> | null = null;
+
+const renderPage = async (
+  opts: { from?: string; taskId?: string; edit?: string } = {},
+) =>
   render(
     await TaskPage({
       params: Promise.resolve({ taskId: opts.taskId ?? "t1" }),
-      searchParams: Promise.resolve(opts.from ? { from: opts.from } : {}),
+      searchParams: Promise.resolve({
+        ...(opts.from ? { from: opts.from } : {}),
+        ...(opts.edit ? { edit: opts.edit } : {}),
+      }),
     }),
   );
 
 beforeEach(() => {
+  chatProps = null;
   findFirstMock.mockResolvedValue(task());
   getSettingsMock.mockResolvedValue({ voice: "plain" });
   currentWorkspaceIdMock.mockResolvedValue("owner");
@@ -288,5 +310,64 @@ describe("TaskPage — workspace scoping", () => {
         where: expect.objectContaining({ id: "t1", workspaceId: "guest-42" }),
       }),
     );
+  });
+});
+
+// ── #118 Phase C — the acting account's own status ─────────────────────────
+//
+// Two bugs, one fix. `owner ? googleStatus : null` is what made a member's 📅
+// fall back to .ics even with their own Google account connected. And the
+// editing branch passed the RAW, unfiltered status into <BreakdownChat> as a
+// NON-NULLABLE prop while gating the section on a separate isGuest flag, so
+// configured/connected/needsReconnect were serialised into the RSC payload for
+// exactly the people the section was hidden from — the opposite of the rule
+// integrations-panel.test.tsx already asserts.
+describe("TaskPage — per-user Google status (#118)", () => {
+  it("gives a MEMBER their own Google status, not a null fallback", async () => {
+    currentUserMock.mockResolvedValue(MEMBER_USER);
+    await renderPage();
+    // Before #118 a member got `google = null` here and the .ics control with
+    // it, which silently hid the feature this whole phase exists to ship.
+    expect(
+      screen.getByRole("button", { name: /^schedule$/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /add to calendar/i }),
+    ).toBeNull();
+  });
+
+  it("resolves the status for the member's OWN id, never another account's", async () => {
+    currentUserMock.mockResolvedValue(MEMBER_USER);
+    await renderPage();
+    expect(getGoogleStatusMock).toHaveBeenCalledWith(MEMBER_ID);
+    expect(getGoogleStatusMock).not.toHaveBeenCalledWith(OWNER_ID);
+  });
+
+  it("asks for no status at all when nobody is signed in", async () => {
+    currentUserMock.mockResolvedValue(null);
+    await renderPage();
+    // null, not an id: getGoogleStatus short-circuits before any query, so a
+    // guest page load no longer materialises a credential row either.
+    expect(getGoogleStatusMock).toHaveBeenCalledWith(null);
+  });
+
+  it("never puts a connection status in a GUEST's payload", async () => {
+    currentUserMock.mockResolvedValue(null);
+    await renderPage({ edit: "1" });
+    // The prop must be null, not merely unrendered: a non-nullable prop is
+    // serialised into the RSC payload whether or not the section renders it.
+    expect(chatProps).not.toBeNull();
+    expect(chatProps!.google).toBeNull();
+    expect(chatProps).not.toHaveProperty("isGuest");
+  });
+
+  it("hands a MEMBER their own status in the editing branch", async () => {
+    currentUserMock.mockResolvedValue(MEMBER_USER);
+    await renderPage({ edit: "1" });
+    expect(chatProps!.google).toEqual({
+      configured: true,
+      connected: true,
+      needsReconnect: false,
+    });
   });
 });

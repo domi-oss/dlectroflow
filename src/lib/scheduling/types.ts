@@ -17,8 +17,9 @@ export const SchedulingMethod = {
 export type SchedulingMethod =
   (typeof SchedulingMethod)[keyof typeof SchedulingMethod];
 
-/** Owner Google connection status; null for guests (mirrors today's
- *  `owner ? googleStatus : null`). */
+/** The ACTING ACCOUNT's own Google connection status; `null` when nobody is
+ *  signed in (#118 Phase C — mirrors the pages' `me ? googleStatus : null`,
+ *  which replaced an `owner ? …` filter that hid a member's own connection). */
 export type GoogleConnStatus = {
   configured: boolean;
   connected: boolean;

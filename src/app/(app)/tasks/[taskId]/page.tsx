@@ -64,14 +64,15 @@ export default async function TaskPage({
   if (!task) notFound();
   const owner = me?.role === UserRole.Owner;
 
-  // Scheduling context resolved once at the server boundary (S1 seam, #34):
-  // `ctx.isOwner` drives the guest/owner control choice and `ctx.google` is the
-  // owner's status (null for guests). When F (#35) makes Google per-user, only
-  // this construction + the provider's isAvailable() change.
+  // Scheduling context resolved once at the server boundary (S1 seam, #34).
+  // `ctx.isOwner` is still the honest name for the ROLE; what it no longer does
+  // is stand in for "is a guest" — #118 Phase C gave members their own
+  // connection, so `ctx.google` is the ACTING account's own status and `null`
+  // means only one thing: nobody is signed in.
   const ctx: SchedulingContext = {
     workspaceId,
     isOwner: owner,
-    google: owner ? google : null,
+    google: me ? google : null,
   };
 
   const voice: Voice = settings.voice === "playful" ? "playful" : "plain";
@@ -97,11 +98,11 @@ export default async function TaskPage({
         title={task.title}
         initialProposal={initialProposal}
         startManual={manual === "1"}
-        // BreakdownChat gates the Google section on `isGuest` (not on a nullable
-        // status), so it takes the always-present workspace status directly; the
-        // owner/guest split is carried by isGuest below.
-        google={google}
-        isGuest={!ctx.isOwner}
+        // #118 — the same nullable status the seam gets. It used to receive the
+        // RAW object with the guest/owner split carried by a separate isGuest
+        // prop, so configured/connected/needsReconnect were serialised into the
+        // RSC payload for people the section was hidden from.
+        google={ctx.google}
         scheduled={task.scheduledAt != null}
         from={from}
       />

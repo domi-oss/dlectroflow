@@ -77,36 +77,45 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-/** Minimal props for BreakdownChat, then drive it into the confirmed (schedule) view. */
+/**
+ * Minimal props for BreakdownChat, then drive it into the confirmed (schedule)
+ * view.
+ *
+ * #118 Phase C — `google` is nullable and the `isGuest` prop is GONE: a null
+ * status IS the "no signed-in account" signal, so the two can no longer disagree
+ * about who is looking. Pass `google: null` to render as a guest.
+ */
 async function renderChat(
   overrides: {
-    google?: Partial<GoogleProp>;
-    isGuest?: boolean;
+    google?: Partial<GoogleProp> | null;
     scheduled?: boolean;
   } = {},
 ) {
-  const google: GoogleProp = {
-    configured: false,
-    connected: false,
-    needsReconnect: false,
-    ...overrides.google,
-  };
+  const google: GoogleProp | null =
+    overrides.google === null
+      ? null
+      : {
+          configured: false,
+          connected: false,
+          needsReconnect: false,
+          ...overrides.google,
+        };
   render(
     <BreakdownChat
       taskId="task-1"
       title="Plan the party"
       initialProposal={proposal}
       google={google}
-      isGuest={overrides.isGuest ?? false}
       scheduled={overrides.scheduled ?? false}
     />,
   );
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "Looks right" }));
+  // The universal .ics export is in the confirmed view for everyone, so it is
+  // what "we got there" is asserted on — the Google section is the thing under
+  // test and may legitimately be absent.
   await waitFor(() =>
-    expect(
-      screen.getByText(/schedule onto your calendar/i),
-    ).toBeInTheDocument(),
+    expect(screen.getByText(/add to your calendar/i)).toBeInTheDocument(),
   );
 }
 
@@ -251,5 +260,27 @@ describe("BreakdownChat — confirmed banner reflects ground truth (not optimist
         screen.getByText(/scheduled — these steps are on your calendar/i),
       ).toBeInTheDocument(),
     );
+  });
+});
+
+// ── #118 Phase C — a nullable status replaces the isGuest prop ─────────────
+describe("BreakdownChat — a null status is the guest signal (#118)", () => {
+  it("renders no Google section when there is no status", async () => {
+    await renderChat({ google: null });
+    expect(screen.queryByText(/schedule onto your calendar/i)).toBeNull();
+    // The universal .ics export is still there — it needs no integration.
+    expect(screen.getByText(/add to your calendar/i)).toBeInTheDocument();
+  });
+
+  it("renders the Connect affordance for a member who has not connected", async () => {
+    // A signed-in member with no connection gets a status OBJECT
+    // (connected: false), not null — which is exactly what makes the Connect
+    // affordance reachable for them instead of the silent .ics fallback.
+    await renderChat({
+      google: { configured: true, connected: false, needsReconnect: false },
+    });
+    expect(
+      screen.getByRole("link", { name: /connect google tasks/i }),
+    ).toHaveAttribute("href", "/api/google/oauth/start");
   });
 });

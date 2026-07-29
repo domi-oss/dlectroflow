@@ -33,7 +33,6 @@ export function BreakdownChat({
   initialProposal,
   startManual = false,
   google,
-  isGuest = false,
   scheduled = false,
   from,
 }: {
@@ -42,8 +41,15 @@ export function BreakdownChat({
   initialProposal: Proposal | null;
   /** Start with one blank step and skip the automatic AI proposal (manual re-plan). */
   startManual?: boolean;
-  google: GoogleConnStatus;
-  isGuest?: boolean;
+  /**
+   * The acting account's own Google status, or `null` when nobody is signed in.
+   *
+   * #118 Phase C: nullable, and the `isGuest` prop is gone. A null status IS the
+   * guest signal — a signed-in member with no connection still gets a status
+   * object (`connected: false`) so they see the Connect affordance, and a guest
+   * gets nothing, which is also what keeps it out of the RSC payload.
+   */
+  google: GoogleConnStatus | null;
   /** Persisted ground truth: has this task ever been scheduled (task.scheduledAt)? */
   scheduled?: boolean;
   /** Origin (`?from=`) this task was opened from, so the back links + the
@@ -238,12 +244,15 @@ export function BreakdownChat({
   const busy = streaming || confirmPending;
 
   // Route the Google-vs-ICS control choice through the seam (S1, #34): the
-  // "Schedule onto your calendar" (Google Tasks) section is the owner-led method;
-  // guests only ever get the universal ICS export above it. `leadSchedulingMethod`
-  // maps a null status (guest) to "ics", any status (owner) to "googleTasks" —
-  // behaviourally identical to the previous `!isGuest`.
+  // "Schedule onto your calendar" (Google Tasks) section is offered to any
+  // signed-in account (#118 Phase C — members have their own connection now);
+  // a caller with no account only ever gets the universal ICS export above it.
+  //
+  // The explicit `google != null` is what narrows the type for the
+  // `google.configured` dereference below — `leadSchedulingMethod` returning
+  // "googleTasks" implies non-null logically, but TypeScript cannot see it.
   const showGoogleSection =
-    leadSchedulingMethod(isGuest ? null : google) === "googleTasks";
+    google != null && leadSchedulingMethod(google) === "googleTasks";
 
   if (confirmed) {
     return (

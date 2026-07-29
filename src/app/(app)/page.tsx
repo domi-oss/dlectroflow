@@ -1,7 +1,7 @@
 import { prisma, getSettings } from "@/lib/db";
 import { currentWorkspaceId, currentUser } from "@/lib/workspace";
 import { getGoogleStatus } from "@/lib/google";
-import { BrainDumpStatus, UserRole } from "@/lib/constants";
+import { BrainDumpStatus } from "@/lib/constants";
 import { InboxView } from "@/components/inbox/inbox-view";
 import { firstResumableStep } from "@/components/inbox/resume-step";
 import { openSessionRemainingSec } from "@/lib/focus-timer-clock";
@@ -73,11 +73,13 @@ export default async function InboxPage({
     // MATERIALISED the credential row (#118).
     mePromise.then((u) => getGoogleStatus(u ? u.id : null)),
   ]);
-  const owner = me?.role === UserRole.Owner;
-  // Resolved once at the server boundary (S1 seam, #34). Task 5 of #118 changes
-  // this line to `me ? googleStatus : null`; it is left owner-gated here so this
-  // commit ships no behaviour change and a member still falls back to .ics.
-  const google = owner ? googleStatus : null;
+  // #118 Phase C — the ACTING ACCOUNT's own status, resolved once at the server
+  // boundary (S1 seam, #34). Was `owner ? googleStatus : null`, which is what
+  // made a member's 📅 fall back to .ics even when they had their own
+  // connection. getGoogleStatus() already returns the not-connected shape
+  // without a query for a caller with no account, so `null` here means exactly
+  // one thing: nobody is signed in.
+  const google = me ? googleStatus : null;
 
   const items = rawItems.map(({ task, ...item }) => ({
     ...item,

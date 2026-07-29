@@ -1854,7 +1854,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 **Two bugs in one place.** `owner ? googleStatus : null` is what makes the 📅 fall back to `.ics` for a member who has their own connection. And `tasks/[taskId]/page.tsx:88-89` passes the **raw, un-filtered** `google` object into `breakdown-chat.tsx` — a non-nullable prop — while gating the section on `isGuest`, so `configured`/`connected`/`needsReconnect` land in the RSC payload for people who should not see them. That is the precise opposite of the rule `integrations-panel.test.tsx:126` asserts ("never leaks the owner's real connection status to guests"). After Phase C the two are the same fix: **a non-null status means "this is the acting account's own status", and `null` means "no account".**
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `src/app/(app)/tasks/[taskId]/page.test.tsx` (read the file's existing render harness first — do not guess how it mounts an async server component):
 
@@ -1903,7 +1903,7 @@ Add to the breakdown-chat test file:
   });
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 ```bash
 npx vitest run "src/app/(app)/tasks/[taskId]/page.test.tsx" src/components/breakdown
@@ -1911,7 +1911,7 @@ npx vitest run "src/app/(app)/tasks/[taskId]/page.test.tsx" src/components/break
 
 Expected: FAIL — `google={null}` is a type error and the member case renders `.ics`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `src/app/(app)/page.tsx` — delete the owner filter:
 
@@ -1969,14 +1969,14 @@ The explicit `google != null` is what narrows the type for the `google.configure
 
 Remove the `isGuest` parameter and its type entirely (`grep -n "isGuest" src/components/breakdown/breakdown-chat.tsx` should return nothing afterwards), and fix every other caller and test the grep across `src/` turns up.
 
-- [ ] **Step 4: Run the tests and the whole suite**
+- [x] **Step 4: Run the tests and the whole suite**
 
 ```bash
 npx vitest run "src/app/(app)" src/components/breakdown
 npm test && npx tsc --noEmit
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add "src/app/(app)/page.tsx" "src/app/(app)/tasks/[taskId]/page.tsx" \
