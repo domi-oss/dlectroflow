@@ -122,7 +122,13 @@ describe("AgeLabel — aging accent (#95 a11y)", () => {
   const aged = { ...base, createdAt: new Date(now - 13 * 3600_000) };
   const fresh = { ...base, createdAt: new Date(now - 60_000) };
 
+  // `afterEach(cleanup)` only runs BETWEEN tests, so a second call inside one
+  // test would leave the first render mounted and `getByText` would throw
+  // "Found multiple elements" — a failure that points nowhere near the cause.
+  // Cleaning up here instead makes the helper safe to call repeatedly, which is
+  // what a future test comparing two states in one block will want to do.
   function label(item: Item): HTMLElement {
+    cleanup();
     render(
       <AgeLabel item={item} now={now} voice="plain" settings={settings} />,
     );
