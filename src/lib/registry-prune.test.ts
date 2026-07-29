@@ -32,6 +32,25 @@ import { join } from "node:path";
 
 const SCRIPT = join(process.cwd(), "scripts/prune-registry.sh");
 
+/**
+ * The script under test is bash and shells out to jq, and Alpine (which the
+ * `test_app` CI job runs on) has neither by default. Without this check a
+ * missing `bash` shows up as ~30 assertions failing on an EMPTY stderr, because
+ * it was the *spawn* that failed and not the script — which is how the first CI
+ * run of this suite presented. Fail once, clearly, instead.
+ */
+for (const tool of ["bash", "jq"]) {
+  const found = spawnSync("sh", ["-c", `command -v ${tool}`], {
+    encoding: "utf8",
+  });
+  if (found.status !== 0) {
+    throw new Error(
+      `${tool} is not on PATH, so scripts/prune-registry.sh cannot be tested. ` +
+        `Install it (CI: the apk line in test_app's before_script in .gitlab-ci.yml).`,
+    );
+  }
+}
+
 const API = "https://gitlab.test/api/v4";
 const PROJECT_ID = "4242";
 const PROJECT_PATH = "acme/apps/dlectroflow";
