@@ -49,6 +49,14 @@ operators upgrading a self-hosted instance don't get surprised.
   `@import`s `shadcn/tailwind.css`, so the build fails outright without it — but
   that CSS is compiled into `.next/static` before the image is assembled.
   `npx shadcn add …` still works, since dev dependencies are installed locally.
+- **`CONTRIBUTING.md` now documents how to add a dependency (#81).** The
+  lockfile-regeneration trap (#67) was tribal knowledge: CI installs with `npm ci`,
+  which fails on a mismatch rather than repairing it, and the npm that resolves a
+  contributor's tree is not the npm in `node:22-alpine`. The new section gives the
+  `docker run … npm install --package-lock-only` recipe, the
+  `dependencies`-vs-`devDependencies` test (does it appear in the standalone
+  trace?), why images are pinned by digest, and what each hygiene guard means when
+  it fails.
 - **The header's theme control is icon-only (#103).** In a menu bar the words
   "Dark mode" / "Light mode" were dead weight, and the width they added crowded
   the rest of the bar at 390px. The header now shows a lucide moon/sun glyph in a
