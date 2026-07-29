@@ -6,6 +6,7 @@ import {
   OWNER_SUB,
   OWNER_USER_ID,
   OWNER_WS_ID,
+  OWNER_HANDLE,
   MEMBER_USER_ID,
   MEMBER_WS_ID,
   MEMBER_HANDLE,
@@ -34,7 +35,7 @@ export default async function globalSetup(): Promise<void> {
         id: OWNER_USER_ID,
         provider: "gitlab",
         providerSub: OWNER_SUB,
-        handle: "e2e-owner",
+        handle: OWNER_HANDLE,
         role: "owner",
         status: "active",
         // #35 Phase B: the instance owner is UNCAPPED by design, and the People
@@ -45,7 +46,15 @@ export default async function globalSetup(): Promise<void> {
       },
       // Re-assert what the suite depends on: an earlier run (or a spec) may
       // have left the row in another state.
-      update: { role: "owner", status: "active", aiPolicy: "uncapped" },
+      update: {
+        role: "owner",
+        status: "active",
+        aiPolicy: "uncapped",
+        // #100 — the header renders this, so re-assert it: a spec that changed
+        // the handle would otherwise leave the next run naming a different
+        // account in the bar.
+        handle: OWNER_HANDLE,
+      },
     });
     await prisma.workspace.upsert({
       where: { id: OWNER_WS_ID },

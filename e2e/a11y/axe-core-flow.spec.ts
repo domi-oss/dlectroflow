@@ -32,6 +32,28 @@ test.describe("accessibility: core-flow routes (axe)", () => {
     });
   }
 
+  // #100 — the header's identity popover, under the FULL ruleset rather than the
+  // contrast-only gate. This is the surface where the mechanical rules earn their
+  // keep: a `Popover.Popup` is a `dialog`, so it must carry an accessible name
+  // (aria-dialog-name), and its trigger has to keep the visible handle inside its
+  // accessible name (label-in-name). Both are attributes jsdom will happily
+  // report; only a real accessibility tree can confirm them.
+  //
+  // Scanned on /help because the header is byte-identical on every route and
+  // /help has no live clock re-rendering under the scan (#105).
+  test("no new serious/critical violations: header identity popover open", async ({
+    page,
+  }) => {
+    await page.goto("/help");
+    await waitForShell(page);
+    await page
+      .locator("header")
+      .getByRole("button", { name: /^Account: / })
+      .click();
+    await expect(page.getByRole("dialog", { name: "Account" })).toBeVisible();
+    await scanA11y(page, "/help (identity popover open)");
+  });
+
   // clarify + schedule live on the task-detail page. "Break into steps →" runs a
   // server action that creates the task (no AI required) and navigates to
   // /tasks/[taskId], which renders the breakdown/clarify editor and the schedule

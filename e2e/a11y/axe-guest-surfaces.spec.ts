@@ -218,8 +218,13 @@ test.describe("accessibility: guest scan preconditions", () => {
       cookies,
       "df_owner must not be present in a guest context",
     ).not.toContain("df_owner");
-    // …and the app agrees it is looking at an anonymous visitor.
+    // …and the app agrees it is looking at an anonymous visitor. #100 — the
+    // signed-in header is the account's own handle opening an identity popover,
+    // so its absence is the stronger of the two checks: a forged owner session
+    // would put a name in the bar.
     await expect(page.getByRole("link", { name: /^sign in$/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /^account$/i })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Account: / })).toHaveCount(
+      0,
+    );
   });
 });

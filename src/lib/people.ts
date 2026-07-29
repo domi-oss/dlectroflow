@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { isOwnerRequest } from "@/lib/workspace";
+import { accountLabel } from "@/lib/identity";
 import { UserRole } from "@/lib/constants";
 import type { UserStatus } from "@/lib/constants";
 import {
@@ -67,10 +68,10 @@ export type PeopleAdminView = {
   windowHours: number;
 };
 
-/** Display label for an account with no provider username. */
-function labelFor(user: { id: string; handle: string | null }): string {
-  return user.handle ?? `#${user.id.slice(0, 8)}`;
-}
+// #100 — `labelFor` used to live here as a private copy of this rule. The header
+// now names the signed-in account too, and two copies of "what is this account
+// called?" is exactly how the two surfaces would come to disagree, so the rule
+// moved to src/lib/identity.ts and both call the same function.
 
 /**
  * Everything the owner-only People panel renders, or `null` when the caller is
@@ -142,7 +143,7 @@ export async function loadPeopleAdmin(
     people: ordered.map((u) => ({
       id: u.id,
       handle: u.handle,
-      label: labelFor(u),
+      label: accountLabel(u),
       provider: u.provider,
       role: u.role as UserRole,
       status: u.status as UserStatus,

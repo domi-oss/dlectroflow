@@ -177,6 +177,8 @@ describe("currentUser", () => {
     id: string;
     role: string;
     status: string;
+    provider?: string;
+    handle?: string | null;
   }) {
     const token = await signUserSession(
       { kind: "user", userId: user.id, wsId: `ws-${user.id}` },
@@ -202,12 +204,57 @@ describe("currentUser", () => {
     expect(await currentUser()).toBeNull();
   });
 
-  it("returns the account's id, role and workspace", async () => {
-    await signedInAs({ id: "u1", role: "member", status: "active" });
+  // #100 — provider + handle join the resolved account. They come from the SAME
+  // row read that already loads role and status, so naming the signed-in account
+  // in the header costs no extra round trip, and the header can never be shown a
+  // handle that belongs to a different session than the role it enforces.
+  it("returns the account's id, role, workspace, provider and handle", async () => {
+    await signedInAs({
+      id: "u1",
+      role: "member",
+      status: "active",
+      provider: "gitlab",
+      handle: "dlectronique",
+    });
     expect(await currentUser()).toEqual({
       id: "u1",
       role: "member",
       workspaceId: "ws-u1",
+      provider: "gitlab",
+      handle: "dlectronique",
+    });
+  });
+
+  // A provider may withhold a username (AuthProfile.username is optional), so
+  // `handle` has to survive being absent as `null` rather than as `undefined` —
+  // the display layer keys its short-id fallback off exactly that.
+  it("reports a missing handle as null", async () => {
+    await signedInAs({
+      id: "u1",
+      role: "owner",
+      status: "active",
+      provider: "gitlab",
+      handle: null,
+    });
+    expect(await currentUser()).toMatchObject({ handle: null });
+  });
+
+  it("selects the display fields alongside role and status, in one query", async () => {
+    await signedInAs({
+      id: "u1",
+      role: "owner",
+      status: "active",
+      provider: "gitlab",
+      handle: "x",
+    });
+    await currentUser();
+    expect(userFindUniqueMock).toHaveBeenCalledTimes(1);
+    expect(userFindUniqueMock.mock.calls[0][0].select).toEqual({
+      id: true,
+      role: true,
+      status: true,
+      provider: true,
+      handle: true,
     });
   });
 
@@ -237,7 +284,18 @@ describe("isOwnerRequest", () => {
       SECRET,
     );
     cookiesMock.mockResolvedValue(jarWith(token));
-    userFindUniqueMock.mockResolvedValue({ id: "u1", role, status });
+    // provider/handle are carried even though `isOwnerRequest` only reads
+    // `role`: `CurrentUser` declares `provider: string` non-optional (#100), so
+    // a mock without them describes a row that cannot exist. The test would
+    // still pass — which is exactly why it is worth keeping the fixture honest,
+    // rather than leaving the next reader to infer the field is optional.
+    userFindUniqueMock.mockResolvedValue({
+      id: "u1",
+      role,
+      status,
+      provider: "gitlab",
+      handle: "owner-handle",
+    });
   }
 
   it("treats the owner role as owner", async () => {

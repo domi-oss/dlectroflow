@@ -40,14 +40,18 @@ test("a guest still sees the sandbox banner with its AI allowance", async ({
   await expect(banner).toContainText(/AI assisted task breakdowns/i);
 });
 
-test("a guest is offered sign-in, never Account or Sign out", async ({
+test("a guest is offered sign-in, never an account identity or Sign out", async ({
   page,
 }) => {
   await page.goto("/");
 
   await expect(page.getByRole("link", { name: /^sign in$/i })).toBeVisible();
-  await expect(page.getByRole("link", { name: /^account$/i })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /sign out/i })).toHaveCount(0);
+  // #100 — the signed-in half of the header is now the account's own handle,
+  // opening an identity popover. A guest has no account, so neither exists.
+  await expect(page.getByRole("button", { name: /^Account: / })).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "Account" })).toHaveCount(0);
+  await expect(page.getByText(/signed in with/i)).toHaveCount(0);
 });
 
 test("a guest is refused an authenticated-only path", async ({ page }) => {

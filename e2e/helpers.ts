@@ -119,5 +119,40 @@ export async function expandAllSections(page: Page): Promise<void> {
   // (#101) named that section the current one. Leave the page where the caller
   // found it — at the top, with the scroll-spy back in charge — so "expand
   // everything" is a change of STATE and not also a change of scroll position.
-  await page.evaluate(() => window.scrollTo(0, 0));
+  //
+  // Both halves of that have to be WAITED for, which this did not do, and the
+  // omission was a live flake in a zero-tolerance gate:
+  //
+  //  • The nav opts into `scroll-behavior: smooth`, so `scrollTo(0, 0)` is
+  //    ASYNCHRONOUS — this returned with the page still ~1400px down (measured).
+  //  • The heading band the last click highlighted takes on the magenta
+  //    `[data-current]` treatment, and its TITLE transitions to
+  //    `--primary-foreground` over the transition duration while the band's
+  //    background is magenta immediately. Sampled in flight that is dark text on
+  //    magenta — 3.08:1 light / 2.23:1 dark, reported by axe against
+  //    `button[data-section-toggle="settings-demo"] > .truncate`. The SETTLED
+  //    pairing is white on magenta, the documented AA combination (globals.css),
+  //    so the violation only ever existed mid-transition.
+  //
+  // Same class of problem this file's callers already handle with
+  // `reducedMotion: "reduce"` — which suppresses animations, not
+  // `transition-colors`. So: scroll instantly, wait for it to land, and wait for
+  // any highlighted band's title to finish catching up with it.
+  await page.evaluate(() =>
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" }),
+  );
+  await expect
+    .poll(() => page.evaluate(() => window.scrollY), {
+      message: "the page never came back to the top",
+    })
+    .toBe(0);
+  await page.waitForFunction(() => {
+    const band = document.querySelector("[data-section-header][data-current]");
+    if (!band) return true; // nothing highlighted — nothing in transition
+    const title = band.querySelector("[data-section-toggle] .truncate");
+    if (!title) return true;
+    // Descendants of a highlighted band are forced to `currentColor`, so a
+    // settled title's computed colour IS the band's.
+    return getComputedStyle(title).color === getComputedStyle(band).color;
+  });
 }

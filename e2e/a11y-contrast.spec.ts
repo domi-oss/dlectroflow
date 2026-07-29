@@ -160,6 +160,29 @@ for (const theme of THEMES) {
       expectNoContrastViolations(await scanColorContrast(page));
     });
 
+    // #100: the header's identity popover. New signed-in chrome, and CLOSED by
+    // default — so the route scans above see only its trigger, never the popup's
+    // muted "Owner · signed in with GitLab" line or its two entries. A popup axe
+    // never opens is a popup this gate does not cover, which is the #90/#101
+    // lesson twice over. The identity line is the risk: `text-muted-foreground`
+    // at `text-xs` over the popup's own `bg-background`, i.e. exactly the
+    // small-muted-text pairing that shipped #56 and #73 below AA.
+    test(`zero color-contrast violations: header identity popover open (${theme})`, async ({
+      page,
+    }) => {
+      // /help, not the inbox: the header is byte-identical everywhere and /help
+      // holds still (no live clock re-render, #105), so the popup cannot be
+      // scanned mid-remount.
+      await page.goto("/help");
+      await waitForShell(page);
+      await page
+        .locator("header")
+        .getByRole("button", { name: /^Account: / })
+        .click();
+      await expect(page.getByRole("dialog", { name: "Account" })).toBeVisible();
+      expectNoContrastViolations(await scanColorContrast(page));
+    });
+
     // #48: the Library hub's active tab-count chip. It rendered white
     // `text-primary-foreground` on a translucent `bg-primary-foreground/20`
     // chip over the magenta active tab — the white overlay lightened the bg

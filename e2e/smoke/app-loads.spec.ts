@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { CAPTURE_PLACEHOLDER } from "../helpers";
+import { OWNER_HANDLE } from "../constants";
 
 // Flow 1: authenticated app loads and the inbox renders at the bare root.
 // The inbox now lives at "/" (src/app/(app)/page.tsx); "/inbox" permanently
@@ -29,15 +30,31 @@ test("/inbox permanently redirects to / (bookmarks + OAuth callbacks)", async ({
 // suite silently runs as an anonymous visitor — every other spec above keeps
 // passing, because guests can capture and browse too. So assert the signed-in
 // state explicitly, from the outside, on something only a signed-in account
-// sees: the header's Account/Sign out controls, and the ABSENCE of the guest
-// sandbox banner.
-test("the suite really is signed in (guards against a silently anonymous run)", async ({
+// sees, and on the ABSENCE of the guest sandbox banner.
+//
+// #100 made that guard STRICTER rather than replacing it. It used to look for the
+// anonymous word "Account"; the header now names the account, so the guard can
+// assert the suite is signed in as the RIGHT one — a token resolving to some
+// other row would show a different handle and fail here instead of quietly
+// running against another workspace's data.
+test("the suite really is signed in, as the forged owner (guards against a silently anonymous run)", async ({
   page,
 }) => {
   await page.goto("/");
 
-  await expect(page.getByRole("link", { name: /^account$/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /sign out/i })).toBeVisible();
+  const identity = page
+    .locator("header")
+    .getByRole("button", { name: `Account: ${OWNER_HANDLE}` });
+  await expect(identity).toBeVisible();
+
+  // Sign out moved into the identity popover (#100) — still reachable, still a
+  // POST form, and still something no guest is offered.
+  await identity.click();
+  await expect(
+    page.getByRole("dialog", { name: "Account" }).getByRole("button", {
+      name: "Sign out",
+    }),
+  ).toBeVisible();
 
   // A guest would be offered sign-in and shown the sandbox banner instead.
   await expect(page.getByRole("link", { name: /^sign in$/i })).toHaveCount(0);

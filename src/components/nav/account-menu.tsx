@@ -1,0 +1,128 @@
+"use client";
+
+import { useRef } from "react";
+import Link from "next/link";
+import { ChevronDown } from "lucide-react";
+import { Popover } from "@base-ui/react/popover";
+import { cn, touchTarget } from "@/lib/utils";
+import {
+  ANCHORED_POSITIONER,
+  popupSurface,
+} from "@/components/ui/anchored-popup";
+import { identityLine, type AccountIdentity } from "@/lib/identity";
+
+/**
+ * #100 — who you are signed in as, in the header.
+ *
+ * THE DESIGN CALL. The handle is visible at rest and IS the trigger for a
+ * popover holding the provider, the role, and the two controls it replaced
+ * ("Account" and "Sign out"). Three reasons it is shaped this way rather than as
+ * a sixth item in the bar:
+ *
+ *  1. The header had no room. It already carries the brand, the theme toggle,
+ *     Account, Sign out and the menu button, and at 390px that cluster measured
+ *     wider than the viewport before this change. Replacing two text controls
+ *     with one leaves the signed-in bar exactly as wide as a guest's.
+ *  2. #74's obligation needs a sentence, not a word. "Owner · signed in with
+ *     GitLab" cannot go in the bar at any width — but it has to be reachable
+ *     from EVERY page, because the alarming moment it exists for (an empty
+ *     workspace that looks like data loss) happens on the inbox, not in
+ *     Settings.
+ *  3. Sign out stops sitting one mis-tap away from Account on a phone. For a
+ *     tool people use when their attention is already thin, that is a feature.
+ *
+ * Rejected: an avatar or initial. The header's menu trigger is ALREADY a
+ * brand-gradient circle (#40 Phase 3.6), so a second circle beside it would read
+ * as two menus, and an initial answers "who?" with one character when the owner
+ * asked to see a name. Rejected: showing the email. Nothing in this app displays
+ * an email (people.ts states the rule), a header is read over shoulders, and the
+ * handle plus the provider already answer the only question being asked.
+ *
+ * The popover is the row-actions idiom (`ANCHORED_POSITIONER` + `popupSurface`),
+ * not a second one: those primitives are what keep a popup from being clipped
+ * past a viewport edge (#92), and this one is anchored to the rightmost text
+ * control in the bar.
+ */
+export function AccountMenu({ identity }: { identity: AccountIdentity }) {
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Names the ACCOUNT, and contains the visible handle so voice control can
+  // address what it can see (WCAG 2.5.3, Label in Name).
+  const triggerLabel = `Account: ${identity.label}`;
+  // A pointer user gets the provider — and the untruncated handle — on hover,
+  // without opening anything. Same convention as the theme toggle (#103).
+  const triggerTitle = `Signed in as ${identity.label} (${identity.provider})`;
+
+  // Popup entries: full-width rows at the 44px minimum (WCAG 2.5.5), matching
+  // the app menu's entries directly above them in the same corner.
+  const entry =
+    "hover:bg-accent hover:text-primary focus-visible:bg-accent focus-visible:text-primary flex min-h-11 w-full items-center rounded-md px-3 text-left outline-none";
+
+  return (
+    <div ref={rootRef} className="relative">
+      <Popover.Root>
+        <Popover.Trigger
+          aria-label={triggerLabel}
+          title={triggerTitle}
+          className={cn(
+            "hover:bg-accent hover:text-primary gap-1 rounded-md px-2 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+            touchTarget,
+          )}
+        >
+          {/* Capped, not wrapped: a long provider handle must not be able to
+              widen the bar past the viewport. Tighter on a phone than on a
+              desktop, because 390px is where the collisions are (#72, #103).
+              The popup below and the `title` above both carry it in full. */}
+          <span className="max-w-20 truncate sm:max-w-40">
+            {identity.label}
+          </span>
+          <ChevronDown aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+        </Popover.Trigger>
+        <Popover.Portal container={rootRef}>
+          <Popover.Positioner {...ANCHORED_POSITIONER}>
+            <Popover.Popup
+              // The dialog's accessible name (axe aria-dialog-name). There is a
+              // visible handle inside, but naming the dialog after the account
+              // would announce the handle twice — on the trigger and again on
+              // the popup it opened.
+              aria-label="Account"
+              className={popupSurface("min-w-56 p-1 text-xs")}
+            >
+              <div className="px-3 py-2">
+                {/* Uncapped and breakable here: this is the copy someone reads
+                    when they are asking "is this the right account?", so it must
+                    never be the truncated version. */}
+                <p
+                  data-account-label
+                  className="text-foreground text-sm font-medium break-all"
+                >
+                  {identity.label}
+                </p>
+                {/* One pre-composed string — see identityLine() for why the
+                    spaces are not JSX text. */}
+                <p className="text-muted-foreground">
+                  {identityLine(identity)}
+                </p>
+              </div>
+              <div className="my-1 border-t" />
+              {/* The deep link the header used to hold. The Account group itself
+                  lands in #35 Phase C; until then this resolves to /settings and
+                  the fragment is inert. */}
+              <Link href="/settings#account" className={entry}>
+                Account settings
+              </Link>
+              {/* Logout is a state change → POST-only (CSRF-safe), so it stays a
+                  form/button rather than becoming a link now that it lives in a
+                  popup. See #21 (P5 batch B). */}
+              <form action="/api/auth/logout" method="post" className="flex">
+                <button type="submit" className={entry}>
+                  Sign out
+                </button>
+              </form>
+            </Popover.Popup>
+          </Popover.Positioner>
+        </Popover.Portal>
+      </Popover.Root>
+    </div>
+  );
+}
