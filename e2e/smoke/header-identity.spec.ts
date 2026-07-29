@@ -8,7 +8,14 @@ import {
   OWNER_HANDLE,
   SESSION_SECRET,
 } from "../constants";
-import { DESKTOP, MOBILE, waitForShell } from "../helpers";
+import {
+  DESKTOP,
+  MOBILE,
+  THEMES,
+  expectThemeApplied,
+  setTheme,
+  waitForShell,
+} from "../helpers";
 
 // #100 — "the header gives no indication of who you are signed in as".
 //
@@ -302,3 +309,120 @@ test.describe("#100 header identity — guest", () => {
     expect(scrollWidth).toBeLessThanOrEqual(MOBILE.width);
   });
 });
+
+// ── Screenshots ─────────────────────────────────────────────────────────────
+//
+// The repo's convention (section-nav.spec.ts, settings-disclosure.spec.ts):
+// captures live with the feature's own spec and write to test-results/, so the
+// frames a reviewer eyeballs are reproducible from a real production build
+// rather than pasted in once. All three identity states × both themes × both
+// widths — the full matrix, because #73 shipped a 2.44:1 dark-mode banner that
+// only a human looking at a dark screenshot caught.
+
+const SHOTS = "test-results/header-identity";
+
+/**
+ * The header band plus the space the popover opens into.
+ *
+ * Clipped from the HEADER's own top edge rather than from y=0: a guest carries
+ * the sandbox banner above the bar, which at 390px is tall enough to push the
+ * header out of a fixed top-of-page crop entirely (the first pass of these
+ * captures produced four guest frames with no header in them).
+ */
+async function captureHeader(
+  page: Page,
+  name: string,
+  width: number,
+): Promise<void> {
+  // `.first()` because /help's page heading is a <header> too — the app bar is
+  // the first one in the document.
+  const box = await page.locator("header").first().boundingBox();
+  expect(box, "the header has no layout box to clip to").not.toBeNull();
+  await page.screenshot({
+    path: `${SHOTS}/${name}.png`,
+    clip: {
+      x: 0,
+      y: Math.max(0, Math.round(box!.y) - 8),
+      width,
+      height: 260,
+    },
+  });
+}
+
+for (const [size, viewport] of [
+  ["desktop", DESKTOP],
+  ["mobile", MOBILE],
+] as const) {
+  for (const theme of THEMES) {
+    test.describe(`#100 header identity — screenshots, ${size}/${theme}`, () => {
+      test(`owner: bar at rest, and the popover open (${size}/${theme})`, async ({
+        page,
+      }) => {
+        await page.setViewportSize(viewport);
+        await setTheme(page, theme);
+        await page.goto("/help");
+        await waitForShell(page);
+        // Guard the precondition: a silently-light "dark" screenshot is worse
+        // than no screenshot, because it looks like it was reviewed (#73).
+        await expectThemeApplied(page, theme);
+
+        await captureHeader(page, `owner-${size}-${theme}-bar`, viewport.width);
+        await identityTrigger(page).click();
+        await expect(accountPopup(page)).toBeVisible();
+        await captureHeader(
+          page,
+          `owner-${size}-${theme}-open`,
+          viewport.width,
+        );
+      });
+
+      test(`guest: bar at rest (${size}/${theme})`, async ({ browser }) => {
+        // A fresh context with NO storage state IS a first-time visitor — the
+        // same opt-out the guest specs above use.
+        const context = await browser.newContext({
+          storageState: { cookies: [], origins: [] },
+          viewport,
+        });
+        const page = await context.newPage();
+        await setTheme(page, theme);
+        await page.goto("/help");
+        await waitForShell(page);
+        await expectThemeApplied(page, theme);
+        await expect(
+          page.getByRole("link", { name: /^sign in$/i }),
+        ).toBeVisible();
+        await captureHeader(page, `guest-${size}-${theme}-bar`, viewport.width);
+        await context.close();
+      });
+
+      test(`member: bar at rest, and the popover open (${size}/${theme})`, async ({
+        browser,
+      }) => {
+        const context = await browser.newContext({
+          storageState: { cookies: [], origins: [] },
+          viewport,
+        });
+        await signInAsMember(context);
+        const page = await context.newPage();
+        await setTheme(page, theme);
+        await page.goto("/help");
+        await waitForShell(page);
+        await expectThemeApplied(page, theme);
+
+        await captureHeader(
+          page,
+          `member-${size}-${theme}-bar`,
+          viewport.width,
+        );
+        await identityTrigger(page).click();
+        await expect(accountPopup(page)).toBeVisible();
+        await captureHeader(
+          page,
+          `member-${size}-${theme}-open`,
+          viewport.width,
+        );
+        await context.close();
+      });
+    });
+  }
+}
