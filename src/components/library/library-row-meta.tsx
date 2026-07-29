@@ -69,7 +69,11 @@ export function AgeLabel({
   voice: Voice;
   settings: AgingSettings;
 }) {
-  const aging = isAging(item.createdAt, settings);
+  // #105 — the row already renders its age from the server's `now`; the amber
+  // tint has to be decided by the same clock, or the class the server sent and
+  // the class the client computes can disagree on a row sitting on the
+  // threshold. The Library page stamps `now` once per request (page.tsx).
+  const aging = isAging(item.createdAt, settings, now);
   return (
     <span
       className={cn(

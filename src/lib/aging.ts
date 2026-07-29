@@ -15,11 +15,25 @@ export function effectiveAgingMs(s: AgingSettings): number {
     : s.agingThresholdMinutes * 60_000;
 }
 
-/** True once an inbox item has sat past the aging threshold. */
-export function isAging(createdAt: Date | string, s: AgingSettings): boolean {
+/**
+ * True once an inbox item has sat past the aging threshold.
+ *
+ * `now` is a parameter (like `freshnessAgeMs`/`freshnessTier`/`shouldPrompt24h`
+ * below) so a render can pass the ONE clock it was handed instead of rolling a
+ * fresh one — #105. Calling `Date.now()` while rendering a component makes the
+ * server's output and the client's hydration disagree the moment they straddle
+ * a threshold, and the aging threshold is seconds away in demo mode
+ * (`demoOverrideSeconds`). The default keeps non-render callers (notifications,
+ * server-side checks) unchanged.
+ */
+export function isAging(
+  createdAt: Date | string,
+  s: AgingSettings,
+  now: number = Date.now(),
+): boolean {
   const created =
     typeof createdAt === "string" ? new Date(createdAt) : createdAt;
-  return Date.now() - created.getTime() >= effectiveAgingMs(s);
+  return now - created.getTime() >= effectiveAgingMs(s);
 }
 
 export type FreshnessTier = "recent" | "aging" | "overdue" | "wayOverdue";

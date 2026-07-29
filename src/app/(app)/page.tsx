@@ -131,6 +131,13 @@ export default async function InboxPage({
         welcomeVisible={welcomeVisible}
         resumeStep={firstRun ? null : resumeStep}
         notifyAging={settings.notifyAging}
+        // #105 — the same request-time clock used above, handed to the client
+        // component so its FIRST render matches this one. Without it InboxView
+        // read the wall clock again at hydration time, and any row younger than
+        // a minute renders "Ns ago" from two different seconds: a text mismatch,
+        // React error #418, and a regeneration from the root that silently
+        // stripped the pre-hydration `dark` class off <html>.
+        now={now}
       />
     </div>
   );

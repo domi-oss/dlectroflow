@@ -45,13 +45,15 @@ for (const [label, viewport] of [
       await page.setViewportSize(viewport);
     });
 
-    // Measured on /help, not on the inbox, and #105 is why: while the inbox is
-    // re-rendering out of a hydration bailout, React swaps the DOM node, and a
-    // single `boundingBox()` read on the old handle comes back **null** (observed
-    // 5/5 reloads at 20x CPU throttle). Geometry needs a route that holds still.
-    // The header is byte-identical on every route, so nothing is lost — and the
-    // inbox, the route the crowding complaint is about, keeps its own check
-    // below using only auto-retrying assertions.
+    // Measured on /help, not on the inbox. #105 was the original reason — while
+    // the inbox re-rendered out of a hydration bailout React swapped the DOM
+    // node, and a single `boundingBox()` read on the old handle came back
+    // **null** (5/5 reloads at 20x CPU throttle). That bailout is fixed, but a
+    // one-shot geometry read still wants the calmest route available: the inbox
+    // re-renders on its own live clock every few seconds regardless. The header
+    // is byte-identical on every route, so nothing is lost — and the inbox, the
+    // route the crowding complaint is about, keeps its own check below using
+    // only auto-retrying assertions.
     test(`is icon-only and still named + hit-targetable (${label})`, async ({
       page,
     }) => {
@@ -99,10 +101,12 @@ for (const [label, viewport] of [
       expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);
     });
 
-    // On /help rather than the inbox because this asserts that `dark` is STILL
-    // on the html element after the click: the inbox drops it on hydration
-    // whenever a sub-minute row is on screen (#105 — not this change's doing).
-    // The header is byte-identical on every route, so nothing is lost.
+    // On /help rather than the inbox: this is a check of the CONTROL (click →
+    // class → label → persisted preference), and the header is byte-identical on
+    // every route, so the quietest one is the right one. (It was originally
+    // parked here because the inbox dropped `dark` on hydration whenever a
+    // sub-minute row was on screen — #105, now fixed and covered by
+    // e2e/smoke/inbox-hydration.spec.ts.)
     test(`toggling re-labels it and writes the theme (${label})`, async ({
       page,
     }) => {
@@ -125,8 +129,8 @@ for (const [label, viewport] of [
     });
 
     // …and the inbox itself, since that is the bar the issue is about. Only
-    // auto-retrying assertions here, so a re-render mid-check retries instead of
-    // reading a detached node (#105).
+    // auto-retrying assertions here, so the inbox's live-clock re-render
+    // mid-check retries instead of reading a detached node.
     test(`is icon-only on the inbox too, and the bar fits (${label})`, async ({
       page,
     }) => {
@@ -154,21 +158,22 @@ for (const [label, viewport] of [
 // actually on screen (#23's invariant, re-asserted now that the label is the
 // only thing carrying the state visibly).
 //
-// Deliberately on /help, not on the inbox. This assertion first ran against `/`
-// and caught a REAL and pre-existing fault there, filed as #105: a sub-minute
-// "Ns ago" row is rendered from a clock seeded during render, so the server's
-// text and the client's disagree, React bails out of hydration (#418) and
-// rebuilds the tree from the root — which resets the `class` on the html element
-// and silently drops dark mode. It reproduced 6/6 reloads at 20x CPU throttle.
-// /help carries the same header with no live clock, so this stays a strict check
-// of #103's behaviour instead of a gate on someone else's bug. Move it back to
-// `/` when #105 lands.
+// Back on `/`, where it belongs. This assertion first ran against the inbox and
+// caught a REAL and pre-existing fault there, filed as #105: a sub-minute "Ns
+// ago" row was rendered from a clock seeded during render, so the server's text
+// and the client's disagreed, React bailed out of hydration (#418) and rebuilt
+// the tree from the root — which reset the `class` on the html element and
+// silently dropped dark mode (6/6 reloads at 20x CPU throttle). It was parked on
+// /help so #103 would not be gated on someone else's bug. #105 is fixed, so the
+// check is back on the route that has a live clock — the one where it has
+// something to catch. The throttled, multi-reload version of the same claim is
+// e2e/smoke/inbox-hydration.spec.ts.
 test("#103 a preloaded dark theme comes up labelled 'Switch to light mode'", async ({
   page,
 }) => {
   await page.setViewportSize(MOBILE);
   await setTheme(page, "dark");
-  await page.goto("/help");
+  await page.goto("/");
   await waitForShell(page);
 
   // The label assertion goes FIRST because it is the auto-retrying one: the

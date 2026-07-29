@@ -148,6 +148,7 @@ export function InboxView({
   welcomeVisible,
   resumeStep,
   notifyAging = true,
+  now: initialNow,
 }: {
   initialItems: Item[];
   settings: AgingSettings;
@@ -161,6 +162,23 @@ export function InboxView({
   resumeStep: { id: string; text: string } | null;
   /** Phase 6 — gates the aging→browser-notification firing (permission still applies). */
   notifyAging?: boolean;
+  /**
+   * #105 — the request-time clock, stamped ONCE on the server and handed down,
+   * exactly as the Library page hands `now` to `<LibraryRows>`. It seeds the
+   * live clock below so the server's markup and the browser's hydration are
+   * rendered from the same instant.
+   *
+   * Required, not optional: it is the only way a caller can be stopped from
+   * reintroducing the fault. Seeding the clock inside this component meant the
+   * server evaluated it at request time and the client evaluated it again at
+   * hydration time, so every row younger than a minute rendered "Ns ago" from
+   * two different clocks. React bails out of a text mismatch (minified error
+   * #418) by regenerating the tree from the ROOT, which rebuilds <html>'s class
+   * list from the RSC payload — and that payload never carries the `dark` the
+   * pre-hydration script wrote, so a returning dark-mode user watched the theme
+   * fall off the inbox. Same fault, same fix as #75 on /settings.
+   */
+  now: number;
 }) {
   const router = useRouter();
   const voice = useVoice();
@@ -192,9 +210,12 @@ export function InboxView({
   // Which completed multi-step row (if any) has its per-step Reopen picker open.
   const [reopenPickerId, setReopenPickerId] = useState<string | null>(null);
 
-  // Live clock for bucketing + relative ages — interval-driven state (rather
-  // than Date.now() during render) so ages recompute live AND render stays pure.
-  const [now, setNow] = useState(() => Date.now());
+  // Live clock for bucketing + relative ages. Seeded from the server's
+  // request-time stamp (#105) — NOT from Date.now(), which is a second reading
+  // of the wall clock and put the first client render a tick ahead of the
+  // markup it was supposed to hydrate. Only the FIRST render is pinned; the
+  // interval below keeps ages ticking from here on.
+  const [now, setNow] = useState(initialNow);
   useEffect(() => {
     const ms = Math.min(effectiveAgingMs(settings), 15_000);
     const id = setInterval(() => setNow(Date.now()), Math.max(1000, ms / 4));
@@ -243,8 +264,12 @@ export function InboxView({
   } = bucketItems(initialItems, now);
 
   const untriagedCount = needsReview.length;
+  // #105 — from the render's own clock, not a fresh Date.now(): this count is
+  // RENDERED ("· 3 aging 🟡" in NavBadge), so a threshold crossed between the
+  // server's render and hydration is another text mismatch. `demoOverrideSeconds`
+  // puts that threshold seconds away rather than half an hour.
   const agingCount = needsReview.filter((i) =>
-    isAging(i.createdAt, settings),
+    isAging(i.createdAt, settings, now),
   ).length;
 
   // Fire a desktop reminder once per aging, not-yet-reminded item, then persist
@@ -1764,13 +1789,21 @@ function ItemRow({
   editMenuItem?: React.ReactNode;
   titleEditor?: React.ReactNode;
 }) {
-  const aging = isAging(item.createdAt, settings);
-  const tier = freshnessTier(item.createdAt, item.freshenedAt, settings);
+  // #105 — every age question this row asks is answered by the ONE clock it was
+  // handed. Each of these three used to default to a fresh `Date.now()`, and all
+  // three feed rendered output (the amber age tint, the StatusPill's WORDS, and
+  // whether the "still needed?" nudge exists at all), so a boundary crossed
+  // between the server's render and hydration was a structural mismatch, not
+  // just a stale label. In demo mode (`demoOverrideSeconds`) those boundaries
+  // are seconds apart, which is well inside the server↔hydration gap.
+  const aging = isAging(item.createdAt, settings, now);
+  const tier = freshnessTier(item.createdAt, item.freshenedAt, settings, now);
   const showStillNeededPrompt = shouldPrompt24h(
     item.createdAt,
     item.freshenedAt,
     item.promptDismissedAt,
     settings,
+    now,
   );
   // v5: 🗑 delete appears twice — once inline in the end cluster, once as a
   // duplicate ▾-menu entry — both driven by the same confirmingDelete state.
