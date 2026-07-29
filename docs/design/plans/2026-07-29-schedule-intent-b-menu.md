@@ -16,6 +16,7 @@
 - **No new npm dependencies.** `@base-ui/react/popover` is already used; the duration popover in `src/components/inbox/row-actions.tsx:250` is the pattern to copy.
 - **`AGENTS.md` applies:** Next.js 16.2, APIs differ from training data. Read `node_modules/next/dist/docs/` before touching framework code.
 - **Defaults must match A exactly** — deadline 3 days out, priority `high`, hours `work`, `busy` true. They come from `defaultIntentFor()`; do not restate them as literals in the UI, or the menu path and the no-menu path will drift.
+- **`defaultIntentFor` lives in `src/lib/scheduling/intent.ts`, not in the action file.** !187 had to move it there: `next build` rejects a **synchronous** export from a `"use server"` module, and making it async would have turned "what are the defaults?" into a network call from this plan's client component. Import it from `@/lib/scheduling/intent`.
 - **Pseudo-enum columns get CHECK constraints** named `<Table>_<column>_check`, mirroring the const object, and **must be registered** in `src/lib/enum-constraint-sync.integration.test.ts`'s `REGISTRY` — the suite fails if a managed constraint exists without a registry entry or vice versa.
 - **Migrations repair before they enforce** (see `prisma/migrations/20260727194512_step_est_minutes_check/migration.sql`): if a column could hold a violating value, `UPDATE` it first so `prisma migrate deploy` cannot wedge a release halfway.
 - **Accessibility is a gate, not a polish pass.** The popover needs an accessible name (axe's `aria-dialog-name`), labelled controls, full keyboard operation, focus restored to the trigger on close, and 44×44 minimum touch targets via `touchTarget` from `src/lib/utils.ts`.
@@ -427,7 +428,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 - Test: `src/app/actions/schedule-intent.test.ts`
 
 **Interfaces:**
-- Consumes: `defaultIntentFor` (#104), `prisma`, `currentWorkspaceId`, `isOwnerRequest`.
+- Consumes: `defaultIntentFor` from `@/lib/scheduling/intent` (#104 — NOT from the action file; see Global Constraints), `prisma`, `currentWorkspaceId`, `isOwnerRequest`.
 - Produces: `loadScheduleIntent(taskId: string): Promise<ScheduleIntent | null>` — `null` when the task is not visible to the caller.
 
 - [ ] **Step 1: Write the failing tests**
@@ -530,7 +531,7 @@ Create `src/app/actions/schedule-intent.ts`:
 
 import { prisma } from "@/lib/db";
 import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
-import { defaultIntentFor } from "./google-schedule";
+import { defaultIntentFor } from "@/lib/scheduling/intent";
 import { SchedulePriority, ScheduleHours } from "@/lib/scheduling/types";
 import type { ScheduleIntent, ScheduleUnit } from "@/lib/scheduling/types";
 
