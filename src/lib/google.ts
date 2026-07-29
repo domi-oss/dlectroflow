@@ -11,8 +11,13 @@ const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const TASKS_API = "https://tasks.googleapis.com/tasks/v1";
 const SCOPE = "https://www.googleapis.com/auth/tasks";
 
-// The Google Tasks list Reclaim syncs from (default per Reclaim's docs: "🗓 Reclaim").
-// Match is case-insensitive "contains"; override the search term with env.
+// The Google Tasks list Reclaim syncs from. Reclaim syncs EXCLUSIVELY from its
+// own "🗓 Reclaim" list — per its docs, "any other tasks in other lists will not
+// be synced" — so pointing GOOGLE_TASKS_LIST_NAME at a different list means
+// Reclaim never sees anything we push. That is not a broken push: it is a list
+// with no scheduler attached, which is a legitimate setup for a self-hoster
+// without Reclaim, and `pickEncoder` detects it and drops the Reclaim syntax.
+// Match is case-insensitive "contains".
 const RECLAIM_LIST_MATCH = (
   process.env.GOOGLE_TASKS_LIST_NAME ?? "reclaim"
 ).toLowerCase();
