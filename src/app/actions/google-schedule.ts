@@ -14,12 +14,9 @@ import {
 import { TaskSource, TaskStatus } from "@/lib/constants";
 import { currentWorkspaceId, isOwnerRequest } from "@/lib/workspace";
 import { awardFirstSchedule } from "@/lib/scheduling/award";
-import {
-  SchedulePriority,
-  ScheduleHours,
-  SchedulingMethod,
-} from "@/lib/scheduling/types";
-import type { ScheduleIntent, ScheduleUnit } from "@/lib/scheduling/types";
+import { SchedulingMethod } from "@/lib/scheduling/types";
+import type { ScheduleUnit } from "@/lib/scheduling/types";
+import { defaultIntentFor } from "@/lib/scheduling/intent";
 import { deriveWindows } from "@/lib/scheduling/windows";
 import { pickEncoder } from "@/lib/scheduling/encoder";
 import { publicOrigin } from "@/lib/origin";
@@ -38,26 +35,6 @@ export type GoogleScheduleResult =
         | "error";
       message?: string;
     };
-
-/** Reclaim's own default due date is 3 days out; matching it means the no-menu
- *  path behaves exactly as it did before the menu existed (sub-project B). */
-const DEFAULT_DUE_DAYS = 3;
-
-export function defaultIntentFor(
-  units: ScheduleUnit[],
-  now: Date = new Date(),
-): ScheduleIntent {
-  return {
-    dueAt: new Date(now.getTime() + DEFAULT_DUE_DAYS * 24 * 60 * 60_000),
-    // High, not Normal: today we send no priority at all and inherit Reclaim's
-    // P2 default, so anything lower would silently downgrade every task the
-    // owner already schedules.
-    priority: SchedulePriority.High,
-    hours: ScheduleHours.Work,
-    busy: true,
-    units: [...units].sort((a, b) => a.order - b.order),
-  };
-}
 
 /**
  * Push a task's steps into the Reclaim-synced Google Tasks list. Reclaim then

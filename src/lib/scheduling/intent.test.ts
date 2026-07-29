@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { defaultIntentFor } from "./google-schedule";
-import { ScheduleHours, SchedulePriority } from "@/lib/scheduling/types";
-import { deriveWindows } from "@/lib/scheduling/windows";
+import { defaultIntentFor } from "./intent";
+import { ScheduleHours, SchedulePriority } from "./types";
+import { deriveWindows } from "./windows";
 
 describe("defaultIntentFor — what the no-menu path sends", () => {
   const now = new Date("2026-07-29T09:00:00.000+01:00");
