@@ -43,11 +43,14 @@ export default async function SettingsPage({
   // signature already accepts null (a caller with no account is answered without
   // a query), so no non-null assertion is needed at all.
   const meId = me?.id ?? null;
-  // Both owner-only reads. loadPeopleAdmin re-checks the role itself and returns
-  // null for anyone else, so the panel cannot render for a member even if this
-  // call site were ever changed to drop the gate.
   const [google, people] = await Promise.all([
-    owner ? getGoogleStatus(meId) : Promise.resolve(null),
+    // #118 Phase C — every signed-in account has its own connection, so this is
+    // resolved for whoever is asking. A caller with no account is passed null
+    // and getGoogleStatus() answers without a query.
+    getGoogleStatus(meId),
+    // Still owner-only. loadPeopleAdmin re-checks the role itself and returns
+    // null for anyone else, so the panel cannot render for a member even if this
+    // call site were ever changed to drop the gate.
     owner ? loadPeopleAdmin(me?.id) : Promise.resolve(null),
   ]);
   const voice: Voice = settings.voice === "playful" ? "playful" : "plain";
@@ -56,15 +59,12 @@ export default async function SettingsPage({
   // eslint-disable-next-line react-hooks/purity -- async Server Component: this runs once per request on the server, not in a compiler-memoised client render.
   const now = Date.now();
 
-  // #72 — the nav must list what this render actually put on the page. Two
-  // sections are conditional (see the branches below): an owner with no status
-  // object gets a nav without a dead "Integrations" anchor, and People is
-  // owner-only, so a guest never gets a link that jumps nowhere.
-  const showIntegrations = owner ? google != null : true;
+  // #72 + #118 — the nav lists what this render actually put on the page. Both
+  // presentations of the Integrations section render something now (your own
+  // panel, or the signed-out shell), so it is always listed; People remains
+  // owner-only, so a caller without it never gets a link that jumps nowhere.
   const sections = SETTINGS_SECTIONS.filter(
-    (section) =>
-      (section.id !== "settings-integrations" || showIntegrations) &&
-      (section.id !== "settings-people" || people != null),
+    (section) => section.id !== "settings-people" || people != null,
   );
 
   return (
@@ -145,20 +145,18 @@ export default async function SettingsPage({
           fable={randomFableLine()}
         />
       </div>
-      {owner && google ? (
-        <div className="border-t pt-4">
+      <div className="border-t pt-4">
+        {me ? (
+          // #118 Phase C — YOUR OWN connection, owner or member alike. Was
+          // `owner && google`, with a member falling into the guest shell below
+          // and no way to reach the connect flow from the UI at all.
           <IntegrationsPanel google={google} voice={voice} />
-        </div>
-      ) : !owner ? (
-        // #11 — guests see the integrations section as a read-only owner-only
-        // shell (no owner status fetched or shown).
-        <div className="border-t pt-4">
+        ) : (
+          // #11 — a caller with no account sees the section EXISTS, read-only,
+          // with no status fetched and none shown.
           <IntegrationsPanel google={null} readOnly voice={voice} />
-        </div>
-      ) : // Owner but no status object (shouldn't happen; getGoogleStatus always
-      // returns one) — render nothing, matching the pre-#11 behaviour rather
-      // than showing an owner the guest shell.
-      null}
+        )}
+      </div>
       <div className="border-t pt-4">
         <DemoSection firstRunPreview={settings.firstRunPreview} voice={voice} />
       </div>

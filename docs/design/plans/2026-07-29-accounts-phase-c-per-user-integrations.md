@@ -2010,7 +2010,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 **Today a member gets the same 🔒 owner-only shell a guest gets** (`settings/page.tsx:151`). That branch becomes "any signed-in account sees their own panel; a guest sees the shell". The shell's copy also stops being true — it says the integration is owner-only, which it no longer is.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `src/app/(app)/settings/page.test.tsx` (read its existing harness first):
 
@@ -2084,7 +2084,7 @@ In `src/components/settings/integrations-panel.test.tsx`, keep every existing te
   });
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 ```bash
 npx vitest run "src/app/(app)/settings/page.test.tsx" src/components/settings/integrations-panel.test.tsx
@@ -2092,7 +2092,7 @@ npx vitest run "src/app/(app)/settings/page.test.tsx" src/components/settings/in
 
 Expected: FAIL — a member gets the shell, the shell says "Owner-only", no `/your google/i` copy exists.
 
-- [ ] **Step 3: Implement the page branch**
+- [x] **Step 3: Implement the page branch**
 
 `src/app/(app)/settings/page.tsx`. The Google read stops being owner-gated (the People read does not — it stays owner-only):
 
@@ -2138,7 +2138,7 @@ Expected: FAIL — a member gets the shell, the shell says "Owner-only", no `/yo
 
 The old "owner but no status object → render nothing" arm goes: `getGoogleStatus` always returns an object, and `me` is now the only condition.
 
-- [ ] **Step 4: Implement the panel copy and a11y**
+- [x] **Step 4: Implement the panel copy and a11y**
 
 `src/components/settings/integrations-panel.tsx`:
 
@@ -2173,14 +2173,14 @@ Two more things the tests above demand:
 
 Do **not** re-introduce an `opacity-*` wash on either card — `integrations-panel.test.tsx`'s `#90` lock and `e2e/a11y/axe-guest-surfaces.spec.ts` both police it.
 
-- [ ] **Step 5: Run the tests and the whole suite**
+- [x] **Step 5: Run the tests and the whole suite**
 
 ```bash
 npx vitest run src/components/settings "src/app/(app)/settings"
 npm test && npx tsc --noEmit && npm run lint
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add "src/app/(app)/settings/page.tsx" "src/app/(app)/settings/page.test.tsx" \

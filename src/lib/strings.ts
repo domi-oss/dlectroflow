@@ -687,11 +687,16 @@ export const STRINGS = {
     playful:
       "The workspace owner picks which model does the AI breakdowns. As a guest you get a speedy one, on the house.",
   },
-  "settings.integrationsOwnerHint": {
+  // #118 Phase C — integrations are PER USER now, so the read-only shell is for
+  // a caller with no ACCOUNT rather than for anyone who is not the owner.
+  // `settings.integrationsOwnerHint` is gone with it; `settings.ownerOnly` stays
+  // because BreakdownModelSection is still genuinely owner-only.
+  "settings.integrationsSignedOut": { plain: "Sign in", playful: "Sign in" },
+  "settings.integrationsSignInHint": {
     plain:
-      "Live integrations connect to the owner's own accounts, so they're owner-only. Sign in as the owner to set them up.",
+      "Sign in to connect your own Google account. Your connection is yours alone — nobody else on this instance can see or use it.",
     playful:
-      "Live integrations hook into the owner's own accounts, so they're owner-only. Sign in as the owner to wire them up.",
+      "Sign in to hook up your own Google account. Yours alone — nobody else gets a peek. 🔒",
   },
   // Settings footer link → in-app /help docs. Dedicated key (not the shared
   // nav.help label) so the footer reads "Help & Docs" — both words capitalised

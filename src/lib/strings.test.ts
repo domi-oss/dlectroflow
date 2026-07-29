@@ -122,6 +122,10 @@ describe("t() function", () => {
     // #11 — guest read-only settings + onboarding help banner
     ["settings.ownerOnly", "plain", "Owner-only"],
     ["settings.ownerOnly", "playful", "Owner-only"],
+    // #118 — the integrations shell is for a signed-OUT caller now, not a
+    // non-owner. Literal in both voices; the 🔒 lives in the hint's playful copy.
+    ["settings.integrationsSignedOut", "plain", "Sign in"],
+    ["settings.integrationsSignedOut", "playful", "Sign in"],
     ["guest.newHere", "plain", "New here?"],
     ["guest.helpCta", "plain", "See the help & docs →"],
     ["guest.helpCta", "playful", "🆘 See the help & docs →"],
@@ -564,7 +568,7 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     // → is a functional glyph, allowed in plain).
     "settings.ownerOnly",
     "settings.modelOwnerHint",
-    "settings.integrationsOwnerHint",
+    "settings.integrationsSignedOut",
     "settings.helpDocs",
     "guest.newHere",
     "guest.helpCta",

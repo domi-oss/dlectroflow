@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 const { disconnectMock } = vi.hoisted(() => ({ disconnectMock: vi.fn() }));
 vi.mock("@/app/actions/google-schedule", () => ({
@@ -78,8 +79,91 @@ describe("IntegrationsPanel — Google card", () => {
   });
 });
 
-describe("IntegrationsPanel — guest read-only shell (#11)", () => {
-  it("shows the integration exists + an owner-only label, with no actions", () => {
+// ── #118 Phase C — the connection is YOURS ─────────────────────────────────
+describe("IntegrationsPanel — per-user copy and a11y (#118)", () => {
+  it("says the connection is YOURS, not the instance's", () => {
+    render(
+      <IntegrationsPanel
+        google={{ ...base, connected: true }}
+        defaultExpanded
+      />,
+    );
+    // Copy matters here: a member reading "the owner's Google account" would
+    // reasonably assume disconnecting affects somebody else.
+    expect(screen.getByText(/your own google tasks/i)).toBeInTheDocument();
+  });
+
+  it("the read-only shell no longer claims the integration is owner-only", () => {
+    // #118 — it is per-user now. The shell is for a caller with no ACCOUNT.
+    render(<IntegrationsPanel google={null} readOnly defaultExpanded />);
+    expect(screen.queryByText(/owner-only/i)).toBeNull();
+    expect(screen.getAllByText(/sign in/i).length).toBeGreaterThan(0);
+  });
+
+  it("gives both destructive controls a 44x44 hit target (WCAG 2.5.5)", () => {
+    render(
+      <IntegrationsPanel
+        google={{ ...base, connected: true }}
+        defaultExpanded
+      />,
+    );
+    const disconnect = screen.getByRole("button", { name: /^disconnect$/i });
+    expect(disconnect.className).toContain("min-h-11");
+    fireEvent.click(disconnect);
+    for (const name of [/yes, disconnect/i, /^cancel$/i]) {
+      const btn = screen.getByRole("button", { name });
+      expect(btn.className, String(name)).toContain("min-h-11");
+    }
+  });
+
+  it("announces the disconnect confirmation and wires it to the button", () => {
+    render(
+      <IntegrationsPanel
+        google={{ ...base, connected: true }}
+        defaultExpanded
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^disconnect$/i }));
+    // A confirmation that appears silently is a confirmation a screen-reader
+    // user never learns about — and the destructive button has to SAY what it
+    // is confirming, not just be next to the words.
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent(/remove access/i);
+    const confirm = screen.getByRole("button", { name: /yes, disconnect/i });
+    expect(confirm).toHaveAttribute("aria-describedby", status.id);
+    expect(status.id).toBeTruthy();
+  });
+
+  it("keeps the Disconnect confirmation reachable and cancellable from the keyboard", async () => {
+    const user = userEvent.setup();
+    render(
+      <IntegrationsPanel
+        google={{ ...base, connected: true }}
+        defaultExpanded
+      />,
+    );
+    const disconnect = screen.getByRole("button", { name: /^disconnect$/i });
+    disconnect.focus();
+    await user.keyboard("{Enter}");
+    expect(
+      screen.getByRole("button", { name: /yes, disconnect/i }),
+    ).toBeInTheDocument();
+
+    // Cancel by keyboard, and focus must land somewhere real rather than on
+    // <body> after the button that had it was unmounted.
+    const cancel = screen.getByRole("button", { name: /^cancel$/i });
+    cancel.focus();
+    await user.keyboard("{Enter}");
+    expect(disconnectMock).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: /^disconnect$/i }),
+    ).toBeInTheDocument();
+    expect(document.activeElement).not.toBe(document.body);
+  });
+});
+
+describe("IntegrationsPanel — signed-out read-only shell (#11, #118)", () => {
+  it("shows the integration exists + a sign-in label, with no actions", () => {
     render(
       <IntegrationsPanel
         google={null}
@@ -90,8 +174,9 @@ describe("IntegrationsPanel — guest read-only shell (#11)", () => {
     );
     // The integration is named so guests see what exists…
     expect(screen.getByText("Google Tasks")).toBeInTheDocument();
-    // …flagged owner-only (text, not colour alone)…
-    expect(screen.getAllByText(/owner-only/i).length).toBeGreaterThan(0);
+    // …flagged as needing an account (text, not colour alone). #118 changed the
+    // WORD — the integration is per-user, not owner-only — not the rule.
+    expect(screen.getAllByText(/sign in/i).length).toBeGreaterThan(0);
     // …and no interactive affordances.
     expect(screen.queryByRole("link", { name: /connect/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /disconnect/i })).toBeNull();
@@ -123,7 +208,7 @@ describe("IntegrationsPanel — guest read-only shell (#11)", () => {
     expect(card!.className).not.toContain("opacity-");
   });
 
-  it("never leaks the owner's real connection status to guests", () => {
+  it("never leaks anyone's real connection status to a signed-out caller", () => {
     render(
       <IntegrationsPanel
         google={null}
@@ -139,7 +224,7 @@ describe("IntegrationsPanel — guest read-only shell (#11)", () => {
 });
 
 describe("IntegrationsPanel — the disclosure (#101)", () => {
-  it("rests collapsed for the owner, keeping the owner-only badge visible", () => {
+  it("rests collapsed for a signed-in account", () => {
     render(<IntegrationsPanel google={base} />);
     const trigger = document.querySelector(
       '[data-section-toggle="settings-integrations"]',
@@ -148,7 +233,7 @@ describe("IntegrationsPanel — the disclosure (#101)", () => {
     expect(screen.queryByRole("link", { name: /connect google/i })).toBeNull();
   });
 
-  it("rests collapsed in the guest shell too, badge and all", () => {
+  it("rests collapsed in the signed-out shell too, badge and all", () => {
     render(<IntegrationsPanel google={null} readOnly voice="plain" />);
     const trigger = document.querySelector(
       '[data-section-toggle="settings-integrations"]',
@@ -157,7 +242,7 @@ describe("IntegrationsPanel — the disclosure (#101)", () => {
     // The "you cannot act on this" read has to survive the section being closed,
     // because closed is how a guest first meets it (#11 + #90).
     expect(trigger.closest("[data-section-header]")!.textContent).toMatch(
-      /owner-only/i,
+      /sign in/i,
     );
   });
 });

@@ -29,6 +29,20 @@ const settingsFixture = {
 const isOwnerRequest = vi.fn().mockResolvedValue(true);
 const voiceOverride = vi.fn<() => "plain" | "playful">(() => "plain");
 
+// #118 Phase C — the page's Integrations branch is now "signed in → your own
+// panel, no account → the read-only shell", so the identity mock has to be able
+// to answer MEMBER as well as owner and guest. Derived from isOwnerRequest by
+// default so the existing owner/guest specs above are untouched.
+const OWNER_USER = { id: "u-owner", role: "owner", workspaceId: "ws-test" };
+const MEMBER_USER = {
+  id: "u-member",
+  role: "member",
+  workspaceId: "ws-member",
+};
+const userOverride = vi.fn<() => Promise<object | null>>(async () =>
+  (await isOwnerRequest()) ? OWNER_USER : null,
+);
+
 vi.mock("@/lib/db", () => ({
   getSettings: vi.fn().mockImplementation(async () => ({
     ...settingsFixture,
@@ -40,10 +54,7 @@ vi.mock("@/lib/workspace", () => ({
   isOwnerRequest: () => isOwnerRequest(),
   // #35 Phase B — the page resolves the identity once and derives `owner` from
   // its role, so the mock has to answer with a user, not just a boolean.
-  currentUser: async () =>
-    (await isOwnerRequest())
-      ? { id: "u-owner", role: "owner", workspaceId: "ws-test" }
-      : null,
+  currentUser: () => userOverride(),
 }));
 vi.mock("@/lib/google", () => ({
   getGoogleStatus: vi.fn().mockResolvedValue(null),
@@ -87,8 +98,26 @@ vi.mock("@/components/settings/appearance-section", () => ({
 vi.mock("@/components/settings/focus-timer-section", () => ({
   FocusTimerSection: stub("settings-focus-timer"),
 }));
+// #118 — this stub records the two props the page's branch decides: whether the
+// panel is the read-only shell, and WHOSE status it was handed. The real panel's
+// own copy and a11y are covered in integrations-panel.test.tsx.
 vi.mock("@/components/settings/integrations-panel", () => ({
-  IntegrationsPanel: stub("settings-integrations"),
+  IntegrationsPanel: ({
+    defaultExpanded,
+    readOnly,
+    google,
+  }: {
+    defaultExpanded?: boolean;
+    readOnly?: boolean;
+    google?: unknown;
+  }) => (
+    <div
+      data-stub="settings-integrations"
+      data-default-expanded={String(Boolean(defaultExpanded))}
+      data-read-only={String(Boolean(readOnly))}
+      data-google={google == null ? "null" : "status"}
+    />
+  ),
 }));
 vi.mock("@/components/settings/people-panel", () => ({
   PeoplePanel: stub("settings-people"),
@@ -135,8 +164,22 @@ async function renderWholePage() {
 
 afterEach(() => {
   cleanup();
+  // Call history is per-test: these are module-level mocks, so without this a
+  // `not.toHaveBeenCalledWith(...)` assertion would be about the whole file's
+  // history rather than about the render under test.
+  vi.mocked(getGoogleStatus).mockClear();
+  vi.mocked(loadPeopleAdmin).mockClear();
   voiceOverride.mockReturnValue("plain");
+  userOverride.mockImplementation(async () =>
+    (await isOwnerRequest()) ? OWNER_USER : null,
+  );
+  isOwnerRequest.mockResolvedValue(true);
 });
+
+/** The recorded Integrations stub, or null if the page rendered none. */
+function integrationsStub() {
+  return document.querySelector('[data-stub="settings-integrations"]');
+}
 
 describe("SettingsPage footer help link", () => {
   it('renders "Help & Docs" — dedicated string, casing + spacing intact', async () => {
@@ -185,5 +228,75 @@ describe("SettingsPage section composition (#101)", () => {
   it("closes the page with administration, not with it", async () => {
     const stubs = await renderWholePage();
     expect(stubs.at(-1)!.getAttribute("data-stub")).toBe("settings-people");
+  });
+});
+
+// ── #118 Phase C — a member manages their OWN connection ───────────────────
+//
+// A member used to get the identical 🔒 owner-only shell a guest gets
+// (settings/page.tsx's `owner && google` / `!owner` branch), so the one account
+// type this phase exists for had no way to reach the connect flow from the UI at
+// all. The branch is now "signed in → your own panel, no account → the shell".
+describe("SettingsPage — Integrations is per-account (#118)", () => {
+  it("gives a MEMBER the real Integrations panel, not the owner-only shell", async () => {
+    isOwnerRequest.mockResolvedValue(false);
+    userOverride.mockResolvedValue(MEMBER_USER);
+    vi.mocked(getGoogleStatus).mockResolvedValueOnce({
+      configured: true,
+      connected: false,
+      needsReconnect: false,
+    });
+
+    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+
+    const panel = integrationsStub();
+    expect(panel).not.toBeNull();
+    expect(panel!.getAttribute("data-read-only")).toBe("false");
+    expect(panel!.getAttribute("data-google")).toBe("status");
+  });
+
+  it("resolves the status for the member's OWN id", async () => {
+    isOwnerRequest.mockResolvedValue(false);
+    userOverride.mockResolvedValue(MEMBER_USER);
+    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+    expect(getGoogleStatus).toHaveBeenCalledWith("u-member");
+    expect(getGoogleStatus).not.toHaveBeenCalledWith("u-owner");
+  });
+
+  it("still gives a caller with NO ACCOUNT the read-only shell and no status", async () => {
+    isOwnerRequest.mockResolvedValue(false);
+    userOverride.mockResolvedValue(null);
+
+    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+
+    const panel = integrationsStub();
+    expect(panel!.getAttribute("data-read-only")).toBe("true");
+    expect(panel!.getAttribute("data-google")).toBe("null");
+    // null, not an id — getGoogleStatus answers without a query, so a guest's
+    // settings page load touches the credential table not at all (#118).
+    expect(getGoogleStatus).toHaveBeenCalledWith(null);
+  });
+
+  it("lists Integrations in the section nav for a member", async () => {
+    // showIntegrations was `owner ? google != null : true`, which a member fell
+    // through in the wrong direction once they stopped being "not owner".
+    isOwnerRequest.mockResolvedValue(false);
+    userOverride.mockResolvedValue(MEMBER_USER);
+    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+    expect(
+      screen.getByRole("link", { name: /integrations/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the panel for an owner even when no status object came back", async () => {
+    // The old branch had a third arm ("owner but no status → render nothing")
+    // that could only fire if getGoogleStatus lied. It always returns an object,
+    // so the arm is gone and `me` is the only condition.
+    userOverride.mockResolvedValue(OWNER_USER);
+    vi.mocked(getGoogleStatus).mockResolvedValueOnce(
+      null as unknown as Awaited<ReturnType<typeof getGoogleStatus>>,
+    );
+    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+    expect(integrationsStub()!.getAttribute("data-read-only")).toBe("false");
   });
 });
