@@ -362,15 +362,37 @@ describe("e2e webServer boots the artefact that ships (#97)", () => {
     },
   );
 
+  // The bind address is the one divergence that took CI down rather than just
+  // making the suite less truthful: `server.js` honours HOSTNAME, `next start`
+  // ignores it, and Docker sets HOSTNAME to the container id on every container
+  // — so the standalone server binds the container's own address and nothing
+  // answers on localhost. Both Dockerfiles carry `ENV HOSTNAME=0.0.0.0` for
+  // exactly that reason; the e2e config has to agree or the gate cannot boot.
+  it("pins the same bind address the runtime image does", () => {
+    expect(playwrightConfig).toMatch(/HOSTNAME:\s*"0\.0\.0\.0"/);
+  });
+
   it.each([["Dockerfile"], ["Dockerfile.ci"]])(
-    "%s grafts on the same asset trees the e2e server does",
+    "%s grafts on the same asset trees and bind address the e2e server does",
     (filename) => {
-      const copies = stageInstructions(
+      const runner = stageInstructions(
         parseDockerfile(readFileSync(join(process.cwd(), filename), "utf8")),
         "runner",
-      )
+      );
+      const copies = runner
         .filter((i) => i.instruction === "COPY")
         .map((i) => i.args);
+
+      expect(
+        runner.some(
+          (i) =>
+            i.instruction === "ENV" && /^HOSTNAME=0\.0\.0\.0$/.test(i.args),
+        ),
+        `${filename} runner stage must set ENV HOSTNAME=0.0.0.0: the standalone ` +
+          `entrypoint binds whatever HOSTNAME says, and Docker sets it to the ` +
+          `container id, so without this the server answers on the container's ` +
+          `own address and the readiness probe never passes (#97)`,
+      ).toBe(true);
 
       // Destinations, not sources: the CI file stages the build output under
       // ci-dist/ (.dockerignore excludes .next), so only the left-hand side

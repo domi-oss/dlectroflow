@@ -22,6 +22,15 @@ import { SESSION_SECRET, STORAGE_STATE, BASE_URL } from "./e2e/constants";
 //     them in. Skip that copy and every HTML route still returns 200 while
 //     every stylesheet, client chunk and public file 404s — an app with no
 //     styling and no hydration that a status-code smoke check calls healthy.
+//   * The bind address. `server.js` honours `process.env.HOSTNAME`; `next start`
+//     ignores it and always binds 0.0.0.0. Docker sets HOSTNAME to the container
+//     id on every container, so inside CI the standalone server binds the
+//     container's own address and `http://localhost:3000` is refused — which is
+//     exactly why Dockerfile and Dockerfile.ci both carry
+//     `ENV HOSTNAME=0.0.0.0`. Reproduced with `HOSTNAME=runner-abc123 node
+//     .next/standalone/server.js`: `getaddrinfo ENOTFOUND runner-abc123`. The
+//     first CI run of this change hit it, which is a fair advertisement for the
+//     switch: `next start` cannot see this class of bug at all.
 //   * Modules. Only the traced dependency subtree is present, which is exactly
 //     the class of failure #76 was (`dotenv` resolving only by hoisting).
 //
@@ -89,6 +98,12 @@ const bootGuardEnv = {
   GUEST_IP_HASH_SALT: "e2e-guest-ip-hash-salt-000",
   TOKEN_ENC_KEY:
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  // What Dockerfile and Dockerfile.ci both set, and for the same reason: the
+  // standalone entrypoint reads HOSTNAME, Docker sets HOSTNAME to the container
+  // id on every container, and a server bound to the container's own address
+  // does not answer on localhost. Not a test workaround — it is the production
+  // value. src/lib/dockerfile-hygiene.test.ts asserts all three agree.
+  HOSTNAME: "0.0.0.0",
   // Only when there is one to forward — otherwise leave the key unset rather
   // than handing the server an empty connection string.
   ...(DATABASE_URL ? { DATABASE_URL } : {}),
