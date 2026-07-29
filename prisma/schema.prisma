@@ -181,11 +181,16 @@ model Settings {
 // ── Google Tasks OAuth (tokens obtained at runtime) ───────────────────────
 // client_id/secret come from env (GOOGLE_CLIENT_ID/SECRET); only tokens here.
 //
-// #35 Phase A: the `@default("singleton")` id is GONE and the accounts
-// migration DELETEs every row, so the tokens that belonged to the pre-accounts
-// "owner" workspace are destroyed rather than left sitting behind a guard that
-// no longer means what it did. `userId` is nullable ONLY because Phase C is
-// what writes it; Google Tasks sync is deliberately down until then.
+// #35 Phase A dropped the `@default("singleton")` id and DELETEd every row, so
+// the tokens that belonged to the pre-accounts "owner" workspace are destroyed.
+// The SHARED ROW ITSELF IS NOT GONE: src/lib/google.ts still passes
+// `id: SINGLETON_ID` explicitly on every read (getAuth's upsert) and write
+// (storeTokens), so one instance-wide row is re-created on demand and sync kept
+// working — only the database default moved into application code. `userId` is
+// nullable because nothing writes it yet; Phase C (#118) is what keys the row on
+// a user. Until it does, both OAuth routes are owner-gated at the handler (#119)
+// — a shared credential row plus an ungated writer is how a member ends up
+// receiving the owner's tasks.
 model GoogleAuth {
   id             String    @id @default(cuid())
   userId         String?   @unique

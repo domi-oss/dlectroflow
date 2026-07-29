@@ -2,10 +2,20 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { exchangeCode } from "@/lib/google";
 import { requestOrigin } from "@/lib/origin";
+import { isOwnerRequest } from "@/lib/workspace";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request): Promise<Response> {
+  // #119 — same handler-layer owner gate as /start, and it matters more here:
+  // this is the route that WRITES credentials (exchangeCode → storeTokens → the
+  // instance-wide GoogleAuth row). Gating on the role rather than on the
+  // cookies means a member who somehow holds a state + verifier pair still
+  // cannot complete an exchange. First, before the cookie jar is read.
+  if (!(await isOwnerRequest())) {
+    return new NextResponse("Forbidden", { status: 403 });
+  }
+
   const url = new URL(req.url);
   const origin = requestOrigin(req);
   const code = url.searchParams.get("code");

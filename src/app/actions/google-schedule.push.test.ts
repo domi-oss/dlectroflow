@@ -110,6 +110,24 @@ beforeEach(() => {
 });
 
 describe("pushStepsToGoogleTasks — provider-agnostic marker + reward-once", () => {
+  // #119 — this file's beforeEach pins isOwnerRequest → true, so until now every
+  // test here ran as the owner and NOTHING asserted the rejection. That absent
+  // negative case is why the missing owner gate on the OAuth routes went
+  // unnoticed: the guard was covered on the paths that USE the credential
+  // (single/disconnect) and nowhere on the push path. Phase C (#118) will change
+  // what "allowed" means here, and this is the test it has to keep passing.
+  it("rejects a non-owner without touching Google", async () => {
+    isOwnerMock.mockResolvedValue(false);
+    taskFindFirstMock.mockResolvedValue(baseTask());
+    await expect(pushStepsToGoogleTasks("task-1")).rejects.toThrow(
+      "owner only",
+    );
+    expect(upsertGoogleTaskMock).not.toHaveBeenCalled();
+    expect(createGoogleTaskMock).not.toHaveBeenCalled();
+    expect(taskUpdateMock).not.toHaveBeenCalled();
+    expect(logRewardMock).not.toHaveBeenCalled();
+  });
+
   it("marks the task scheduled + awards once on first push", async () => {
     taskFindFirstMock.mockResolvedValue(baseTask());
     const res = await pushStepsToGoogleTasks("task-1");

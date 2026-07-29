@@ -104,6 +104,22 @@ describe("proxy: authenticated-only paths", () => {
     const res = await proxy(reqWith("/"));
     expect(res.headers.get("location")).toBeNull();
   });
+
+  // #119 — the guest leg of the OWNER_ONLY_PREFIXES gate. The role half now
+  // lives in the handlers (isOwnerRequest), and this asserts the middleware half
+  // it is paired with still turns a guest away before any handler runs.
+  it("keeps stopping a guest session at the Google OAuth routes", async () => {
+    const guest = await signGuestSession("g-1", SECRET, 3600);
+    for (const path of [
+      "/api/google/oauth/start",
+      "/api/google/oauth/callback",
+    ]) {
+      const res = await proxy(
+        reqWith(path, { name: GUEST_COOKIE, value: guest }),
+      );
+      expect(res.headers.get("location")).toBe("https://dlectroflow.dev/login");
+    }
+  });
 });
 
 describe("proxy: a signed-in user is never also minted a guest", () => {
