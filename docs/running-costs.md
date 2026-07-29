@@ -1,6 +1,6 @@
 # dlectroflow — What it costs to self-host
 
-_Last checked: 2026-07-28._
+_Last checked: 2026-07-29._
 
 This guide exists because "self-hostable" is a claim, not an answer. Below are
 eight concrete ways to run dlectroflow, cheapest first, with every tool named and
@@ -440,6 +440,15 @@ price is acceptable.
   including egress.
 - **A nightly guest-data purge CronJob** — deletes expired guest workspaces.
   Costs essentially nothing.
+- **The GitLab container registry** — where CI pushes the image the cluster
+  pulls. **$0 on this project's GitLab plan**, but not free of consequences: CI
+  pushes a tag per commit, so it reached **1,886 tags and 116.5 GiB** of registry
+  storage. A weekly `prune_registry` job (see
+  [.gitlab-ci.yml](../.gitlab-ci.yml)) bounds it, because GitLab's own cleanup
+  policy cannot express "keep the newest N tags matching a pattern" and its
+  `name_regex_keep` was therefore keeping every production build forever. If you
+  run your own CI, see
+  [What every option also costs](#what-every-option-also-costs).
 - **The GKE cluster management fee** — $0.10/hour, about $73/month, **entirely
   cancelled** by Google's free-tier credit of $74.40/month per billing account.
   So this line is genuinely **$0** — confirm the credit is active on your billing
@@ -499,6 +508,19 @@ capacity to absorb them the way there is when you rent whole machines.
 - **Calendar integration is free.** **Google Tasks** needs only a free Google
   Cloud OAuth client; **Reclaim.ai** is configured entirely on their side and has
   a free tier.
+- **Container-registry storage, if you build the image yourself.** The image is
+  207 MB (it was 893 MB until the runtime image was slimmed), and a
+  tag-per-commit pipeline accumulates them: this project's registry measured
+  **116.5 GiB across 1,886 tags** on 2026-07-29 before it was bounded, layer
+  deduplication notwithstanding. On GitLab.com that is $0 on a paid plan but
+  counts against namespace storage, and **GitLab Free allows 5 GiB** — twenty
+  times less than the above, so a Free namespace running this pipeline hits the
+  quota rather than a bill. Docker Hub, GHCR and a self-hosted registry each have
+  their own limits. Whatever you use, bound it deliberately: a retention policy
+  that keeps "the newest N matching a pattern" is what you want, and if your
+  registry cannot express that (GitLab's cannot), it takes a scheduled job — this
+  repo ships one at
+  [scripts/prune-registry.sh](../scripts/prune-registry.sh).
 - **Sign-in is not optional.** The production start-up guard refuses to boot
   without a **GitLab OAuth application** (free to create) plus three generated
   secrets: `AUTH_SESSION_SECRET`, `GUEST_IP_HASH_SALT` and `TOKEN_ENC_KEY`.

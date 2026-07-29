@@ -1,6 +1,7 @@
 # Avoid duplicate pipelines: run a merge-request pipeline for MRs, suppress the
 # redundant branch pipeline while an MR is open, and run branch pipelines on main.
-# Scheduled pipelines (weekly base-image rescan + Renovate) are allowed explicitly.
+# Scheduled pipelines (weekly base-image rescan, Renovate, registry prune) are
+# allowed explicitly.
 # Version tags (vX.Y.Z) also get a pipeline — it builds + publishes the versioned
 # release image (see build_image). Without this rule a tag push matches no rule
 # and creates no pipeline. Tag pipelines never deploy (deploy jobs are MR/main only).
@@ -18,17 +19,22 @@ stages:
   - build_image   # build_image: Kaniko assembles the image from build_app's artifacts
   - test          # security scanners (container_scanning needs the built image → after build_image)
   - deploy
-  - maintenance   # renovate: dependency/base-image update MRs (Renovate schedule only)
+  - maintenance   # scheduled housekeeping only: renovate, ops_digest, prune_registry
 
 # ── Scheduled pipelines (issue #2, task 4.3 — base-image refresh cadence) ─────
-# Two pipeline schedules drive maintenance (create in Settings → CI/CD → Schedules):
+# Three pipeline schedules drive maintenance (create in Settings → CI/CD → Schedules):
 #   1. "Weekly base-image rescan"  → no extra variables. Rebuilds the image on the
 #      current main and re-runs all scanners so new base/dependency CVEs surface in
-#      the Vulnerability Report even when no code changed. Does NOT deploy.
+#      the Vulnerability Report even when no code changed. Does NOT deploy. Also
+#      carries ops_digest.
 #   2. "Weekly Renovate"           → variable RENOVATE_RUN=true. Runs ONLY the
 #      renovate job, which opens update MRs (npm deps + Docker base). Each MR then
 #      runs the full scanner suite and is gated by review (see renovate.json).
-# The RENOVATE_RUN flag keeps the two schedules from stepping on each other.
+#   3. "Weekly registry prune"     → variable REGISTRY_PRUNE=true. Runs ONLY the
+#      prune_registry job, which bounds the main-* registry tag set (#114).
+# Each flag variable gets a `when: never` guard on every OTHER scheduled job, so
+# a flagged maintenance schedule runs its own job and nothing else — no duplicate
+# ops digest, no pointless weekly rebuild. Add a flag, add its guards.
 
 variables:
   IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
@@ -79,6 +85,8 @@ include:
 # is the job of the Scan Result Policy, task 4.2, not job exit status.)
 .scanner_rules: &scanner_rules
   - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'
+    when: never
+  - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'
     when: never
   - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     allow_failure: false
@@ -145,6 +153,8 @@ include:
 # which is itself gated — a dangling `needs` would fail pipeline creation.
 .code_scanner_rules: &code_scanner_rules
   - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'
+    when: never
+  - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'
     when: never
   - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     changes: *code_changes
@@ -239,6 +249,8 @@ build_app:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'
       when: never
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'
+      when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: *code_changes
     - if: '$CI_COMMIT_BRANCH == "main"'
@@ -310,6 +322,8 @@ test_app:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'
       when: never
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'
+      when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: *code_changes
     - if: '$CI_COMMIT_BRANCH == "main"'
@@ -365,6 +379,8 @@ e2e_test:
     policy: pull
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'
       when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: *code_changes
@@ -427,6 +443,8 @@ build_image:
         --cache-repo "$CI_REGISTRY_IMAGE/cache"
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'
       when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: *code_changes
@@ -688,4 +706,46 @@ ops_digest:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'
       when: never
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'
+      when: never
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
+
+# ── Registry prune (#114, from #113) ─────────────────────────────────────────
+# Bounds the `main-*` tag set that the registry cleanup policy keeps FOREVER
+# (`name_regex_keep` includes `main-.*`), which is why the registry reached 1,886
+# tags / ~116 GiB. GitLab's policy cannot express "keep the newest N matching a
+# pattern", so the retention rule lives in scripts/prune-registry.sh: keep the
+# newest 10 `main-*` tags by main's git history, plus whatever production is
+# actually running, and delete the rest.
+#
+# THIS JOB DELETES PRODUCTION ARTEFACTS, so read scripts/prune-registry.sh's
+# header before changing anything here. Its safety properties (read prod's tag
+# from the cluster or delete nothing; assert the tag→commit match rate; page the
+# alphabetical tags API to exhaustion) are covered by
+# src/lib/registry-prune.test.ts, which also asserts the two settings below.
+#
+# Runs ONLY on the "Weekly registry prune" schedule (REGISTRY_PRUNE=true) — see
+# the schedule list at the top of this file. Never on a merge request, never on
+# main, never on a tag.
+prune_registry:
+  extends: .deploy_base       # helm-kubectl image + $KUBECONFIG perms + agent context
+  stage: maintenance          # this is maintenance, not a deploy
+  needs: []
+  interruptible: false        # a prune should finish, not be cancelled part-way
+  variables:
+    # Ranking tags needs EVERY commit on main. The runner's default depth of 50
+    # would leave most main-* tags looking unmatched — which the script's
+    # match-rate assertion correctly turns into a hard abort, so the job would
+    # simply never do anything.
+    GIT_DEPTH: 0
+    # SHIPS AS A DRY RUN (#114). The job prints the plan it would carry out and
+    # deletes nothing. Flipping this to "false" is a deliberate decision to be
+    # taken AFTER reading a real dry run's output in this job's log.
+    PRUNE_DRY_RUN: "true"
+  script:
+    # The helm-kubectl image carries most of these, but the runner clones in a
+    # helper container, so nothing about the job image's toolchain is guaranteed.
+    - 'for tool in curl jq git; do command -v "$tool" >/dev/null 2>&1 || apk add --no-cache "$tool"; done'
+    - bash scripts/prune-registry.sh
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'
