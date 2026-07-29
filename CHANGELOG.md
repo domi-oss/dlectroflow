@@ -21,6 +21,35 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Added
 
+- **The hosted instance now publishes a Privacy Policy and Terms of Service (#123).**
+  Two new public pages, `/privacy` and `/terms`, linked from a quiet footer on
+  every app screen and on the sign-in page. Written for the **UK GDPR** and the
+  **Data Protection Act 2018**, governed by the law of **England and Wales**, with
+  the ICO complaint route spelled out.
+  - **The immediate driver was Google OAuth verification**, which requires a
+    publicly reachable policy before the consent screen can be verified. Both
+    paths join `PUBLIC_PREFIXES` (`src/lib/auth/gate.ts`) — without that the
+    middleware redirects a reviewer arriving with no cookies to `/login`, and
+    verification fails while the app itself looks perfectly healthy. Guarded from
+    both sides: `src/lib/auth/gate.test.ts` for the classifier and
+    `src/proxy.test.ts` for the middleware that has to honour it.
+  - **It documents what is shipped, and says so where something is not.** No
+    self-service export exists, revocation does not auto-delete content, and only
+    the instance administrator can connect Google — so the pages describe the
+    honest fallback (requests handled by hand within the statutory one month)
+    rather than a feature the software lacks. `src/app/privacy/page.test.tsx`
+    asserts that honest wording is still there.
+  - **Notably disclosed rather than buried:** task text is sent to Anthropic in
+    the **United States** to produce breakdowns, which is an international
+    transfer; the Google integration uses exactly one scope
+    (`.../auth/tasks`); and all six cookies are strictly necessary, so there is
+    **no cookie banner** and no analytics package anywhere in the codebase.
+  - Facts live once, in `src/lib/legal.ts` (controller, contact addresses,
+    effective date, hosting region, backup retention). **Maintaining the pages:
+    [`docs/legal.md`](docs/legal.md)** lists which claims depend on the running
+    system — region, backup retention, LLM provider, cookies, scopes — and what
+    to re-check when infrastructure changes, plus a Google verification checklist.
+
 - **You can self-host dlectroflow on one small server without Kubernetes (#102).**
   `docker-compose.prod.yml`, a `Caddyfile` and `.env.prod.example` now ship, with
   a walkthrough in `docs/self-host-vps.md`. That is roughly **$6/month** on a

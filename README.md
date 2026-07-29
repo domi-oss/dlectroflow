@@ -38,6 +38,7 @@ to run it locally, or [Deploy](#-deploy) to host your own. (Also a learning proj
 - [🤝 Contributing](#-contributing)
 - [🧭 Roadmap](#-roadmap)
 - [🧠 A note for fellow neurodivergent nerds](#-a-note-for-fellow-neurodivergent-nerds)
+- [⚖️ Legal & privacy](#️-legal--privacy)
 
 ---
 
@@ -548,3 +549,23 @@ Licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
 In short: you're free to use, modify, and self-host it — but if you run a modified
 version as a network service, you must make your source (including your changes)
 available to its users.
+
+---
+
+## ⚖️ Legal & privacy
+
+The hosted instance publishes a [Privacy Policy](https://dlectroflow.dev/privacy)
+and [Terms of Service](https://dlectroflow.dev/terms) (source:
+`src/app/privacy/page.tsx` and `src/app/terms/page.tsx`).
+
+> [!NOTE]
+> **They cover dlectroflow.dev only.** If you self-host, that instance is yours —
+> you are its data controller, and you need your own policy. Nothing there applies
+> to your deployment.
+
+**Maintaining them: [docs/legal.md](docs/legal.md).** It lists which facts the
+published text asserts about the running system — region, backup retention, LLM
+provider, cookies, OAuth scopes — and therefore what has to be re-checked when
+infrastructure changes, plus the effective-date rule and a Google OAuth
+verification checklist. Worth reading *before* changing any of those, because the
+pages go stale silently.
