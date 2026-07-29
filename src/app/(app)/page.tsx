@@ -109,13 +109,18 @@ export default async function InboxPage({
   // HERE rather than fetched per row: `rawItems` already carries each task's
   // three intent columns and its steps, so the alternative is one server-action
   // round trip per multi-step row on every inbox load. Only tasks WITH steps can
-  // reach `ready_steps`, so nothing else needs an entry. Owner-only, mirroring
-  // `google` above: a guest never sees the Google control at all.
+  // reach `ready_steps`, so nothing else needs an entry.
+  //
+  // Gated on `me`, mirroring `google` above rather than on the role: #118 Phase C
+  // gave members their own Google connection, so a member reaches the Schedule
+  // menu too and needs the same prefill. Keeping this owner-only would have left
+  // a member's menu opening on the defaults while their choice sat in the
+  // database. A guest has no account, so never sees the Google control at all.
   //
   // Built on the same mergePersistedIntent as loadScheduleIntent, so "what the
   // menu opens with" has one definition, not two that agree today.
   const scheduleIntents: Record<string, ScheduleIntent> = {};
-  if (owner) {
+  if (me) {
     for (const { task } of rawItems) {
       if (!task || task.steps.length === 0) continue;
       scheduleIntents[task.id] = mergePersistedIntent(

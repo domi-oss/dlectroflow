@@ -3,10 +3,10 @@ import { SchedulePriority, ScheduleHours } from "@/lib/scheduling/types";
 
 // Mirrors the mocking style of google-schedule.push.test.ts: hoisted mocks, the
 // module boundary faked at @/lib/db and @/lib/workspace, no real Postgres.
-const { findFirstMock, workspaceMock, isOwnerMock } = vi.hoisted(() => ({
+const { findFirstMock, workspaceMock, currentUserMock } = vi.hoisted(() => ({
   findFirstMock: vi.fn(),
   workspaceMock: vi.fn(),
-  isOwnerMock: vi.fn(),
+  currentUserMock: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -14,7 +14,7 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/workspace", () => ({
   currentWorkspaceId: workspaceMock,
-  isOwnerRequest: isOwnerMock,
+  currentUser: currentUserMock,
 }));
 
 import { loadScheduleIntent } from "./schedule-intent";
@@ -36,7 +36,7 @@ const taskRow = (over: Record<string, unknown> = {}) => ({
 beforeEach(() => {
   vi.clearAllMocks();
   workspaceMock.mockResolvedValue("ws_1");
-  isOwnerMock.mockResolvedValue(true);
+  currentUserMock.mockResolvedValue({ id: "u_owner", role: "owner" });
 });
 
 describe("loadScheduleIntent", () => {
@@ -115,10 +115,31 @@ describe("loadScheduleIntent", () => {
     });
   });
 
-  // Google is still the owner's singleton connection until #35 Phase C, so a
-  // non-owner has no menu to prefill — and must not learn a task exists either.
-  it("returns null for a non-owner without touching the database", async () => {
-    isOwnerMock.mockResolvedValue(false);
+  // #118 Phase C gave every member their own Google connection, so a member
+  // reaches the Schedule menu and MUST get their own prefill — an owner-only gate
+  // here would open their menu on the defaults while their stored choice sat in
+  // the database. What keeps accounts apart is the workspace filter, not the role.
+  it("returns a member's own intent, not just the owner's", async () => {
+    currentUserMock.mockResolvedValue({ id: "u_member", role: "member" });
+    findFirstMock.mockResolvedValue(
+      taskRow({ schedulePriority: SchedulePriority.Critical }),
+    );
+
+    const intent = await loadScheduleIntent("t1");
+
+    expect(intent!.priority).toBe(SchedulePriority.Critical);
+    // Scoped by the caller's OWN workspace, never by an id from the request.
+    expect(findFirstMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: "t1", workspaceId: "ws_1" }),
+      }),
+    );
+  });
+
+  // A caller with no account has no menu to prefill — and must not learn a task
+  // exists either, so the check comes before the query.
+  it("returns null for a caller with no account, without touching the database", async () => {
+    currentUserMock.mockResolvedValue(null);
     expect(await loadScheduleIntent("t1")).toBeNull();
     expect(findFirstMock).not.toHaveBeenCalled();
   });
