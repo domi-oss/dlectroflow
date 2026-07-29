@@ -3,6 +3,7 @@ import { getSettings } from "@/lib/db";
 import { currentWorkspaceId, currentUser } from "@/lib/workspace";
 import { getGoogleStatus } from "@/lib/google";
 import { loadPeopleAdmin } from "@/lib/people";
+import { ownLlmKeyPresent } from "@/app/actions/account";
 import { PeoplePanel } from "@/components/settings/people-panel";
 import { AgingSection } from "@/components/settings/aging-section";
 import { VoiceSection } from "@/components/settings/voice-section";
@@ -14,6 +15,7 @@ import { NotificationsSection } from "@/components/settings/notifications-sectio
 import { AppearanceSection } from "@/components/settings/appearance-section";
 import { FocusTimerSection } from "@/components/settings/focus-timer-section";
 import { IntegrationsPanel } from "@/components/settings/integrations-panel";
+import { AccountPanel } from "@/components/settings/account-panel";
 import { BackLink } from "@/components/nav/back-link";
 import { SectionNav } from "@/components/nav/section-nav";
 import { SETTINGS_SECTIONS } from "@/lib/section-nav";
@@ -43,7 +45,7 @@ export default async function SettingsPage({
   // signature already accepts null (a caller with no account is answered without
   // a query), so no non-null assertion is needed at all.
   const meId = me?.id ?? null;
-  const [google, people] = await Promise.all([
+  const [google, people, keyPresent] = await Promise.all([
     // #118 Phase C — every signed-in account has its own connection, so this is
     // resolved for whoever is asking. A caller with no account is passed null
     // and getGoogleStatus() answers without a query.
@@ -52,6 +54,10 @@ export default async function SettingsPage({
     // null for anyone else, so the panel cannot render for a member even if this
     // call site were ever changed to drop the gate.
     owner ? loadPeopleAdmin(me?.id) : Promise.resolve(null),
+    // #118 — PRESENCE only, and it derives the account from the session itself:
+    // there is no id to pass, which is why the ciphertext can never be read for
+    // somebody else. Answers false without a query for a caller with no account.
+    ownLlmKeyPresent(),
   ]);
   const voice: Voice = settings.voice === "playful" ? "playful" : "plain";
   // Relative times ("2h ago") are rendered from ONE timestamp so the server and
@@ -62,9 +68,12 @@ export default async function SettingsPage({
   // #72 + #118 — the nav lists what this render actually put on the page. Both
   // presentations of the Integrations section render something now (your own
   // panel, or the signed-out shell), so it is always listed; People remains
-  // owner-only, so a caller without it never gets a link that jumps nowhere.
+  // owner-only and Account needs an account, so a caller without either never
+  // gets a link that jumps nowhere.
   const sections = SETTINGS_SECTIONS.filter(
-    (section) => section.id !== "settings-people" || people != null,
+    (section) =>
+      (section.id !== "settings-people" || people != null) &&
+      (section.id !== "settings-account" || me != null),
   );
 
   return (
@@ -157,6 +166,20 @@ export default async function SettingsPage({
           <IntegrationsPanel google={null} readOnly voice={voice} />
         )}
       </div>
+      {/* #118 Phase C — your own account: the per-user LLM key. Signed-in only;
+          there is nothing here for a caller with no account to see or set, and
+          the section is filtered out of the nav to match. */}
+      {me && (
+        <div className="border-t pt-4">
+          <AccountPanel
+            handle={me.handle}
+            provider={me.provider}
+            keyPresent={keyPresent}
+            activeModelName={resolveUtilityModel()}
+            voice={voice}
+          />
+        </div>
+      )}
       <div className="border-t pt-4">
         <DemoSection firstRunPreview={settings.firstRunPreview} voice={voice} />
       </div>

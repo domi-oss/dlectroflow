@@ -230,17 +230,36 @@ describe("workspace-scoping harness", () => {
     expect(offenders).toEqual([]);
   });
 
-  // The two files allowed to name the ciphertext column, each with its reason.
-  // Adding one is a security decision: Phase C's per-user key UI will need an
-  // entry here, and that is exactly the review conversation this list forces.
+  // The files allowed to name the ciphertext column, each with its reason.
+  // Adding one is a security decision, and that is exactly the review
+  // conversation this list forces — #118 Phase C's key writer is the third entry
+  // this comment predicted.
   const KEY_CIPHERTEXT_FILES: Record<string, string> = {
     "src/lib/user-quota.ts":
       "decrypts it to bill the request to the user's own key",
     "src/lib/people.ts":
       "presence only — `{ llmKeyEnc: { not: null } }`, selecting ids",
+    // #118 Phase C — the writer. Encrypts and stores the CALLER's own key
+    // (`where: { id: me.id }`, no id parameter exists) and answers presence with
+    // the same where-clause trick people.ts uses. It never reads the ciphertext
+    // back: the panel is told a boolean, so no decrypted secret can reach an RSC
+    // payload.
+    "src/app/actions/account.ts":
+      "writes the caller's own key, encrypted; presence-only read, never selected",
   };
 
-  it("only the two named modules touch the encrypted per-user LLM key", () => {
+  it("the key-ciphertext modules exist where this test thinks they do", () => {
+    // Without this, renaming one turns the rule below into a test that reads no
+    // files and passes forever — the same guard the People block uses.
+    for (const file of Object.keys(KEY_CIPHERTEXT_FILES)) {
+      expect(
+        () => readFileSync(file, "utf8"),
+        `${file} is missing`,
+      ).not.toThrow();
+    }
+  });
+
+  it("only the named modules touch the encrypted per-user LLM key", () => {
     const offenders = sourceFiles().filter((file) => {
       if (KEY_CIPHERTEXT_FILES[file]) return false;
       return readFileSync(file, "utf8")
@@ -253,6 +272,27 @@ describe("workspace-scoping harness", () => {
         );
     });
     expect(offenders).toEqual([]);
+  });
+
+  it("the key writer never SELECTS the ciphertext either", () => {
+    // Same rule as the People read below, applied to the one file that WRITES
+    // the column: writing it is necessary, reading it back into an object graph
+    // is not — the panel is handed a boolean.
+    //
+    // Comments are stripped first (the idiom the OWNER_WORKSPACE_ID rule below
+    // uses): account.ts's doc comment quotes the forbidden
+    // `select: { llmKeyEnc: true }` in order to explain why it is not there, and
+    // a rule that cannot tell code from prose punishes the explanation.
+    const code = readFileSync("src/app/actions/account.ts", "utf8")
+      .split("\n")
+      .filter(
+        (line) =>
+          !line.trimStart().startsWith("//") &&
+          !line.trimStart().startsWith("*"),
+      )
+      .join("\n");
+    expect(code).not.toMatch(/llmKeyEnc:\s*true/);
+    expect(code).toMatch(/llmKeyEnc:\s*\{\s*not:\s*null\s*\}/);
   });
 
   it("the People read never SELECTS the ciphertext, only tests it for presence", () => {

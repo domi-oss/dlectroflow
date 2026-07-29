@@ -42,6 +42,7 @@ const MEMBER_USER = {
 const userOverride = vi.fn<() => Promise<object | null>>(async () =>
   (await isOwnerRequest()) ? OWNER_USER : null,
 );
+const ownLlmKeyPresentMock = vi.fn<() => Promise<boolean>>(async () => false);
 
 vi.mock("@/lib/db", () => ({
   getSettings: vi.fn().mockImplementation(async () => ({
@@ -122,6 +123,17 @@ vi.mock("@/components/settings/integrations-panel", () => ({
 vi.mock("@/components/settings/people-panel", () => ({
   PeoplePanel: stub("settings-people"),
 }));
+vi.mock("@/components/settings/account-panel", () => ({
+  AccountPanel: stub("settings-account"),
+}));
+// #118 — the page reads key PRESENCE at the server boundary. Mocked so this stays
+// a unit test; the action's own rules are covered in src/app/actions/account.test.ts.
+vi.mock("@/app/actions/account", () => ({
+  // Wrapped in a lambda, like the workspace mock above: a vi.mock factory is
+  // hoisted above the const declarations, so naming the mock directly would read
+  // it before initialisation.
+  ownLlmKeyPresent: () => ownLlmKeyPresentMock(),
+}));
 vi.mock("@/components/nav/back-link", () => ({ BackLink: () => null }));
 
 // Plain anchor stub — avoids needing router context and keeps the assertion on
@@ -169,6 +181,8 @@ afterEach(() => {
   // history rather than about the render under test.
   vi.mocked(getGoogleStatus).mockClear();
   vi.mocked(loadPeopleAdmin).mockClear();
+  ownLlmKeyPresentMock.mockClear();
+  ownLlmKeyPresentMock.mockResolvedValue(false);
   voiceOverride.mockReturnValue("plain");
   userOverride.mockImplementation(async () =>
     (await isOwnerRequest()) ? OWNER_USER : null,
@@ -298,5 +312,37 @@ describe("SettingsPage — Integrations is per-account (#118)", () => {
     );
     render(await SettingsPage({ searchParams: Promise.resolve({}) }));
     expect(integrationsStub()!.getAttribute("data-read-only")).toBe("false");
+  });
+});
+
+// ── #118 Phase C — the Account section (your own LLM key) ──────────────────
+describe("SettingsPage — Account section (#118)", () => {
+  it("renders for a signed-in MEMBER and is listed in the nav", async () => {
+    isOwnerRequest.mockResolvedValue(false);
+    userOverride.mockResolvedValue(MEMBER_USER);
+    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+    expect(
+      document.querySelector('[data-stub="settings-account"]'),
+    ).not.toBeNull();
+    expect(screen.getByRole("link", { name: /account/i })).toBeInTheDocument();
+  });
+
+  it("is absent from the page AND the nav for a caller with no account", async () => {
+    // There is nothing here for a guest to see or set, so a nav link would jump
+    // nowhere — the same rule People follows.
+    isOwnerRequest.mockResolvedValue(false);
+    userOverride.mockResolvedValue(null);
+    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+    expect(document.querySelector('[data-stub="settings-account"]')).toBeNull();
+    expect(screen.queryByRole("link", { name: /^account$/i })).toBeNull();
+  });
+
+  it("reads key presence without being handed an id", async () => {
+    // ownLlmKeyPresent() derives the account from the session; the page has no
+    // way to ask about somebody else's key because there is no parameter for it.
+    ownLlmKeyPresentMock.mockResolvedValue(true);
+    userOverride.mockResolvedValue(MEMBER_USER);
+    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+    expect(ownLlmKeyPresentMock).toHaveBeenCalledWith();
   });
 });

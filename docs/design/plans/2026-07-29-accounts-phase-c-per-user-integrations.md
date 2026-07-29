@@ -2235,7 +2235,7 @@ Phase B built the whole read side: `getLLM(creds)` takes a per-request key, `use
 
 **A present key is what lifts the cap** — see `consumeUserBreakdown`'s resolution order. So saving a key must NOT touch `aiPolicy`: a member on `capped` who brings a key is already uncapped by construction, and writing `own_key` into the policy column from a member-facing action would let a member edit a field the owner administers.
 
-- [ ] **Step 1: Write the failing tests for the action**
+- [x] **Step 1: Write the failing tests for the action**
 
 Create `src/app/actions/account.test.ts`, mirroring `src/app/actions/people.test.ts`'s mocking style (read it first):
 
@@ -2409,12 +2409,12 @@ describe("ownLlmKeyPresent", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `npx vitest run src/app/actions/account.test.ts`
 Expected: FAIL — module not found.
 
-- [ ] **Step 3: Implement the action**
+- [x] **Step 3: Implement the action**
 
 Create `src/app/actions/account.ts`:
 
@@ -2545,7 +2545,7 @@ export async function ownLlmKeyPresent(): Promise<boolean> {
 
 If Prisma's `findUnique` rejects the extra `llmKeyEnc` filter in `where` (it accepts non-unique filters alongside a unique field, but check the generated types), use `findFirst` with the same `where` and `select` — the id is unique either way, and the harness rule for `llmKeyEnc` cares about the *file*, not the operation.
 
-- [ ] **Step 4: Register the file in the harness**
+- [x] **Step 4: Register the file in the harness**
 
 `src/lib/__tests__/scoping.harness.test.ts:236-241` — its comment already says Phase C's key UI belongs here:
 
@@ -2567,7 +2567,7 @@ If Prisma's `findUnique` rejects the extra `llmKeyEnc` filter in `where` (it acc
 
 Add a matching entry to the harness's existing "exists where this test thinks it does" guard so a rename cannot turn the rule into a test that reads no files.
 
-- [ ] **Step 5: Run action tests + harness**
+- [x] **Step 5: Run action tests + harness**
 
 ```bash
 npx vitest run src/app/actions/account.test.ts src/lib/__tests__/scoping.harness.test.ts
@@ -2575,7 +2575,7 @@ npx vitest run src/app/actions/account.test.ts src/lib/__tests__/scoping.harness
 
 Expected: PASS. If the harness reports `src/app/actions/account.ts` as an offender, the `KEY_CIPHERTEXT_FILES` key does not match the path `sourceFiles()` produces — it joins with `path.join("src", f)`, so the key must be exactly `src/app/actions/account.ts`.
 
-- [ ] **Step 6: Write the failing tests for the panel**
+- [x] **Step 6: Write the failing tests for the panel**
 
 Create `src/components/settings/account-panel.test.tsx`:
 
@@ -2701,7 +2701,7 @@ describe("AccountPanel", () => {
 });
 ```
 
-- [ ] **Step 7: Run to verify they fail, then implement the panel**
+- [x] **Step 7: Run to verify they fail, then implement the panel**
 
 Run: `npx vitest run src/components/settings/account-panel.test.tsx` → FAIL, module not found.
 
@@ -2717,7 +2717,7 @@ Create `src/components/settings/account-panel.tsx`. Copy the shape of `src/compo
 - Explicitly **no** provider or base-URL field. `LLMCredentials` has no `baseUrl` on purpose — "letting a per-user value choose the endpoint would turn a settings field into an SSRF primitive" (`src/lib/llm/types.ts`). A user's key is for the instance's configured provider; show `activeModelName` read-only so they know which.
 - Add the new copy to `src/lib/strings.ts` in both voices, next to the existing `settings.*` keys.
 
-- [ ] **Step 8: Wire it into the page**
+- [x] **Step 8: Wire it into the page**
 
 `src/lib/section-nav.ts` — add one entry to `SETTINGS_SECTIONS`, **before** `settings-people` (administration stays last) and after `settings-integrations`:
 
@@ -2743,7 +2743,7 @@ Create `src/components/settings/account-panel.tsx`. Copy the shape of `src/compo
 
 Filter `settings-account` out of `sections` when `me` is null, exactly as `settings-people` is filtered — `src/app/(app)/settings/page.test.tsx` locks the section order, so update that expectation too.
 
-- [ ] **Step 9: Run everything**
+- [x] **Step 9: Run everything**
 
 ```bash
 npx vitest run src/components/settings src/app/actions/account.test.ts \
@@ -2751,7 +2751,7 @@ npx vitest run src/components/settings src/app/actions/account.test.ts \
 npm test && npx tsc --noEmit && npm run lint && npm run format:check
 ```
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add src/app/actions/account.ts src/app/actions/account.test.ts \

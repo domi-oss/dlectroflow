@@ -692,6 +692,41 @@ export const STRINGS = {
   // `settings.integrationsOwnerHint` is gone with it; `settings.ownerOnly` stays
   // because BreakdownModelSection is still genuinely owner-only.
   "settings.integrationsSignedOut": { plain: "Sign in", playful: "Sign in" },
+  // #118 Phase C — the Account section. A member's own API key: what storing one
+  // changes (it pays for their breakdowns, so no instance cap applies) is the one
+  // thing they cannot discover, so the copy states it outright.
+  "settings.accountHeading": { plain: "Account", playful: "Account" },
+  "settings.accountKeyLabel": { plain: "API key", playful: "API key" },
+  "settings.accountKeyHint": {
+    plain:
+      "Add your own API key and your AI breakdowns run on it instead of this instance's — so no usage limit applies to you. It is encrypted before it is stored and never shown again, not even to you.",
+    playful:
+      "Bring your own API key and your breakdowns run on your tab instead of the instance's — no usage limit for you. 🔐 Encrypted on the way in, never shown again, not even to you.",
+  },
+  "settings.accountKeyInUse": {
+    plain: "Your own key is in use — no instance usage limit applies to you.",
+    playful:
+      "✅ Your own key is in use — no instance usage limit applies to you.",
+  },
+  "settings.accountKeyRemoveConfirm": {
+    plain:
+      "Remove your key? AI will go back to this instance's key and its usage limits.",
+    playful:
+      "Remove your key? AI goes back to this instance's key — and its usage limits.",
+  },
+  "settings.accountKeySaved": { plain: "Key saved ✓", playful: "Key saved ✓" },
+  "settings.accountKeyRemoved": {
+    plain: "Key removed ✓",
+    playful: "Key removed ✓",
+  },
+  "settings.accountKeyRejected": {
+    plain: "That key was not accepted. Check you pasted all of it.",
+    playful: "That key was not accepted — check you pasted the whole thing.",
+  },
+  "settings.accountKeySignedOut": {
+    plain: "You are no longer signed in. Reload and sign in again.",
+    playful: "You are no longer signed in. Reload and sign in again.",
+  },
   "settings.integrationsSignInHint": {
     plain:
       "Sign in to connect your own Google account. Your connection is yours alone — nobody else on this instance can see or use it.",
