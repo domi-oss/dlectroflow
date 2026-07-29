@@ -38,6 +38,27 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Changed
 
+- **The header's theme control is icon-only (#103).** In a menu bar the words
+  "Dark mode" / "Light mode" were dead weight, and the width they added crowded
+  the rest of the bar at 390px. The header now shows a lucide moon/sun glyph in a
+  44×44 button. **Settings → Appearance keeps its words**, where a bare icon in a
+  settings row would be worse than the label it replaced — the component takes a
+  `variant` prop and the labelled variant is the default, so no call site can
+  quietly lose its text.
+  - **Accessibility.** Dropping the visible words drops the button's accessible
+    name with them, so the icon-only variant carries an `aria-label` (and a
+    matching `title` for pointer users) naming the **action** — "Switch to dark
+    mode" / "Switch to light mode" — keeps `aria-pressed` for the state, and is
+    squared up to the shared 44×44 minimum target (WCAG 2.5.5). The box is
+    measured in a real browser by a Playwright spec, not just asserted as a class
+    name. The labelled variant deliberately has **no** `aria-label`, so its
+    visible words stay its name (WCAG 2.5.3, Label in Name).
+  - **Both variants draw lucide icons instead of emoji**, finishing the move
+    started in !141: emoji render differently on every platform, and the VS16
+    variation selector makes their advance width unpredictable.
+  - **Behaviour is untouched** — the control still writes the `dark` class on
+    `<html>`, reads it back through `useSyncExternalStore`, and two mounted
+    toggles stay in sync.
 - **Documentation-only merge requests no longer run the full build gate.** A
   three-file README change was spending ~18 minutes of runner time compiling the
   app, running unit + Playwright suites, building and scanning a container image,

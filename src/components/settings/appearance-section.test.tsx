@@ -136,6 +136,16 @@ describe("AppearanceSection", () => {
     ).toBeInTheDocument();
   });
 
+  // #103 — the header went icon-only; this row deliberately did NOT. A bare
+  // icon in a settings row would be worse than the label it replaced, so the
+  // words stay (and with them the accessible name, un-overridden).
+  it("keeps the theme control's visible words", () => {
+    render(<AppearanceSection {...base} />);
+    const toggle = screen.getByRole("button", { name: /mode/i });
+    expect(toggle).toHaveTextContent("Dark mode");
+    expect(toggle).not.toHaveAttribute("aria-label");
+  });
+
   it("toggling the theme flashes the shared Appearance save indicator", async () => {
     const user = userEvent.setup();
     render(<AppearanceSection {...base} />);
