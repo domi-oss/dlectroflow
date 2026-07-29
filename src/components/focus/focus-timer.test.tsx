@@ -955,6 +955,59 @@ describe("FocusTimer — alarm + auto-expand at time's-up (fake timers)", () => 
   });
 });
 
+// #99 — the live session's two primary confirm CTAs. Solid `bg-green-600`
+// (#00a63e) with `text-white` is 3.21:1 as axe measures it in the running app
+// (the issue's 3.27 was derived from the reported lab() value; the real ratio is
+// slightly worse, not better), and AA-normal needs 4.5:1 — 16px at
+// weight 500 is not "large text" (that needs 18.66px bold / 24px), so the 3:1
+// allowance does not apply. It failed in BOTH themes: the class is a fixed
+// Tailwind colour with no dark variant and `text-white` never changes.
+//
+// green-700 (#008236) is the weight that fixes it without trading one failure
+// for another: white on it is 4.95:1 (AA-normal, clear of the floor), while the
+// button — a solid fill with no border, so the fill IS its visual boundary —
+// keeps 4.65:1 against the light page background and 3.97:1 against the dark
+// one, both over the 3:1 WCAG 1.4.11 non-text floor. green-800 would read
+// better on paper for the label (7.13:1) but drops that boundary to 2.75:1 on
+// the dark background, i.e. an AA failure of a different clause.
+//
+// Asserted here as well as in e2e (which removes both `bg-green-600` entries
+// from e2e/a11y/axe-baseline.json and adds the running session to the
+// zero-tolerance contrast gate in both themes): this is the cheap check that
+// says which weight, in a file a palette edit is likely to touch.
+describe("FocusTimer — green CTA contrast (#99 a11y)", () => {
+  it("the running session's 'Complete step' CTA uses AA green-700, not sub-AA green-600", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimer {...base()} />);
+    await start(user);
+    const complete = screen.getByRole("button", { name: /complete step/i });
+    expect(complete.className).toContain("bg-green-700");
+    expect(complete.className).not.toContain("bg-green-600");
+    // The white label is the other half of the pair — it must stay white, or
+    // the measured 4.95:1 is not what ships.
+    expect(complete.className).toContain("text-white");
+  });
+
+  it("the time's-up 'Yes, done!' CTA uses the same AA green-700", async () => {
+    vi.useFakeTimers();
+    try {
+      render(<FocusTimer {...base()} />); // step estMinutes = 1 → 60s
+      await act(async () => {
+        screen.getByRole("button", { name: /start focusing/i }).click();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      const yesDone = screen.getByRole("button", { name: /yes, done/i });
+      expect(yesDone.className).toContain("bg-green-700");
+      expect(yesDone.className).not.toContain("bg-green-600");
+      expect(yesDone.className).toContain("text-white");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("FocusTimer — complete", () => {
   it("Complete step calls completeFocus and stops the lofi player", async () => {
     const user = userEvent.setup();

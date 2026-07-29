@@ -854,10 +854,24 @@ export function FocusTimer({
 
       {(phase === "running" || phase === "paused") && (
         <div className="flex flex-wrap items-center justify-center gap-2">
+          {/* #99 a11y — green-700, not green-600. White on `bg-green-600`
+              (#00a63e) measures 3.21:1 and AA-normal needs 4.5:1: at 16px /
+              weight 500 this is not "large text" (that needs 18.66px bold or
+              24px), so the 3:1 allowance does not apply, and it failed in both
+              themes because neither the fill nor the label had a dark variant.
+              green-700 (#008236) takes white to 4.95:1 — and, because this is a
+              borderless solid fill whose colour IS the button's visual
+              boundary, it also keeps that boundary above the 3:1 non-text floor
+              (WCAG 1.4.11) in both themes: 4.65:1 on the light background,
+              3.97:1 on the dark one. green-800 reads better for the label alone
+              (7.13:1) but drops the boundary to 2.75:1 in dark — one AA failure
+              traded for another — so 700 is the weight that clears both.
+              Same family as the completion tick's darkened green
+              (--tick-color in globals.css), which solved this for text. */}
           <button
             onClick={finishComplete}
             disabled={pending}
-            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-md bg-green-600 px-5 font-medium text-white disabled:opacity-50"
+            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-md bg-green-700 px-5 font-medium text-white disabled:opacity-50"
           >
             <Check aria-hidden="true" className="h-4 w-4 shrink-0" />
             {stripLeadingGlyph(t("focus.timer.completeStep", voice))}
@@ -906,12 +920,15 @@ export function FocusTimer({
           <div className="flex flex-wrap justify-center gap-2">
             {/* Shares sessionCtaRef with the Pause/Resume control above: the two
                 blocks are mutually exclusive, so a coupled resume that lands
-                straight on time's-up still has somewhere to put focus (#65). */}
+                straight on time's-up still has somewhere to put focus (#65).
+                green-700 for AA — see the "Complete step" CTA above for the
+                measured ratios; the two are the same control at two moments and
+                must stay the same green. */}
             <button
               ref={sessionCtaRef}
               onClick={finishComplete}
               disabled={pending}
-              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-md bg-green-600 px-4 font-medium text-white disabled:opacity-50"
+              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-md bg-green-700 px-4 font-medium text-white disabled:opacity-50"
             >
               <Check aria-hidden="true" className="h-4 w-4 shrink-0" />
               {stripLeadingGlyph(t("focus.yesDone", voice))}

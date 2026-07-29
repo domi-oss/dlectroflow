@@ -3,6 +3,7 @@ import { t, type Voice } from "@/lib/strings";
 import { isAging, type AgingSettings } from "@/lib/aging";
 import { formatAgo } from "@/lib/format";
 import type { Item } from "@/components/inbox/bucket";
+import { FRESHNESS_TIER_STYLE } from "@/components/inbox/status-pill";
 import { itemRemainingMin, activeStepRemainingMin } from "@/lib/task-remaining";
 
 export function nextStepText(item: Item): string | null {
@@ -57,7 +58,17 @@ export function ProgressBar({ item }: { item: Item }) {
   );
 }
 
-/** "added Xh ago" with an amber accent once the item is aging. */
+/**
+ * "added Xh ago" with an amber accent once the item is aging.
+ *
+ * #95 a11y — the accent was a flat `text-amber-600`: 3.01:1 against the light
+ * `--background` (#fdf6fa) at 12px, where AA-normal needs 4.5:1, and with no
+ * dark variant at all. It now reads the `aging` tier's colour from
+ * FRESHNESS_TIER_STYLE, the pair #57 tuned for exactly this meaning
+ * (amber-700 light = 4.73:1, amber-400 dark = 11.40:1) — so the hub agrees with
+ * the Inbox and there is one aging amber to change, not two. Colour is not the
+ * only signal: the label spells the age out in words either way.
+ */
 export function AgeLabel({
   item,
   now,
@@ -78,7 +89,7 @@ export function AgeLabel({
     <span
       className={cn(
         "text-xs",
-        aging ? "text-amber-600" : "text-muted-foreground",
+        aging ? FRESHNESS_TIER_STYLE.aging.color : "text-muted-foreground",
       )}
     >
       {t("lib.added", voice)}{" "}
