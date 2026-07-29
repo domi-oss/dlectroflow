@@ -73,6 +73,68 @@ npx tsc --noEmit       # typecheck
 - **Keep the diff focused.** One logical change per MR; avoid repo-wide reformatting (it re-fingerprints security findings and blocks unrelated work).
 - **This is not stock Next.js** — it tracks a fast-moving version with breaking changes. Check `node_modules/next/dist/docs/` before reaching for an API you remember.
 
+## Adding a dependency
+
+Three steps, and one trap that has cost this project real time twice (#67, #76).
+Worth reading rather than guessing.
+
+**1. Pick the right group.** `dependencies` is for packages the **shipped app
+imports to serve a request**. Everything else — build tooling, scaffolding CLIs,
+test libraries, type stubs — is a `devDependency`. The arbiter is Next's
+`output: "standalone"` trace: if a package doesn't land in
+`.next/standalone/node_modules`, it isn't serving anything.
+
+Note that *build-time* is not *runtime*. `shadcn` is the worked example (#93): it
+sat in `dependencies`, which made `npm ci --omit=dev` resolve 412 packages instead
+of 103 — 309 packages of scaffolding CLI declared as production surface, none of
+which ever reached the image. `src/app/globals.css` does still
+`@import "shadcn/tailwind.css"` and the build fails without it, but that CSS is
+compiled into `.next/static` before the image is assembled, so it belongs in
+`devDependencies`.
+
+Two conventions come from Renovate's `config:best-practices` and are worth
+matching by hand: `devDependencies` are **pinned exactly** (`"shadcn": "4.13.1"`)
+while `dependencies` carry a range, and **container images are pinned by digest**
+(`node:22-alpine@sha256:…`). A tag is mutable — a digest is the only way a rebuild
+months from now gets the same bytes that were scanned and tested. Renovate keeps
+the digests fresh.
+
+**2. Regenerate the lockfile in the CI image — not with your local npm.**
+
+```bash
+docker run --rm -v "$PWD":/app -w /app node:22-alpine \
+  sh -c 'npm install --package-lock-only && npm ci --dry-run'
+```
+
+CI installs with `npm ci`, which **fails on a mismatch instead of repairing it**,
+and the npm that resolves your tree is almost certainly not the npm that resolves
+CI's (`node:22-alpine` ships npm 10; a current Node ships npm 11+). The two
+disagree about nested subtrees: in #67 the newer npm dropped a nested `esbuild`
+while keeping the package that required it, producing a lockfile CI rejected
+outright and blocking every dependency MR until each was rebuilt by hand. The
+maintainer's local npm is additionally wrapped to disallow install scripts, which
+is a second reason its output isn't trustworthy here. Commit the regenerated
+`package-lock.json` in the same MR.
+
+**3. Declare it even if it already resolves.** Inside `src/`, an undeclared import
+fails the build. Outside it — root config files like `prisma.config.ts`, and the
+`tsx` scripts the cluster runs — nothing traces the dependency, so an undeclared
+package keeps working for exactly as long as some *other* package happens to hoist
+it, and then fails at deploy time. That was #76.
+
+### If one of the hygiene guards fails
+
+The first three are vitest specs, so they fail in `npm test` long before CI sees
+them:
+
+- **`manifest-hygiene`** — a root config file imports something `package.json` doesn't declare. Declare it (#76).
+- **`lockfile-hygiene`** — `esbuild` resolved to more than one version. Realign the ranges rather than deleting the test; a nested duplicate is exactly what the two npm versions disagree about (#67).
+- **`dockerfile-hygiene`** — bumping `prisma`, `tsx` or `dotenv` means moving their pins in **both** `Dockerfile` and `Dockerfile.ci` to match the lockfile. The cluster runs migrations from that image, so drift runs them on a different Prisma than the app was tested against (#71).
+- **`npm run check:env`** — a dependency that reads a new env var needs it listed in `.env.example`.
+
+New dependencies also go through the blocking scanners — see the security-scan
+note above.
+
 ## MR workflow
 
 1. Branch from `main` (e.g. `feat/short-description` or `fix/short-description`).

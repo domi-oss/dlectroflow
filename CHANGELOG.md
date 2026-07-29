@@ -66,6 +66,26 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Changed
 
+- **`shadcn` is a `devDependency`, not a runtime one (#93).** It is the
+  component-scaffolding CLI; nothing in the shipped app imports it. Declaring it
+  under `dependencies` meant `npm ci --omit=dev` resolved **412 packages instead
+  of 103** — 309 packages of CLI subtree (`ts-morph`, `@dotenvx/dotenvx`, a second
+  `dotenv@17.4.2`) described as production supply-chain surface that never reached
+  the image. The `output: "standalone"` trace is unchanged at 13 packages, the
+  compiled stylesheet is bit-identical, and `find / -name 'shadcn*'` in the built
+  image returns nothing — so this changes what the dependency graph *claims*, not
+  what ships. It is not removable: `src/app/globals.css` still
+  `@import`s `shadcn/tailwind.css`, so the build fails outright without it — but
+  that CSS is compiled into `.next/static` before the image is assembled.
+  `npx shadcn add …` still works, since dev dependencies are installed locally.
+- **`CONTRIBUTING.md` now documents how to add a dependency (#81).** The
+  lockfile-regeneration trap (#67) was tribal knowledge: CI installs with `npm ci`,
+  which fails on a mismatch rather than repairing it, and the npm that resolves a
+  contributor's tree is not the npm in `node:22-alpine`. The new section gives the
+  `docker run … npm install --package-lock-only` recipe, the
+  `dependencies`-vs-`devDependencies` test (does it appear in the standalone
+  trace?), why images are pinned by digest, and what each hygiene guard means when
+  it fails.
 - **The header's theme control is icon-only (#103).** In a menu bar the words
   "Dark mode" / "Light mode" were dead weight, and the width they added crowded
   the rest of the bar at 390px. The header now shows a lucide moon/sun glyph in a
@@ -187,9 +207,10 @@ operators upgrading a self-hosted instance don't get surprised.
     image at all** — it is absent from the `output: "standalone"` trace and from
     the image's isolated `prisma`/`dotenv`/`tsx` install. It reaches the tree
     only through build and lint tooling, so no request path can feed it
-    untrusted input. The one copy that is nonetheless *declared* under runtime
-    `dependencies` (`shadcn` → `ts-morph` → `@ts-morph/common`) is on 5.0.8
-    anyway; the residual one is `devDependencies`-only.
+    untrusted input. Since #93 moved `shadcn` to `devDependencies`, **no copy is
+    declared under runtime `dependencies` either** — the copy that used to be
+    (`shadcn` → `ts-morph` → `@ts-morph/common`, on 5.0.8 anyway) is dev-only
+    along with the rest, so all three are now `devDependencies`-only.
   - **Operators:** no action.
 
 ## [0.4.0] - 2026-07-27
