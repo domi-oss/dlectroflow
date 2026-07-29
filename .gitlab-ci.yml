@@ -749,3 +749,19 @@ prune_registry:
     - bash scripts/prune-registry.sh
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'
+
+# TEMPORARY (#114) — answers "can CI_JOB_TOKEN delete a registry tag in this
+# GitLab version?" empirically. Manual, MR-only, removed once it has answered.
+registry_token_probe:
+  stage: maintenance
+  image: alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+  needs: []
+  interruptible: false
+  before_script:
+    - apk add --no-cache curl jq bash
+  script:
+    - bash probe-token.sh
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: manual
+  allow_failure: true
