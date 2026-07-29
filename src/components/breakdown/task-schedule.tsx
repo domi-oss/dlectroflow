@@ -14,7 +14,7 @@ import {
   SCHEDULE_ERROR_MESSAGES,
 } from "@/components/inbox/inbox-view";
 import { leadSchedulingMethod } from "@/lib/scheduling/providers";
-import type { GoogleConnStatus } from "@/lib/scheduling/types";
+import type { GoogleConnStatus, ScheduleIntent } from "@/lib/scheduling/types";
 import { t, type Voice } from "@/lib/strings";
 
 /**
@@ -35,12 +35,20 @@ import { t, type Voice } from "@/lib/strings";
  */
 export function TaskSchedule({
   taskId,
+  taskTitle,
   scheduledAt,
+  scheduleIntent = null,
   google,
   voice,
 }: {
   taskId: string;
+  /** Names the #106 Schedule menu's dialog. */
+  taskTitle: string;
   scheduledAt: Date | null;
+  /** #106 — persisted-or-default intent, resolved on the server by the page so
+   *  the menu opens prefilled with no client round trip. Null for a guest (or
+   *  any caller with nothing to prefill), which keeps 📅 immediate. */
+  scheduleIntent?: ScheduleIntent | null;
   /** Owner + Google connection status; null for guests — mirrors
    *  inbox/page.tsx's `google = owner ? googleStatus : null` (guests always
    *  get the ICS control, never a live Google one). */
@@ -68,10 +76,12 @@ export function TaskSchedule({
     leadSchedulingMethod(effectiveGoogle) === "googleTasks" && effectiveGoogle
       ? {
           state: scheduleState(effectiveGoogle, "ready_steps"),
-          onScheduleSteps: () => {
+          taskTitle,
+          scheduleIntent,
+          onScheduleSteps: (intent?: ScheduleIntent) => {
             setError(null);
             startTransition(async () => {
-              const res = await pushStepsToGoogleTasks(taskId);
+              const res = await pushStepsToGoogleTasks(taskId, intent);
               if (res.ok) {
                 router.refresh();
                 return;

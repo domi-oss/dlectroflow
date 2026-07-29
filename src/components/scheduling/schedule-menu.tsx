@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useId, useRef, useState, type ReactNode } from "react";
+import { useCallback, useId, useRef, useState, type ReactElement } from "react";
 import { Popover } from "@base-ui/react/popover";
 import { cn, touchTarget } from "@/lib/utils";
 import {
@@ -41,9 +41,12 @@ export type ScheduleMenuProps = {
   /** True while a push for this task is in flight; disables the primary action. */
   pending?: boolean;
   onSchedule: (intent: ScheduleIntent) => void;
-  /** The control that opens the menu — rendered AS the popover trigger, so its
-   *  own label/title/classes are what the user sees and hears. */
-  trigger: ReactNode;
+  /** The control that opens the menu — rendered AS the popover trigger (Base UI's
+   *  `render` prop), so its own label/title/classes are what the user sees and
+   *  hears rather than a wrapper's. An element, not a ReactNode: Base UI merges
+   *  its trigger props into this element and has nothing to merge them into
+   *  otherwise. */
+  trigger: ReactElement;
 };
 
 /**

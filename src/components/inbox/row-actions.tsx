@@ -13,6 +13,8 @@ import {
   ANCHORED_POSITIONER,
   popupSurface,
 } from "@/components/ui/anchored-popup";
+import { ScheduleMenu } from "@/components/scheduling/schedule-menu";
+import type { ScheduleIntent } from "@/lib/scheduling/types";
 
 const DURATION_PRESETS = [15, 30, 60] as const;
 
@@ -26,7 +28,9 @@ export type ScheduleControlProps = {
     | "reconnect"
     | "ics_ready_steps"
     | "ics_needs_duration";
-  onScheduleSteps?: () => void;
+  /** #106 — called with the intent the Schedule menu produced, or with no args
+   *  when the menu was skipped (no intent supplied, or the `menu` variant). */
+  onScheduleSteps?: (intent?: ScheduleIntent) => void;
   onScheduleSingle?: (minutes: number) => void;
   /** ICS "Add to calendar" handler — called with the chosen minutes for a
    *  stepless task (ics_needs_duration) or with no args for a task with steps
@@ -42,10 +46,20 @@ export type ScheduleControlProps = {
   variant?: "icon" | "menu";
   /** Menu-variant trigger text (voice-resolved by the caller). Defaults to "Schedule". */
   label?: string;
+  /**
+   * #106 — the intent the Schedule menu opens with, resolved by the caller
+   * (persisted-or-default). Present → the `ready_steps` 📅 opens the menu;
+   * `null`/absent → it keeps firing immediately, so the control is never dead
+   * while data is in flight.
+   */
+  scheduleIntent?: ScheduleIntent | null;
+  /** Names the menu's dialog, so the wrong row's popover is obvious to AT. */
+  taskTitle?: string;
 };
 
 /**
- * The 📅 control. `ready_steps` schedules immediately on click; `needs_duration`
+ * The 📅 control. `ready_steps` opens the Schedule menu when the caller supplied
+ * an intent (#106) and otherwise schedules immediately on click; `needs_duration`
  * opens an inline popover (15/30/60 presets + a custom number input) and fires
  * `onScheduleSingle` once a valid duration is chosen; out-of-range custom values
  * (0, negative, non-numeric, or >480) visibly disable Go and show a hint instead
@@ -56,7 +70,9 @@ export type ScheduleControlProps = {
  * ui/anchored-popup.ts) — it used to be `absolute right-0`, which clipped it
  * past the bottom edge on any row low on a phone screen. The `menu` variant is
  * untouched: it expands in normal flow inside the 🔽 popover, so there is no
- * floating element to position and nothing to collide with.
+ * floating element to position and nothing to collide with — and for the same
+ * reason it keeps firing `onScheduleSteps()` immediately rather than opening the
+ * #106 menu, which would nest a floating popup inside the 🔽 popup.
  */
 export function ScheduleControl({
   state,
@@ -66,6 +82,8 @@ export function ScheduleControl({
   pending,
   variant = "icon",
   label = "Schedule",
+  scheduleIntent,
+  taskTitle,
 }: ScheduleControlProps) {
   const [open, setOpen] = useState(false);
   const [custom, setCustom] = useState("");
@@ -224,6 +242,38 @@ export function ScheduleControl({
           </span>
         )}
       </span>
+    );
+  }
+
+  // #106 — the Google steps path asks first: deadline, priority, work-or-personal.
+  //
+  // The .ics path deliberately keeps its one click. A guest with no Reclaim has
+  // nothing to choose that the menu could offer beyond a deadline, and turning
+  // their download into a two-step dialog would be a regression, not a feature.
+  // With no intent yet (a row whose parent has not resolved one) the control also
+  // stays immediate, so it is never dead while data is in flight.
+  if (state === "ready_steps" && scheduleIntent) {
+    return (
+      <ScheduleMenu
+        taskTitle={taskTitle ?? ""}
+        intent={scheduleIntent}
+        // Always true here: this branch is the Google path by construction, and
+        // priority/hours are exactly the fields an .ics VEVENT cannot carry.
+        showReclaimFields
+        pending={pending}
+        onSchedule={(chosen) => onScheduleSteps?.(chosen)}
+        trigger={
+          <button
+            type="button"
+            aria-label={iconLabel}
+            title={iconLabel}
+            disabled={pending}
+            className={triggerClassName}
+          >
+            📅
+          </button>
+        }
+      />
     );
   }
 

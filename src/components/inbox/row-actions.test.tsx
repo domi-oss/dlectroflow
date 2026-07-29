@@ -6,9 +6,12 @@ import {
   fireEvent,
   cleanup,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RowActions, ScheduleControl } from "./row-actions";
+import { SchedulePriority, ScheduleHours } from "@/lib/scheduling/types";
+import type { ScheduleIntent } from "@/lib/scheduling/types";
 
 afterEach(cleanup);
 
@@ -622,5 +625,142 @@ describe("ScheduleControl — menu variant (▾ dropdown 'Schedule' entry)", () 
     expect(
       screen.getByRole("link", { name: /reconnect google/i }),
     ).toHaveAttribute("href", "/api/google/oauth/start");
+  });
+});
+
+// ── #106 — the Schedule menu on the Google steps path ────────────────────────
+describe("ScheduleControl — the Schedule menu (#106)", () => {
+  const intent: ScheduleIntent = {
+    dueAt: new Date("2026-07-31T16:00:00.000Z"),
+    priority: SchedulePriority.High,
+    hours: ScheduleHours.Work,
+    busy: true,
+    units: [
+      { id: "s1", order: 1, total: 2, text: "a", estMinutes: 30 },
+      { id: "s2", order: 2, total: 2, text: "b", estMinutes: 30 },
+    ],
+  };
+
+  it("opens the menu instead of firing immediately when steps are ready", async () => {
+    const onScheduleSteps = vi.fn();
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{
+          state: "ready_steps",
+          taskTitle: "do flex training",
+          scheduleIntent: intent,
+          onScheduleSteps,
+        }}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Schedule" }));
+    const dialog = screen.getByRole("dialog", { name: /do flex training/i });
+    expect(onScheduleSteps).not.toHaveBeenCalled();
+
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: /^schedule$/i }),
+    );
+    expect(onScheduleSteps).toHaveBeenCalledWith(
+      expect.objectContaining({ priority: "high", hours: "work" }),
+    );
+  });
+
+  it("advertises the popup on the trigger, as the duration popover does", () => {
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{
+          state: "ready_steps",
+          taskTitle: "t",
+          scheduleIntent: intent,
+          onScheduleSteps: vi.fn(),
+        }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Schedule" })).toHaveAttribute(
+      "aria-haspopup",
+      "dialog",
+    );
+  });
+
+  // The control must never be dead: before an intent has loaded (or on a row
+  // whose parent does not supply one), 📅 keeps today's immediate behaviour.
+  it("falls back to firing immediately when no intent has loaded yet", async () => {
+    const onScheduleSteps = vi.fn();
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{
+          state: "ready_steps",
+          scheduleIntent: null,
+          onScheduleSteps,
+        }}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Schedule" }));
+    expect(onScheduleSteps).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  // A guest with no Reclaim has nothing to choose beyond a deadline, and turning
+  // their one-click download into a two-step dialog would be a regression.
+  it("still fires the .ics path immediately — no menu, no regression for guests", async () => {
+    const onScheduleIcs = vi.fn();
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{
+          state: "ics_ready_steps",
+          taskTitle: "t",
+          scheduleIntent: intent,
+          onScheduleIcs,
+        }}
+      />,
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add to calendar (.ics)" }),
+    );
+    expect(onScheduleIcs).toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("keeps the ≥44px touch target on the menu's trigger", () => {
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{
+          state: "ready_steps",
+          taskTitle: "t",
+          scheduleIntent: intent,
+          onScheduleSteps: vi.fn(),
+        }}
+      />,
+    );
+    const btn = screen.getByRole("button", { name: "Schedule" });
+    expect(btn.className).toContain("min-h-11");
+    expect(btn.className).toContain("min-w-11");
+  });
+
+  it("pending disables the trigger, so the menu cannot be opened mid-push", () => {
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{
+          state: "ready_steps",
+          taskTitle: "t",
+          scheduleIntent: intent,
+          onScheduleSteps: vi.fn(),
+          pending: true,
+        }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Schedule" })).toBeDisabled();
   });
 });

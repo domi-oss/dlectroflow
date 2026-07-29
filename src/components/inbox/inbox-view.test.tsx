@@ -16,6 +16,7 @@ import {
   DragGhostRow,
 } from "@/components/inbox/inbox-view";
 import type { Item } from "@/components/inbox/bucket";
+import { SchedulePriority, ScheduleHours } from "@/lib/scheduling/types";
 import type { AgingSettings } from "@/lib/aging";
 
 const push = vi.fn();
@@ -1830,7 +1831,58 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
       within(row).getByRole("button", { name: /schedule/i }),
     ).toBeInTheDocument();
     await user.click(within(row).getByRole("button", { name: /schedule/i }));
-    expect(pushStepsToGoogleTasks).toHaveBeenCalledWith("t1");
+    // No `scheduleIntents` prop here, so the row keeps its pre-#106 immediate
+    // behaviour: undefined is the absence of a choice, and the action falls back
+    // to the shared defaults. The menu path is covered in row-actions.test.tsx
+    // and end to end in e2e/smoke/schedule-menu.spec.ts.
+    expect(pushStepsToGoogleTasks).toHaveBeenCalledWith("t1", undefined);
+  });
+
+  // #106 — the primary surface: with the page's server-resolved prefill in hand,
+  // 📅 asks first and the push carries what the owner chose.
+  it("multi-step row with a resolved intent: 📅 opens the Schedule menu and pushes the choice", async () => {
+    const { pushStepsToGoogleTasks } =
+      await import("@/app/actions/google-schedule");
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[makeMultiStep()]}
+        settings={settings}
+        google={connected}
+        scheduleIntents={{
+          t1: {
+            dueAt: new Date(Date.now() + 3 * 24 * 60 * 60_000),
+            priority: SchedulePriority.Critical,
+            hours: ScheduleHours.Personal,
+            busy: true,
+            units: [
+              { id: "s1", order: 1, total: 1, text: "book", estMinutes: 10 },
+            ],
+          },
+        }}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const row = screen.getByText("plan trip").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: /schedule/i }));
+
+    // Portaled into the row, so a row-scoped query still finds it.
+    const dialog = within(row).getByRole("dialog", { name: /plan trip/i });
+    expect(pushStepsToGoogleTasks).not.toHaveBeenCalled();
+    expect(within(dialog).getByLabelText(/priority/i)).toHaveValue("critical");
+    expect(
+      within(dialog).getByRole("radio", { name: /personal/i }),
+    ).toBeChecked();
+
+    await user.click(
+      within(dialog).getByRole("button", { name: /^schedule$/i }),
+    );
+    expect(pushStepsToGoogleTasks).toHaveBeenCalledWith(
+      "t1",
+      expect.objectContaining({ priority: "critical", hours: "personal" }),
+    );
   });
 
   it("single-task row: 📅 opens the popover; picking 30 min calls scheduleSingleTask(itemId, 30)", async () => {
