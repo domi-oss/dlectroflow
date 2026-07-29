@@ -2,6 +2,8 @@ type IcsStep = {
   text: string;
   estMinutes: number;
   subtaskEmoji?: string | null;
+  /** Per-step DESCRIPTION (#104). Falls back to the builder's shared `description`. */
+  description?: string | null;
 };
 
 function pad(n: number): string {
@@ -38,8 +40,16 @@ export function buildTaskIcs(input: {
   steps: IcsStep[];
   start?: Date;
   fallbackDurationMin?: number;
-  /** Optional note (e.g. focus deep-link, #39) added as each VEVENT's DESCRIPTION. */
+  /** Optional note (e.g. focus deep-link, #39) added as each VEVENT's DESCRIPTION.
+   *  Used when a step carries no `description` of its own — which is still the
+   *  only source for the stepless (fallback) event. */
   description?: string;
+  /**
+   * Defend the time (#104): `TRANSP:OPAQUE` marks the events busy in the
+   * viewer's calendar. The ICS path is the one place the intent's `busy` flag
+   * can be honoured literally — Reclaim decides free vs busy itself.
+   */
+  busy?: boolean;
 }): string {
   const description = input.description?.trim() || null;
   const start = input.start ?? nextTopOfHour();
@@ -55,6 +65,9 @@ export function buildTaskIcs(input: {
     const end = new Date(cursor.getTime() + dur * 60_000);
     const emoji = s.subtaskEmoji ? `${s.subtaskEmoji} ` : "";
     const summary = `${input.parentEmoji ? input.parentEmoji + " " : ""}${input.title}: ${emoji}${s.text}`;
+    // Per-step note (#104): the defect this replaces built ONE description from
+    // steps[0] and reused it, so every event opened the timer on step 1.
+    const stepDescription = s.description?.trim() || description;
     lines.push(
       "BEGIN:VEVENT",
       `UID:${floating(cursor)}-${i}@dlectroflow`,
@@ -62,7 +75,8 @@ export function buildTaskIcs(input: {
       `DTSTART:${floating(cursor)}`,
       `DTEND:${floating(end)}`,
       `SUMMARY:${esc(summary)}`,
-      ...(description ? [`DESCRIPTION:${esc(description)}`] : []),
+      ...(stepDescription ? [`DESCRIPTION:${esc(stepDescription)}`] : []),
+      ...(input.busy ? ["TRANSP:OPAQUE"] : []),
       "END:VEVENT",
     );
     cursor = end;
@@ -79,6 +93,7 @@ export function buildTaskIcs(input: {
       `DTEND:${floating(end)}`,
       `SUMMARY:${esc(summary)}`,
       ...(description ? [`DESCRIPTION:${esc(description)}`] : []),
+      ...(input.busy ? ["TRANSP:OPAQUE"] : []),
       "END:VEVENT",
     );
   }

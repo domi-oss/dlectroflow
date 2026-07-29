@@ -120,7 +120,9 @@ describe("scheduleViaIcs", () => {
     expect(taskUpdateMock).not.toHaveBeenCalled();
   });
 
-  it("embeds a voice-aware focus deep-link note pointing at the first step (#39)", async () => {
+  // #104: every VEVENT used to carry steps[0]'s link, so a downloaded calendar
+  // sent all of a task's events to step 1's timer. Each event links to ITS step.
+  it("embeds a voice-aware focus deep-link note pointing at ITS OWN step (#104)", async () => {
     workspaceMock.mockResolvedValue("owner");
     getSettingsMock.mockResolvedValue({ voice: "playful" });
     process.env.PUBLIC_ORIGIN = "https://app.example";
@@ -135,9 +137,12 @@ describe("scheduleViaIcs", () => {
     const res = await scheduleViaIcs("task-1");
     expect(res.ok).toBe(true);
     if (res.ok) {
-      expect(res.ics).toContain("DESCRIPTION:");
+      expect((res.ics.match(/DESCRIPTION:/g) ?? []).length).toBe(2);
       expect(res.ics).toContain("https://app.example/focus/step-A");
+      expect(res.ics).toContain("https://app.example/focus/step-B");
       expect(res.ics).toContain("🍽️"); // playful voice resolved from settings
+      // The owner asked for defended time and an .ics can say so (#104).
+      expect((res.ics.match(/TRANSP:OPAQUE/g) ?? []).length).toBe(2);
     }
     delete process.env.PUBLIC_ORIGIN;
   });
