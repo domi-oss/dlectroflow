@@ -18,6 +18,10 @@ import {
   UserStatus,
   AiPolicy,
 } from "@/lib/constants";
+// #106 — the scheduling vocabulary lives in its own client-safe module (both the
+// server actions and the Schedule menu import it), so these two value sets are
+// authoritative from there rather than from constants.ts.
+import { SchedulePriority, ScheduleHours } from "@/lib/scheduling/types";
 
 // #38 — keep the DB CHECK constraints (see the
 // 20260719171754_add_status_check_constraints migration) in lockstep with the
@@ -43,10 +47,11 @@ import {
 // under sibling integration tests.
 const prisma = new PrismaClient();
 
-// The bijection between a CHECK constraint and the constants.ts object whose
-// values it must mirror. Deriving `values` from the imported constant object
-// (not a re-typed literal list) is what makes constants.ts authoritative:
-// adding `BrainDumpStatus.Foo` here immediately changes the expected set.
+// The bijection between a CHECK constraint and the const object whose values it
+// must mirror — constants.ts for most of them, scheduling/types.ts for the two
+// #106 scheduling columns. Deriving `values` from the imported constant object
+// (not a re-typed literal list) is what makes that module authoritative: adding
+// `BrainDumpStatus.Foo` there immediately changes the expected set here.
 const REGISTRY: ReadonlyArray<{
   constraint: string;
   table: string;
@@ -166,6 +171,23 @@ const REGISTRY: ReadonlyArray<{
     column: "aiPolicy",
     values: AiPolicy,
     nullable: false,
+  },
+  // #106 — the Schedule menu's persisted intent. Nullable: a task nobody has
+  // scheduled through the menu has no intent, and that "nobody has said yet" is
+  // load-bearing (it is what makes defaultIntentFor supply the fallback).
+  {
+    constraint: "Task_schedulePriority_check",
+    table: "Task",
+    column: "schedulePriority",
+    values: SchedulePriority,
+    nullable: true,
+  },
+  {
+    constraint: "Task_scheduleHours_check",
+    table: "Task",
+    column: "scheduleHours",
+    values: ScheduleHours,
+    nullable: true,
   },
 ];
 

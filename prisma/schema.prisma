@@ -236,6 +236,21 @@ model Task {
   googleTaskListId String?
   scheduledAt      DateTime?  // when the task was first scheduled (any method)
   scheduledVia     String?    // "ics" | "google" (method-agnostic marker)
+  // #106 — what the owner asked for the last time this task was scheduled
+  // through the Schedule menu, so re-opening it prefills instead of asking
+  // again. Null until they have said something: `defaultIntentFor()`
+  // (src/lib/scheduling/intent.ts) supplies the fallback, which is why these are
+  // nullable with NO column default — a default would freeze "3 days from the
+  // migration date" and would also make "the owner chose this" indistinguishable
+  // from "nobody has said yet", the very distinction prefill needs.
+  // The two pseudo-enum columns mirror SchedulePriority / ScheduleHours in
+  // src/lib/scheduling/types.ts and are CHECK-constrained by
+  // 20260729120000_task_schedule_intent; Prisma can't express a CHECK, so these
+  // comments are their only trace in the schema and the constraints are
+  // registered in src/lib/enum-constraint-sync.integration.test.ts.
+  scheduleDueAt    DateTime?
+  schedulePriority String?    // critical | high | normal | low
+  scheduleHours    String?    // work | personal
   steps            Step[]
   turns            BreakdownTurn[]
   brainDumpItems   BrainDumpItem[]
