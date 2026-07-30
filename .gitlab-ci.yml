@@ -628,12 +628,41 @@ deploy_production:
     # --atomic still guarantees rollback, so the cost of a longer timeout is only
     # slower rollback on a genuinely bad deploy; the benefit is not rolling back
     # good ones. The real lever is the image size — see the follow-up issue.
+    #
+    # ── Hostnames (#130) ──────────────────────────────────────────────────────
+    # `host` does three jobs at once: the ingress rule, the TLS SAN, and
+    # PUBLIC_ORIGIN — the app derives it as https://{{ .Values.host }} (see
+    # charts/dlectroflow/templates/deployment.yaml), and that value pins the OAuth
+    # redirect URIs against Host / X-Forwarded-* spoofing. So there is exactly ONE
+    # auth origin per deployment: two hostnames can be SERVED, but only one can
+    # complete a sign-in. Changing `host` is therefore atomic, not gradual, and it
+    # invalidates existing Google connections — the redirect URI moves with it.
+    #
+    # This cluster is the corp-facing instance: colleagues signing in with a work
+    # Google account, which only the Internal OAuth client in the work GCP project
+    # can serve. The apex is reserved for the instance that outlives it, so the
+    # canonical host here is the subdomain.
+    #
+    # legacyHosts[1] is the apex, served by this SAME cluster during the overlap
+    # and served WITHOUT a redirect — the subtle bit. `legacyHosts` only adds a
+    # host to the ingress and the multi-SAN cert; the 301 is a SEPARATE hardcoded
+    # rule in next.config.ts matching dlectroflow.dlectronique.dev alone, so a host
+    # listed here but absent from that rule is simply served. That is deliberate:
+    # Google is verifying the OAuth consent screen against https://dlectroflow.dev
+    # right now, and its homepage / privacy / terms checks want a 200, not a hop.
+    # Do NOT add the apex to the next.config.ts redirect until verification has
+    # cleared AND the apex has moved to the instance that keeps it.
+    #
+    # Both hostnames must also be in cert-manager's hostAliases or the HTTP-01
+    # self-check never completes on GKE and the cert silently never issues —
+    # docs/deploy-runbook.md §4.
     - helm upgrade --install dlectroflow charts/dlectroflow
         --namespace dlectroflow-prod --create-namespace
         --set env=production --set postgres.persistent=true
         --set-string image.tag="main-$CI_COMMIT_SHORT_SHA"
-        --set-string host="dlectroflow.dev"
+        --set-string host="work.dlectroflow.dev"
         --set-string "legacyHosts[0]=dlectroflow.dlectronique.dev"
+        --set-string "legacyHosts[1]=dlectroflow.dev"
         --set-string secrets.postgresPassword="$POSTGRES_PASSWORD"
         --set-string secrets.anthropicApiKey="$ANTHROPIC_API_KEY"
         --set-string secrets.googleClientId="$GOOGLE_CLIENT_ID"
