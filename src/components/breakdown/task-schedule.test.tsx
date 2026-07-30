@@ -8,6 +8,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { TaskSchedule } from "./task-schedule";
+import { GOOGLE_ACCOUNT_HINT } from "@/components/integrations/google-account-hint";
 
 const push = vi.fn();
 const refresh = vi.fn();
@@ -229,5 +230,105 @@ describe("TaskSchedule — guest / no Google (google=null)", () => {
     expect(
       await screen.findByText(/couldn't build the calendar file/i),
     ).toBeInTheDocument();
+  });
+});
+
+// ── #128 — which Google account to connect ───────────────────────────────────
+// The task working view renders a single connect control (not one per row), so
+// the guidance is visible here — but the control is wrapped in a bordered pill,
+// so this surface renders the hint outside it and hands the id to the control.
+describe("TaskSchedule — the pick-your-account hint (#128)", () => {
+  const hintFor = (link: HTMLElement) =>
+    document.getElementById(link.getAttribute("aria-describedby") ?? "");
+
+  it("describes the Connect link with a visible hint", () => {
+    render(
+      <TaskSchedule
+        taskId="t1"
+        taskTitle="Ship the thing"
+        scheduledAt={null}
+        google={{ configured: true, connected: false, needsReconnect: false }}
+        voice="plain"
+      />,
+    );
+    const link = screen.getByRole("link", { name: /connect google/i });
+    expect(hintFor(link)).toHaveTextContent(GOOGLE_ACCOUNT_HINT);
+  });
+
+  it("describes the Reconnect link too", () => {
+    render(
+      <TaskSchedule
+        taskId="t1"
+        taskTitle="Ship the thing"
+        scheduledAt={null}
+        google={{ configured: true, connected: false, needsReconnect: true }}
+        voice="plain"
+      />,
+    );
+    const link = screen.getByRole("link", { name: /reconnect google/i });
+    expect(hintFor(link)).toHaveTextContent(GOOGLE_ACCOUNT_HINT);
+  });
+
+  it("keeps the hint out of the pill so the bordered control stays a control", () => {
+    render(
+      <TaskSchedule
+        taskId="t1"
+        taskTitle="Ship the thing"
+        scheduledAt={null}
+        google={{ configured: true, connected: false, needsReconnect: false }}
+        voice="plain"
+      />,
+    );
+    const link = screen.getByRole("link", { name: /connect google/i });
+    const hint = screen.getByText(GOOGLE_ACCOUNT_HINT);
+    expect(link.closest("span.rounded-md.border")).not.toContainElement(hint);
+  });
+
+  it("appears when a mid-flight reconnect_required swaps the control to a link", async () => {
+    const { pushStepsToGoogleTasks } =
+      await import("@/app/actions/google-schedule");
+    (pushStepsToGoogleTasks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: false,
+      reason: "reconnect_required",
+    });
+    render(
+      <TaskSchedule
+        taskId="t1"
+        taskTitle="Ship the thing"
+        scheduledAt={null}
+        google={connected}
+        voice="plain"
+      />,
+    );
+    expect(screen.queryByText(GOOGLE_ACCOUNT_HINT)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /schedule/i }));
+    const link = await screen.findByRole("link", { name: /reconnect google/i });
+    expect(hintFor(link)).toHaveTextContent(GOOGLE_ACCOUNT_HINT);
+  });
+
+  it("says nothing about accounts on the guest .ics control", () => {
+    render(
+      <TaskSchedule
+        taskId="t1"
+        taskTitle="Ship the thing"
+        scheduledAt={null}
+        google={null}
+        voice="plain"
+      />,
+    );
+    expect(screen.queryByText(GOOGLE_ACCOUNT_HINT)).toBeNull();
+  });
+
+  it("says nothing about accounts once Google is connected", () => {
+    render(
+      <TaskSchedule
+        taskId="t1"
+        taskTitle="Ship the thing"
+        scheduledAt={null}
+        google={connected}
+        voice="plain"
+      />,
+    );
+    expect(screen.queryByText(GOOGLE_ACCOUNT_HINT)).toBeNull();
   });
 });

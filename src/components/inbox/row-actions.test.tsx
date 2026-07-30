@@ -10,6 +10,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RowActions, ScheduleControl } from "./row-actions";
+import { GOOGLE_ACCOUNT_HINT } from "@/components/integrations/google-account-hint";
 import { SchedulePriority, ScheduleHours } from "@/lib/scheduling/types";
 import type { ScheduleIntent } from "@/lib/scheduling/types";
 
@@ -762,5 +763,69 @@ describe("ScheduleControl — the Schedule menu (#106)", () => {
       />,
     );
     expect(screen.getByRole("button", { name: "Schedule" })).toBeDisabled();
+  });
+});
+
+// ── #128 — which Google account to connect ───────────────────────────────────
+// A managed work account can be refused by its own administrator at Google's
+// consent step: no callback comes back, so there is no error state to render
+// and nothing in the logs. The only fix is preventive copy before the click —
+// but this control is repeated once per inbox row, so WHERE the sentence is
+// visible depends on how much room the variant has.
+describe("ScheduleControl — the pick-your-account hint (#128)", () => {
+  const hintFor = (link: HTMLElement) =>
+    document.getElementById(link.getAttribute("aria-describedby") ?? "");
+
+  it("menu variant: the ▾ column has room, so the hint is visible and described", () => {
+    render(<ScheduleControl variant="menu" state="connect" />);
+    const link = screen.getByRole("link", { name: /connect google/i });
+    expect(hintFor(link)).toHaveTextContent(GOOGLE_ACCOUNT_HINT);
+  });
+
+  it("menu variant: reconnect carries it too — an admin can block an app that used to work", () => {
+    render(<ScheduleControl variant="menu" state="reconnect" />);
+    const link = screen.getByRole("link", { name: /reconnect google/i });
+    expect(hintFor(link)).toHaveTextContent(GOOGLE_ACCOUNT_HINT);
+  });
+
+  it("icon variant: no per-row paragraph — the hint rides on title instead", () => {
+    // Every unconnected row renders this link. A visible sentence on each one
+    // would be the same paragraph a dozen times down the page, so the compact
+    // control keeps the guidance as its accessible description via `title`
+    // (the same tooltip mechanism the 📅 / Scheduled ✓ controls already use).
+    render(
+      <RowActions inline={[]} menu={[]} schedule={{ state: "connect" }} />,
+    );
+    const link = screen.getByRole("link", { name: /connect google/i });
+    expect(link).toHaveAttribute("title", GOOGLE_ACCOUNT_HINT);
+    expect(link).not.toHaveAttribute("aria-describedby");
+    expect(screen.queryByText(GOOGLE_ACCOUNT_HINT)).toBeNull();
+  });
+
+  it("accountHintId: a caller rendering its own hint owns the association", () => {
+    // The task working view wraps this control in a bordered pill, so its hint
+    // has to live OUTSIDE the control — it passes the id in rather than
+    // leaving the guidance as loose text beside the link.
+    render(
+      <>
+        <ScheduleControl state="connect" accountHintId="task-hint" />
+        <span id="task-hint">{GOOGLE_ACCOUNT_HINT}</span>
+      </>,
+    );
+    const link = screen.getByRole("link", { name: /connect google/i });
+    expect(link).toHaveAttribute("aria-describedby", "task-hint");
+    // No duplicate description: `title` would be a second, competing one.
+    expect(link).not.toHaveAttribute("title");
+  });
+
+  it("says nothing about accounts once there is nothing to connect", () => {
+    render(
+      <ScheduleControl
+        variant="menu"
+        state="ready_steps"
+        onScheduleSteps={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText(GOOGLE_ACCOUNT_HINT)).toBeNull();
   });
 });
