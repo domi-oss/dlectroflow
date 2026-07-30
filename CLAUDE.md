@@ -83,5 +83,6 @@ Prod deploys, cluster changes and deletes are owner-authorised only.
 ## Local development gotchas
 
 - Local `npm` is allow-scripts-wrapped: regenerate lockfiles inside the CI image (`node:22-alpine`), not on the host.
+- **Worktrees live in `.claude/worktrees/<name>`**, which `.gitignore`, `.dockerignore`, `.prettierignore` and `eslint.config.mjs` all exclude. Putting one anywhere else means every one of those tools walks into it.
 - Worktrees share a symlinked `node_modules` including the generated Prisma client, and branches carry different schema columns. Seed a new worktree with `cp -Rc` from the main checkout, then `npx prisma generate` for that branch.
 - Never `git stash` while other agents are working the repo — the stash is repo-wide and gets clobbered.
