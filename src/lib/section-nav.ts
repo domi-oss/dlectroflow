@@ -9,6 +9,9 @@ import { t, type StringKey, type Voice } from "@/lib/strings";
  * so a heading rename can never leave the nav pointing at a name that no longer
  * exists on the page. `id` is a real DOM id and a URL fragment — treat it as
  * part of the public surface (people bookmark and share `#settings-focus-timer`).
+ * #115 made that true rather than aspirational: a collapsible section opens
+ * itself when the fragment names it, so a shared link no longer lands on a
+ * title with nothing under it.
  */
 export type SectionDef = {
   readonly id: string;
@@ -112,6 +115,36 @@ export function announceSectionActive(id: string): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(
     new CustomEvent<SectionActivateDetail>(SECTION_ACTIVATE_EVENT, {
+      detail: { id },
+    }),
+  );
+}
+
+/**
+ * #115 — "take me to this section", published on `window` when a "Jump to…"
+ * pill is activated.
+ *
+ * The mirror image of {@link SECTION_ACTIVATE_EVENT}: that one travels from a
+ * section's own header UP to the nav, this one travels from the nav DOWN to a
+ * section, across the same boundary and for the same reason — a section's
+ * expanded state is local to `<CollapsibleSection>`, which is not in the nav's
+ * React tree, so the DOM is the channel.
+ *
+ * Why an event and not just the fragment the pill already sets: clicking a pill
+ * twice does not CHANGE `location.hash`, so no `hashchange` fires and the
+ * fragment alone cannot tell a section it has been asked for again. That is the
+ * everyday case of "I closed this section, now take me back to it".
+ */
+export const SECTION_JUMP_EVENT = "dlectroflow:section-jump";
+
+/** Payload of {@link SECTION_JUMP_EVENT}: the id of the section jumped to. */
+export type SectionJumpDetail = { readonly id: string };
+
+/** Publish {@link SECTION_JUMP_EVENT}. No-op outside the browser. */
+export function announceSectionJump(id: string): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent<SectionJumpDetail>(SECTION_JUMP_EVENT, {
       detail: { id },
     }),
   );

@@ -13,6 +13,7 @@ import { SectionHeading } from "@/components/nav/section-heading";
 import {
   HELP_SECTIONS,
   SECTION_ACTIVATE_EVENT,
+  SECTION_JUMP_EVENT,
   sectionLabel,
 } from "@/lib/section-nav";
 import type { Voice } from "@/lib/strings";
@@ -109,6 +110,9 @@ afterEach(() => {
   delete window.matchMedia;
   document.documentElement.removeAttribute("style");
   document.documentElement.className = "";
+  // jsdom DOES follow same-document fragment links, so a jump in one test
+  // leaves the fragment behind for the next one (#115 made that observable).
+  window.location.hash = "";
 });
 
 describe("SectionNav (#72)", () => {
@@ -466,6 +470,66 @@ describe("SectionNav (#72)", () => {
     expect(document.activeElement).toBe(
       document.getElementById("help-task-breakdown"),
     );
+  });
+
+  describe("jumping publishes the destination (#115)", () => {
+    /** Collect every SECTION_JUMP_EVENT fired while `run` executes. */
+    async function jumpsDuring(run: () => Promise<void>): Promise<string[]> {
+      const seen: string[] = [];
+      const listener = (event: Event) =>
+        seen.push((event as CustomEvent<{ id: string }>).detail.id);
+      window.addEventListener(SECTION_JUMP_EVENT, listener);
+      try {
+        await run();
+      } finally {
+        window.removeEventListener(SECTION_JUMP_EVENT, listener);
+      }
+      return seen;
+    }
+
+    it("names the destination, so a collapsed section can open itself", async () => {
+      // #115 — the nav cannot expand the section it sends you to: expansion is
+      // local state inside <CollapsibleSection>, which lives outside this
+      // component's tree. Same channel as #101's activate event, opposite
+      // direction. A pill click clicked TWICE does not change the fragment, so
+      // the fragment alone cannot carry this.
+      render(<Page />);
+      await userEvent.click(toggle());
+      const seen = await jumpsDuring(async () => {
+        await userEvent.click(
+          screen.getByRole("link", { name: "Task breakdown" }),
+        );
+      });
+      expect(seen).toEqual(["help-task-breakdown"]);
+    });
+
+    it("says nothing for a modified click — that one opens a new tab", async () => {
+      // Cmd/Ctrl-click leaves the page entirely alone (the nav's own guard), so
+      // there is no destination on THIS page to open.
+      const user = userEvent.setup();
+      render(<Page />);
+      await user.click(toggle());
+      const seen = await jumpsDuring(async () => {
+        await user.keyboard("{Meta>}");
+        await user.click(screen.getByRole("link", { name: "Task breakdown" }));
+        await user.keyboard("{/Meta}");
+      });
+      expect(seen).toEqual([]);
+    });
+
+    it("Enter on a pill behaves exactly like a click", async () => {
+      render(<Page />);
+      await userEvent.click(toggle());
+      const link = screen.getByRole("link", { name: "Task breakdown" });
+      link.focus();
+      const seen = await jumpsDuring(async () => {
+        await userEvent.keyboard("{Enter}");
+      });
+      expect(seen).toEqual(["help-task-breakdown"]);
+      expect(document.activeElement).toBe(
+        document.getElementById("help-task-breakdown"),
+      );
+    });
   });
 
   it("publishes its live height so a jump target clears the sticky bar", () => {

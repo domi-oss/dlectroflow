@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CollapsibleSection } from "@/components/nav/collapsible-section";
-import { SECTION_ACTIVATE_EVENT } from "@/lib/section-nav";
+import { announceSectionJump, SECTION_ACTIVATE_EVENT } from "@/lib/section-nav";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  window.location.hash = "";
+});
 
 /** The trigger for a section, by the stable hook every section carries. */
 const trigger = (id = "settings-voice") =>
@@ -207,6 +210,183 @@ describe("CollapsibleSection — the disclosure (#101)", () => {
     await user.click(trigger());
     await user.click(trigger());
     expect(screen.getByLabelText("a pending edit")).toHaveValue("half typed");
+  });
+});
+
+describe("CollapsibleSection — being asked for opens it (#115)", () => {
+  /**
+   * jsdom implements no layout, so it has no `scrollIntoView` at all. Stubbing
+   * it is what lets these tests see WHEN the landing is issued relative to the
+   * expansion, which is the half of #115 that a "did it open?" assertion misses.
+   */
+  const landings: { hidden: boolean }[] = [];
+  const scrollIntoView = vi.fn(function (this: Element) {
+    landings.push({ hidden: body().hasAttribute("hidden") });
+  });
+
+  function withScrollIntoView() {
+    landings.length = 0;
+    scrollIntoView.mockClear();
+    Element.prototype.scrollIntoView = scrollIntoView;
+  }
+
+  afterEach(() => {
+    // @ts-expect-error – jsdom never had one; put the absence back.
+    delete Element.prototype.scrollIntoView;
+  });
+
+  /** Change the fragment the way a browser does: set it, then announce it. */
+  function setFragment(next: string) {
+    act(() => {
+      window.location.hash = next;
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+  }
+
+  /** What the nav publishes when a "Jump to…" pill is activated. */
+  function jumpTo(id: string) {
+    act(() => announceSectionJump(id));
+  }
+
+  it("opens when the page is loaded at its own fragment", () => {
+    // The whole point of #115's second half: /settings#settings-voice used to
+    // land on a title with nothing under it.
+    withScrollIntoView();
+    window.location.hash = "#settings-voice";
+    renderSection();
+    expect(trigger()).toHaveAttribute("aria-expanded", "true");
+    expect(body()).not.toHaveAttribute("hidden");
+  });
+
+  it("leaves a section the fragment does not name exactly where it was", () => {
+    withScrollIntoView();
+    window.location.hash = "#settings-demo";
+    renderSection();
+    expect(trigger()).toHaveAttribute("aria-expanded", "false");
+    expect(body()).toHaveAttribute("hidden");
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("opens on a fragment change — clicking a nav pill IS one", () => {
+    withScrollIntoView();
+    renderSection();
+    expect(trigger()).toHaveAttribute("aria-expanded", "false");
+    setFragment("#settings-voice");
+    expect(trigger()).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("never toggles an already-open section shut", () => {
+    withScrollIntoView();
+    renderSection({ defaultExpanded: true });
+    setFragment("#settings-voice");
+    expect(trigger()).toHaveAttribute("aria-expanded", "true");
+    jumpTo("settings-voice");
+    expect(trigger()).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("opens on an explicit jump even when the fragment already named it", () => {
+    // The case the fragment alone cannot see: the pill is clicked a SECOND
+    // time, so `location.hash` does not change and no hashchange fires.
+    withScrollIntoView();
+    window.location.hash = "#settings-voice";
+    renderSection();
+    expect(trigger()).toHaveAttribute("aria-expanded", "true");
+
+    // The reader closes it by hand, with the fragment still pointing here.
+    act(() => trigger().click());
+    expect(trigger()).toHaveAttribute("aria-expanded", "false");
+
+    jumpTo("settings-voice");
+    expect(trigger()).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("does not re-open a section the reader deliberately collapsed", () => {
+    withScrollIntoView();
+    window.location.hash = "#settings-voice";
+    const view = renderSection();
+    act(() => trigger().click());
+    expect(trigger()).toHaveAttribute("aria-expanded", "false");
+
+    // Re-renders, and history events that leave the fragment alone (the
+    // scroll-spy's own churn is exactly this shape), must not undo that.
+    view.rerender(
+      <CollapsibleSection id="settings-voice" voice="plain">
+        <p>the voice controls</p>
+      </CollapsibleSection>,
+    );
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(trigger()).toHaveAttribute("aria-expanded", "false");
+    expect(body()).toHaveAttribute("hidden");
+  });
+
+  it("ignores a jump aimed at a different section", () => {
+    withScrollIntoView();
+    renderSection();
+    jumpTo("settings-demo");
+    expect(trigger()).toHaveAttribute("aria-expanded", "false");
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("lands on the heading only AFTER the body is on the page", () => {
+    // #115's subtlety, and the reason this is not just `setExpanded(true)`:
+    // expanding raises the document's scroll limit, so a landing computed
+    // against the collapsed page clamps short and leaves the heading somewhere
+    // down the viewport. The DOM must already be expanded when the scroll is
+    // issued. (The resulting scroll POSITION is asserted in
+    // e2e/smoke/section-nav.spec.ts, where there is real layout.)
+    withScrollIntoView();
+    window.location.hash = "#settings-voice";
+    renderSection();
+    expect(scrollIntoView).toHaveBeenCalled();
+    expect(landings).not.toHaveLength(0);
+    expect(landings.every((l) => !l.hidden)).toBe(true);
+    // No `behavior` argument, deliberately: that leaves it to CSS, which is
+    // `scroll-smooth` while the nav is mounted and `auto` under
+    // prefers-reduced-motion (globals.css) — the same one rule the rest of the
+    // app honours.
+    expect(scrollIntoView).toHaveBeenCalledWith();
+  });
+
+  it("lands again when the reader asks again after closing it", () => {
+    withScrollIntoView();
+    window.location.hash = "#settings-voice";
+    renderSection();
+    const first = scrollIntoView.mock.calls.length;
+    act(() => trigger().click());
+    jumpTo("settings-voice");
+    expect(scrollIntoView.mock.calls.length).toBeGreaterThan(first);
+    expect(landings.at(-1)).toEqual({ hidden: false });
+  });
+
+  it("does not move the page when the reader opens a section by its own header", () => {
+    // Opening a section you are already looking at must not yank it to the top
+    // of the viewport — only an explicit "take me there" scrolls.
+    withScrollIntoView();
+    renderSection();
+    act(() => trigger().click());
+    expect(trigger()).toHaveAttribute("aria-expanded", "true");
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("keeps aria-expanded honest through every one of those routes", () => {
+    withScrollIntoView();
+    renderSection();
+    const state = () => trigger().getAttribute("aria-expanded");
+    const bodyHidden = () => String(!body().hasAttribute("hidden"));
+
+    expect(state()).toBe("false");
+    expect(state()).toBe(bodyHidden());
+    setFragment("#settings-voice");
+    expect(state()).toBe("true");
+    expect(state()).toBe(bodyHidden());
+    act(() => trigger().click());
+    expect(state()).toBe("false");
+    expect(state()).toBe(bodyHidden());
+    jumpTo("settings-voice");
+    expect(state()).toBe("true");
+    expect(state()).toBe(bodyHidden());
   });
 });
 
