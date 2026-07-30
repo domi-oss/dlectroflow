@@ -149,6 +149,47 @@ describe("proxy: authenticated-only paths", () => {
   });
 });
 
+// #123 — the published legal pages must be reachable by a stranger.
+//
+// This drives the real middleware rather than isPublicPath() on purpose: the
+// failure mode being guarded is "the classifier says public and the middleware
+// redirects anyway". Google's OAuth verification reviewer arrives with NO
+// cookies, follows no sign-in, and is not a guest yet — if either page answers
+// with a redirect to /login, consent-screen verification fails and nothing in
+// the app appears broken.
+describe("proxy: the legal pages are reachable with no cookies at all (#123)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.AUTH_SESSION_SECRET = SECRET;
+    vi.mocked(requestOrigin).mockReturnValue("https://dlectroflow.dev");
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  for (const path of ["/privacy", "/terms"]) {
+    it(`serves ${path} to a request carrying no session and no guest cookie`, async () => {
+      const req = new NextRequest(`https://dlectroflow.dev${path}`);
+      expect(req.cookies.getAll()).toEqual([]);
+
+      const res = await proxy(req);
+
+      expect(res.headers.get("location")).toBeNull();
+      expect(res.status).toBe(200);
+    });
+
+    it(`mints no guest sandbox for ${path}`, async () => {
+      // A public path returns before the guest-minting branch. Worth asserting:
+      // a reader of the privacy policy should not have a workspace created for
+      // them by reading it, and the policy says the guest cookie is set when you
+      // use the app.
+      const res = await proxy(
+        new NextRequest(`https://dlectroflow.dev${path}`),
+      );
+      expect(res.cookies.get(GUEST_COOKIE)).toBeUndefined();
+      expect(res.headers.get(GUEST_WS_HEADER)).toBeNull();
+    });
+  }
+});
+
 describe("proxy: a signed-in user is never also minted a guest", () => {
   beforeEach(() => {
     vi.clearAllMocks();

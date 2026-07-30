@@ -1,4 +1,27 @@
-export const PUBLIC_PREFIXES = ["/api/health", "/login", "/api/auth/"];
+/**
+ * Paths served to anyone, with no session of any kind.
+ *
+ * `/privacy` and `/terms` (#123) are here because they are LEGALLY REQUIRED to
+ * be publicly reachable, not merely convenient: UK GDPR Art. 12(1) wants the
+ * notice accessible, and Google's OAuth verification reviewers fetch both URLs
+ * cold — no cookies, no sign-in. Everything not matched here is redirected to
+ * /login by src/proxy.ts, so omitting them shows the reviewer a sign-in wall and
+ * fails consent-screen verification while the app itself looks perfectly fine.
+ * Asserted by src/lib/auth/gate.test.ts AND src/proxy.test.ts (the classifier
+ * and the middleware that has to honour it).
+ *
+ * Matching is exact-or-`prefix + "/"` (see isPublicPath), so a prefix without a
+ * trailing "/" is still safe against lookalikes like "/privacyhack" — unlike
+ * OWNER_ONLY_PREFIXES / AUTHENTICATED_PREFIXES below, which use a plain
+ * startsWith and therefore MUST end in "/".
+ */
+export const PUBLIC_PREFIXES = [
+  "/api/health",
+  "/login",
+  "/api/auth/",
+  "/privacy",
+  "/terms",
+];
 
 /**
  * Paths only the instance owner may reach. **Deliberately empty since #118.**

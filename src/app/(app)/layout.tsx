@@ -14,6 +14,7 @@ import { ReviewNudge } from "@/components/dashboard/review-nudge";
 import { AppMenu } from "@/components/nav/app-menu";
 import { AuthActions } from "@/components/nav/auth-actions";
 import { BrandMark } from "@/components/brand/brand-mark";
+import { LegalFooter } from "@/components/legal/legal-footer";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { completionRootAttrs } from "@/lib/completion-style";
 import { typefaceRootAttrs } from "@/lib/typeface";
@@ -117,6 +118,11 @@ export default async function AppLayout({
           {children}
         </VoiceProvider>
       </div>
+      {/* #123 — Google's OAuth verification requires the privacy policy to be
+          reachable FROM the app, not merely to exist at a URL. One quiet footer
+          on the shell covers every in-app route at once. Outside the
+          VoiceProvider on purpose: legal links are not voiced copy. */}
+      <LegalFooter />
     </div>
   );
 }
