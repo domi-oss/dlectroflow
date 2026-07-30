@@ -570,6 +570,13 @@ test.describe("section nav — the highlight settles before the helper returns",
     // At the top of the page, but the WRONG band is still magenta. This is
     // precisely the DOM a scan started here would read.
     expect(sameTask.current).toEqual([lastId]);
+    // Named FIRST, for the same reason as the settled read below: a `null`
+    // topmost satisfies `not.toBe(lastId)` vacuously and would prove nothing
+    // about WHICH band is on top (review on !206).
+    expect(
+      sameTask.topmost,
+      "the read could not name the topmost band",
+    ).not.toBe(null);
     expect(sameTask.topmost).not.toBe(lastId);
     expect(isSectionHighlightSettled(sameTask)).toBe(false);
 
