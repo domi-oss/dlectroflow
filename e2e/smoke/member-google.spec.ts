@@ -1,5 +1,8 @@
 import { test, expect } from "@playwright/test";
+import { PrismaClient } from "@prisma/client";
 import { captureItem, needsReviewRow, waitForShell, MOBILE } from "../helpers";
+import { MEMBER_USER_ID, MEMBER_GOOGLE_ACCESS_TOKEN } from "../constants";
+import { seedConnectedGoogle, clearGoogleTokens } from "../google-credential";
 
 /**
  * #118 Phase C — an invited MEMBER, signed in, with their own Google connection,
@@ -10,10 +13,12 @@ import { captureItem, needsReviewRow, waitForShell, MOBILE } from "../helpers";
  * fallback, and a 🔒 owner-only shell in Settings. Every assertion below was
  * false a commit ago.
  *
- * Runs in the `member-google` Playwright project, against its own server: that
- * server is the one with a dummy GOOGLE_CLIENT_ID, which is what makes the Google
- * method offered at all. See playwright.config.ts for why it is a second server
- * rather than two extra variables on the shared one.
+ * Runs in the `member-google` Playwright project, which carries the member's own
+ * storageState (the owner's cookie cannot exercise any of this) against its own
+ * server on its own port. Google is CONFIGURED on both servers — `bootGuardEnv`
+ * has set a dummy client id since #106 — so what makes these controls reachable is
+ * the connected credential seeded below, not the second server. See
+ * playwright.config.ts for what that server actually buys (its own PUBLIC_ORIGIN).
  *
  * Nothing here pushes to Google. The seeded credential is a dummy with no refresh
  * token and no expiry, so no code path in these specs makes a network request to
@@ -23,6 +28,45 @@ import { captureItem, needsReviewRow, waitForShell, MOBILE } from "../helpers";
 
 const INTEGRATIONS = "#settings-integrations";
 const ACCOUNT = "#settings-account";
+
+let prisma: PrismaClient;
+
+/**
+ * The member's connected credential is seeded HERE, not in global-setup (!200).
+ *
+ * schedule-menu.spec.ts already states the rule for the owner's row: a connected
+ * credential changes the 📅 control on every row that sees it, so the file that
+ * wants the state seeds it and hands it back. Keeping the member's row on the
+ * same footing means neither project depends on the other's ordering, and a spec
+ * that fails here cannot leave a connected member behind for the next run.
+ *
+ * Encrypted through e2e/google-credential.ts, which pins TOKEN_ENC_KEY to the key
+ * the server under test decrypts with — see that file for why the ambient value
+ * must never win.
+ */
+test.beforeAll(async () => {
+  prisma = new PrismaClient();
+  try {
+    await seedConnectedGoogle(
+      prisma,
+      MEMBER_USER_ID,
+      MEMBER_GOOGLE_ACCESS_TOKEN,
+    );
+  } catch (err) {
+    // Own the client's lifecycle on the seed path: a throw here means afterAll
+    // never runs against a usable client, which would leak the connection.
+    await prisma.$disconnect();
+    throw err;
+  }
+});
+
+test.afterAll(async () => {
+  try {
+    await clearGoogleTokens(prisma, MEMBER_USER_ID);
+  } finally {
+    await prisma.$disconnect();
+  }
+});
 
 /** The Integrations section, expanded. Every settings section is a disclosure
  *  (#101) and they all rest closed, so a spec has to open the one it is about. */

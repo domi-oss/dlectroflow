@@ -14,7 +14,7 @@ import {
   expectNoContrastViolations,
 } from "../a11y/axe-helpers";
 import { OWNER_WS_ID, OWNER_USER_ID } from "../constants";
-import { encryptToken } from "../../src/lib/crypto/token-cipher";
+import { seedConnectedGoogle, clearGoogleTokens } from "../google-credential";
 
 /**
  * The Schedule menu in a production build (#106).
@@ -28,7 +28,10 @@ import { encryptToken } from "../../src/lib/crypto/token-cipher";
  * PUSHING, and it is not true for OPENING the menu — but it takes more than the
  * two client env vars: `scheduleState` (inbox-view.tsx) returns "connect" unless
  * Google is BOTH configured AND connected, and `getGoogleStatus().connected` is
- * `Boolean(auth.accessToken)`, a database fact.
+ * whether this user's stored `accessToken` DECRYPTS — not whether the column is
+ * populated. (It was `Boolean(auth.accessToken)` when this note was written; #119
+ * changed it so a key rotation stops the UI claiming "Connected" while every push
+ * fails. !200 is what happens when the fixture gets that key wrong.)
  *
  * So: playwright.config.ts supplies the dummy client id/secret for the whole run
  * (which on its own changes nothing — no token, still "connect"), and this spec
@@ -46,10 +49,6 @@ import { encryptToken } from "../../src/lib/crypto/token-cipher";
 const MARKER = "e2e-schedule-menu";
 const TASK_ID = "e2e-schedule-menu-task";
 const ITEM_ID = "e2e-schedule-menu-item";
-// #118 Phase C — the credential is keyed on the ACTING USER, not on a singleton
-// row id. `userId` is the only handle on it: the row's own id is a generated cuid,
-// so `where: { id: "singleton" }` no longer matches anything and this spec's 📅
-// silently rendered "Connect Google" instead of "Schedule".
 const SHOTS = "test-results/schedule-menu";
 
 // 30 + 45 + 60 = 135 working minutes, none of them below the 30-minute floor, so
@@ -62,15 +61,18 @@ const STEPS = [
 
 let prisma: PrismaClient;
 
+// #118 Phase C — the credential is keyed on the ACTING USER (OWNER_USER_ID here),
+// not on a singleton row id. `userId` is the only handle on it: the row's own id is
+// a generated cuid, so `where: { id: "singleton" }` no longer matches anything and
+// this spec's 📅 silently rendered "Connect Google" instead of "Schedule".
 async function removeFixtures(client: PrismaClient): Promise<void> {
   await client.step.deleteMany({ where: { taskId: TASK_ID } });
   await client.brainDumpItem.deleteMany({ where: { id: ITEM_ID } });
   await client.task.deleteMany({ where: { id: TASK_ID } });
   // Back to "configured but not connected" — the state every other spec expects.
-  await client.googleAuth.updateMany({
-    where: { userId: OWNER_USER_ID },
-    data: { accessToken: null, refreshToken: null, expiresAt: null },
-  });
+  // Scoped to the OWNER, so the member's own credential (seeded by global-setup
+  // for the member-google project) is untouched.
+  await clearGoogleTokens(client, OWNER_USER_ID);
 }
 
 /** Today, as the date field spells it — a deadline that cannot hold 2h15m. */
@@ -121,22 +123,15 @@ test.beforeAll(async () => {
         workspaceId: OWNER_WS_ID,
       },
     });
-    // Encrypted, matching global-setup.ts: the app decrypts on read, so a
-    // plaintext token would satisfy the `connected` check (which only tests for
-    // presence) and then fail the moment anything actually used it.
-    await prisma.googleAuth.upsert({
-      where: { userId: OWNER_USER_ID },
-      create: {
-        userId: OWNER_USER_ID,
-        accessToken: encryptToken("e2e-not-a-real-google-token"),
-        scope: "https://www.googleapis.com/auth/tasks",
-        needsReconnect: false,
-      },
-      update: {
-        accessToken: encryptToken("e2e-not-a-real-google-token"),
-        needsReconnect: false,
-      },
-    });
+    // Encrypted through the shared fixture (!200), which pins TOKEN_ENC_KEY to
+    // the key the server under test decrypts with. `connected` is derived from
+    // DECRYPTABILITY, not from ciphertext presence, so a token encrypted with any
+    // other key reads as "reconnect needed" and every 📅 below falls back to .ics.
+    await seedConnectedGoogle(
+      prisma,
+      OWNER_USER_ID,
+      "e2e-not-a-real-google-token",
+    );
   } catch (err) {
     // Own the client's lifecycle on the seed path: a throw here means afterAll
     // never runs against a usable client, which would leak the connection.

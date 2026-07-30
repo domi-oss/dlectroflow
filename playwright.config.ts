@@ -125,10 +125,17 @@ const bootGuardEnv = {
   GOOGLE_CLIENT_ID: "e2e-google-client-id",
   GOOGLE_CLIENT_SECRET: "e2e-google-client-secret",
   GUEST_IP_HASH_SALT: "e2e-guest-ip-hash-salt-000",
-  // Read from e2e/constants.ts, not restated: global-setup encrypts the member's
-  // seeded Google token with the same value from a DIFFERENT PROCESS (#118), and
-  // a drift between the two would decrypt to null and quietly test the
-  // "reconnect needed" state instead of a connected one.
+  // Read from e2e/constants.ts, not restated: the fixtures encrypt the seeded
+  // Google tokens with the same value from a DIFFERENT PROCESS (#118), and a
+  // drift between the two decrypts to null and quietly tests the "reconnect
+  // needed" state instead of a connected one.
+  //
+  // Listing it here also OVERRIDES any ambient value, which on `main` is the real
+  // production key (a protected CI/CD variable, withheld from unprotected refs) —
+  // so the server is pinned. !200 is the other half: the fixture processes are
+  // pinned too, in e2e/google-credential.ts, because they used to let the ambient
+  // value win and the two sides then disagreed on `main` alone.
+  // src/lib/__tests__/e2e-token-key.harness.test.ts keeps the two in lock-step.
   TOKEN_ENC_KEY,
   // What Dockerfile and Dockerfile.ci both set, and for the same reason: the
   // standalone entrypoint reads HOSTNAME, Docker sets HOSTNAME to the container
