@@ -60,7 +60,7 @@ you'd rather pay nothing.
   it: a single `docker-compose.yml` file describes several containers and
   `docker compose up` starts them together.
 - **The dlectroflow image** — the app, prebuilt as a container from this repo's
-  [Dockerfile](../Dockerfile) and published by CI, so you download it rather than
+  [Dockerfile](../docker/Dockerfile) and published by CI, so you download it rather than
   compiling anything.
 - **PostgreSQL** — free, open-source database. You run the official `postgres:16`
   container image. [postgresql.org](https://www.postgresql.org)
@@ -117,7 +117,7 @@ pick, pick this one.**
 - **Docker + Docker Compose** — free, open source. Docker runs each piece as an
   isolated container; Compose describes them all in one `docker-compose.yml` and
   starts them with `docker compose up -d`. [docker.com](https://www.docker.com)
-- **The dlectroflow image** — prebuilt from this repo's [Dockerfile](../Dockerfile)
+- **The dlectroflow image** — prebuilt from this repo's [Dockerfile](../docker/Dockerfile)
   and published by CI, so you pull it rather than building it.
 - **PostgreSQL** — free, open-source database; the official `postgres:16` image
   with a named Docker volume so data survives restarts.
@@ -151,8 +151,8 @@ run the *build* on a 2 GB box. Check whether this project's container registry
 image is publicly pullable; if not, you'll need registry credentials.
 
 > **This one is ready to copy.** The repo ships
-> [docker-compose.prod.yml](../docker-compose.prod.yml), a
-> [Caddyfile](../Caddyfile) and [.env.prod.example](../.env.prod.example) for
+> [docker-compose.prod.yml](../docker/docker-compose.prod.yml), a
+> [Caddyfile](../docker/Caddyfile) and [.env.prod.example](../.env.prod.example) for
 > exactly this setup, with a step-by-step walkthrough in
 > **[docs/self-host-vps.md](self-host-vps.md)** — including the nightly backup and
 > guest-purge cron lines, how to restore a dump, and how to upgrade. The stack was
@@ -180,7 +180,7 @@ than typing Docker commands.
 - **Dokploy** — free, open-source alternative to Coolify with the same idea and a
   lighter footprint. Pick whichever interface you prefer.
   [dokploy.com](https://dokploy.com)
-- **The dlectroflow image** — prebuilt from this repo's [Dockerfile](../Dockerfile);
+- **The dlectroflow image** — prebuilt from this repo's [Dockerfile](../docker/Dockerfile);
   you paste the image name into the dashboard as one service.
 - **PostgreSQL** — free, open source. The platform provisions a Postgres 16
   database as a second service, with a persistent volume, from a dropdown.
@@ -274,7 +274,7 @@ patch, and you're willing to run your own database to keep it cheap.
   fast-booting virtual machines called "Machines", in data centres near your
   users. There is no longer a free tier. [fly.io](https://fly.io)
 - **flyctl** — Fly's free, open-source command-line tool. `fly deploy` from this
-  repo builds the [Dockerfile](../Dockerfile) and ships it.
+  repo builds the [Dockerfile](../docker/Dockerfile) and ships it.
 - **One app Machine** — `shared-cpu-1x` with 512 MB RAM, roughly $3–4/month,
   running the dlectroflow container.
 - **PostgreSQL on a second Machine** — free, open-source database that you run
@@ -315,7 +315,7 @@ small premium for it.
 **The pieces:**
 
 - **Render** — a paid commercial hosting platform that builds and runs apps from
-  a Git repository. Connect the repo, it detects the [Dockerfile](../Dockerfile),
+  a Git repository. Connect the repo, it detects the [Dockerfile](../docker/Dockerfile),
   and it redeploys on every push to the branch you choose.
   [render.com](https://render.com)
 - **A Starter web service** — $7/month, 512 MB RAM and 0.5 CPU, running the
@@ -567,4 +567,4 @@ tested by us. Contributions that would genuinely help, in rough order of value:
 Open a merge request against this file, or an issue if you'd rather just report
 the numbers and let someone else write it up. Please include the date you checked
 and the region you're in — prices vary by both. See
-[CONTRIBUTING.md](../CONTRIBUTING.md).
+[CONTRIBUTING.md](CONTRIBUTING.md).

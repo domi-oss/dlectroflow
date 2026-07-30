@@ -3,7 +3,7 @@ Daily purge of expired guest workspaces + stale guest-scoped counters (#21).
 Rendered only in production and only when purge.enabled — review apps use an
 ephemeral emptyDir DB with a handful of throwaway guests, so there's nothing
 worth purging on a schedule there. Reuses the app image (already carries tsx
-via Dockerfile.ci, so `npx tsx` resolves with no registry fetch) and runs
+via docker/Dockerfile.ci, so `npx tsx` resolves with no registry fetch) and runs
 prisma/scheduled-purge.ts — a SELF-CONTAINED entrypoint (imports only
 @prisma/client, no app source) because the standalone image has no src/. It:
   - deletes guest workspaces past their TTL (purgeExpiredGuests)

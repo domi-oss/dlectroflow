@@ -14,7 +14,7 @@
 >
 > 5. **Supply Chain & Dependency Security** — Audit dependency hygiene: vulnerable packages, unpinned versions (`*`, `^` ranges), missing or uncommitted lock files, unmaintained libraries, and absence of an automated dependency update strategy (e.g., Renovate, Dependabot).
 >
-> 6. **Container & Runtime Security** — Evaluate Dockerfile for base image pinning, use of minimal/distroless images, non-root user enforcement, read-only filesystem, and defined resource limits. Flag any `latest` tag usage.
+> 6. **Container & Runtime Security** — Evaluate `docker/Dockerfile` and `docker/Dockerfile.ci` for base image pinning, use of minimal/distroless images, non-root user enforcement, read-only filesystem, and defined resource limits. Flag any `latest` tag usage.
 >
 > 7. **Frontend Security** (TypeScript/React) — Check for `dangerouslySetInnerHTML` usage, missing HTTP security headers (`CSP`, `HSTS`, `X-Frame-Options`, `X-Content-Type-Options`), insecure token storage (e.g., `localStorage` for sensitive data), Subresource Integrity (SRI) for external assets, and input validation on externally ingested data.
 >

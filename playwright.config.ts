@@ -12,7 +12,7 @@ import {
 // ── The server under test is the artefact that ships (#97) ───────────────────
 // `next.config.ts` sets `output: "standalone"`, so production runs
 // `node server.js` out of the standalone bundle — see `CMD ["node",
-// "server.js"]` in Dockerfile and Dockerfile.ci. This suite used to boot
+// "server.js"]` in docker/Dockerfile and docker/Dockerfile.ci. This suite used to boot
 // `next start`, which Next 16 warns about on every run ("next start" does not
 // work with "output: standalone" configuration) and which differs from the
 // shipped artefact in ways that stay invisible until production:
@@ -33,7 +33,7 @@ import {
 //     ignores it and always binds 0.0.0.0. Docker sets HOSTNAME to the container
 //     id on every container, so inside CI the standalone server binds the
 //     container's own address and `http://localhost:3000` is refused — which is
-//     exactly why Dockerfile and Dockerfile.ci both carry
+//     exactly why docker/Dockerfile and docker/Dockerfile.ci both carry
 //     `ENV HOSTNAME=0.0.0.0`. Reproduced with `HOSTNAME=runner-abc123 node
 //     .next/standalone/server.js`: `getaddrinfo ENOTFOUND runner-abc123`. The
 //     first CI run of this change hit it, which is a fair advertisement for the
@@ -45,7 +45,7 @@ import {
 // `next build` this needs was already being run by the e2e_test CI job.
 
 // Assemble the bundle the way the runtime image does, then exec the same
-// entrypoint. The two copies mirror the asset COPYs in Dockerfile.ci's runner
+// entrypoint. The two copies mirror the asset COPYs in docker/Dockerfile.ci's runner
 // stage (`public` → ./public, `ci-dist/static` → ./.next/static);
 // src/lib/dockerfile-hygiene.test.ts keeps the two sides in lock-step.
 //
@@ -137,7 +137,7 @@ const bootGuardEnv = {
   // value win and the two sides then disagreed on `main` alone.
   // src/lib/__tests__/e2e-token-key.harness.test.ts keeps the two in lock-step.
   TOKEN_ENC_KEY,
-  // What Dockerfile and Dockerfile.ci both set, and for the same reason: the
+  // What docker/Dockerfile and docker/Dockerfile.ci both set, and for the same reason: the
   // standalone entrypoint reads HOSTNAME, Docker sets HOSTNAME to the container
   // id on every container, and a server bound to the container's own address
   // does not answer on localhost. Not a test workaround — it is the production

@@ -21,13 +21,13 @@ Three ground rules baked into the prompts below:
    training data. Claude must read the relevant guides in `node_modules/next/dist/docs/`
    before judging or refactoring any Next.js pattern.
 2. **GitLab, not GitHub.** This repo already has `.gitlab-ci.yml`, a multi-stage
-   `Dockerfile`, `docker-compose.yml`, `.env.example`, and Vitest. The deploy layer is an
+   `docker/Dockerfile`, `docker/docker-compose.yml`, `.env.example`, and Vitest. The deploy layer is an
    **audit-and-harden**, not a scaffold. Do **not** generate GitHub Actions.
 3. **ADHD app.** Cognitive load is a functional requirement, not polish. That's Layer 0.
 
 ## Cadence
 
-**One schedule, unified with `SECURITY.md` and issue #16 (hosted-mode ops) — don't
+**One schedule, unified with `docs/SECURITY.md` and issue #16 (hosted-mode ops) — don't
 re-run manually what CI/Duo already enforce.** CI already gates every MR with
 `tsc`/`eslint`/`vitest` (incl. Postgres integration tests), all five scanners
 (SAST + Advanced SAST, Dependency, Secret, Container) plus a Scan Result Policy, and
@@ -40,7 +40,7 @@ run on a schedule. The table below is what a **human** runs *on top* of that flo
 | **Weekly (~30 min)** | Triage the weekly base-image rescan + Renovate MRs; #16 ops glance — site + `/api/health`, error-log scan, Anthropic + GKE spend, guest AI-cap sanity. |
 | **Monthly** | Duo `security-assessment.md` full run (owns the generic security posture — see the Layer 2 scope note). One rotating **Layer 0** cognitive-load pass on the roughest-feeling flow. One **Layer 1** whole-repo smell + dependency-redundancy pass. |
 | **Quarterly** | Full **Layer 0** WCAG-AA sweep across all flows. Threat-model refresh + **Layer 2** app-specific deep dive. Refresh these prompt files and `security-assessment.md`. |
-| **Pre-release / on-demand** | **Layer 3** before onboarding more users or when the data/scale shape changes (also unlocks the #16 weekly health/spend checks). **Layer 4** when the Dockerfile / CI / compose / Prisma flow changes. Full **Layer 2** before anything touching user data hits the live domain. |
+| **Pre-release / on-demand** | **Layer 3** before onboarding more users or when the data/scale shape changes (also unlocks the #16 weekly health/spend checks). **Layer 4** when the `docker/` stack / CI / Prisma flow changes. Full **Layer 2** before anything touching user data hits the live domain. |
 
 **Hard trigger:** run **Layer 2** before anything touching auth, tokens, or user-data
 isolation reaches `dlectroflow.dev`.
@@ -51,7 +51,7 @@ capture → clarify → schedule → focus → reward flow → **Layer 1** → *
 Budget ~5–7 h spread over 1–2 weeks in 30–60 min chunks.
 
 Treat this as a **ratchet**, not a one-time ritual — the value is repetition catching new
-debt each cycle. This file **defers to** `SECURITY.md` (security cadence) and #16
+debt each cycle. This file **defers to** `docs/SECURITY.md` (security cadence) and #16
 (hosted-mode ops) rather than duplicating them.
 
 ### Automation gaps (turn manual prompt work into CI)
@@ -117,7 +117,7 @@ contributor running. Report first, patch only what I approve.
 > degradation on outage.
 
 ```
-Act as a paranoid security and reliability engineer. Cross-reference `SECURITY.md` and
+Act as a paranoid security and reliability engineer. Cross-reference `docs/SECURITY.md` and
 `.gitlab/duo/prompts/security-assessment.md` and produce an actionable, prioritised work
 plan (not just prose) — focused on the four app-specific risks (defer generic posture to
 the monthly security-assessment): (1) the OAuth/token flow — how Google/Reclaim access &
@@ -154,12 +154,12 @@ or a shared store. Report with specific files.
 
 ```
 Act as a DevOps engineer. This repo already has `.gitlab-ci.yml`, a multi-stage
-`Dockerfile`, `docker-compose.yml`, `.env.example`, and Vitest — so audit and harden what
-exists; do NOT scaffold GitHub Actions. Check: (1) the Dockerfile is genuinely lean and
+`docker/Dockerfile`, `docker/docker-compose.yml`, `.env.example`, and Vitest — so audit and harden what
+exists; do NOT scaffold GitHub Actions. Check: (1) `docker/Dockerfile` is genuinely lean and
 multi-stage with no dev deps or secrets in the final image; (2) `.gitlab-ci.yml` runs lint,
 `vitest`, a Prisma migration check, and a Docker build on every pipeline, and fails
 properly when any stage fails (note: there is no `format` step — Prettier isn't installed;
-flag adding `prettier --check` as a finding if wanted); (3) `docker-compose.yml` spins up
+flag adding `prettier --check` as a finding if wanted); (3) `docker/docker-compose.yml` spins up
 the full stack (app + Postgres) with one command for a new contributor; (4) `.env.example`
 lists every variable the app actually reads — diff it against real usage in the code (this
 is the canonical home for the `.env` drift check; best turned into a CI job); (5) Prisma

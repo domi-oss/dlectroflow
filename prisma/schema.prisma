@@ -6,7 +6,7 @@
 generator client {
   provider      = "prisma-client-js"
   // native = local dev (mac / glibc Linux); linux-musl-openssl-3.0.x = the
-  // alpine (musl) runtime image built by Dockerfile.ci. Both engines are
+  // alpine (musl) runtime image built by docker/Dockerfile.ci. Both engines are
   // generated so the client works locally AND in the deployed container.
   binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }

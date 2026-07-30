@@ -348,7 +348,7 @@ test_app:
 # with `output: "standalone"` and which is not what any environment runs. It now
 # boots `node .next/standalone/server.js` — the same entrypoint as the deployed
 # image's `CMD` — with `public/` and `.next/static` grafted on the way
-# Dockerfile.ci grafts them (the bundle omits both; skip the copy and every HTML
+# docker/Dockerfile.ci grafts them (the bundle omits both; skip the copy and every HTML
 # route still answers 200 while every stylesheet and client chunk 404s).
 # playwright.config.ts owns that assembly, so this job is unchanged: the
 # `npm run build` below already produced `.next/standalone`, and the copy costs
@@ -412,7 +412,7 @@ e2e_test:
     # test_app) — otherwise build_image is skipped and no release image ships.
     - if: '$CI_COMMIT_TAG'
 
-# Assembles the final image from build_app's artifacts using Dockerfile.ci.
+# Assembles the final image from build_app's artifacts using docker/Dockerfile.ci.
 # Kaniko does no compilation here — COPY + npm install prisma only — so the
 # remaining layers are very stable and almost always cache hits.
 build_image:
