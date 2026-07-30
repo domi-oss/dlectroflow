@@ -219,9 +219,19 @@ describe("CollapsibleSection — being asked for opens it (#115)", () => {
    * it is what lets these tests see WHEN the landing is issued relative to the
    * expansion, which is the half of #115 that a "did it open?" assertion misses.
    */
-  const landings: { hidden: boolean }[] = [];
+  const landings: { id: string; hidden: boolean }[] = [];
   const scrollIntoView = vi.fn(function (this: Element) {
-    landings.push({ hidden: body().hasAttribute("hidden") });
+    // `this` is the section's own <h2> — the element the landing was aimed at.
+    // Recording WHICH one, and whether its body was on the page at the time, is
+    // what lets these tests see both halves of #115 without layout.
+    const controls = this.querySelector("[data-section-toggle]")?.getAttribute(
+      "aria-controls",
+    );
+    const sectionBody = controls ? document.getElementById(controls) : null;
+    landings.push({
+      id: this.id,
+      hidden: sectionBody?.hasAttribute("hidden") ?? true,
+    });
   });
 
   function withScrollIntoView() {
@@ -357,7 +367,7 @@ describe("CollapsibleSection — being asked for opens it (#115)", () => {
     act(() => trigger().click());
     jumpTo("settings-voice");
     expect(scrollIntoView.mock.calls.length).toBeGreaterThan(first);
-    expect(landings.at(-1)).toEqual({ hidden: false });
+    expect(landings.at(-1)).toEqual({ id: "settings-voice", hidden: false });
   });
 
   it("does not move the page when the reader opens a section by its own header", () => {
@@ -368,6 +378,66 @@ describe("CollapsibleSection — being asked for opens it (#115)", () => {
     act(() => trigger().click());
     expect(trigger()).toHaveAttribute("aria-expanded", "true");
     expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("does not drag the page back to itself when the reader leaves for another section", () => {
+    // Review finding on !205, and the nastiest shape this bug takes: a section
+    // the reader has ALREADY visited still has its ask on the books, so a
+    // fragment moving AWAY from it must not read as a request to come back.
+    //
+    // The order is what makes it a landing bug rather than a flicker. Effects
+    // run in tree order, so the section LOWER on the page fires last and its
+    // landing is the one that stands — jumping back UP to an earlier section
+    // would leave the reader at the later one.
+    withScrollIntoView();
+    render(
+      <>
+        <CollapsibleSection id="settings-appearance" voice="plain">
+          <p>A: appearance</p>
+        </CollapsibleSection>
+        <CollapsibleSection id="settings-demo" voice="plain">
+          <p>B: demo</p>
+        </CollapsibleSection>
+      </>,
+    );
+
+    // A, then B — so both have been asked for at least once.
+    setFragment("#settings-appearance");
+    expect(landings.at(-1)?.id).toBe("settings-appearance");
+    setFragment("#settings-demo");
+    expect(landings.at(-1)?.id).toBe("settings-demo");
+
+    // …and back to A. B is lower on the page, so if it answered at all it
+    // would answer LAST and win.
+    const atB = landings.filter((l) => l.id === "settings-demo").length;
+    setFragment("#settings-appearance");
+    expect(landings.at(-1)?.id).toBe("settings-appearance");
+    // Nothing aimed at B in that last round AT ALL — not merely out-ordered by
+    // A, which is what "the page happens to end up right" would look like.
+    expect(landings.filter((l) => l.id === "settings-demo")).toHaveLength(atB);
+  });
+
+  it("a jump to another section leaves this one open, just not landed on", () => {
+    // Leaving is not closing: a section the reader opened stays open behind
+    // them. Only the LANDING is withdrawn.
+    withScrollIntoView();
+    render(
+      <>
+        <CollapsibleSection id="settings-appearance" voice="plain">
+          <p>A: appearance</p>
+        </CollapsibleSection>
+        <CollapsibleSection id="settings-demo" voice="plain">
+          <p>B: demo</p>
+        </CollapsibleSection>
+      </>,
+    );
+    setFragment("#settings-demo");
+    setFragment("#settings-appearance");
+    expect(trigger("settings-demo")).toHaveAttribute("aria-expanded", "true");
+    expect(trigger("settings-appearance")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
   });
 
   it("keeps aria-expanded honest through every one of those routes", () => {

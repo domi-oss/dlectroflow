@@ -382,6 +382,94 @@ test.describe("section nav — being sent to a section opens it (#115)", () => {
     await expectLandedOnHeading(page, nav, page.locator("#settings-demo"));
   });
 
+  test("jumping BACK to an earlier section lands on it, not on the one you left", async ({
+    page,
+  }) => {
+    // Review finding on !205. A section that has already been visited keeps its
+    // ask on the books, so the fragment moving AWAY from it must not read as a
+    // request to come back. The section lower on the page answers LAST (effects
+    // run in tree order), so if it answers at all it wins — and the reader
+    // jumping back up to an earlier section ends up at the later one.
+    await page.goto("/settings");
+    await waitForShell(page);
+    await waitForNavHydrated(page);
+    const nav = page.locator(SETTINGS_NAV);
+    await openPanel(nav);
+
+    // A → B → A, with A EARLIER in the document than B.
+    for (const [label, id] of [
+      ["Appearance", "settings-appearance"],
+      ["Demo", "settings-demo"],
+      ["Appearance", "settings-appearance"],
+    ] as const) {
+      await nav.getByRole("link", { name: label, exact: true }).click();
+      await expect(sectionToggle(page, id)).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+      await expectLandedOnHeading(page, nav, page.locator(`#${id}`));
+    }
+
+    // Leaving is not closing: B stayed open behind the reader.
+    await expect(sectionToggle(page, "settings-demo")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
+  test("the same trip driven by the FRAGMENT, with no pill in the loop", async ({
+    page,
+  }) => {
+    // The path that actually catches the !205 finding, and the reason the pill
+    // version above is not enough on its own: a pill ALSO fires the jump event,
+    // which lands a scroll to the destination in an earlier commit, and
+    // Chromium favours that first request. A bare fragment change — a link in a
+    // doc, a typed URL, Back/Forward — puts the destination's landing and the
+    // section-you-left's stale one in the SAME commit, where the stale one
+    // wins. Measured before the fix: the heading came to rest at y=-43, i.e.
+    // above the viewport and behind the sticky bar, with the page dragged to
+    // the far end of the document.
+    const nav = page.locator(SETTINGS_NAV);
+    const setFragment = (id: string) =>
+      page.evaluate((next) => {
+        window.location.hash = `#${next}`;
+      }, id);
+
+    await page.goto("/settings#settings-appearance");
+    await waitForShell(page);
+    await waitForNavHydrated(page);
+    await expectLandedOnHeading(
+      page,
+      nav,
+      page.locator("#settings-appearance"),
+    );
+
+    await setFragment("settings-demo");
+    await expect(sectionToggle(page, "settings-demo")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    await expectLandedOnHeading(page, nav, page.locator("#settings-demo"));
+
+    await setFragment("settings-appearance");
+    await expectLandedOnHeading(
+      page,
+      nav,
+      page.locator("#settings-appearance"),
+    );
+
+    // Back/Forward is the same journey through the history API, and popstate
+    // does not fire hashchange — so it is worth walking separately.
+    await page.goBack();
+    await expectLandedOnHeading(page, nav, page.locator("#settings-demo"));
+    await page.goForward();
+    await expectLandedOnHeading(
+      page,
+      nav,
+      page.locator("#settings-appearance"),
+    );
+  });
+
   test("keyboard: Enter on a pill opens the destination exactly like a click", async ({
     page,
   }) => {

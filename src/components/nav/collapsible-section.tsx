@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { SectionHeading } from "@/components/nav/section-heading";
 import {
   announceSectionActive,
@@ -141,16 +141,45 @@ export function CollapsibleSection({
   // before the anchor's default action runs, so the browser measures the page
   // expanded; the effect is harmless there and the e2e covers both.
   //
-  // Deps are the two ASKS, never `expanded`: the reader opening a section by
-  // its own header must not yank the page to it. No `behavior` argument, also
-  // deliberately — that leaves the choice to CSS, which is `scroll-smooth`
-  // while the nav is mounted and `auto` under prefers-reduced-motion
-  // (globals.css), so this honours the same one rule as the rest of the app.
-  // `scroll-margin-top` on `[data-section-target]` keeps it clear of the bar.
-  useEffect(() => {
-    if (asks === 0 && !namedByFragment) return;
+  // Never keyed on `expanded`: the reader opening a section by its own header
+  // must not yank the page to it. No `behavior` argument either, deliberately —
+  // that leaves the choice to CSS, which is `scroll-smooth` while the nav is
+  // mounted and `auto` under prefers-reduced-motion (globals.css), so this
+  // honours the same one rule as the rest of the app. `scroll-margin-top` on
+  // `[data-section-target]` keeps the heading clear of the bar.
+  const landOnHeading = useCallback(() => {
     document.getElementById(id)?.scrollIntoView();
-  }, [asks, namedByFragment, id]);
+  }, [id]);
+
+  // ONE EFFECT PER ASK, and that separation is the whole point (review finding
+  // on !205). A single effect over both signals also re-runs when the fragment
+  // moves AWAY from this section — and a section that has been visited before
+  // still has `asks > 0`, so it would sail past the guard and scroll the reader
+  // back to a section they just left. A fragment leaving is not a request to
+  // come back, so the fragment effect returns on the way out and the ask effect
+  // never sees the fragment at all.
+  //
+  // Measured before the split, on a production build, walking the fragment
+  // A → B → A with A earlier in the document: A's heading came to rest at
+  // y=-43 — above the viewport, behind the sticky bar — with the page dragged
+  // to the far end of the document by B's stale landing.
+  useEffect(() => {
+    if (asks === 0) return;
+    landOnHeading();
+  }, [asks, landOnHeading]);
+
+  // The fragment arriving on this section. Separate from the count above
+  // because on a fresh page load there is no event to count: the value simply
+  // turns true with the first post-hydration render (see `namedByFragment`).
+  //
+  // A fragment change to THIS section does trip both effects — it is an ask, so
+  // it bumps the count too. That is one duplicate call, to the same element, in
+  // the same commit, which the browser resolves to the same place; paying for it
+  // is much cheaper than coupling the two signals back together.
+  useEffect(() => {
+    if (!namedByFragment) return;
+    landOnHeading();
+  }, [namedByFragment, landOnHeading]);
 
   return (
     <section className="space-y-3">
