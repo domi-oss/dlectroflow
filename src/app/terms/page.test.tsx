@@ -138,12 +138,58 @@ describe("Terms of Service page: the substantive terms", () => {
     expect(text).toMatch(/denial of service/i);
     expect(text).toMatch(/resell, proxy or automate/i);
     expect(text).toMatch(/Security research is welcome/i);
+    // #118 Phase C — the RATIONALE for the no-reselling rule was "it runs on my
+    // API credentials and my money", which stopped being universally true once a
+    // member could save their own key. The rule survives; the reason is now
+    // qualified rather than false.
+    expect(text).toMatch(/Unless you have saved your own API key/i);
+    expect(text).toMatch(/lifts the allowance, not this rule/i);
   });
 
   it("puts the user's Google account content on the user", () => {
     const text = pageText();
     expect(text).toMatch(/your responsibility/i);
     expect(text).toMatch(/disconnect at any time/i);
+  });
+
+  it("says the Google connection is the user's own, not the instance's (#118)", () => {
+    // Phase C: `GoogleAuth` is keyed on `userId`, so a member's tasks land in
+    // THEIR Google account. The pre-Phase-C text described a single instance-wide
+    // connection owned by the administrator, which would now be simply false.
+    const text = pageText();
+    expect(text).toMatch(/you connect your own Google account/i);
+    expect(text).toMatch(/rather than mine or anybody else/i);
+    // Revoking at Google works even when the account here is frozen — the app's
+    // Disconnect is unreachable in that state (see the Privacy Policy tests).
+    expect(text).toMatch(/revoking at Google.{0,3}s end always works/i);
+  });
+
+  it("covers a member's own API key: their key, their bill, their terms", () => {
+    const text = pageText();
+    expect(text).toMatch(/Your key, your bill/i);
+    expect(text).toMatch(/Your agreement with the provider applies to it/i);
+    // Removing it must not read as losing access altogether.
+    expect(text).toMatch(/back to the shared allowance/i);
+  });
+
+  it("does not let BYO key read as BYO provider (#125 is unshipped)", () => {
+    // The distinction that is easy to overstate and expensive to get wrong: the
+    // caller supplies a KEY. `LLMCredentials` carries no base URL by design,
+    // because a per-user endpoint would let a settings field aim the server at an
+    // arbitrary host. The Terms must not imply a vendor choice that does not
+    // exist.
+    const text = pageText();
+    expect(text).toMatch(
+      /What a key does not do is let you choose the provider/i,
+    );
+    expect(text).toMatch(
+      /no setting for a different vendor, model endpoint or address/i,
+    );
+    // The honest alternative offered instead of a per-user provider field.
+    expect(text).toMatch(/run your own instance configured however you like/i);
+    expect(text).not.toMatch(
+      /you (?:can|may|could) (?:choose|pick|select|set) (?:your own|a different|another)\s+(?:AI\s+)?(?:provider|vendor|endpoint)/i,
+    );
   });
 
   it("covers suspension and termination of access", () => {

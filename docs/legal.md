@@ -122,6 +122,15 @@ There is no automated way to tell those apart. If you are unsure, bump it — a
 spurious bump costs a reader thirty seconds; a missed one misrepresents when a
 material change took effect.
 
+> [!NOTE]
+> **The rule only bites once the text has been published.** The date identifies a
+> version *a reader may have relied on*. While the pages are still unpublished
+> (#123 unmerged), edits — including the substantive #118 Phase C rewrite of the
+> Google and AI sections — are edits to the **first** version, not a transition
+> between two, and there is nobody who read a prior one. So the date stays at the
+> date this text first takes effect. **The first substantive change after
+> publication is the first one that must bump it.**
+
 ---
 
 ## Facts the pages assert about the running system
@@ -139,8 +148,11 @@ thing in the left column, the pages are wrong until you fix them.
 | **Guest TTL** (`GUEST_SANDBOX_TTL_HOURS`, default 24) | "about a day" in three places, and the `df_guest` cookie lifetime | Privacy → *Cookies*, *How long I keep it*; Terms → *Who can use it* |
 | **LLM provider** (`LLM_PROVIDER`, default `anthropic`) | Who the AI processor is, and the international-transfer section. **A switch to a non-UK provider is a new transfer disclosure**; a switch to a self-hosted model may remove one | Privacy → *Sending your text to an AI provider*, *Data that leaves the UK* |
 | **What is put in an LLM prompt** | The "what is sent / what is not sent" list. See the four call sites below | Privacy → *Sending your text to an AI provider* |
+| **Anything writing `User.llmProvider`** (nothing does today — #125) | **The whole "it is a key, not a destination" argument**, and with it the transfer section: today every request goes to Anthropic *because* a member cannot redirect it. See *The BYO-key / BYO-provider line* below | `src/app/actions/account.ts`, `src/lib/llm/index.ts` → `getLLM`; Privacy → *If you bring your own API key*; Terms → *About the AI suggestions* |
 | **Google OAuth scopes** (one: `.../auth/tasks`) | The verbatim scope literal, and "no Gmail, no Calendar, no Drive, no Contacts" | `src/lib/google.ts` → `SCOPE`; Privacy → *Connecting Google Tasks* |
-| **Google connection becoming per-user** (planned) | The paragraph saying only the instance administrator can connect | `src/lib/google.ts` (`SINGLETON_ID`), `OWNER_ONLY_PREFIXES`; Privacy → *Connecting Google Tasks* |
+| **Google credentials ceasing to be per-user** (they are per-user since #118 Phase C) | "your own Google account", "one connection per person", and the claim that the owner cannot reach a member's connection | `src/lib/google.ts` (`getAuth`, keyed on `userId`), `AUTHENTICATED_PREFIXES`, `src/lib/__tests__/scoping.harness.test.ts`; Privacy → *Connecting Google Tasks*; Terms → *Your Google account is yours to look after* |
+| **A revoke path other than `disconnectGoogle`** (e.g. Phase D's purge sweep learning to revoke) | The "freezing or deleting does not revoke at Google" honesty. **If Phase D starts revoking, that paragraph becomes wrong in the reassuring direction** | `src/lib/google.ts` → `disconnectGoogle`, `src/app/actions/people.ts` → `revokePerson`; Privacy → *Tokens, and how to disconnect* |
+| **The People panel selecting anything new** | "counts, never content", and "does not even disclose whether you have one" for Google | `src/lib/people.ts` (`select` blocks); Privacy → *Connecting Google Tasks*, *How it is protected* |
 | **Cookies** (six, all strictly necessary) | The cookie list AND the "no cookie banner" conclusion. **Adding any non-essential cookie means a consent mechanism, not a wording tweak** | `src/lib/auth/session.ts`, the OAuth `start` routes; Privacy → *Cookies* |
 | **Adding an analytics/telemetry dependency** | Invalidates "there is no analytics package in the codebase at all" — which the policy invites readers to verify | Privacy → *What is not collected* |
 | **Session TTL** (`USER_SESSION_TTL_SECONDS`, 30 days) | The `df_owner` lifetime in the cookie list | `src/lib/auth/session.ts`; Privacy → *Cookies* |
@@ -178,13 +190,99 @@ and until then, please do not "improve" the wording into a promise.
 
 | Not shipped | What the page says instead |
 |---|---|
-| Self-service data export (no `/api/account/*` route exists) | Access and portability are handled **by hand** from the contact address, within the statutory one month |
+| Self-service data export (still no `src/app/api/account/` directory — the `/api/account/` entry in `AUTHENTICATED_PREFIXES` reserves the prefix, it does not implement a route) | Access and portability are handled **by hand** from the contact address, within the statutory one month |
 | Automatic revoke → freeze → 30-day purge (`User.purgeAfter` is written but never read) | Revocation does **not** delete content today; email and it will be deleted |
-| Per-member Google connections | Only the instance administrator can connect; there is one connection per instance |
-| Per-account BYO LLM key (`User.llmKeyEnc` is read but nothing writes it) | Provider choice is a deploy-time setting; this instance uses Anthropic for every request |
+| **Per-account choice of AI provider (#125)** | The key is used against *this instance's* configured provider; "it is a key, not a destination", and choosing your own provider is not something dlectroflow can do today |
 
 `src/app/privacy/page.test.tsx` has a `promises nothing unshipped` block that
 asserts each honest wording is still present.
+
+> [!NOTE]
+> Two rows left this table in #118 Phase C, because they **shipped**: per-member
+> Google connections, and a per-account BYO LLM key. Their claims are now pinned
+> by the `per-user integrations (#118 Phase C)` block in the same test file.
+
+### The BYO-key / BYO-provider line
+
+**Read this before editing either AI section.** It is the one distinction in these
+pages that is easy to overstate by accident, and overstating it would misdescribe
+where a user's text goes.
+
+A member can save **their own API key** (`User.llmKeyEnc`, encrypted with
+`token-cipher`, written only by `saveOwnLlmKey`). A member **cannot choose the
+provider**:
+
+- `src/lib/llm/openai-compatible.ts` resolves the base URL from **`LLM_BASE_URL`**
+  and takes only the *key* from the caller. `LLMCredentials` deliberately has no
+  `baseUrl` field: a per-user endpoint would let a settings field aim the server at
+  an arbitrary host (SSRF).
+- `User.llmProvider` exists and `getLLM()` *would* honour it — but **nothing in the
+  app writes it**. `saveOwnLlmKey` writes one column and its docblock says so
+  ("Not aiPolicy, not aiQuota, not `llmProvider`"), so the value is always `NULL`,
+  which `getLLM` resolves to the deployment's `LLM_PROVIDER`.
+- Per-user provider selection is **#125, unshipped**.
+
+So the accurate sentence is *"your key, spent against this instance's provider"* —
+never *"bring your own provider"*. This also keeps the transfer section true: every
+request still goes to Anthropic, own key or not, so the Article 46 analysis does
+not fork. **If #125 ever ships, the international-transfer section must be
+reopened**, not just this paragraph.
+
+What *does* change with an own key, and is disclosed: the request is authenticated
+as the member, so it lands in their own account with the provider and their own
+agreement governs it — the controller's processor terms cover requests on the
+controller's key only.
+
+### Google revocation: the gap the pages admit
+
+`disconnectGoogle` (Settings → Disconnect) is the **only** code path that calls
+Google's revoke endpoint. Two other states exist and neither revokes:
+
+- **Frozen** (`revokePerson`): sets `status`/`revokedAt`/`purgeAfter` and touches
+  no tokens. The account's ciphertext stays in `GoogleAuth`, unusable because
+  `currentUser()` resolves a revoked account to `null` — which *also* means the
+  member can no longer reach Disconnect.
+- **Deleted**: `GoogleAuth.userId` has `onDelete: Cascade`, so the row goes with
+  the `User` — silently, without a revoke call.
+
+Both pages therefore point at the user's own Google security settings as the route
+that always works. **Do not soften that into "disconnecting revokes your access"
+without also making the freeze/delete paths revoke.**
+
+#### The pre-accounts credential destroyed by Phase C — and why it is not in the notice
+
+Phase C's migration (`20260729140000_google_auth_orphan_purge`) ran
+`DELETE FROM "GoogleAuth" WHERE "userId" IS NULL`, with a logged row count. That
+destroyed the **real** encrypted access + refresh tokens of the single
+pre-accounts, instance-wide Google connection.
+
+**Deliberate decision: this is NOT disclosed in the published Privacy Policy.**
+The reasoning, recorded so it is not re-litigated as an oversight:
+
+1. **Whose data was it?** Before Phase C, `/api/google/oauth/*` was owner-only, so
+   the only Google account that connection could belong to is the **instance
+   owner's own** — i.e. the controller's. A privacy notice tells *other people*
+   what happens to *their* data. The controller deleting their own OAuth token is
+   not a disclosure owed to readers.
+2. **The direction of the event is deletion.** No data was exposed, copied or
+   newly processed; a stale credential that had become unreachable and unrevocable
+   was removed. Data minimisation working is not a notice-triggering event.
+3. **A notice is not a changelog.** The repository history is the change log, and
+   both pages already say so. Narrating one-off migrations in the notice starts a
+   habit that rots, and pushes genuinely current facts further down the page.
+
+The general rule that *is* user-affecting — deletion removes tokens without
+revoking at Google — **is** disclosed, in the section above. That is the right
+altitude: the standing behaviour, not the single historical instance of it.
+
+> [!WARNING]
+> **Operational follow-up, not a legal one.** That migration deleted the row but
+> never called Google's revoke endpoint, so the pre-accounts grant may still be
+> listed as active in the owner's Google account even though no token for it
+> survives here. Nothing in the app can revoke it now (there is no row to read a
+> token from). If it is still there, revoke it by hand at
+> [myaccount.google.com](https://myaccount.google.com/permissions) before
+> reconnecting — the reconnect is already a documented post-deploy step.
 
 ---
 
@@ -228,8 +326,8 @@ consent screen for review.
 | `src/lib/legal.test.ts` | An unnamed or placeholder controller (Art. 13(1)(a)); a malformed effective date; the two contact inboxes collapsing into one |
 | `src/lib/auth/gate.test.ts` | The legal paths losing their public exemption, and lookalike paths gaining one |
 | `src/proxy.test.ts` | The **middleware** redirecting the pages even while the classifier says public — the failure that silently breaks Google verification |
-| `src/app/privacy/page.test.tsx` | Missing required disclosures; contents/heading drift; hardcoded copies of `legal.ts` values; unshipped features creeping into the text; the non-commercial framing being lost, or the Art. 2(2)(c) rebuttal being dropped |
-| `src/app/terms/page.test.tsx` | Missing "as is"/no-uptime-guarantee wording; the liability carve-outs disappearing or becoming conditional on trader status; "sole trader"/"trading as" returning; governing law changing by accident |
+| `src/app/privacy/page.test.tsx` | Missing required disclosures; contents/heading drift; hardcoded copies of `legal.ts` values; unshipped features creeping into the text; the non-commercial framing being lost, or the Art. 2(2)(c) rebuttal being dropped. **Plus (#118 Phase C):** the per-user Google claims regressing to owner-only, the "owner cannot reach your connection" claim being dropped, the freeze/delete revoke gap being softened, and BYO key drifting into BYO provider |
+| `src/app/terms/page.test.tsx` | Missing "as is"/no-uptime-guarantee wording; the liability carve-outs disappearing or becoming conditional on trader status; "sole trader"/"trading as" returning; governing law changing by accident; **the Google connection being described as the instance's rather than the user's, and the own-key clause implying a provider choice (#125)** |
 | `src/components/legal/legal-footer.test.tsx` | The links that make the pages reachable |
 | `e2e/a11y/axe-legal-pages.spec.ts` | WCAG A/AA and colour-contrast regressions on both pages, in both themes, with no session |
 | `e2e/smoke/legal-pages.spec.ts` | The deployed pages being unreachable, or the footer link being broken, end to end |

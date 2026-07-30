@@ -321,10 +321,16 @@ describe("Privacy Policy page: non-commercial framing", () => {
 describe("Privacy Policy page: promises nothing unshipped", () => {
   // The failure mode this guards is specific and nasty: a notice describing a
   // feature the software lacks is an unkeepable promise in writing to every
-  // reader. Three were designed but are NOT shipped, and the honest wording for
-  // each is asserted here so a future edit cannot quietly "improve" it into a
-  // claim.
+  // reader. The honest wording for each is asserted here so a future edit cannot
+  // quietly "improve" it into a claim.
+  //
+  // #118 Phase C shipped two of the original three (per-member Google
+  // connections, and a per-account BYO LLM key), so their "not yet" wording is
+  // GONE and the claims are pinned in the Phase C block below instead. What
+  // remains unshipped is asserted here.
   it("says access and erasure are handled by hand, not self-service", () => {
+    // `src/app/api/account/` still does not exist. (The `/api/account/` entry in
+    // AUTHENTICATED_PREFIXES reserves the prefix; it does not implement a route.)
     const text = pageText();
     expect(text).toMatch(/no self-service export button/i);
     expect(text).toMatch(/by me, by hand/i);
@@ -334,17 +340,120 @@ describe("Privacy Policy page: promises nothing unshipped", () => {
     expect(pageText()).toMatch(/is\s+not\s+deleted automatically today/i);
   });
 
-  it("does not claim members can connect their own Google account yet", () => {
+  it("does not claim a member can choose their own AI provider (#125)", () => {
+    // The replacement guard, and the one most at risk of a well-meaning
+    // "improvement": BYO KEY shipped, BYO PROVIDER did not. `LLMCredentials` has
+    // no base URL by design (a per-user endpoint is an SSRF primitive), nothing
+    // in the app writes `User.llmProvider`, and `getLLM` falls back to the
+    // deployment's `LLM_PROVIDER`. So the page must keep saying the vendor is not
+    // the member's to pick.
     const text = pageText();
-    expect(text).toMatch(/only the account that administers this instance/i);
-    expect(text).toMatch(/cannot yet connect your own Google account/i);
+    expect(text).toMatch(/it is a key, not a destination/i);
+    expect(text).toMatch(
+      /Choosing your own provider is not something dlectroflow can do today/i,
+    );
+    // And it must not have drifted into the opposite claim. Matched on the
+    // affirmative CONSTRUCTIONS rather than on the bare words, so the sentence
+    // that denies the capability does not trip its own guard.
+    expect(text).not.toMatch(
+      /you (?:can|may|could) (?:choose|pick|select|set) (?:your own|a different|another)\s+(?:AI\s+)?(?:provider|vendor|endpoint|model host)/i,
+    );
+  });
+});
+
+// ── #118 Phase C: what the per-user integrations text must keep saying ───────
+//
+// Phase C changed the central factual claim of two sections. Before it, a
+// member's scheduled tasks went into the ADMINISTRATOR's Google account and
+// `User.llmKeyEnc` was read but never written. Both are now per-user, and the
+// text says so — these tests pin the parts that are easy to lose or overstate.
+describe("Privacy Policy page: per-user integrations (#118 Phase C)", () => {
+  it("says a member's Google tasks go into their OWN Google account", () => {
+    // The material improvement, and the one the old text got backwards. Asserted
+    // on the affirmative claim rather than the absence of the old one, so a
+    // rewrite that drops the point entirely also fails.
+    const text = pageText();
+    expect(text).toMatch(/you can connect your own Google account/i);
+    expect(text).toMatch(/one connection per person/i);
+    // And the negative half: NOT the administrator's.
+    expect(text).toMatch(/Not the administrator.{0,3}s, and not a shared one/i);
   });
 
-  it("does not claim a per-account BYO AI key is on offer", () => {
-    // `User.llmKeyEnc` exists and is read, but nothing writes it — there is no UI
-    // for it. The page says the provider is a deployment setting instead.
+  it("states that a member's Google connection is unreachable by the owner", () => {
+    // `getAuth` is a findUnique keyed on `userId` with no id parameter anywhere in
+    // google.ts's public surface, and `src/lib/people.ts` never selects a
+    // credential — the owner's People panel cannot even tell whether a member has
+    // connected. This is the claim a member is most entitled to have pinned.
     const text = pageText();
-    expect(text).toMatch(/deployment setting, not something you choose/i);
+    expect(text).toMatch(/not visible or usable to anyone else/i);
+    expect(text).toMatch(/including me, as the person who administers/i);
+    expect(text).toMatch(/does not even disclose whether you have one/i);
+    // And that it is structural rather than a promise — the scoping harness was
+    // extended to userId-keyed models precisely so this is enforced in CI.
+    expect(text).toMatch(/fails the build/i);
+  });
+
+  it("says guests cannot connect Google", () => {
+    // `/api/google/oauth/` moved to AUTHENTICATED_PREFIXES, not to public: any
+    // signed-in member, never a guest.
+    expect(pageText()).toMatch(/Guests cannot connect Google/i);
+  });
+
+  it("is honest that freezing or deleting an account does not revoke at Google", () => {
+    // `disconnectGoogle` is the ONLY revoke path in the codebase. `revokePerson`
+    // freezes the account without touching the tokens, and a frozen account can
+    // no longer reach the Disconnect action; a deleted User cascades the row away
+    // without revoking. Reassuring wording here would be a false promise about
+    // somebody's live Google grant.
+    const text = pageText();
+    expect(text).toMatch(
+      /only thing in the app that asks Google to revoke the grant/i,
+    );
+    expect(text).toMatch(/your tokens are not deleted/i);
+    expect(text).toMatch(
+      /neither of those cases does anything automatically tell Google to revoke/i,
+    );
+    // And points at the route that always works.
+    expect(text).toMatch(/Google account.{0,3}s security settings/i);
+  });
+
+  it("discloses the stored own API key as data it collects", () => {
+    // A new column holding a user-supplied secret is a new category of personal
+    // data. An incomplete "what I collect" list is the failure mode docs/legal.md
+    // warns about for exactly this case.
+    expect(pageText()).toMatch(/Your own AI provider API key/i);
+  });
+
+  it("describes BYO key as lifting the cap and paying its own way", () => {
+    const text = pageText();
+    expect(text).toMatch(/Your breakdowns are paid for by you/i);
+    expect(text).toMatch(/fair-use cap on AI requests stops applying/i);
+    // Encrypted with the same cipher as the Google tokens, and never readable back.
+    expect(text).toMatch(/never displayed back to you/i);
+  });
+
+  it("says an own-key request falls under the member's own provider agreement", () => {
+    // The consequence that actually matters to a data subject: my Article 46
+    // safeguards and processor terms are for requests on MY key. A request
+    // authenticated as them is not covered by them.
+    const text = pageText();
+    expect(text).toMatch(/your own agreement with the provider governs it/i);
+    expect(text).toMatch(/they cannot cover requests made on yours/i);
+  });
+
+  it("still names Anthropic as the recipient for every request", () => {
+    // Load-bearing for the international-transfer section: because the member
+    // supplies only a key, the DESTINATION is unchanged, so the transfer
+    // disclosure still holds for everyone. If BYO provider ever ships (#125),
+    // this is the assertion that should force that section to be revisited.
+    const text = pageText();
     expect(text).toMatch(/this instance uses Anthropic for every request/i);
+    expect(text).toMatch(/whether or not they brought their own key/i);
+  });
+
+  it("keeps the owner's view of a stored key to a boolean", () => {
+    // `src/lib/people.ts` answers "has a key?" with a query that selects ids
+    // only, so the ciphertext never enters the object graph.
+    expect(pageText()).toMatch(/whether.{0,40}saved a key/i);
   });
 });

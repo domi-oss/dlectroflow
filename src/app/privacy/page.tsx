@@ -31,9 +31,22 @@ import {
  *     re-check list lives in docs/legal.md.
  *  2. It describes ONLY what is shipped. Several things were tempting to
  *     promise — a self-service export, an automatic purge after revocation,
- *     per-member Google connections — and are absent because they do not exist.
- *     A notice describing behaviour the software lacks is a worse problem than a
- *     plain one: it is an unkeepable promise made in writing to every reader.
+ *     per-account choice of AI provider (#125) — and are absent because they do
+ *     not exist. A notice describing behaviour the software lacks is a worse
+ *     problem than a plain one: it is an unkeepable promise made in writing to
+ *     every reader.
+ *
+ * #118 Phase C moved two of those from "not shipped" to shipped, and this text
+ * was rewritten to match: Google is now a PER-USER connection (each member's
+ * tasks go into their OWN Google account, unreachable by any other account
+ * including the owner), and a member may store their OWN LLM API key.
+ *
+ * The distinction the LLM text has to keep making, because it is the easy one to
+ * overstate: a member supplies a KEY, never a PROVIDER. `LLMCredentials` has no
+ * base URL by design — a per-user endpoint would be an SSRF primitive — so the
+ * key is spent against whatever `LLM_PROVIDER` the DEPLOYMENT configures. Nothing
+ * in the app writes `User.llmProvider`; per-account provider selection is #125
+ * and unshipped. Do not "simplify" that into "choose your own AI provider".
  */
 export const metadata: Metadata = {
   title: "Privacy Policy · dlectroflow",
@@ -303,6 +316,16 @@ export default function PrivacyPage() {
             .
           </li>
           <li>
+            <strong>Your own AI provider API key</strong>, if you save one: the
+            key itself, encrypted, and nothing else — no account name and no
+            billing details, because the key is all the provider needs and all
+            the app asks for. Signed-in accounts only. Details in{" "}
+            <Link href={`#${s("ai").id}`} className="underline">
+              Sending your text to an AI provider
+            </Link>
+            .
+          </li>
+          <li>
             <strong>The end-of-day round-up email</strong>, if switched on: the
             email address you type in. It is off by default and guests cannot
             set one.
@@ -499,20 +522,88 @@ export default function PrivacyPage() {
         <p>
           I do not use your content to train anything, and Anthropic&rsquo;s
           commercial terms state that they do not train their models on inputs
-          or outputs sent through their API. Anthropic processes this text on my
-          instructions, as a processor, to answer the request and for nothing
-          else.
+          or outputs sent through their API. Where the request is made on my API
+          key — which is the default, and the case for everyone who has not
+          saved their own — Anthropic processes this text on my instructions, as
+          a processor, to answer the request and for nothing else. If you have
+          saved your own key, the request is made on yours instead; see{" "}
+          <em>If you bring your own API key</em> below.
         </p>
 
         <LegalSubheading>Which provider, and why it matters</LegalSubheading>
         <p>
           The code can talk to other providers — there is an OpenAI-compatible
           adapter for people self-hosting against a local model or another
-          vendor — but that is a deployment setting, not something you choose in
-          the app, and{" "}
-          <strong>this instance uses Anthropic for every request</strong>. If
+          vendor — but which one is used is a{" "}
+          <strong>
+            deployment setting, chosen by whoever runs the instance
+          </strong>
+          , not something you choose in the app. On this instance that setting
+          is Anthropic, and{" "}
+          <strong>this instance uses Anthropic for every request</strong> —
+          whoever is asking, and whether or not they brought their own key. If
           that ever changes here, this page changes with it and the effective
           date at the top moves.
+        </p>
+
+        <LegalSubheading>If you bring your own API key</LegalSubheading>
+        <p>
+          If you have an account, Settings lets you save your own API key for
+          the AI provider. It is entirely optional — everything works without
+          one — and guests cannot save a key, because there is no account to
+          hold it against.
+        </p>
+        <p>What saving a key changes:</p>
+        <ul className="ml-5 list-disc space-y-2">
+          <li>
+            <strong>Your breakdowns are paid for by you</strong>, not by me. The
+            instance&rsquo;s fair-use cap on AI requests stops applying to your
+            account, because it exists to protect my bill rather than to ration
+            yours.
+          </li>
+          <li>
+            <strong>The key is encrypted at rest</strong> with AES-256-GCM, the
+            same way the Google tokens are, with the encryption key held in the
+            deployment&rsquo;s secrets rather than in the database. It is never
+            displayed back to you, never sent to your browser, and never shown
+            to anyone else — there is deliberately no &ldquo;reveal my
+            key&rdquo; button. You can remove it in Settings whenever you like.
+          </li>
+          <li>
+            <strong>
+              The request is then made as you, so your own agreement with the
+              provider governs it.
+            </strong>{" "}
+            Your text still travels from this server to the provider exactly as
+            described above, but authenticated with your credentials — so it
+            lands in <em>your</em> account with them and is subject to whatever
+            terms you have accepted. The processing terms and transfer
+            safeguards I rely on cover requests made on <em>my</em> key; they
+            cannot cover requests made on yours.
+          </li>
+        </ul>
+        <p>
+          <strong>
+            And the significant thing it does not change: it is a key, not a
+            destination.
+          </strong>{" "}
+          A key you save is used against <em>this instance&rsquo;s</em>{" "}
+          configured provider — Anthropic — and nothing else. It does not let
+          you choose a different company, a different endpoint, or a different
+          address for the server to send your text to, and there is no field in
+          the app for any of those. That is a deliberate security decision
+          rather than an oversight: a per-account setting that chose which host
+          this server connects to would let anybody with an account aim it at a
+          machine of their own choosing.{" "}
+          <strong>
+            Choosing your own provider is not something dlectroflow can do today
+          </strong>
+          , and if it is ever built, this page changes before it ships.
+        </p>
+        <p className="text-muted-foreground">
+          What the administrator can see about this is <em>whether</em> you have
+          saved a key — a yes or no in the admin panel — and never the key
+          itself.
         </p>
         <p>
           Because Anthropic is in the United States, this is an{" "}
@@ -546,31 +637,51 @@ export default function PrivacyPage() {
 
         <LegalSubheading>What it is used for</LegalSubheading>
         <p>
-          Creating and updating tasks in a Google Tasks list inside the
+          Creating and updating tasks in a Google Tasks list inside your own
           connected Google account, so that a scheduling tool which syncs from
           that list can find them and book time for them. What is written is a
           task title (built from your task and step text, with a duration) and a
           due date.
         </p>
         <p>
-          The only thing <em>read</em> from the Google account is the list of
+          The only thing <em>read</em> from your Google account is the list of
           your Google Tasks list names, so the right list can be found to write
           into. Nothing from your Google account is copied into dlectroflow
           beyond the list and task identifiers needed to update the right task
           later.
         </p>
 
-        <LegalSubheading>Who can connect it</LegalSubheading>
+        <LegalSubheading>
+          Whose Google account it goes into — yours
+        </LegalSubheading>
         <p>
-          As things stand, only the account that administers this instance can
-          connect Google, and there is a single connection for the instance. If
-          you are an invited member, you cannot yet connect your own Google
-          account — and nothing of yours is pushed into anybody else&rsquo;s
-          Google account. Per-member connections are planned; when they arrive,
-          this section changes.
+          If you have an account here, you can connect <strong>your own</strong>{" "}
+          Google account, and the tasks dlectroflow creates are written into{" "}
+          <strong>your</strong> Google Tasks. Not the administrator&rsquo;s, and
+          not a shared one. Everyone who connects Google connects their own:
+          there is one connection per person, each independent of the others,
+          and each connected and disconnected by the person it belongs to.
+        </p>
+        <p>
+          <strong>
+            Your connection is not visible or usable to anyone else — including
+            me, as the person who administers this instance.
+          </strong>{" "}
+          The stored credential is held against your account and can only ever
+          be looked up by the account it belongs to. There is no administrative
+          route to somebody else&rsquo;s Google connection: the admin panel
+          cannot use it, cannot show it, and does not even disclose whether you
+          have one. That is not a promise I am asking you to take on trust — an
+          automated check reads the source on every change and fails the build
+          if any query for a stored credential is not tied to the account making
+          the request.
+        </p>
+        <p>
+          <strong>Guests cannot connect Google.</strong> It needs an account,
+          because the connection has to belong to somebody.
         </p>
 
-        <LegalSubheading>Tokens, and disconnecting</LegalSubheading>
+        <LegalSubheading>Tokens, and how to disconnect</LegalSubheading>
         <p>
           The access and refresh tokens are{" "}
           <strong>encrypted at rest using AES-256-GCM</strong>. The encryption
@@ -578,11 +689,27 @@ export default function PrivacyPage() {
           a copy of the database on its own yields no usable tokens.
         </p>
         <p>
-          Disconnecting in Settings asks Google to revoke the grant and then
-          deletes the stored tokens — the deletion happens whether or not
-          Google&rsquo;s revoke call succeeds, so dead tokens are never left
-          lying around. You can also revoke access yourself at any time from
-          your Google account&rsquo;s security settings.
+          <strong>Disconnecting in Settings</strong> asks Google to revoke the
+          grant and then deletes your stored tokens — the deletion happens
+          whether or not Google&rsquo;s revoke call succeeds, so dead tokens are
+          never left lying around.
+        </p>
+        <p>
+          <strong>Being straight about the limits of that.</strong>{" "}
+          Disconnecting is the only thing in the app that asks Google to revoke
+          the grant. If your account is <em>frozen</em> instead, your tokens are
+          not deleted — they simply stop being usable, because a frozen account
+          cannot make a request — and a frozen account can no longer reach the
+          Disconnect button either. If the account is <em>deleted</em>, the
+          tokens are deleted with it. In neither of those cases does anything
+          automatically tell Google to revoke the grant.
+        </p>
+        <p>
+          So the route that always works, and the one that does not depend on me
+          at all, is your own{" "}
+          <strong>Google account&rsquo;s security settings</strong>: you can
+          withdraw dlectroflow&rsquo;s access there at any time, and it takes
+          effect immediately whatever is or is not stored at this end.
         </p>
       </LegalSection>
 

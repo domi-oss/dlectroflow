@@ -294,6 +294,41 @@ export default function TermsPage() {
           has no way of knowing that it has.
         </p>
 
+        <LegalSubheading>If you bring your own API key</LegalSubheading>
+        <p>
+          If you have an account, you can save your own API key for the AI
+          provider in Settings. It is optional, and the app works without one.
+          Two things follow, and both are yours rather than mine:
+        </p>
+        <ul className="ml-5 list-disc space-y-1">
+          <li>
+            <strong>Your key, your bill.</strong> Requests you make are charged
+            to your account with the provider, and keeping the key valid and
+            funded is up to you. If it stops working, breakdowns stop working —
+            that is between you and them, and I cannot fix it from here. Remove
+            the key in Settings and your account goes back to the shared
+            allowance.
+          </li>
+          <li>
+            <strong>Your agreement with the provider applies to it.</strong>{" "}
+            Requests made on your key sit under whatever terms you accepted with
+            them, not under mine, and you are responsible for complying with
+            those.
+          </li>
+        </ul>
+        <p>
+          <strong>
+            What a key does not do is let you choose the provider.
+          </strong>{" "}
+          The key is used against the provider{" "}
+          <em>this instance is configured to use</em>, and there is no setting
+          for a different vendor, model endpoint or address — deliberately,
+          since letting an account decide where the server sends requests would
+          be a security hole rather than a feature. If you want a different
+          provider, the software is open source and you can run your own
+          instance configured however you like.
+        </p>
+
         <LegalSubheading>And a note on the hard days</LegalSubheading>
         <p>
           The app is enthusiastic about streaks because that helps some people
@@ -319,9 +354,11 @@ export default function TermsPage() {
             rate limits and fair-use caps;
           </li>
           <li>
-            resell, proxy or automate the AI feature for your own purposes. It
-            runs on my API credentials and my money, and abuse of it is what
-            would force a cap on everyone else;
+            resell, proxy or automate the AI feature for your own purposes.
+            Unless you have saved your own API key, it runs on my API
+            credentials and my money, and abuse of it is what would force a cap
+            on everyone else. Bringing your own key lifts the allowance, not
+            this rule — dlectroflow is not a gateway to resell;
           </li>
           <li>upload malware, or scrape the site;</li>
           <li>
@@ -340,8 +377,11 @@ export default function TermsPage() {
 
       <LegalSection {...s("google")}>
         <p>
-          If you connect Google Tasks, dlectroflow writes tasks into the
-          connected Google account. That account, and everything in it, remains{" "}
+          Connecting Google Tasks is optional, and the connection is{" "}
+          <strong>yours</strong>: if you have an account you connect your own
+          Google account, and dlectroflow writes tasks into{" "}
+          <strong>your</strong> Google Tasks rather than mine or anybody
+          else&rsquo;s. That account, and everything in it, remains{" "}
           <strong>your responsibility</strong> and is governed by your agreement
           with Google, not by these Terms.
         </p>
@@ -350,7 +390,9 @@ export default function TermsPage() {
           titles and due dates in one list, and while it is careful to update
           rather than duplicate, you should satisfy yourself that it is behaving
           before you let a scheduler act on it. You can disconnect at any time
-          in Settings, or revoke access from your Google account directly.
+          in Settings, or revoke access from your Google account directly — and
+          revoking at Google&rsquo;s end always works, whatever state your
+          account here is in.
         </p>
         <p>
           I am not responsible for what any third-party scheduler does with
