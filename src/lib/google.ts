@@ -277,11 +277,13 @@ function logDisconnectFailure(
  * token, because nothing to revoke is not a failure to revoke. The two halves
  * fail differently and on purpose:
  *
- *  • A failed revoke is REPORTED, and logged here rather than by the callers,
- *    so it is greppable however the disconnect was reached — the interactive
- *    Disconnect included. The tokens go either way, so the caller has no
- *    decision left to make, but it is not free of consequence: the grant may
- *    still be listed in the person's Google account. #126 needs that surfaced.
+ *  • A failed revoke is RETURNED, and logged here rather than by the callers,
+ *    so the log line exists however the disconnect was reached. The tokens go
+ *    either way, so there is no decision left to make — but there is one step
+ *    left to TAKE, and only the account holder can take it, at
+ *    <https://myaccount.google.com/permissions>. Callers are expected to act on
+ *    `false`: `disconnectGoogleTasks` passes it to the person who clicked
+ *    Disconnect, and the lifecycle paths log it for the operator (#126).
  *  • A failed DELETE still THROWS, because a surviving row means the disconnect
  *    did not happen. `disconnectGoogleTasks` must not tell someone who clicked
  *    Disconnect that it worked. Lifecycle callers contain it instead — see
@@ -307,9 +309,14 @@ export async function disconnectGoogle(userId: string): Promise<boolean> {
     } catch {
       revoked = false;
     }
+    // Logged here, before the delete, not after it: the delete can throw, and a
+    // throw would take this line with it. The operator would then be told to
+    // clear a surviving row and never learn that the grant ALSO needs clearing
+    // at Google — two states, two clean-ups, and the double failure is exactly
+    // when losing one of them costs the most.
+    if (!revoked) logDisconnectFailure(userId, "revoke_rejected");
   }
   await prisma.googleAuth.deleteMany({ where: { userId } });
-  if (!revoked) logDisconnectFailure(userId, "revoke_rejected");
   return revoked;
 }
 

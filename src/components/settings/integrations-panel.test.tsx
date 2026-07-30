@@ -10,7 +10,12 @@ vi.mock("@/app/actions/google-schedule", () => ({
 
 import { IntegrationsPanel } from "./integrations-panel";
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  // #126 — the action reports whether Google accepted the revoke. The happy
+  // path is the default; the tests that care set their own.
+  disconnectMock.mockResolvedValue({ ok: true, revoked: true });
+});
 afterEach(cleanup);
 
 const base = { configured: true, connected: false, needsReconnect: false };
@@ -65,7 +70,6 @@ describe("IntegrationsPanel — Google card", () => {
   });
 
   it("disconnect asks for confirmation before firing the action", async () => {
-    disconnectMock.mockResolvedValue({ ok: true });
     render(
       <IntegrationsPanel
         google={{ ...base, connected: true }}
@@ -159,6 +163,74 @@ describe("IntegrationsPanel — per-user copy and a11y (#118)", () => {
       screen.getByRole("button", { name: /^disconnect$/i }),
     ).toBeInTheDocument();
     expect(document.activeElement).not.toBe(document.body);
+  });
+});
+
+// ── #126 — when Google does not confirm the revoke ─────────────────────────
+//
+// The tokens are deleted here either way, so the disconnect DID happen and this
+// is not an error. What is outstanding is a step only this person can take, on
+// their own Google account — and they are the one the app was not telling. It
+// is their own connection, so unlike the People panel there is nothing to
+// withhold: say the real thing, in the same words /privacy uses.
+describe("IntegrationsPanel — an unconfirmed revoke (#126)", () => {
+  const PERMISSIONS_URL = "https://myaccount.google.com/permissions";
+
+  async function disconnect() {
+    render(
+      <IntegrationsPanel
+        google={{ ...base, connected: true }}
+        defaultExpanded
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^disconnect$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /yes, disconnect/i }));
+  }
+
+  it("says the grant may still be listed, and links where to remove it", async () => {
+    disconnectMock.mockResolvedValue({ ok: true, revoked: false });
+    await disconnect();
+
+    expect(
+      await screen.findByText(/may still be listed in your Google account/i),
+    ).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: /permissions page/i });
+    expect(link).toHaveAttribute("href", PERMISSIONS_URL);
+    // Same rule the legal footer states and tests: no forced new tab. Nothing
+    // here is lost by navigating away, so `target="_blank"` would only remove
+    // the reader's choice and add an "opens in a new tab" announcement.
+    expect(link).not.toHaveAttribute("target");
+    // The Referer would otherwise tell Google which instance sent them.
+    expect(link).toHaveAttribute("rel", expect.stringContaining("noreferrer"));
+  });
+
+  it("does not read as a failure — the disconnect here is reported as done", async () => {
+    disconnectMock.mockResolvedValue({ ok: true, revoked: false });
+    await disconnect();
+
+    const notice = await screen.findByText(
+      /may still be listed in your Google account/i,
+    );
+    // The tokens ARE gone; wording that implied otherwise would send someone
+    // hunting for a Disconnect button that has already done its job.
+    expect(notice).toHaveTextContent(/tokens stored here are deleted/i);
+    // Announced politely, not as an alert. Nothing has gone wrong.
+    expect(notice).toHaveAttribute("role", "status");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("stays quiet when Google confirmed the revoke", async () => {
+    await disconnect();
+
+    expect(
+      await screen.findByRole("button", { name: /^disconnect$/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /permissions page/i }),
+    ).toBeNull();
+    expect(
+      screen.queryByText(/may still be listed in your Google account/i),
+    ).toBeNull();
   });
 });
 

@@ -505,6 +505,33 @@ describe("tryDisconnectGoogle (#126)", () => {
     expect(line.message).toMatch(/db down/);
     errorSpy.mockRestore();
   });
+
+  it("keeps BOTH signals when the revoke is refused and the row then survives", async () => {
+    // The double failure, and the reason the refusal is logged the moment it is
+    // observed rather than after the delete: the throw would skip the line, and
+    // the operator would be told to clear a database row while never learning
+    // that the grant needs clearing at Google as well. Two states, two
+    // clean-ups — losing one is exactly what having two reasons is for.
+    prismaMock.googleAuth.findUnique.mockResolvedValue(
+      connectedRow({ expiresAt: null }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 500 }),
+    );
+    prismaMock.googleAuth.deleteMany.mockRejectedValueOnce(
+      new Error("db down"),
+    );
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { tryDisconnectGoogle } = await import("./google");
+
+    expect(await tryDisconnectGoogle(USER)).toBe(false);
+    const reasons = errorSpy.mock.calls.map(
+      (call) => JSON.parse(String(call[0])).reason,
+    );
+    expect(reasons).toEqual(["revoke_rejected", "tokens_not_cleared"]);
+    errorSpy.mockRestore();
+  });
 });
 
 describe("Google Tasks URL construction (#79)", () => {
