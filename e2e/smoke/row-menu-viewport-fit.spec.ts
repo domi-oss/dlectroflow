@@ -311,11 +311,12 @@ test.describe("#92 row-action popups fit the phone viewport", () => {
 
 // The 📅 duration popover shares the exact shape of the two above
 // (`absolute right-0` on its own trigger). For a SIGNED-IN account it only
-// appears with Google connected, which this project's environment has no way to
-// be — its server boots with no GOOGLE_CLIENT_ID (#118 put the Google-configured
-// server behind the separate `member-google` project) — but a GUEST's primary 📅
-// is the .ics control in its `needs_duration` form, so the same popup is
-// reachable with no cookies at all.
+// appears with Google CONNECTED, and no spec in this file seeds a credential —
+// the two that want one (schedule-menu.spec.ts here, member-google.spec.ts in the
+// other project) seed it per file and hand it back. But a GUEST's primary 📅 is
+// the .ics control in its `needs_duration` form, so the same popup is reachable
+// with no cookies at all. (!200: this used to say the server boots with no
+// GOOGLE_CLIENT_ID — it does not; `bootGuardEnv` has set one since #106.)
 test.describe("#92 the 📅 duration popover fits the phone viewport", () => {
   test.use({ viewport: MOBILE, storageState: { cookies: [], origins: [] } });
 

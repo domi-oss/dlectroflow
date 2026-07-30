@@ -148,15 +148,17 @@ const bootGuardEnv = {
   ...(DATABASE_URL ? { DATABASE_URL } : {}),
 };
 
-// #118 Phase C — the member project's server. A dummy Google OAuth client is what
-// makes the Google Tasks method OFFERED (`googleConfigured()`), which is the only
-// way a member's own connect/disconnect controls are reachable at all.
+// #118 Phase C — the member project's server.
 //
-// Its own port and its own env, rather than adding these two variables to
-// `bootGuardEnv`: setting GOOGLE_CLIENT_ID globally flips the inbox 📅 control
-// from "Add to calendar (.ics)" to "Schedule" for EVERY spec, and
-// schedule-ics.spec.ts finds the .ics entry in the ▾ menu BY that label. Two
-// servers keep the default suite's behaviour byte-identical.
+// The dummy Google OAuth client that makes the Tasks method OFFERED
+// (`googleConfigured()`) is inherited from `bootGuardEnv`, which has carried it
+// since #106 — this server does not restate it. !200 corrected the comment that
+// used to sit here: it said the pair was kept off the shared server because
+// setting GOOGLE_CLIENT_ID globally "flips the inbox 📅 control for EVERY spec",
+// which is not what happens and not what the config does. `scheduleState` needs
+// configured AND connected, so with no stored token the default project's rows
+// resolve to "connect" with the client id present exactly as they would without
+// it. What the second server actually buys is its own PUBLIC_ORIGIN and PORT.
 //
 // Deliberately not a working credential: no spec here pushes, so no request
 // leaves the machine.
@@ -166,8 +168,6 @@ const memberServerEnv = {
   // (the OAuth start route included) at the other port.
   PUBLIC_ORIGIN: MEMBER_BASE_URL,
   PORT: String(new URL(MEMBER_BASE_URL).port),
-  GOOGLE_CLIENT_ID: "e2e-google-client-id",
-  GOOGLE_CLIENT_SECRET: "e2e-google-client-secret",
 };
 
 export default defineConfig({
