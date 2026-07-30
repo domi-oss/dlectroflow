@@ -191,7 +191,11 @@ describe("lateRecursiveChowns", () => {
  *    purge CronJob run `npx tsx <script>`, and prisma.config.ts imports dotenv.
  *    Pruning any of those breaks the deploy, not just the build.
  */
-describe.each([["Dockerfile"], ["Dockerfile.ci"]])(
+// Paths are relative to the repo root (Vitest's cwd) and carry the `docker/`
+// prefix since the root tidy moved the family there. Kept as full paths rather
+// than a shared DOCKER_DIR constant so the `%s` test name still names the file
+// a failure is actually about.
+describe.each([["docker/Dockerfile"], ["docker/Dockerfile.ci"]])(
   "%s runtime stage hygiene (#71)",
   (filename) => {
     const runtime = stageInstructions(
@@ -372,7 +376,7 @@ describe("e2e webServer boots the artefact that ships (#97)", () => {
     expect(playwrightConfig).toMatch(/HOSTNAME:\s*"0\.0\.0\.0"/);
   });
 
-  it.each([["Dockerfile"], ["Dockerfile.ci"]])(
+  it.each([["docker/Dockerfile"], ["docker/Dockerfile.ci"]])(
     "%s grafts on the same asset trees and bind address the e2e server does",
     (filename) => {
       const runner = stageInstructions(

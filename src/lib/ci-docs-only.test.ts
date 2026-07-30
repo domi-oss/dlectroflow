@@ -97,10 +97,16 @@ describe("globCoversTopLevel", () => {
     expect(globCoversTopLevel("*.ts", "src/index.ts")).toBe(false);
   });
 
+  // `.code_changes` no longer contains a trailing-wildcard glob — the last one
+  // was `Dockerfile*`, retired when the Docker family moved under `docker/`.
+  // The shape stays supported and stays tested: it is the same substitution
+  // that makes `*.ts` work, so a rewrite to `endsWith` would pass the leading-
+  // wildcard cases above and quietly break this one. Names here are generic on
+  // purpose — nothing in the repo is called this.
   it("matches a trailing-wildcard name", () => {
-    expect(globCoversTopLevel("Dockerfile*", "Dockerfile")).toBe(true);
-    expect(globCoversTopLevel("Dockerfile*", "Dockerfile.ci")).toBe(true);
-    expect(globCoversTopLevel("Dockerfile*", "my.Dockerfile")).toBe(false);
+    expect(globCoversTopLevel("Widget*", "Widget")).toBe(true);
+    expect(globCoversTopLevel("Widget*", "Widget.ci")).toBe(true);
+    expect(globCoversTopLevel("Widget*", "my.Widget")).toBe(false);
   });
 
   it("matches a literal dotfile and does not treat the dot as a wildcard", () => {
@@ -109,9 +115,11 @@ describe("globCoversTopLevel", () => {
   });
 
   it("does not let a bare * glob swallow dotfiles the way the shell would", () => {
-    expect(globCoversTopLevel("*.yml", "docker-compose.yml")).toBe(true);
+    expect(globCoversTopLevel("*.yml", "anything.yml")).toBe(true);
     // `.gitlab-ci.yml` IS matched by *.yml here, which is what GitLab does for
     // an explicit extension glob — the guard below is what keeps that honest.
+    // It is now the only top-level .yml left: the two Compose files moved into
+    // docker/, where `docker/**/*` covers them.
     expect(globCoversTopLevel("*.yml", ".gitlab-ci.yml")).toBe(true);
   });
 });
@@ -153,8 +161,9 @@ describe("docs-only CI fast path covers every committed top-level path", () => {
       "charts",
       "package.json",
       "package-lock.json",
-      "Dockerfile",
-      "Dockerfile.ci",
+      // The whole Docker family — both Dockerfiles, the Caddyfile and both
+      // Compose files — is one top-level entry now, covered by `docker/**/*`.
+      "docker",
       ".gitlab-ci.yml",
       ".env.example",
     ]) {

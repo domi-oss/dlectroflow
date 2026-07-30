@@ -32,16 +32,21 @@
  * Top-level paths that are pure documentation or licensing: changing one cannot
  * change what the application does, so a merge request touching only these is
  * safe to fast-path. Everything else must be matched by `.code_changes`.
+ *
+ * `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md` and `SECURITY.md` are NOT missing —
+ * they moved under `docs/` in the root tidy, and `docs` below already covers
+ * them. Keeping them as top-level entries would be dead weight the next reader
+ * has to disprove. Note the fast path is exactly why they went to `docs/`
+ * rather than `.gitlab/`: GitLab detects the community files in any of the
+ * three locations, but `.gitlab/` has a recursive glob in `.code_changes`, so
+ * a typo fix there would run the full pipeline.
  */
 export const DOCS_ONLY_PATHS = [
   "AGENTS.md",
   "CHANGELOG.md",
   "CLAUDE.md",
-  "CODE_OF_CONDUCT.md",
-  "CONTRIBUTING.md",
   "LICENSE",
   "README.md",
-  "SECURITY.md",
   "docs",
 ] as const;
 
@@ -108,7 +113,11 @@ export function parseCodeChangeGlobs(gitlabCiYml: string): string[] {
  * Only the two shapes used by `.code_changes` are supported:
  *   • `dir/**` + `/ *` — covers the directory entry `dir`
  *   • a filename pattern where `*` matches any run of non-`/` characters
- *     (`*.ts`, `Dockerfile*`, or a literal name like `.nvmrc`)
+ *     (`*.ts`, or a literal name like `.nvmrc`)
+ *
+ * A trailing wildcard (`Name*`) falls out of the same substitution and is still
+ * honoured, though `.code_changes` no longer uses one — the last was
+ * `Dockerfile*`, retired when the Docker family moved under `docker/`.
  */
 export function globCoversTopLevel(glob: string, name: string): boolean {
   const slash = glob.indexOf("/");
