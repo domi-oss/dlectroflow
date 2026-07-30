@@ -10,3 +10,5 @@ prisma/*.db-journal
 npm-debug.log*
 .DS_Store
 coverage
+.claude
+**/node_modules
