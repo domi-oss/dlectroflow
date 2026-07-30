@@ -576,6 +576,12 @@ test.describe("section nav — the highlight settles before the helper returns",
     // …and the wait is what closes it.
     await waitForSectionHighlightSettled(page);
     const settled = await readSectionHighlight(page);
+    // Named FIRST: `toEqual` between two unnamed bands would agree with itself
+    // and prove nothing (review on !206).
+    expect(
+      settled.topmost,
+      "the read could not name the topmost band",
+    ).not.toBe(null);
     expect(settled.current).toEqual([settled.topmost]);
     expect(isSectionHighlightSettled(settled)).toBe(true);
   });
@@ -602,7 +608,16 @@ test.describe("section nav — the highlight settles before the helper returns",
 
     const state = await readSectionHighlight(page);
     expect(state.scrollY).toBe(0);
+    // Named FIRST — `[null]` equals `[null]`, so the comparison below has to be
+    // between two real ids or it is satisfying itself (review on !206). This is
+    // the assertion-site half of the same hole `isSectionHighlightSettled` now
+    // closes; both are needed, because either one alone can be read as the
+    // whole check.
+    expect(state.topmost, "the read could not name the topmost band").not.toBe(
+      null,
+    );
     expect(state.current).toEqual([state.topmost]);
+    expect(isSectionHighlightSettled(state)).toBe(true);
 
     // Nothing moves afterwards either — the scan window is quiet, not merely
     // correct at the instant the helper let go.

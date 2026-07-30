@@ -171,13 +171,20 @@ export async function readSectionHighlight(
       document.querySelectorAll("[data-section-header]"),
     );
     // The band's identity is its heading's id — the same id the nav links to.
+    //
+    // `|| null`, NOT `?? null`: `HTMLElement.id` is `""` for an element with no
+    // id attribute, never nullish, so `??` would let the empty string through
+    // as if it were an identity. It is not one — it is this read failing to
+    // name the band, and it has to be reported as such (see
+    // `isSectionHighlightSettled`, where "" === "" would otherwise satisfy the
+    // invariant with two values that mean "I could not tell").
     const idOf = (band: Element | undefined): string | null =>
-      band?.querySelector("h2")?.id ?? null;
+      band?.querySelector("h2")?.id || null;
     return {
       scrollY: Math.round(window.scrollY),
       current: bands
         .filter((band) => band.hasAttribute("data-current"))
-        .map((band) => idOf(band) ?? "(band with no heading id)"),
+        .map((band) => idOf(band)),
       topmost: idOf(bands[0]),
     };
   }, options.scrollHomeFirst ?? false);
@@ -191,11 +198,33 @@ export type SectionHighlight = {
    * The heading id of EVERY band claiming to be the current section. At rest
    * that is exactly one; more than one would mean two magenta bands, none means
    * the nav has not decided yet.
+   *
+   * `null` for a band whose heading has no usable id — a state this read can
+   * report but cannot compare, deliberately kept distinct from a real id rather
+   * than flattened into a placeholder string that could compare equal to
+   * something.
    */
-  readonly current: readonly string[];
-  /** The heading id of the first band in document order. */
+  readonly current: readonly (string | null)[];
+  /** The heading id of the first band in document order, `null` if unnamed. */
   readonly topmost: string | null;
 };
+
+/**
+ * Did the read manage to NAME this band?
+ *
+ * Rejects the empty string as well as `null`, so the answer stays correct even
+ * if {@link readSectionHighlight}'s `idOf` ever goes back to `?? null` —
+ * `HTMLElement.id` is `""`, not nullish, for a missing attribute, and that is
+ * the exact slip this guards (review on !206).
+ */
+function isNamedBand(id: string | null): id is string {
+  return id !== null && id !== "";
+}
+
+/** Render an id for a human, without letting an unnamed band print as blank. */
+function describeBand(id: string | null): string {
+  return isNamedBand(id) ? id : "(band with no heading id)";
+}
 
 /**
  * Is the page at rest at the top with the scroll-spy in charge?
@@ -206,12 +235,28 @@ export type SectionHighlight = {
  * further can move it. If the app's resting behaviour ever changes this fails
  * with a message naming the band that actually holds the highlight, instead of
  * quietly going back to sampling a moving target.
+ *
+ * Both bands must be NAMED for the comparison to count. Review finding on !206:
+ * `HTMLElement.id` is `""` rather than nullish when the attribute is absent, so
+ * an unnamed `topmost` and an unnamed `current` used to compare equal and
+ * satisfy this — an invariant agreeing with itself about a page it could not
+ * describe. That is the same class of defect as the no-op `waitForFunction`
+ * this change removed, so the unnamed case is rejected explicitly rather than
+ * left to `idOf`'s return type: a blank id must fail loudly, and the wait must
+ * time out with `topmost=(band with no heading id)` in the message.
+ *
+ * Guarded by src/lib/__tests__/section-highlight.harness.test.ts, which is where
+ * the vacuous-pass cases live — they are pure logic, so they do not need a
+ * browser and should not cost a Playwright run to check.
  */
 export function isSectionHighlightSettled(state: SectionHighlight): boolean {
+  const [current] = state.current;
   return (
     state.scrollY === 0 &&
     state.current.length === 1 &&
-    state.current[0] === state.topmost
+    isNamedBand(current) &&
+    isNamedBand(state.topmost) &&
+    current === state.topmost
   );
 }
 
@@ -254,11 +299,14 @@ export async function waitForSectionHighlightSettled(
       async () => {
         const state = await readSectionHighlight(page);
         // A string rather than a boolean so the failure names the offending
-        // band: `expect.poll` prints the last value it received.
+        // band: `expect.poll` prints the last value it received. Every id goes
+        // through `describeBand`, so an unnamed band reads as one instead of
+        // vanishing into a blank — `join` would render `null` as "".
         return isSectionHighlightSettled(state)
           ? "settled"
           : `unsettled: scrollY=${state.scrollY} ` +
-              `current=[${state.current.join(", ")}] topmost=${state.topmost}`;
+              `current=[${state.current.map(describeBand).join(", ")}] ` +
+              `topmost=${describeBand(state.topmost)}`;
       },
       {
         message:
