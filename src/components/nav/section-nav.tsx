@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
+  announceSectionJump,
   SECTION_ACTIVATE_EVENT,
   sectionLabel,
   type SectionActivateDetail,
@@ -355,6 +356,13 @@ export function SectionNav({
     // losing it to the end-of-page rule for a section the page cannot scroll to
     // the top, which #101's reorder made an everyday case rather than a corner.
     activate(id);
+    // #115 — and tell the destination it has been asked for, so a COLLAPSED one
+    // opens instead of landing the reader on a title with nothing under it. The
+    // nav cannot expand it itself: that state is local to <CollapsibleSection>,
+    // outside this tree. Published even when the fragment is already this
+    // section's — clicking the same pill twice fires no `hashchange`, and
+    // "I closed it, take me back" is exactly that case.
+    announceSectionJump(id);
   };
 
   return (
