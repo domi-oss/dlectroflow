@@ -93,17 +93,54 @@ describe("no other module deletes a User (#126)", () => {
     expect(readFileSync(OWNER, "utf8")).toContain("prisma.user.deleteMany(");
   });
 
+  /**
+   * The delete shapes this rule can see, as plain substrings — not a regex
+   * assembled from a variable (semgrep `non-literal-regexp`, flagged on !175).
+   * `.user.delete` covers `delete` and `deleteMany` alike, and the lowercased
+   * copy makes the raw-SQL needle case-insensitive without one.
+   *
+   * WHAT IT CANNOT SEE, stated rather than implied: a Prisma client bound to
+   * some other alias than the three this codebase uses, and raw SQL broken
+   * across lines or built from fragments. Neither exists here, and both are
+   * conspicuous in review in a way that a stray `prisma.user.delete` is not —
+   * the failure mode worth catching is the ordinary one, written by someone who
+   * did not know this function existed. Widen the list if a fourth alias ever
+   * appears; do not let the gap become the argument for dropping the rule.
+   */
+  function deleteShapesIn(src: string): string[] {
+    const lower = src.toLowerCase();
+    const found: string[] = [];
+    for (const receiver of ["prisma", "tx", "db"]) {
+      const needle = `${receiver}.user.delete`;
+      if (src.includes(needle)) found.push(needle);
+    }
+    if (lower.includes('delete from "user"')) found.push('DELETE FROM "User"');
+    return found;
+  }
+
+  it("recognises both an ORM delete and a raw one", () => {
+    // The fixture is the proof this scanner can fail — a matcher only ever
+    // pointed at a clean tree is indistinguishable from one that matches
+    // nothing (the same argument scoping.harness.test.ts makes).
+    expect(
+      deleteShapesIn(`
+        await prisma.user.delete({ where: { id } });
+        await tx.user.deleteMany({ where: { id } });
+        await prisma.$executeRawUnsafe('DELETE FROM "User" WHERE "id" = $1', id);
+      `),
+    ).toEqual(["prisma.user.delete", "tx.user.delete", 'DELETE FROM "User"']);
+    // And that it is not merely matching everything.
+    expect(
+      deleteShapesIn(`await prisma.user.updateMany({ where: { id } });`),
+    ).toEqual([]);
+  });
+
   it("no other source file deletes a User", () => {
-    // Plain substring search per receiver, not a regex assembled from a
-    // variable (semgrep `non-literal-regexp`, flagged on !175). `.user.delete`
-    // catches `delete` and `deleteMany` alike.
     const offenders: string[] = [];
     for (const file of sourceFiles()) {
       if (file === OWNER) continue;
-      const src = readFileSync(file, "utf8");
-      for (const receiver of ["prisma", "tx", "db"]) {
-        const needle = `${receiver}.user.delete`;
-        if (src.includes(needle)) offenders.push(`${file}: ${needle}`);
+      for (const shape of deleteShapesIn(readFileSync(file, "utf8"))) {
+        offenders.push(`${file}: ${shape}`);
       }
     }
     expect(offenders).toEqual([]);

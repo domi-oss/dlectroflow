@@ -522,9 +522,15 @@ describe("PeoplePanel — revoking", () => {
 
     await user.click(within(card).getByRole("button", { name: /revoke ada/i }));
 
-    expect(
-      within(card).getByText(/any Google Tasks connection of theirs/i),
-    ).toBeInTheDocument();
+    const warning = within(card).getByText(
+      /any Google Tasks connection of theirs/i,
+    );
+    expect(warning).toBeInTheDocument();
+    // "asks Google", not "revoked at Google". Revoking is a call that can be
+    // refused (`disconnectGoogle` reads `res.ok`), and this must not promise an
+    // outcome the Privacy Policy is careful not to promise either.
+    expect(warning).toHaveTextContent(/asks Google to revoke the grant/i);
+    expect(warning).not.toHaveTextContent(/and revoked at Google/i);
   });
 
   it("offers NO revoke control on the owner's own row", () => {

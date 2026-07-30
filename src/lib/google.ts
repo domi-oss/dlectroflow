@@ -233,29 +233,84 @@ export async function getGoogleStatus(userId: string | null): Promise<{
 
 const REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke";
 
+/** Why a disconnect did not fully succeed. The two are different states with
+ *  different clean-ups, so they are never logged as one. */
+type DisconnectFailure =
+  /** The tokens are gone from here, but Google did not accept the revoke, so
+   *  the grant may still be listed in the person's own Google account. Nothing
+   *  left at this end can retry it — clearing it is a manual step at
+   *  <https://myaccount.google.com/permissions>. */
+  | "revoke_rejected"
+  /** The stored tokens could not be deleted. The credential row may still be
+   *  sitting here, decryptable, on an account that is about to stop being
+   *  reachable — #126's own failure state, reached through a database fault.
+   *  On the DELETION path the FK cascade still clears it; on the FREEZE path
+   *  there is no backstop and it needs clearing by hand. */
+  | "tokens_not_cleared";
+
+function logDisconnectFailure(
+  userId: string,
+  reason: DisconnectFailure,
+  message?: string,
+): void {
+  // The id, not the token or the identity: enough to find the account, and the
+  // same pseudonymous key the purge job logs (purge_skip).
+  console.error(
+    JSON.stringify({
+      tag: "google_disconnect_failed",
+      reason,
+      userId,
+      ...(message === undefined ? {} : { message }),
+      ts: new Date().toISOString(),
+    }),
+  );
+}
+
 /**
  * Disconnect ONE user's Google account: best-effort server-side revoke (refresh
  * token preferred — revoking it kills the whole grant), then delete that user's
  * row regardless. Idempotent; revoke failures must never keep dead tokens
  * around. `deleteMany` rather than `delete` so a user with no row is a no-op
  * instead of a thrown `RecordNotFound`.
+ *
+ * Returns whether the GRANT was withdrawn — `true` also for a user with no
+ * token, because nothing to revoke is not a failure to revoke. The two halves
+ * fail differently and on purpose:
+ *
+ *  • A failed revoke is REPORTED, and logged here rather than by the callers,
+ *    so it is greppable however the disconnect was reached — the interactive
+ *    Disconnect included. The tokens go either way, so the caller has no
+ *    decision left to make, but it is not free of consequence: the grant may
+ *    still be listed in the person's Google account. #126 needs that surfaced.
+ *  • A failed DELETE still THROWS, because a surviving row means the disconnect
+ *    did not happen. `disconnectGoogleTasks` must not tell someone who clicked
+ *    Disconnect that it worked. Lifecycle callers contain it instead — see
+ *    {@link tryDisconnectGoogle}.
  */
-export async function disconnectGoogle(userId: string): Promise<void> {
+export async function disconnectGoogle(userId: string): Promise<boolean> {
   const auth = await getAuth(userId);
   const token =
     decryptNullable(auth?.refreshToken) ?? decryptNullable(auth?.accessToken);
+  let revoked = true;
   if (token) {
     try {
-      await fetch(REVOKE_ENDPOINT, {
+      const res = await fetch(REVOKE_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({ token }),
       });
+      // `fetch` rejects only on a network-level failure — a 400 for a grant
+      // Google has already expired, or a 5xx, RESOLVES. Reading `res.ok` is the
+      // difference between "the grant is withdrawn" and "we asked"; without it
+      // every realistic revoke failure was reported as a success.
+      revoked = res.ok;
     } catch {
-      // Best-effort: the row still gets deleted below.
+      revoked = false;
     }
   }
   await prisma.googleAuth.deleteMany({ where: { userId } });
+  if (!revoked) logDisconnectFailure(userId, "revoke_rejected");
+  return revoked;
 }
 
 /**
@@ -271,27 +326,23 @@ export async function disconnectGoogle(userId: string): Promise<void> {
  * But the revoke must never abort the step that asked for it. An account left
  * ACTIVE because Google was unreachable is worse than a grant that has to be
  * withdrawn at Google's end, so this reports the outcome instead of raising it.
- * `disconnectGoogle` already swallows a failing revoke CALL and deletes the row
- * regardless; what this adds is the same containment for the database half.
  *
- * Returns whether the disconnect completed. A failure gets one structured,
- * greppable line, because "a grant this app could not withdraw" is precisely
- * the state an operator has to go and clear by hand at Google's end.
+ * Returns whether the disconnect FULLY succeeded — revoked at Google and
+ * cleared here. Neither caller can act on `false` (access must stop either
+ * way), so the value is for tests and future callers; the operator's signal is
+ * the log line, one per failure, carrying which of the two states it left
+ * behind. See {@link DisconnectFailure} — they need different clean-ups. The
+ * `revoke_rejected` half is logged by `disconnectGoogle` itself, so it is
+ * reported for the interactive Disconnect too; only the containment is here.
  */
 export async function tryDisconnectGoogle(userId: string): Promise<boolean> {
   try {
-    await disconnectGoogle(userId);
-    return true;
+    return await disconnectGoogle(userId);
   } catch (err) {
-    // The id, not the token or the identity: enough to find the account, and
-    // this is the same pseudonymous key the purge job logs (purge_skip).
-    console.error(
-      JSON.stringify({
-        tag: "google_disconnect_failed",
-        userId,
-        message: err instanceof Error ? err.message : String(err),
-        ts: new Date().toISOString(),
-      }),
+    logDisconnectFailure(
+      userId,
+      "tokens_not_cleared",
+      err instanceof Error ? err.message : String(err),
     );
     return false;
   }

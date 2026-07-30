@@ -198,10 +198,28 @@ export async function revokePerson(
   // BEFORE the freeze, not after: whichever step runs first is the one that
   // survives a crash between them, and "active account, no Google connection"
   // is recoverable by reconnecting while "frozen account, live grant" is the
-  // exact state this fixes. The revoke is best-effort by contract —
-  // `tryDisconnectGoogle` reports failure rather than raising it, so Google
-  // being unreachable can never leave an account unfrozen, and the stored
-  // tokens are deleted either way.
+  // exact state this fixes.
+  //
+  // Best-effort, and the freeze runs whatever comes back — stopping access is
+  // the part that cannot wait for Google. `tryDisconnectGoogle` reports rather
+  // than raises, so an unreachable Google can never leave an account unfrozen.
+  // It does NOT promise a clean end state, and both ways it can fall short are
+  // logged (`google_disconnect_failed`, with the reason) rather than papered
+  // over here:
+  //   • Google refused the revoke — the stored tokens are deleted regardless,
+  //     but the grant may stay listed in that person's Google account until
+  //     they clear it. The Privacy Policy says exactly this and points at
+  //     Google's permissions page.
+  //   • the tokens could not be deleted — the credential row may survive on an
+  //     account that is now unreachable. `deleteAccount` has the FK cascade
+  //     behind it for that; a freeze has no backstop at all, so it needs
+  //     clearing by hand.
+  //
+  // The result is deliberately not surfaced to the owner. `false` is only
+  // reachable when a token EXISTED, so a message about it would tell the owner
+  // whether that member had connected Google — the one thing the People panel
+  // is designed never to disclose (src/lib/people.ts, and the Privacy Policy's
+  // "does not even disclose whether you have one").
   await tryDisconnectGoogle(userId);
 
   const now = new Date();

@@ -34,7 +34,10 @@ export async function deleteAccount(userId: string): Promise<boolean> {
   // Best-effort by contract: `tryDisconnectGoogle` reports a failure rather
   // than raising it, so an unreachable Google can never block an erasure — the
   // request has a statutory clock on it, and the person can always withdraw the
-  // grant at Google's own permissions page. A failure is logged there.
+  // grant at Google's own permissions page. Both failure modes are logged
+  // there, and this is the path where the cascade earns its keep: if the tokens
+  // could not be DELETED, the row still goes when the user does, two lines
+  // below. What no cascade can do is the revoke, which is why it goes first.
   await tryDisconnectGoogle(userId);
 
   // `deleteMany`, not `delete`: deleting an account that is already gone is the
