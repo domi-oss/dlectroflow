@@ -33,10 +33,16 @@ describe("GoogleAccountHint (#128)", () => {
     // no instance operator: a self-hoster's users are not ours, and copy that
     // names one organisation is wrong for everybody else who runs this.
     const words = GOOGLE_ACCOUNT_HINT.match(/\b[A-Z][A-Za-z]+/g) ?? [];
-    const named = words.filter(
-      (w, i) => !(i === 0 && GOOGLE_ACCOUNT_HINT.startsWith(w)),
-    );
-    expect(named).toEqual(["Google"]);
+    // words[0] is sentence-initial, so its capital is grammar rather than a
+    // name — skip it by POSITION. Skipping it by value instead would reject a
+    // hint that opens with "Google", and dropping the position rule would
+    // reject the current one for opening with "Use". Everything after the first
+    // word has to earn its capital.
+    const named = words.filter((w, i) => i > 0 && w !== "Google");
+    expect(named).toEqual([]);
+    // And the allowed proper noun is still actually there: a guard that passes
+    // on an empty string would be no guard at all.
+    expect(words).toContain("Google");
   });
 
   it("renders inline-safe markup — it sits inside <span>-only popup surfaces", () => {
