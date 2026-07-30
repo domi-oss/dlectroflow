@@ -366,12 +366,31 @@ export async function scheduleSingleTask(
 // reads getGoogleStatus() at the server boundary instead. Deleted rather than
 // re-gated: carrying a live endpoint forward for nobody is how a surface grows.
 
-export async function disconnectGoogleTasks(): Promise<{ ok: true }> {
+/**
+ * Disconnect the CALLER's own Google connection.
+ *
+ * `ok` is not the whole answer (#126). The stored tokens are deleted whatever
+ * Google says, so the disconnect at this end always happens — but Google can
+ * refuse the revoke (a grant it has already expired, a 5xx), and then the
+ * app is listed in that person's Google account with no token left here to
+ * revoke it with. `revoked: false` says so, because the only remaining step is
+ * theirs to take at <https://myaccount.google.com/permissions>, and telling
+ * them it is finished when it is not is the withdrawal gap #126 exists to close.
+ *
+ * This is the caller's OWN connection, so there is nothing to withhold here —
+ * unlike `revokePerson`, where the same information would disclose whether
+ * another member had connected Google.
+ */
+export async function disconnectGoogleTasks(): Promise<{
+  ok: true;
+  /** Did Google accept the revoke? `false` leaves one step for the user. */
+  revoked: boolean;
+}> {
   // #118 Phase C — you disconnect YOUR OWN connection. No id parameter, so
   // there is no other account's credential this could revoke.
   const me = await currentUser();
   if (!me) throw new Error("sign in required");
-  await disconnectGoogle(me.id);
+  const revoked = await disconnectGoogle(me.id);
   revalidatePath("/settings");
-  return { ok: true };
+  return { ok: true, revoked };
 }

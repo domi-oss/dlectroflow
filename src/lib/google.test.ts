@@ -352,22 +352,185 @@ describe("disconnectGoogle", () => {
       }),
     );
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net down")));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const { disconnectGoogle } = await import("./google");
-    await expect(disconnectGoogle(USER)).resolves.toBeUndefined();
+    await expect(disconnectGoogle(USER)).resolves.toBe(false);
     expect(prismaMock.googleAuth.deleteMany).toHaveBeenCalledWith({
       where: { userId: USER },
     });
+    // Logged HERE, not by the lifecycle wrapper, so the interactive Disconnect
+    // reports a failed revoke too instead of swallowing it.
+    expect(JSON.parse(String(errorSpy.mock.calls[0][0])).reason).toBe(
+      "revoke_rejected",
+    );
+    errorSpy.mockRestore();
+  });
+
+  it("reports a REJECTED revoke — fetch does not throw on a 4xx", async () => {
+    // The realistic failure mode, and the one a try/catch cannot see: Google
+    // answers 400 `invalid_token` for a grant it has already expired, or 5xx
+    // when it is having a bad day. `fetch` resolves for both, so a disconnect
+    // that revoked nothing looked exactly like one that succeeded — and the
+    // caller was told the grant had been withdrawn when it had not.
+    prismaMock.googleAuth.findUnique.mockResolvedValue(
+      connectedRow({
+        accessToken: encryptToken("at"),
+        refreshToken: null,
+        expiresAt: null,
+      }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 400 }),
+    );
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { disconnectGoogle } = await import("./google");
+    await expect(disconnectGoogle(USER)).resolves.toBe(false);
+    // Still deleted. A grant we could not revoke is all the more reason not to
+    // keep the token that could not revoke it.
+    expect(prismaMock.googleAuth.deleteMany).toHaveBeenCalledWith({
+      where: { userId: USER },
+    });
+    expect(JSON.parse(String(errorSpy.mock.calls[0][0])).reason).toBe(
+      "revoke_rejected",
+    );
+    errorSpy.mockRestore();
   });
 
   it("is idempotent for a user with no row and calls no revoke", async () => {
     prismaMock.googleAuth.findUnique.mockResolvedValue(null);
     vi.stubGlobal("fetch", vi.fn());
     const { disconnectGoogle } = await import("./google");
-    await expect(disconnectGoogle(USER)).resolves.toBeUndefined();
+    // Nothing to revoke is not a failure to revoke.
+    await expect(disconnectGoogle(USER)).resolves.toBe(true);
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
     expect(prismaMock.googleAuth.deleteMany).toHaveBeenCalledWith({
       where: { userId: USER },
     });
+  });
+
+  it("still throws when the tokens cannot be deleted", async () => {
+    // The interactive Disconnect (`disconnectGoogleTasks`) depends on this: a
+    // row that survived is a disconnect that did not happen, and the person who
+    // clicked the button must not be told it did. Only the LIFECYCLE callers
+    // contain this failure, and they do it in `tryDisconnectGoogle`.
+    prismaMock.googleAuth.findUnique.mockResolvedValue(
+      connectedRow({ expiresAt: null }),
+    );
+    prismaMock.googleAuth.deleteMany.mockRejectedValueOnce(
+      new Error("db down"),
+    );
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+    const { disconnectGoogle } = await import("./google");
+    await expect(disconnectGoogle(USER)).rejects.toThrow(/db down/);
+  });
+});
+
+// ── #126 — the lifecycle wrapper ──────────────────────────────────────────
+//
+// Freezing a member and deleting an account both have to withdraw the grant
+// BEFORE the account stops being reachable, and neither may be aborted by a
+// revoke that failed. That is one rule, so it is one function — a try/catch
+// copied into each caller is how the two come to disagree about it.
+describe("tryDisconnectGoogle (#126)", () => {
+  it("revokes at Google and leaves no row holding a live token", async () => {
+    prismaMock.googleAuth.findUnique.mockResolvedValue(
+      connectedRow({ refreshToken: encryptToken("rt"), expiresAt: null }),
+    );
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    const { tryDisconnectGoogle } = await import("./google");
+
+    expect(await tryDisconnectGoogle(USER)).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://oauth2.googleapis.com/revoke",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(String(fetchMock.mock.calls[0][1].body)).toContain("token=rt");
+    expect(prismaMock.googleAuth.deleteMany).toHaveBeenCalledWith({
+      where: { userId: USER },
+    });
+  });
+
+  // The two failures are NOT the same event and do not leave the same mess, so
+  // they are logged apart. The operator's next move differs: one is cleared at
+  // Google, the other is a row sitting in this database.
+  it("logs revoke_rejected when Google refuses — the tokens are gone, the grant may not be", async () => {
+    prismaMock.googleAuth.findUnique.mockResolvedValue(
+      connectedRow({ expiresAt: null }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 400 }),
+    );
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { tryDisconnectGoogle } = await import("./google");
+
+    expect(await tryDisconnectGoogle(USER)).toBe(false);
+    expect(errorSpy).toHaveBeenCalledOnce();
+    const line = JSON.parse(String(errorSpy.mock.calls[0][0]));
+    expect(line.tag).toBe("google_disconnect_failed");
+    expect(line.reason).toBe("revoke_rejected");
+    expect(line.userId).toBe(USER);
+    // The row went, so there is nothing left here to clean up — the grant is
+    // cleared at Google's permissions page or not at all.
+    expect(prismaMock.googleAuth.deleteMany).toHaveBeenCalledWith({
+      where: { userId: USER },
+    });
+    errorSpy.mockRestore();
+  });
+
+  it("logs tokens_not_cleared when the row survives, without throwing", async () => {
+    // The worse of the two, and the one the caller cannot see: a thrown error
+    // would abort the freeze or the deletion that asked for this, so it is
+    // contained — but a surviving credential on an account that is about to
+    // become unreachable is #126's exact state, reached through a database
+    // fault instead of a missing revoke path. It gets its own reason for that.
+    prismaMock.googleAuth.findUnique.mockResolvedValue(
+      connectedRow({ expiresAt: null }),
+    );
+    prismaMock.googleAuth.deleteMany.mockRejectedValueOnce(
+      new Error("db down"),
+    );
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { tryDisconnectGoogle } = await import("./google");
+
+    expect(await tryDisconnectGoogle(USER)).toBe(false);
+    expect(errorSpy).toHaveBeenCalledOnce();
+    const line = JSON.parse(String(errorSpy.mock.calls[0][0]));
+    expect(line.tag).toBe("google_disconnect_failed");
+    expect(line.reason).toBe("tokens_not_cleared");
+    expect(line.userId).toBe(USER);
+    expect(line.message).toMatch(/db down/);
+    errorSpy.mockRestore();
+  });
+
+  it("keeps BOTH signals when the revoke is refused and the row then survives", async () => {
+    // The double failure, and the reason the refusal is logged the moment it is
+    // observed rather than after the delete: the throw would skip the line, and
+    // the operator would be told to clear a database row while never learning
+    // that the grant needs clearing at Google as well. Two states, two
+    // clean-ups — losing one is exactly what having two reasons is for.
+    prismaMock.googleAuth.findUnique.mockResolvedValue(
+      connectedRow({ expiresAt: null }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 500 }),
+    );
+    prismaMock.googleAuth.deleteMany.mockRejectedValueOnce(
+      new Error("db down"),
+    );
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { tryDisconnectGoogle } = await import("./google");
+
+    expect(await tryDisconnectGoogle(USER)).toBe(false);
+    const reasons = errorSpy.mock.calls.map(
+      (call) => JSON.parse(String(call[0])).reason,
+    );
+    expect(reasons).toEqual(["revoke_rejected", "tokens_not_cleared"]);
+    errorSpy.mockRestore();
   });
 });
 

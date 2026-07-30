@@ -424,8 +424,9 @@ export default function PrivacyPage() {
             <em>Consent</em> (Article 6(1)(a)). Genuinely optional, separately
             asked for through Google&rsquo;s own consent screen, and
             withdrawable at any time in Settings — which revokes the grant and
-            deletes the stored tokens. Nothing else in the app stops working if
-            you never connect it.
+            deletes the stored tokens. If your access to this instance ends
+            before you get round to it, the grant is withdrawn for you. Nothing
+            else in the app stops working if you never connect it.
           </li>
           <li>
             <strong>The end-of-day round-up email.</strong>
@@ -695,14 +696,25 @@ export default function PrivacyPage() {
           never left lying around.
         </p>
         <p>
-          <strong>Being straight about the limits of that.</strong>{" "}
-          Disconnecting is the only thing in the app that asks Google to revoke
-          the grant. If your account is <em>frozen</em> instead, your tokens are
-          not deleted — they simply stop being usable, because a frozen account
-          cannot make a request — and a frozen account can no longer reach the
-          Disconnect button either. If the account is <em>deleted</em>, the
-          tokens are deleted with it. In neither of those cases does anything
-          automatically tell Google to revoke the grant.
+          <strong>The same happens if your access here is withdrawn.</strong> If
+          your account is <em>frozen</em> by the administrator, or it is{" "}
+          <em>deleted</em>, dlectroflow asks Google to revoke the grant first
+          and then deletes the stored tokens — the same two steps, without you
+          having to ask for them. That is a deliberate choice: the grant only
+          ever existed so this app could write your tasks, and a frozen account
+          can no longer reach the Disconnect button, so leaving the grant live
+          would hand you a permission you could not withdraw here any more.
+          Nothing in your Google account is deleted by this. What ends is
+          dlectroflow&rsquo;s access to it.
+        </p>
+        <p>
+          <strong>Being straight about the limits of that.</strong> Revoking is
+          a call to Google, and that call can fail — a network problem, or a
+          grant Google has already expired. When it does, your tokens are still
+          deleted at this end, so the app is left with no way to try again and
+          the grant can stay listed in your Google account until you clear it.
+          The same is true of any connection that was frozen or deleted before
+          this behaviour existed.
         </p>
         <p>
           So the route that always works, and the one that does not depend on me
@@ -828,9 +840,10 @@ export default function PrivacyPage() {
             be.
           </li>
           <li>
-            <strong>Google tokens</strong> are kept until you disconnect, or
-            until the grant is revoked at Google&rsquo;s end — at which point
-            they are cleared.
+            <strong>Google tokens</strong> are kept until you disconnect, until
+            your access here is revoked or your account is deleted, or until the
+            grant is revoked at Google&rsquo;s end — at which point they are
+            cleared.
           </li>
           <li>
             <strong>The round-up email address</strong> is kept until you clear

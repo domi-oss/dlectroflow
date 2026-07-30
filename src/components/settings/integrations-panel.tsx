@@ -59,6 +59,10 @@ export function IntegrationsPanel({
   defaultExpanded?: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
+  // #126 — set when the disconnect completed here but Google did not accept the
+  // revoke. Not an error state: the tokens are gone. It is the one step left,
+  // and it is the account holder's to take.
+  const [grantUnrevoked, setGrantUnrevoked] = useState(false);
   const [pending, startTransition] = useTransition();
   // Stable id so the destructive button can point at the confirmation question
   // it is answering (aria-describedby) rather than merely sitting beside it.
@@ -213,7 +217,8 @@ export function IntegrationsPanel({
                 )}
                 onClick={() =>
                   startTransition(async () => {
-                    await disconnectGoogleTasks();
+                    const { revoked } = await disconnectGoogleTasks();
+                    setGrantUnrevoked(!revoked);
                     setConfirming(false);
                   })
                 }
@@ -233,6 +238,35 @@ export function IntegrationsPanel({
             </>
           )}
         </div>
+        {/* #126 — the disconnect happened here, but Google refused the revoke,
+            so this app is probably still listed in their Google account and
+            there is no token left at this end to try again with. Told plainly,
+            because it is THEIR connection (nothing to withhold, unlike the
+            People panel) and because the remaining step is one only they can
+            take. `role="status"` and muted copy, not an alert: nothing has gone
+            wrong — the tokens are gone, one thing is outstanding. Wording
+            tracks /privacy's "that call can fail" paragraph deliberately. */}
+        {grantUnrevoked && (
+          <p className="text-muted-foreground mt-3 text-sm" role="status">
+            Disconnected — the tokens stored here are deleted. Google did not
+            confirm the revoke, so dlectroflow may still be listed in your
+            Google account. You can remove it from your{" "}
+            {/* No `target="_blank"`, matching the legal footer's rule and for
+                the same reason: nothing here is lost by navigating away, so
+                forcing a new tab only takes the choice away and adds an "opens
+                in a new tab" announcement. `rel="noreferrer"` stays — it costs
+                nothing and keeps this instance's URL out of the Referer sent
+                to Google. */}
+            <a
+              href="https://myaccount.google.com/permissions"
+              rel="noreferrer"
+              className="hover:text-primary focus-visible:text-primary focus-visible:ring-ring rounded underline outline-none focus-visible:ring-2"
+            >
+              Google account&rsquo;s permissions page
+            </a>
+            .
+          </p>
+        )}
       </div>
     </CollapsibleSection>
   );

@@ -54,8 +54,15 @@ export const ADMIN_CONTACT_EMAIL = "admin@dlectroflow.dev";
 export const SOURCE_REPO_URL =
   "https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow";
 
-/** ISO date the current text took effect. Bump when the substance changes. */
-export const LEGAL_EFFECTIVE_DATE = "2026-07-29";
+/**
+ * ISO date the current text took effect. Bump when the substance changes.
+ *
+ * Bumped for #126: freezing or deleting an account now revokes the Google grant
+ * as well, which is a change to what the app does with somebody's Google
+ * account — the first substantive change since the pages were published, and so
+ * the first one that has to move this date (see docs/legal.md).
+ */
+export const LEGAL_EFFECTIVE_DATE = "2026-07-30";
 
 /** Where the hosted instance and its backups physically sit. */
 export const HOSTING_REGION = "London, United Kingdom (GCP europe-west2)";

@@ -59,12 +59,17 @@ const memberUser = () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   currentUserMock.mockResolvedValue(ownerUser());
+  // #126 — `disconnectGoogle` answers whether Google accepted the revoke.
+  disconnectMock.mockResolvedValue(true);
 });
 
 describe("disconnectGoogleTasks", () => {
   it("disconnects for the owner and revalidates /settings", async () => {
     workspaceMock.mockResolvedValue(OWNER_WS);
-    await expect(disconnectGoogleTasks()).resolves.toEqual({ ok: true });
+    await expect(disconnectGoogleTasks()).resolves.toEqual({
+      ok: true,
+      revoked: true,
+    });
     // #118 — the ACTING account's own connection, reached by their own id.
     expect(disconnectMock).toHaveBeenCalledWith(OWNER_ID);
     expect(disconnectMock).toHaveBeenCalledOnce();
@@ -76,9 +81,30 @@ describe("disconnectGoogleTasks", () => {
   it("disconnects the ACTING user's connection, never another's", async () => {
     workspaceMock.mockResolvedValue("ws-member");
     currentUserMock.mockResolvedValue(memberUser());
-    await expect(disconnectGoogleTasks()).resolves.toEqual({ ok: true });
+    await expect(disconnectGoogleTasks()).resolves.toEqual({
+      ok: true,
+      revoked: true,
+    });
     expect(disconnectMock).toHaveBeenCalledWith(MEMBER_ID);
     expect(disconnectMock).not.toHaveBeenCalledWith(OWNER_ID);
+  });
+
+  // #126 — the disconnect DID happen at this end either way, so this is not an
+  // error; `ok` stays true. But the one remaining step belongs to the person who
+  // clicked, and only they can take it (their own Google permissions page). A
+  // hardcoded `{ ok: true }` told them it was finished when it was not — the
+  // same "you cannot withdraw it through the product" gap #126 is about, at the
+  // one moment the product had their attention.
+  it("reports an unrevoked grant rather than a bare ok", async () => {
+    workspaceMock.mockResolvedValue(OWNER_WS);
+    disconnectMock.mockResolvedValue(false);
+    await expect(disconnectGoogleTasks()).resolves.toEqual({
+      ok: true,
+      revoked: false,
+    });
+    // Still a completed disconnect at this end: the tokens are gone and the
+    // page must re-render as "Not connected".
+    expect(revalidatePathMock).toHaveBeenCalledWith("/settings");
   });
 
   it("rejects a caller with no signed-in account without touching tokens", async () => {

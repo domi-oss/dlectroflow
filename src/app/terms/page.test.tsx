@@ -159,8 +159,10 @@ describe("Terms of Service page: the substantive terms", () => {
     const text = pageText();
     expect(text).toMatch(/you connect your own Google account/i);
     expect(text).toMatch(/rather than mine or anybody else/i);
-    // Revoking at Google works even when the account here is frozen — the app's
-    // Disconnect is unreachable in that state (see the Privacy Policy tests).
+    // Revoking at Google works whatever state the account here is in — the
+    // app's Disconnect is unreachable once an account is frozen, and since #126
+    // a freeze revokes the grant for you, but neither of those is something the
+    // user has to rely on (see the Privacy Policy tests).
     expect(text).toMatch(/revoking at Google.{0,3}s end always works/i);
   });
 
