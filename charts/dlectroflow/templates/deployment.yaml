@@ -150,7 +150,7 @@ spec:
         # Review apps ONLY (#25): seed a small demo data set so the review app
         # has content across the inbox buckets instead of an empty sandbox. Runs
         # after `migrate`, reusing the app image (which carries the Prisma CLI +
-        # tsx via Dockerfile.ci). Never rendered for production; prisma/seed.ts
+        # tsx via docker/Dockerfile.ci). Never rendered for production; prisma/seed.ts
         # ALSO self-guards via assertReviewEnv (defense in depth), and is
         # best-effort — a seed failure logs and exits 0 so it can't block the
         # deploy. Sized like `migrate`, and since initContainers run

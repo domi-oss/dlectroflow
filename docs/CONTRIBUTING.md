@@ -23,13 +23,13 @@ maintainer at the address on the GitLab profile) with repro + impact.
 
 ## Getting set up
 
-The [README quick start](README.md#-quick-start-local-5-minutes) is the source of
+The [README quick start](../README.md#-quick-start-local-5-minutes) is the source of
 truth. The short version:
 
 ```bash
 git clone https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow.git
 cd dlectroflow
-cp .env.example .env   # copy as-is — DATABASE_URL already matches docker-compose.yml
+cp .env.example .env   # copy as-is — DATABASE_URL already matches docker/docker-compose.yml
 npm run setup          # starts Postgres in Docker, installs deps, runs migrations
 npm run dev
 ```
@@ -38,7 +38,7 @@ npm run dev
 `prisma migrate dev`, which reads `DATABASE_URL` from **`.env`** — the Prisma CLI
 does not read `.env.local` (Next.js reads both, `.env.local` winning). So if `.env`
 is missing, setup stops at *"Environment variable not found: DATABASE_URL"*. See
-[Which file: `.env` vs `.env.local`](README.md#which-file-env-vs-envlocal).
+[Which file: `.env` vs `.env.local`](../README.md#which-file-env-vs-envlocal).
 
 The app is designed so nothing hard-fails on a missing piece — no Claude API key
 or Google connection needed to run it locally.
@@ -129,7 +129,7 @@ them:
 
 - **`manifest-hygiene`** — a root config file imports something `package.json` doesn't declare. Declare it (#76).
 - **`lockfile-hygiene`** — `esbuild` resolved to more than one version. Realign the ranges rather than deleting the test; a nested duplicate is exactly what the two npm versions disagree about (#67).
-- **`dockerfile-hygiene`** — bumping `prisma`, `tsx` or `dotenv` means moving their pins in **both** `Dockerfile` and `Dockerfile.ci` to match the lockfile. The cluster runs migrations from that image, so drift runs them on a different Prisma than the app was tested against (#71).
+- **`dockerfile-hygiene`** — bumping `prisma`, `tsx` or `dotenv` means moving their pins in **both** `docker/Dockerfile` and `docker/Dockerfile.ci` to match the lockfile. The cluster runs migrations from that image, so drift runs them on a different Prisma than the app was tested against (#71).
 - **`npm run check:env`** — a dependency that reads a new env var needs it listed in `.env.example`.
 
 New dependencies also go through the blocking scanners — see the security-scan
@@ -146,7 +146,7 @@ note above.
 ## Licensing & sign-off
 
 - By contributing, you agree that your contributions are licensed under this
-  project's license, **[AGPL-3.0](LICENSE)** (inbound = outbound). There is no
+  project's license, **[AGPL-3.0](../LICENSE)** (inbound = outbound). There is no
   separate CLA. Note AGPL-3.0's network-service clause: deploying a modified
   version as a service over a network is itself a distribution event, so it
   triggers the obligation to make your source available to those users — worth

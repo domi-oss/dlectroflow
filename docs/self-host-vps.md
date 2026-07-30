@@ -54,7 +54,7 @@ The project's container registry is currently **private**, so the published imag
 cannot be pulled anonymously. Build it yourself:
 
 ```bash
-docker compose -f docker-compose.prod.yml build
+docker build -f docker/Dockerfile -t dlectroflow:local .
 ```
 
 That produces `dlectroflow:local`, which the stack uses by default. It takes a few
@@ -105,6 +105,9 @@ cp .env.prod.example .env.prod
 chmod 600 .env.prod
 ```
 
+Keep it at the repo root, next to `.env.prod.example` — not beside the compose
+file. `docker/docker-compose.prod.yml` reads it as `../.env.prod`.
+
 Now open `.env.prod` and fill in every value marked REQUIRED. The four secrets
 can be generated right now:
 
@@ -150,12 +153,12 @@ nothing but electricity.
 ## 4. Start it
 
 ```bash
-docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
+docker compose --env-file .env.prod -f docker/docker-compose.prod.yml up -d
 ```
 
 **That `--env-file .env.prod` is not optional, and it is the single easiest thing
 to get wrong.** Compose reads `env_file:` entries only to build a *container's*
-environment; the `${VAR}` references inside `docker-compose.prod.yml` itself are
+environment; the `${VAR}` references inside `docker/docker-compose.prod.yml` itself are
 resolved from your shell or from `.env`. Without the flag, the database
 credentials come out blank. Every command on this page therefore carries it.
 
@@ -175,7 +178,7 @@ you would be locked out of your own invite-only instance.
 ## 5. Check it worked
 
 ```bash
-docker compose --env-file .env.prod -f docker-compose.prod.yml ps -a
+docker compose --env-file .env.prod -f docker/docker-compose.prod.yml ps -a
 ```
 
 `db`, `app` and `caddy` should be `running` (with `db` and `app` healthy), and
@@ -199,14 +202,16 @@ it. `crontab -e` and add:
 
 ```cron
 # Nightly database dump at 02:00, keeping the last 14 in ./backups
-0 2 * * * cd /path/to/dlectroflow && docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm backup >> /var/log/dlectroflow-backup.log 2>&1
+0 2 * * * cd /path/to/dlectroflow && docker compose --env-file .env.prod -f docker/docker-compose.prod.yml run --rm backup >> /var/log/dlectroflow-backup.log 2>&1
 
 # Nightly guest-data purge at 03:30
-30 3 * * * cd /path/to/dlectroflow && docker compose --env-file .env.prod -f docker-compose.prod.yml run --rm purge >> /var/log/dlectroflow-purge.log 2>&1
+30 3 * * * cd /path/to/dlectroflow && docker compose --env-file .env.prod -f docker/docker-compose.prod.yml run --rm purge >> /var/log/dlectroflow-purge.log 2>&1
 ```
 
 > **A dump that only exists on the machine you are protecting is not a backup.**
-> The job writes to `./backups` on the host and prunes to the newest 14. Getting a
+> The job writes to `./backups` at the repo root on the host (the compose file
+> mounts it as `../backups`, since the file itself sits in `docker/`) and prunes
+> to the newest 14. Getting a
 > copy somewhere else is the part it cannot do for you — add `rclone`, `restic`,
 > `rsync` to another host, or your provider's snapshots. Backblaze B2 gives you
 > 10 GB free, which is far more than these dumps need.
@@ -216,7 +221,7 @@ confirm it looks right before going anywhere near your live one:
 
 ```bash
 gunzip -c backups/dlectroflow-YYYYMMDDTHHMMSSZ.sql.gz \
-  | docker compose --env-file .env.prod -f docker-compose.prod.yml exec -T db \
+  | docker compose --env-file .env.prod -f docker/docker-compose.prod.yml exec -T db \
     psql -U dlectroflow -d dlectroflow
 ```
 
@@ -229,8 +234,8 @@ existing schema.
 
 ```bash
 git pull
-docker compose -f docker-compose.prod.yml build
-docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
+docker build -f docker/Dockerfile -t dlectroflow:local .
+docker compose --env-file .env.prod -f docker/docker-compose.prod.yml up -d
 ```
 
 `migrate` runs again automatically and applies any new migrations before the new
@@ -245,26 +250,26 @@ environment variables. Downgrades are not supported.
 | Symptom | Cause and fix |
 |---|---|
 | Blank database credentials, or `required variable POSTGRES_USER is missing` | You left off `--env-file .env.prod`. See [step 4](#4-start-it). |
-| `caddy` restarting in a loop, nothing served, no obvious network fault | Check `docker compose logs caddy`. A Caddyfile syntax error looks like a connectivity problem from outside. Most likely an `email` line with no value — Caddy rejects that. |
-| You edited the `Caddyfile` and Caddy still uses the old config | Editors replace the file rather than writing in place, and the container keeps the old one. Recreate it: `docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --force-recreate caddy`. A plain `restart` is not enough. |
+| `caddy` restarting in a loop, nothing served, no obvious network fault | Check `docker compose logs caddy`. A `docker/Caddyfile` syntax error looks like a connectivity problem from outside. Most likely an `email` line with no value — Caddy rejects that. |
+| You edited `docker/Caddyfile` and Caddy still uses the old config | Editors replace the file rather than writing in place, and the container keeps the old one. Recreate it: `docker compose --env-file .env.prod -f docker/docker-compose.prod.yml up -d --force-recreate caddy`. A plain `restart` is not enough. |
 | No certificate issued | Let's Encrypt must reach port 80 on this host for the domain in `DLECTROFLOW_DOMAIN`. Check DNS actually resolves to this server, that ports 80 and 443 are open in both the host firewall and your provider's, and that nothing else already holds port 80. |
 | `app` exits with `refusing to boot with data reachable. Missing: …` | Working as designed — the app will not start half-configured. It names exactly which variables are missing or too short; fill them in and `up -d` again. |
 | `migrate` exited non-zero | Read `docker compose logs migrate`. The app will not start until migrations succeed, which is deliberate. |
-| Sign-in says you are not invited | `OWNER_ALLOWLIST` did not match your identity. Numeric GitLab id is the most reliable value. Fix it, then re-run the seed: `docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --force-recreate seed-allowlist`. |
-| It took over a database container you were using for local development | The dev stack in `docker-compose.yml` and this one use different Compose project names (`dlectroflow` vs `dlectroflow-prod`) precisely to avoid that. If you see it, you are probably running an older copy of this file. |
+| Sign-in says you are not invited | `OWNER_ALLOWLIST` did not match your identity. Numeric GitLab id is the most reliable value. Fix it, then re-run the seed: `docker compose --env-file .env.prod -f docker/docker-compose.prod.yml up -d --force-recreate seed-allowlist`. |
+| It took over a database container you were using for local development | The dev stack in `docker/docker-compose.yml` and this one use different Compose project names (`dlectroflow` vs `dlectroflow-prod`) precisely to avoid that. If you see it, you are probably running an older copy of this file. |
 | Someone says **Connect Google →** "does nothing" — they never return to the app, and your logs show no callback at all | Their Google account is probably managed by an organisation that has not allowlisted your OAuth client. Google refuses at its own consent step (`Error 400: access_not_configured`), so there is no callback to log and no error the app can render. Nothing to fix on this host: see [A managed work account can be blocked by its own administrator](../README.md#a-managed-work-account-can-be-blocked-by-its-own-administrator). A personal Google account is the reliable workaround, and `.ics` export needs no Google account at all. |
 
 Useful commands:
 
 ```bash
 # Logs, following
-docker compose --env-file .env.prod -f docker-compose.prod.yml logs -f app
+docker compose --env-file .env.prod -f docker/docker-compose.prod.yml logs -f app
 
 # A psql shell
-docker compose --env-file .env.prod -f docker-compose.prod.yml exec db psql -U dlectroflow -d dlectroflow
+docker compose --env-file .env.prod -f docker/docker-compose.prod.yml exec db psql -U dlectroflow -d dlectroflow
 
 # Stop everything (data survives — it lives in named volumes)
-docker compose --env-file .env.prod -f docker-compose.prod.yml down
+docker compose --env-file .env.prod -f docker/docker-compose.prod.yml down
 ```
 
 > `down -v` also deletes the volumes, which means **your database and your issued

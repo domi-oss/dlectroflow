@@ -36,6 +36,6 @@ if (/\.integration\.test\.tsx?$/.test(testPath) && !process.env.DATABASE_URL) {
       `  1. cp .env.example .env   # as-is — DATABASE_URL is pre-filled; .env must exist before step 2\n` +
       `  2. npm run setup          # starts Postgres in Docker, installs deps, applies migrations\n\n` +
       `Already have a database? Put DATABASE_URL in \`.env\` (or \`.env.local\`, or export it) and re-run.\n` +
-      `See CONTRIBUTING.md → "Getting set up". Unit tests need none of this and run on a bare checkout.`,
+      `See docs/CONTRIBUTING.md → "Getting set up". Unit tests need none of this and run on a bare checkout.`,
   );
 }

@@ -60,7 +60,7 @@ postgres:
   # In-major (16.x -> 16.y) bumps are binary-compatible and need no dump/restore;
   # a cross-major bump (17.x) needs a dump/restore and so is deliberately NOT
   # auto-merged (majors always get a manual-review MR). Now tracked by the
-  # customManager in renovate.json via the "# renovate:" annotation below, which
+  # customManager in .gitlab/renovate.json via the "# renovate:" annotation below, which
   # bumps this tag+digest — and the backup dumpImage that defaults to it. (#15)
   # renovate: datasource=docker depName=postgres versioning=docker
   image: postgres:16.14@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20
@@ -121,7 +121,7 @@ backup:
   serviceAccountName: dlectroflow-backup
   dumpImage: ""                        # defaults to postgres.image (keeps pg_dump matched to the server major, and inherits its Renovate tracking); override only for a different version
   # `slim` is a rolling tag, so Renovate tracks the DIGEST here (the customManager
-  # in renovate.json bumps it as google/cloud-sdk:slim is rebuilt). (#15)
+  # in .gitlab/renovate.json bumps it as google/cloud-sdk:slim is rebuilt). (#15)
   # renovate: datasource=docker depName=google/cloud-sdk
   uploadImage: google/cloud-sdk:slim@sha256:4ff69e21bec9a7d0ed54d0134a9b9682fc8008252cb5f173a23ddd70b8e024a4
 

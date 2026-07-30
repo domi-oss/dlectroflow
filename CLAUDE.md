@@ -19,7 +19,7 @@ Next.js 16 has breaking changes vs. older training data — read `node_modules/n
 ## Commands
 
 ```
-npm run setup          docker compose up -d db && npm install && prisma migrate dev
+npm run setup          docker compose -f docker/docker-compose.yml up -d db && npm install && prisma migrate dev
 npm run dev            dev server
 npm test               vitest run (unit + integration; *.integration.test.ts need Postgres)
 npm run test:e2e       playwright
@@ -38,6 +38,8 @@ npm run check:env      env-drift check
 - `src/lib/` — all domain logic, flat, colocated `*.test.ts`. Subfolders only where a cluster earns one: `auth/`, `llm/`, `crypto/`, `scheduling/`, `nav/`.
 - `src/components/` — grouped by feature (`inbox/`, `focus/`, `library/`, `settings/`…); `ui/` is shadcn primitives.
 - `prisma/schema.prisma` — 19 models. `Workspace` is the tenancy root.
+- `docker/` — both Dockerfiles, the Caddyfile and both Compose files. Paths inside the compose files resolve against `docker/`, so `.env.prod` and `backups/` are referenced as `../`; the image build context stays the repo root.
+- Community files (`CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`) live in `docs/`, not the root and not `.gitlab/` — `.gitlab/**` is in the CI `.code_changes` list, so putting them there would cost every typo fix a full pipeline. Renovate's config is `.gitlab/renovate.json`.
 
 ### The scoping invariant
 
@@ -76,7 +78,7 @@ Stages: `build` → `build_image` (Kaniko) → `test` (SAST, dependency, secret,
 Two targets, both documented in `docs/`:
 
 - **Production** — GKE Autopilot (europe-west2) via `charts/`, at `dlectroflow.dev`. See `docs/deploy-runbook.md`.
-- **Self-host** — Docker Compose + Caddy. See `docs/self-host-vps.md`.
+- **Self-host** — Docker Compose + Caddy, from `docker/`. See `docs/self-host-vps.md`.
 
 Prod deploys, cluster changes and deletes are owner-authorised only.
 

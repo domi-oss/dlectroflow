@@ -124,7 +124,7 @@ hit **Break down →**, and watch Claude stream a plan. 🎉
 > reads `DATABASE_URL` from **`.env`** — so `.env` has to exist before you run it,
 > or setup stops at *"Environment variable not found: DATABASE_URL"*. The copied
 > file needs no editing: its `DATABASE_URL` is already the local Compose database
-> (`dlectroflow` / `dlectroflow`, matching `docker-compose.yml`), which `npm run setup`
+> (`dlectroflow` / `dlectroflow`, matching `docker/docker-compose.yml`), which `npm run setup`
 > starts for you. Note it's `.env`, **not** `.env.local` — Prisma only reads the
 > former ([which file?](#which-file-env-vs-envlocal)).
 
@@ -431,14 +431,14 @@ For the full provisioning walkthrough (cluster, ingress-nginx, cert-manager, Git
 
 ### 🖥️ Or self-host it on one small server (~$6/month)
 
-You don't need Kubernetes. `docker-compose.prod.yml` runs the whole thing —
+You don't need Kubernetes. `docker/docker-compose.prod.yml` runs the whole thing —
 app, Postgres and [Caddy](https://caddyserver.com) for automatic HTTPS — on a
 single VPS, with a nightly backup and guest-data purge:
 
 ```bash
 cp .env.prod.example .env.prod          # fill in your domain + secrets
-docker compose -f docker-compose.prod.yml build
-docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
+docker build -f docker/Dockerfile -t dlectroflow:local .
+docker compose --env-file .env.prod -f docker/docker-compose.prod.yml up -d
 ```
 
 Step-by-step walkthrough, cron lines, restore and upgrade steps:
@@ -449,7 +449,7 @@ Step-by-step walkthrough, cron lines, restore and upgrade steps:
 If you want to run the image outside the cluster (e.g. a quick local prod-like test), supply a Postgres `DATABASE_URL`:
 
 ```bash
-docker build -t dlectroflow .
+docker build -f docker/Dockerfile -t dlectroflow .
 docker run -p 3000:3000 \
   -e DATABASE_URL="postgresql://user:pass@host:5432/dlectroflow" \
   -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
@@ -502,8 +502,8 @@ practice, or $0 if you point it at a model you run yourself.
 |---|---|
 | `command not found: node` | Node isn't installed / not on PATH. Install it (see Prerequisites), reopen your terminal. |
 | `npm run setup` stops at *"Environment variable not found: DATABASE_URL"* | There's no `.env` yet — or your `DATABASE_URL` is in `.env.local`, which Prisma doesn't read. `cp .env.example .env`, then re-run ([which file?](#which-file-env-vs-envlocal)). |
-| `P1000: Authentication failed against database server` | Your `DATABASE_URL` password doesn't match `docker-compose.yml` (it's `dlectroflow`). Re-copy the template: `cp .env.example .env`. |
-| `P1001: Can't reach database server at localhost:5432` | Postgres isn't running. `docker compose up -d db` (or just re-run `npm run setup`, which starts it). |
+| `P1000: Authentication failed against database server` | Your `DATABASE_URL` password doesn't match `docker/docker-compose.yml` (it's `dlectroflow`). Re-copy the template: `cp .env.example .env`. |
+| `P1001: Can't reach database server at localhost:5432` | Postgres isn't running. `docker compose -f docker/docker-compose.yml up -d db` (or just re-run `npm run setup`, which starts it). |
 | First-ever page load logs `prisma:error … Unique constraint failed on the fields: (id)` | Harmless, and only on a brand-new database: two concurrent first-use reads race to create your Settings/Streak row, and the loser re-fetches it (see the docblock in `src/lib/db.ts`). The page still renders; you won't see it again. |
 | Breakdown returns *"ANTHROPIC_API_KEY is not set"* | Export the key (or put it in `.env`, or `.env.local` — either works for runtime values) **and restart** `npm run dev`. Env is read at server start. |
 | DB error mentioning a table/model that should exist | You ran a migration while `npm run dev` was running. **Restart the dev server.** |
@@ -536,6 +536,11 @@ Full feature spec and the build order live in [`docs/dlectroflow-plan.md`](docs/
 Spotted a bug, a confusing doc step, or an idea? **Open an issue** — small reports
 are very welcome. For code changes, open a merge request against `main`; every MR
 gets its own review app so you (and reviewers) can click around the change live.
+
+Setup, house conventions, the hygiene tests and the commit format are all in
+**[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)**. Security reports go through
+**[docs/SECURITY.md](docs/SECURITY.md)**, and participation is governed by the
+**[Code of Conduct](docs/CODE_OF_CONDUCT.md)**.
 
 > 🤖 This app is built with the support of **[Claude](https://claude.com/claude-code)** and **GitLab Duo** —
 > from pair-building features and reviewing every merge request to drafting these very docs.
