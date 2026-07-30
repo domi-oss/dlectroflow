@@ -6,6 +6,7 @@ import {
   setTheme,
   expectThemeApplied,
   waitForShell,
+  sectionToggle,
   expandSection,
   expandAllSections,
 } from "../helpers";
@@ -221,6 +222,215 @@ for (const state of ["as it lands", "all expanded"] as const) {
     });
   });
 }
+
+/**
+ * #115 — the reader ended up AT the heading.
+ *
+ * Stronger than `expectClearOfStickyBar`, and deliberately so: this asserts the
+ * FINAL scroll position, which is the only thing that catches "the section
+ * expanded, but only after the scroll had already come to rest".
+ *
+ * Two acceptable outcomes, and no third:
+ *  • the heading is flush at its landing spot — `scroll-margin-top` below the
+ *    viewport's top edge, which is the bar's height plus the band's own padding
+ *    (read from the DOM rather than hard-coded, so a change to either lands
+ *    here as a real result and not as a stale magic number); or
+ *  • the page is at its scroll limit and physically cannot do better.
+ *
+ * A scroll computed against the COLLAPSED page satisfies neither, because
+ * expanding the target raises the document's scroll limit: the old limit is no
+ * longer the limit, and it is short of the heading's landing spot.
+ */
+async function expectLandedOnHeading(
+  page: Page,
+  nav: Locator,
+  heading: Locator,
+): Promise<void> {
+  await waitForScrollToSettle(page);
+  const navBox = (await nav.boundingBox())!;
+  const headingBox = (await heading.boundingBox())!;
+  const landingSpot = await heading.evaluate((el) =>
+    parseFloat(getComputedStyle(el).scrollMarginTop),
+  );
+  const { scrollY, maxScroll } = await page.evaluate(() => ({
+    scrollY: Math.round(window.scrollY),
+    maxScroll: Math.round(
+      document.documentElement.scrollHeight - window.innerHeight,
+    ),
+  }));
+
+  const flush = Math.abs(headingBox.y - landingSpot) <= 1;
+  const atLimit = scrollY >= maxScroll - 2;
+  expect(
+    flush || atLimit,
+    `heading at y=${Math.round(headingBox.y)} (landing spot ${landingSpot}), ` +
+      `page at ${scrollY}/${maxScroll}`,
+  ).toBe(true);
+  // Under the bar is never acceptable, on either branch.
+  expect(headingBox.y).toBeGreaterThanOrEqual(navBox.y + navBox.height - 1);
+  await expect(heading).toBeInViewport();
+}
+
+// #115 — the seam between #72's nav and #101's collapsed sections: being sent to
+// a section has to OPEN it, from a pill and from a URL fragment alike, and the
+// landing has to be computed against the page as it ends up rather than as it
+// started.
+test.describe("section nav — being sent to a section opens it (#115)", () => {
+  test.use({ viewport: DESKTOP });
+
+  // Two destinations with different geometry: one in the body of the page, and
+  // the last one, which the page can never scroll all the way to the top.
+  for (const id of ["settings-aging", "settings-people"] as const) {
+    test(`a jump to a collapsed ${id} expands it and lands on its heading`, async ({
+      page,
+    }) => {
+      await page.goto("/settings");
+      await waitForShell(page);
+      await waitForNavHydrated(page);
+      const nav = page.locator(SETTINGS_NAV);
+      const toggle = sectionToggle(page, id);
+      // The precondition #115 is about: the destination starts closed.
+      await expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+      await openPanel(nav);
+      const label = await toggle.locator("span").innerText();
+      await nav.getByRole("link", { name: label, exact: true }).click();
+
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+      await expectLandedOnHeading(page, nav, page.locator(`#${id}`));
+      await expect(page.locator(`#${id}`)).toBeFocused();
+    });
+
+    test(`loading /settings#${id} directly expands it and lands on its heading`, async ({
+      page,
+    }) => {
+      // The bigger half of #115: a shared link, a bookmark, a link in a runbook.
+      await page.goto(`/settings#${id}`);
+      await waitForShell(page);
+      await waitForNavHydrated(page);
+
+      await expect(sectionToggle(page, id)).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+      await expectLandedOnHeading(
+        page,
+        page.locator(SETTINGS_NAV),
+        page.locator(`#${id}`),
+      );
+    });
+  }
+
+  test("a deep link leaves every OTHER section closed", async ({ page }) => {
+    await page.goto("/settings#settings-demo");
+    await waitForShell(page);
+    await waitForNavHydrated(page);
+
+    const open = await page
+      .locator("[data-section-toggle][aria-expanded='true']")
+      .evaluateAll((els) =>
+        els.map((el) => el.getAttribute("data-section-toggle")),
+      );
+    // The named one, plus the one the page always opens on arrival.
+    expect(open.sort()).toEqual(["settings-demo", "settings-focus-timer"]);
+  });
+
+  test("a section the reader closed is not re-opened by scrolling past it", async ({
+    page,
+  }) => {
+    // The scroll-spy names sections constantly; only an explicit ask may open
+    // one. Without this rule a closed section would spring open under the
+    // reader as they scrolled.
+    await page.goto("/settings#settings-demo");
+    await waitForShell(page);
+    await waitForNavHydrated(page);
+    const toggle = sectionToggle(page, "settings-demo");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    // Scroll the whole page, so the spy hands the highlight around, and come
+    // back. The fragment still says #settings-demo throughout.
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await waitForScrollToSettle(page);
+    await page.evaluate(() =>
+      window.scrollTo(0, document.documentElement.scrollHeight),
+    );
+    await waitForScrollToSettle(page);
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("…but asking for it again does re-open it, fragment unchanged", async ({
+    page,
+  }) => {
+    // Clicking the same pill twice does not change `location.hash`, so no
+    // hashchange fires — the nav has to say so itself.
+    await page.goto("/settings#settings-demo");
+    await waitForShell(page);
+    await waitForNavHydrated(page);
+    const toggle = sectionToggle(page, "settings-demo");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    const nav = page.locator(SETTINGS_NAV);
+    await openPanel(nav);
+    await nav.getByRole("link", { name: "Demo", exact: true }).click();
+
+    expect(new URL(page.url()).hash).toBe("#settings-demo");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expectLandedOnHeading(page, nav, page.locator("#settings-demo"));
+  });
+
+  test("keyboard: Enter on a pill opens the destination exactly like a click", async ({
+    page,
+  }) => {
+    await page.goto("/settings");
+    await waitForShell(page);
+    await waitForNavHydrated(page);
+    const nav = page.locator(SETTINGS_NAV);
+    await openPanel(nav);
+
+    const link = nav.getByRole("link", { name: "Notifications", exact: true });
+    await link.focus();
+    await page.keyboard.press("Enter");
+
+    const toggle = sectionToggle(page, "settings-notifications");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator("#settings-notifications")).toBeFocused();
+    await expectLandedOnHeading(
+      page,
+      nav,
+      page.locator("#settings-notifications"),
+    );
+  });
+});
+
+test.describe("section nav — deep links under prefers-reduced-motion (#115)", () => {
+  test.use({ viewport: DESKTOP });
+
+  test("still expands and still lands on the heading, instantly", async ({
+    page,
+  }) => {
+    // globals.css forces `scroll-behavior: auto` under the reduce query, which
+    // beats the nav's `scroll-smooth` opt-in — the landing must not depend on
+    // an animation having run.
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/settings#settings-people");
+    await waitForShell(page);
+    await waitForNavHydrated(page);
+
+    await expect(sectionToggle(page, "settings-people")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    await expectLandedOnHeading(
+      page,
+      page.locator(SETTINGS_NAV),
+      page.locator("#settings-people"),
+    );
+  });
+});
 
 test.describe("section nav — desktop", () => {
   test.use({ viewport: DESKTOP });
