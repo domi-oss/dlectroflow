@@ -252,6 +252,7 @@ environment variables. Downgrades are not supported.
 | `migrate` exited non-zero | Read `docker compose logs migrate`. The app will not start until migrations succeed, which is deliberate. |
 | Sign-in says you are not invited | `OWNER_ALLOWLIST` did not match your identity. Numeric GitLab id is the most reliable value. Fix it, then re-run the seed: `docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --force-recreate seed-allowlist`. |
 | It took over a database container you were using for local development | The dev stack in `docker-compose.yml` and this one use different Compose project names (`dlectroflow` vs `dlectroflow-prod`) precisely to avoid that. If you see it, you are probably running an older copy of this file. |
+| Someone says **Connect Google →** "does nothing" — they never return to the app, and your logs show no callback at all | Their Google account is probably managed by an organisation that has not allowlisted your OAuth client. Google refuses at its own consent step (`Error 400: access_not_configured`), so there is no callback to log and no error the app can render. Nothing to fix on this host: see [A managed work account can be blocked by its own administrator](../README.md#a-managed-work-account-can-be-blocked-by-its-own-administrator). A personal Google account is the reliable workaround, and `.ics` export needs no Google account at all. |
 
 Useful commands:
 

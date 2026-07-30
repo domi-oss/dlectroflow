@@ -288,6 +288,33 @@ consent screen*) before inviting anyone. Full verification is only needed above
 Each person connects their **own** Google account: credentials are stored per
 user, and no account (the instance owner included) can see or use another's.
 
+### A managed work account can be blocked by its own administrator
+
+Google Workspace administrators can restrict which third-party OAuth apps may
+access accounts in their domain. If your OAuth client isn't on that allowlist,
+Google refuses at **its own** consent step and shows **its own** page — the
+organisation's help link plus `Error 400: access_not_configured`.
+
+You will not see this happen. The person never reaches your callback, so there
+is no error state to render and **nothing in your logs**; from inside the app it
+is indistinguishable from someone changing their mind. It is also easy to
+misdiagnose: `access_not_configured` is the same code Google returns for an API
+that simply isn't enabled, which sends you looking at your Cloud project rather
+than at the user's domain.
+
+Two things follow if you run this for other people:
+
+- **A personal Google account is the reliable choice**, and every Connect
+  control in the app already carries that hint. It is the whole mitigation —
+  there is no detection to add.
+- **If your users all sit in one Workspace domain**, ask that domain's
+  administrator to allowlist your OAuth client id (Google Admin console →
+  *Security* → *Access and data control* → *API controls* → *App access
+  control*). Only they can make that change.
+
+Nobody is locked out either way: [`.ics` export](#no-google-account-ics-still-works)
+needs no Google account at all.
+
 ### No Google account? `.ics` still works
 
 Scheduling isn't all-or-nothing. With no Google connection at all, a task's steps
@@ -485,6 +512,7 @@ practice, or $0 if you point it at a model you run yourself.
 | Breakdown returns *"LLM_BASE_URL is not set"* | You set `LLM_PROVIDER=openai-compatible` without a base URL (outside production nothing checks at boot). Set `LLM_BASE_URL` and restart. |
 | Your own model chats back but never produces steps | It probably can't do native tool-calling: set `LLM_SUPPORTS_TOOLS=false` for the JSON-in-text fallback. Also read the [experimental warning](#-bring-your-own-llm-byo-llm) — no human has run this path against a real non-Anthropic endpoint yet. |
 | Prisma client seems out of date after `git pull` | `npm install` (runs `prisma generate`) or `npm run db:migrate`. |
+| Someone clicks **Connect Google →**, never comes back, and nothing appears in your logs — or they report `Error 400: access_not_configured` | Their Google account is probably managed by an organisation that hasn't allowlisted your OAuth client, so Google refuses at its own consent step. Not a bug you can fix in the app: see [A managed work account can be blocked by its own administrator](#a-managed-work-account-can-be-blocked-by-its-own-administrator). |
 
 ---
 

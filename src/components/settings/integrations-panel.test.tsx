@@ -9,6 +9,7 @@ vi.mock("@/app/actions/google-schedule", () => ({
 }));
 
 import { IntegrationsPanel } from "./integrations-panel";
+import { GOOGLE_ACCOUNT_HINT } from "@/components/integrations/google-account-hint";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -316,5 +317,61 @@ describe("IntegrationsPanel — the disclosure (#101)", () => {
     expect(trigger.closest("[data-section-header]")!.textContent).toMatch(
       /sign in/i,
     );
+  });
+});
+
+// ── #128 — which Google account to connect ───────────────────────────────────
+// A managed work account can be refused by its own administrator at Google's
+// consent step. We never see it: no callback, no error state, no log line. The
+// only thing that helps is saying which account to pick BEFORE the click.
+describe("IntegrationsPanel — the pick-your-account hint (#128)", () => {
+  const hintFor = (link: HTMLElement) =>
+    document.getElementById(link.getAttribute("aria-describedby") ?? "");
+
+  it("describes the Connect link with the hint, not merely sits it nearby", () => {
+    render(<IntegrationsPanel google={base} defaultExpanded />);
+    const link = screen.getByRole("link", { name: /connect google/i });
+    expect(hintFor(link)).toHaveTextContent(GOOGLE_ACCOUNT_HINT);
+  });
+
+  it("describes the Reconnect link too — an admin can start blocking an app that used to work", () => {
+    render(
+      <IntegrationsPanel
+        google={{ ...base, needsReconnect: true }}
+        defaultExpanded
+      />,
+    );
+    const link = screen.getByRole("link", { name: /reconnect google/i });
+    expect(hintFor(link)).toHaveTextContent(GOOGLE_ACCOUNT_HINT);
+  });
+
+  it("drops the hint once connected — there is no account left to pick", () => {
+    render(
+      <IntegrationsPanel
+        google={{ ...base, connected: true }}
+        defaultExpanded
+      />,
+    );
+    expect(screen.queryByText(GOOGLE_ACCOUNT_HINT)).toBeNull();
+  });
+
+  it("stays out of the signed-out shell, which offers nothing to connect", () => {
+    render(
+      <IntegrationsPanel
+        google={null}
+        readOnly
+        voice="plain"
+        defaultExpanded
+      />,
+    );
+    expect(screen.queryByText(GOOGLE_ACCOUNT_HINT)).toBeNull();
+  });
+
+  it("reads as guidance, not an alarm — no destructive/warning colouring", () => {
+    render(<IntegrationsPanel google={base} defaultExpanded />);
+    const hint = screen.getByText(GOOGLE_ACCOUNT_HINT);
+    expect(hint.className).toContain("text-muted-foreground");
+    expect(hint.className).not.toMatch(/destructive|text-red|bg-red|amber/);
+    expect(hint).not.toHaveAttribute("role", "alert");
   });
 });

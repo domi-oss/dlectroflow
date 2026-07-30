@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BreakdownChat } from "@/components/breakdown/breakdown-chat";
+import { GOOGLE_ACCOUNT_HINT } from "@/components/integrations/google-account-hint";
 import type { Proposal } from "@/lib/breakdown";
 
 vi.mock("next/navigation", () => ({
@@ -282,5 +283,42 @@ describe("BreakdownChat — a null status is the guest signal (#118)", () => {
     expect(
       screen.getByRole("link", { name: /connect google tasks/i }),
     ).toHaveAttribute("href", "/api/google/oauth/start");
+  });
+});
+
+// ── #128 — which Google account to connect ───────────────────────────────────
+// The inline connect path README names alongside Settings → Integrations, so it
+// carries the same guidance: a managed work account can be refused by its own
+// administrator at Google's consent step, and we never see it happen.
+describe("BreakdownChat — the pick-your-account hint (#128)", () => {
+  const hintFor = (link: HTMLElement) =>
+    document.getElementById(link.getAttribute("aria-describedby") ?? "");
+
+  it("describes the inline Connect link with the hint", async () => {
+    await renderChat({
+      google: { configured: true, connected: false, needsReconnect: false },
+    });
+    const link = screen.getByRole("link", { name: /connect google tasks/i });
+    expect(hintFor(link)).toHaveTextContent(GOOGLE_ACCOUNT_HINT);
+  });
+
+  it("describes the Reconnect link too", async () => {
+    await renderChat({
+      google: { configured: true, connected: false, needsReconnect: true },
+    });
+    const link = screen.getByRole("link", { name: /reconnect google/i });
+    expect(hintFor(link)).toHaveTextContent(GOOGLE_ACCOUNT_HINT);
+  });
+
+  it("says nothing about accounts once connected", async () => {
+    await renderChat({
+      google: { configured: true, connected: true, needsReconnect: false },
+    });
+    expect(screen.queryByText(GOOGLE_ACCOUNT_HINT)).toBeNull();
+  });
+
+  it("says nothing about accounts to a guest, who has no Google section at all", async () => {
+    await renderChat({ google: null });
+    expect(screen.queryByText(GOOGLE_ACCOUNT_HINT)).toBeNull();
   });
 });

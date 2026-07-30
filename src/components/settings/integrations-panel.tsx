@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { disconnectGoogleTasks } from "@/app/actions/google-schedule";
 import { t, type Voice } from "@/lib/strings";
 import { CollapsibleSection } from "@/components/nav/collapsible-section";
+import { GoogleAccountHint } from "@/components/integrations/google-account-hint";
 import { cn, touchTarget } from "@/lib/utils";
 
 type GoogleStatus = {
@@ -67,6 +68,9 @@ export function IntegrationsPanel({
   // Stable id so the destructive button can point at the confirmation question
   // it is answering (aria-describedby) rather than merely sitting beside it.
   const confirmId = useId();
+  // #128 — same treatment for the "which Google account" hint: the Connect
+  // link is described by it, not merely followed by it.
+  const accountHintId = useId();
   // Focus must not fall to <body> when the confirmation row unmounts — the
   // control that had focus is gone, and a keyboard user is left with no position
   // on the page and a Tab that restarts from the top. Returning focus to
@@ -166,10 +170,20 @@ export function IntegrationsPanel({
             <code>GOOGLE_CLIENT_SECRET</code> to enable (see the README).
           </p>
         )}
+        {/* #128 — above the button, not below it: a work/managed Google account
+            can be refused by its own administrator at Google's consent step,
+            and since the person never returns to our callback there is no
+            error we could show afterwards. Deliberately the same muted
+            treatment as the not-configured note above rather than a warning
+            banner — nothing has gone wrong, this is which account to pick. */}
+        {d.connectHref && (
+          <GoogleAccountHint id={accountHintId} className="mt-3 text-sm" />
+        )}
         <div className="mt-3 flex flex-wrap items-center gap-3">
           {d.connectHref && (
             <a
               href={d.connectHref}
+              aria-describedby={accountHintId}
               className="bg-primary text-primary-foreground rounded-md px-3 py-2 text-sm font-medium"
             >
               {d.connectLabel}

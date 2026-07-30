@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { confirmBreakdown } from "@/app/actions/breakdown";
 import { createBrainDumpItem } from "@/app/actions/braindump";
@@ -12,6 +12,7 @@ import { reorder, blankStep } from "@/lib/breakdown";
 import { EmojiPicker } from "@/components/breakdown/emoji-picker";
 import { ScheduleStatusBanner } from "@/components/breakdown/schedule-status-banner";
 import { BackLink } from "@/components/nav/back-link";
+import { GoogleAccountHint } from "@/components/integrations/google-account-hint";
 import { withFrom } from "@/lib/nav/back";
 import { leadSchedulingMethod } from "@/lib/scheduling/providers";
 import type { GoogleConnStatus } from "@/lib/scheduling/types";
@@ -58,6 +59,10 @@ export function BreakdownChat({
 }) {
   const router = useRouter();
   const voice = useVoice();
+  // #128 — the "which Google account" hint the connect/reconnect CTAs below are
+  // described by. One id: those two branches are mutually exclusive, so only
+  // ever one of them is in the tree.
+  const accountHintId = useId();
   const [gsched, setGsched] = useState<ScheduleState>({ status: "idle" });
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [proposal, setProposal] = useState<Proposal | null>(
@@ -301,8 +306,14 @@ export function BreakdownChat({
                     Google needs reconnecting — your access expired or was
                     revoked.
                   </p>
+                  {/* #128 — on the reconnect path too: an administrator can
+                      start blocking an app that connected fine before, and a
+                      revoked token is exactly when someone re-picks an
+                      account. */}
+                  <GoogleAccountHint id={accountHintId} className="text-xs" />
                   <a
                     href="/api/google/oauth/start"
+                    aria-describedby={accountHintId}
                     className="bg-primary text-primary-foreground inline-block rounded-md px-3 py-2 font-medium"
                   >
                     Reconnect Google →
@@ -314,8 +325,13 @@ export function BreakdownChat({
                     Connect Google Tasks — steps land in your task list, and a
                     Reclaim-synced list is scheduled automatically.
                   </p>
+                  {/* #128 — the inline connect path README names alongside
+                      Settings → Integrations, so it carries the same guidance
+                      about which account to pick. */}
+                  <GoogleAccountHint id={accountHintId} className="text-xs" />
                   <a
                     href="/api/google/oauth/start"
+                    aria-describedby={accountHintId}
                     className="bg-primary text-primary-foreground inline-block rounded-md px-3 py-2 font-medium"
                   >
                     Connect Google Tasks →

@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
   type ReactNode,
@@ -13,6 +14,10 @@ import {
   ANCHORED_POSITIONER,
   popupSurface,
 } from "@/components/ui/anchored-popup";
+import {
+  GoogleAccountHint,
+  GOOGLE_ACCOUNT_HINT,
+} from "@/components/integrations/google-account-hint";
 import { ScheduleMenu } from "@/components/scheduling/schedule-menu";
 import type { ScheduleIntent } from "@/lib/scheduling/types";
 
@@ -55,6 +60,14 @@ export type ScheduleControlProps = {
   scheduleIntent?: ScheduleIntent | null;
   /** Names the menu's dialog, so the wrong row's popover is obvious to AT. */
   taskTitle?: string;
+  /**
+   * #128 — id of a "which Google account" hint the CALLER renders, for the
+   * `connect`/`reconnect` link to point at with `aria-describedby`. Supplied by
+   * a surface that has to place the sentence outside this control's own markup
+   * (the task working view wraps it in a bordered pill); omitted everywhere
+   * else, where this component decides for itself — see the connect branch.
+   */
+  accountHintId?: string;
 };
 
 /**
@@ -84,10 +97,12 @@ export function ScheduleControl({
   label = "Schedule",
   scheduleIntent,
   taskTitle,
+  accountHintId,
 }: ScheduleControlProps) {
   const [open, setOpen] = useState(false);
   const [custom, setCustom] = useState("");
   const rootRef = useRef<HTMLSpanElement>(null);
+  const ownHintId = useId();
   const isMenu = variant === "menu";
   const isIcs = state === "ics_ready_steps" || state === "ics_needs_duration";
   const needsDuration =
@@ -123,9 +138,31 @@ export function ScheduleControl({
   }, [isMenu, open, close]);
 
   if (state === "connect" || state === "reconnect") {
-    return (
+    // #128 — a work/managed Google account can be refused by its own
+    // administrator at Google's consent step. Google shows its own page and the
+    // person never returns to our callback, so there is nothing to catch, log
+    // or render afterwards: the guidance has to arrive before the click.
+    //
+    // Where it is VISIBLE depends on how much room this control has, because
+    // the same component renders once per inbox row:
+    //   • `menu` variant — the ▾ dropdown is a full-width column and only one
+    //     is ever open, so the sentence goes under the link.
+    //   • `accountHintId` — a single-control surface renders the hint itself
+    //     (outside its own wrapper) and we point at it.
+    //   • compact icon variant — every unconnected row shows this link, so a
+    //     visible sentence would be the same paragraph a dozen times down the
+    //     page. It rides on `title` instead, which is still the link's
+    //     accessible description and matches the tooltip idiom the rest of the
+    //     end cluster already uses.
+    const ownHint = isMenu && !accountHintId;
+    const describedBy = accountHintId ?? (ownHint ? ownHintId : undefined);
+    const link = (
       <a
         href="/api/google/oauth/start"
+        aria-describedby={describedBy}
+        // Never both: `aria-describedby` already wins as the accessible
+        // description, and a tooltip repeating it is noise on hover.
+        title={describedBy ? undefined : GOOGLE_ACCOUNT_HINT}
         className={cn(
           isMenu
             ? "hover:bg-accent w-full rounded-md px-2.5 py-1 text-left font-medium"
@@ -135,6 +172,20 @@ export function ScheduleControl({
       >
         {state === "reconnect" ? "Reconnect Google →" : "Connect Google →"}
       </a>
+    );
+    if (!ownHint) return link;
+    return (
+      <span className="flex flex-col">
+        {link}
+        {/* `max-w-56` so a ~120-character sentence cannot stretch the popup out
+            to the `max-w-[calc(100vw-1rem)]` cap that popupSurface allows —
+            the menu's other entries are short, and a full-width popup on a
+            phone is the clipping problem #92 fixed, arriving from the inside. */}
+        <GoogleAccountHint
+          id={ownHintId}
+          className="max-w-56 px-2.5 pb-1 text-xs"
+        />
+      </span>
     );
   }
 

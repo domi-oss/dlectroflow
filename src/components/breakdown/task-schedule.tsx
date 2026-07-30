@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useId, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { pushStepsToGoogleTasks } from "@/app/actions/google-schedule";
 import { scheduleViaIcs } from "@/app/actions/ics-schedule";
@@ -13,6 +13,7 @@ import {
   scheduleState,
   SCHEDULE_ERROR_MESSAGES,
 } from "@/components/inbox/inbox-view";
+import { GoogleAccountHint } from "@/components/integrations/google-account-hint";
 import { leadSchedulingMethod } from "@/lib/scheduling/providers";
 import type { GoogleConnStatus, ScheduleIntent } from "@/lib/scheduling/types";
 import { t, type Voice } from "@/lib/strings";
@@ -58,6 +59,12 @@ export function TaskSchedule({
   voice: Voice;
 }) {
   const router = useRouter();
+  // #128 — this view renders ONE schedule control, so unlike an inbox row it
+  // can afford the visible "which Google account" hint. It has to own the
+  // element, though: <ScheduleControl> is wrapped in the bordered pill below,
+  // and a sentence rendered inside that wrapper would be drawn as part of the
+  // button. So the hint sits outside the pill and the control is handed its id.
+  const accountHintId = useId();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   // Mirrors inbox-view's per-row reconnect handling: a reconnect_required
@@ -140,9 +147,17 @@ export function TaskSchedule({
           Reconnect control. No padding on the wrapper: the inner button
           already carries "px-2.5 py-1", so adding it here would double it. */}
       <span className="hover:bg-accent rounded-md border text-sm">
-        <ScheduleControl {...schedule} />
+        <ScheduleControl {...schedule} accountHintId={accountHintId} />
       </span>
       {error && <span className="text-destructive text-xs">{error}</span>}
+      {/* Rendered only while there is an account left to pick — including when
+          a mid-flight `reconnect_required` swaps the control to a link, since
+          `schedule.state` is recomputed from `effectiveGoogle`. `basis-full`
+          gives it its own line in this flex-wrap row rather than squeezing the
+          control. */}
+      {(schedule.state === "connect" || schedule.state === "reconnect") && (
+        <GoogleAccountHint id={accountHintId} className="basis-full text-xs" />
+      )}
     </div>
   );
 }
