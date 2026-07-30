@@ -213,7 +213,8 @@ Schedule "do flex training"
                                      [ Cancel ]  [ Schedule ]
 ```
 
-- **Defaults:** deadline **3 days out** (matching Reclaim's own default), priority **High**, hours **Work**. Personal is one click.
+- **Defaults:** deadline **7 days out**, priority **High**, hours **Work**. Personal is one click.
+  - *Revised 2026-07-30, from production evidence.* This was 3 days, to match Reclaim's own default. In prod, a 4-step task at the 30-minute floor (2h of blocks) had its last two steps' work sessions placed **after** the 3-day deadline — the at-risk state, which is precisely the feeling an ADHD planner should not manufacture by default. A week gives the scheduler room; a tighter deadline is what the menu is for.
 - **Fields are shown only where they do something.** Priority and hours are Reclaim vocabulary, so they appear when the Google Tasks method is the active one and are omitted for the `.ics`-only case (guests, self-hosters without Google) — which sees the deadline and the per-step expander alone. A control that provably has no effect is not shown greyed out; it is not rendered.
 - **`.ics` keeps its own placement.** The intent's windows drive the Google/Reclaim path; `buildTaskIcs` continues to lay steps back-to-back from the next top of the hour, because a downloaded calendar file is a "do this now" artifact and spreading it across three days would be a regression for the guest flow. What `.ics` takes from the intent is the per-step description (the deep-link fix), `TRANSP:OPAQUE` from `busy`, and — when a deadline was explicitly chosen — `DUE`.
 - The summary line recomputes live and turns into the feasibility warning when the deadline cannot fit the work.
@@ -279,7 +280,7 @@ Every layer below the UI is pure, which is the point of the split.
 
 Three MRs, each independently shippable and each leaving the app working:
 
-1. **A — payload** (`ScheduleIntent`, `windows.ts`, both encoders, per-step deep-link, update-in-place, `(type work)`, the floor). No UI change: the actions derive a default intent (3 days out, High, Work) exactly as the menu will. **This alone un-reverses the calendar.**
+1. **A — payload** (`ScheduleIntent`, `windows.ts`, both encoders, per-step deep-link, update-in-place, `(type work)`, the floor). No UI change: the actions derive a default intent (7 days out, High, Work) exactly as the menu will. **This alone un-reverses the calendar.**
 2. **B — the menu** + the three persisted columns + prefill.
 3. **C — per-step overrides** + `Step.scheduleDueAt`.
 
@@ -296,7 +297,7 @@ Also folded into A, being one-line fixes in the files already open: the `no_recl
 | Title layout? | Counter badge prefix, then step text. Task title, estimate detail and focus link in the description. |
 | `(type …)` default? | `work`, unless personal is chosen. |
 | Priority default? | High (P2) — matches what Reclaim already infers today, so nothing is silently downgraded. |
-| Deadline default? | 3 days out — matches Reclaim's default due date. |
+| Deadline default? | **7 days out.** Was 3 (matching Reclaim's own default) until 2026-07-30, when production showed a 4-step task's later blocks landing after the deadline. See the Defaults note above. |
 | Per-step control? | Yes, as an opt-in expander inside the same menu (C). |
 | Ordering mechanism? | Disjoint `(not before …)`/`(due …)` windows, proportional to duration, over working minutes. |
 | Non-Reclaim self-hosters? | Detected from the list name; plain encoder uses Google's native `due` field and adds no syntax. |

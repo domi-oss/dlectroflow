@@ -61,9 +61,14 @@ describe("loadScheduleIntent", () => {
     expect(intent!.priority).toBe(SchedulePriority.High);
     expect(intent!.hours).toBe(ScheduleHours.Work);
     expect(intent!.busy).toBe(true);
-    // Three days out, the default the bare-📅 path already uses.
+    // A week out — the shared default from defaultIntentFor, which the bare-📅
+    // path uses too. Asserted as a window rather than an instant because the
+    // action computes `now` itself.
     expect(intent!.dueAt.getTime()).toBeGreaterThan(
-      Date.now() + 2.9 * 24 * 60 * 60_000,
+      Date.now() + 6.9 * 24 * 60 * 60_000,
+    );
+    expect(intent!.dueAt.getTime()).toBeLessThan(
+      Date.now() + 7.1 * 24 * 60 * 60_000,
     );
   });
 
