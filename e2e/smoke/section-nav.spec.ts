@@ -9,6 +9,9 @@ import {
   sectionToggle,
   expandSection,
   expandAllSections,
+  readSectionHighlight,
+  isSectionHighlightSettled,
+  waitForSectionHighlightSettled,
 } from "../helpers";
 
 // #72 — the collapsible sticky "Jump to…" section nav on the two long pages.
@@ -517,6 +520,119 @@ test.describe("section nav — deep links under prefers-reduced-motion (#115)", 
       page.locator(SETTINGS_NAV),
       page.locator("#settings-people"),
     );
+  });
+});
+
+// #110 — the guard on `expandAllSections`'s postcondition.
+//
+// Every assertion above about the highlight uses a Playwright matcher, and those
+// AUTO-RETRY: `toHaveText(/Focus timer/)` passes by waiting out the very race
+// that was failing the zero-tolerance contrast gates. axe does not retry. It
+// reads the DOM once, and if `data-current` moves mid-read it samples one
+// element's background and its foreground on opposite sides of the change,
+// reporting a pair that exists in no single frame (`--foreground` over
+// `--primary`, 3.08:1 light / 2.23:1 dark on `settings-demo`'s label).
+//
+// So these two check the same invariant the retrying assertions do, but the way
+// a scanner sees it: in one synchronous read.
+test.describe("section nav — the highlight settles before the helper returns", () => {
+  test.use({ viewport: DESKTOP });
+
+  test("scrolling home does NOT release the highlight in the same task", async ({
+    page,
+  }) => {
+    // The deterministic half, and the reason the wait cannot be dropped. It does
+    // not depend on machine speed, on the flake firing, or on axe: the scroll
+    // and the read happen in ONE evaluate, and the scroll-spy releases the
+    // override from an IntersectionObserver callback, which by specification
+    // cannot run in the middle of a task.
+    await page.goto("/settings");
+    await waitForShell(page);
+    await waitForNavHydrated(page);
+
+    // Put the page in the state `expandAllSections`'s LAST click leaves it in:
+    // a section far down the page explicitly named current (#101), with the
+    // reader nowhere near the top.
+    const last = page.locator("[data-section-toggle]").last();
+    const lastId = await last.getAttribute("data-section-toggle");
+    expect(lastId, "no collapsible sections found").toBeTruthy();
+    await last.scrollIntoViewIfNeeded();
+    await last.click();
+    await expect(
+      page.locator("[data-section-header][data-current] h2"),
+    ).toHaveAttribute("id", lastId!);
+
+    // Home, and read back before the browser has had a rendering opportunity.
+    const sameTask = await readSectionHighlight(page, {
+      scrollHomeFirst: true,
+    });
+    expect(sameTask.scrollY, "the instant scroll should have landed").toBe(0);
+    // At the top of the page, but the WRONG band is still magenta. This is
+    // precisely the DOM a scan started here would read.
+    expect(sameTask.current).toEqual([lastId]);
+    expect(sameTask.topmost).not.toBe(lastId);
+    expect(isSectionHighlightSettled(sameTask)).toBe(false);
+
+    // …and the wait is what closes it.
+    await waitForSectionHighlightSettled(page);
+    const settled = await readSectionHighlight(page);
+    expect(settled.current).toEqual([settled.topmost]);
+    expect(isSectionHighlightSettled(settled)).toBe(true);
+  });
+
+  test("expandAllSections returns with the page already settled", async ({
+    page,
+  }) => {
+    // The contract guard. Deliberately literal-free — it asserts that the ONE
+    // band claiming to be current is the topmost one, not that it is
+    // `settings-focus-timer`, so reordering the sections cannot make it red for
+    // the wrong reason.
+    //
+    // Honest about what it is: a ONE-WAY guard. It cannot fail falsely — a red
+    // here means the DOM really was still changing — but a machine fast enough
+    // to finish the browser's work inside a CDP round trip can pass it even with
+    // the wait removed (measured on `main`: the last `data-current` mutation
+    // landed 1 ms before the helper returned). The test above is the half that
+    // does not depend on timing; this is the half that watches the actual helper
+    // its callers use.
+    await page.goto("/settings");
+    await waitForShell(page);
+    await waitForNavHydrated(page);
+    await expandAllSections(page);
+
+    const state = await readSectionHighlight(page);
+    expect(state.scrollY).toBe(0);
+    expect(state.current).toEqual([state.topmost]);
+
+    // Nothing moves afterwards either — the scan window is quiet, not merely
+    // correct at the instant the helper let go.
+    const movedAfterwards = await page.evaluate(
+      () =>
+        new Promise<boolean>((resolve) => {
+          let moved = false;
+          const observer = new MutationObserver(() => {
+            moved = true;
+          });
+          observer.observe(document, {
+            subtree: true,
+            attributes: true,
+            attributeFilter: ["data-current"],
+          });
+          // Four frames: more than the one the IntersectionObserver callback
+          // and React's re-render need between them.
+          let frames = 0;
+          const tick = () => {
+            if (++frames < 4) return requestAnimationFrame(tick);
+            observer.disconnect();
+            resolve(moved);
+          };
+          requestAnimationFrame(tick);
+        }),
+    );
+    expect(
+      movedAfterwards,
+      "data-current moved after the helper returned",
+    ).toBe(false);
   });
 });
 
