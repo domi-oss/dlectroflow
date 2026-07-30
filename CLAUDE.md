@@ -12,7 +12,7 @@ This is a **maintained production app, not a demo** — real users, real data. T
 - **Prisma 6** → PostgreSQL. Migrations run on container start.
 - **Tailwind 4** + shadcn/ui + Base UI, `lucide-react` icons, `motion` for animation
 - **LLM**: bring-your-own provider — `@anthropic-ai/sdk` and `openai` behind `src/lib/llm/`
-- **Tests**: Vitest (unit/integration, jsdom + RTL) and Playwright (e2e, `@axe-core/playwright` for a11y)
+- **Tests**: Vitest (unit/integration) and Playwright (e2e, `@axe-core/playwright` for a11y)
 
 Next.js 16 has breaking changes vs. older training data — read `node_modules/next/dist/docs/` before writing framework code (see `AGENTS.md`).
 
@@ -56,6 +56,8 @@ Auth path classification lives in `src/lib/auth/gate.ts` and is enforced by `src
 ## Testing
 
 TDD: failing test first, watch it fail, then implement.
+
+**Vitest runs in the `node` environment.** jsdom is opt-in per file, via a `// @vitest-environment jsdom` docblock on the first line — 64 files do this today. A component or hook test written without it fails on missing DOM globals rather than telling you what's wrong, so add the docblock when you add a `.test.tsx`.
 
 The suite includes **hygiene tests that assert on the repo itself** — `dockerfile-hygiene`, `lockfile-hygiene`, `manifest-hygiene`, `env-drift`, `ci-docs-only`, `enum-constraint-sync`. If one fails, the repo drifted; fix the drift, don't relax the test.
 
