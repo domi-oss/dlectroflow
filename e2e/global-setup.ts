@@ -1,7 +1,7 @@
 import { chromium } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
 import { signUserSession, OWNER_COOKIE } from "../src/lib/auth/session";
-import { encryptToken } from "../src/lib/crypto/token-cipher";
+import { clearGoogleTokens } from "./google-credential";
 import {
   SESSION_SECRET,
   OWNER_SUB,
@@ -12,21 +12,9 @@ import {
   MEMBER_WS_ID,
   MEMBER_HANDLE,
   MEMBER_STORAGE_STATE,
-  MEMBER_GOOGLE_ACCESS_TOKEN,
-  TOKEN_ENC_KEY,
   STORAGE_STATE,
   BASE_URL,
 } from "./constants";
-
-// #118 — the member's Google credential is seeded ENCRYPTED, with the app's own
-// cipher and the same key the server under test runs with. A hand-written string
-// would decrypt to null, `getGoogleStatus` would answer "reconnect needed", and
-// the member specs would quietly assert against the wrong state.
-//
-// token-cipher reads TOKEN_ENC_KEY from the environment on every call, and this
-// is a separate process from the server, so it is set here before the import is
-// used. A real environment variable already present is left alone.
-if (!process.env.TOKEN_ENC_KEY) process.env.TOKEN_ENC_KEY = TOKEN_ENC_KEY;
 
 // Mint a real, valid signed-in session the same way the OAuth callback does,
 // then persist it as Playwright storageState so every spec starts logged in.
@@ -120,32 +108,13 @@ export default async function globalSetup(): Promise<void> {
       update: { kind: "user", userId: MEMBER_USER_ID, expiresAt: null },
     });
 
-    // #118 Phase C — the member's OWN Google credential, keyed on their userId.
-    // No refresh token and no expiry: the member specs read status and open
-    // controls, they never push, so nothing ever calls Google. An expiry in the
-    // past would trigger the refresh path and a real network request; a refresh
-    // token would be offered to Google's revoke endpoint on disconnect.
-    //
-    // Re-asserted every run, so a spec that disconnected cannot leak into the
-    // next one. Keyed on `userId` rather than on the row's own generated id —
-    // which is the whole point of #118: there is no other handle on this row.
-    await prisma.googleAuth.upsert({
-      where: { userId: MEMBER_USER_ID },
-      create: {
-        userId: MEMBER_USER_ID,
-        accessToken: encryptToken(MEMBER_GOOGLE_ACCESS_TOKEN),
-        refreshToken: null,
-        expiresAt: null,
-        scope: "https://www.googleapis.com/auth/tasks",
-        needsReconnect: false,
-      },
-      update: {
-        accessToken: encryptToken(MEMBER_GOOGLE_ACCESS_TOKEN),
-        refreshToken: null,
-        expiresAt: null,
-        needsReconnect: false,
-      },
-    });
+    // #118 Phase C — the member's Google credential is NOT seeded here. Only
+    // member-google.spec.ts wants that row, so !200 moved it into that file's
+    // beforeAll/afterAll, for the reason schedule-menu.spec.ts already gives for
+    // the owner's: a connected credential changes the 📅 control on every row it
+    // reaches, and the spec that needs the state should own it and hand it back.
+    // Clear it instead, so an interrupted run cannot leave one behind.
+    await clearGoogleTokens(prisma, MEMBER_USER_ID);
 
     // #118 — and no key on the member, so the Account section starts in its
     // "no key stored" state. The member spec saves one and removes it again; this

@@ -69,14 +69,26 @@ export const MEMBER_BASE_URL =
  * the same key: if the two ever drifted, the ciphertext would decrypt to null,
  * `getGoogleStatus` would report "reconnect needed", and the member specs would
  * quietly test the wrong state instead of failing.
+ *
+ * !200 — that drift then happened, and only on `main`. Unlike SESSION_SECRET
+ * above, this is a hard-coded constant with NO `process.env` fallback, so it
+ * cannot follow the environment; every process that encrypts a fixture token
+ * must therefore be FORCED onto it. `TOKEN_ENC_KEY` is a protected project
+ * CI/CD variable, GitLab withholds protected variables from unprotected refs,
+ * and `main` is the only protected branch — so the ambient production key
+ * appears in `e2e_test` on `main` and nowhere else. Anything that encrypts with
+ * the ambient value is green on every merge request and red on merge. The
+ * forcing lives in e2e/google-credential.ts; use it rather than calling
+ * `encryptToken` from a spec.
  */
 export const TOKEN_ENC_KEY =
   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 /**
- * A fake but well-formed access token for the member's credential. Encrypted by
- * global-setup with the app's own cipher, so `connected` reads true. Deliberately
- * NOT a working credential: the member specs read status and open controls, they
- * never push, so no request ever leaves the machine.
+ * A fake but well-formed access token for the member's credential. Encrypted with
+ * the app's own cipher by e2e/smoke/member-google.spec.ts — the file that wants
+ * the connected state — so `connected` reads true. Deliberately NOT a working
+ * credential: the member specs read status and open controls, they never push, so
+ * no request ever leaves the machine.
  */
 export const MEMBER_GOOGLE_ACCESS_TOKEN = "e2e-member-google-access-token";

@@ -125,10 +125,17 @@ const bootGuardEnv = {
   GOOGLE_CLIENT_ID: "e2e-google-client-id",
   GOOGLE_CLIENT_SECRET: "e2e-google-client-secret",
   GUEST_IP_HASH_SALT: "e2e-guest-ip-hash-salt-000",
-  // Read from e2e/constants.ts, not restated: global-setup encrypts the member's
-  // seeded Google token with the same value from a DIFFERENT PROCESS (#118), and
-  // a drift between the two would decrypt to null and quietly test the
-  // "reconnect needed" state instead of a connected one.
+  // Read from e2e/constants.ts, not restated: the fixtures encrypt the seeded
+  // Google tokens with the same value from a DIFFERENT PROCESS (#118), and a
+  // drift between the two decrypts to null and quietly tests the "reconnect
+  // needed" state instead of a connected one.
+  //
+  // Listing it here also OVERRIDES any ambient value, which on `main` is the real
+  // production key (a protected CI/CD variable, withheld from unprotected refs) —
+  // so the server is pinned. !200 is the other half: the fixture processes are
+  // pinned too, in e2e/google-credential.ts, because they used to let the ambient
+  // value win and the two sides then disagreed on `main` alone.
+  // src/lib/__tests__/e2e-token-key.harness.test.ts keeps the two in lock-step.
   TOKEN_ENC_KEY,
   // What Dockerfile and Dockerfile.ci both set, and for the same reason: the
   // standalone entrypoint reads HOSTNAME, Docker sets HOSTNAME to the container
@@ -141,15 +148,17 @@ const bootGuardEnv = {
   ...(DATABASE_URL ? { DATABASE_URL } : {}),
 };
 
-// #118 Phase C — the member project's server. A dummy Google OAuth client is what
-// makes the Google Tasks method OFFERED (`googleConfigured()`), which is the only
-// way a member's own connect/disconnect controls are reachable at all.
+// #118 Phase C — the member project's server.
 //
-// Its own port and its own env, rather than adding these two variables to
-// `bootGuardEnv`: setting GOOGLE_CLIENT_ID globally flips the inbox 📅 control
-// from "Add to calendar (.ics)" to "Schedule" for EVERY spec, and
-// schedule-ics.spec.ts finds the .ics entry in the ▾ menu BY that label. Two
-// servers keep the default suite's behaviour byte-identical.
+// The dummy Google OAuth client that makes the Tasks method OFFERED
+// (`googleConfigured()`) is inherited from `bootGuardEnv`, which has carried it
+// since #106 — this server does not restate it. !200 corrected the comment that
+// used to sit here: it said the pair was kept off the shared server because
+// setting GOOGLE_CLIENT_ID globally "flips the inbox 📅 control for EVERY spec",
+// which is not what happens and not what the config does. `scheduleState` needs
+// configured AND connected, so with no stored token the default project's rows
+// resolve to "connect" with the client id present exactly as they would without
+// it. What the second server actually buys is its own PUBLIC_ORIGIN and PORT.
 //
 // Deliberately not a working credential: no spec here pushes, so no request
 // leaves the machine.
@@ -159,8 +168,6 @@ const memberServerEnv = {
   // (the OAuth start route included) at the other port.
   PUBLIC_ORIGIN: MEMBER_BASE_URL,
   PORT: String(new URL(MEMBER_BASE_URL).port),
-  GOOGLE_CLIENT_ID: "e2e-google-client-id",
-  GOOGLE_CLIENT_SECRET: "e2e-google-client-secret",
 };
 
 export default defineConfig({

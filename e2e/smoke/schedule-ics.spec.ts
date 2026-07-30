@@ -5,14 +5,15 @@ import { captureItem, needsReviewRow } from "../helpers";
  * The .ics schedule path, end to end in a production build (#104).
  *
  * This is the only scheduling method reachable in THIS Playwright project (the
- * default `chromium` one): its server boots with no GOOGLE_CLIENT_ID, so
- * `scheduleState` resolves every Google control to `"connect"` and renders it as
- * a "Connect Google →" link (row-actions.tsx). #118 Phase C added a second
- * project (`member-google`) whose own server DOES have a dummy Google client —
- * which is exactly why it is a second server: setting GOOGLE_CLIENT_ID on the
- * shared one would flip this row's 📅 label and break the menu lookup below.
- * The claim is about this project's environment, not about the instance: a
- * per-user GoogleAuth row now exists for the member fixture (#118).
+ * default `chromium` one). Its server IS Google-configured (`bootGuardEnv` has
+ * carried a dummy client id since #106), but `scheduleState` needs configured AND
+ * connected, and no row in this project has a stored token: schedule-menu.spec.ts
+ * seeds the owner's credential for its own file and hands it back, and
+ * member-google.spec.ts does the same for the member's in the other project. So
+ * every Google control here resolves to `"connect"` and renders as a
+ * "Connect Google →" link (row-actions.tsx), which is what keeps the ▾ menu
+ * lookup below stable. !200 corrected the previous version of this note, which
+ * attributed that to a missing GOOGLE_CLIENT_ID.
  *
  * The suite runs as the OWNER, and an owner still LEADS with the Google control
  * (`leadSchedulingMethod`) — so the .ics entry is the one in the row's ▾ "All
