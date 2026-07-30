@@ -399,22 +399,31 @@ describe("Privacy Policy page: per-user integrations (#118 Phase C)", () => {
     expect(pageText()).toMatch(/Guests cannot connect Google/i);
   });
 
-  it("is honest that freezing or deleting an account does not revoke at Google", () => {
-    // `disconnectGoogle` is the ONLY revoke path in the codebase. `revokePerson`
-    // freezes the account without touching the tokens, and a frozen account can
-    // no longer reach the Disconnect action; a deleted User cascades the row away
-    // without revoking. Reassuring wording here would be a false promise about
-    // somebody's live Google grant.
+  it("says losing access here withdraws the Google grant too (#126)", () => {
+    // Until #126 this section said the opposite, accurately: `disconnectGoogle`
+    // was the only revoke path, `revokePerson` froze an account without touching
+    // its tokens, and a deleted User cascaded the credential away in silence.
+    // Both lifecycle paths now revoke first (`src/app/actions/people.ts`,
+    // `src/lib/account-lifecycle.ts`), so the honest text is the other way round
+    // — and a page that still described the gap would understate what the app
+    // does to somebody's Google account.
     const text = pageText();
+    expect(text).toMatch(/if your access here is withdrawn/i);
+    expect(text).toMatch(/asks Google to revoke the grant first/i);
+    // The reason the grant goes with the access, in the reader's terms.
     expect(text).toMatch(
+      /grant only ever existed so this app could write your tasks/i,
+    );
+    // And the limit that survives the fix: a revoke CALL can fail, and the
+    // tokens are deleted either way, so the grant can outlive the app's ability
+    // to withdraw it. That is what the Google-side fallback is for.
+    expect(text).toMatch(/that call can fail/i);
+    expect(text).toMatch(/Google account.{0,3}s security settings/i);
+    // It must not drift back to the pre-#126 disclosure, which is now wrong in
+    // the alarming direction.
+    expect(text).not.toMatch(
       /only thing in the app that asks Google to revoke the grant/i,
     );
-    expect(text).toMatch(/your tokens are not deleted/i);
-    expect(text).toMatch(
-      /neither of those cases does anything automatically tell Google to revoke/i,
-    );
-    // And points at the route that always works.
-    expect(text).toMatch(/Google account.{0,3}s security settings/i);
   });
 
   it("discloses the stored own API key as data it collects", () => {

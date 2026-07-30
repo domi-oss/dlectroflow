@@ -124,12 +124,17 @@ material change took effect.
 
 > [!NOTE]
 > **The rule only bites once the text has been published.** The date identifies a
-> version *a reader may have relied on*. While the pages are still unpublished
+> version *a reader may have relied on*. While the pages were still unpublished
 > (#123 unmerged), edits — including the substantive #118 Phase C rewrite of the
-> Google and AI sections — are edits to the **first** version, not a transition
-> between two, and there is nobody who read a prior one. So the date stays at the
-> date this text first takes effect. **The first substantive change after
-> publication is the first one that must bump it.**
+> Google and AI sections — were edits to the **first** version, not a transition
+> between two, and nobody had read a prior one. So the date stayed at the date
+> that text first took effect, **2026-07-29**.
+>
+> The pages are published now, and **#126 was the first substantive change after
+> publication**: freezing or deleting an account revokes the Google grant, which
+> the policy had disclosed as something the app did *not* do. It bumped the date
+> to **2026-07-30**, in the same commit as the behaviour. That is the rule
+> working; every substantive change from here does the same.
 
 ---
 
@@ -151,7 +156,8 @@ thing in the left column, the pages are wrong until you fix them.
 | **Anything writing `User.llmProvider`** (nothing does today — #125) | **The whole "it is a key, not a destination" argument**, and with it the transfer section: today every request goes to Anthropic *because* a member cannot redirect it. See *The BYO-key / BYO-provider line* below | `src/app/actions/account.ts`, `src/lib/llm/index.ts` → `getLLM`; Privacy → *If you bring your own API key*; Terms → *About the AI suggestions* |
 | **Google OAuth scopes** (one: `.../auth/tasks`) | The verbatim scope literal, and "no Gmail, no Calendar, no Drive, no Contacts" | `src/lib/google.ts` → `SCOPE`; Privacy → *Connecting Google Tasks* |
 | **Google credentials ceasing to be per-user** (they are per-user since #118 Phase C) | "your own Google account", "one connection per person", and the claim that the owner cannot reach a member's connection | `src/lib/google.ts` (`getAuth`, keyed on `userId`), `AUTHENTICATED_PREFIXES`, `src/lib/__tests__/scoping.harness.test.ts`; Privacy → *Connecting Google Tasks*; Terms → *Your Google account is yours to look after* |
-| **A revoke path other than `disconnectGoogle`** (e.g. Phase D's purge sweep learning to revoke) | The "freezing or deleting does not revoke at Google" honesty. **If Phase D starts revoking, that paragraph becomes wrong in the reassuring direction** | `src/lib/google.ts` → `disconnectGoogle`, `src/app/actions/people.ts` → `revokePerson`; Privacy → *Tokens, and how to disconnect* |
+| **A lifecycle path that stops revoking at Google** (#126 made freeze and delete revoke first; `tryDisconnectGoogle` is the one wrapper both use) | The "if your access here is withdrawn, the grant goes with it" paragraph. **Dropping the revoke makes it wrong in the reassuring direction** — a live grant its holder cannot withdraw through the product is the Art. 7(3) problem #126 fixed | `src/lib/google.ts` → `disconnectGoogle` / `tryDisconnectGoogle`, `src/app/actions/people.ts` → `revokePerson`, `src/lib/account-lifecycle.ts` → `deleteAccount`; Privacy → *Tokens, and how to disconnect* |
+| **Anything deleting a `User` outside `deleteAccount`** | Same paragraph, from the other direction: the FK cascade drops the credential without telling Google, so a second delete path silently reintroduces the gap. `src/lib/account-lifecycle.test.ts` fails the build if one appears | `src/lib/account-lifecycle.ts`; Privacy → *Tokens, and how to disconnect*, *How long I keep it* |
 | **The People panel selecting anything new** | "counts, never content", and "does not even disclose whether you have one" for Google | `src/lib/people.ts` (`select` blocks); Privacy → *Connecting Google Tasks*, *How it is protected* |
 | **Cookies** (six, all strictly necessary) | The cookie list AND the "no cookie banner" conclusion. **Adding any non-essential cookie means a consent mechanism, not a wording tweak** | `src/lib/auth/session.ts`, the OAuth `start` routes; Privacy → *Cookies* |
 | **Adding an analytics/telemetry dependency** | Invalidates "there is no analytics package in the codebase at all" — which the policy invites readers to verify | Privacy → *What is not collected* |
@@ -191,7 +197,7 @@ and until then, please do not "improve" the wording into a promise.
 | Not shipped | What the page says instead |
 |---|---|
 | Self-service data export (still no `src/app/api/account/` directory — the `/api/account/` entry in `AUTHENTICATED_PREFIXES` reserves the prefix, it does not implement a route) | Access and portability are handled **by hand** from the contact address, within the statutory one month |
-| Automatic revoke → freeze → 30-day purge (`User.purgeAfter` is written but never read) | Revocation does **not** delete content today; email and it will be deleted |
+| Automatic revoke → freeze → 30-day purge (`User.purgeAfter` is written but never read; #126 added `deleteAccount` as the one safe way to delete an account, but nothing calls it yet) | Revocation does **not** delete content today; email and it will be deleted |
 | **Per-account choice of AI provider (#125)** | The key is used against *this instance's* configured provider; "it is a key, not a destination", and choosing your own provider is not something dlectroflow can do today |
 
 `src/app/privacy/page.test.tsx` has a `promises nothing unshipped` block that
