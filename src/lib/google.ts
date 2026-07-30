@@ -258,6 +258,45 @@ export async function disconnectGoogle(userId: string): Promise<void> {
   await prisma.googleAuth.deleteMany({ where: { userId } });
 }
 
+/**
+ * {@link disconnectGoogle} with its failure contained. Never throws (#126).
+ *
+ * The account-lifecycle callers — freezing a member (`revokePerson`) and
+ * deleting an account (`deleteAccount`) — must withdraw the grant BEFORE the
+ * account stops being reachable, because after that point nothing in the
+ * product can: a frozen account resolves to `null` in `currentUser()`, so its
+ * owner can no longer reach the Disconnect control, and a deleted `User`
+ * cascades the credential away without ever telling Google.
+ *
+ * But the revoke must never abort the step that asked for it. An account left
+ * ACTIVE because Google was unreachable is worse than a grant that has to be
+ * withdrawn at Google's end, so this reports the outcome instead of raising it.
+ * `disconnectGoogle` already swallows a failing revoke CALL and deletes the row
+ * regardless; what this adds is the same containment for the database half.
+ *
+ * Returns whether the disconnect completed. A failure gets one structured,
+ * greppable line, because "a grant this app could not withdraw" is precisely
+ * the state an operator has to go and clear by hand at Google's end.
+ */
+export async function tryDisconnectGoogle(userId: string): Promise<boolean> {
+  try {
+    await disconnectGoogle(userId);
+    return true;
+  } catch (err) {
+    // The id, not the token or the identity: enough to find the account, and
+    // this is the same pseudonymous key the purge job logs (purge_skip).
+    console.error(
+      JSON.stringify({
+        tag: "google_disconnect_failed",
+        userId,
+        message: err instanceof Error ? err.message : String(err),
+        ts: new Date().toISOString(),
+      }),
+    );
+    return false;
+  }
+}
+
 // ── Google Tasks API ──────────────────────────────────────────────────────
 
 /**

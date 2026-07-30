@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma, isUniqueViolation } from "@/lib/db";
 import { isOwnerRequest, currentUser } from "@/lib/workspace";
+import { tryDisconnectGoogle } from "@/lib/google";
 import { AiPolicy, UserStatus } from "@/lib/constants";
 
 /**
@@ -160,7 +161,8 @@ export async function updatePersonAiPolicy(input: {
 const PURGE_GRACE_DAYS = 30;
 
 /**
- * Revoke an account: freeze it now, schedule its data for purge in 30 days.
+ * Revoke an account: withdraw its Google grant, freeze it now, and schedule its
+ * data for purge in 30 days.
  *
  * Freezing takes effect on the NEXT REQUEST, not at the next sign-in, because
  * `currentUser()` re-reads `status` on every request (src/lib/workspace.ts). The
@@ -180,6 +182,27 @@ export async function revokePerson(
   if (me && me.id === userId) {
     return { ok: false, error: "cannot_revoke_self" };
   }
+
+  // #126 — the owner's revoke takes the Google grant with it.
+  //
+  // These are arguably two different acts: ending someone's access to this
+  // instance, and withdrawing the consent they gave Google on their own
+  // account. The call made here is that a grant which only ever existed to
+  // serve this app must not outlive the app's access to them — the alternative
+  // leaves a live grant its owner CANNOT withdraw through the product, because
+  // a frozen account resolves to `null` in `currentUser()` and can no longer
+  // reach the Disconnect control. Consent that cannot be withdrawn as easily as
+  // it was given is the thing UK GDPR Art. 7(3) forbids, and a stale grant the
+  // member never revisits is the larger risk of the two.
+  //
+  // BEFORE the freeze, not after: whichever step runs first is the one that
+  // survives a crash between them, and "active account, no Google connection"
+  // is recoverable by reconnecting while "frozen account, live grant" is the
+  // exact state this fixes. The revoke is best-effort by contract —
+  // `tryDisconnectGoogle` reports failure rather than raising it, so Google
+  // being unreachable can never leave an account unfrozen, and the stored
+  // tokens are deleted either way.
+  await tryDisconnectGoogle(userId);
 
   const now = new Date();
   const res = await prisma.user.updateMany({

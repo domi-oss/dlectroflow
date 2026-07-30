@@ -328,7 +328,14 @@ function PersonCard({
       ) : (
         <div className="space-y-2">
           <p className="text-sm">
-            {`Remove ${person.label}'s access? They lose the ability to sign in immediately. Their data is kept for 30 days, then deleted.`}
+            {/* #126 — the Google sentence is phrased conditionally on purpose.
+                Revoking withdraws the grant because a frozen account can no
+                longer reach its own Disconnect control, and that is an effect
+                on somebody's own Google account, so the owner is told before
+                they confirm. "Any … of theirs" says what WOULD happen without
+                disclosing whether this person has connected — the panel never
+                learns that (src/lib/people.ts). */}
+            {`Remove ${person.label}'s access? They lose the ability to sign in immediately, and any Google Tasks connection of theirs is disconnected and revoked at Google. Their data is kept for 30 days, then deleted.`}
           </p>
           <div className="flex flex-wrap gap-2">
             <button

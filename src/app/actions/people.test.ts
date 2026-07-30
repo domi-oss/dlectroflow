@@ -15,6 +15,7 @@ const db = vi.hoisted(() => ({
 const isOwnerRequestMock = vi.hoisted(() => vi.fn());
 const currentUserMock = vi.hoisted(() => vi.fn());
 const revalidatePathMock = vi.hoisted(() => vi.fn());
+const tryDisconnectGoogleMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/db", () => ({
   prisma: db,
@@ -24,6 +25,9 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/workspace", () => ({
   isOwnerRequest: isOwnerRequestMock,
   currentUser: currentUserMock,
+}));
+vi.mock("@/lib/google", () => ({
+  tryDisconnectGoogle: tryDisconnectGoogleMock,
 }));
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 
@@ -48,12 +52,17 @@ beforeEach(() => {
   db.allowlist.create.mockResolvedValue({ id: "a-1" });
   db.allowlist.deleteMany.mockResolvedValue({ count: 1 });
   db.user.updateMany.mockResolvedValue({ count: 1 });
+  tryDisconnectGoogleMock.mockResolvedValue(true);
 });
 
 function expectNoWrites() {
   expect(db.allowlist.create).not.toHaveBeenCalled();
   expect(db.allowlist.deleteMany).not.toHaveBeenCalled();
   expect(db.user.updateMany).not.toHaveBeenCalled();
+  // #126 — "writes nothing" includes somebody's Google grant. Revoking a
+  // member now withdraws their grant, so a rejected caller reaching this
+  // action must not be able to destroy a connection either.
+  expect(tryDisconnectGoogleMock).not.toHaveBeenCalled();
 }
 
 describe("every People action is owner-only", () => {
@@ -307,5 +316,49 @@ describe("revokePerson", () => {
       ok: false,
       error: "not_found",
     });
+  });
+
+  // ── #126 — the grant goes with the access ────────────────────────────────
+  //
+  // Before this, freezing an account touched no tokens: the member's GoogleAuth
+  // row survived, their grant stayed live at Google, and a frozen account
+  // cannot reach the Disconnect control — so the product had no way left to
+  // withdraw a consent it had taken. UK GDPR Art. 7(3) says withdrawing consent
+  // must be as easy as giving it, and "email the owner" is not that.
+  it("withdraws the member's Google grant as part of revoking them", async () => {
+    await revokePerson("u-2");
+    expect(tryDisconnectGoogleMock).toHaveBeenCalledWith("u-2");
+  });
+
+  it("revokes the grant BEFORE the freeze, never after", async () => {
+    await revokePerson("u-2");
+    // Not cosmetic ordering. Whichever step runs first is the one that survives
+    // a crash between them: revoke-then-freeze can leave an ACTIVE account with
+    // no Google connection (the member simply reconnects), while
+    // freeze-then-revoke leaves exactly the bug — a frozen account holding a
+    // live grant that nothing in the product can withdraw.
+    expect(tryDisconnectGoogleMock.mock.invocationCallOrder[0]).toBeLessThan(
+      db.user.updateMany.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("still freezes the account when the revoke fails", async () => {
+    // Access has to stop even if Google cannot be reached. `tryDisconnectGoogle`
+    // reports rather than throws (src/lib/google.ts) precisely so this holds,
+    // and it deletes the stored tokens either way — no dead token is left
+    // behind by a failed revoke.
+    tryDisconnectGoogleMock.mockResolvedValue(false);
+    expect(await revokePerson("u-2")).toEqual({ ok: true });
+    expect(db.user.updateMany.mock.calls[0][0].data.status).toBe("revoked");
+  });
+
+  it("touches no grant when the owner is stopped from revoking themselves", async () => {
+    // The self-revoke guard runs before anything happens, so the owner's own
+    // connection survives a click on their own row.
+    expect(await revokePerson(OWNER.id)).toEqual({
+      ok: false,
+      error: "cannot_revoke_self",
+    });
+    expectNoWrites();
   });
 });

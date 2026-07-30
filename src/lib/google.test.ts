@@ -371,6 +371,58 @@ describe("disconnectGoogle", () => {
   });
 });
 
+// ── #126 — the lifecycle wrapper ──────────────────────────────────────────
+//
+// Freezing a member and deleting an account both have to withdraw the grant
+// BEFORE the account stops being reachable, and neither may be aborted by a
+// revoke that failed. That is one rule, so it is one function — a try/catch
+// copied into each caller is how the two come to disagree about it.
+describe("tryDisconnectGoogle (#126)", () => {
+  it("revokes at Google and leaves no row holding a live token", async () => {
+    prismaMock.googleAuth.findUnique.mockResolvedValue(
+      connectedRow({ refreshToken: encryptToken("rt"), expiresAt: null }),
+    );
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    const { tryDisconnectGoogle } = await import("./google");
+
+    expect(await tryDisconnectGoogle(USER)).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://oauth2.googleapis.com/revoke",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(String(fetchMock.mock.calls[0][1].body)).toContain("token=rt");
+    expect(prismaMock.googleAuth.deleteMany).toHaveBeenCalledWith({
+      where: { userId: USER },
+    });
+  });
+
+  it("reports failure instead of throwing, so the caller's step still runs", async () => {
+    // The half `disconnectGoogle` does NOT already contain: a failing revoke
+    // CALL is swallowed in there and the row is deleted anyway, but a database
+    // failure throws — and a thrown error here would abort the freeze or the
+    // deletion that called it, which is the worse outcome of the two.
+    prismaMock.googleAuth.findUnique.mockResolvedValue(
+      connectedRow({ expiresAt: null }),
+    );
+    prismaMock.googleAuth.deleteMany.mockRejectedValueOnce(
+      new Error("db down"),
+    );
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { tryDisconnectGoogle } = await import("./google");
+
+    expect(await tryDisconnectGoogle(USER)).toBe(false);
+    // One structured, greppable line — a grant this app could not withdraw is
+    // the thing an operator has to go and clear by hand at Google's end.
+    expect(errorSpy).toHaveBeenCalledOnce();
+    const line = JSON.parse(String(errorSpy.mock.calls[0][0]));
+    expect(line.tag).toBe("google_disconnect_failed");
+    expect(line.userId).toBe(USER);
+    errorSpy.mockRestore();
+  });
+});
+
 describe("Google Tasks URL construction (#79)", () => {
   const TASKS_API = "https://tasks.googleapis.com/tasks/v1";
 

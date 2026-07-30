@@ -509,6 +509,24 @@ describe("PeoplePanel — revoking", () => {
     expect(within(card).getByText(/30 days/i)).toBeInTheDocument();
   });
 
+  it("warns that any Google connection is withdrawn with the access (#126)", async () => {
+    // Revoking now reaches into the member's OWN Google account (they cannot
+    // reach Disconnect once frozen, so the app withdraws the grant for them).
+    // An effect outside this instance is not something to spring on the owner
+    // after the fact. Phrased conditionally on purpose: the panel must not
+    // disclose WHETHER this person has connected Google — that is the claim the
+    // Privacy Policy makes and the scoping harness enforces.
+    const user = userEvent.setup();
+    renderPanel();
+    const card = personCard("ada");
+
+    await user.click(within(card).getByRole("button", { name: /revoke ada/i }));
+
+    expect(
+      within(card).getByText(/any Google Tasks connection of theirs/i),
+    ).toBeInTheDocument();
+  });
+
   it("offers NO revoke control on the owner's own row", () => {
     renderPanel({
       people: [
