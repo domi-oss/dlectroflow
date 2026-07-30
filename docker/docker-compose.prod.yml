@@ -22,11 +22,10 @@
 # behind profiles because Compose has no scheduler — the host's cron runs them.
 # See docs/self-host-vps.md for the two crontab lines.
 
-# A DISTINCT project name from the dev stack in docker-compose.yml, whose
-# project defaults to the directory name (dlectroflow). Without this they share
-# container names, and bringing this stack up on a machine that also runs the dev
-# database silently takes over the dev container. Found the hard way while
-# testing this file.
+# A DISTINCT project name from the dev stack in docker-compose.yml, which pins
+# itself to `dlectroflow`. Without this they share container names, and bringing
+# this stack up on a machine that also runs the dev database silently takes over
+# the dev container. Found the hard way while testing this file.
 name: dlectroflow-prod
 
 services:

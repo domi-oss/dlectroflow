@@ -1,3 +1,13 @@
+# Pinned, not defaulted. Compose derives the project name from the directory
+# holding the compose file, so moving this file into docker/ would silently
+# rename the project from `dlectroflow` to `docker` — and with it the volume,
+# from `dlectroflow_dlectroflow_pgdata` to `docker_dlectroflow_pgdata`. Every
+# developer who already has a local database would get a fresh empty one and
+# their data left orphaned under the old name. `docker` is also a name any
+# other repo with a docker/ directory would collide on, which is the same trap
+# docker-compose.prod.yml documents hitting the hard way.
+name: dlectroflow
+
 services:
   db:
     image: postgres:16@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20
