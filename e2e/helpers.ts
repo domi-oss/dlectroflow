@@ -120,39 +120,198 @@ export async function expandAllSections(page: Page): Promise<void> {
   // found it — at the top, with the scroll-spy back in charge — so "expand
   // everything" is a change of STATE and not also a change of scroll position.
   //
-  // Both halves of that have to be WAITED for, which this did not do, and the
-  // omission was a live flake in a zero-tolerance gate:
-  //
-  //  • The nav opts into `scroll-behavior: smooth`, so `scrollTo(0, 0)` is
-  //    ASYNCHRONOUS — this returned with the page still ~1400px down (measured).
-  //  • The heading band the last click highlighted takes on the magenta
-  //    `[data-current]` treatment, and its TITLE transitions to
-  //    `--primary-foreground` over the transition duration while the band's
-  //    background is magenta immediately. Sampled in flight that is dark text on
-  //    magenta — 3.08:1 light / 2.23:1 dark, reported by axe against
-  //    `button[data-section-toggle="settings-demo"] > .truncate`. The SETTLED
-  //    pairing is white on magenta, the documented AA combination (globals.css),
-  //    so the violation only ever existed mid-transition.
-  //
-  // Same class of problem this file's callers already handle with
-  // `reducedMotion: "reduce"` — which suppresses animations, not
-  // `transition-colors`. So: scroll instantly, wait for it to land, and wait for
-  // any highlighted band's title to finish catching up with it.
+  // `behavior: "instant"` rather than a bare `scrollTo(0, 0)`: SectionNav puts
+  // `scroll-smooth` on <html> while a section page is open, which makes the
+  // default an ANIMATED scroll that this returned in the middle of (measured at
+  // scrollY 2486 mid-scan on a page whose rest position is 0). Forcing the
+  // behaviour is stronger than relying on the caller's `reducedMotion: "reduce"`
+  // — it holds for the callers that do NOT emulate reduced motion too.
   await page.evaluate(() =>
     window.scrollTo({ top: 0, left: 0, behavior: "instant" }),
   );
+  // …and then wait for the OTHER half, which arriving at the top does not
+  // give you for free. See #110.
+  await waitForSectionHighlightSettled(page);
+}
+
+/**
+ * One atomic, NON-RETRYING read of where the section nav's "you are here"
+ * highlight currently is.
+ *
+ * Atomic because it is a single `page.evaluate`: every field comes from the same
+ * moment, which is the whole point — the #110 flake was axe reading one
+ * element's background and its foreground on opposite sides of a state change,
+ * and a read assembled from several round trips could not have seen that.
+ *
+ * Non-retrying for the same reason. Playwright's own assertions auto-wait, so
+ * `expect(band).toContainText("Focus timer")` quietly waits the race out and
+ * passes; axe does not retry, it reads the DOM once. This is what a scanner
+ * sees.
+ *
+ * @param options.scrollHomeFirst Scroll to the top INSIDE the same evaluate,
+ *   immediately before reading. It exists so the #110 regression test can prove
+ *   the release of the highlight is asynchronous rather than assume it: the
+ *   scroll-spy hands the highlight back from an IntersectionObserver callback,
+ *   which cannot run in the middle of a task, so a read in the SAME task is
+ *   guaranteed to catch the page at the top with the previous section still
+ *   marked current. Doing it here rather than in the spec keeps one definition
+ *   of the read — a second, inlined copy would be free to drift from the one
+ *   {@link waitForSectionHighlightSettled} waits on, which is exactly the
+ *   drift that would let this flake back in.
+ */
+export async function readSectionHighlight(
+  page: Page,
+  options: { readonly scrollHomeFirst?: boolean } = {},
+): Promise<SectionHighlight> {
+  return page.evaluate((scrollHomeFirst) => {
+    if (scrollHomeFirst) {
+      window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    }
+    const bands = Array.from(
+      document.querySelectorAll("[data-section-header]"),
+    );
+    // The band's identity is its heading's id — the same id the nav links to.
+    //
+    // `|| null`, NOT `?? null`: `HTMLElement.id` is `""` for an element with no
+    // id attribute, never nullish, so `??` would let the empty string through
+    // as if it were an identity. It is not one — it is this read failing to
+    // name the band, and it has to be reported as such (see
+    // `isSectionHighlightSettled`, where "" === "" would otherwise satisfy the
+    // invariant with two values that mean "I could not tell").
+    const idOf = (band: Element | undefined): string | null =>
+      band?.querySelector("h2")?.id || null;
+    return {
+      scrollY: Math.round(window.scrollY),
+      current: bands
+        .filter((band) => band.hasAttribute("data-current"))
+        .map((band) => idOf(band)),
+      topmost: idOf(bands[0]),
+    };
+  }, options.scrollHomeFirst ?? false);
+}
+
+/** The shape {@link readSectionHighlight} returns. */
+export type SectionHighlight = {
+  /** `window.scrollY`, rounded. */
+  readonly scrollY: number;
+  /**
+   * The heading id of EVERY band claiming to be the current section. At rest
+   * that is exactly one; more than one would mean two magenta bands, none means
+   * the nav has not decided yet.
+   *
+   * `null` for a band whose heading has no usable id — a state this read can
+   * report but cannot compare, deliberately kept distinct from a real id rather
+   * than flattened into a placeholder string that could compare equal to
+   * something.
+   */
+  readonly current: readonly (string | null)[];
+  /** The heading id of the first band in document order, `null` if unnamed. */
+  readonly topmost: string | null;
+};
+
+/**
+ * Did the read manage to NAME this band?
+ *
+ * Rejects the empty string as well as `null`, so the answer stays correct even
+ * if {@link readSectionHighlight}'s `idOf` ever goes back to `?? null` —
+ * `HTMLElement.id` is `""`, not nullish, for a missing attribute, and that is
+ * the exact slip this guards (review on !206).
+ */
+function isNamedBand(id: string | null): id is string {
+  return id !== null && id !== "";
+}
+
+/** Render an id for a human, without letting an unnamed band print as blank. */
+function describeBand(id: string | null): string {
+  return isNamedBand(id) ? id : "(band with no heading id)";
+}
+
+/**
+ * Is the page at rest at the top with the scroll-spy in charge?
+ *
+ * The condition is deliberately POSITIVE and TERMINAL rather than a "nothing
+ * changed for N frames" heuristic: at the top of the page the topmost section is
+ * the one being read, so it is the one that must be highlighted, and nothing
+ * further can move it. If the app's resting behaviour ever changes this fails
+ * with a message naming the band that actually holds the highlight, instead of
+ * quietly going back to sampling a moving target.
+ *
+ * Both bands must be NAMED for the comparison to count. Review finding on !206:
+ * `HTMLElement.id` is `""` rather than nullish when the attribute is absent, so
+ * an unnamed `topmost` and an unnamed `current` used to compare equal and
+ * satisfy this — an invariant agreeing with itself about a page it could not
+ * describe. That is the same class of defect as the no-op `waitForFunction`
+ * this change removed, so the unnamed case is rejected explicitly rather than
+ * left to `idOf`'s return type: a blank id must fail loudly, and the wait must
+ * time out with `topmost=(band with no heading id)` in the message.
+ *
+ * Guarded by src/lib/__tests__/section-highlight.harness.test.ts, which is where
+ * the vacuous-pass cases live — they are pure logic, so they do not need a
+ * browser and should not cost a Playwright run to check.
+ */
+export function isSectionHighlightSettled(state: SectionHighlight): boolean {
+  const [current] = state.current;
+  return (
+    state.scrollY === 0 &&
+    state.current.length === 1 &&
+    isNamedBand(current) &&
+    isNamedBand(state.topmost) &&
+    current === state.topmost
+  );
+}
+
+/**
+ * Wait until the section nav's highlight has come to rest at the top of the
+ * page — the missing half of {@link expandAllSections}'s own contract, and the
+ * fix for #110.
+ *
+ * Why it has to exist. `expandAllSections` clicks every section header, and per
+ * #101 a click NAMES that section current via an explicit override — so the last
+ * one clicked (Demo, for a guest) ends up holding the magenta pinned band.
+ * Scrolling home releases that override, but the release is ASYNCHRONOUS: the
+ * IntersectionObserver callback cannot run until the next rendering opportunity,
+ * React then re-renders, and only then does the `data-current` attribute move to
+ * the first section. `scrollTo` returning tells you nothing about any of it.
+ *
+ * So a scan that started as soon as the page reached the top was reading a DOM
+ * that was still changing, and axe would sample one element's background and its
+ * foreground on opposite sides of that change: `--foreground` text over
+ * `--primary` magenta, 3.08:1 light / 2.23:1 dark, reported against
+ * `button[data-section-toggle="settings-demo"] > .truncate`. Nothing was wrong
+ * with the colour — the settled band is `--primary-foreground` on `--primary`,
+ * the documented AA pairing (globals.css) — and no element ever carries the
+ * reported pair in any single frame. The tell is that axe's own report calls
+ * that `font-semibold` label "weight normal": at least one field came from a
+ * different moment than the others.
+ *
+ * !192 fixed the first half of this (the animated scroll) and left this half to
+ * luck. Instrumented on `main` before this change, the last `data-current`
+ * mutation landed 1 ms before the helper returned — green because the CDP round
+ * trips happened to outlast one frame of browser work, not because anything
+ * waited. Under an 8× CPU throttle that margin inverts and the helper returns
+ * with the wrong band still magenta.
+ */
+export async function waitForSectionHighlightSettled(
+  page: Page,
+): Promise<void> {
   await expect
-    .poll(() => page.evaluate(() => window.scrollY), {
-      message: "the page never came back to the top",
-    })
-    .toBe(0);
-  await page.waitForFunction(() => {
-    const band = document.querySelector("[data-section-header][data-current]");
-    if (!band) return true; // nothing highlighted — nothing in transition
-    const title = band.querySelector("[data-section-toggle] .truncate");
-    if (!title) return true;
-    // Descendants of a highlighted band are forced to `currentColor`, so a
-    // settled title's computed colour IS the band's.
-    return getComputedStyle(title).color === getComputedStyle(band).color;
-  });
+    .poll(
+      async () => {
+        const state = await readSectionHighlight(page);
+        // A string rather than a boolean so the failure names the offending
+        // band: `expect.poll` prints the last value it received. Every id goes
+        // through `describeBand`, so an unnamed band reads as one instead of
+        // vanishing into a blank — `join` would render `null` as "".
+        return isSectionHighlightSettled(state)
+          ? "settled"
+          : `unsettled: scrollY=${state.scrollY} ` +
+              `current=[${state.current.map(describeBand).join(", ")}] ` +
+              `topmost=${describeBand(state.topmost)}`;
+      },
+      {
+        message:
+          "the section nav's highlight never came to rest at the top of the page",
+      },
+    )
+    .toBe("settled");
 }
