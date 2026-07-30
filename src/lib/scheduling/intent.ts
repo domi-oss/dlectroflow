@@ -11,9 +11,23 @@
 import { SchedulePriority, ScheduleHours } from "./types";
 import type { ScheduleIntent, ScheduleUnit } from "./types";
 
-/** Reclaim's own default due date is 3 days out; matching it means the no-menu
- *  path behaves exactly as it did before the menu existed (sub-project B). */
-export const DEFAULT_DUE_DAYS = 3;
+/**
+ * A week, not Reclaim's own 3-day default.
+ *
+ * Three days matched Reclaim and was the right call while the bare-📅 path had
+ * no way to say otherwise. Watching it land in production changed the answer: a
+ * four-step task at the 30-minute floor is two hours of blocks, and Reclaim
+ * placed the last two steps' work sessions AFTER the deadline it had been given
+ * — technically correct, and exactly the "already behind" feeling this app
+ * exists to avoid. A default that routinely produces at-risk tasks is a bad
+ * default for a planner aimed at ADHD, whatever its provenance.
+ *
+ * A week gives the scheduler room to place blocks without the deadline fighting
+ * it. Anyone who wants a tighter deadline sets one in the Schedule menu (#106),
+ * which is the case where a deadline is a deliberate choice rather than a
+ * default nobody picked.
+ */
+export const DEFAULT_DUE_DAYS = 7;
 
 export function defaultIntentFor(
   units: ScheduleUnit[],

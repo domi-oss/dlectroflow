@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { defaultIntentFor, mergePersistedIntent } from "./intent";
+import {
+  DEFAULT_DUE_DAYS,
+  defaultIntentFor,
+  mergePersistedIntent,
+} from "./intent";
 import { ScheduleHours, SchedulePriority } from "./types";
 import { deriveWindows } from "./windows";
 
@@ -10,9 +14,19 @@ describe("defaultIntentFor — what the no-menu path sends", () => {
     { id: "s2", order: 2, total: 2, text: "b", estMinutes: 45 },
   ];
 
-  it("defaults the deadline to three days out, matching Reclaim's own default", () => {
+  it("defaults the deadline a week out, so the scheduler is not fighting it", () => {
     const i = defaultIntentFor(units, now);
-    expect(i.dueAt.getTime()).toBe(now.getTime() + 3 * 24 * 60 * 60_000);
+    expect(i.dueAt.getTime()).toBe(
+      now.getTime() + DEFAULT_DUE_DAYS * 24 * 60 * 60_000,
+    );
+  });
+
+  // Pins the VALUE, not just the arithmetic. Reclaim placed work sessions after
+  // a 3-day deadline in production, which is the at-risk state this app should
+  // not manufacture by default (#106 is where a tighter deadline gets chosen
+  // deliberately). Regressing this to 3 should fail loudly, not silently.
+  it("is a week, not Reclaim's 3-day default", () => {
+    expect(DEFAULT_DUE_DAYS).toBe(7);
   });
 
   it("defaults to HIGH priority, because sending nothing already meant P2", () => {
@@ -75,7 +89,12 @@ describe("mergePersistedIntent — what the Schedule menu opens with (#106)", ()
     );
     expect(i.priority).toBe(SchedulePriority.Low);
     expect(i.hours).toBe(ScheduleHours.Work);
-    expect(i.dueAt.getTime()).toBe(now.getTime() + 3 * 24 * 60 * 60_000);
+    // The persisted priority wins; the ABSENT deadline still falls back to the
+    // shared default, so this reads it from the constant rather than repeating
+    // the number (which is how it went stale when the default changed).
+    expect(i.dueAt.getTime()).toBe(
+      now.getTime() + DEFAULT_DUE_DAYS * 24 * 60 * 60_000,
+    );
   });
 
   // A CHECK constraint makes this unreachable, but this output goes straight
