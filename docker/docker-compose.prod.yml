@@ -91,7 +91,12 @@ services:
     # No `ports:` — Caddy is the only thing the internet talks to. Publishing
     # 3000 here would bypass HTTPS and the request-size cap.
     env_file:
-      - .env.prod
+      # `../` because this file lives in docker/ but .env.prod stays at the repo
+      # root, where the operator creates it from .env.prod.example. Compose
+      # resolves env_file relative to THIS file's directory, so a bare
+      # `.env.prod` would silently look for docker/.env.prod and start the app
+      # with no configuration at all.
+      - ../.env.prod
     environment:
       # Overrides anything in .env.prod — Compose's `environment` beats
       # `env_file` — so DATABASE_URL is derived in exactly one place.
@@ -122,6 +127,9 @@ services:
     environment:
       DLECTROFLOW_DOMAIN: ${DLECTROFLOW_DOMAIN:?set DLECTROFLOW_DOMAIN in .env.prod}
     volumes:
+      # `./`, not `../`, unlike the two paths below and above: the Caddyfile is
+      # part of this stack and moved into docker/ with it, so it really is a
+      # sibling of this file.
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       # caddy_data holds the issued certificates and the ACME account key. Losing
       # it means re-issuing certs and can hit Let's Encrypt rate limits, so keep
@@ -133,9 +141,11 @@ services:
   # Compose has no scheduler, so these carry a profile and stay out of `up`.
   # docs/self-host-vps.md has the crontab lines.
 
-  # Logical backup to ./backups on the host. Mirrors the chart's backup CronJob,
-  # except the chart uploads to GCS. Keep a copy OFF this machine — a backup that
-  # only exists on the disk you are protecting is not a backup.
+  # Logical backup to ../backups on the host — i.e. backups/ at the REPO ROOT,
+  # because Compose resolves a relative bind mount against this file's directory
+  # and this file lives in docker/. Mirrors the chart's backup CronJob, except
+  # the chart uploads to GCS. Keep a copy OFF this machine — a backup that only
+  # exists on the disk you are protecting is not a backup.
   backup:
     image: postgres:16@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20
     profiles: ["tools"]
@@ -149,7 +159,13 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env.prod}
       POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env.prod}
     volumes:
-      - ./backups:/backups
+      # `../` for the same reason as the app's env_file above. `./backups`
+      # would write to docker/backups, which .gitignore does NOT cover — its
+      # entry is the root-anchored `/backups/` — so every nightly dump of the
+      # whole database would show up as untracked and be one `git add -A` away
+      # from being committed. The restore step in docs/self-host-vps.md also
+      # looks at the repo root.
+      - ../backups:/backups
     # --clean --if-exists so the dump can be restored over an existing schema.
     # bash, not sh: pipefail is what makes a failed pg_dump fail the command.
     # Without it `pg_dump | gzip` exits 0 on a dump error, gzip writes a
