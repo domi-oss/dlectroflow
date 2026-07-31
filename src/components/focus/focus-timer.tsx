@@ -1353,8 +1353,14 @@ export function FocusTimer({
               reading the children. The setup screen's "Focus for" group already
               gets this right; this now matches it. */}
           <div className="flex flex-wrap items-center justify-center gap-2">
+            {/* No `stripLeadingGlyph` here, unlike the buttons above (Duo
+                review): that call exists because those render their own lucide
+                icon, so a leading glyph in the string would double it up. This
+                is a plain text label with no icon beside it — stripping would be
+                a no-op today and would silently eat a playful emoji if one is
+                ever added, which for a label is the wrong default. */}
             <span id={keepGoingLabelId} className="text-muted-foreground">
-              {stripLeadingGlyph(t("focus.keepGoingFor", voice))}
+              {t("focus.keepGoingFor", voice)}
             </span>
             <div
               role="group"

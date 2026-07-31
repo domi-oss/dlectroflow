@@ -1124,8 +1124,13 @@ describe("FocusTimer — time-up: keep going for N more minutes (#138)", () => {
     // Still on the question, so the window Duo described is genuinely open.
     expect(screen.getByText("How did that go?")).toBeInTheDocument();
 
+    // Settled inside act with a microtask flush (Duo review): resolving
+    // completeFocus triggers goToPhase("done"), stopSound() and
+    // router.refresh(), and letting those land outside React's batching leaves
+    // the component mid-update and emits "not wrapped in act(...)".
     await act(async () => {
       settle({ ok: true } as CompleteReturn);
+      await Promise.resolve();
     });
   });
 
