@@ -2,8 +2,32 @@ apiVersion: v2
 name: dlectroflow
 description: dlectroflow — ADHD helper app (review + production)
 type: application
-version: 0.2.0
-appVersion: "1.0.0"
+# #148 — DECISION: the chart version tracks the app version, in lockstep.
+#
+# Helm's semantics allow these two to differ, and for a chart published on its
+# own cadence they should: `version` is the chart's semver, `appVersion` is the
+# version of the application it installs. That is not this chart. It is never
+# `helm package`d and never pushed to a chart repository — `deploy_production`
+# and `deploy_review` run `helm upgrade --install … charts/dlectroflow` straight
+# from the repo checkout, so the chart and the app are always the same commit
+# and no consumer can pair chart 0.5.0 with app 0.4.0. Neither field is read by
+# any template (`grep -r '.Chart.' charts/` is empty); both exist to be printed
+# by `helm list` and `helm status`.
+#
+# So an independent chart semver would be a second number to reason about at
+# every cut, with nothing depending on the answer — and a number nobody needs is
+# exactly how this one reached 0.2.0 while the app shipped 0.4.0. Lockstep makes
+# both fields true at once and lets one gate cover both:
+# `src/lib/version-hygiene.test.ts` asserts these two, `package.json` and the
+# newest CHANGELOG heading are one value.
+#
+# What would overturn this: publishing the chart to a chart repository (an OCI
+# registry, GitLab's package registry, a `helm repo`) for people to install
+# without the source tree. Then chart-only fixes need their own semver, these
+# two must decouple, and `Chart.yaml version` comes out of that guard's claim
+# list with a note saying why.
+version: 0.4.0
+appVersion: "0.4.0"
 # unhealthyPodEvictionPolicy (pdb.yaml) is GA in 1.27 / on-by-default beta in
 # 1.26; the -0 suffix lets GKE's prerelease version strings (e.g. 1.29.5-gke.x)
 # satisfy the constraint.
