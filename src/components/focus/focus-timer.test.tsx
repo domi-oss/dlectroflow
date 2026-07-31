@@ -1109,6 +1109,11 @@ describe("FocusTimer — time-up: keep going for N more minutes (#138)", () => {
     for (const b of within(group).getAllByRole("button")) {
       expect(b).toBeDisabled();
     }
+    // "ask Claude" too (Duo review): it carries the same `disabled={pending}` and
+    // the same race — startReestimate would move the phase to `reestimate` only
+    // for the resolving completeFocus to overwrite it with `done`. Asserting only
+    // the keep-going row would let a refactor drop this one and stay green.
+    expect(screen.getByRole("button", { name: /ask claude/i })).toBeDisabled();
     // Still on the question, so the window Duo described is genuinely open.
     expect(screen.getByText("How did that go?")).toBeInTheDocument();
 
