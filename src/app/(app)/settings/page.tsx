@@ -85,7 +85,15 @@ export default async function SettingsPage({
       <BackLink from={from} voice={voice} />
 
       <h1 className="text-xl font-semibold">{t("nav.settings", voice)}</h1>
-      <SectionNav sections={sections} voice={voice} label="Settings sections" />
+      {/* #131 — the same `from` goes to both back controls: the one above, which
+          scrolls away with the header, and the compact copy the sticky bar
+          carries for everywhere below the fold. */}
+      <SectionNav
+        sections={sections}
+        voice={voice}
+        label="Settings sections"
+        from={from}
+      />
       {/* #101 — frequency of use descending, administration last, and every
           section is a disclosure (see <CollapsibleSection>). The order here and
           the order in SETTINGS_SECTIONS are the same list twice over: the nav is

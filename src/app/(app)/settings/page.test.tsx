@@ -134,7 +134,21 @@ vi.mock("@/app/actions/account", () => ({
   // it before initialisation.
   ownLlmKeyPresent: () => ownLlmKeyPresentMock(),
 }));
-vi.mock("@/components/nav/back-link", () => ({ BackLink: () => null }));
+// Rendered as an inert marker rather than a real link: this file's assertions
+// are about which sections the page composes, and the control's own behaviour
+// (the `?from=` whitelist, the label, the focus ring) belongs to
+// back-link.test.tsx. A <span> keeps it out of every getByRole("link") query
+// while still recording the two props the PAGE decides — which copy this is,
+// and the origin it was handed (#131).
+vi.mock("@/components/nav/back-link", () => ({
+  BackLink: ({
+    from,
+    variant = "page",
+  }: {
+    from?: string;
+    variant?: string;
+  }) => <span data-back-link={variant} data-from={from ?? ""} />,
+}));
 
 // Plain anchor stub — avoids needing router context and keeps the assertion on
 // the page's own JSX (the children it hands to <Link>).
@@ -242,6 +256,50 @@ describe("SettingsPage section composition (#101)", () => {
   it("closes the page with administration, not with it", async () => {
     const stubs = await renderWholePage();
     expect(stubs.at(-1)!.getAttribute("data-stub")).toBe("settings-people");
+  });
+});
+
+// ── #131 — there is a way home from the bottom of the page ──────────────────
+//
+// The page-level "← Back" scrolls away with the header; the "Jump to…" bar does
+// not. The bar now carries a second copy of the SAME control, and what this page
+// owes it is the origin — otherwise the exit on a scrolled page sends the reader
+// somewhere the one at the top would not have.
+describe("SettingsPage back control (#131)", () => {
+  /** Both copies the page renders, in document order. */
+  function backControls() {
+    return Array.from(document.querySelectorAll("[data-back-link]"));
+  }
+
+  it("renders the page-level control AND the one in the sticky bar", async () => {
+    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+    expect(
+      backControls().map((el) => el.getAttribute("data-back-link")),
+    ).toEqual(["page", "bar"]);
+    // The sticky one lives inside the bar, which is the whole point: it is the
+    // only part of the page's chrome that is still on screen at the bottom.
+    const nav = screen.getByRole("navigation", { name: "Settings sections" });
+    expect(nav.querySelector('[data-back-link="bar"]')).not.toBeNull();
+  });
+
+  it("hands BOTH copies the same origin", async () => {
+    render(
+      await SettingsPage({ searchParams: Promise.resolve({ from: "help" }) }),
+    );
+    expect(backControls().map((el) => el.getAttribute("data-from"))).toEqual([
+      "help",
+      "help",
+    ]);
+  });
+
+  it("passes an absent origin through untouched — the component owns the fallback", async () => {
+    // The inbox fallback and the whitelist are resolved once, in <BackLink>
+    // (back-link.test.tsx). The page must not grow a second opinion about it.
+    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+    expect(backControls().map((el) => el.getAttribute("data-from"))).toEqual([
+      "",
+      "",
+    ]);
   });
 });
 

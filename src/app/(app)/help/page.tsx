@@ -39,11 +39,14 @@ export default async function HelpPage({
         </p>
       </header>
 
-      {/* #72 — the page map. Sticky so it stays reachable on a long scroll. */}
+      {/* #72 — the page map. Sticky so it stays reachable on a long scroll.
+          #131 — and the way OUT rides with it: the same `from` the control
+          above was given, so both copies resolve to the same origin. */}
       <SectionNav
         sections={HELP_SECTIONS}
         voice={voice}
         label="Help sections"
+        from={from}
       />
 
       <section className="space-y-2">

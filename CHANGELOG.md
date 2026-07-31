@@ -185,6 +185,29 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **Settings and Help now have a way home from the bottom of the page (#131).**
+  On both pages the "Jump to…" bar sticks, but everything above it scrolls away
+  — including the "← Back" link, the one control that returns you to wherever
+  you came from. A screen down a long list of disclosures there was no way back
+  but scrolling all the way up or reaching for browser Back. The exit now rides
+  in the bar that already sticks, at its left end.
+  - **The same control, not a second one.** `<BackLink>` grew a compact variant,
+    so the origin whitelist, the inbox fallback for an unknown or hostile
+    `?from=`, and the "← Back" label are still resolved in exactly one place.
+    Both pages hand the same origin to both copies, so the exit below the fold
+    can never lead somewhere the one at the top would not have. The full-width
+    control at the top of each page is unchanged.
+  - **No second sticky row**, deliberately: the bar's height is what every jump
+    target's landing offset is measured against (#115), and a second layer would
+    also cost a permanent slice of every phone screen on the two longest pages.
+    The exit shares the toggle's row instead — asserted end to end, along with
+    the pills still laying out at 390px with no sideways scroll.
+  - **Accessibility:** one tab stop, at the head of the bar rather than one per
+    jump (checked in both directions), first in the DOM because it is first on
+    screen, a 44px touch target, the bar's visible focus ring, and the same
+    accessible name as the control it stands in for. axe unchanged on both
+    pages, both themes.
+
 - **The documented quick start now works on a fresh clone (#91).** Following the
   README could not get a new checkout running, and three faults compounded:
   `.env.example` shipped a `CHANGEME` database password while

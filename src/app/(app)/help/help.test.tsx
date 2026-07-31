@@ -3,14 +3,21 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import HelpPage from "./page";
 
+// The rest of the props are spread through rather than dropped, so the
+// components' own attributes (#131's `data-back-link`) reach the DOM.
 vi.mock("next/link", () => ({
   default: ({
     children,
     href,
+    ...rest
   }: {
     children: React.ReactNode;
     href: string;
-  }) => <a href={href}>{children}</a>,
+  }) => (
+    <a href={href} {...rest}>
+      {children}
+    </a>
+  ),
 }));
 vi.mock("@/lib/db", () => ({
   getSettings: vi.fn().mockResolvedValue({ voice: "plain" }),
@@ -107,8 +114,14 @@ describe("HelpPage", () => {
       .map((a) => a.getAttribute("href"));
     // Settings deep-links carry the origin so Settings can offer "Back to Help".
     expect(hrefs).toContain("/settings?from=help");
-    // With no `?from=`, the shared back link falls back to the inbox.
-    expect(hrefs).toContain("/");
+    // With no `?from=`, the shared back link falls back to the inbox. Asserted
+    // on the NAMED control rather than on the href list (review on !216): since
+    // #131 the page renders two back controls, so `toContain("/")` would be
+    // satisfied twice over and would no longer say anything about this one.
+    expect(document.querySelector('[data-back-link="page"]')).toHaveAttribute(
+      "href",
+      "/",
+    );
   });
 
   it("is origin-aware: ?from=settings sends the '← Back' link to Settings", async () => {
@@ -116,8 +129,35 @@ describe("HelpPage", () => {
       await HelpPage({ searchParams: Promise.resolve({ from: "settings" }) }),
     );
     // Label is a simple "← Back"; only the destination reflects the origin.
-    const back = screen.getByRole("link", { name: /back/i });
+    const back = document.querySelector('[data-back-link="page"]')!;
     expect(back).toHaveTextContent("← Back");
     expect(back).toHaveAttribute("href", "/settings");
+  });
+
+  // #131 — the page-level control scrolls away with the header, so the sticky
+  // "Jump to…" bar carries a second copy. Both are the same component; what this
+  // page owes them is the SAME origin, or the exit on a scrolled page quietly
+  // sends the reader somewhere the one at the top would not have.
+  it("hands the same origin to the sticky bar's back control (#131)", async () => {
+    render(
+      await HelpPage({ searchParams: Promise.resolve({ from: "settings" }) }),
+    );
+    const nav = screen.getByRole("navigation", { name: "Help sections" });
+    const sticky = nav.querySelector('[data-back-link="bar"]')!;
+    expect(sticky).not.toBeNull();
+    expect(sticky).toHaveAttribute("href", "/settings");
+    expect(sticky).toHaveTextContent("← Back");
+    // Exactly two: the one at the top of the page and the one in the bar. A
+    // third would mean a page-level recipe crept back in.
+    expect(document.querySelectorAll("[data-back-link]")).toHaveLength(2);
+  });
+
+  it("defaults the sticky back control to the inbox with no origin (#131)", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    const nav = screen.getByRole("navigation", { name: "Help sections" });
+    expect(nav.querySelector('[data-back-link="bar"]')).toHaveAttribute(
+      "href",
+      "/",
+    );
   });
 });
