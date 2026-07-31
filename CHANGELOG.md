@@ -21,6 +21,27 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Added
 
+- **The Privacy Policy now carries Google's Limited Use undertaking (#140).**
+  A new subsection of "Connecting Google Tasks" states, in Google's own required
+  wording, that use of Workspace API data adheres to the Google User Data Policy
+  including the Limited Use requirements — and states plainly that nothing from a
+  connected Google account is ever sent to the AI provider or used to train any
+  model. **Effective date moved to 2026-07-31.**
+  - Prompted by Google's Third-Party Data Safety team pausing OAuth verification
+    for apps that pair a Workspace API with an AI/ML model. The substantive claim
+    was already true: the Tasks integration is **write-only**, so no Workspace
+    data exists in the app to forward anywhere. What was missing was saying so.
+  - **Self-hosters running their own OAuth client**: this obligation follows the
+    client, not the code. If you pair the Google scope with any model, you need
+    the equivalent statement somewhere you control. See `docs/legal.md`.
+- **A CI gate pinning the published legal text to the effective date (#141).**
+  `src/lib/legal-fingerprint.test.tsx` hashes the rendered text of `/privacy` and
+  `/terms`; changing a word fails the build until someone decides whether the
+  change is substance (bump `LEGAL_EFFECTIVE_DATE`) or copy (do not). It hashes
+  rendered output rather than source, so formatting and refactors do not trip it.
+  Added because #140 shipped new material text under the previous day's date and
+  nothing caught it.
+
 - **The hosted instance now publishes a Privacy Policy and Terms of Service (#123).**
   Two new public pages, `/privacy` and `/terms`, linked from a quiet footer on
   every app screen and on the sign-in page. Written for the **UK GDPR** and the

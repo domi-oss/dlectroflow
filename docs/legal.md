@@ -319,9 +319,56 @@ consent screen for review.
       `privacy@dlectroflow.dev` and `admin@dlectroflow.dev`.
 - [ ] **Domain ownership is verified** in Google Search Console for the account
       that owns the OAuth client.
-- [ ] Only if a **sensitive or restricted** scope is ever added: expect a demo
-      video and possibly a security assessment. `.../auth/tasks` is neither
-      today — keep it that way if at all possible.
+- [ ] **`.../auth/tasks` IS a sensitive scope.** This checklist previously said
+      it was neither sensitive nor restricted; that was wrong, and events
+      disproved it — the 2026-07-30 submission drew the full sensitive-scope
+      treatment, demo video included. Budget for a demo video and a multi-week
+      review, and treat "keep the scope list at one" as the thing that stops it
+      escalating to *restricted*, not as a way to avoid review altogether.
+- [ ] **If the app pairs a Workspace scope with any AI/ML model, the Limited Use
+      requirements apply** — see the section below. This is the one that paused
+      the 2026-07-31 review.
+
+---
+
+## Google Limited Use, and why this app clears it structurally
+
+Raised by Google's Third-Party Data Safety team on 2026-07-31 (#140). Any app
+that touches a Workspace or Photos API **and** uses an AI/ML model falls under
+the Limited Use requirements of the Workspace API User Data and Developer
+Policy, which prohibit using, transferring or selling Google user data — raw,
+aggregated or derived — to train or improve AI/ML models.
+
+dlectroflow pairs `.../auth/tasks` with the Anthropic breakdown coach, so it is
+in scope. It clears the bar for a reason worth stating precisely, because the
+reason is architectural rather than procedural:
+
+**The Google Tasks integration is write-only.** `src/lib/google.ts` issues
+`POST` and `PATCH` against `/lists/{listId}/tasks`, plus exactly one read —
+`GET /users/@me/lists`, which returns task-**list** names so the right list can
+be found to write into. No task is ever read back. There is therefore no
+Workspace user data held in the app that *could* be forwarded to a model.
+`src/lib/breakdown-context.ts` independently pins a `select` of numeric, enum,
+boolean and date columns and never selects `Step.text` or `BrainDumpItem.text`.
+
+Two consequences that save work if this comes round again:
+
+1. **No re-architecture and no new demo video are needed.** Google asks for
+   those only where Workspace data actually reaches a training-capable service.
+2. **The answer to "which AI provider, and on what tier" is about the product,
+   not the billing.** What Google needs to establish is whether the provider's
+   terms permit training. All Anthropic API access sits under the same
+   Commercial Terms of Service, which prohibit training on inputs and outputs —
+   so "paid Anthropic API access, not a consumer Claude.ai plan" is the
+   responsive answer, and it stays true across a change of key or account.
+
+The affirmative statement Google requires is published in the "Connecting Google
+Tasks" section of /privacy, verbatim, and pinned by a test. Reviewers match on
+the standard wording — do not paraphrase it.
+
+**Self-hosters:** this obligation travels with the OAuth client, not with the
+codebase. Run your own client against your own LLM and it is yours to satisfy,
+including hosting the statement somewhere you control.
 
 ---
 
@@ -330,6 +377,7 @@ consent screen for review.
 | Test | What it prevents |
 |---|---|
 | `src/lib/legal.test.ts` | An unnamed or placeholder controller (Art. 13(1)(a)); a malformed effective date; the two contact inboxes collapsing into one |
+| `src/lib/legal-fingerprint.test.tsx` | **The published text changing without anyone deciding whether the effective date should move** (#141). Hashes the *rendered* text of both pages, so a Prettier run or a JSX refactor does not trip it but a changed sentence does. This is the gate that #140 needed and did not have |
 | `src/lib/auth/gate.test.ts` | The legal paths losing their public exemption, and lookalike paths gaining one |
 | `src/proxy.test.ts` | The **middleware** redirecting the pages even while the classifier says public — the failure that silently breaks Google verification |
 | `src/app/privacy/page.test.tsx` | Missing required disclosures; contents/heading drift; hardcoded copies of `legal.ts` values; unshipped features creeping into the text; the non-commercial framing being lost, or the Art. 2(2)(c) rebuttal being dropped. **Plus (#118 Phase C):** the per-user Google claims regressing to owner-only, the "owner cannot reach your connection" claim being dropped, the freeze/delete revoke gap being softened, and BYO key drifting into BYO provider |
