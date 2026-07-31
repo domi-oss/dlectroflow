@@ -290,7 +290,15 @@ describe("parseStubReportTypes", () => {
       parseStubReportTypes(`${DOCS_ONLY_STUB_JOB}:\n  script:\n    - true\n`),
     ).toThrow(/no artifacts:reports:/);
   });
+});
 
+/**
+ * `parseStubReportTypes` is this function's keys, so the throwing cases above
+ * cover both. What is asserted here is the part only this function has: the
+ * filename each report type points at, which is what the writer is compared
+ * against.
+ */
+describe("parseStubDeclaredReports", () => {
   it("tolerates inline comments on the block and on its entries", () => {
     const yml = [
       `${DOCS_ONLY_STUB_JOB}:`,
