@@ -146,8 +146,17 @@ export function latestReleasedChangelogVersion(
  * `a` is older, positive when newer, `0` when equal. Numeric rather than
  * lexicographic, which would put `0.10.0` before `0.9.0` (the trap
  * `distinctLockVersions` documents for #67).
+ *
+ * Returns **`null`** rather than a number when either argument is not a release
+ * version. `distinctLockVersions` records why that matters: a
+ * segment-subtraction comparator handed `"0-beta"` computes `NaN`, every
+ * comparison then no-ops, and the ordering check it feeds silently passes on
+ * input it never actually ordered. A guard cannot report "unordered" with the
+ * same value it reports "equal" with, so this says "I could not compare these"
+ * in a way the caller has to handle.
  */
-export function compareReleaseVersions(a: string, b: string): number {
+export function compareReleaseVersions(a: string, b: string): number | null {
+  if (!isReleaseVersion(a) || !isReleaseVersion(b)) return null;
   const left = a.split(".").map(Number);
   const right = b.split(".").map(Number);
   for (let i = 0; i < 3; i++) {
@@ -160,12 +169,18 @@ export function compareReleaseVersions(a: string, b: string): number {
  * The first adjacent pair in `versions` that is not strictly descending, or
  * `null` when the whole list is. A repeat counts as out of order — two sections
  * for one version means one of them was edited instead of being cut.
+ *
+ * A pair that cannot be compared at all is reported as out of order too, so an
+ * unparseable version **fails the check** instead of skipping it. That cannot
+ * happen via `releasedChangelogVersions`, whose matcher only ever yields three
+ * numeric segments, but this is exported and the failure mode is silent.
  */
 export function firstOutOfOrderPair(
   versions: readonly string[],
 ): [string, string] | null {
   for (let i = 1; i < versions.length; i++) {
-    if (compareReleaseVersions(versions[i - 1], versions[i]) <= 0) {
+    const order = compareReleaseVersions(versions[i - 1], versions[i]);
+    if (order === null || order <= 0) {
       return [versions[i - 1], versions[i]];
     }
   }

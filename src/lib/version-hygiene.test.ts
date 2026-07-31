@@ -180,6 +180,17 @@ describe("compareReleaseVersions", () => {
     expect(compareReleaseVersions("0.4.1", "0.4.0")).toBeGreaterThan(0);
     expect(compareReleaseVersions("0.4.0", "0.4.0")).toBe(0);
   });
+
+  // #67's lesson, applied here: a segment-subtraction comparator handed
+  // "0-beta" computes NaN, every comparison no-ops, and the ordering check it
+  // feeds passes on input it never ordered. `null` is distinguishable from `0`,
+  // so the caller cannot mistake "incomparable" for "equal".
+  it("returns null rather than NaN for anything that is not a release version", () => {
+    expect(compareReleaseVersions("1.0.0-beta.2", "1.0.0")).toBeNull();
+    expect(compareReleaseVersions("0.4", "0.4.0")).toBeNull();
+    expect(compareReleaseVersions("v0.4.0", "0.4.0")).toBeNull();
+    expect(compareReleaseVersions("0.4.0", "")).toBeNull();
+  });
 });
 
 describe("firstOutOfOrderPair", () => {
@@ -201,6 +212,13 @@ describe("firstOutOfOrderPair", () => {
   it("accepts a list too short to be out of order", () => {
     expect(firstOutOfOrderPair([])).toBeNull();
     expect(firstOutOfOrderPair(["0.4.0"])).toBeNull();
+  });
+
+  // Fails closed: an incomparable pair is reported rather than skipped, so a
+  // malformed version cannot make the whole ordering check silently no-op.
+  it("reports a pair it cannot compare as out of order", () => {
+    expect(firstOutOfOrderPair(["0.4.0", "0.3"])).toEqual(["0.4.0", "0.3"]);
+    expect(firstOutOfOrderPair(["nope", "0.3.0"])).toEqual(["nope", "0.3.0"]);
   });
 });
 
