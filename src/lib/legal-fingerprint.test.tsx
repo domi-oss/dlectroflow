@@ -45,8 +45,25 @@ afterEach(cleanup);
  * would be about itself instead of about the policy text.
  */
 
-/** The rendered date line, in both the forms the pages emit it. */
+/**
+ * The rendered date line. There is exactly ONE per page and it takes exactly
+ * this form, because both pages get it from the same place — `LegalPage` in
+ * `src/components/legal/legal-page.tsx` renders it once, and neither page body
+ * repeats the date anywhere else.
+ *
+ * That is a claim about rendered output, so it is asserted rather than trusted:
+ * see "no rendered date survives stripping" below. If a page ever grows a
+ * second date (a "last updated" line, a version history), that test fails
+ * first and points here — which is the order you want, because the failure the
+ * unstripped date would otherwise cause is far more confusing: the fingerprint
+ * would start moving every time the date is bumped, and the assertion would
+ * quietly become about itself instead of about the policy text.
+ */
 const EFFECTIVE_DATE_TEXT = /Effective\s+\d{1,2}\s+\w+\s+\d{4}/g;
+
+/** Any human-rendered date, in the `en-GB` long form these pages use. */
+const ANY_LONG_DATE =
+  /\d{1,2}\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}/;
 
 function publishedText(node: React.ReactElement): string {
   const { container } = render(node);
@@ -100,4 +117,31 @@ describe("legal: published text is pinned to the effective date (#141)", () => {
       ).toBe(recorded);
     },
   );
+
+  it.each([
+    ["privacy", () => <PrivacyPage />],
+    ["terms", () => <TermsPage />],
+  ] as const)("no rendered date survives stripping on /%s", (name, page) => {
+    // The fingerprint must not move when only the effective date moves —
+    // otherwise bumping the date invalidates the hash, the hash has to be
+    // re-recorded in the same commit, and the gate ends up asserting against
+    // its own last run rather than against the published text.
+    //
+    // `EFFECTIVE_DATE_TEXT` is what buys that, so this asserts the stripping is
+    // COMPLETE rather than assuming the regex matches every form. Raised by
+    // review of !222: the question "are you sure there is only one form?" is
+    // not one a comment can answer durably, but a test can.
+    const stripped = publishedText(page());
+    expect(
+      stripped,
+      `/${name} still renders a date after stripping. Some date text is not ` +
+        `matched by EFFECTIVE_DATE_TEXT, so it is inside the fingerprint — ` +
+        `which means the hash will change every time LEGAL_EFFECTIVE_DATE is ` +
+        `bumped. Widen the regex to cover the new form.`,
+    ).not.toMatch(ANY_LONG_DATE);
+    expect(
+      stripped,
+      `/${name} renders the raw ISO date in its text; strip it too.`,
+    ).not.toContain(LEGAL_EFFECTIVE_DATE);
+  });
 });
