@@ -29,10 +29,14 @@ export const DURATION_PRESET_MIN = [15, 30, 45, 60] as const;
  * #138 — this used to be the positional `DURATION_PRESET_MIN[1]`, which the new
  * ladder would have silently changed from 10m to 30m. Having no usable estimate
  * is the weakest possible reason to commit someone to half an hour, so it is the
- * *shortest* offer, and named rather than positional so the next ladder edit
- * cannot move it by accident.
+ * *shortest* offer.
+ *
+ * Derived with `Math.min` rather than `DURATION_PRESET_MIN[0]` (Duo review):
+ * index 0 is only the smallest while the array happens to stay sorted, so the
+ * positional form leaves a reordered ladder to be caught by a test after the
+ * fact. This way the definition IS the invariant.
  */
-export const DEFAULT_DURATION_MIN = DURATION_PRESET_MIN[0];
+export const DEFAULT_DURATION_MIN = Math.min(...DURATION_PRESET_MIN);
 
 /**
  * #66 — the whole-minute duration a raw estimate means. Nothing in the schema

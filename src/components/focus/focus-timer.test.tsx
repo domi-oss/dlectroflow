@@ -1065,8 +1065,15 @@ describe("FocusTimer — time-up: keep going for N more minutes (#138)", () => {
         .getAllByRole("button")
         .map((b) => b.textContent),
     ).toEqual(["15", "30", "45", "60"]);
-    // …and the unit appears exactly once, not four times.
-    expect(group).toHaveTextContent(/Keep going for\s*15\s*30\s*45\s*60\s*min/);
+    // The label and unit are OUTSIDE the group (Duo review): inside, the label
+    // is both the accessible name and traversal content, which some screen
+    // readers announce twice. So the group holds only the buttons…
+    expect(group).toHaveTextContent(/^15304560$/);
+    expect(within(group).queryByText(/keep going for/i)).toBeNull();
+    expect(within(group).queryByText(/^min$/)).toBeNull();
+    // …while the row as a whole still reads as one sentence, unit said once.
+    const row = group.parentElement as HTMLElement;
+    expect(row).toHaveTextContent(/Keep going for\s*15\s*30\s*45\s*60\s*min/);
   });
 
   it("tapping one adds that time and returns to a running countdown", async () => {

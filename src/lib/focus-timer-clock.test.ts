@@ -247,7 +247,10 @@ describe("normalizeEstMin", () => {
   it("falls back to the shortest preset when the estimate isn't a number", () => {
     expect(normalizeEstMin(Number.NaN)).toBe(15);
     expect(normalizeEstMin(Number.NaN)).toBe(DEFAULT_DURATION_MIN);
-    expect(DEFAULT_DURATION_MIN).toBe(Math.min(...DURATION_PRESET_MIN));
+    // Not `toBe(Math.min(...DURATION_PRESET_MIN))` any more — since Duo review
+    // that IS the definition, so asserting it would be a tautology. The concrete
+    // 15 above is what still notices a ladder change.
+    expect(DURATION_PRESET_MIN).toContain(DEFAULT_DURATION_MIN);
   });
 
   it("keeps the fallback among the offered chips, so Start is never 0m", () => {

@@ -1346,25 +1346,33 @@ export function FocusTimer({
               once the server answers. Without the guard a tap here would set
               phase to `running` and then have `finishComplete` resolve and
               override it with `done`, silently discarding the choice. */}
-          <div
-            role="group"
-            aria-labelledby={keepGoingLabelId}
-            className="flex flex-wrap items-center justify-center gap-2"
-          >
+          {/* The label and the unit sit OUTSIDE the group (Duo review): inside,
+              "Keep going for" is both the group's accessible name via
+              `aria-labelledby` AND a text node in its traversal content, so some
+              screen readers announce it twice — once on entry, once while
+              reading the children. The setup screen's "Focus for" group already
+              gets this right; this now matches it. */}
+          <div className="flex flex-wrap items-center justify-center gap-2">
             <span id={keepGoingLabelId} className="text-muted-foreground">
               {stripLeadingGlyph(t("focus.keepGoingFor", voice))}
             </span>
-            {DURATION_PRESET_MIN.map((mins) => (
-              <button
-                key={mins}
-                onClick={() => changeTime(mins)}
-                disabled={pending}
-                aria-label={`Add ${mins} minutes`}
-                className="hover:bg-accent inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border px-3 disabled:opacity-50"
-              >
-                {mins}
-              </button>
-            ))}
+            <div
+              role="group"
+              aria-labelledby={keepGoingLabelId}
+              className="flex flex-wrap items-center justify-center gap-2"
+            >
+              {DURATION_PRESET_MIN.map((mins) => (
+                <button
+                  key={mins}
+                  onClick={() => changeTime(mins)}
+                  disabled={pending}
+                  aria-label={`Add ${mins} minutes`}
+                  className="hover:bg-accent inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border px-3 disabled:opacity-50"
+                >
+                  {mins}
+                </button>
+              ))}
+            </div>
             <span aria-hidden="true" className="text-muted-foreground">
               {t("focus.keepGoingUnit", voice)}
             </span>
