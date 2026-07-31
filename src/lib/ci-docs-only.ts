@@ -189,19 +189,8 @@ export function parseJobsGatedOn(
   return [...jobs];
 }
 
-/**
- * The `artifacts:reports:` keys of the docs-only stub job — i.e. the security
- * report types it stands in for.
- *
- * Throws rather than returning `[]` when the job or its reports block is
- * missing: an empty result would make the coverage assertion in the test pass
- * by vacuity at precisely the moment the job that closes the gap was deleted,
- * which is the silent failure this whole guard exists to prevent.
- */
-export function parseStubReportTypes(
-  gitlabCiYml: string,
-  job: string = DOCS_ONLY_STUB_JOB,
-): string[] {
+/** The lines of one column-0 job block, excluding the `job:` line itself. */
+function jobBlock(gitlabCiYml: string, job: string): string[] {
   const lines = gitlabCiYml.split("\n");
   const start = lines.findIndex((l) => l.startsWith(`${job}:`));
   if (start === -1) {
@@ -209,20 +198,35 @@ export function parseStubReportTypes(
       `\`${job}:\` not found in .gitlab-ci.yml. Without it a docs-only merge request produces none of the report types main's pipeline has, and the approval policy blocks it as \`scan_removed\` (#116).`,
     );
   }
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((l) => /^[^\s#]/.test(l)); // next column-0 key
+  return end === -1 ? rest : rest.slice(0, end);
+}
 
-  const types: string[] = [];
+/**
+ * The docs-only stub job's `artifacts:reports:` block, as report type → file.
+ *
+ * Throws rather than returning `{}` when the job or its reports block is
+ * missing: an empty result would make the coverage assertions in the test pass
+ * by vacuity at precisely the moment the job that closes the gap was deleted,
+ * which is the silent failure this whole guard exists to prevent.
+ */
+export function parseStubDeclaredReports(
+  gitlabCiYml: string,
+  job: string = DOCS_ONLY_STUB_JOB,
+): Record<string, string> {
+  const declared: Record<string, string> = {};
   let reportsIndent: number | null = null;
 
-  for (const line of lines.slice(start + 1)) {
-    if (/^[^\s#]/.test(line)) break; // next column-0 key — the job is over
+  for (const line of jobBlock(gitlabCiYml, job)) {
     const trimmed = line.trim();
     if (trimmed === "" || trimmed.startsWith("#")) continue;
 
     const indent = line.length - line.trimStart().length;
     if (reportsIndent !== null) {
       if (indent > reportsIndent) {
-        const key = /^([A-Za-z_][A-Za-z0-9_]*):/.exec(trimmed);
-        if (key) types.push(key[1]);
+        const entry = /^([A-Za-z_][A-Za-z0-9_]*):\s*(\S+)$/.exec(trimmed);
+        if (entry) declared[entry[1]] = entry[2];
         continue;
       }
       reportsIndent = null; // dedented back out of the reports block
@@ -230,12 +234,52 @@ export function parseStubReportTypes(
     if (trimmed === "reports:") reportsIndent = indent;
   }
 
-  if (types.length === 0) {
+  if (Object.keys(declared).length === 0) {
     throw new Error(
       `\`${job}:\` declares no artifacts:reports:, so it registers no scan types with GitLab and cannot unblock a docs-only merge request (#116).`,
     );
   }
-  return types;
+  return declared;
+}
+
+/** The report types the stub job declares in `artifacts:reports:`. */
+export function parseStubReportTypes(
+  gitlabCiYml: string,
+  job: string = DOCS_ONLY_STUB_JOB,
+): string[] {
+  return Object.keys(parseStubDeclaredReports(gitlabCiYml, job));
+}
+
+/**
+ * The report type → file pairs the stub job's inline `node -e` script actually
+ * writes, read from its `["type", "file"],` array literal.
+ *
+ * Declaring a report in `artifacts:reports:` and forgetting to write the file
+ * is the one way left to reintroduce #116 silently: the runner logs
+ * `no matching files`, the job still SUCCEEDS, GitLab registers no scan for
+ * that type, and the next docs-only merge request is blocked again with a
+ * message about security rather than about this file. So the two lists are
+ * compared, and a script that writes nothing throws rather than comparing
+ * equal to an empty set.
+ */
+export function parseStubWrittenReports(
+  gitlabCiYml: string,
+  job: string = DOCS_ONLY_STUB_JOB,
+): Record<string, string> {
+  const written: Record<string, string> = {};
+  const PAIR = /^\["([A-Za-z_][A-Za-z0-9_]*)",\s*"([^"]+)"\],?$/;
+
+  for (const line of jobBlock(gitlabCiYml, job)) {
+    const pair = PAIR.exec(line.trim());
+    if (pair) written[pair[1]] = pair[2];
+  }
+
+  if (Object.keys(written).length === 0) {
+    throw new Error(
+      `\`${job}:\` writes no report files. Expected a \`["type", "file"],\` pair per declared report in its inline node script — without one, artifacts:reports: points at a file that never exists, the job still passes, and #116 comes back silently.`,
+    );
+  }
+  return written;
 }
 
 /**

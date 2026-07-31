@@ -338,6 +338,12 @@ docs_only_scan_stub:
             null,
             2,
           );
+        // These pairs and the artifacts:reports: block below are two lists of
+        // the same thing, so they are compared by
+        // src/lib/ci-docs-only.test.ts. Declaring a report and forgetting to
+        // write it is the quietest way back to #116: the runner logs
+        // `no matching files`, the job still SUCCEEDS, and GitLab registers no
+        // scan for that type.
         for (const [type, file] of [
           ["sast", "gl-sast-report.json"],
           ["dependency_scanning", "gl-dependency-scanning-report.json"],
@@ -351,6 +357,8 @@ docs_only_scan_stub:
     # `reports:` is what registers the scan type with GitLab and is the whole
     # point. `paths:` keeps the same files browsable so anyone auditing the
     # merge request can open them and confirm `"vulnerabilities": []`.
+    # Every entry under `reports:` must have a matching pair in the script
+    # above — asserted by src/lib/ci-docs-only.test.ts, filenames included.
     paths:
       - gl-sast-report.json
       - gl-dependency-scanning-report.json

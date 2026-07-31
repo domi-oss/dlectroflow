@@ -8,7 +8,9 @@ import {
   DOCS_ONLY_STUB_JOB,
   parseCodeChangeGlobs,
   parseJobsGatedOn,
+  parseStubDeclaredReports,
   parseStubReportTypes,
+  parseStubWrittenReports,
   globCoversTopLevel,
   classifyTopLevelPath,
 } from "./ci-docs-only";
@@ -261,6 +263,71 @@ describe("parseStubReportTypes", () => {
   });
 });
 
+describe("parseStubWrittenReports", () => {
+  /**
+   * A stub job whose `artifacts:reports:` block and inline writer disagree:
+   * `dependency_scanning` is declared but never written. The runner logs
+   * `no matching files`, the job still passes, and no scan type is registered
+   * — #116 back, silently. This fixture is the shape that must not slip past.
+   */
+  const divergent = [
+    `${DOCS_ONLY_STUB_JOB}:`,
+    "  script:",
+    "    - |",
+    "      node -e '",
+    "        for (const [type, file] of [",
+    '          ["sast", "gl-sast-report.json"],',
+    '          ["container_scanning", "gl-container-scanning-report.json"],',
+    "        ]) { writeFileSync(file, report(type)); }",
+    "      '",
+    "  artifacts:",
+    "    reports:",
+    "      sast: gl-sast-report.json",
+    "      dependency_scanning: gl-dependency-scanning-report.json",
+    "      container_scanning: gl-container-scanning-report.json",
+  ].join("\n");
+
+  it("reads the type-to-file pairs the inline script writes", () => {
+    expect(parseStubWrittenReports(divergent)).toEqual({
+      sast: "gl-sast-report.json",
+      container_scanning: "gl-container-scanning-report.json",
+    });
+  });
+
+  it("catches a report declared in artifacts but never written", () => {
+    expect(parseStubWrittenReports(divergent)).not.toEqual(
+      parseStubDeclaredReports(divergent),
+    );
+  });
+
+  it("catches a declared report pointed at a different filename", () => {
+    const typo = [
+      `${DOCS_ONLY_STUB_JOB}:`,
+      "  script:",
+      "    - |",
+      "      node -e '",
+      "        for (const [type, file] of [",
+      '          ["sast", "gl-sast-report.json"],',
+      "        ]) { writeFileSync(file, report(type)); }",
+      "      '",
+      "  artifacts:",
+      "    reports:",
+      "      sast: gl-sast-reports.json", // plural: the artifact never resolves
+    ].join("\n");
+    expect(parseStubWrittenReports(typo)).not.toEqual(
+      parseStubDeclaredReports(typo),
+    );
+  });
+
+  it("throws when the script writes nothing rather than comparing equal to {}", () => {
+    expect(() =>
+      parseStubWrittenReports(
+        `${DOCS_ONLY_STUB_JOB}:\n  script:\n    - true\n  artifacts:\n    reports:\n      sast: x.json\n`,
+      ),
+    ).toThrow(/writes no report files/);
+  });
+});
+
 /**
  * #116: the fast path skipping a scanner is only half the story. The approval
  * policy in the linked security-policy project compares the security report
@@ -290,6 +357,17 @@ describe("docs-only fast path leaves no security report type behind", () => {
       parseStubReportTypes(gitlabCiYml).sort(),
       `${DOCS_ONLY_STUB_JOB}'s artifacts:reports: must cover exactly the report types the skipped scanners produce.`,
     ).toEqual(expected);
+  });
+
+  it("actually writes every report file it declares", () => {
+    // Duo review on !217: `artifacts:reports:` and the inline writer are two
+    // separate lists, and only the first was guarded. A declared-but-unwritten
+    // report is the quietest way back to #116 — `no matching files` is a
+    // WARNING, the job goes green, and the scan type never registers.
+    expect(
+      parseStubWrittenReports(gitlabCiYml),
+      `${DOCS_ONLY_STUB_JOB}'s inline node script and its artifacts:reports: block must name the same report types AND the same filenames.`,
+    ).toEqual(parseStubDeclaredReports(gitlabCiYml));
   });
 
   it("never stubs a report type whose scanner still runs on a docs-only MR", () => {
