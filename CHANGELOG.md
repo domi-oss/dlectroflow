@@ -436,9 +436,10 @@ operators upgrading a self-hosted instance don't get surprised.
     supports only `disable`, an `identifier` selector and a metadata `override`,
     so a **path-scoped** disable of one rule is not expressible at all. Which
     analyzer sections needed the override was answered from a real
-    `gl-sast-report.json` artifact rather than assumed: all four findings come
-    from `gitlab-advanced-sast`, and the `[semgrep]` entries are included but
-    labelled as currently inert.
+    `gl-sast-report.json` artifact rather than assumed: all four SSRF findings
+    **in the current report** come from `gitlab-advanced-sast` and the semgrep
+    report has none, so the `[semgrep]` entries are included but labelled as
+    currently inert.
   - **The compensating control is a hard gate, not an approval prompt.**
     `src/lib/fetch-host-hygiene.ts` walks the TypeScript AST and asserts that
     every `fetch()` and `new Request()` target in `src/`, `prisma/` and
@@ -502,12 +503,12 @@ operators upgrading a self-hosted instance don't get surprised.
     because a digest that printed "8 HIGH" and stopped would reproduce the exact
     confusion above. With no `GL_TOKEN` configured it previews to the log, posts
     nothing and exits 0.
-  - **The 62 MEDIUM are deliberately not triaged**, with a measurement to make
-    that decision cheaper later: `main`'s own scan reports **18 MEDIUM** against
-    64 in the project baseline, so roughly three quarters of the MEDIUM baseline is
-    in the same already-fixed-never-resolved state the HIGH ones were. Left to the
-    first scheduled assessment run, which will report the live number rather than
-    the baseline's.
+  - **The MEDIUM findings are deliberately not triaged** — 64 of them once the
+    HIGH ones were cleared — but one measurement was taken to make that decision
+    cheaper later: `main`'s own scan reports **18 MEDIUM**, so roughly three
+    quarters of the MEDIUM baseline is in the same already-fixed-never-resolved
+    state the HIGH ones turned out to be in. Left to the first scheduled
+    assessment run, which will report the live number rather than the baseline's.
 
 - **`brace-expansion` is on the patched 5.0.8 wherever it can go (#82).** This
   is **CVE-2026-14257** (High) — a DoS via unbounded expansion length that
