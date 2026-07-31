@@ -237,6 +237,25 @@ describe("focus lanes — header, count and zero-state (#136)", () => {
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
 
+  // The acknowledgement has to OUTLIVE the optimistic window, not merely fill
+  // it. `router.refresh()` lands a moment later with the row legitimately gone
+  // from the server's props, and deciding on `items.length` alone would swap the
+  // celebration for "Nothing here yet" a few hundred milliseconds after the user
+  // earned it — the wrong half of #136's own distinction, since a lane the user
+  // emptied is still an emptied lane once the server agrees.
+  it("still reads as cleared after the server props catch up", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <SingleTaskLane voice="plain" items={[single({ itemId: "i1" })]} />,
+    );
+    await user.click(screen.getByRole("button", { name: /complete/i }));
+    // What router.refresh() eventually delivers: the row really is gone now.
+    rerender(<SingleTaskLane voice="plain" items={[]} />);
+
+    expect(screen.getByText(/Cleared/)).toBeInTheDocument();
+    expect(screen.queryByText("Nothing here yet")).not.toBeInTheDocument();
+  });
+
   // …and it is NOT a live region: nothing happened, the text was there on first
   // paint, and announcing it would be announcing the absence of an event.
   it("the never-had-anything empty state is not announced as a status", () => {

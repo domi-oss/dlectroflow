@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { t, type Voice } from "@/lib/strings";
 import type { LauncherData } from "@/lib/focus-launcher";
-import { SubHeader, SEE_ALL } from "@/components/inbox/sub-header";
 import { SingleTaskLane, MultiStepLane } from "@/components/focus/focus-lanes";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -124,39 +123,18 @@ export function FocusLauncher({
         </div>
       )}
 
-      {/* 5 + 6. Lanes (hidden entirely in the empty/all-cleared case). */}
+      {/* 5 + 6. Lanes (hidden entirely in the empty/all-cleared case).
+          #136 — each lane owns its own SubHeader, count and zero-state. This
+          shell used to render the header from ITS copy of the rows while the
+          lane rendered the list from an optimistically filtered one, and a
+          Server Component cannot follow a client-side ✓: completing the last
+          row in a lane left a stale count beside a bare empty <ul>. The count
+          now comes from the same array the list maps, inside the one component
+          that knows about both. */}
       {!isEmpty && (
         <div className="space-y-4">
-          <div>
-            <SubHeader
-              label={t("section.singleTask", voice)}
-              count={singleTasks.length}
-              seeAllHref={SEE_ALL.singleTask}
-              voice={voice}
-            />
-            {singleTasks.length === 0 ? (
-              <p className="text-muted-foreground rounded-lg border border-dashed px-4 py-4 text-center text-xs">
-                {t("bucket.empty", voice)}
-              </p>
-            ) : (
-              <SingleTaskLane items={singleTasks} voice={voice} />
-            )}
-          </div>
-          <div>
-            <SubHeader
-              label={t("section.multiStep", voice)}
-              count={multiStep.length}
-              seeAllHref={SEE_ALL.multiStep}
-              voice={voice}
-            />
-            {multiStep.length === 0 ? (
-              <p className="text-muted-foreground rounded-lg border border-dashed px-4 py-4 text-center text-xs">
-                {t("bucket.empty", voice)}
-              </p>
-            ) : (
-              <MultiStepLane items={multiStep} voice={voice} />
-            )}
-          </div>
+          <SingleTaskLane items={singleTasks} voice={voice} />
+          <MultiStepLane items={multiStep} voice={voice} />
         </div>
       )}
 
