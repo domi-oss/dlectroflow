@@ -179,6 +179,36 @@ describe("Privacy Policy page: the disclosures UK GDPR requires", () => {
     expect(text).toMatch(/No Gmail, no Calendar, no Drive, no Contacts/);
   });
 
+  it("hosts the Google Limited Use affirmative statement, verbatim", () => {
+    // Google's Third-Party Data Safety team requires an affirmative Limited Use
+    // statement hosted on the app or its website whenever an app pairs a
+    // Workspace API with any AI/ML model. Their reviewers grep for this wording,
+    // so it is reproduced exactly as published rather than paraphrased — the
+    // whole point of the sentence is that it is the standard one.
+    const text = pageText();
+    expect(text).toContain(
+      "The use of raw or derived user data received from Workspace APIs will " +
+        "adhere to the Google User Data Policy, including the Limited Use " +
+        "requirements.",
+    );
+  });
+
+  it("states that no Google data reaches the AI provider", () => {
+    // The substantive half of the Limited Use answer. The claim is true because
+    // the Tasks integration is write-only — `src/lib/google.ts` reads only the
+    // user's task-LIST names (to find the list to write into) and never a task
+    // back — so no Workspace data exists in the app to send onward. If that
+    // direction ever reverses, this test is the tripwire and the policy is a lie.
+    const text = pageText();
+    expect(text).toMatch(
+      /Nothing from your Google account is ever sent to the AI provider/i,
+    );
+    // And the Limited Use clause Google actually cares about: no training.
+    expect(text).toMatch(
+      /nothing from your Google account is used to train, improve or evaluate any AI model/i,
+    );
+  });
+
   it("describes what is sent to the AI provider, and what is not", () => {
     const text = pageText();
     expect(text).toMatch(/task.{0,20}title/i);
