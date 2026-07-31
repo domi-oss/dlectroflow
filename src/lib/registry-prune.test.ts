@@ -24,11 +24,16 @@
  * The stubs record every call, so "deleted nothing" is asserted against the
  * absence of DELETE requests, not merely against the script's own summary.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  GIT_ENV_PASSTHROUGH,
+  GIT_LOCATION_VARIABLES,
+  isolatedGitEnv,
+} from "@/lib/git-env";
 
 const SCRIPT = join(process.cwd(), "scripts/prune-registry.sh");
 
@@ -87,32 +92,52 @@ const REPOSITORIES = [
 
 // ── git history fixture ──────────────────────────────────────────────────────
 
-const GIT_ENV = {
-  ...process.env,
-  // Ignore whatever the developer's global git config does (signing hooks,
-  // templates, a different default branch) so the fixture is identical in CI.
-  GIT_CONFIG_GLOBAL: "/dev/null",
-  GIT_CONFIG_SYSTEM: "/dev/null",
+/**
+ * #146: an ALLOW-LIST, built by `isolatedGitEnv` from `{}` — not
+ * `{ ...process.env }`. Spreading the ambient environment neutralised git's
+ * config while letting `GIT_DIR` and friends through, so this fixture spent
+ * months reading the repository the runner happened to be in. Only the
+ * fixture's own commit identity is added here; the config pins and the
+ * passthrough list live in `git-env.ts` next to the reasoning.
+ */
+const GIT_ENV = isolatedGitEnv({
   GIT_AUTHOR_NAME: "Prune Test",
   GIT_AUTHOR_EMAIL: "prune@example.test",
   GIT_COMMITTER_NAME: "Prune Test",
   GIT_COMMITTER_EMAIL: "prune@example.test",
-};
+});
 
+/**
+ * `-C dir` as well as `cwd`, deliberately. Belt and braces: `cwd` was the only
+ * thing pinning the repository when #146 happened, and it lost.
+ */
 function git(dir: string, ...args: string[]): string {
-  return execFileSync("git", args, {
+  return execFileSync("git", ["-C", dir, ...args], {
     cwd: dir,
     encoding: "utf8",
     env: GIT_ENV,
   });
 }
 
-/** A repo with `commits` empty commits on `main` plus `refs/remotes/origin/main`. */
-function makeHistory(commits: number): { dir: string; shas: string[] } {
+/**
+ * A repo with `commits` empty commits on `main` plus `refs/remotes/origin/main`.
+ *
+ * `label` exists because a commit SHA is a hash of its content, and an empty
+ * commit's content is the tree, the parent, the message and the timestamps —
+ * every one of which two histories built in the same second share. So
+ * `makeHistory(2)` and `makeHistory(40)` produce the SAME first two SHAs, and a
+ * test comparing one history against another has to make them differ on purpose
+ * or it is measuring the clock. (Found writing the #146 isolation tests, where
+ * that collision looked exactly like the leak they exist to detect.)
+ */
+function makeHistory(
+  commits: number,
+  label = "commit",
+): { dir: string; shas: string[] } {
   const dir = mkdtempSync(join(tmpdir(), "prune-history-"));
   git(dir, "init", "--quiet", "--initial-branch=main");
   for (let i = 0; i < commits; i++) {
-    git(dir, "commit", "--quiet", "--allow-empty", "-m", `commit ${i}`);
+    git(dir, "commit", "--quiet", "--allow-empty", "-m", `${label} ${i}`);
   }
   git(dir, "update-ref", "refs/remotes/origin/main", "HEAD");
   const shas = git(dir, "log", "--format=%H").trim().split("\n");
@@ -335,19 +360,20 @@ function run(scenario: Scenario = {}): Result {
   // `main` and absent on MR branches, which is exactly the shape that turns a
   // green MR pipeline into a red default branch after the merge (#120).
   // Scenarios opt a value back in explicitly via `scenario.env`.
-  const {
-    REGISTRY_PRUNE_TOKEN: _ambientPruneToken,
-    PRUNE_DRY_RUN: _ambientDryRun,
-    REGISTRY_PRUNE: _ambientPruneFlag,
-    ...ambientEnv
-  } = process.env;
-
+  //
+  // #146 made that an allow-list rather than a list of exclusions: the script's
+  // ranking step runs `git log` itself, and it was reading the runner's own
+  // clone whenever a `GIT_DIR` was exported — which no amount of removing
+  // `REGISTRY_PRUNE_TOKEN` would have caught. Starting from `{}` covers the
+  // variables this comment predates as well as the ones it names.
   const proc = spawnSync("bash", [SCRIPT], {
     cwd: scenario.cwd ?? HISTORY.dir,
     encoding: "utf8",
-    env: {
-      ...ambientEnv,
-      PATH: `${bin}:${process.env.PATH}`,
+    env: isolatedGitEnv({
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      // Its own HOME, so nothing the script or git writes can land in the
+      // developer's — and so `~` resolves to a directory that exists.
+      HOME: work,
       STUB_LOG: log,
       STUB_ROUTES: routesFile,
       STUB_DEPLOY_IMAGE: prodImage,
@@ -360,7 +386,7 @@ function run(scenario: Scenario = {}): Result {
       CI_JOB_TOKEN: "stub-job-token",
       PRUNE_PER_PAGE: String(perPage),
       ...scenario.env,
-    },
+    }),
   });
 
   const calls = readFileSync(log, "utf8").split("\n").filter(Boolean);
@@ -387,6 +413,140 @@ function run(scenario: Scenario = {}): Result {
     summary: line("SUMMARY ")[0] ?? "",
   };
 }
+
+// ── the fixture itself: isolation from the ambient git environment ───────────
+
+/**
+ * Every variable git reads to decide WHICH repository it is looking at, mapped
+ * onto a decoy repo. Set together they are the shape that reddened `main` in
+ * #146 — a `GIT_DIR` inherited from the runner, pointing at a shallow clone.
+ */
+function ambientGitEnvPointingAt(dir: string): Record<string, string> {
+  const gitDir = join(dir, ".git");
+  return {
+    GIT_DIR: gitDir,
+    GIT_COMMON_DIR: gitDir,
+    GIT_WORK_TREE: dir,
+    GIT_INDEX_FILE: join(gitDir, "index"),
+    GIT_OBJECT_DIRECTORY: join(gitDir, "objects"),
+    GIT_ALTERNATE_OBJECT_DIRECTORIES: join(gitDir, "objects"),
+    GIT_CEILING_DIRECTORIES: dir,
+    GIT_DISCOVERY_ACROSS_FILESYSTEM: "1",
+    GIT_NAMESPACE: "refs/namespaces/decoy",
+  };
+}
+
+/** A decoy repo, labelled so its commits cannot hash-collide with a fixture's. */
+function makeDecoy(): { dir: string; shas: string[] } {
+  return makeHistory(2, "decoy");
+}
+
+/** Point the live environment at `dir`, for the duration of one test. */
+function pollute(dir: string): void {
+  for (const [name, value] of Object.entries(ambientGitEnvPointingAt(dir))) {
+    vi.stubEnv(name, value);
+  }
+}
+
+/**
+ * #146 — `main` was red for 86 minutes and `deploy_production` was SKIPPED, so
+ * the !220 merge never reached production, because the fixture above spread
+ * `process.env` into its git calls. That neutralised git's *config* while
+ * letting `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and the object-directory
+ * variables straight through — so `git log`, run with `cwd` set to a freshly
+ * `git init`ed temp directory, read the runner's own shallow clone instead and
+ * died traversing parents that were outside the clone depth.
+ *
+ * The fixture was never isolated. It only looked isolated because a developer's
+ * shell does not export those variables, which is why the tests below export
+ * them on purpose: a suite that only ever runs in a clean environment cannot
+ * tell real isolation from the appearance of it.
+ *
+ * Two different regressions are covered, deliberately:
+ *
+ *   * The environment handed to a git child is an ALLOW-LIST — asserted on
+ *     `GIT_ENV` itself, because that object is built once at module load, so no
+ *     amount of stubbing `process.env` inside a test can observe it leaking.
+ *     This is the assertion that fails against the code #146 was filed about.
+ *   * A child git ignores the ambient environment END TO END — asserted by
+ *     polluting `process.env` and running the real thing, which is what catches
+ *     an `env` that is rebuilt per call, or omitted altogether (the shape
+ *     `ci-docs-only.test.ts` had).
+ */
+describe("the git history fixture is isolated from the ambient environment", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("points every repository-locating variable at the decoy", () => {
+    // When `git-env.ts` learns about another variable, this fixture has to
+    // exercise it too — otherwise the allow-list grows a name that nothing
+    // below ever proves is being ignored, which is the state this issue found
+    // the suite in.
+    expect(Object.keys(ambientGitEnvPointingAt("/tmp/decoy")).sort()).toEqual(
+      [...GIT_LOCATION_VARIABLES].sort(),
+    );
+  });
+
+  it("hands git an allow-list, not a copy of the ambient environment", () => {
+    // Before the fix this object held every variable the shell exported —
+    // hundreds of them on a developer machine, and on a runner the `GIT_DIR`
+    // that broke the job. Asserting on the KEYS rather than on git's behaviour
+    // is what makes this independent of whether the machine running the suite
+    // happens to export anything interesting.
+    const unexpected = Object.keys(GIT_ENV).filter(
+      (name) =>
+        !(GIT_ENV_PASSTHROUGH as readonly string[]).includes(name) &&
+        !name.startsWith("GIT_"),
+    );
+    expect(
+      unexpected,
+      "GIT_ENV carries variables git was never given on purpose",
+    ).toEqual([]);
+    for (const name of GIT_LOCATION_VARIABLES) {
+      expect(GIT_ENV, `GIT_ENV must not name a repository`).not.toHaveProperty(
+        name,
+      );
+    }
+  });
+
+  it("builds its own history when the environment points at another repo", () => {
+    // Built BEFORE the pollution, so it is a real repository with a history of
+    // its own that the fixture must neither read nor write.
+    const decoy = makeDecoy();
+    pollute(decoy.dir);
+
+    const own = makeHistory(40);
+
+    // Reading the decoy would return 2 SHAs, or 42 once the fixture's own
+    // commits had been written into it.
+    expect(own.shas).toHaveLength(40);
+    for (const sha of decoy.shas) {
+      expect(own.shas, "the fixture read the decoy repository").not.toContain(
+        sha,
+      );
+    }
+    // …and writing into the decoy must not have happened either.
+    vi.unstubAllEnvs();
+    expect(
+      git(decoy.dir, "log", "--format=%H").trim().split("\n"),
+      "the fixture committed into the decoy repository",
+    ).toEqual(decoy.shas);
+  });
+
+  it("drives the script against the fixture, not the ambient repo", () => {
+    // The script runs `git log` itself, so the environment `run()` hands it has
+    // to be isolated too — a leaked GIT_DIR sends the ranking step at whatever
+    // repository the runner happens to be sitting in. This one DID fail against
+    // the old code: `run()` reads `process.env` on every call.
+    pollute(makeDecoy().dir);
+
+    const r = run();
+    expect(r.stderr).not.toMatch(/FATAL/);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/matched=11\/11/);
+  });
+});
 
 // ── the non-negotiable safety property ───────────────────────────────────────
 
