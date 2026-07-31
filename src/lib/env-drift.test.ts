@@ -10,6 +10,7 @@ import {
   CONFIG_SURFACE_ALLOWLIST,
   PLATFORM_DIVERGENCES,
   CHART_CONFIG_SURFACE_FILES,
+  assertManifestKeysLookLikeEnv,
   ENV_PROD_EXAMPLE_FILE,
 } from "./env-drift";
 
@@ -397,6 +398,24 @@ describe("Instance A / Instance B config surface parity (#135)", () => {
       ),
     ),
   ];
+
+  // Duo review (!230): the extractor separates env keys from YAML structure by
+  // CASE, which is a convention these manifests hold to rather than a rule YAML
+  // enforces. Adding a file with an all-caps structural key would invent drift.
+  // Checked per file, so the failure names the offender.
+  it.each([...CHART_CONFIG_SURFACE_FILES])(
+    "%s declares only things that read as env variables",
+    (file) => {
+      expect(() =>
+        assertManifestKeysLookLikeEnv(
+          file,
+          extractManifestEnvKeys(
+            readFileSync(join(process.cwd(), file), "utf8"),
+          ),
+        ),
+      ).not.toThrow();
+    },
+  );
 
   it("reads a non-trivial surface from each side", () => {
     // Fail closed: a renamed file or a broken regex reads as zero keys, and

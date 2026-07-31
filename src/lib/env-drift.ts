@@ -150,6 +150,17 @@ export const ENV_PROD_EXAMPLE_FILE = ".env.prod.example";
  * and folding it in would mean allowlisting a pile of keys that were never
  * comparable in the first place. `postgres.yaml` is the same story on the
  * database side.
+ *
+ * ── The constraint on adding a file here (Duo review on !230) ───────────────
+ * The extractor tells env keys from YAML structure by CASE: ALL_CAPS is a key,
+ * lowercase is Kubernetes. That is a convention these two manifests happen to
+ * hold to, not a rule YAML enforces — so a file containing an all-caps
+ * *structural* key (`NODE_PORT: 3000` in a Service, say) would have it counted as
+ * an env variable and reported as drift that does not exist.
+ *
+ * `assertManifestKeysLookLikeEnv` below is the guard, and the test calls it on
+ * every file in this list. It is not a comment asking for care: adding a
+ * violating file fails the suite by name.
  */
 export const CHART_CONFIG_SURFACE_FILES: readonly string[] = [
   "charts/dlectroflow/templates/secret.yaml",
@@ -393,6 +404,45 @@ const MANIFEST_STRING_DATA_KEY_RE = /^\s*([A-Z_][A-Z0-9_]*):/;
 // that does not exist, and the fix for the phantom gap would have been to edit
 // the config surface. Fails loud, not quietly wrong.
 const MANIFEST_ENV_NAME_RE = /^\s*-\s*name:\s*([A-Z_][A-Z0-9_]*)\s*(#.*)?$/;
+
+/**
+ * Kubernetes structural keys that are ALL_CAPS and would therefore be mistaken
+ * for env variables. Not exhaustive by construction — it cannot be — which is
+ * why the guard below reports anything suspicious rather than only these.
+ */
+const KNOWN_STRUCTURAL_ALLCAPS = new Set([
+  "TCP",
+  "UDP",
+  "SCTP",
+  "HTTP",
+  "HTTPS",
+]);
+
+/**
+ * Throws if a manifest's extracted keys include something that is plainly
+ * Kubernetes structure rather than an env variable.
+ *
+ * The extractor separates the two by CASE (see CHART_CONFIG_SURFACE_FILES), and
+ * that convention is unenforceable in YAML itself. This makes adding a violating
+ * file to the compared surface fail loudly, by name, instead of quietly
+ * inventing drift — which is the failure the case-convention comment warned
+ * about but did nothing to prevent (Duo review on !230).
+ */
+export function assertManifestKeysLookLikeEnv(
+  file: string,
+  keys: readonly string[],
+): void {
+  const suspicious = keys.filter((key) => KNOWN_STRUCTURAL_ALLCAPS.has(key));
+  if (suspicious.length > 0) {
+    throw new Error(
+      `${file} declares ${suspicious.join(", ")}, which read as Kubernetes ` +
+        `structure rather than environment variables. The config-surface ` +
+        `extractor tells the two apart by case, so this file would produce ` +
+        `phantom drift. Either drop it from CHART_CONFIG_SURFACE_FILES or ` +
+        `teach the extractor the shape it actually needs.`,
+    );
+  }
+}
 
 /**
  * The sorted, deduped set of env keys a chart manifest declares. Sorted so a

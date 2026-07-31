@@ -1,7 +1,54 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { shortBuildSha } from "./build-info";
 
 describe("shortBuildSha", () => {
+  // Duo review (!230): a silent null on the endpoint whose job is answering
+  // "which build is this?" is the quiet-failure shape #147 is about. Warn — but
+  // once, because /api/health is probed continuously and the suggested
+  // per-call warning would turn one misconfiguration into an unbounded log
+  // stream.
+  describe("diagnostics for a rejected BUILD_SHA", () => {
+    it("warns once per bad value, not once per call", () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const bad = `v1.2.3-not-a-sha-${Math.random()}`;
+        expect(shortBuildSha(bad)).toBeNull();
+        expect(shortBuildSha(bad)).toBeNull();
+        expect(shortBuildSha(bad)).toBeNull();
+        expect(warn).toHaveBeenCalledTimes(1);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it("never puts the rejected value in the log", () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const secretish = `AKIAsomethingthatlookslikeacredential${Math.random()}`;
+        shortBuildSha(secretish);
+        const logged = warn.mock.calls.flat().join(" ");
+        expect(logged).not.toContain(secretish);
+        expect(logged).toMatch(/BUILD_SHA is set but is not a valid/);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it("stays silent when BUILD_SHA is simply absent or blank", () => {
+      // A local `next build`, or a self-hoster building their own image. Normal,
+      // not a misconfiguration — warning here would cry wolf on every dev run.
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        expect(shortBuildSha(undefined)).toBeNull();
+        expect(shortBuildSha("")).toBeNull();
+        expect(shortBuildSha("   ")).toBeNull();
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  });
+
   it("shortens a full 40-char SHA to git's 7-char form", () => {
     expect(shortBuildSha("cafc16d2f4b8a9e1c3d5069a7b8c9d0e1f2a3b4c")).toBe(
       "cafc16d",

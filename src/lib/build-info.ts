@@ -54,10 +54,43 @@ const SHA_RE = new RegExp(`^[0-9a-f]{${SHORT_SHA_LENGTH},40}$`);
  * captured at module load: Next.js keeps route modules alive across requests,
  * and a load-time snapshot would also make this untestable.
  */
+/**
+ * Values already reported by {@link shortBuildSha}, so a rejected `BUILD_SHA` is
+ * logged **once** rather than on every request.
+ *
+ * Duo review on !230 asked for a warning here and it was the right ask — a silent
+ * `null` on the one endpoint whose job is answering "which build is this?" is
+ * exactly the kind of quiet failure #147 is about. But the suggested patch warned
+ * on every call, and `shortBuildSha` is read per request by /api/health, which a
+ * cluster probes continuously: that turns one misconfiguration into an unbounded
+ * log stream, and a log nobody can read is no more useful than no log at all.
+ *
+ * Keyed by value rather than a bare boolean so a test exercising several bad
+ * inputs still sees one warning each. In production the set holds at most one
+ * entry: `BUILD_SHA` is baked into the image by `ENV`, so it cannot change within
+ * a process.
+ */
+const warnedShaValues = new Set<string>();
+
 export function shortBuildSha(
   raw: string | undefined = process.env.BUILD_SHA,
 ): string | null {
   const normalized = (raw ?? "").trim().toLowerCase();
-  if (!SHA_RE.test(normalized)) return null;
+  if (!SHA_RE.test(normalized)) {
+    // An ABSENT build arg is a normal state (a local `next build`, a self-hoster
+    // building their own image), so only a non-empty value that failed
+    // validation is worth saying anything about.
+    if (normalized.length > 0 && !warnedShaValues.has(normalized)) {
+      warnedShaValues.add(normalized);
+      // Length only, never the value: this reaches container logs, and a
+      // BUILD_SHA that failed validation is by definition not something whose
+      // contents we can vouch for.
+      console.warn(
+        `[build-info] BUILD_SHA is set but is not a valid short-or-full SHA-1 ` +
+          `(${normalized.length} chars); /api/health will report sha: null`,
+      );
+    }
+    return null;
+  }
   return normalized.slice(0, SHORT_SHA_LENGTH);
 }
