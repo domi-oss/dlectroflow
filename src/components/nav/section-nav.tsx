@@ -10,6 +10,7 @@ import {
   type SectionDef,
 } from "@/lib/section-nav";
 import { useMediaQuery } from "@/lib/use-media-query";
+import { BackLink } from "@/components/nav/back-link";
 import { type Voice } from "@/lib/strings";
 
 /** Tailwind's `sm` breakpoint (40rem). */
@@ -65,6 +66,16 @@ function sectionOnScreen(id: string, barHeight: number): boolean {
  *    marked `data-current`, which globals.css renders as the pinned magenta
  *    section header — its PINNED POSITION is a second non-colour cue;
  *  - every control clears the 44px touch-target minimum;
+ *  - #131 — the bar also carries the page's way OUT, at its head. The
+ *    destinations were sticky and the exit was not: `<BackLink>` sits at the top
+ *    of both pages and scrolls away with the header, stranding anyone a screen
+ *    down a long list of disclosures. It rides here rather than in a second
+ *    sticky row so the bar keeps costing one slice of the viewport, the z-order
+ *    stays a three-way stack, and `--section-nav-h` remains the single measured
+ *    offset every jump target lands against. It is the SAME component the page
+ *    renders at the top (one origin whitelist, one label), first in the DOM
+ *    because it is first on screen — so reading order and focus order agree —
+ *    and it adds exactly one tab stop to the bar, not one per jump;
  *  - motion: the smooth scroll is opted into by adding `scroll-smooth` to
  *    `<html>`, which the global `prefers-reduced-motion` rule in globals.css
  *    already overrides with `scroll-behavior: auto !important` — so reduced
@@ -76,11 +87,19 @@ export function SectionNav({
   sections,
   voice,
   label,
+  from,
 }: {
   sections: readonly SectionDef[];
   voice: Voice;
   /** Accessible name for the landmark, e.g. "Settings sections". */
   label: string;
+  /**
+   * #131 — the page's raw `?from=` origin, forwarded straight to `<BackLink>`,
+   * which resolves it against the whitelist. Optional: an absent origin is a
+   * legitimate everyday case (someone typed the URL), and it resolves to the
+   * inbox rather than to no exit at all.
+   */
+  from?: string;
 }) {
   const listId = useId();
   const navRef = useRef<HTMLElement>(null);
@@ -381,6 +400,10 @@ export function SectionNav({
       className="bg-background sticky top-0 z-[2] -mx-4 border-b px-4 py-2"
     >
       <div className="flex items-center gap-2">
+        {/* #131 — the way out, first on the row and first in the tab order.
+            Quiet (muted, text-sm) against the toggle's full-contrast semibold:
+            it is the escape hatch, not the bar's headline. */}
+        <BackLink from={from} voice={voice} variant="bar" />
         <button
           type="button"
           aria-expanded={expanded}
@@ -388,10 +411,11 @@ export function SectionNav({
           onClick={() => setExpanded((v) => !v)}
           // Collapsed is now the resting state at every width, so this row is
           // the whole nav most of the time — it carries real weight (semibold,
-          // full-contrast) rather than reading as quiet chrome. The -ml-2
-          // pulls the padded hit area back to the page's text margin so the
-          // extra weight costs no extra height.
-          className="hover:bg-accent focus-visible:ring-ring focus-visible:ring-offset-background -ml-2 inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-md px-2 text-base font-semibold outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+          // full-contrast) rather than reading as quiet chrome. The -ml-2 that
+          // used to pull its padded hit area back to the page's text margin now
+          // lives on the back control (#131), which is the row's first element;
+          // repeating it here would drag the toggle over the top of it.
+          className="hover:bg-accent focus-visible:ring-ring focus-visible:ring-offset-background inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-md px-2 text-base font-semibold outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
         >
           <svg
             aria-hidden="true"

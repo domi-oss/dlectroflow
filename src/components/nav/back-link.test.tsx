@@ -5,17 +5,18 @@ import { BackLink } from "@/components/nav/back-link";
 
 // Render <Link> as a plain <a> so the link's href/text can be asserted without a
 // router context (mirrors the next/link mock in help.test.tsx / library.test.tsx).
+// The rest of the props are spread through rather than picked, so the component's
+// own attributes (className, #131's `data-back-link`) reach the DOM.
 vi.mock("next/link", () => ({
   default: ({
     children,
     href,
-    className,
+    ...rest
   }: {
     children: React.ReactNode;
     href: string;
-    className?: string;
   }) => (
-    <a href={href} className={className}>
+    <a href={href} {...rest}>
       {children}
     </a>
   ),
@@ -71,5 +72,64 @@ describe("BackLink", () => {
   it("falls back to the inbox for an inherited prototype key (no crash)", () => {
     render(<BackLink from="__proto__" voice="plain" />);
     expect(screen.getByRole("link")).toHaveAttribute("href", "/");
+  });
+
+  // #131 — the sticky <SectionNav> bar needs the same control in a compact
+  // shape. A VARIANT rather than a second component, because the thing that
+  // must not fork is the recipe: the origin whitelist, the fallback and the
+  // label are resolved once, here, for both.
+  describe("variants (#131)", () => {
+    it("resolves the same destination and reads the same label in the bar", () => {
+      const { rerender } = render(
+        <BackLink from="help" voice="plain" variant="page" />,
+      );
+      const page = screen.getByRole("link");
+      expect(page).toHaveAttribute("href", "/help");
+      expect(page).toHaveAccessibleName("← Back");
+
+      rerender(<BackLink from="help" voice="plain" variant="bar" />);
+      const bar = screen.getByRole("link");
+      expect(bar).toHaveAttribute("href", "/help");
+      expect(bar).toHaveAccessibleName("← Back");
+    });
+
+    it("applies the whitelist in the bar too — no open redirect either way", () => {
+      render(
+        <BackLink
+          from="https://evil.example.com"
+          variant="bar"
+          voice="plain"
+        />,
+      );
+      expect(screen.getByRole("link")).toHaveAttribute("href", "/");
+    });
+
+    it("labels which copy it is, so the two are separable on a page carrying both", () => {
+      // Both pages keep the full-width control at the top AND the compact one in
+      // the bar, so tests (and only tests) need a way to name one of them.
+      const { rerender } = render(<BackLink voice="plain" />);
+      expect(screen.getByRole("link")).toHaveAttribute(
+        "data-back-link",
+        "page",
+      );
+      rerender(<BackLink voice="plain" variant="bar" />);
+      expect(screen.getByRole("link")).toHaveAttribute("data-back-link", "bar");
+    });
+
+    it("clears the 44px touch target in the bar, and keeps a focus ring in both", () => {
+      // Layout is e2e's job (jsdom has none), but the classes that produce it
+      // are this component's: the bar sits on a phone screen where every control
+      // in it is a tap target, and a control with no visible focus state is a
+      // keyboard trap in all but name.
+      const { rerender } = render(<BackLink voice="plain" variant="bar" />);
+      const bar = screen.getByRole("link");
+      expect(bar.className).toContain("min-h-11");
+      expect(bar.className).toContain("focus-visible:ring-2");
+
+      rerender(<BackLink voice="plain" />);
+      expect(screen.getByRole("link").className).toContain(
+        "focus-visible:ring-2",
+      );
+    });
   });
 });

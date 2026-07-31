@@ -18,6 +18,24 @@ import {
 } from "@/lib/section-nav";
 import type { Voice } from "@/lib/strings";
 
+// #131 put a <BackLink> inside the bar, and <BackLink> renders a next/link.
+// Render it as a plain <a> so its href is assertable without a router context
+// (the same mock back-link.test.tsx / help.test.tsx / library.test.tsx use).
+vi.mock("next/link", () => ({
+  default: ({
+    children,
+    href,
+    ...rest
+  }: {
+    children: React.ReactNode;
+    href: string;
+  }) => (
+    <a href={href} {...rest}>
+      {children}
+    </a>
+  ),
+}));
+
 // ── IntersectionObserver stub ────────────────────────────────────────────────
 // jsdom ships none. Capture the instances the nav creates so a test can drive
 // "this section is now in the tracking band" by hand.
@@ -75,14 +93,22 @@ function Page({
    *  reproduce the split case: a heading still in the DOM for a section the nav
    *  no longer lists. */
   headings = sections,
+  /** The page's raw `?from=` origin, forwarded to the bar's back control. */
+  from,
 }: {
   voice?: Voice;
   sections?: readonly (typeof HELP_SECTIONS)[number][];
   headings?: readonly (typeof HELP_SECTIONS)[number][];
+  from?: string;
 }) {
   return (
     <>
-      <SectionNav sections={sections} voice={voice} label="Help sections" />
+      <SectionNav
+        sections={sections}
+        voice={voice}
+        label="Help sections"
+        from={from}
+      />
       {headings.map((s) => (
         <section key={s.id}>
           <SectionHeading id={s.id} voice={voice} />
@@ -96,6 +122,12 @@ function Page({
 const list = () =>
   document.getElementById(toggle().getAttribute("aria-controls")!)!;
 const toggle = () => screen.getByRole("button", { name: /jump to/i });
+/** The jump PILLS only — the bar also carries a back control now (#131). */
+const pills = () => Array.from(list().querySelectorAll("a"));
+const backControl = () =>
+  screen
+    .getByRole("navigation", { name: "Help sections" })
+    .querySelector<HTMLAnchorElement>('a[data-back-link="bar"]')!;
 
 beforeEach(() => {
   FakeIntersectionObserver.instances = [];
@@ -125,9 +157,9 @@ describe("SectionNav (#72)", () => {
 
   it("renders exactly one entry per section, and every target id really exists", () => {
     render(<Page />);
-    const nav = screen.getByRole("navigation", { name: "Help sections" });
-    const links = Array.from(nav.querySelectorAll("a"));
-    expect(links).toHaveLength(HELP_SECTIONS.length);
+    // Scoped to the jump LIST rather than to every anchor in the bar: since
+    // #131 the bar also carries a back control, which is not a section entry.
+    expect(pills()).toHaveLength(HELP_SECTIONS.length);
 
     for (const section of HELP_SECTIONS) {
       const label = sectionLabel(section, "plain");
@@ -139,6 +171,80 @@ describe("SectionNav (#72)", () => {
       expect(target!.tagName).toBe("H2");
       expect(target).toHaveTextContent(label);
     }
+  });
+
+  // ── #131: the way OUT rides in the bar that already sticks ────────────────
+  //
+  // The destinations were sticky; the exit was not. `<BackLink>` sits at the top
+  // of both pages and scrolls away with the header, so a reader a screen down a
+  // long settings page had no way home but scrolling back up. The fix folds a
+  // compact copy of the SAME component into the left of this bar — one sticky
+  // layer, one measured height, one back recipe.
+  describe("the way out stays on screen (#131)", () => {
+    it("carries an origin-aware back control inside the sticky bar", () => {
+      render(<Page from="settings" />);
+      const back = backControl();
+      expect(back).not.toBeNull();
+      // Same single, destination-agnostic label as the page-level control —
+      // only the destination reflects the origin (see @/lib/nav/back).
+      expect(back).toHaveAccessibleName("← Back");
+      expect(back).toHaveAttribute("href", "/settings");
+    });
+
+    it("falls back to the inbox for an absent or hostile origin", () => {
+      // The whitelist lives in @/lib/nav/back and is exercised in full by
+      // back-link.test.tsx; this is the wiring check — the bar really does hand
+      // its `from` to the shared resolver rather than reflecting it into a path.
+      const { rerender } = render(<Page />);
+      expect(backControl()).toHaveAttribute("href", "/");
+      rerender(<Page from="https://evil.example.com" />);
+      expect(backControl()).toHaveAttribute("href", "/");
+      rerender(<Page from="help" />);
+      expect(backControl()).toHaveAttribute("href", "/help");
+    });
+
+    it("keeps the '← Back' label in the playful voice too", () => {
+      render(<Page voice="playful" from="library" />);
+      expect(backControl()).toHaveAccessibleName("← Back");
+      expect(backControl()).toHaveAttribute("href", "/library?tab=sorted");
+    });
+
+    it("is not a jump pill — the section list is untouched", () => {
+      render(<Page from="settings" />);
+      expect(pills()).toHaveLength(HELP_SECTIONS.length);
+      expect(list().contains(backControl())).toBe(false);
+      expect(backControl()).not.toHaveAttribute("aria-current");
+    });
+
+    it("is reachable while the bar is COLLAPSED, which is its resting state", () => {
+      // The whole point: the exit must be there without opening anything. The
+      // pill list is `hidden` at rest, so a back control inside it would be
+      // exactly as unreachable as the one that scrolled away.
+      render(<Page from="settings" />);
+      expect(toggle()).toHaveAttribute("aria-expanded", "false");
+      expect(list()).toHaveClass("hidden");
+      expect(backControl()).toBeVisible();
+    });
+
+    it("takes ONE tab stop, at the head of the bar, in visual order", async () => {
+      // Deliberate tab-order check (#131): the control is first in the DOM
+      // because it is first on screen, so focus order and reading order agree
+      // (WCAG 2.4.3), and it costs keyboard users a single stop before the
+      // toggle rather than one per jump.
+      render(<Page from="settings" />);
+      const back = backControl();
+      expect(
+        back.compareDocumentPosition(toggle()) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+
+      back.focus();
+      expect(back).toHaveFocus();
+      await userEvent.tab();
+      expect(toggle()).toHaveFocus();
+      await userEvent.tab({ shift: true });
+      expect(back).toHaveFocus();
+    });
   });
 
   it("exposes collapse state: aria-expanded on a button that owns the list", async () => {
