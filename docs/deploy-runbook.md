@@ -96,13 +96,29 @@ EOF
 >   --set 'global.leaderElection.namespace=cert-manager' \
 >   --set "hostAliases[0].ip=$INGRESS_CLUSTERIP" \
 >   --set 'hostAliases[0].hostnames[0]=dlectroflow.dev' \
->   --set 'hostAliases[0].hostnames[1]=dlectroflow.dlectronique.dev'
+>   --set 'hostAliases[0].hostnames[1]=dlectroflow.dlectronique.dev' \
+>   --set 'hostAliases[0].hostnames[2]=work.dlectroflow.dev'
 > ```
 >
 > List **every** host the ingress terminates TLS for — during the domain
 > migration (#54) that's both the canonical `dlectroflow.dev` **and** the legacy
 > `dlectroflow.dlectronique.dev`, otherwise the legacy `dlectroflow-legacy-tls`
-> cert's HTTP-01 self-check times out and never issues.
+> cert's HTTP-01 self-check times out and never issues. Since #130 that list also
+> includes `work.dlectroflow.dev`, this cluster's canonical host.
+>
+> **`--set` REPLACES the list, it does not append.** Re-running this command with
+> fewer hostnames than are currently configured silently drops the missing ones,
+> and the certs covering them fail to renew — 30-ish days later, not immediately,
+> which is the worst possible feedback loop. Read the live list before changing it:
+> ```bash
+> kubectl -n cert-manager get deploy cert-manager \
+>   -o jsonpath='{.spec.template.spec.hostAliases}'
+> ```
+>
+> **Add the alias BEFORE the ingress starts serving a new host.** If the ingress
+> gets there first, the HTTP-01 challenge fails its self-check and cert-manager
+> backs off exponentially — the cert then still issues eventually, but long after
+> you have fixed the cause and started looking for a different bug.
 > Public DNS is untouched, so Let's Encrypt still validates over the internet. (Review apps on dynamic `*.sslip.io` hosts are left on the ingress default self-signed cert — ephemeral previews, and the per-MR host would need its own alias.)
 
 ## 5. Install + register the GitLab agent
@@ -137,6 +153,32 @@ Confirm these secrets exist with the listed scopes (all created except Resend):
 
 ## 7. Production DNS (done)
 `dlectroflow` A record → `YOUR_STATIC_IP` in dlectronique.dev DNS.
+
+Since #130 this cluster answers on **two** names, both A records to the same
+static IP:
+
+| Host | Role |
+|---|---|
+| `work.dlectroflow.dev` | **canonical** — the value of `host`, and therefore `PUBLIC_ORIGIN`. Sign-in happens here. |
+| `dlectroflow.dev` | the apex, served by this cluster **without a redirect** during the overlap, and reserved for the instance that outlives it. |
+
+`host` is the single auth origin: it becomes `PUBLIC_ORIGIN`
+(`charts/dlectroflow/templates/deployment.yaml`), which pins the OAuth redirect
+URIs against Host / `X-Forwarded-*` spoofing. Two hostnames can be **served**;
+only one can complete a sign-in. Changing `host` is therefore an atomic switch,
+and it invalidates every existing Google connection — the redirect URI moves with
+it, so everyone reconnects. Do it while the user count is small.
+
+Adding a host is four coordinated changes, in this order:
+
+1. **DNS** A record → the ingress static IP (do it first; it propagates while you work)
+2. **cert-manager `hostAliases`** — §4, and read the existing list before you `--set` over it
+3. **Redirect URIs**, both providers: `…/api/google/oauth/callback` on the Google
+   client **and** `…/api/auth/gitlab/callback` on the GitLab OAuth application.
+   Forgetting the second breaks *sign-in*, not just Google Tasks.
+4. **`host` / `legacyHosts`** in `deploy_production`, then deploy
+
+Rolling back is putting the old `host` back and redeploying.
 
 ## 8. Google OAuth redirect
 Add to the OAuth client's authorized redirect URIs (keep the local one too):
