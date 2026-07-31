@@ -1054,6 +1054,9 @@ describe("FocusTimer — time-up: keep going for N more minutes (#138)", () => {
     ).toBeInTheDocument();
   });
 
+  // The row is one sentence: bare numbers in the buttons, the unit said once at
+  // the end. Unlike the setup chips, which each carry their own "10m" because
+  // there a chip is a standalone value rather than part of a phrase.
   it("offers 15/30/45/60 as a labelled group, not four bare numbers", async () => {
     await runToTimeUp();
     const group = screen.getByRole("group", { name: /keep going for/i });
@@ -1061,7 +1064,9 @@ describe("FocusTimer — time-up: keep going for N more minutes (#138)", () => {
       within(group)
         .getAllByRole("button")
         .map((b) => b.textContent),
-    ).toEqual(["15m", "30m", "45m", "60m"]);
+    ).toEqual(["15", "30", "45", "60"]);
+    // …and the unit appears exactly once, not four times.
+    expect(group).toHaveTextContent(/Keep going for\s*15\s*30\s*45\s*60\s*min/);
   });
 
   it("tapping one adds that time and returns to a running countdown", async () => {
@@ -1077,6 +1082,39 @@ describe("FocusTimer — time-up: keep going for N more minutes (#138)", () => {
     expect(screen.queryByText("How did that go?")).not.toBeInTheDocument();
     expect(screen.getByText("30:00")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /pause/i })).toBeInTheDocument();
+  });
+
+  // Duo review: the time-up block stays mounted while a completeFocus is in
+  // flight, because the phase only moves once the server answers. Without a
+  // `pending` guard a tap here sets the phase to `running` and then
+  // finishComplete resolves and overrides it with `done` — the keep-going choice
+  // silently discarded, and the user sent to the celebration screen they had
+  // just declined. Same family as #137/#139: a server action's outcome racing a
+  // local phase change.
+  it("cannot be tapped while a completeFocus is still in flight", async () => {
+    type CompleteReturn = Awaited<ReturnType<typeof completeFocus>>;
+    let settle: (v: CompleteReturn) => void = () => {};
+    vi.mocked(completeFocus).mockReturnValueOnce(
+      new Promise<CompleteReturn>((resolve) => {
+        settle = resolve;
+      }),
+    );
+    await runToTimeUp();
+    // Start the completion but do not let it resolve.
+    await act(async () => {
+      screen.getByRole("button", { name: /^all done$/i }).click();
+    });
+
+    const group = screen.getByRole("group", { name: /keep going for/i });
+    for (const b of within(group).getAllByRole("button")) {
+      expect(b).toBeDisabled();
+    }
+    // Still on the question, so the window Duo described is genuinely open.
+    expect(screen.getByText("How did that go?")).toBeInTheDocument();
+
+    await act(async () => {
+      settle({ ok: true } as CompleteReturn);
+    });
   });
 
   it("drops the old bare +5m button — the row supersedes it", async () => {

@@ -1301,14 +1301,29 @@ export function FocusTimer({
             </button>
           </div>
           {/* A `group` with its own label, not four loose buttons: without it a
-              screen-reader user hears "15m, 30m, 45m, 60m" with nothing saying
-              what the numbers do. Same shape as the setup screen's "Focus for"
-              chip group. Each button also carries a spoken "Add N minutes",
-              because "30m" alone is a quantity, not an action.
+              screen-reader user hears "15, 30, 45, 60" with nothing saying what
+              the numbers mean. Same shape as the setup screen's "Focus for" chip
+              group. Each button also carries a spoken "Add N minutes", because a
+              bare number is a quantity, not an action.
+
+              The row reads as one sentence — "Keep going for 15 / 30 / 45 / 60
+              min" — so the buttons hold bare numbers and the unit is said once at
+              the end. That is deliberately UNLIKE the setup screen's chips, which
+              each carry their own "10m" because there a chip is a standalone
+              value you select rather than part of a phrase. Owner-approved copy
+              (#138); the alternative, four "15m"-style buttons, repeats the unit
+              four times and leaves the label dangling.
 
               These are NOT aria-pressed toggles like the setup chips — tapping
               one is a one-shot action that immediately returns the timer to
-              `running`, so there is no selected state to report. */}
+              `running`, so there is no selected state to report.
+
+              `disabled={pending}` matches the two buttons above, and is load-
+              bearing rather than cosmetic (Duo review): the block stays mounted
+              while a `completeFocus` is in flight, because the phase only moves
+              once the server answers. Without the guard a tap here would set
+              phase to `running` and then have `finishComplete` resolve and
+              override it with `done`, silently discarding the choice. */}
           <div
             role="group"
             aria-labelledby={keepGoingLabelId}
@@ -1321,12 +1336,16 @@ export function FocusTimer({
               <button
                 key={mins}
                 onClick={() => changeTime(mins)}
+                disabled={pending}
                 aria-label={`Add ${mins} minutes`}
-                className="hover:bg-accent inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border px-3"
+                className="hover:bg-accent inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border px-3 disabled:opacity-50"
               >
-                {mins}m
+                {mins}
               </button>
             ))}
+            <span aria-hidden="true" className="text-muted-foreground">
+              {t("focus.keepGoingUnit", voice)}
+            </span>
           </div>
         </div>
       )}

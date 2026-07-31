@@ -210,12 +210,19 @@ export const STRINGS = {
     playful: "Plate cleared?",
   },
   "focus.yesDone": { plain: "All done", playful: "Devoured it" },
-  // The label for the 15/30/45/60 row. Composed with a trailing "min" in the
-  // component, mirroring focus.setup.focusFor's "Focus for [chips]" shape.
+  // The label opening the 15/30/45/60 row, mirroring focus.setup.focusFor's
+  // "Focus for [chips]" shape. The row reads as one sentence — "Keep going for
+  // 15 / 30 / 45 / 60 min" — so the buttons hold bare numbers and the unit is
+  // said once, by focus.keepGoingUnit below.
   "focus.keepGoingFor": {
     plain: "Keep going for",
     playful: "Back for seconds",
   },
+  // Voice-neutral UI furniture, like focus.timer.of and focus.timer.steps: an
+  // abbreviated unit has no plain/playful register to differ in. `aria-hidden`
+  // at the call site, because each button already says "Add N minutes" in full —
+  // without that a screen reader would read the row as "…60, min".
+  "focus.keepGoingUnit": { plain: "min", playful: "min" },
   "focus.notYet": {
     plain: "Not sure how much longer — ask Claude",
     playful: "No idea — ask Claude",
