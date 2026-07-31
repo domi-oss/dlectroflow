@@ -1753,6 +1753,34 @@ describe("FocusTimer — server-action failures (#137, #139)", () => {
     // WCAG 2.4.3 — the same precedent the #66 disclosure and the #65 coupled
     // transport already set in this component: when a transition unmounts the
     // control that was pressed, hand focus to whatever is now primary.
+    it("announces the wait itself, so the spinner is not silent to a screen reader", async () => {
+      vi.mocked(proposeNewEstimate).mockReturnValueOnce(
+        new Promise<number>(() => {}),
+      );
+      await askForNewEstimate();
+
+      expect(screen.getByRole("status")).toHaveTextContent(
+        /claude is re-estimating/i,
+      );
+    });
+
+    it("gives the notice's controls ≥44px targets and an aria-describedby reason", async () => {
+      vi.mocked(proposeNewEstimate).mockRejectedValueOnce(new Error("nope"));
+      await askForNewEstimate();
+
+      const retry = screen.getByRole("button", { name: /try again/i });
+      const skip = screen.getByRole("button", { name: /pick a time myself/i });
+      expect(retry.className).toMatch(/min-h-\[44px\]/);
+      expect(skip.className).toMatch(/min-h-\[44px\]/);
+      // Focus moves to the button, which can cut a role="alert" announcement
+      // short — so the button carries the reason too.
+      const describedBy = retry.getAttribute("aria-describedby");
+      expect(describedBy).toBeTruthy();
+      expect(document.getElementById(describedBy!)).toHaveTextContent(
+        /couldn't get a new estimate/i,
+      );
+    });
+
     it("moves focus to the error's primary action rather than dropping it to <body>", async () => {
       vi.mocked(proposeNewEstimate).mockRejectedValueOnce(new Error("nope"));
       await askForNewEstimate();
