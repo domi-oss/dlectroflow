@@ -124,6 +124,36 @@ function unwrap(node: ts.Expression): ts.Expression {
   }
 }
 
+/**
+ * Climb OUT of the wrappers that change how an expression is written but not
+ * whether it runs, and return the node the expression's statement is.
+ *
+ * The mirror of `unwrap`, and needed for the same reason (Duo review round 2,
+ * !223): `await revalidatePath("/")` puts an `AwaitExpression` between the call
+ * and its `ExpressionStatement`, so a parent check that looks exactly one level
+ * up sees no statement and silently downgrades a top-level call to
+ * "conditional" — a false failure with a misleading message, in a guard whose
+ * whole value is that its verdict can be trusted. Duo reported the `await`
+ * case; the others are the same mistake in different clothes, so they are
+ * handled here rather than waiting to be found one at a time.
+ *
+ * Terminates: `setParentNodes` gives every node a parent up to the source file,
+ * which is none of these.
+ */
+function enclosingStatement(node: ts.Node): ts.Node {
+  let current = node.parent;
+  while (
+    ts.isAwaitExpression(current) ||
+    ts.isParenthesizedExpression(current) ||
+    ts.isVoidExpression(current) ||
+    ts.isNonNullExpression(current) ||
+    ts.isAsExpression(current)
+  ) {
+    current = current.parent;
+  }
+  return current;
+}
+
 /** A module-level function declaration, with the node that carries `export`. */
 interface Declared {
   name: string;
@@ -235,7 +265,7 @@ function scanBody(fn: FunctionLike): Direct {
             // Unconditional == the call IS a statement sitting directly in the
             // function body. Anything else (an `if` consequent, a nested block,
             // a `&&`, a ternary, a loop) can be skipped at run time.
-            const statement = node.parent;
+            const statement = enclosingStatement(node);
             const unconditional =
               ts.isExpressionStatement(statement) && statement.parent === body;
             (unconditional

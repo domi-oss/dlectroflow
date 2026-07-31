@@ -172,6 +172,42 @@ describe("scanServerActions", () => {
     });
   });
 
+  // Duo review round 2 (!223) — `await revalidatePath("/")` puts an
+  // AwaitExpression between the call and its statement, so a parent check that
+  // only looks one level up silently downgrades a top-level call to
+  // "conditional". Generalised past the reported `await` to every wrapper that
+  // changes how an expression is written but not WHETHER it runs, because each
+  // one would have been the same silent misclassification.
+  it.each([
+    ["await", "await revalidatePath('/');"],
+    ["void", "void revalidatePath('/');"],
+    ["parentheses", "(revalidatePath('/'));"],
+  ])("credits a top-level revalidation written with %s", (_label, call) => {
+    const source = [
+      "export async function act() {",
+      "  await prisma.step.update({});",
+      `  ${call}`,
+      "}",
+    ].join("\n");
+    expect(scanServerActions(source)[0]).toMatchObject({
+      revalidates: ["/"],
+      conditionalRevalidates: [],
+    });
+  });
+
+  it("still refuses an awaited revalidation inside a branch", () => {
+    const source = [
+      "export async function act() {",
+      "  await prisma.step.update({});",
+      "  if (x) await revalidatePath('/');",
+      "}",
+    ].join("\n");
+    expect(scanServerActions(source)[0]).toMatchObject({
+      revalidates: [],
+      conditionalRevalidates: ["/"],
+    });
+  });
+
   it("does not credit a revalidation nested in a block", () => {
     const source = [
       "export async function act() {",
