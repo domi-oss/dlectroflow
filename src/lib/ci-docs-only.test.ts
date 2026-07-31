@@ -221,6 +221,22 @@ describe("parseJobsGatedOn", () => {
   it("returns nothing when the alias is unused", () => {
     expect(parseJobsGatedOn("job_a:\n  rules: []\n", "nope")).toEqual([]);
   });
+
+  // Duo review on !217: an exact-string match would silently miss a commented
+  // line and then fail the coverage assertion with a message about
+  // CODE_GATED_SCANNERS drifting, sending the reader after the wrong thing.
+  // `parseCodeChangeGlobs` already tolerates inline comments; so does this.
+  it("tolerates a trailing inline comment on the rules line", () => {
+    const yml = "job_a:\n  rules: *code_scanner_rules   # added in !217\n";
+    expect(parseJobsGatedOn(yml, "code_scanner_rules")).toEqual(["job_a"]);
+  });
+
+  it("does not treat a # without leading whitespace as a comment", () => {
+    // YAML only starts a comment at a `#` preceded by whitespace, so this is a
+    // different alias, not `code_scanner_rules` plus a comment.
+    const yml = "job_a:\n  rules: *code_scanner_rules#notacomment\n";
+    expect(parseJobsGatedOn(yml, "code_scanner_rules")).toEqual([]);
+  });
 });
 
 describe("parseStubReportTypes", () => {
@@ -260,6 +276,32 @@ describe("parseStubReportTypes", () => {
     expect(() =>
       parseStubReportTypes(`${DOCS_ONLY_STUB_JOB}:\n  script:\n    - true\n`),
     ).toThrow(/no artifacts:reports:/);
+  });
+
+  it("tolerates inline comments on the block and on its entries", () => {
+    const yml = [
+      `${DOCS_ONLY_STUB_JOB}:`,
+      "  artifacts:",
+      "    reports:   # what registers the scan type",
+      "      sast: gl-sast-report.json   # empty by construction",
+      "    expire_in: 1 week",
+    ].join("\n");
+    expect(parseStubDeclaredReports(yml)).toEqual({
+      sast: "gl-sast-report.json",
+    });
+  });
+
+  it("names the problem when a report value is a YAML alias, not a filename", () => {
+    // Duo review on !217: an alias compares unequal to the literal filename the
+    // script writes, so the guard would fail — but with a message about the two
+    // lists disagreeing rather than about the alias in front of you.
+    const yml = [
+      `${DOCS_ONLY_STUB_JOB}:`,
+      "  artifacts:",
+      "    reports:",
+      "      sast: *sast_report_file",
+    ].join("\n");
+    expect(() => parseStubDeclaredReports(yml)).toThrow(/literal filename/);
   });
 });
 
@@ -317,6 +359,18 @@ describe("parseStubWrittenReports", () => {
     expect(parseStubWrittenReports(typo)).not.toEqual(
       parseStubDeclaredReports(typo),
     );
+  });
+
+  it("tolerates a trailing // comment on a pair line", () => {
+    const yml = [
+      `${DOCS_ONLY_STUB_JOB}:`,
+      "  script:",
+      "    - |",
+      '          ["sast", "gl-sast-report.json"], // semgrep + advanced SAST',
+    ].join("\n");
+    expect(parseStubWrittenReports(yml)).toEqual({
+      sast: "gl-sast-report.json",
+    });
   });
 
   it("throws when the script writes nothing rather than comparing equal to {}", () => {

@@ -184,9 +184,25 @@ export function parseJobsGatedOn(
       currentKey = topLevelKey[1];
       continue;
     }
-    if (currentKey && line.trim() === `rules: *${anchor}`) jobs.add(currentKey);
+    if (currentKey && withoutComment(line) === `rules: *${anchor}`) {
+      jobs.add(currentKey);
+    }
   }
   return [...jobs];
+}
+
+/**
+ * A line with its trailing YAML comment removed, trimmed.
+ *
+ * YAML only starts a comment at a `#` preceded by whitespace, so `\s+#` is the
+ * correct test and `value#notacomment` is left alone. The list-item parser
+ * above already tolerates inline comments; the job/report parsers below do the
+ * same, because this file's YAML uses them freely and a parser that silently
+ * skipped a commented line would fail its assertion with a message about the
+ * wrong thing (Duo review on !217).
+ */
+function withoutComment(line: string): string {
+  return line.replace(/\s+#.*$/, "").trim();
 }
 
 /** The lines of one column-0 job block, excluding the `job:` line itself. */
@@ -219,14 +235,24 @@ export function parseStubDeclaredReports(
   let reportsIndent: number | null = null;
 
   for (const line of jobBlock(gitlabCiYml, job)) {
-    const trimmed = line.trim();
+    const trimmed = withoutComment(line);
     if (trimmed === "" || trimmed.startsWith("#")) continue;
 
     const indent = line.length - line.trimStart().length;
     if (reportsIndent !== null) {
       if (indent > reportsIndent) {
-        const entry = /^([A-Za-z_][A-Za-z0-9_]*):\s*(\S+)$/.exec(trimmed);
-        if (entry) declared[entry[1]] = entry[2];
+        // The value is the rest of the line rather than one token, so a
+        // filename containing a space is captured instead of skipped.
+        const entry = /^([A-Za-z_][A-Za-z0-9_]*):\s*(.+)$/.exec(trimmed);
+        if (entry) {
+          const [, type, value] = entry;
+          if (value.startsWith("*") || value.startsWith("&")) {
+            throw new Error(
+              `\`${job}:\` declares \`${type}: ${value}\` — artifacts:reports: must name a literal filename here, because the guard compares it against the filename the inline script writes. A YAML alias cannot be compared and would fail as a phantom mismatch (#116).`,
+            );
+          }
+          declared[type] = value;
+        }
         continue;
       }
       reportsIndent = null; // dedented back out of the reports block
@@ -267,7 +293,9 @@ export function parseStubWrittenReports(
   job: string = DOCS_ONLY_STUB_JOB,
 ): Record<string, string> {
   const written: Record<string, string> = {};
-  const PAIR = /^\["([A-Za-z_][A-Za-z0-9_]*)",\s*"([^"]+)"\],?$/;
+  // Trailing `//` comment tolerated for the same reason the YAML parsers
+  // tolerate `#`: this list is meant to be annotated.
+  const PAIR = /^\["([A-Za-z_][A-Za-z0-9_]*)",\s*"([^"]+)"\],?(?:\s*\/\/.*)?$/;
 
   for (const line of jobBlock(gitlabCiYml, job)) {
     const pair = PAIR.exec(line.trim());
