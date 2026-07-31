@@ -280,8 +280,11 @@ describe("parseStubReportTypes", () => {
   it("throws when the stub job is gone rather than reporting zero types", () => {
     // Reporting `[]` would make the coverage assertion below pass by vacuity
     // exactly when the job that closes the gap has been deleted.
+    // Substring match, not `new RegExp(DOCS_ONLY_STUB_JOB)`: building a regex
+    // from a variable trips semgrep's "regular expression with non-literal
+    // value" rule, and `toThrow(string)` already means "message contains".
     expect(() => parseStubReportTypes("workflow:\n  rules: []\n")).toThrow(
-      new RegExp(DOCS_ONLY_STUB_JOB),
+      DOCS_ONLY_STUB_JOB,
     );
   });
 
