@@ -296,7 +296,23 @@ export function FocusTimer({
   // one is ever mounted). Focus lands here when a coupled resume from the
   // mini-player unmounts the button that was pressed — see the effect below.
   const sessionCtaRef = useRef<HTMLButtonElement | null>(null);
-  const pauseHandoffRef = useRef(false);
+  // Why focus needs handing off after the next phase commit, or null for "it
+  // doesn't". A reason rather than a boolean (#138) because the two cases want
+  // *different* behaviour when the sound player is on screen, and a second
+  // boolean ref would have let a third case pick the wrong one silently:
+  //
+  // - "coupled-transport" (#65): the button pressed was the mini-player's, which
+  //   is still mounted when the player stays visible — so stand down, because
+  //   moving focus off a control the user is still pointing at is the rudeness
+  //   the `showSoundPlayer` guard exists to prevent.
+  // - "keep-going" (#138): the button pressed lived in the `timeup` block, which
+  //   has just unmounted. Focus has nowhere to be and MUST move, whether or not
+  //   the player is showing. `showSoundPlayer` is false during `timeup` and true
+  //   once `running` commits, so guarding on it here skipped the hand-off in
+  //   exactly the case that needed it (Duo review; WCAG 2.4.3).
+  const handoffReasonRef = useRef<"coupled-transport" | "keep-going" | null>(
+    null,
+  );
   // #137 a11y (WCAG 2.4.3) — the error notice's own primary action (Retry, or
   // Reload when the deployment moved on). Focus lands here when the notice
   // appears, for the same reason the two refs above exist: the transition can
@@ -602,7 +618,8 @@ export function FocusTimer({
     // togglePause schedules a React update, so the disarm would win the race
     // against the commit and the hand-off would silently stop happening. That
     // exact suggestion was tried and it fails the minimal-mode focus test.
-    pauseHandoffRef.current = phase === "paused" && sessionId != null;
+    handoffReasonRef.current =
+      phase === "paused" && sessionId != null ? "coupled-transport" : null;
     await togglePause();
   }, [phase, sessionId, togglePause]);
 
@@ -613,12 +630,18 @@ export function FocusTimer({
     if (phase === "timeup" && mins > 0) {
       // #138 a11y (WCAG 2.4.3) — this transition unmounts the whole time-up
       // block, including the keep-going button that was just pressed, so focus
-      // would land on <body>. Reuse the #65 coupled-transport hand-off: the
-      // effect below moves focus to sessionCtaRef, which in the running block is
-      // the Pause control. Armed only on THIS branch — the running screen's ±5
-      // buttons also call changeTime and they stay mounted, so hijacking focus
-      // there would yank it off the button the user is still tapping.
-      pauseHandoffRef.current = true;
+      // would land on <body>. The effect below moves it to sessionCtaRef, which
+      // in the running block is the Pause control. Armed only on THIS branch —
+      // the running screen's ±5 buttons also call changeTime and they stay
+      // mounted, so hijacking focus there would yank it off the button the user
+      // is still tapping.
+      //
+      // Tagged "keep-going" rather than reusing #65's reason (Duo review): #65
+      // stands down while the sound player is visible, and here that guard is
+      // actively wrong — showSoundPlayer is false during `timeup` and true once
+      // `running` commits, so it suppressed the hand-off precisely when the
+      // pressed button had gone.
+      handoffReasonRef.current = "keep-going";
       goToPhase("running");
     }
   };
@@ -751,8 +774,9 @@ export function FocusTimer({
   // — so there is no second copy of that condition to drift. Unconditional and
   // above every early return, so hook order is stable.
   useEffect(() => {
-    if (!pauseHandoffRef.current) return;
-    pauseHandoffRef.current = false;
+    const reason = handoffReasonRef.current;
+    if (!reason) return;
+    handoffReasonRef.current = null;
     // #137 — a failed coupled press does not change the phase, so this effect
     // would not otherwise re-run and the flag would stay armed for the next,
     // unrelated transition to consume. Disarm above this line, then stand
@@ -760,7 +784,12 @@ export function FocusTimer({
     // session control would bounce a screen-reader user away from the message
     // that just appeared.
     if (failure) return;
-    if (!showSoundPlayer) sessionCtaRef.current?.focus();
+    // See handoffReasonRef: only the coupled-transport case defers to a visible
+    // sound player. A keep-going tap always hands off, because the button it was
+    // made on no longer exists.
+    if (reason === "keep-going" || !showSoundPlayer) {
+      sessionCtaRef.current?.focus();
+    }
   }, [phase, showSoundPlayer, failure]);
 
   // #137 a11y (WCAG 2.4.3) — when the notice appears, put focus on the one
@@ -1292,13 +1321,6 @@ export function FocusTimer({
               <Check aria-hidden="true" className="h-4 w-4 shrink-0" />
               {stripLeadingGlyph(t("focus.yesDone", voice))}
             </button>
-            <button
-              onClick={startReestimate}
-              disabled={pending}
-              className="hover:bg-accent inline-flex min-h-[44px] items-center rounded-md border px-4 disabled:opacity-50"
-            >
-              {t("focus.notYet", voice)}
-            </button>
           </div>
           {/* A `group` with its own label, not four loose buttons: without it a
               screen-reader user hears "15, 30, 45, 60" with nothing saying what
@@ -1346,6 +1368,21 @@ export function FocusTimer({
             <span aria-hidden="true" className="text-muted-foreground">
               {t("focus.keepGoingUnit", voice)}
             </span>
+          </div>
+          {/* Last, not beside "All done" (Duo review). The comment above claims
+              the order is done -> keep going -> not sure, and this button sitting
+              in the same flex row as "All done" made that false in the DOM: tab
+              and screen-reader order announced the AI round-trip BEFORE the four
+              immediate choices, which is the opposite of the rationale. Cheapest
+              answer first, the one that costs a server round-trip last. */}
+          <div className="flex justify-center">
+            <button
+              onClick={startReestimate}
+              disabled={pending}
+              className="hover:bg-accent inline-flex min-h-[44px] items-center rounded-md border px-4 disabled:opacity-50"
+            >
+              {t("focus.notYet", voice)}
+            </button>
           </div>
         </div>
       )}

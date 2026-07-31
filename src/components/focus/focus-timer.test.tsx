@@ -1160,6 +1160,67 @@ describe("FocusTimer — time-up: keep going for N more minutes (#138)", () => {
     expect(document.body).not.toHaveFocus();
   });
 
+  // Duo review round 2, and a sharp catch. The #65 hand-off effect stands down
+  // when `showSoundPlayer` is true, because in the coupled-transport case the
+  // button the user pressed is still on screen and moving focus would be rude.
+  // The keep-going case is the opposite — the pressed button lived in the
+  // `timeup` block, which has just unmounted. And `showSoundPlayer` is *false*
+  // during `timeup` (`sessionActive` is false there) and flips to *true* on the
+  // way to `running`, so with sound enabled the hand-off was skipped exactly
+  // when it was most needed and focus fell to <body>. WCAG 2.4.3.
+  //
+  // Every other test here uses base()'s `sound: "off"`, which keeps
+  // `showSoundPlayer` false throughout and structurally cannot see this.
+  it("hands focus off even with the sound player on screen after the transition", async () => {
+    render(
+      <FocusTimer
+        {...base({
+          settings: {
+            timerStyle: null,
+            minimalMode: false,
+            keepAwake: true,
+            alarmEnabled: true,
+            sound: "lofi_calm",
+          },
+        })}
+      />,
+    );
+    await act(async () => {
+      screen.getByRole("button", { name: /start focusing/i }).click();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    const group = screen.getByRole("group", { name: /keep going for/i });
+    await act(async () => {
+      within(group)
+        .getByRole("button", { name: /^add 15 minutes$/i })
+        .click();
+    });
+    expect(screen.getByRole("button", { name: /^pause$/i })).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
+  });
+
+  // Duo review round 2: the comment claimed "done → keep going → not sure", but
+  // "ask Claude" sat in the same flex row as "All done", so the DOM (and so tab
+  // and screen-reader) order announced the AI round-trip BEFORE the four
+  // immediate choices — the opposite of the stated rationale.
+  it("orders the answers done → keep going → not sure in the DOM", async () => {
+    await runToTimeUp();
+    const labels = screen
+      .getAllByRole("button")
+      .map((b) => b.getAttribute("aria-label") ?? b.textContent ?? "")
+      .filter((t) => /all done|add \d+ minutes|ask claude/i.test(t));
+    expect(labels).toEqual([
+      "All done",
+      "Add 15 minutes",
+      "Add 30 minutes",
+      "Add 45 minutes",
+      "Add 60 minutes",
+      "Not sure how much longer — ask Claude",
+    ]);
+  });
+
   it("playful voice keeps the food register the app already ships", async () => {
     mockVoice = "playful";
     await runToTimeUp();
