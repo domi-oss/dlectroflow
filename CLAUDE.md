@@ -61,7 +61,7 @@ TDD: failing test first, watch it fail, then implement.
 
 **Vitest runs in the `node` environment.** jsdom is opt-in per file, via a `// @vitest-environment jsdom` docblock on the first line — 64 files do this today. A component or hook test written without it fails on missing DOM globals rather than telling you what's wrong, so add the docblock when you add a `.test.tsx`.
 
-The suite includes **hygiene tests that assert on the repo itself** — `dockerfile-hygiene`, `lockfile-hygiene`, `manifest-hygiene`, `env-drift`, `ci-docs-only`, `enum-constraint-sync`. If one fails, the repo drifted; fix the drift, don't relax the test.
+The suite includes **hygiene tests that assert on the repo itself** — `dockerfile-hygiene`, `lockfile-hygiene`, `manifest-hygiene`, `fetch-host-hygiene`, `env-drift`, `ci-docs-only`, `enum-constraint-sync`. If one fails, the repo drifted; fix the drift, don't relax the test. `fetch-host-hygiene` is a security gate, not style: it replaced a SAST rule (#83), so relaxing it means reopening a CWE-918 hole.
 
 ## CI & release
 

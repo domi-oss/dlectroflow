@@ -66,8 +66,14 @@ manual toil from the buckets above:
   cognitive-load judgment).
 - **Format gate** — Prettier is **not** installed today; add it + `prettier --check` to the
   `test_app` job (reconciles Layer 1 item 4 and Layer 4 item 2).
-- **Scheduled pipelines** — a weekly #16 health/spend digest and a monthly run of the Duo
-  `security-assessment.md` (it already files a tracked issue).
+- ~~**Scheduled pipelines** — a weekly #16 health/spend digest and a monthly run of the Duo
+  `security-assessment.md` (it already files a tracked issue).~~ **Done.** The weekly
+  digest is the `ops_digest` job on the base-image rescan schedule; the monthly
+  assessment is the `security_assessment` job on its own **Monthly security
+  assessment** schedule (`SECURITY_ASSESSMENT=true`, #134). The job does not
+  perform the assessment — it files the dated work item the prompt requires,
+  pre-filled with the active-vulnerability snapshot, so the monthly bucket below
+  starts from data instead of from a blank page.
 
 ---
 
