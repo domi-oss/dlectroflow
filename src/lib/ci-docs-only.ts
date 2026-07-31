@@ -184,9 +184,12 @@ export function parseJobsGatedOn(
       currentKey = topLevelKey[1];
       continue;
     }
-    if (currentKey && withoutComment(line) === `rules: *${anchor}`) {
-      jobs.add(currentKey);
-    }
+    // Match on the parsed alias rather than the literal line: `rules:  *x`
+    // with two spaces is valid YAML, and a literal comparison would drop the
+    // job and then fail the coverage assertion with a message about
+    // CODE_GATED_SCANNERS drifting instead of about the whitespace.
+    const alias = /^rules:\s*\*(\S+)$/.exec(withoutComment(line));
+    if (currentKey && alias?.[1] === anchor) jobs.add(currentKey);
   }
   return [...jobs];
 }
@@ -243,7 +246,11 @@ export function parseStubDeclaredReports(
       if (indent > reportsIndent) {
         // The value is the rest of the line rather than one token, so a
         // filename containing a space is captured instead of skipped.
-        const entry = /^([A-Za-z_][A-Za-z0-9_]*):\s*(.+)$/.exec(trimmed);
+        // Hyphens are allowed in the type even though every GitLab report
+        // type is snake_case today: a type neither parser recognised would be
+        // dropped from BOTH sides, so the two lists would agree about a report
+        // neither of them had actually checked.
+        const entry = /^([A-Za-z_][\w-]*):\s*(.+)$/.exec(trimmed);
         if (entry) {
           const [, type, value] = entry;
           if (value.startsWith("*") || value.startsWith("&")) {
@@ -294,8 +301,10 @@ export function parseStubWrittenReports(
 ): Record<string, string> {
   const written: Record<string, string> = {};
   // Trailing `//` comment tolerated for the same reason the YAML parsers
-  // tolerate `#`: this list is meant to be annotated.
-  const PAIR = /^\["([A-Za-z_][A-Za-z0-9_]*)",\s*"([^"]+)"\],?(?:\s*\/\/.*)?$/;
+  // tolerate `#`: this list is meant to be annotated. The type character class
+  // matches the one in parseStubDeclaredReports, hyphens included — the two
+  // must recognise the same set of types or they agree by both skipping.
+  const PAIR = /^\["([A-Za-z_][\w-]*)",\s*"([^"]+)"\],?(?:\s*\/\/.*)?$/;
 
   for (const line of jobBlock(gitlabCiYml, job)) {
     const pair = PAIR.exec(line.trim());

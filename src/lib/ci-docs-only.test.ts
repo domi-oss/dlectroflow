@@ -231,6 +231,19 @@ describe("parseJobsGatedOn", () => {
     expect(parseJobsGatedOn(yml, "code_scanner_rules")).toEqual(["job_a"]);
   });
 
+  it("tolerates extra whitespace before the alias", () => {
+    // `rules:  *anchor` is valid YAML. Matching on the parsed alias rather
+    // than the literal line keeps the failure message about the thing that
+    // actually drifted (Duo review on !217).
+    const yml = "job_a:\n  rules:   *code_scanner_rules\n";
+    expect(parseJobsGatedOn(yml, "code_scanner_rules")).toEqual(["job_a"]);
+  });
+
+  it("does not match a different alias with the anchor as a prefix", () => {
+    const yml = "job_a:\n  rules: *code_scanner_rules_v2\n";
+    expect(parseJobsGatedOn(yml, "code_scanner_rules")).toEqual([]);
+  });
+
   it("does not treat a # without leading whitespace as a comment", () => {
     // YAML only starts a comment at a `#` preceded by whitespace, so this is a
     // different alias, not `code_scanner_rules` plus a comment.
@@ -289,6 +302,26 @@ describe("parseStubReportTypes", () => {
     expect(parseStubDeclaredReports(yml)).toEqual({
       sast: "gl-sast-report.json",
     });
+  });
+
+  it("reads a hyphenated report type on both sides of the comparison", () => {
+    // Every GitLab security report type is snake_case today, so this is
+    // future-proofing, not a live bug — but a type the parsers silently
+    // skipped would be skipped on BOTH sides, so the two lists would agree
+    // about a report neither of them checked (Duo review on !217).
+    const yml = [
+      `${DOCS_ONLY_STUB_JOB}:`,
+      "  script:",
+      "    - |",
+      '          ["future-type", "gl-future-report.json"],',
+      "  artifacts:",
+      "    reports:",
+      "      future-type: gl-future-report.json",
+    ].join("\n");
+    expect(parseStubDeclaredReports(yml)).toEqual({
+      "future-type": "gl-future-report.json",
+    });
+    expect(parseStubWrittenReports(yml)).toEqual(parseStubDeclaredReports(yml));
   });
 
   it("names the problem when a report value is a YAML alias, not a filename", () => {
