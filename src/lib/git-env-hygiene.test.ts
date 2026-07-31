@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   ALLOWLIST_HELPER,
@@ -62,12 +63,25 @@ const SCANNED_ROOTS = ["src", "scripts", "prisma", "e2e"] as const;
 
 const REPO_ROOT = path.join(__dirname, "..", "..");
 
+/**
+ * Resolved against REPO_ROOT, never the process CWD (Duo review on !227).
+ * `readdirSync` on a bare `"src"` depends on where the runner happens to be, and
+ * the failure is SILENT in the worst way: the catch below turns an unreadable
+ * root into zero files, so a CWD that is not the repo root makes this whole gate
+ * pass while scanning nothing. That is the #146 shape — a guard that quietly
+ * stops guarding — reproduced inside the guard written to prevent it. The paths
+ * that go OUT stay repo-relative, because they key REVIEWED_AMBIENT_GIT_CALLS
+ * and appear in failure messages.
+ */
 function scannedFiles(): string[] {
   const files: string[] = [];
   for (const root of SCANNED_ROOTS) {
     let entries: string[];
     try {
-      entries = readdirSync(root, { recursive: true, encoding: "utf8" });
+      entries = readdirSync(path.join(REPO_ROOT, root), {
+        recursive: true,
+        encoding: "utf8",
+      });
     } catch {
       // A scanned root that does not exist is a repo-layout change, not a
       // silent pass — the "roots exist" test below is what reports it.
@@ -84,7 +98,10 @@ function scannedFiles(): string[] {
 /** Every child-process call site in the real tree, with its file. */
 function repoCalls(): { file: string; call: ChildProcessCall }[] {
   return scannedFiles().flatMap((file) =>
-    scanChildProcessCalls(readFileSync(file, "utf8"), file).map((call) => ({
+    scanChildProcessCalls(
+      readFileSync(path.join(REPO_ROOT, file), "utf8"),
+      file,
+    ).map((call) => ({
       file,
       call,
     })),
@@ -357,6 +374,22 @@ describe("scanChildProcessCalls — is the repository named", () => {
     expect(only(source).pinsRepository).toBe(false);
   });
 
+  it("does not call an unrelated .assign() ambient", () => {
+    // Duo review (!227): matching any `.assign` treated `schema.assign(process.env)`
+    // as Object.assign. Safe direction — it over-reports — but a guard that cries
+    // wolf on unrelated code gets routed around, which is how the SAST ruleset
+    // this replaced became unusable.
+    const source = `const env = schema.assign(process.env);
+       execFileSync("git", ["-C", dir, "log"], { env });`;
+    expect(only(source).env).not.toBe("ambient");
+  });
+
+  it("still calls a real Object.assign(…, process.env) ambient", () => {
+    const source = `const env = Object.assign({}, process.env);
+       execFileSync("git", ["-C", dir, "log"], { env });`;
+    expect(only(source).env).toBe("ambient");
+  });
+
   it("is not fooled by a -C that belongs to another word", () => {
     expect(
       only(`execFileSync("git", ["log", "--pretty=-Coops"]);`).pinsRepository,
@@ -412,7 +445,7 @@ describe("the repo itself", () => {
     // `fetch-host-hygiene` puts on its roots, for the same reason (!218).
     for (const root of SCANNED_ROOTS) {
       expect(
-        () => readdirSync(root, { encoding: "utf8" }),
+        () => readdirSync(path.join(REPO_ROOT, root), { encoding: "utf8" }),
         `${root}/ is missing — fix the layout or update SCANNED_ROOTS`,
       ).not.toThrow();
     }
@@ -420,6 +453,35 @@ describe("the repo itself", () => {
 
   it("scans a real number of files (guards against matching nothing)", () => {
     expect(scannedFiles().length).toBeGreaterThan(50);
+  });
+
+  // Duo review (!227). The scan used to `readdirSync("src")` relative to the
+  // process CWD, and `scannedFiles()` swallows an unreadable root — so running
+  // from anywhere else made every "no violations" assertion below vacuously true.
+  // The gate would have been green while looking at nothing.
+  it("scans the same files from any working directory", () => {
+    const fromRepoRoot = scannedFiles();
+    const original = process.cwd();
+    try {
+      process.chdir(tmpdir());
+      expect(scannedFiles()).toEqual(fromRepoRoot);
+      expect(scannedFiles().length).toBeGreaterThan(50);
+    } finally {
+      process.chdir(original);
+    }
+  });
+
+  it("reads file contents from any working directory too", () => {
+    // Anchoring the listing without anchoring the reads would trade a silent
+    // empty scan for a loud ENOENT — better, but still not working.
+    const original = process.cwd();
+    try {
+      process.chdir(tmpdir());
+      expect(() => repoCalls()).not.toThrow();
+      expect(repoCalls().length).toBeGreaterThanOrEqual(6);
+    } finally {
+      process.chdir(original);
+    }
   });
 
   it("finds the child-process call sites that are known to exist", () => {

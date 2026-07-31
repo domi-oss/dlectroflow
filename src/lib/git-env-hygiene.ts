@@ -262,9 +262,17 @@ function isAmbientEnv(
 
   // `Object.assign(target, ...sources)` merges every argument into the result,
   // so any ambient one contaminates it.
+  //
+  // The callee object is checked too (Duo review on !227): matching any `.assign`
+  // would call `schema.assign(process.env)` ambient. That errs in the SAFE
+  // direction — over-reporting fails the gate loudly rather than letting a leak
+  // past — but a guard that cries wolf on unrelated code is a guard people start
+  // routing around, which is how the SAST ruleset this replaced became unusable.
   if (
     ts.isCallExpression(expression) &&
     ts.isPropertyAccessExpression(expression.expression) &&
+    ts.isIdentifier(expression.expression.expression) &&
+    expression.expression.expression.text === "Object" &&
     expression.expression.name.text === "assign"
   ) {
     return expression.arguments.some((argument) =>
