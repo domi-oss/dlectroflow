@@ -1,0 +1,96 @@
+# Custom GitLab SAST ruleset.
+#
+# ── #83: the generic SSRF taint rule is demoted to Info, not disabled ─────────
+#
+# `javascript-node-ssrf-generic-taint` has produced FIVE findings in this repo
+# and zero true positives. All of them sit on OAuth token-exchange code whose
+# request target is a module-level string constant:
+#
+#   src/lib/google.ts        fetch(TOKEN_ENDPOINT, …)   ×2  (exchangeCode, refreshAccessToken)
+#   src/lib/google.ts        fetch(REVOKE_ENDPOINT, …)  ×1  (disconnectGoogle)
+#   src/lib/auth/providers.ts  fetch(`${GITLAB}/oauth/token`, …)  and  `${GITLAB}/api/v4/user`
+#
+# What the taint engine actually follows is user input reaching the request
+# BODY — the `code` and `refresh_token` form fields. That is what an
+# authorization-code exchange *is*. SSRF (CWE-918) requires control of the
+# request TARGET; none of these call sites lets a caller influence the scheme,
+# host or port. The hosts are `oauth2.googleapis.com` and the `GITLAB` constant,
+# fixed at build time.
+#
+# Worse, the findings RE-FINGERPRINT whenever a line moves, so they resurface as
+# "new High" and trip the "Require approval for new Critical or High
+# vulnerabilities" scan-result policy on merge requests that changed nothing
+# relevant. That has now blocked an unrelated MR six times (!169 among them),
+# and #35 Phase C — per-user Google and LLM credentials — will move these lines
+# again.
+#
+# ── Why an override and not `disable = true` ──────────────────────────────────
+#
+# Disabling marks everything the rule previously found as "No longer detected",
+# which would silently retire the documented google.ts dismissals and lose the
+# audit trail. A severity override keeps every finding VISIBLE in the report and
+# keeps its dismissal history intact, while taking the rule out of a gate that
+# fires on new Critical/High. It is also reversible without losing history.
+#
+# ── The compensating control ──────────────────────────────────────────────────
+#
+# A severity override on its own is a reduction in coverage, so it is paired
+# with a repo-owned static guard: `src/lib/fetch-host-hygiene.ts` +
+# `src/lib/fetch-host-hygiene.test.ts` assert that every `fetch()` call site in
+# `src/`, `prisma/` and `scripts/` targets a host that is constant at build
+# time. That guard tests the property this rule cannot — target constancy rather
+# than body taint — and it fails the unit-test job, which is a HARD gate rather
+# than an approval prompt. The test file's `REVIEWED_DYNAMIC_HOSTS` map is where
+# an intentionally configurable host (BYO-LLM `LLM_BASE_URL`, #59) has to be
+# argued for in review.
+#
+# ── Which analyzer sections are needed, and how that was established ──────────
+#
+# Verified against real `gl-sast-report.json` artifacts from main pipeline 1240
+# (jobs 15635509187 `gitlab-advanced-sast` and 15635509188 `semgrep-sast`),
+# rather than assumed:
+#
+#   * gitlab-advanced-sast reports all four SSRF findings, rule id
+#     `javascript-node-ssrf-generic-taint`.
+#   * semgrep-sast reports ZERO SSRF findings today.
+#
+# The `[semgrep]` overrides below are therefore currently inert, and are here
+# deliberately. The advanced-SAST finding cross-references BOTH semgrep ids, and
+# the semgrep report does contain other `nodejs_scan.*` rules — so that family is
+# enabled and could surface the same false positive under the other analyzer if
+# the two ever stop deduping the way they do now. Overriding one analyzer and
+# not the other would silently reopen the gate.
+
+[gitlab-advanced-sast]
+  [[gitlab-advanced-sast.ruleset]]
+    [gitlab-advanced-sast.ruleset.identifier]
+      type = "gitlab-advanced-sast_id"
+      value = "javascript-node-ssrf-generic-taint"
+    [gitlab-advanced-sast.ruleset.override]
+      # Still reported, still triaged, no longer a merge gate. Reachability is
+      # asserted by src/lib/fetch-host-hygiene.test.ts instead — see above.
+      severity = "Info"
+      description = "Generic SSRF taint sink. Demoted to Info in #83: this rule follows user input into the request BODY, not the request TARGET, and every call site in this repo fetches a host that is constant at build time. Target constancy is enforced instead by src/lib/fetch-host-hygiene.test.ts, which fails the build rather than asking for an approval. Re-raise this to High if that guard is ever removed or its REVIEWED_DYNAMIC_HOSTS map grows a request-derived host."
+
+[semgrep]
+  # The nodejs-scan variant of the same detector. Live in the semgrep ruleset
+  # (other `nodejs_scan.*` rules do fire here) but currently deduped away by
+  # gitlab-advanced-sast.
+  [[semgrep.ruleset]]
+    [semgrep.ruleset.identifier]
+      type = "semgrep_id"
+      value = "nodejs_scan.javascript-ssrf-rule-node_ssrf"
+    [semgrep.ruleset.override]
+      severity = "Info"
+      description = "Generic SSRF taint sink. Demoted to Info in #83 for the same reason as the gitlab-advanced-sast rule above — body taint, not target taint. Target constancy is enforced by src/lib/fetch-host-hygiene.test.ts."
+
+  # The LGPL variant, cross-referenced as a `semgrep_id` on the advanced-SAST
+  # finding. Not present in today's semgrep report; overridden so enabling the
+  # LGPL ruleset cannot reopen the gate without anyone noticing.
+  [[semgrep.ruleset]]
+    [semgrep.ruleset.identifier]
+      type = "semgrep_id"
+      value = "rules_lgpl_javascript_ssrf_rule-node-ssrf"
+    [semgrep.ruleset.override]
+      severity = "Info"
+      description = "Generic SSRF taint sink. Demoted to Info in #83 for the same reason as the gitlab-advanced-sast rule above — body taint, not target taint. Target constancy is enforced by src/lib/fetch-host-hygiene.test.ts."
