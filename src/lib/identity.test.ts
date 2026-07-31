@@ -3,6 +3,7 @@ import {
   accountLabel,
   identityFor,
   identityLine,
+  newAccountLine,
   providerDisplayName,
   roleWord,
 } from "./identity";
@@ -132,5 +133,69 @@ describe("identityLine", () => {
     });
     expect(line).not.toMatch(/ {2}/);
     expect(line).toMatch(/ with acme-sso$/);
+  });
+});
+
+describe("newAccountLine", () => {
+  const ADA = {
+    label: "ada",
+    provider: "GitLab",
+    role: UserRole.Owner,
+  };
+
+  // #111 — the empty inbox of an account that has NEVER held anything. Same
+  // "one JS string" rule as identityLine(), for the same reason: the sentence
+  // is built from a voiced lead and two interpolations, and JSX text between
+  // them is where this Next version's transform eats spaces.
+  it("names the account inside the voiced lead, in plain", () => {
+    expect(newAccountLine(ADA, "plain")).toBe(
+      "Nothing here yet — this is a new account (ada, signed in with GitLab)",
+    );
+  });
+
+  it("names the account inside the voiced lead, in playful", () => {
+    expect(newAccountLine(ADA, "playful")).toBe(
+      "🍳 Nothing here yet — this account is brand new (ada, signed in with GitLab)",
+    );
+  });
+
+  // The whole point of #100/#111: the alarming case is signing in with the
+  // WRONG provider account, which produces an empty workspace that looks like
+  // data loss. Both facts have to be in the sentence for it to answer that.
+  it("carries the handle and the provider in both voices", () => {
+    for (const voice of ["plain", "playful"] as const) {
+      const line = newAccountLine(ADA, voice);
+      expect(line).toContain("ada");
+      expect(line).toContain("GitLab");
+    }
+  });
+
+  // A provider may withhold a username, in which case accountLabel() falls back
+  // to a short account id — the line must still read as a sentence, not trail
+  // off into an empty bracket.
+  it("reads sensibly when the account has no handle", () => {
+    expect(
+      newAccountLine(
+        { label: "#cabc1234", provider: "acme-sso", role: UserRole.Member },
+        "plain",
+      ),
+    ).toBe(
+      "Nothing here yet — this is a new account (#cabc1234, signed in with acme-sso)",
+    );
+  });
+
+  it("keeps single spaces around every interpolation", () => {
+    for (const voice of ["plain", "playful"] as const) {
+      expect(newAccountLine(ADA, voice)).not.toMatch(/ {2}/);
+    }
+  });
+
+  // The role is deliberately absent: it answers "what may I do here?", not
+  // "whose workspace am I looking at?", and the header popover carries it on
+  // every page already (identityLine).
+  it("does not repeat the role the header popover already shows", () => {
+    for (const voice of ["plain", "playful"] as const) {
+      expect(newAccountLine(ADA, voice)).not.toContain("Owner");
+    }
   });
 });
