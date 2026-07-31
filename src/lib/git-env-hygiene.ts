@@ -30,9 +30,15 @@
  * ── Kept free of `fs`, like every other hygiene module ───────────────────────
  * The caller reads the files; this module parses. It uses the TypeScript AST for
  * the reason `fetch-host-hygiene` does: a regex cannot tell `process.env` spread
- * wholesale from `process.env.PATH` read by name, and the difference between
- * those two is the entire bug. The first hands the child every variable git
- * looks at; the second is exactly how an allow-list is meant to be built.
+ * wholesale from a single variable read off it by name, and the difference
+ * between those two is the entire bug. The first hands the child every variable
+ * git looks at; the second is exactly how an allow-list is meant to be built.
+ *
+ * Which is also why the prose here never spells out a `process.env` dot-read or
+ * a destructuring of it: `check-env-drift.ts` greps raw source text, comments
+ * included, and skips only `*.test.ts`. A named example in a doc comment here
+ * registers as a real env read and fails that gate on a variable that does not
+ * exist (#146 — it did, on `PATH` and on an example binding called `A`).
  *
  * ── What it does NOT see ────────────────────────────────────────────────────
  * A git invocation reached through an imported helper, or one whose command is
@@ -146,9 +152,11 @@ function statementsOf(node: ts.Node): readonly ts.Statement[] {
  * What the nearest `const` named `name` is bound to, walking outwards from
  * `from`.
  *
- * `"ambient-rest"` is the `const { A: _a, ...rest } = process.env` shape — the
- * one `registry-prune.test.ts` used to launder the ambient environment through a
+ * `"ambient-rest"` is the `const { …, ...rest } = process.env` shape — the one
+ * `registry-prune.test.ts` used to launder the ambient environment through a
  * list of exclusions. It is not an expression, so it needs its own answer.
+ * (Spelling the excluded names out here would trip the env-drift gate; see the
+ * module comment.)
  *
  * `let` and `var` return `null`: a rebindable name is only as constant as the
  * last write to it, and proving that needs flow analysis this module does not
@@ -221,10 +229,10 @@ function isProcessEnv(node: ts.Expression): boolean {
  * Does `node` carry the ambient environment as a WHOLE object?
  *
  * `{ ...process.env }`, `process.env`, `Object.assign({}, process.env)` and a
- * rest binding of it all do. `process.env.PATH` does not — reading one variable
- * by name is how the allow-list is built, and conflating the two would make this
- * guard unusable. That distinction is the reason this module parses TypeScript
- * instead of grepping for `process.env`.
+ * rest binding of it all do. A single named read — PATH, say — does not:
+ * reading one variable by name is how the allow-list is built, and conflating
+ * the two would make this guard unusable. That distinction is the reason this
+ * module parses TypeScript instead of grepping for `process.env`.
  */
 function isAmbientEnv(
   node: ts.Expression,
