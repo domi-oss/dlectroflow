@@ -680,26 +680,19 @@ export function FocusTimer({
    * reload instead, because the retry would post the same dead action id.
    */
   const retryFailed = () => {
-    switch (failure?.handler) {
-      case "start":
-        void start();
-        return;
-      case "resumeExisting":
-        void resumeExisting();
-        return;
-      case "togglePause":
-        void togglePause();
-        return;
-      case "complete":
-        void finishComplete();
-        return;
-      case "reestimate":
-        void startReestimate();
-        return;
-      case "requeue":
-        void confirmRequeue();
-        return;
-    }
+    // A `Record<FailedHandler, …>` rather than a switch, so adding a handler to
+    // the union without giving it a retry is a TYPE error rather than a Retry
+    // button that silently does nothing — which would be this MR's own bug,
+    // reintroduced in the button that exists to fix it.
+    const retry: Record<FailedHandler, () => void> = {
+      start: () => void start(),
+      resumeExisting: () => void resumeExisting(),
+      togglePause: () => void togglePause(),
+      complete: () => void finishComplete(),
+      reestimate: () => void startReestimate(),
+      requeue: () => void confirmRequeue(),
+    };
+    if (failure) retry[failure.handler]();
   };
 
   /**
