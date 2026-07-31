@@ -61,7 +61,9 @@ TDD: failing test first, watch it fail, then implement.
 
 **Vitest runs in the `node` environment.** jsdom is opt-in per file, via a `// @vitest-environment jsdom` docblock on the first line — 64 files do this today. A component or hook test written without it fails on missing DOM globals rather than telling you what's wrong, so add the docblock when you add a `.test.tsx`.
 
-The suite includes **hygiene tests that assert on the repo itself** — `dockerfile-hygiene`, `lockfile-hygiene`, `manifest-hygiene`, `fetch-host-hygiene`, `env-drift`, `ci-docs-only`, `enum-constraint-sync`. If one fails, the repo drifted; fix the drift, don't relax the test. `fetch-host-hygiene` is a security gate, not style: it replaced a SAST rule (#83), so relaxing it means reopening a CWE-918 hole.
+The suite includes **hygiene tests that assert on the repo itself** — `dockerfile-hygiene`, `lockfile-hygiene`, `manifest-hygiene`, `fetch-host-hygiene`, `version-hygiene`, `revalidation-hygiene`, `env-drift`, `ci-docs-only`, `ci-job-deps`, `enum-constraint-sync`. If one fails, the repo drifted; fix the drift, don't relax the test. `fetch-host-hygiene` is a security gate, not style: it replaced a SAST rule (#83), so relaxing it means reopening a CWE-918 hole.
+
+They all follow one shape: a **pure module with no `fs`**, so the parsing is unit-testable on synthetic input, and the colocated `.test.ts` reads the real files. Follow it when adding one — a guard whose parser can only be exercised against the repo can't be shown to fail.
 
 ## CI & release
 
@@ -70,8 +72,17 @@ Stages: `build` → `build_image` (Kaniko) → `test` (SAST, dependency, secret,
 - Docs-only changes take a reduced pipeline (the path list in `.gitlab-ci.yml` decides).
 - **Protected CI variables make `main`'s environment differ from every MR's** — an MR can be green and `main` still go red. Diff the two before assuming a flake.
 - A repo-wide reformat re-fingerprints triaged SAST findings, hard-blocking unrelated MRs as "new". Rebase the MR onto the reformatted `main` to clear it.
-- Releases: a `vX.Y.Z` tag builds the versioned image, but **the GitLab Release object is a manual step** — no CI job creates it. Verify tag + CHANGELOG + image + Release when cutting.
 - Upgrades must step through minor versions sequentially; downgrades are unsupported.
+
+### Cutting a release
+
+A `vX.Y.Z` tag builds and publishes the versioned image. **Everything else is manual** — no CI job bumps a version or creates the GitLab Release object. Do these in order, on `main`, in **one commit before the tag**:
+
+1. **Bump the version in all three files, to the same value** — `package.json` `version`, `charts/dlectroflow/Chart.yaml` `version` **and** `appVersion` (they're lockstep by decision; the reasoning is in `Chart.yaml`).
+2. **Close the CHANGELOG section**: `## [Unreleased]` becomes `## [X.Y.Z] - <date>`, a fresh empty `## [Unreleased]` goes above it, and the link-reference definitions at the foot of the file are updated.
+3. `npx vitest run src/lib/version-hygiene.test.ts` — **the gate.** It fails until steps 1 and 2 agree with each other. #148 exists because this step didn't: v0.4.0's tag moved while `package.json` stayed on `0.3.0`, so the image published as `:v0.4.0` was built from a tree calling itself 0.3.0, and `Chart.yaml` still advertised the `helm create` scaffold's `appVersion: "1.0.0"` — which `helm list` prints to operators as the version of the app running.
+4. Commit, push, **then** tag: `git tag vX.Y.Z && git push origin vX.Y.Z`. The bump must be *in* the tagged tree, which is why nothing automates it — a pipeline rewriting `package.json` on tag push creates a commit the tag doesn't contain.
+5. Verify the `:vX.Y.Z` image landed in the registry, then **create the GitLab Release object by hand** and paste the CHANGELOG section into it.
 
 ## Deploy
 

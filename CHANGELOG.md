@@ -17,7 +17,13 @@ operators upgrading a self-hosted instance don't get surprised.
 ## [Unreleased]
 
 > Shipped to production but not yet tagged. At cut time this becomes
-> `## [X.Y.Z] - <date>` and a fresh empty `## [Unreleased]` is added above it.
+> `## [X.Y.Z] - <date>` and a fresh empty `## [Unreleased]` is added above it —
+> **in the same commit that bumps `package.json` and `charts/dlectroflow/Chart.yaml`
+> to that version, before the tag is pushed.** `src/lib/version-hygiene.test.ts`
+> fails until all three agree; the full cut checklist is in `CLAUDE.md`
+> ("CI & release" → "Cutting a release"). v0.4.0 was tagged without the bump
+> (#148), so the image published as `:v0.4.0` was built from a tree that called
+> itself 0.3.0.
 
 ### Added
 
