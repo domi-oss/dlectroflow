@@ -54,11 +54,19 @@ The project's container registry is currently **private**, so the published imag
 cannot be pulled anonymously. Build it yourself:
 
 ```bash
-docker build -f docker/Dockerfile -t dlectroflow:local .
+docker build -f docker/Dockerfile \
+  --build-arg BUILD_SHA="$(git rev-parse HEAD)" \
+  -t dlectroflow:local .
 ```
 
 That produces `dlectroflow:local`, which the stack uses by default. It takes a few
 minutes and needs more than 2 GB of RAM.
+
+`BUILD_SHA` is optional but worth passing. It bakes the commit into the image so
+`/api/health` can tell you which one a running container is on — a container
+cannot read the tag it was pulled under, so without it the endpoint answers
+`"sha": null` and "am I running what I think I'm running?" has no answer. Step 5
+uses it.
 
 If you have registry access and would rather skip the build, run
 `docker login registry.gitlab.com` and set `DLECTROFLOW_IMAGE` in your
@@ -150,6 +158,45 @@ nothing but electricity.
 > ⚠️ The self-hosted-model path is unit-tested only. Nobody has yet run it against
 > a real non-Anthropic endpoint, so treat it as experimental.
 
+### Google Tasks — the connect flow needs your own OAuth client
+
+**Skip this and "Connect Google" cannot succeed on your instance.** There is no
+shared client to fall back on and nothing in the UI explains the absence, so it
+reads as a bug rather than as unconfigured. Steps still save locally and export
+as `.ics` without it, but the auto-scheduling half of the product does not exist
+until `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set.
+
+In [Google Cloud Console](https://console.cloud.google.com):
+
+1. Create (or pick) a project, then **APIs & Services → Library → Google Tasks
+   API → Enable**. Without this the callback returns `access_not_configured`.
+2. **APIs & Services → Credentials → Create credentials → OAuth client ID**,
+   application type **Web application**.
+3. Authorised redirect URI: `https://YOUR-DOMAIN/api/google/oauth/callback` —
+   exactly, including the scheme and no trailing slash. Google matches it
+   literally.
+4. Copy the client id and secret into `GOOGLE_CLIENT_ID` and
+   `GOOGLE_CLIENT_SECRET` in `.env.prod`, uncommenting both lines.
+
+While the OAuth consent screen is in **Testing**, only accounts you add as test
+users can connect, and their grant expires after seven days. Add yourself as a
+test user; publishing is only needed if other people will use the instance.
+
+`GOOGLE_TASKS_LIST_NAME` defaults to `reclaim`, because Reclaim.ai only
+auto-schedules from its own list. Change it if you use a different scheduler, and
+see `SCHEDULING_SYNTAX` / `SCHEDULING_TIMEZONE` in `.env.prod.example` if you do
+— the default timezone is `Europe/London`.
+
+Stored Google tokens are encrypted with `TOKEN_ENC_KEY`, so rotating that key
+means everyone reconnects once.
+
+### The weekly round-up email (optional)
+
+`RESEND_API_KEY` plus `ROUNDUP_FROM_EMAIL` turn on the emailed round-up. The
+in-app and desktop round-ups work without them, so this is purely additive.
+Resend's free tier is plenty for one instance, and the from-address has to be on
+a domain you have verified with them.
+
 ## 4. Start it
 
 ```bash
@@ -186,12 +233,25 @@ docker compose --env-file .env.prod -f docker/docker-compose.prod.yml ps -a
 so that is success, not failure.
 
 ```bash
-curl https://YOUR-DOMAIN/api/health     # {"status":"ok"}
+curl https://YOUR-DOMAIN/api/health     # {"status":"ok","sha":"cafc16d"}
 ```
 
 `/api/health` runs a real query against Postgres, so `ok` means the app can
 genuinely serve rather than merely that Node started. Then open your domain in a
 browser and sign in with GitLab.
+
+`sha` is the short commit the image was built from — the `BUILD_SHA` build arg
+from step 2. It is `null` if you built without it. To confirm the running
+container is the commit you think it is:
+
+```bash
+cd /path/to/dlectroflow
+git rev-parse --short HEAD
+curl -s https://YOUR-DOMAIN/api/health | grep -o '"sha":"[^"]*"'
+```
+
+Those two should agree. If they don't, the container is on an older image —
+rebuild and `up -d` again (see [Upgrading](#upgrading)).
 
 ---
 
@@ -234,12 +294,17 @@ existing schema.
 
 ```bash
 git pull
-docker build -f docker/Dockerfile -t dlectroflow:local .
+docker build -f docker/Dockerfile \
+  --build-arg BUILD_SHA="$(git rev-parse HEAD)" \
+  -t dlectroflow:local .
 docker compose --env-file .env.prod -f docker/docker-compose.prod.yml up -d
+curl -s https://YOUR-DOMAIN/api/health
 ```
 
 `migrate` runs again automatically and applies any new migrations before the new
-app container starts. **Upgrade one minor version at a time** and read
+app container starts. The `curl` is worth keeping: `sha` should now match the
+commit you just pulled, which is the one thing that distinguishes "upgraded" from
+"restarted the same image". **Upgrade one minor version at a time** and read
 `CHANGELOG.md` first — it calls out breaking changes and any newly required
 environment variables. Downgrades are not supported.
 

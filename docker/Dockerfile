@@ -79,6 +79,25 @@ COPY --chown=node:node --from=build /app/public ./public
 COPY --chown=node:node --from=build /app/.next/standalone ./
 COPY --chown=node:node --from=build /app/.next/static ./.next/static
 
+# ── Which commit this image is (#135) ────────────────────────────────────────
+# /api/health reports the short form, so Instance A (Helm on Kubernetes) and
+# Instance B (this Compose stack) can be ASSERTED to be on the same commit
+# instead of assumed to be. It has to be baked in here: a running container
+# cannot read the registry tag it was pulled under.
+#
+#   docker build -f docker/Dockerfile --build-arg BUILD_SHA=$(git rev-parse HEAD) \
+#     -t dlectroflow:local .
+#
+# Optional — the default leaves the value empty and /api/health answers
+# `"sha": null`, so a build without it still works. ENV, not just ARG: an ARG is
+# build-time only and never reaches the process. LAST in the stage on purpose —
+# the value changes every commit, so anything below it rebuilds on every build,
+# and below it there is only metadata. src/lib/dockerfile-hygiene.test.ts asserts
+# both Dockerfiles carry this pair, since one missing it silently makes the
+# comparison impossible.
+ARG BUILD_SHA=""
+ENV BUILD_SHA=$BUILD_SHA
+
 # Run as the non-root `node` user (uid 1000, present in node images).
 USER node
 
