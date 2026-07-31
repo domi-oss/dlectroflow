@@ -109,8 +109,11 @@ maintainers:
   });
 });
 
-describe("releasedChangelogVersions", () => {
-  const CHANGELOG = `# Changelog
+// Shared by the two CHANGELOG readers below, which is why it sits at module
+// scope rather than inside either `describe`: they are separate contracts over
+// the same file shape, so a fixture that drifted between them would let one of
+// them pass on a document the other could not read.
+const CHANGELOG = `# Changelog
 
 ## [Unreleased]
 
@@ -132,6 +135,7 @@ describe("releasedChangelogVersions", () => {
 [0.4.0]: https://example.invalid/releases/v0.4.0
 `;
 
+describe("releasedChangelogVersions", () => {
   it("lists released versions in document order, newest first", () => {
     expect(releasedChangelogVersions(CHANGELOG)).toEqual([
       "0.4.0",
@@ -150,7 +154,9 @@ describe("releasedChangelogVersions", () => {
     expect(releasedChangelogVersions(CHANGELOG)).not.toContain("9.9.9");
     expect(releasedChangelogVersions("### [0.9.0] - 2026-01-01\n")).toEqual([]);
   });
+});
 
+describe("latestReleasedChangelogVersion", () => {
   it("takes the first released heading as the newest", () => {
     expect(latestReleasedChangelogVersion(CHANGELOG)).toBe("0.4.0");
   });
