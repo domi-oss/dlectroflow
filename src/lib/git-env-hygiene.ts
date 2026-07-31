@@ -558,16 +558,50 @@ function envVerdict(
   };
 }
 
-/** Args that name the repository, so `cwd` is not the only thing pinning it. */
+/**
+ * Args that name the repository, so `cwd` is not the only thing pinning it.
+ *
+ * Position matters, and getting it wrong is a false negative in the one
+ * direction that hurts (Duo review on !227). `-C` is two different flags:
+ *
+ * - `git -C <dir> log` — a GLOBAL option, before the subcommand, choosing the
+ *   repository. This is what the guard is looking for.
+ * - `git log -C` / `git diff -C` — copy detection, after the subcommand, saying
+ *   nothing whatsoever about which repository is read.
+ *
+ * Matching `-C` anywhere let the second satisfy a check written for the first,
+ * so `execFileSync("git", ["log", "-C"], { cwd: dir })` — #146's exact shape —
+ * was reported as pinned. `--git-dir` is global too and gets the same treatment.
+ *
+ * So: tokenise, drop a leading `git`, then read only the leading run of options.
+ * The first token that is not an option is the subcommand, and everything from
+ * there on is the subcommand's business, not ours.
+ *
+ * Deliberately NOT also requiring a directory token after `-C`. That rule looks
+ * stricter and is actually wrong here: this scanner only sees arguments it can
+ * resolve to constants, and the directory is almost always a variable
+ * (`["-C", dir, ...args]`), so "no token after `-C`" is indistinguishable from
+ * "a token I cannot read". Adding the rule flagged `registry-prune.test.ts`'s
+ * fixture — which is correct, and is the very code #146 fixed. A bare trailing
+ * `-C` is a malformed git command that fails loudly at runtime; this guard exists
+ * for the failure that is SILENT, which is git quietly choosing another
+ * repository.
+ */
 function namesRepository(strings: readonly string[]): boolean {
-  return strings.some(
-    (value) =>
-      value === "-C" ||
-      / -C(\s|$)/.test(value) ||
-      value === "--git-dir" ||
-      value.startsWith("--git-dir=") ||
-      value.includes(" --git-dir"),
-  );
+  // Each element may itself be a whole command line (`execSync("git -C x log")`)
+  // or a single argv entry, so flatten on whitespace before reading positions.
+  const tokens = strings.flatMap((value) => value.split(/\s+/)).filter(Boolean);
+  const start = tokens[0] === "git" ? 1 : 0;
+
+  for (let i = start; i < tokens.length; i++) {
+    const token = tokens[i];
+    // First non-option token is the subcommand: stop, since `-C` past here is
+    // copy detection.
+    if (!token.startsWith("-")) return false;
+    if (token === "--git-dir" || token.startsWith("--git-dir=")) return true;
+    if (token === "-C") return true;
+  }
+  return false;
 }
 
 /**

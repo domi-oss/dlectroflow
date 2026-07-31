@@ -93,6 +93,42 @@ describe("isolatedGitEnv", () => {
     });
   });
 
+  // Duo review (!227): `overrides` used to be spread AFTER the pins, so a caller
+  // could hand back `GIT_CONFIG_GLOBAL: "/real/config"` and quietly undo the
+  // isolation — while the doc comment claimed the pins applied regardless of what
+  // the caller asked for. A guard whose docs overstate it is worse than no guard,
+  // because the next fixture author reads the promise and stops checking. The
+  // location variables already threw; the pins now do too, for the same reason.
+  it("refuses to let a caller override an isolation pin", () => {
+    for (const pin of [
+      "GIT_CONFIG_GLOBAL",
+      "GIT_CONFIG_SYSTEM",
+      "GIT_TERMINAL_PROMPT",
+      "NODE_ENV",
+    ]) {
+      expect(() => isolatedGitEnv({ [pin]: "/real/config" })).toThrow(
+        new RegExp(pin),
+      );
+    }
+  });
+
+  it("names every offending pin at once, so one run fixes them all", () => {
+    expect(() =>
+      isolatedGitEnv({
+        GIT_CONFIG_GLOBAL: "/real",
+        GIT_TERMINAL_PROMPT: "1",
+      }),
+    ).toThrow(/GIT_CONFIG_GLOBAL, GIT_TERMINAL_PROMPT/);
+  });
+
+  it("re-asserting a pin at its own pinned value is still refused", () => {
+    // Permitting the no-op would mean the guard's answer depends on the value,
+    // so a later edit of that value turns a passing call into a silent override.
+    expect(() => isolatedGitEnv({ GIT_CONFIG_GLOBAL: "/dev/null" })).toThrow(
+      /GIT_CONFIG_GLOBAL/,
+    );
+  });
+
   it("applies the caller's own variables", () => {
     expect(
       isolatedGitEnv({

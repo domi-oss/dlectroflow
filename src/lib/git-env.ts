@@ -30,10 +30,16 @@
  */
 
 /**
- * Every variable git reads to decide WHICH repository it operates on, i.e. the
- * ones that make `cwd` and `-C` irrelevant. Never copied from the parent
- * environment and never accepted as an override — the repository is named on
- * the command line instead.
+ * Every variable that makes `cwd` and `-C` irrelevant — either by telling git
+ * WHICH repository to operate on, or by changing what it can see once it has
+ * found one. Never copied from the parent environment and never accepted as an
+ * override; the repository is named on the command line instead.
+ *
+ * The second clause is why `GIT_NAMESPACE` belongs here even though it does not
+ * redirect git anywhere (Duo review on !227): it scopes which refs are visible
+ * inside the current repository, so a leaked one makes `refs/heads/main`
+ * invisible and the fixture's own history unreachable. Different mechanism, same
+ * outcome — the command line stops deciding what git reads.
  *
  * Kept as a list rather than folded into the code because it is also what
  * `registry-prune.test.ts` points at a decoy repo to prove the isolation is
@@ -123,6 +129,24 @@ export const GIT_ISOLATION_PINS = {
 export function isolatedGitEnv(
   overrides: Readonly<Record<string, string>> = {},
 ): NodeJS.ProcessEnv {
+  // Refused for the same reason as the location variables below: the doc comment
+  // above promises the pins apply regardless of what the caller asks for, and
+  // `overrides` is spread last, so without this the promise was false (Duo review
+  // on !227). Refused even when the override re-states the pin's own value —
+  // otherwise the guard's answer depends on that value, and editing the pin later
+  // silently converts a passing call into an override.
+  const pinned = Object.keys(overrides).filter(
+    (name) => name in GIT_ISOLATION_PINS,
+  );
+  if (pinned.length > 0) {
+    throw new Error(
+      `isolatedGitEnv: refusing to override the isolation pin(s) ` +
+        `${pinned.join(", ")} — these are what make a fixture reproducible ` +
+        `regardless of the machine it runs on. If a test genuinely needs a real ` +
+        `git config or a terminal prompt, it is not using this helper.`,
+    );
+  }
+
   const located = Object.keys(overrides).filter((name) =>
     (GIT_LOCATION_VARIABLES as readonly string[]).includes(name),
   );

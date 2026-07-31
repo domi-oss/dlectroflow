@@ -362,6 +362,46 @@ describe("scanChildProcessCalls — is the repository named", () => {
       only(`execFileSync("git", ["log", "--pretty=-Coops"]);`).pinsRepository,
     ).toBe(false);
   });
+
+  // Duo review (!227): `-C` is two different flags depending on where it sits.
+  // As a GLOBAL option before the subcommand, `git -C <dir>` chooses the
+  // repository — that is the one this guard is looking for. After the
+  // subcommand, `git log -C` / `git diff -C` is copy detection and says nothing
+  // about which repository is being read. Matching it anywhere in the argument
+  // list let the copy-detection flag satisfy a repository-pinning guard, which
+  // is a false negative in the one direction that matters: it reports #146's
+  // exact shape as safe.
+  it("rejects -C used as git's copy-detection flag after the subcommand", () => {
+    expect(
+      only(`execFileSync("git", ["log", "-C"], { cwd: dir });`).pinsRepository,
+    ).toBe(false);
+    expect(
+      only(`execFileSync("git", ["diff", "-C", "-M"], { cwd: dir });`)
+        .pinsRepository,
+    ).toBe(false);
+    expect(only(`execSync("git log -C");`).pinsRepository).toBe(false);
+  });
+
+  it("still accepts -C before the subcommand, where it names the repo", () => {
+    expect(
+      only(`execFileSync("git", ["-C", dir, "diff", "-C"]);`).pinsRepository,
+    ).toBe(true);
+    expect(only(`execSync(\`git -C \${dir} log -C\`);`).pinsRepository).toBe(
+      true,
+    );
+  });
+
+  // The mirror of the above: a global `-C` counts even when the directory after
+  // it is a variable this scanner cannot resolve — which is the normal case, and
+  // is `registry-prune.test.ts`'s own `["-C", dir, ...args]` fixture. Requiring a
+  // readable directory token flagged that correct code, so the rule was dropped;
+  // see namesRepository's comment for why a bare `-C` is not worth catching.
+  it("accepts a global -C whose directory is not statically readable", () => {
+    const source = `function git(dir: string, ...args: string[]) {
+         return execFileSync("git", ["-C", dir, ...args], { cwd: dir });
+       }`;
+    expect(only(source).pinsRepository).toBe(true);
+  });
 });
 
 describe("the repo itself", () => {
