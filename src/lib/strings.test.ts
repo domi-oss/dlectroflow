@@ -255,6 +255,37 @@ describe("Task 4 — nav/menu/prompt/confirm keys (plain vs playful)", () => {
       "🎉 Inbox zero! Nothing to review.",
     );
   });
+
+  // inbox.newAccount (#111) — the OTHER empty inbox. Both voices are the LEAD
+  // of a sentence that newAccountLine() finishes with the account, so neither
+  // may carry closing punctuation: "…a new account. (ada, signed in with
+  // GitLab)" is two sentences where the copy is meant to be one.
+  it('t("inbox.newAccount", "plain") → "Nothing here yet — this is a new account"', () => {
+    expect(t("inbox.newAccount", "plain")).toBe(
+      "Nothing here yet — this is a new account",
+    );
+  });
+  it('t("inbox.newAccount", "playful") → "🍳 Nothing here yet — this account is brand new"', () => {
+    expect(t("inbox.newAccount", "playful")).toBe(
+      "🍳 Nothing here yet — this account is brand new",
+    );
+  });
+  it("inbox.newAccount ends unpunctuated in both voices", () => {
+    for (const voice of ["plain", "playful"] as const) {
+      expect(t("inbox.newAccount", voice)).not.toMatch(/[.!?]$/);
+    }
+  });
+
+  // The two empty-inbox strings must stay DISTINGUISHABLE: #111 exists because
+  // one message was doing both jobs. "Inbox zero" is a congratulation for
+  // clearing a queue and must never be what a brand-new account is shown.
+  it("inbox.newAccount never says “inbox zero”", () => {
+    for (const voice of ["plain", "playful"] as const) {
+      expect(t("inbox.newAccount", voice).toLowerCase()).not.toContain(
+        "inbox zero",
+      );
+    }
+  });
 });
 
 describe("Task 2 — inbox/focus/breakdown keys (plain vs playful)", () => {
@@ -589,6 +620,9 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "focus.setup.stepsToGo",
     "focus.setup.stepToGo",
     "focus.setup.keepPaused",
+    // #111 — the brand-new-account empty inbox. Plain stays literal; the 🍳 is
+    // playful-only flavour.
+    "inbox.newAccount",
   ];
 
   for (const key of plainOnlyKeys) {

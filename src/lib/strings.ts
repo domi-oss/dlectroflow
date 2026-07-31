@@ -455,9 +455,24 @@ export const STRINGS = {
   },
 
   // ── Inbox empty state ──────────────────────────────────────────────────────
+  // Two empty inboxes, not one. This pair is the whole of #111: "Inbox zero"
+  // congratulates you for CLEARING a queue, which is the wrong sentence — and in
+  // playful voice a celebratory one — to greet an account that never had a queue
+  // with. It stays, unchanged, for the account that really did clear one.
   "inbox.zero": {
     plain: "Inbox zero. Nothing to review.",
     playful: "🎉 Inbox zero! Nothing to review.",
+  },
+  // The LEAD of a sentence that `newAccountLine()` finishes by naming the
+  // account, so neither voice carries closing punctuation — "…a new account.
+  // (ada, signed in with GitLab)" would be two sentences where this is one.
+  // Naming the account here answers the #74/#100 question in the place the
+  // alarming version of it is actually asked: signing in with the second of two
+  // provider accounts produces an empty workspace, and an empty workspace is
+  // read on the inbox, not in the header.
+  "inbox.newAccount": {
+    plain: "Nothing here yet — this is a new account",
+    playful: "🍳 Nothing here yet — this account is brand new",
   },
 
   // ── Links ──────────────────────────────────────────────────────────────────

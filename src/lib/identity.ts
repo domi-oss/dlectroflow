@@ -1,4 +1,5 @@
 import { UserRole } from "@/lib/constants";
+import { t, type Voice } from "@/lib/strings";
 
 /**
  * #100 — how an account is DESCRIBED to the person signed in as it.
@@ -108,4 +109,34 @@ export function identityFor(user: {
  */
 export function identityLine(identity: AccountIdentity): string {
   return `${roleWord(identity.role)} · signed in with ${identity.provider}`;
+}
+
+/**
+ * #111 — the empty inbox of an account that has NEVER held anything.
+ *
+ * The header half of #100 put "which account is this?" one click away on every
+ * page. This is the other half of the same obligation: the moment the question
+ * gets asked is when the screen is blank, and a blank screen that says "Inbox
+ * zero" is telling a brand-new account that something it never had is gone.
+ *
+ * WHY THE PROVIDER IS HERE, and not just the handle (the open question on #111).
+ * The failure this copy exists for is signing in with the SECOND of two provider
+ * accounts: one login = one account = one workspace, account linking is out of
+ * scope, so the wrong provider yields an empty workspace that is indistinguishable
+ * from data loss. The provider is the fact that resolves it. The header popover
+ * does carry it — but behind a click you only make once you already suspect what
+ * happened, and this sentence is what has to produce the suspicion. Redundancy
+ * that costs six words is the right trade against a user concluding their data is
+ * gone. The ROLE is deliberately left out: it answers "what may I do here?", not
+ * "whose workspace is this?", and the popover is the right home for it.
+ *
+ * One JS string, for the reason identityLine() states: a voiced lead plus two
+ * interpolations is exactly the shape whose spaces this Next version's JSX
+ * transform trims and vitest's does not.
+ */
+export function newAccountLine(
+  identity: AccountIdentity,
+  voice: Voice,
+): string {
+  return `${t("inbox.newAccount", voice)} (${identity.label}, signed in with ${identity.provider})`;
 }

@@ -76,6 +76,7 @@ import {
 } from "@/components/inbox/row-actions";
 import { CompleteButton } from "@/components/inbox/complete-button";
 import { WelcomeCard } from "@/components/inbox/welcome-card";
+import { newAccountLine, type AccountIdentity } from "@/lib/identity";
 import { SubHeader, SEE_ALL } from "@/components/inbox/sub-header";
 import { t } from "@/lib/strings";
 import { useVoice } from "@/components/voice-provider";
@@ -148,6 +149,7 @@ export function InboxView({
   scheduleIntents,
   welcomeVisible,
   resumeStep,
+  newAccount = null,
   notifyAging = true,
   now: initialNow,
 }: {
@@ -168,6 +170,18 @@ export function InboxView({
    * server-side by the Inbox page. Null when there's nothing to resume — or
    * while previewing the demo first-run empty state, which never shows it. */
   resumeStep: { id: string; text: string } | null;
+  /**
+   * #111 — the account to NAME in the empty state, set only when this workspace
+   * has never held anything. Null otherwise, and null is what an omitted prop
+   * means, so an inbox that is merely empty keeps "Inbox zero".
+   *
+   * The identity itself rather than a boolean, mirroring `<AuthActions>`: this
+   * state cannot be rendered without the account it exists to name, so the two
+   * cannot drift apart. `AccountIdentity` is the display boundary — a handle, a
+   * provider display name and a role, never an id and never an email — so this
+   * is safe to hand to a client component (see identity.ts).
+   */
+  newAccount?: AccountIdentity | null;
   /** Phase 6 — gates the aging→browser-notification firing (permission still applies). */
   notifyAging?: boolean;
   /**
@@ -270,6 +284,15 @@ export function InboxView({
     completed,
     completedTodayCount,
   } = bucketItems(initialItems, now);
+
+  // #111 — re-checked here rather than trusted from the prop alone. The server
+  // sets `newAccount` for a workspace with nothing in it, but the client can get
+  // ahead of that: capture something and this component re-renders with a row
+  // while the prop still says "new". "This is a new account" printed next to the
+  // thing you just typed is worse than the copy it replaced. Note it is EVERY
+  // item, not just `needsReview` — an empty review queue on an account holding
+  // triaged to-dos is a cleared queue, which is what inbox.zero is for.
+  const brandNewAccount = initialItems.length === 0 ? newAccount : null;
 
   const untriagedCount = needsReview.length;
   // #105 — from the render's own clock, not a fresh Date.now(): this count is
@@ -701,8 +724,18 @@ export function InboxView({
           </h2>
           <DroppableBucket id="needsReview">
             {needsReview.length === 0 ? (
+              // #111 — two empty inboxes, one node. "Inbox zero" is a
+              // congratulation for clearing a queue; a workspace that never had
+              // one gets a sentence that NAMES the account instead, because an
+              // unexplained empty screen is where "did I lose everything?" gets
+              // asked. Same element and same tokens either way, so the
+              // zero-tolerance color-contrast gate sees no new pairing.
+              // newAccountLine() composes the whole sentence as one JS string —
+              // see identity.ts for why it is not JSX text around expressions.
               <p className="text-muted-foreground rounded-lg border border-dashed px-4 py-6 text-center text-sm">
-                {t("inbox.zero", voice)}
+                {brandNewAccount
+                  ? newAccountLine(brandNewAccount, voice)
+                  : t("inbox.zero", voice)}
               </p>
             ) : (
               <ul className={cn("space-y-2", pending && "opacity-70")}>

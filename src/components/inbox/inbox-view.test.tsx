@@ -18,6 +18,8 @@ import {
 import type { Item } from "@/components/inbox/bucket";
 import { SchedulePriority, ScheduleHours } from "@/lib/scheduling/types";
 import type { AgingSettings } from "@/lib/aging";
+import { UserRole } from "@/lib/constants";
+import { VoiceProvider } from "@/components/voice-provider";
 
 const push = vi.fn();
 const refresh = vi.fn();
@@ -569,6 +571,124 @@ describe("InboxView — inbox zero copy", () => {
     expect(
       screen.getByText("Inbox zero. Nothing to review."),
     ).toBeInTheDocument();
+  });
+});
+
+// #111 — the OTHER empty inbox. "Inbox zero" congratulates you for clearing a
+// queue; an account that never had one must not be told that something it never
+// had is gone. `newAccount` is the resolved identity or null, mirroring
+// <AuthActions> — a boolean would let this state render without the account it
+// exists to name.
+describe("InboxView — brand-new account empty state (#111)", () => {
+  const IDENTITY = {
+    label: "ada",
+    provider: "GitLab",
+    role: UserRole.Owner,
+  };
+
+  function renderNew(
+    props: Partial<React.ComponentProps<typeof InboxView>> = {},
+  ) {
+    return render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+        newAccount={IDENTITY}
+        {...props}
+      />,
+    );
+  }
+
+  it("names the account instead of congratulating it on inbox zero", () => {
+    renderNew();
+    expect(
+      screen.getByText(
+        "Nothing here yet — this is a new account (ada, signed in with GitLab)",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Inbox zero. Nothing to review."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("is voice-aware — playful gets the playful lead, same account clause", () => {
+    render(
+      <VoiceProvider voice="playful">
+        <InboxView
+          now={Date.now()}
+          initialItems={[]}
+          settings={settings}
+          welcomeVisible={false}
+          resumeStep={null}
+          newAccount={IDENTITY}
+        />
+      </VoiceProvider>,
+    );
+    expect(
+      screen.getByText(
+        "🍳 Nothing here yet — this account is brand new (ada, signed in with GitLab)",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("🎉 Inbox zero! Nothing to review."),
+    ).not.toBeInTheDocument();
+  });
+
+  // A GUEST has no account to name and already gets the sandbox banner, so the
+  // issue is explicit that their copy is unchanged. `newAccount` is null for
+  // them — and null is also what an omitted prop means, so every existing call
+  // site keeps today's behaviour.
+  it("a guest (newAccount null) keeps the existing inbox.zero copy", () => {
+    renderNew({ newAccount: null });
+    expect(
+      screen.getByText("Inbox zero. Nothing to review."),
+    ).toBeInTheDocument();
+  });
+
+  // The server only sets `newAccount` for a workspace with nothing in it, but
+  // the client can get ahead of the server: capture something and the optimistic
+  // re-render has rows while the prop is still set. "This is a new account"
+  // alongside the thing you just captured would be nonsense, so the component
+  // re-checks rather than trusting the prop alone.
+  it("stops claiming 'new account' as soon as the client has any item", () => {
+    renderNew({ initialItems: [makeItem({ text: "first ever capture" })] });
+    expect(screen.queryByText(/this is a new account/)).not.toBeInTheDocument();
+  });
+
+  // The needs-review bucket can be empty while other buckets are not. That is
+  // an emptied REVIEW QUEUE on an account with plenty in it — the case
+  // inbox.zero is exactly right for.
+  it("an account with triaged to-dos and an empty review queue still reads inbox zero", () => {
+    renderNew({
+      initialItems: [
+        makeItem({ id: "t-1", status: "triaged", triagedAt: new Date() }),
+      ],
+    });
+    expect(
+      screen.getByText("Inbox zero. Nothing to review."),
+    ).toBeInTheDocument();
+  });
+
+  // Colour is never the only cue and the node must stay a plain readable
+  // paragraph: same element, same tokens as the string it replaces, so the
+  // zero-tolerance color-contrast gate sees no new pairing (#90, #99).
+  it("reuses the existing empty-state paragraph, tokens and all", () => {
+    renderNew();
+    const p = screen.getByText(/this is a new account/);
+    expect(p.tagName).toBe("P");
+    expect(p.className).toContain("text-muted-foreground");
+    expect(p.className).toContain("border-dashed");
+  });
+
+  // The four bucket placeholders below stay the neutral "Nothing here yet" —
+  // repeating the account name five times down one screen would be noise, and
+  // "yet" already reads correctly on a new account.
+  it("names the account exactly once", () => {
+    renderNew();
+    expect(screen.getAllByText(/signed in with GitLab/)).toHaveLength(1);
   });
 });
 
