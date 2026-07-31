@@ -1,6 +1,11 @@
 import { prisma, getSettings } from "@/lib/db";
 import { currentWorkspaceId, currentUser } from "@/lib/workspace";
 import { getGoogleStatus } from "@/lib/google";
+import { identityFor } from "@/lib/identity";
+import {
+  emptyInboxIsNewAccount,
+  workspaceHasHistory,
+} from "@/lib/workspace-history";
 import { BrainDumpStatus } from "@/lib/constants";
 import { InboxView } from "@/components/inbox/inbox-view";
 import { firstResumableStep } from "@/components/inbox/resume-step";
@@ -145,6 +150,32 @@ export default async function InboxPage({
   // workspace has ever dismissed the welcome card.
   const firstRun = settings.firstRunPreview;
   const welcomeVisible = firstRun || settings.welcomeDismissedAt == null;
+
+  // #111 — "this is a new account", not "you emptied this". The header half of
+  // #100 named the account on every page; this is the same obligation in the
+  // place the alarming version of the question gets asked, which is a blank
+  // inbox rather than a header.
+  //
+  // Gated on `me` for the same reason `google` above is: a guest has no account
+  // to name, already gets the sandbox banner, and keeps today's copy unchanged.
+  //
+  // Gated on the item count as well, so the four-table probe in
+  // workspaceHasHistory() only runs on the ONE request where its answer can
+  // change anything. An ordinary load with rows on screen never reaches it, and
+  // the first-run preview (#8) answers `true` from `firstRunPreview` alone
+  // without touching the database — which is why the `hasHistory` argument is
+  // allowed to be a placeholder `false` in that branch.
+  const visibleItems = firstRun ? 0 : items.length;
+  const newAccount =
+    me !== null &&
+    visibleItems === 0 &&
+    emptyInboxIsNewAccount({
+      visibleItems,
+      hasHistory: firstRun ? false : await workspaceHasHistory(workspaceId),
+      firstRunPreview: firstRun,
+    })
+      ? identityFor(me)
+      : null;
   // Most-recent resumable, NOT-done step (open focus session) for the resume
   // banner — see resume-step.ts for why the !done guard matters.
   const resumeStep = firstResumableStep(items);
@@ -176,6 +207,7 @@ export default async function InboxPage({
         scheduleIntents={scheduleIntents}
         welcomeVisible={welcomeVisible}
         resumeStep={firstRun ? null : resumeStep}
+        newAccount={newAccount}
         notifyAging={settings.notifyAging}
         // #105 — the same request-time clock used above, handed to the client
         // component so its FIRST render matches this one. Without it InboxView
