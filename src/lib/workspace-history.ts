@@ -30,11 +30,24 @@ import { prisma } from "@/lib/db";
  * the one request where the answer changes anything. Every probe is
  * workspace-scoped (the scoping invariant) and selects the id only — this is a
  * "does a row exist" question and has no business reading a capture's text.
+ *
+ * FAILURE IS A DECISION HERE, not a detail (!215 review), and it is settled the
+ * same way as everything above: `allSettled`, and a probe that never answered
+ * counts AS history. A rejected query is not evidence that there is nothing to
+ * find, and guessing "nothing" is the generous error — it puts "this is a new
+ * account" in front of somebody whose data is merely unreachable, which is the
+ * data-loss ambiguity this whole change exists to remove. So a transient fault
+ * degrades to the pre-existing "Inbox zero" copy.
+ *
+ * It also means this never rejects. That matters because it is the only database
+ * work the inbox page does that the page can render without: letting one flaky
+ * probe propagate would have turned a cosmetic nicety into a new way for the
+ * whole inbox to 500. Quietly is not silently, though — the fault is logged.
  */
 export async function workspaceHasHistory(
   workspaceId: string,
 ): Promise<boolean> {
-  const [item, task, reward, badge] = await Promise.all([
+  const probes = await Promise.allSettled([
     prisma.brainDumpItem.findFirst({
       where: { workspaceId },
       select: { id: true },
@@ -46,7 +59,22 @@ export async function workspaceHasHistory(
     }),
     prisma.badge.findFirst({ where: { workspaceId }, select: { id: true } }),
   ]);
-  return [item, task, reward, badge].some((row) => row !== null);
+  // Every failure is logged, not just the first: `some()` would short-circuit
+  // past the rest and a probe that fails every time would stay invisible
+  // whenever an earlier one happened to answer.
+  let failed = false;
+  for (const probe of probes) {
+    if (probe.status !== "rejected") continue;
+    failed = true;
+    console.warn(
+      "[workspace-history] a history probe failed; assuming this workspace HAS history rather than calling it new",
+      probe.reason,
+    );
+  }
+  if (failed) return true;
+  return probes.some(
+    (probe) => probe.status === "fulfilled" && probe.value !== null,
+  );
 }
 
 /**

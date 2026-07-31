@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // #111 — "has this workspace EVER held anything?" is the question that separates
 // a NEW account from an EMPTIED one, so these tests are mostly about the tables
@@ -91,6 +91,58 @@ describe("workspaceHasHistory", () => {
         expect.objectContaining({ select: { id: true } }),
       );
     }
+  });
+});
+
+// !215 review — the failure path, which is a decision and not a detail. A probe
+// that never answered is not evidence that there is nothing to find, and the
+// docstring's own rule is that the generous error is the worse one: telling
+// someone who really does have data that their account is "new" is the data-loss
+// ambiguity this whole change exists to remove.
+describe("workspaceHasHistory — when a probe fails", () => {
+  let warn: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warn.mockRestore();
+  });
+
+  it("answers 'has history' rather than throwing, when one probe rejects", async () => {
+    db.rewardEvent.findFirst.mockRejectedValue(new Error("connection reset"));
+    await expect(workspaceHasHistory(WS)).resolves.toBe(true);
+  });
+
+  // A transient failure must degrade to the OLD copy, never to a crashed inbox:
+  // this probe is the only database work the page does that it can survive
+  // without, so it must not become a new way for the inbox to 500.
+  it("never rejects, even when every probe fails", async () => {
+    const boom = () => Promise.reject(new Error("db down"));
+    db.brainDumpItem.findFirst.mockImplementation(boom);
+    db.task.findFirst.mockImplementation(boom);
+    db.rewardEvent.findFirst.mockImplementation(boom);
+    db.badge.findFirst.mockImplementation(boom);
+    await expect(workspaceHasHistory(WS)).resolves.toBe(true);
+  });
+
+  // Degrading quietly is not the same as degrading silently — a probe that keeps
+  // failing is a real fault and has to be visible in the logs.
+  it("warns about the failure instead of swallowing it", async () => {
+    const err = new Error("connection reset");
+    db.badge.findFirst.mockRejectedValue(err);
+    await workspaceHasHistory(WS);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("[workspace-history]"),
+      err,
+    );
+  });
+
+  it("still answers from the probes that DID resolve", async () => {
+    db.task.findFirst.mockRejectedValue(new Error("connection reset"));
+    db.brainDumpItem.findFirst.mockResolvedValue({ id: "i-1" });
+    await expect(workspaceHasHistory(WS)).resolves.toBe(true);
   });
 });
 
