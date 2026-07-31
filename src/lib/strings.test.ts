@@ -360,6 +360,15 @@ describe("Task 2 — inbox/focus/breakdown keys (plain vs playful)", () => {
   it('t("focus.keepGoingFor", "playful") → "Back for seconds"', () => {
     expect(t("focus.keepGoingFor", "playful")).toBe("Back for seconds");
   });
+  // Voice-neutral, but asserted in both voices anyway (Duo review): the
+  // completeness test only rejects an empty string, so "min" drifting to
+  // "minutes" — or the two voices quietly diverging — would pass unnoticed.
+  it('t("focus.keepGoingUnit", "plain") → "min"', () => {
+    expect(t("focus.keepGoingUnit", "plain")).toBe("min");
+  });
+  it('t("focus.keepGoingUnit", "playful") → "min"', () => {
+    expect(t("focus.keepGoingUnit", "playful")).toBe("min");
+  });
   // Re-estimate is reframed as "not sure", not as "no": once the keep-going row
   // exists, "no" is answered by picking 15/30/45/60. What re-estimation is FOR
   // is the case where the user cannot judge it themselves.
@@ -596,6 +605,7 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     // #138 — the keep-going row's label and the reframed re-estimate answer.
     // Plain stays literal; the playful twins carry the food register instead.
     "focus.keepGoingFor",
+    "focus.keepGoingUnit",
     "focus.notYet",
     "link.seeAll",
     "pill.toDo",
