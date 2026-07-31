@@ -125,7 +125,14 @@ function Lane<T>({
   }, [cleared]);
 
   return (
-    <div>
+    // A NAMED landmark (`<section>` + an accessible name → role="region", WCAG
+    // 1.3.1) rather than the anonymous `<div>` the launcher shell used to wrap
+    // each lane in. Two unnamed groups of rows on /focus gave a screen-reader
+    // user nothing to distinguish "single-task" from "multi-step" while moving
+    // between them, and now that the lane owns its own heading and count it can
+    // carry the name too. `label` is used for both, from the one `t()` call the
+    // lane makes, so the visible heading and the accessible name cannot drift.
+    <section aria-label={label}>
       <SubHeader
         label={label}
         count={rows.length}
@@ -158,7 +165,7 @@ function Lane<T>({
           {t("bucket.empty", voice)}
         </p>
       )}
-    </div>
+    </section>
   );
 }
 

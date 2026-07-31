@@ -53,11 +53,17 @@ const single = (
  * #136 is a disagreement between that badge and the rows beside it, so every
  * assertion about it has to come from the rendered header rather than from the
  * props that went in.
+ *
+ * Scoped by the lane's named landmark rather than by walking up from the label
+ * text (!226 review): `getByText(label).parentElement` would have assumed the
+ * label is a direct child of SubHeader's root, and would break the moment
+ * SubHeader — a component shared with the whole inbox — gained a wrapper. The
+ * region is the lane's own contract. The count is the only pure-digit node in a
+ * lane: a row's estimate renders "8m" and its progress renders "1/3".
  */
 function laneCount(label: string): number {
-  const header = screen.getByText(label).parentElement;
-  if (!header) throw new Error(`no SubHeader rendered for "${label}"`);
-  return Number(within(header).getByText(/^\d+$/).textContent);
+  const lane = screen.getByRole("region", { name: label });
+  return Number(within(lane).getByText(/^\d+$/).textContent);
 }
 
 beforeEach(() => vi.clearAllMocks());
@@ -160,6 +166,22 @@ describe("focus lanes — header, count and zero-state (#136)", () => {
       "href",
       "/library?tab=plated",
     );
+  });
+
+  // a11y (WCAG 1.3.1) — each lane is a NAMED landmark, so a screen-reader user
+  // moving between them can tell single-task rows from multi-step ones. It also
+  // gives the count badge a stable home to be read from (!226 review): the
+  // helper above scopes by this region rather than guessing at SubHeader's
+  // internal structure.
+  it("each lane is a named region, so the two are distinguishable", () => {
+    render(<SingleTaskLane voice="plain" items={[single({ itemId: "i1" })]} />);
+    render(<MultiStepLane voice="plain" items={[multi({ stepId: "m1" })]} />);
+    expect(
+      screen.getByRole("region", { name: "Single-task to-dos" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Multi-step to-dos" }),
+    ).toBeInTheDocument();
   });
 
   it("the multi-step lane carries its own label and see-all deep link", () => {
