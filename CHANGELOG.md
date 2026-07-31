@@ -27,6 +27,42 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Added
 
+- **The Kubernetes and Docker Compose deployments can no longer drift apart, and
+  `/api/health` says which commit it is running (#135).**
+  The Helm chart and `.env.prod.example` are two configuration surfaces of the
+  same app, and nothing checked that they matched. `src/lib/env-drift.test.ts`
+  now diffs them in both directions and fails the build on any divergence that
+  is not written into `CONFIG_SURFACE_ALLOWLIST` with a stated reason.
+  - **Self-hosters gain nothing they must change, and several things they can.**
+    `LLM_OWNER_MODEL`, `LLM_GUEST_MODEL`, `SCHEDULING_SYNTAX` and
+    `SCHEDULING_TIMEZONE` were readable by the app and documented in
+    `.env.example`, but `.env.prod.example` never mentioned them — so a
+    self-hosted instance was stuck on the `Europe/London` default with no way to
+    discover otherwise. All four are now documented. **No new required
+    variables**; everything added is optional.
+  - **`docs/self-host-vps.md` now actually sets Google Tasks up.** The keys were
+    in `.env.prod.example`, but the walkthrough never mentioned them, so
+    following it end to end produced an instance where "Connect Google" could
+    not succeed and nothing said why. The new section covers enabling the Tasks
+    API, the exact redirect URI Google matches literally, and the seven-day
+    grant expiry while the consent screen is in Testing.
+  - **The Kubernetes instance can now tune guest quotas and switch LLM provider
+    without a chart edit.** Seventeen previously Compose-only keys are chart
+    values, each rendered into the Secret only when non-empty — an empty value
+    is not the same as unset for readers that use `??`, and a rendered
+    `GUEST_SANDBOX_TTL_HOURS=""` would have expired every guest workspace
+    immediately.
+  - **`/api/health` gains a `sha` field** — the short build SHA, baked into the
+    image at build time, so two instances can be *asserted* to be on the same
+    commit rather than assumed to be. Additive and backward-compatible; it is
+    `null` on an image built without the new `BUILD_SHA` build arg. Self-hosters
+    who want it should pass
+    `--build-arg BUILD_SHA="$(git rev-parse HEAD)"` when building.
+  - Deliberate platform differences are now recorded in code too
+    (`PLATFORM_DIVERGENCES`): per-IP rate limiting, Postgres TLS, container
+    hardening, PodDisruptionBudget/replicas, and CronJob status as a health
+    signal all exist on Kubernetes and not on the single-host stack.
+
 - **The Privacy Policy now carries Google's Limited Use undertaking (#140).**
   A new subsection of "Connecting Google Tasks" states, in Google's own required
   wording, that use of Workspace API data adheres to the Google User Data Policy
