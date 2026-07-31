@@ -208,10 +208,18 @@ function withoutComment(line: string): string {
   return line.replace(/\s+#.*$/, "").trim();
 }
 
-/** The lines of one column-0 job block, excluding the `job:` line itself. */
+/**
+ * The lines of one column-0 job block, excluding the `job:` line itself.
+ *
+ * The start line must be the job key exactly: at column 0, not a comment, and
+ * with nothing after the colon but an optional comment. `startsWith` would also
+ * accept `job: some-value`, which is not a job at all.
+ */
 function jobBlock(gitlabCiYml: string, job: string): string[] {
   const lines = gitlabCiYml.split("\n");
-  const start = lines.findIndex((l) => l.startsWith(`${job}:`));
+  const start = lines.findIndex(
+    (l) => /^[^\s#]/.test(l) && withoutComment(l) === `${job}:`,
+  );
   if (start === -1) {
     throw new Error(
       `\`${job}:\` not found in .gitlab-ci.yml. Without it a docs-only merge request produces none of the report types main's pipeline has, and the approval policy blocks it as \`scan_removed\` (#116).`,
@@ -235,6 +243,12 @@ export function parseStubDeclaredReports(
   job: string = DOCS_ONLY_STUB_JOB,
 ): Record<string, string> {
   const declared: Record<string, string> = {};
+  // Only `reports:` nested under `artifacts:` counts. The job's `script:` is a
+  // YAML block scalar that this line-based parser reads as plain text, so a log
+  // line or comment inside it that happened to read `reports:` would otherwise
+  // open a phantom block and capture script text as report declarations (Duo
+  // review on !217).
+  let artifactsIndent: number | null = null;
   let reportsIndent: number | null = null;
 
   for (const line of jobBlock(gitlabCiYml, job)) {
@@ -264,7 +278,16 @@ export function parseStubDeclaredReports(
       }
       reportsIndent = null; // dedented back out of the reports block
     }
-    if (trimmed === "reports:") reportsIndent = indent;
+    if (artifactsIndent !== null && indent <= artifactsIndent) {
+      artifactsIndent = null; // dedented back out of artifacts:
+    }
+    if (trimmed === "artifacts:") {
+      artifactsIndent = indent;
+      continue;
+    }
+    if (artifactsIndent !== null && indent > artifactsIndent) {
+      if (trimmed === "reports:") reportsIndent = indent;
+    }
   }
 
   if (Object.keys(declared).length === 0) {

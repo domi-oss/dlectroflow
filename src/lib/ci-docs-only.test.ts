@@ -335,6 +335,42 @@ describe("parseStubDeclaredReports", () => {
     expect(parseStubWrittenReports(yml)).toEqual(parseStubDeclaredReports(yml));
   });
 
+  it("finds the job by its exact key, comment or no comment", () => {
+    const yml = [
+      `# ${DOCS_ONLY_STUB_JOB}: described in the block comment above the job`,
+      `  ${DOCS_ONLY_STUB_JOB}: not-a-job-this-is-nested`,
+      `${DOCS_ONLY_STUB_JOB}:   # the real one`,
+      "  artifacts:",
+      "    reports:",
+      "      sast: gl-sast-report.json",
+    ].join("\n");
+    expect(parseStubDeclaredReports(yml)).toEqual({
+      sast: "gl-sast-report.json",
+    });
+  });
+
+  it("ignores a `reports:` line inside the script block scalar", () => {
+    // Duo review on !217: the job's `script:` is a block scalar this
+    // line-based parser reads as plain text, so a log line or comment that
+    // happens to read `reports:` would otherwise open a phantom block and
+    // capture script text as report declarations. Only `reports:` nested
+    // under `artifacts:` counts.
+    const yml = [
+      `${DOCS_ONLY_STUB_JOB}:`,
+      "  script:",
+      "    - |",
+      "      echo 'reports:'",
+      "      reports:",
+      "        dast: gl-dast-report.json",
+      "  artifacts:",
+      "    reports:",
+      "      sast: gl-sast-report.json",
+    ].join("\n");
+    expect(parseStubDeclaredReports(yml)).toEqual({
+      sast: "gl-sast-report.json",
+    });
+  });
+
   it("names the problem when a report value is a YAML alias, not a filename", () => {
     // Duo review on !217: an alias compares unequal to the literal filename the
     // script writes, so the guard would fail — but with a message about the two
