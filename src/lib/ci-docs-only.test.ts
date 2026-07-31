@@ -3,17 +3,21 @@ import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import {
+  CODE_GATED_SCANNERS,
   DOCS_ONLY_PATHS,
+  DOCS_ONLY_STUB_JOB,
   parseCodeChangeGlobs,
+  parseJobsGatedOn,
+  parseStubReportTypes,
   globCoversTopLevel,
   classifyTopLevelPath,
 } from "./ci-docs-only";
 
 const REPO_ROOT = join(__dirname, "..", "..");
 
-const codeGlobs = parseCodeChangeGlobs(
-  readFileSync(join(REPO_ROOT, ".gitlab-ci.yml"), "utf8"),
-);
+const gitlabCiYml = readFileSync(join(REPO_ROOT, ".gitlab-ci.yml"), "utf8");
+
+const codeGlobs = parseCodeChangeGlobs(gitlabCiYml);
 
 /**
  * Committed top-level entries only. `git ls-tree` rather than `readdirSync` so
@@ -178,5 +182,124 @@ describe("docs-only CI fast path covers every committed top-level path", () => {
     for (const doc of ["README.md", "CHANGELOG.md", "docs"]) {
       expect(classifyTopLevelPath(doc, codeGlobs)).toBe("docs");
     }
+  });
+});
+
+describe("parseJobsGatedOn", () => {
+  it("attributes a rules alias to the job that carries it", () => {
+    const yml = [
+      ".code_scanner_rules: &code_scanner_rules",
+      "  - if: '$CI_PIPELINE_SOURCE == \"merge_request_event\"'",
+      "some-scanner:",
+      "  needs: []",
+      "  rules: *code_scanner_rules",
+      "other_job:",
+      "  rules: *scanner_rules",
+      "third-scanner:",
+      "  rules: *code_scanner_rules",
+    ].join("\n");
+    expect(parseJobsGatedOn(yml, "code_scanner_rules")).toEqual([
+      "some-scanner",
+      "third-scanner",
+    ]);
+  });
+
+  it("is not fooled by a nested key that looks like a job name", () => {
+    // `variables:` and `artifacts:` sit at column 0 only for real jobs; an
+    // indented `rules:` still belongs to the last column-0 key above it.
+    const yml = [
+      "job_a:",
+      "  variables:",
+      "    FOO: bar",
+      "  rules: *code_scanner_rules",
+    ].join("\n");
+    expect(parseJobsGatedOn(yml, "code_scanner_rules")).toEqual(["job_a"]);
+  });
+
+  it("returns nothing when the alias is unused", () => {
+    expect(parseJobsGatedOn("job_a:\n  rules: []\n", "nope")).toEqual([]);
+  });
+});
+
+describe("parseStubReportTypes", () => {
+  it("reads the artifacts:reports: keys of the stub job", () => {
+    const yml = [
+      "before_job:",
+      "  artifacts:",
+      "    reports:",
+      "      junit: not-ours.xml",
+      `${DOCS_ONLY_STUB_JOB}:`,
+      "  stage: test",
+      "  artifacts:",
+      "    paths:",
+      "      - gl-sast-report.json",
+      "    reports:",
+      "      # a comment inside the block",
+      "      sast: gl-sast-report.json",
+      "      container_scanning: gl-container-scanning-report.json",
+      "    expire_in: 1 week",
+      "after_job:",
+      "  artifacts:",
+      "    reports:",
+      "      dast: also-not-ours.json",
+    ].join("\n");
+    expect(parseStubReportTypes(yml)).toEqual(["sast", "container_scanning"]);
+  });
+
+  it("throws when the stub job is gone rather than reporting zero types", () => {
+    // Reporting `[]` would make the coverage assertion below pass by vacuity
+    // exactly when the job that closes the gap has been deleted.
+    expect(() => parseStubReportTypes("workflow:\n  rules: []\n")).toThrow(
+      new RegExp(DOCS_ONLY_STUB_JOB),
+    );
+  });
+
+  it("throws when the stub job declares no reports", () => {
+    expect(() =>
+      parseStubReportTypes(`${DOCS_ONLY_STUB_JOB}:\n  script:\n    - true\n`),
+    ).toThrow(/no artifacts:reports:/);
+  });
+});
+
+/**
+ * #116: the fast path skipping a scanner is only half the story. The approval
+ * policy in the linked security-policy project compares the security report
+ * TYPES in the merge request's pipeline against those in main's; a type main
+ * has and the MR lacks is a `scan_removed` violation, and the policy's
+ * `fallback_behavior: fail: closed` turns that into a required approval. Every
+ * docs-only MR was therefore unmergeable until one specific human approved it.
+ *
+ * `docs_only_scan_stub` closes that by emitting an empty report for each type
+ * the fast path skips. These assertions keep the two lists in step: add a fifth
+ * code-gated scanner and the suite fails until the stub stands in for its
+ * report type too. Without them the regression is silent — the MR just becomes
+ * unmergeable, with a message that blames security rather than CI config.
+ */
+describe("docs-only fast path leaves no security report type behind", () => {
+  it("gates exactly the scanner jobs the stub knows how to stand in for", () => {
+    const gated = parseJobsGatedOn(gitlabCiYml, "code_scanner_rules");
+    expect(
+      [...gated].sort(),
+      `Jobs gated on *code_scanner_rules in .gitlab-ci.yml no longer match CODE_GATED_SCANNERS. A gated scanner missing from that map produces a report type on main that a docs-only MR will not have, which blocks the MR on the approval policy. Map it, then stub its report type in ${DOCS_ONLY_STUB_JOB}.`,
+    ).toEqual(Object.keys(CODE_GATED_SCANNERS).sort());
+  });
+
+  it("emits one empty report for every type those scanners produce", () => {
+    const expected = [...new Set(Object.values(CODE_GATED_SCANNERS))].sort();
+    expect(
+      parseStubReportTypes(gitlabCiYml).sort(),
+      `${DOCS_ONLY_STUB_JOB}'s artifacts:reports: must cover exactly the report types the skipped scanners produce.`,
+    ).toEqual(expected);
+  });
+
+  it("never stubs a report type whose scanner still runs on a docs-only MR", () => {
+    // secret_detection is deliberately ungated (a secret can be pasted into a
+    // README), so it runs on the fast path and must NOT be stubbed — a stub
+    // would sit alongside the real report and add a scanner name to the
+    // security widget that scanned nothing.
+    expect(parseStubReportTypes(gitlabCiYml)).not.toContain("secret_detection");
+    expect(parseJobsGatedOn(gitlabCiYml, "scanner_rules")).toContain(
+      "secret_detection",
+    );
   });
 });

@@ -50,6 +50,37 @@ export const DOCS_ONLY_PATHS = [
   "docs",
 ] as const;
 
+/**
+ * Every scanner job `.code_scanner_rules` gates, mapped to the security report
+ * type it feeds GitLab. Two SAST jobs share one report type, which is exactly
+ * why this is a map and not a list: the stub owes one empty report per *type*,
+ * not per job.
+ *
+ * #116: skipping these jobs is not free. The approval policy in the linked
+ * security-policy project compares the report types present in a merge
+ * request's pipeline against those in main's; a type main has and the merge
+ * request lacks is a `scan_removed` violation, and the policy's
+ * `fallback_behavior: fail: closed` converts that into a required approval. So
+ * every docs-only merge request was unmergeable until one specific human
+ * approved it — on a diff that cannot contain a vulnerability.
+ *
+ * `docs_only_scan_stub` in `.gitlab-ci.yml` supplies the missing types. Keeping
+ * this map honest is what stops the fix rotting: add a fifth code-gated scanner
+ * and the test fails until it is listed here AND stubbed there.
+ *
+ * `secret_detection` is deliberately absent — it is gated on `*scanner_rules`,
+ * not `*code_scanner_rules`, so it runs on the fast path and needs no stand-in.
+ */
+export const CODE_GATED_SCANNERS: Readonly<Record<string, string>> = {
+  "semgrep-sast": "sast",
+  "gitlab-advanced-sast": "sast",
+  "gemnasium-dependency_scanning": "dependency_scanning",
+  container_scanning: "container_scanning",
+};
+
+/** The `.gitlab-ci.yml` job that emits the empty stand-in reports (#116). */
+export const DOCS_ONLY_STUB_JOB = "docs_only_scan_stub";
+
 /** How a top-level entry is treated by the merge-request fast path. */
 export type PathClass = "code" | "docs" | "unclassified";
 
@@ -128,6 +159,83 @@ export function globCoversTopLevel(glob: string, name: string): boolean {
     .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
     .join("[^/]*");
   return new RegExp(`^${pattern}$`).test(name);
+}
+
+/**
+ * Names of the jobs whose `rules:` are the YAML alias `*<anchor>`.
+ *
+ * Line-based for the same reason `parseCodeChangeGlobs` is: no YAML parser
+ * dependency, and the shape being read is unambiguous. A job name is a key at
+ * column 0; everything indented under it belongs to the last such key seen. The
+ * `.code_scanner_rules:` anchor definition itself is a column-0 key too, but it
+ * defines the alias rather than using it, so it never matches the `rules:` line
+ * and never appears in the result.
+ */
+export function parseJobsGatedOn(
+  gitlabCiYml: string,
+  anchor: string,
+): string[] {
+  const jobs = new Set<string>();
+  let currentKey: string | null = null;
+
+  for (const line of gitlabCiYml.split("\n")) {
+    const topLevelKey = /^([^\s#][^:]*):/.exec(line);
+    if (topLevelKey) {
+      currentKey = topLevelKey[1];
+      continue;
+    }
+    if (currentKey && line.trim() === `rules: *${anchor}`) jobs.add(currentKey);
+  }
+  return [...jobs];
+}
+
+/**
+ * The `artifacts:reports:` keys of the docs-only stub job — i.e. the security
+ * report types it stands in for.
+ *
+ * Throws rather than returning `[]` when the job or its reports block is
+ * missing: an empty result would make the coverage assertion in the test pass
+ * by vacuity at precisely the moment the job that closes the gap was deleted,
+ * which is the silent failure this whole guard exists to prevent.
+ */
+export function parseStubReportTypes(
+  gitlabCiYml: string,
+  job: string = DOCS_ONLY_STUB_JOB,
+): string[] {
+  const lines = gitlabCiYml.split("\n");
+  const start = lines.findIndex((l) => l.startsWith(`${job}:`));
+  if (start === -1) {
+    throw new Error(
+      `\`${job}:\` not found in .gitlab-ci.yml. Without it a docs-only merge request produces none of the report types main's pipeline has, and the approval policy blocks it as \`scan_removed\` (#116).`,
+    );
+  }
+
+  const types: string[] = [];
+  let reportsIndent: number | null = null;
+
+  for (const line of lines.slice(start + 1)) {
+    if (/^[^\s#]/.test(line)) break; // next column-0 key — the job is over
+    const trimmed = line.trim();
+    if (trimmed === "" || trimmed.startsWith("#")) continue;
+
+    const indent = line.length - line.trimStart().length;
+    if (reportsIndent !== null) {
+      if (indent > reportsIndent) {
+        const key = /^([A-Za-z_][A-Za-z0-9_]*):/.exec(trimmed);
+        if (key) types.push(key[1]);
+        continue;
+      }
+      reportsIndent = null; // dedented back out of the reports block
+    }
+    if (trimmed === "reports:") reportsIndent = indent;
+  }
+
+  if (types.length === 0) {
+    throw new Error(
+      `\`${job}:\` declares no artifacts:reports:, so it registers no scan types with GitLab and cannot unblock a docs-only merge request (#116).`,
+    );
+  }
+  return types;
 }
 
 /**
