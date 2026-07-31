@@ -77,6 +77,22 @@ COPY --chown=node:node public ./public
 COPY --chown=node:node ci-dist/standalone ./
 COPY --chown=node:node ci-dist/static ./.next/static
 
+# ── Which commit this image is (#135) ────────────────────────────────────────
+# /api/health reports the short form, so Instance A (this image, on Kubernetes)
+# and Instance B (the Compose self-host stack) can be ASSERTED to be on the same
+# commit instead of assumed to be. It has to be baked in here: a running
+# container cannot read the registry tag it was pulled under, even though for
+# this image that tag IS $CI_COMMIT_SHA.
+#
+# build_image passes `--build-arg BUILD_SHA=$CI_COMMIT_SHA` (.gitlab-ci.yml).
+# ENV, not just ARG: an ARG is build-time only and never reaches the process.
+# LAST in the file on purpose — the value changes every commit, so it must sit
+# below every layer Kaniko caches; only metadata follows it. Keep in lock-step
+# with ./Dockerfile; src/lib/dockerfile-hygiene.test.ts asserts both carry the
+# pair, since one missing it silently makes the comparison impossible.
+ARG BUILD_SHA=""
+ENV BUILD_SHA=$BUILD_SHA
+
 # Run as the non-root `node` user (uid 1000, present in node images).
 USER node
 

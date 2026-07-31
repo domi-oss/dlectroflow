@@ -263,6 +263,32 @@ describe.each([["docker/Dockerfile"], ["docker/Dockerfile.ci"]])(
       ).toBe(true);
     });
 
+    // #135 — /api/health reports the short build SHA so Instance A (Helm) and
+    // Instance B (Compose) can be ASSERTED to be on the same commit instead of
+    // assumed to be. The value has to be baked in at build time, because a
+    // running container cannot read the tag it was pulled under. Both
+    // Dockerfiles must carry the pair or one instance answers `sha: null` and
+    // the comparison silently stops being possible — exactly the class of
+    // lock-step drift the rest of this block guards.
+    it("bakes BUILD_SHA in via an ARG/ENV pair so /api/health can report it (#135)", () => {
+      const args = runtime
+        .filter((i) => i.instruction === "ARG")
+        .map((i) => i.args);
+      const envs = runtime
+        .filter((i) => i.instruction === "ENV")
+        .map((i) => i.args);
+
+      expect(
+        args.some((a) => /^BUILD_SHA\b/.test(a)),
+        `${filename} runner stage must declare ARG BUILD_SHA`,
+      ).toBe(true);
+      expect(
+        envs.some((e) => /^BUILD_SHA=\$\{?BUILD_SHA\}?$/.test(e)),
+        `${filename} runner stage must promote the ARG with ENV BUILD_SHA=$BUILD_SHA — ` +
+          `an ARG alone is build-time only and never reaches the running process`,
+      ).toBe(true);
+    });
+
     // Drift caught while fixing #71: the image pinned tsx@4.19.2 while the app
     // had moved to 4.23.1 — the version #67 realigned on so only one esbuild
     // resolves. The image's CLIs must match what `npm ci` installs, or the

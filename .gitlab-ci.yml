@@ -637,9 +637,17 @@ build_image:
     # They are independent: the Dockerfile's `COPY prisma`, `COPY public` and
     # `COPY ci-dist/...` all resolve against the context, so narrowing it to
     # docker/ would fail every one of them. Only the recipe moved.
+    # --build-arg BUILD_SHA (#135): bakes the commit into the image so
+    # /api/health can report it and the two instances can be asserted to be on
+    # the same commit. The image tag already IS the SHA, but a running container
+    # cannot read the tag it was pulled under. The full SHA is passed and
+    # src/lib/build-info.ts shortens it, so both instances shorten identically.
+    # It is the LAST ARG/ENV pair in Dockerfile.ci, so changing every commit
+    # invalidates only the trailing metadata layers, not the cached ones.
     - /kaniko/executor
         --context "$CI_PROJECT_DIR"
         --dockerfile "$CI_PROJECT_DIR/docker/Dockerfile.ci"
+        --build-arg "BUILD_SHA=$CI_COMMIT_SHA"
         $DESTS
         --cache=true
         --cache-repo "$CI_REGISTRY_IMAGE/cache"
