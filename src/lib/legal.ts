@@ -57,12 +57,19 @@ export const SOURCE_REPO_URL =
 /**
  * ISO date the current text took effect. Bump when the substance changes.
  *
- * Bumped for #126: freezing or deleting an account now revokes the Google grant
- * as well, which is a change to what the app does with somebody's Google
- * account — the first substantive change since the pages were published, and so
- * the first one that has to move this date (see docs/legal.md).
+ * Bumped for #140: /privacy now carries the Google Limited Use undertaking and
+ * an explicit statement that no Google data reaches the AI provider. A new
+ * undertaking to a reader is substance by any reading, so it moves this date.
+ *
+ * It did not move it in #140's own commit — the rule lived only in the prose
+ * above and nothing enforced it, so the page shipped new material text under
+ * the previous day's date. `src/lib/legal-fingerprint.test.tsx` (#141) is the
+ * gate that now makes the next omission a red build instead of a lucky catch.
+ *
+ * Previously bumped for #126: freezing or deleting an account also revokes the
+ * Google grant, which changed what the app does with somebody's Google account.
  */
-export const LEGAL_EFFECTIVE_DATE = "2026-07-30";
+export const LEGAL_EFFECTIVE_DATE = "2026-07-31";
 
 /** Where the hosted instance and its backups physically sit. */
 export const HOSTING_REGION = "London, United Kingdom (GCP europe-west2)";
