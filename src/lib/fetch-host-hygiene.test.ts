@@ -244,6 +244,32 @@ describe("scanFetchTargets — constant hosts it must accept", () => {
     expect(only(src)).toMatchObject({ constantHost: true });
   });
 
+  it("a fetch whose target is a Request built from a constant URL", () => {
+    // Duo caught this on !218. `new Request(...)` is a NewExpression, so the
+    // OUTER fetch fell through to "unresolvable" and was reported as dynamic
+    // even though the Request's own URL is a literal — which would have forced
+    // a REVIEWED_DYNAMIC_HOSTS entry for a call that is provably safe, exactly
+    // the kind of dilution this guard replaced.
+    const sites = scanFetchTargets(
+      `await fetch(new Request("https://constant.example/x"));`,
+      "fixture.ts",
+    );
+    expect(sites).toHaveLength(2);
+    expect(sites.every((s) => s.constantHost)).toBe(true);
+  });
+
+  it("a fetch whose Request wraps a const-bound URL", () => {
+    const src = `
+      const ENDPOINT = "https://oauth2.googleapis.com/token";
+      export async function go() {
+        return fetch(new Request(ENDPOINT), { method: "POST" });
+      }
+    `;
+    expect(
+      scanFetchTargets(src, "fixture.ts").every((s) => s.constantHost),
+    ).toBe(true);
+  });
+
   it("a Request built from a literal URL", () => {
     expect(
       only(`const r = new Request("https://example.com/x");`),
@@ -404,6 +430,20 @@ describe("scanFetchTargets — what it must NOT match", () => {
 });
 
 describe("the repo itself", () => {
+  it("every scanned root exists where this test thinks it does", () => {
+    // Duo caught the gap on !218: `scannedFiles()` swallows a missing root, and
+    // the "> 50 files" guard below is satisfied by `src/` alone — so renaming
+    // `prisma/` or `scripts/` would silently drop them from the scan while
+    // everything stayed green. Same guard the scoping harness puts on its
+    // PEOPLE_FILES list, for the same reason.
+    for (const root of SCANNED_ROOTS) {
+      expect(
+        () => readdirSync(root, { encoding: "utf8" }),
+        `${root}/ is missing — fix the layout or update SCANNED_ROOTS`,
+      ).not.toThrow();
+    }
+  });
+
   it("scans a real number of files (guards against matching nothing)", () => {
     // Without this, a broken glob would turn every rule below into a test that
     // reads no files and passes forever.

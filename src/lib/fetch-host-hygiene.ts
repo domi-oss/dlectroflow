@@ -282,6 +282,17 @@ function constantPrefix(
     return constantPrefix(returned, depth + 1, new Set(seen).add(fn));
   }
 
+  // `new Request(url)` — the host lives in the first argument, so recurse into
+  // it rather than treating the constructor as opaque. Without this,
+  // `fetch(new Request(CONST))` reported the OUTER call as dynamic (the
+  // argument is a NewExpression) and would have forced a REVIEWED_DYNAMIC_HOSTS
+  // entry for a provably safe call — diluting the one map that has to stay
+  // readable. Duo review, !218. The Request itself is still reported as its own
+  // call site, so nothing stops being checked.
+  if (isRequestConstruction(expression) && expression.arguments?.[0]) {
+    return constantPrefix(expression.arguments[0], depth + 1, seen);
+  }
+
   // Property access, `await`, conditionals, `new URL(...)`, template tags,
   // element access, anything else: not knowably constant.
   return UNRESOLVED;
