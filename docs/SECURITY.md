@@ -83,4 +83,16 @@ effect without a manual `kubectl rollout restart`.
   Result Policy requires approval for any new Critical/High finding.
 - **Weekly:** base-image rescan schedule; Renovate review.
 - **Monthly:** security assessment re-run (per `.gitlab/duo/prompts/security-assessment.md`).
+  Kicked off by the **Monthly security assessment** pipeline schedule
+  (`SECURITY_ASSESSMENT=true` → the `security_assessment` job), which files the
+  dated work item pre-filled with the active-vulnerability snapshot. Before #134
+  this cadence had no mechanism, and the Vulnerability Report reached 70
+  findings — 8 of them High — that nobody had read.
 - **Quarterly:** threat-model refresh and policy review.
+
+> ⚠️ **The Scan Result Policy only gates on *new* Critical/High findings.**
+> Anything already in the baseline is never "new", so it never blocks anything.
+> The monthly assessment is the only thing that reads the baseline — and it
+> reports "still detected on `main`" separately from "already fixed but never
+> resolved", because the Vulnerability Report's default view does not
+> distinguish them.

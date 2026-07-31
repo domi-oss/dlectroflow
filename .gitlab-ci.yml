@@ -22,7 +22,7 @@ stages:
   - maintenance   # scheduled housekeeping only: renovate, ops_digest, prune_registry
 
 # ── Scheduled pipelines (issue #2, task 4.3 — base-image refresh cadence) ─────
-# Three pipeline schedules drive maintenance (create in Settings → CI/CD → Schedules):
+# Four pipeline schedules drive maintenance (create in Settings → CI/CD → Schedules):
 #   1. "Weekly base-image rescan"  → no extra variables. Rebuilds the image on the
 #      current main and re-runs all scanners so new base/dependency CVEs surface in
 #      the Vulnerability Report even when no code changed. Does NOT deploy. Also
@@ -32,9 +32,17 @@ stages:
 #      runs the full scanner suite and is gated by review (see .gitlab/renovate.json).
 #   3. "Weekly registry prune"     → variable REGISTRY_PRUNE=true. Runs ONLY the
 #      prune_registry job, which bounds the main-* registry tag set (#114).
+#   4. "Monthly security assessment" → variable SECURITY_ASSESSMENT=true. Runs ONLY
+#      the security_assessment job, which files the dated work item that
+#      .gitlab/duo/prompts/security-assessment.md requires, pre-filled with the
+#      active-vulnerability snapshot (#134). The cadence was documented in
+#      docs/quality-audit-prompts.md ## Cadence long before anything ran it, which
+#      is how 8 unread HIGH findings accumulated in the baseline.
 # Each flag variable gets a `when: never` guard on every OTHER scheduled job, so
 # a flagged maintenance schedule runs its own job and nothing else — no duplicate
 # ops digest, no pointless weekly rebuild. Add a flag, add its guards.
+# `src/lib/security-assessment.test.ts` asserts that every rule block guarding
+# one flag guards the others too, so a flag added to only some of them fails CI.
 
 variables:
   IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
@@ -87,6 +95,8 @@ include:
   - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'
     when: never
   - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'
+    when: never
+  - if: '$CI_PIPELINE_SOURCE == "schedule" && $SECURITY_ASSESSMENT == "true"'
     when: never
   - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     allow_failure: false
@@ -160,6 +170,8 @@ include:
   - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'
     when: never
   - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'
+    when: never
+  - if: '$CI_PIPELINE_SOURCE == "schedule" && $SECURITY_ASSESSMENT == "true"'
     when: never
   - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     changes: *code_changes
@@ -256,6 +268,8 @@ build_app:
       when: never
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'
       when: never
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $SECURITY_ASSESSMENT == "true"'
+      when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: *code_changes
     - if: '$CI_COMMIT_BRANCH == "main"'
@@ -336,6 +350,8 @@ test_app:
       when: never
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'
       when: never
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $SECURITY_ASSESSMENT == "true"'
+      when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: *code_changes
     - if: '$CI_COMMIT_BRANCH == "main"'
@@ -404,6 +420,8 @@ e2e_test:
       when: never
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'
       when: never
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $SECURITY_ASSESSMENT == "true"'
+      when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: *code_changes
     - if: '$CI_COMMIT_BRANCH == "main"'
@@ -471,6 +489,8 @@ build_image:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'
       when: never
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $SECURITY_ASSESSMENT == "true"'
       when: never
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: *code_changes
@@ -763,6 +783,8 @@ ops_digest:
       when: never
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'
       when: never
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $SECURITY_ASSESSMENT == "true"'
+      when: never
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
 
 # ── Registry prune (#114, from #113) ─────────────────────────────────────────
@@ -813,4 +835,41 @@ prune_registry:
     - bash scripts/prune-registry.sh
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'
+
+# ── Monthly security assessment (#134) ───────────────────────────────────────
+# The cadence in docs/quality-audit-prompts.md said "monthly: Duo
+# security-assessment.md full run" from the day it was written, and listed
+# scheduled pipelines under "Automation gaps". Nothing ran it, and the
+# Vulnerability Report reached 70 findings with 8 HIGH that had never been read
+# — the Scan Result Policy gates on *new* Critical/High, so the standing
+# baseline is never "new" and is invisible by construction.
+#
+# This job does not perform the assessment (that is a human/agent run of the
+# prompt). It files the dated work item the prompt requires, pre-filled with the
+# active-vulnerability snapshot — including the split the Vulnerability Report's
+# default view hides: how many findings are still detected on `main` versus
+# already fixed but never resolved. All 8 of #134's HIGH findings were the
+# latter.
+#
+# Runs ONLY on the "Monthly security assessment" schedule (SECURITY_ASSESSMENT=true)
+# — see the schedule list at the top of this file. Never on a merge request
+# (it would file one issue per MR), never on main, never on a tag.
+#
+# One-time owner setup: GL_TOKEN (Settings → CI/CD → Variables, protected) — the
+# same api-scoped token ops_digest uses. Unset is the "not configured" case: the
+# script previews to the job log and posts nothing, rather than failing.
+#
+# Behaviour is covered by src/lib/security-assessment.test.ts, which drives the
+# real script with curl stubbed and asserts the settings below.
+security_assessment:
+  stage: maintenance
+  image: alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+  needs: []                 # never gated on a build: the point is that it always runs
+  interruptible: false      # a maintenance run should finish, not be cancelled mid-post
+  before_script:
+    - apk add --no-cache curl jq bash
+  script:
+    - bash scripts/security-assessment.sh
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $SECURITY_ASSESSMENT == "true"'
 
