@@ -54,12 +54,20 @@ const single = (
  * assertion about it has to come from the rendered header rather than from the
  * props that went in.
  *
- * Scoped by the lane's named landmark rather than by walking up from the label
- * text (!226 review): `getByText(label).parentElement` would have assumed the
- * label is a direct child of SubHeader's root, and would break the moment
- * SubHeader — a component shared with the whole inbox — gained a wrapper. The
- * region is the lane's own contract. The count is the only pure-digit node in a
- * lane: a row's estimate renders "8m" and its progress renders "1/3".
+ * Scoped by the lane's named landmark (!226 review). Walking up from the label
+ * text to its parent node instead would assume the label is a direct child of
+ * SubHeader's root, and would break the moment SubHeader — a component shared
+ * with the whole inbox — gained a wrapper; the region is the lane's own
+ * contract, so it holds whatever SubHeader does internally.
+ *
+ * Deliberately no code sample of the rejected approach here: the first version
+ * of this comment quoted the old expression verbatim, and round 2 of the review
+ * read the quotation as live code and re-raised the finding against the very
+ * commit that fixed it. Prose only.
+ *
+ * The count is the only pure-digit node in a lane — a row's estimate renders
+ * "8m" and its progress renders "1/3" — so a stray match would throw on
+ * multiple elements rather than quietly read the wrong number.
  */
 function laneCount(label: string): number {
   const lane = screen.getByRole("region", { name: label });
