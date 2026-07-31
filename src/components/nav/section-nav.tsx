@@ -95,11 +95,17 @@ export function SectionNav({
   label: string;
   /**
    * #131 — the page's raw `?from=` origin, forwarded straight to `<BackLink>`,
-   * which resolves it against the whitelist. Optional: an absent origin is a
-   * legitimate everyday case (someone typed the URL), and it resolves to the
-   * inbox rather than to no exit at all.
+   * which resolves it against the whitelist.
+   *
+   * `undefined` is a legitimate everyday value (someone typed the URL), and it
+   * resolves to the inbox rather than to no exit at all — the bar ALWAYS renders
+   * a visible "← Back", never a hidden one. Which is exactly why the prop is
+   * required rather than optional (review on !216): a page that forgets to
+   * thread its origin gets a working control pointing at the wrong place, and
+   * that is not something to discover by reading the rendered bar. Written out
+   * at every call site, it is a compile error instead.
    */
-  from?: string;
+  from: string | undefined;
 }) {
   const listId = useId();
   const navRef = useRef<HTMLElement>(null);

@@ -226,6 +226,27 @@ describe("SectionNav (#72)", () => {
       expect(backControl()).toBeVisible();
     });
 
+    it("makes the origin a compile-time question, not a rendered surprise", () => {
+      // Review on !216. The bar ALWAYS renders a visible exit, so a page that
+      // adds <SectionNav> and forgets to thread its `?from=` does not get a
+      // missing control — it gets a working one pointing at the inbox, which is
+      // the kind of wrong you only find by reading the rendered bar. `from` is
+      // therefore required even though `undefined` is a perfectly good value.
+      //
+      // This assertion is the type checker's, not the runtime's: if omitting the
+      // prop ever becomes legal again, the directive below goes unused and
+      // `tsc --noEmit` fails the build.
+      const withoutOrigin = (
+        // @ts-expect-error -- `from` is required; pass `from={undefined}` if there is genuinely no origin.
+        <SectionNav
+          sections={HELP_SECTIONS}
+          voice="plain"
+          label="Help sections"
+        />
+      );
+      expect(withoutOrigin).toBeTruthy();
+    });
+
     it("takes ONE tab stop, at the head of the bar, in visual order", async () => {
       // Deliberate tab-order check (#131): the control is first in the DOM
       // because it is first on screen, so focus order and reading order agree
