@@ -205,6 +205,52 @@ export const STRINGS = {
   // (mirrors focus.hero.left's "~Xm left" pattern on the launcher hero).
   "focus.startFresh": { plain: "↻ Start fresh", playful: "↻ Start fresh" },
 
+  // ── #137 — what the timer says when a server action fails ──────────────────
+  // It used to say nothing: a rejected action left the screen on "Claude is
+  // re-estimating…" indefinitely. These are the words that replace the spinner.
+  //
+  // Deliberately IDENTICAL across voices, like "settings.saveError" above: the
+  // playful skin is a delight layer, and a session that has just gone wrong —
+  // alarm ringing, decision half-made — is not where delight belongs. Each
+  // message says what did not happen AND what is still true, because the
+  // unanswerable question at that moment is "did I just lose my work?".
+  "focus.error.stale": {
+    plain:
+      "The app updated while this was open, so that didn't go through. Reload to carry on — nothing is lost.",
+    playful:
+      "The app updated while this was open, so that didn't go through. Reload to carry on — nothing is lost.",
+  },
+  "focus.error.reestimate": {
+    plain: "Couldn't get a new estimate just now.",
+    playful: "Couldn't get a new estimate just now.",
+  },
+  "focus.error.requeue": {
+    plain: "Couldn't save that — your step hasn't changed.",
+    playful: "Couldn't save that — your step hasn't changed.",
+  },
+  "focus.error.complete": {
+    plain: "Couldn't finish the step just now — nothing is lost.",
+    playful: "Couldn't finish the step just now — nothing is lost.",
+  },
+  "focus.error.session": {
+    plain: "Couldn't reach the server just now.",
+    playful: "Couldn't reach the server just now.",
+  },
+  "focus.error.retry": { plain: "Try again", playful: "Try again" },
+  // Announced from inside the notice while a retry is in flight, so the wait is
+  // not silent and the Retry button can keep focus instead of being `disabled`.
+  "focus.error.retrying": { plain: "Trying again…", playful: "Trying again…" },
+  "focus.error.reload": {
+    plain: "Reload the page",
+    playful: "Reload the page",
+  },
+  // The escape hatch from a failed re-estimate: the session ends in a requeue
+  // either way, just with a number the user chose instead of one Claude did.
+  "focus.error.pickTime": {
+    plain: "Skip — pick a time myself",
+    playful: "Skip — pick a time myself",
+  },
+
   // ── #66 setup screen: "one number, one action" ─────────────────────────────
   // The setup phase used to stack four figures (ring countdown, the step-context
   // minutes line, the Resume button's own "~Xm left", and a Duration number

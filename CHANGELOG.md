@@ -206,6 +206,48 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **The focus timer no longer hangs forever when a server action fails (#137).**
+  Finishing a session, choosing "Not yet", or confirming a requeue could leave
+  the screen on "Claude is re-estimating…" indefinitely — no error, no timeout,
+  and no way out but a reload that lost your place. Three handlers shared the
+  same unguarded shape, so a rejected request skipped the line that clears the
+  pending state and the UI silently stopped responding while still *looking*
+  like it was working.
+  - **Every focus action now runs through one guarded path**, with the pending
+    state cleared in a `finally` so no route can leave the timer stuck, and a
+    timeout so a request that never answers surfaces the same way one that
+    rejects does.
+  - **A failed re-estimate is no longer a dead end.** It says what happened and
+    offers **Try again** and **Skip — pick a time myself**, so the session can
+    still end in a requeue with a number you chose.
+  - **A deploy while your tab is open is now named as such.** Next regenerates
+    server-action ids on every build, so a tab open across a release posts an id
+    the running deployment no longer has — the original trigger in production.
+    That case says "the app updated" and offers a reload, and deliberately does
+    *not* offer a retry, which could never succeed against a stale bundle.
+  - **Accessibility:** the notice is a `role="alert"`, focus moves to its
+    primary action, and that action is described by the message so the reason is
+    announced with the remedy. State is carried by the words, not by the red.
+
+- **A requeue's new estimate now shows up on the list (#139).** Choosing "Not
+  yet" wrote the kinder estimate to the database correctly and then left the
+  home list rendering the old one, so a feature that worked looked broken. The
+  requeue was the one mutation in the focus actions that invalidated the task
+  page and not the list.
+  - **It also said "done" when it had failed.** The requeue's result was
+    discarded, so all four of its guard failures still showed the "🌱 bumped to
+    N min" success screen. The screen now appears only when the write actually
+    landed, and completing a step is held to the same standard — a completion
+    the server refused no longer gets a celebration.
+  - **Completing a step mid-task refreshes the list too.** That invalidation sat
+    inside a branch, so finishing the *last* step of a task refreshed the list
+    and finishing any earlier one did not.
+  - **Guarded by a new hygiene test.** `revalidation-hygiene` parses the focus
+    actions and fails the build if a mutation stops invalidating the list, or
+    starts doing it from inside a branch. It follows writes through the file's
+    private helpers, and the four session-only actions are exempt through a
+    reasoned allowlist the test re-proves on every run.
+
 - **Settings and Help now have a way home from the bottom of the page (#131).**
   On both pages the "Jump to…" bar sticks, but everything above it scrolls away
   — including the "← Back" link, the one control that returns you to wherever
