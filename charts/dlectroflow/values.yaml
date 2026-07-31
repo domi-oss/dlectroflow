@@ -91,6 +91,11 @@ secrets:
   googleClientSecret: ""
   resendApiKey: ""
   roundupFromEmail: ""
+  # #135 — LLM_API_KEY, the credential for an openai-compatible endpoint that
+  # needs one (a local Ollama/LM Studio does not). Kept here rather than under
+  # `llm:` below because it is a real secret; the adapter falls back to
+  # "not-needed" when unset. Only rendered into the Secret when non-empty.
+  llmApiKey: ""
   # Owner auth — required in ALL envs (the prod boot guard refuses to start
   # without these; review apps use dummy-but-valid values passed by CI).
   authSessionSecret: ""
@@ -109,6 +114,69 @@ secrets:
 auth:
   provider: gitlab
   ownerAllowlist: ""
+
+# ── Optional app tuning (#135) ───────────────────────────────────────────────
+# The knobs the Compose self-host path has always exposed via
+# .env.prod.example. Before #135 they had no chart equivalent, so this instance
+# could not switch LLM provider or change a guest quota without a chart edit.
+# src/lib/env-drift.test.ts now diffs the two surfaces and fails on any
+# undeclared divergence, so a key added to one must be added to the other or
+# recorded in CONFIG_SURFACE_ALLOWLIST with a reason.
+#
+# EVERY VALUE HERE DEFAULTS TO "" MEANING "LEAVE UNSET — the code default
+# applies". They are deliberately not pre-filled with the code's own defaults:
+# a chart that repeats a default silently pins it, so the next change to
+# src/lib/constants.ts would reach the Compose stack and not the cluster, which
+# is the same class of drift #135 exists to stop. The effective default is noted
+# per key instead, so an operator can see it without reading source.
+#
+# secret.yaml renders each key ONLY when non-empty — "" would be a *set but
+# empty* env var, which several readers treat very differently from unset (see
+# the comment there). Override with --set / --set-string, as CI does for the
+# secrets below.
+llm:
+  provider: "" # LLM_PROVIDER — default: anthropic. Other value: openai-compatible
+  baseUrl: "" # LLM_BASE_URL — no default; REQUIRED when provider=openai-compatible
+  model: "" # LLM_MODEL — no default; REQUIRED when provider=openai-compatible
+  # LLM_SUPPORTS_TOOLS — default: true. Set "false" for a model with no native
+  # tool calling (falls back to JSON-in-text). A STRING, not a bool: see the
+  # `ne (toString …)` note in secret.yaml for why either form still renders.
+  supportsTools: ""
+  ownerBreakdownModel: "" # OWNER_BREAKDOWN_MODEL — default: claude-sonnet-4-6 (anthropic only)
+  guestBreakdownModel: "" # GUEST_BREAKDOWN_MODEL — default: claude-haiku-4-5 (anthropic only)
+  # LLM_OWNER_MODEL / LLM_GUEST_MODEL — the openai-compatible counterparts to
+  # the two breakdown models above (which only apply to `anthropic`). Each falls
+  # back to `model` when unset (#96 — a member is not a guest).
+  ownerModel: ""
+  guestModel: ""
+
+google:
+  # GOOGLE_TASKS_LIST_NAME — default: reclaim. The Google Tasks list confirmed
+  # steps are written to; Reclaim.ai only auto-schedules from its own list.
+  tasksListName: ""
+
+scheduling:
+  # SCHEDULING_SYNTAX — default: detected from the list name (a list matching
+  # "reclaim" gets Reclaim's parenthetical parameters, anything else a clean
+  # title plus Google Tasks' native due date). "reclaim" or "plain" to override.
+  syntax: ""
+  # SCHEDULING_TIMEZONE — default: Europe/London. An IANA zone; the windows the
+  # scheduler treats as working hours are computed in it.
+  timezone: ""
+
+# Guests are unauthenticated visitors in a throwaway sandbox. These caps are
+# what stop a public instance running up the model bill.
+guest:
+  aiQuotaPerWindow: "" # GUEST_AI_QUOTA_PER_WINDOW — default: 5
+  aiWindowHours: "" # GUEST_AI_WINDOW_HOURS — default: 24
+  globalDailyCap: "" # GUEST_GLOBAL_DAILY_GUEST_CAP — default: 10
+  sandboxTtlHours: "" # GUEST_SANDBOX_TTL_HOURS — default: 24
+
+user:
+  # USER_AI_WINDOW_HOURS — default: 720 (30 days). The rolling window a
+  # signed-in account's AI usage is measured over, sliding from that person's
+  # first breakdown.
+  aiWindowHours: ""
 
 # Daily logical Postgres backup → GCS (prod only; see templates/backup.yaml).
 # Disabled by default so review apps and `helm template` stay clean; CI turns it
