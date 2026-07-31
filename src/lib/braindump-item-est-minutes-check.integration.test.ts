@@ -52,7 +52,7 @@ async function wipe() {
  * stop.
  *
  * `estMinutes` is passed as `number | null` so the null case exercises the same
- * statement shape as the numeric ones. Parameterised ($1..$4) rather than
+ * statement shape as the numeric ones. Parameterised ($1..$5) rather than
  * interpolated, so it can't be read as a SQL-injection pattern and matches how
  * the other raw queries in the tree are written.
  */
