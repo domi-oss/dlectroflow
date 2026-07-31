@@ -24,6 +24,20 @@ const HELP_NAV = 'nav[aria-label="Help sections"]';
 const SHOTS = "test-results/section-nav";
 
 /**
+ * The jump PILLS only.
+ *
+ * Since #131 the bar carries one more link than it has sections — the way out —
+ * so "every link in the nav" is no longer the same set as "every section entry".
+ * Scoped to the list the toggle owns rather than loosened to a count, because a
+ * pill quietly going missing has to stay a failure.
+ */
+const pills = (nav: Locator): Locator => nav.locator("ul").getByRole("link");
+
+/** #131's compact back control, the copy that lives inside the sticky bar. */
+const stickyBack = (nav: Locator): Locator =>
+  nav.locator('[data-back-link="bar"]');
+
+/**
  * The bar is server-rendered, so it is on screen BEFORE React hydrates — and
  * every client-side behaviour (the smooth-scroll opt-in, the collapse default,
  * aria-current) only exists after. Wait for the opt-in the nav performs on
@@ -127,8 +141,7 @@ for (const state of ["as it lands", "all expanded"] as const) {
       await openPanel(nav);
 
       // One entry per section that is actually on the page.
-      const links = nav.getByRole("link");
-      await expect(links).toHaveCount(
+      await expect(pills(nav)).toHaveCount(
         await page.locator("h2[data-section-target]").count(),
       );
 
@@ -682,7 +695,7 @@ test.describe("section nav — desktop", () => {
 
     // Tab moves into the link list…
     await page.keyboard.press("Tab");
-    const first = nav.getByRole("link").first();
+    const first = pills(nav).first();
     await expect(first).toBeFocused();
     // …with a VISIBLE focus indicator (the shared focus-visible ring).
     const ring = await first.evaluate(
@@ -693,7 +706,7 @@ test.describe("section nav — desktop", () => {
     // Walk to a later entry and activate it with the keyboard.
     await page.keyboard.press("Tab");
     await page.keyboard.press("Tab");
-    const third = nav.getByRole("link").nth(2);
+    const third = pills(nav).nth(2);
     await expect(third).toBeFocused();
     await page.keyboard.press("Enter");
 
@@ -710,7 +723,11 @@ test.describe("section nav — desktop", () => {
     await waitForNavHydrated(page);
     const nav = page.locator(HELP_NAV);
     await openPanel(nav);
-    const links = await nav.getByRole("link").count();
+    // Counted from the PILLS and walked from the toggle, so the back control
+    // #131 put ahead of the toggle is deliberately outside the walk: this test
+    // is about the far end of the bar, and an over-count would clear it by
+    // accident.
+    const links = await pills(nav).count();
 
     await nav.getByRole("button", { name: /jump to/i }).focus();
     for (let i = 0; i < links + 1; i++) await page.keyboard.press("Tab");
@@ -915,7 +932,10 @@ test.describe("section nav — mobile", () => {
     const nav = page.locator(SETTINGS_NAV);
     const toggle = nav.getByRole("button", { name: /jump to/i });
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
-    await expect(nav.getByRole("link").first()).toBeHidden();
+    await expect(pills(nav).first()).toBeHidden();
+    // …but the way out is NOT behind the disclosure (#131): it is the one thing
+    // in here that has to work without opening anything.
+    await expect(stickyBack(nav)).toBeVisible();
 
     // Collapsed, the bar is one compact row that costs almost no height.
     const collapsed = (await nav.boundingBox())!.height;
@@ -923,10 +943,13 @@ test.describe("section nav — mobile", () => {
 
     // Every control clears the 44px touch-target minimum.
     expect((await toggle.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect(
+      (await stickyBack(nav).boundingBox())!.height,
+    ).toBeGreaterThanOrEqual(44);
 
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
-    const firstLink = nav.getByRole("link").first();
+    const firstLink = pills(nav).first();
     await expect(firstLink).toBeVisible();
     expect((await firstLink.boundingBox())!.height).toBeGreaterThanOrEqual(44);
 
@@ -965,6 +988,229 @@ test.describe("section nav — mobile budget", () => {
     // a future change that doubles it fails here rather than quietly eating the
     // screen.
     expect(combined).toBeLessThan(MOBILE.height * 0.2);
+  });
+});
+
+// ── #131: there is a way home from the bottom of the page ───────────────────
+//
+// The bar's DESTINATIONS were sticky and its exit was not: `<BackLink>` sits
+// above the h1 on both pages and scrolls away with it, so a reader a screen down
+// a long list of disclosures had no way back but scrolling all the way up. jsdom
+// cannot see any of that — the whole bug is scroll geometry — so the proof lives
+// here: scroll the page to its limit, watch the page-level control leave the
+// viewport, and check the one in the bar is still there and still goes to the
+// right place.
+
+/** Scroll to the document's limit and wait for it to come to rest. */
+async function scrollToBottom(page: Page): Promise<void> {
+  await page.evaluate(() =>
+    window.scrollTo(0, document.documentElement.scrollHeight),
+  );
+  await waitForScrollToSettle(page);
+}
+
+const BACK_ROUTES = [
+  {
+    route: "/settings",
+    navSelector: SETTINGS_NAV,
+    // Cross-linked in both directions by the pages themselves: /help links to
+    // "/settings?from=help", /settings links to "/help?from=settings".
+    from: "help",
+    origin: "/help",
+  },
+  {
+    route: "/help",
+    navSelector: HELP_NAV,
+    from: "settings",
+    origin: "/settings",
+  },
+] as const;
+
+test.describe("section nav — the way out sticks (#131)", () => {
+  test.use({ viewport: DESKTOP });
+
+  for (const { route, navSelector, from, origin } of BACK_ROUTES) {
+    test(`${route}: at the bottom of the page the exit is still on screen, and returns to ${origin}`, async ({
+      page,
+    }) => {
+      await page.goto(`${route}?from=${from}`);
+      await waitForShell(page);
+      await waitForNavHydrated(page);
+      // Every section open, so /settings is the LONG page the issue is about
+      // rather than the nine-line collapsed one #101 made it at rest.
+      if (route === "/settings") await expandAllSections(page);
+
+      // The precondition, asserted rather than assumed: the page-level control
+      // starts on screen, and scrolling really does take it away. Without this
+      // the test would pass just as well on a page too short to scroll.
+      const pageLevel = page.locator('[data-back-link="page"]');
+      await expect(pageLevel).toBeInViewport();
+
+      await scrollToBottom(page);
+      expect(
+        await page.evaluate(() => Math.round(window.scrollY)),
+        "the page did not scroll — this test proves nothing",
+      ).toBeGreaterThan(0);
+      await expect(pageLevel).not.toBeInViewport();
+
+      // …and the copy in the bar is right there, with the same name and the
+      // same destination.
+      const back = stickyBack(page.locator(navSelector));
+      await expect(back).toBeInViewport();
+      await expect(back).toHaveAccessibleName("← Back");
+
+      await back.click();
+      await page.waitForURL(`**${origin}`);
+      expect(new URL(page.url()).pathname).toBe(origin);
+    });
+  }
+
+  test("an unknown origin still leads somewhere — the inbox, never the value", async ({
+    page,
+  }) => {
+    // The whitelist in @/lib/nav/back is unit-tested to death; what this checks
+    // is that the STICKY copy goes through it too, in a real browser, so a
+    // hostile `?from=` can never become an open redirect from the sticky bar.
+    await page.goto("/settings?from=https%3A%2F%2Fevil.example.com");
+    await waitForShell(page);
+    await waitForNavHydrated(page);
+
+    const back = stickyBack(page.locator(SETTINGS_NAV));
+    // Resolved, not reflected: the hostile value appears nowhere in the href.
+    await expect(back).toHaveAttribute("href", "/");
+    await back.click();
+    // Matched on the parsed pathname rather than a glob — "**/" matches most
+    // URLs, including the one we started on.
+    await page.waitForURL((url) => url.pathname === "/");
+  });
+
+  test("keyboard: focusable at the bottom, visibly so, and Enter takes you home", async ({
+    page,
+  }) => {
+    await page.goto("/help?from=settings");
+    await waitForShell(page);
+    await waitForNavHydrated(page);
+    await scrollToBottom(page);
+
+    const nav = page.locator(HELP_NAV);
+    const back = stickyBack(nav);
+    const toggle = nav.getByRole("button", { name: /jump to/i });
+
+    await back.focus();
+    await expect(back).toBeFocused();
+    // A visible indicator, not just a focusable element (the shared
+    // focus-visible ring, same as every other control in the bar).
+    const ring = await back.evaluate(
+      (el) => getComputedStyle(el).boxShadow ?? "none",
+    );
+    expect(ring).not.toBe("none");
+
+    // ONE tab stop, at the head of the bar: Tab from the exit reaches the
+    // toggle, so it is not something keyboard users traverse per jump, and
+    // Shift+Tab comes straight back to it.
+    await page.keyboard.press("Tab");
+    await expect(toggle).toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(back).toBeFocused();
+
+    await page.keyboard.press("Enter");
+    await page.waitForURL("**/settings");
+    expect(new URL(page.url()).pathname).toBe("/settings");
+  });
+
+  test("it rides on the toggle's row, so the bar costs no more height", async ({
+    page,
+  }) => {
+    // The reason for putting the exit IN the bar rather than in a second sticky
+    // row: `--section-nav-h` is the one measured offset every jump target lands
+    // against (#115), and a control that wrapped onto its own line would move
+    // it. Same row ⇒ same height ⇒ the landing maths is untouched.
+    await page.goto("/settings?from=help");
+    await waitForShell(page);
+    await waitForNavHydrated(page);
+
+    const nav = page.locator(SETTINGS_NAV);
+    const backBox = (await stickyBack(nav).boundingBox())!;
+    const toggleBox = (await nav
+      .getByRole("button", { name: /jump to/i })
+      .boundingBox())!;
+
+    const centre = (b: { y: number; height: number }) => b.y + b.height / 2;
+    expect(Math.abs(centre(backBox) - centre(toggleBox))).toBeLessThanOrEqual(
+      1,
+    );
+    // To the LEFT of the toggle, matching the DOM order focus follows.
+    expect(backBox.x + backBox.width).toBeLessThanOrEqual(toggleBox.x + 1);
+
+    // And the bar publishes exactly what it measures, which is the row it now
+    // shares with the exit.
+    const published = await page.evaluate(() =>
+      parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue(
+          "--section-nav-h",
+        ),
+      ),
+    );
+    const measured = (await nav.boundingBox())!.height;
+    // The property is published rounded to whole pixels, so allow one.
+    expect(Math.abs(published - measured)).toBeLessThanOrEqual(1);
+  });
+});
+
+test.describe("section nav — the way out on a phone (#131)", () => {
+  test.use({ viewport: MOBILE });
+
+  test("the exit takes its space without pushing the pills off the bar", async ({
+    page,
+  }) => {
+    // The bar was already tight at 390px (#92 is the standing overflow guard),
+    // and the exit is one more thing on its row.
+    await page.goto("/settings?from=help");
+    await waitForShell(page);
+    await waitForNavHydrated(page);
+
+    const nav = page.locator(SETTINGS_NAV);
+    await openPanel(nav);
+
+    const navBox = (await nav.boundingBox())!;
+    const count = await pills(nav).count();
+    expect(count).toBeGreaterThan(0);
+    for (let i = 0; i < count; i++) {
+      const pill = pills(nav).nth(i);
+      await expect(pill).toBeVisible();
+      const box = (await pill.boundingBox())!;
+      // Inside the bar horizontally — nothing clipped off either edge — and
+      // still a real touch target.
+      expect(box.x).toBeGreaterThanOrEqual(navBox.x - 1);
+      expect(box.x + box.width).toBeLessThanOrEqual(
+        navBox.x + navBox.width + 1,
+      );
+      expect(box.height).toBeGreaterThanOrEqual(44);
+    }
+
+    // …and the page as a whole still does not scroll sideways.
+    const overflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      innerWidth: window.innerWidth,
+    }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.innerWidth);
+  });
+
+  test("scrolled to the bottom on a phone, the exit is the control still on screen", async ({
+    page,
+  }) => {
+    await page.goto("/help?from=settings");
+    await waitForShell(page);
+    await waitForNavHydrated(page);
+    await scrollToBottom(page);
+
+    const back = stickyBack(page.locator(HELP_NAV));
+    await expect(page.locator('[data-back-link="page"]')).not.toBeInViewport();
+    await expect(back).toBeInViewport();
+    expect((await back.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+
+    await back.click();
+    await page.waitForURL("**/settings");
   });
 });
 
