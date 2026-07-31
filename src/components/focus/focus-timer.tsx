@@ -454,10 +454,16 @@ export function FocusTimer({
       call: () => Promise<T>,
       timeoutMs: number = ACTION_TIMEOUT_MS,
     ): Promise<Outcome<T>> => {
-      setFailure(null);
       setPending(true);
       try {
-        return { ok: true, value: await withActionTimeout(call(), timeoutMs) };
+        const value = await withActionTimeout(call(), timeoutMs);
+        // Cleared on SUCCESS rather than up front (Duo review round 6): wiping
+        // it before the call unmounted the notice — and the Retry button inside
+        // it that the user had just pressed — dropping focus to <body> for the
+        // whole round trip (WCAG 2.4.3). The notice stays put and reports the
+        // attempt instead.
+        setFailure(null);
+        return { ok: true, value };
       } catch (error) {
         setFailure({ handler, stale: isStaleActionError(error) });
         return { ok: false };
@@ -807,6 +813,23 @@ export function FocusTimer({
     </p>
   ) : null;
 
+  // #137 — the reestimate phase has FOUR states, not two, and naming them once
+  // here keeps the JSX below from re-deriving them:
+  //
+  //   waiting        pending, nothing failed yet  → "Claude is re-estimating…"
+  //   ready          the estimate arrived         → the number field
+  //   estimate failed                            → the notice alone (there is
+  //                                                no estimate to edit)
+  //   requeue failed                             → the field AND the notice —
+  //                                                the number in it is the
+  //                                                user's own, and a retry must
+  //                                                not throw it away
+  //
+  // The field also survives a retry of a failed requeue (`pending` with a
+  // `requeue` failure), which is why this is not simply `!pending && !failure`.
+  const showEstimateField =
+    failure?.handler === "requeue" || (!pending && !failure);
+
   // ── #137: the failure notice ───────────────────────────────────────────────
   // One notice, rendered wherever the user currently is (inside the reestimate
   // block for that phase, under the controls everywhere else), so the message
@@ -832,6 +855,11 @@ export function FocusTimer({
         <TriangleAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
         <span>{t(failureMessageKey(failure), voice)}</span>
       </p>
+      {pending && (
+        <p role="status" className="text-muted-foreground text-xs">
+          {t("focus.error.retrying", voice)}
+        </p>
+      )}
       <div className="flex flex-wrap justify-center gap-2">
         {failure.stale ? (
           // Retrying re-posts the same action id the running deployment has
@@ -847,13 +875,20 @@ export function FocusTimer({
             {t("focus.error.reload", voice)}
           </button>
         ) : (
+          // `aria-disabled`, not `disabled`: a disabled element cannot hold
+          // focus, so the browser would drop it to <body> the moment the retry
+          // starts — the very thing keeping the notice mounted is here to
+          // prevent. The press is guarded in the handler instead, so a
+          // double-tap still cannot fire two requests.
           <button
             ref={failureCtaRef}
             type="button"
             aria-describedby={failureMessageId}
-            onClick={retryFailed}
-            disabled={pending}
-            className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium disabled:opacity-50"
+            aria-disabled={pending}
+            onClick={() => {
+              if (!pending) retryFailed();
+            }}
+            className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium aria-disabled:opacity-50"
           >
             <RotateCcw aria-hidden="true" className="h-4 w-4 shrink-0" />
             {t("focus.error.retry", voice)}
@@ -1264,12 +1299,12 @@ export function FocusTimer({
               edit, so the notice offers Retry and Skip instead); a failed
               REQUEUE keeps the field, because the number in it is the user's
               own and a retry must not throw it away. */}
-          {pending && (
+          {pending && !failure && (
             <p role="status" className="text-muted-foreground text-sm">
               Claude is re-estimating…
             </p>
           )}
-          {!pending && failure?.handler !== "reestimate" && (
+          {showEstimateField && (
             <div className="flex items-center justify-center gap-2">
               <input
                 type="number"
@@ -1290,7 +1325,7 @@ export function FocusTimer({
               </button>
             </div>
           )}
-          {!pending && failureNotice}
+          {failureNotice}
         </div>
       )}
 

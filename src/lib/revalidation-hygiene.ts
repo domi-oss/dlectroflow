@@ -226,13 +226,22 @@ function writtenModel(invoked: ts.Expression): string | null {
 /** What one function body does on its own, before following helpers. */
 interface Direct {
   models: Set<string>;
-  /** Names of same-module functions it calls. */
+  /** Names of same-module functions it calls — and nothing else. */
   calls: Set<string>;
   revalidates: string[];
   conditionalRevalidates: string[];
 }
 
-function scanBody(fn: FunctionLike): Direct {
+/**
+ * @param localNames every function declared at module scope, so `calls` holds
+ *   only same-module edges. Without it the set collected every bare-identifier
+ *   callee — `Number(…)`, `revalidatePath` aside — and `transitiveWrites`
+ *   silently dropped the ones it could not resolve (Duo review round 6, !223).
+ *   No verdict changes, because the drop happened anyway; what changes is that
+ *   `calls` now means what its doc comment says, and a future module-local
+ *   helper sharing a name with a global cannot inherit a phantom edge from it.
+ */
+function scanBody(fn: FunctionLike, localNames: Set<string>): Direct {
   const direct: Direct = {
     models: new Set(),
     calls: new Set(),
@@ -283,7 +292,7 @@ function scanBody(fn: FunctionLike): Direct {
               : direct.conditionalRevalidates
             ).push(first.text);
           }
-        } else {
+        } else if (localNames.has(callee.text)) {
           direct.calls.add(callee.text);
         }
       }
@@ -324,7 +333,13 @@ export function scanServerActions(
   );
 
   const declared = declaredFunctions(parsed);
-  const direct = new Map(declared.map((d) => [d.name, scanBody(d.fn)]));
+  // Collected before any body is scanned, because `scanBody` needs to know
+  // which callees are module-local and the map it would otherwise consult is
+  // still being built at that point.
+  const localNames = new Set(declared.map((d) => d.name));
+  const direct = new Map(
+    declared.map((d) => [d.name, scanBody(d.fn, localNames)]),
+  );
 
   /**
    * Models written by `name`, following module-local calls breadth-first.

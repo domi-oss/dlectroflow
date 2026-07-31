@@ -237,6 +237,9 @@ export const STRINGS = {
     playful: "Couldn't reach the server just now.",
   },
   "focus.error.retry": { plain: "Try again", playful: "Try again" },
+  // Announced from inside the notice while a retry is in flight, so the wait is
+  // not silent and the Retry button can keep focus instead of being `disabled`.
+  "focus.error.retrying": { plain: "Trying again…", playful: "Trying again…" },
   "focus.error.reload": {
     plain: "Reload the page",
     playful: "Reload the page",

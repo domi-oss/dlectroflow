@@ -1788,6 +1788,40 @@ describe("FocusTimer — server-action failures (#137, #139)", () => {
       expect(screen.getByRole("button", { name: /try again/i })).toHaveFocus();
     });
 
+    // Duo review round 6 (!223) — WCAG 2.4.3 again, on the other side of the
+    // press. Retrying used to clear the failure immediately, which unmounted
+    // the notice and the button being pressed, dropping focus to <body> for
+    // the whole round trip. The notice now stays mounted and the button goes
+    // aria-disabled rather than `disabled`, because a `disabled` element also
+    // loses focus.
+    it("keeps focus on Retry while the retry is in flight", async () => {
+      vi.mocked(proposeNewEstimate)
+        .mockRejectedValueOnce(new Error("nope"))
+        .mockReturnValueOnce(new Promise<number>(() => {}));
+      await askForNewEstimate();
+      const retry = screen.getByRole("button", { name: /try again/i });
+      expect(retry).toHaveFocus();
+
+      await click(/try again/i);
+      expect(screen.getByRole("button", { name: /try again/i })).toHaveFocus();
+      expect(
+        screen.getByRole("button", { name: /try again/i }),
+      ).toHaveAttribute("aria-disabled", "true");
+      expect(screen.getByRole("status")).toHaveTextContent(/trying again/i);
+    });
+
+    it("does not fire a second request when Retry is pressed mid-flight", async () => {
+      vi.mocked(proposeNewEstimate)
+        .mockRejectedValueOnce(new Error("nope"))
+        .mockReturnValueOnce(new Promise<number>(() => {}));
+      await askForNewEstimate();
+      await click(/try again/i);
+      await click(/try again/i);
+
+      // once for the original attempt, once for the retry — not three times
+      expect(vi.mocked(proposeNewEstimate)).toHaveBeenCalledTimes(2);
+    });
+
     // The third failure mode: not a rejection, silence. A pod rolling
     // mid-request leaves the request hanging, and an un-timed-out await looks
     // exactly like the original bug from the user's side.
