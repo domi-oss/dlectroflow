@@ -207,11 +207,19 @@ const REGISTRY: ReadonlyArray<{
 // this table pins it: `min` is the inclusive lower bound the SQL must declare.
 // Keeping it here rather than in its own file means one place still answers
 // "which CHECK constraints does this schema manage?".
+//
+// `nullable` mirrors the field of the same name in the enum REGISTRY above: on a
+// nullable column the SQL must carry an `IS NULL OR ...` allowance, and on a NOT
+// NULL column it must not. Getting that backwards is a real failure mode in both
+// directions — a missing allowance makes every estimate-less row unwritable, and
+// a stray one on a NOT NULL column means the column went nullable without this
+// registry noticing — so it is asserted rather than assumed.
 const RANGE_REGISTRY: ReadonlyArray<{
   constraint: string;
   table: string;
   column: string;
   min: number;
+  nullable: boolean;
 }> = [
   {
     // 20260727194512_step_est_minutes_check — every Step must be at least one
@@ -221,6 +229,7 @@ const RANGE_REGISTRY: ReadonlyArray<{
     table: "Step",
     column: "estMinutes",
     min: 1,
+    nullable: false,
   },
   {
     // 20260728130000_user_ai_quota_check (#35 Phase B) — the per-user AI
@@ -231,6 +240,20 @@ const RANGE_REGISTRY: ReadonlyArray<{
     table: "User",
     column: "aiQuota",
     min: 0,
+    nullable: false,
+  },
+  {
+    // 20260731120000_braindump_item_est_minutes_check (#80) — the same >= 1
+    // floor as Step.estMinutes, but on a NULLABLE column where null means "no
+    // estimate given, use the display default". Hence `IS NULL OR >= 1`: the
+    // asymmetry with Step_estMinutes_check is the decision #80 recorded, not an
+    // oversight. Behavioural half in
+    // src/lib/braindump-item-est-minutes-check.integration.test.ts.
+    constraint: "BrainDumpItem_estMinutes_check",
+    table: "BrainDumpItem",
+    column: "estMinutes",
+    min: 1,
+    nullable: true,
   },
 ];
 
@@ -344,7 +367,7 @@ describe("numeric-range CHECK constraints are applied (#78)", () => {
 
   it.each(RANGE_REGISTRY)(
     "$constraint pins $table.$column >= $min",
-    ({ constraint, column, min }) => {
+    ({ constraint, column, min, nullable }) => {
       const def = checks.get(constraint);
       expect(
         def,
@@ -358,12 +381,22 @@ describe("numeric-range CHECK constraints are applied (#78)", () => {
         `${constraint} does not pin "${column}" >= ${min} — its definition is: ${def}`,
       ).toBe(true);
 
-      // A NOT NULL column needs no NULL allowance; one appearing here would
-      // mean the column went nullable without this registry noticing.
-      expect(
-        /IS NULL/i.test(def as string),
-        `${constraint} guards a non-nullable column but unexpectedly contains an "IS NULL" allowance`,
-      ).toBe(false);
+      if (nullable) {
+        // #80 — on a nullable column the bound alone is not the invariant: a
+        // plain `>= 1` would reject every row that legitimately has no
+        // estimate, so the NULL allowance is load-bearing and pinned here.
+        expect(
+          /IS NULL/i.test(def as string),
+          `${constraint} guards a nullable column but has no "IS NULL" allowance — a plain >= ${min} would reject rows whose estimate is legitimately absent`,
+        ).toBe(true);
+      } else {
+        // A NOT NULL column needs no NULL allowance; one appearing here would
+        // mean the column went nullable without this registry noticing.
+        expect(
+          /IS NULL/i.test(def as string),
+          `${constraint} guards a non-nullable column but unexpectedly contains an "IS NULL" allowance`,
+        ).toBe(false);
+      }
     },
   );
 });

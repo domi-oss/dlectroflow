@@ -221,7 +221,23 @@ model BrainDumpItem {
   freshenedAt      DateTime?
   promptDismissedAt DateTime?
   completedAt      DateTime?
-  estMinutes       Int?      // single-task time estimate (minutes); null → display default 5
+  // Single-task time estimate (minutes). Nullable, and null is MEANINGFUL: it
+  // says the user never gave an estimate, and the read side substitutes a
+  // display default (5) rather than storing one.
+  //
+  // #80 — enforced in the DB by BrainDumpItem_estMinutes_check
+  // (20260731120000_braindump_item_est_minutes_check) as
+  // `IS NULL OR >= 1`, NOT the plain `>= 1` that Step.estMinutes gets from
+  // Step_estMinutes_check (#78). That asymmetry is a recorded decision, not an
+  // oversight: Step.estMinutes is NOT NULL so `>= 1` is its whole invariant,
+  // whereas a plain `>= 1` here would reject every estimate-less item and break
+  // createItem — which omits this column — on its first insert. Zero and
+  // negative are still exactly as wrong here as they are on Step, so they are
+  // refused. Prisma can't express a CHECK constraint, so this comment is its
+  // only trace in the schema; it is registered alongside the pseudo-enum
+  // constraints in src/lib/enum-constraint-sync.integration.test.ts
+  // (RANGE_REGISTRY, with nullable: true pinning the NULL allowance).
+  estMinutes       Int?
   // Set when the item is moved into Multi-step without steps yet — it sits in
   // the Multi-step bucket with a "Break into steps now?" call-to-action.
   // Cleared by any move to another bucket.
@@ -283,6 +299,10 @@ model Step {
   // can't express a CHECK constraint, so this comment is its only trace in
   // the schema; it is registered alongside the pseudo-enum constraints in
   // src/lib/enum-constraint-sync.integration.test.ts (RANGE_REGISTRY).
+  //
+  // #80 — BrainDumpItem.estMinutes is the nullable counterpart, constrained
+  // `IS NULL OR >= 1`. Read the note there before assuming either shape is a
+  // copy of the other.
   estMinutes      Int
   subtaskEmoji    String?
   googleTaskId    String? // id of the synced Google Task (Reclaim ingests it downstream)
