@@ -343,9 +343,18 @@ describe("scanChildProcessCalls — is the repository named", () => {
   it("rejects a call that leaves cwd as the only thing pinning the repo", () => {
     // The #146 shape exactly: `cwd` was right and git read a different repo.
     expect(
-      only(`execFileSync("git", ["log"], { cwd: dir }).pinsRepository`)
-        .pinsRepository,
+      only(`execFileSync("git", ["log"], { cwd: dir });`).pinsRepository,
     ).toBe(false);
+  });
+
+  it("fails closed when the argument list cannot be read at all", () => {
+    // `execFileSync("git", args)` inside a `(dir, ...args)` wrapper — the exact
+    // pre-fix shape. Nothing about `args` is knowable here, so the repository is
+    // reported as unpinned rather than assumed fine.
+    const source = `function git(dir: string, ...args: string[]) {
+         return execFileSync("git", args, { env: ${ALLOWLIST_HELPER}() });
+       }`;
+    expect(only(source).pinsRepository).toBe(false);
   });
 
   it("is not fooled by a -C that belongs to another word", () => {
