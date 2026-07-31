@@ -2,6 +2,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import { UserRole } from "@/lib/constants";
+import type { AccountIdentity } from "@/lib/identity";
 
 /**
  * #111 — the Inbox page's server-side half of "new account, not emptied".
@@ -65,13 +66,13 @@ vi.mock("@/lib/workspace-history", async (importOriginal) => {
   return { ...actual, workspaceHasHistory: hasHistoryMock };
 });
 
-// The whole inbox reduced to the one prop this page decides.
+// The whole inbox reduced to the one prop this page decides. Typed with the
+// REAL `AccountIdentity` rather than the two fields this stub happens to read
+// (!215 review): structural typing would accept a narrower annotation, but it
+// would quietly stop describing the prop contract the moment the identity gains
+// or loses a field, which is exactly the drift identity.test.ts guards against.
 vi.mock("@/components/inbox/inbox-view", () => ({
-  InboxView: ({
-    newAccount,
-  }: {
-    newAccount?: { label: string; provider: string } | null;
-  }) => (
+  InboxView: ({ newAccount }: { newAccount?: AccountIdentity | null }) => (
     <div
       data-testid="inbox-view"
       data-new-account={

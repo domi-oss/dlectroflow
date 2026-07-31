@@ -139,10 +139,25 @@ describe("workspaceHasHistory — when a probe fails", () => {
     );
   });
 
-  it("still answers from the probes that DID resolve", async () => {
+  // Not "the surviving probes still decide the answer" — they cannot, because a
+  // failure alone already forces `true`, so such a test would pass even against
+  // an implementation that ignored them (!215 review). What IS worth pinning is
+  // that one rejection does not abort the batch: `allSettled` keeps all four in
+  // flight, so the log names every probe that is actually broken rather than
+  // whichever one happened to reject first.
+  it("issues every probe even when one of them fails", async () => {
     db.task.findFirst.mockRejectedValue(new Error("connection reset"));
-    db.brainDumpItem.findFirst.mockResolvedValue({ id: "i-1" });
-    await expect(workspaceHasHistory(WS)).resolves.toBe(true);
+    await workspaceHasHistory(WS);
+    for (const model of [db.brainDumpItem, db.task, db.rewardEvent, db.badge]) {
+      expect(model.findFirst).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("logs EVERY failed probe, not just the first", async () => {
+    db.brainDumpItem.findFirst.mockRejectedValue(new Error("first"));
+    db.badge.findFirst.mockRejectedValue(new Error("second"));
+    await workspaceHasHistory(WS);
+    expect(warn).toHaveBeenCalledTimes(2);
   });
 });
 
