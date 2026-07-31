@@ -88,14 +88,6 @@ const WRITE_METHODS = new Set([
 /** The client identifier those methods hang off (`prisma.step.update(…)`). */
 const CLIENT = "prisma";
 
-/**
- * How many helper hops to follow. Three is the deepest real chain here
- * (`completeFocus` → `markTaskCompleted` → `prisma.task.update`); the visited
- * set already makes cycles terminate, so this is only a guard against a
- * pathological file, and running out resolves to "no further writes found".
- */
-const MAX_DEPTH = 8;
-
 type FunctionLike =
   ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction;
 
@@ -107,7 +99,11 @@ function isFunctionLike(node: ts.Node): node is FunctionLike {
   );
 }
 
-/** Strip the wrappers that do not change what a call expression is. */
+/**
+ * Strip the wrappers that do not change what a call expression is, nor whether
+ * it runs. Kept in step with `enclosingStatement` below, which climbs out
+ * through the same list from the other side.
+ */
 function unwrap(node: ts.Expression): ts.Expression {
   let current = node;
   for (;;) {
@@ -115,7 +111,8 @@ function unwrap(node: ts.Expression): ts.Expression {
       ts.isParenthesizedExpression(current) ||
       ts.isAsExpression(current) ||
       ts.isNonNullExpression(current) ||
-      ts.isAwaitExpression(current)
+      ts.isAwaitExpression(current) ||
+      ts.isVoidExpression(current)
     ) {
       current = current.expression;
       continue;
@@ -262,12 +259,25 @@ function scanBody(fn: FunctionLike): Direct {
           // Only a string literal is credited: a computed path could be
           // anything, and a guard that assumes the best is decoration.
           if (first && ts.isStringLiteral(first)) {
-            // Unconditional == the call IS a statement sitting directly in the
-            // function body. Anything else (an `if` consequent, a nested block,
-            // a `&&`, a ternary, a loop) can be skipped at run time.
-            const statement = enclosingStatement(node);
-            const unconditional =
-              ts.isExpressionStatement(statement) && statement.parent === body;
+            // Unconditional == the call runs on every route through the
+            // function. Anything else (an `if` consequent, a nested block, a
+            // `&&`, a ternary, a loop) can be skipped at run time.
+            //
+            // Two body shapes, because an arrow function has two (Duo review
+            // round 3, !223, which suggested documenting the second as a known
+            // limitation — it is one line to close, and a guard with a
+            // documented blind spot is a guard someone will one day be trusted
+            // through):
+            //
+            //  * BLOCK body — the call's statement is a direct child of it.
+            //  * CONCISE body (`() => revalidatePath("/")`) — the body IS one
+            //    expression, so the call runs iff it is that expression, seen
+            //    through the wrappers that do not gate it. `x && …` and
+            //    `c ? … : …` are not, and stay conditional.
+            const unconditional = ts.isBlock(body)
+              ? ts.isExpressionStatement(enclosingStatement(node)) &&
+                enclosingStatement(node).parent === body
+              : unwrap(body) === node;
             (unconditional
               ? direct.revalidates
               : direct.conditionalRevalidates
@@ -316,12 +326,22 @@ export function scanServerActions(
   const declared = declaredFunctions(parsed);
   const direct = new Map(declared.map((d) => [d.name, scanBody(d.fn)]));
 
-  /** Models written by `name`, following local calls breadth-first. */
+  /**
+   * Models written by `name`, following module-local calls breadth-first.
+   *
+   * No hop ceiling (Duo review round 3, !223, which read the old `MAX_DEPTH`
+   * off-by-one). `seen` is what makes this terminate, and it does so provably:
+   * a name is expanded at most once, and `next` only collects names not already
+   * expanded, so the walk is bounded by the number of identifiers in the file.
+   * A fixed ceiling on top of that could do exactly one thing — silently
+   * TRUNCATE a legitimately deep helper chain — and a guard that exists to
+   * notice omissions must not have a way to quietly stop looking.
+   */
   const transitiveWrites = (name: string): string[] => {
     const models = new Set<string>();
     const seen = new Set<string>();
     let frontier = [name];
-    for (let depth = 0; depth <= MAX_DEPTH && frontier.length > 0; depth++) {
+    while (frontier.length > 0) {
       const next: string[] = [];
       for (const current of frontier) {
         if (seen.has(current)) continue;

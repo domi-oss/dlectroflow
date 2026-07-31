@@ -67,6 +67,25 @@ describe("isStaleActionError", () => {
     expect(isStaleActionError(wrapped)).toBe(true);
   });
 
+  // Duo review round 3 (!223) renamed the bound to count what the loop counts.
+  // Pinned so the rename stays behaviour-preserving: six errors examined — the
+  // thrown one plus five links.
+  function chain(depth: number): Error {
+    let error: Error = new UnrecognizedActionError("Server Action not found.");
+    for (let i = 0; i < depth; i++) {
+      error = new Error("wrapped", { cause: error });
+    }
+    return error;
+  }
+
+  it("reaches a marker five cause-links down", () => {
+    expect(isStaleActionError(chain(5))).toBe(true);
+  });
+
+  it("gives up rather than walking a pathological chain forever", () => {
+    expect(isStaleActionError(chain(6))).toBe(false);
+  });
+
   it("does not loop forever on a self-referential cause", () => {
     const looped: Error & { cause?: unknown } = new Error("nope");
     looped.cause = looped;

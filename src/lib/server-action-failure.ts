@@ -58,8 +58,14 @@ const STALE_ACTION_MESSAGES = [
   /^server action not found\.?$/i,
 ];
 
-/** Cause chains are short in practice; this only has to refuse to loop. */
-const MAX_CAUSE_DEPTH = 5;
+/**
+ * How many errors to look at before giving up — the thrown one plus five links
+ * of `cause`. Named for what the loop counts rather than for a "depth" (Duo
+ * review round 3, !223: `depth <= MAX_CAUSE_DEPTH` from 0 ran one more pass
+ * than the name implied). Cause chains are short in practice; the `seen` set
+ * below is what refuses to loop, and this only bounds a pathological chain.
+ */
+const MAX_ERRORS_EXAMINED = 6;
 
 /** Our own marker for "the action never answered at all". */
 export class ActionTimeoutError extends Error {
@@ -100,7 +106,7 @@ function looksStale(error: object): boolean {
 export function isStaleActionError(error: unknown): boolean {
   const seen = new Set<unknown>();
   let current = error;
-  for (let depth = 0; depth <= MAX_CAUSE_DEPTH; depth++) {
+  for (let examined = 0; examined < MAX_ERRORS_EXAMINED; examined++) {
     if (typeof current !== "object" || current === null) return false;
     if (seen.has(current)) return false;
     seen.add(current);

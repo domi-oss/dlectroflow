@@ -208,6 +208,58 @@ describe("scanServerActions", () => {
     });
   });
 
+  // Duo review round 3 (!223) — a concise arrow body (`() => revalidatePath("/")`)
+  // makes `fn.body` the expression itself rather than a Block, so the
+  // "is my statement a direct child of the body" test compared the call's
+  // parent (the arrow) against the body (the same call) and said no. Duo
+  // suggested documenting it as a known limitation; it is three lines to
+  // actually close, and a guard with a documented blind spot is a guard that
+  // will one day be trusted through it.
+  it.each([
+    ["a bare concise body", "revalidatePath('/')"],
+    ["a void-ed concise body", "void revalidatePath('/')"],
+    ["a parenthesised concise body", "(revalidatePath('/'))"],
+  ])("credits %s as unconditional", (_label, body) => {
+    const source = [
+      "async function w() { await prisma.step.update({}); }",
+      `export const act = async () => ${body};`,
+      "const _ = w;",
+    ].join("\n");
+    const act = scanServerActions(source).find((a) => a.name === "act")!;
+    expect(act.revalidates).toEqual(["/"]);
+    expect(act.conditionalRevalidates).toEqual([]);
+  });
+
+  it.each([
+    ["a short-circuit", "x && revalidatePath('/')"],
+    ["a ternary", "x ? revalidatePath('/') : null"],
+  ])("does not credit %s in a concise body", (_label, body) => {
+    const source = [`export const act = async () => ${body};`].join("\n");
+    const act = scanServerActions(source)[0];
+    expect(act.revalidates).toEqual([]);
+    expect(act.conditionalRevalidates).toEqual(["/"]);
+  });
+
+  // Duo review round 3 (!223) — the hop limit is gone; `seen` is what makes the
+  // walk terminate, and it does so provably. A fixed ceiling could only ever
+  // TRUNCATE a legitimately deep helper chain, which in a guard built to notice
+  // omissions is a silent false negative — the same argument as the nested-walk
+  // one above, pointing the same way.
+  it("follows a helper chain deeper than any fixed hop ceiling", () => {
+    const chain = Array.from({ length: 30 }, (_, i) =>
+      i === 29
+        ? `async function h29() { await prisma.task.update({}); }`
+        : `async function h${i}() { await h${i + 1}(); }`,
+    );
+    const source = [
+      ...chain,
+      "export async function act() { await h0(); }",
+    ].join("\n");
+    expect(
+      scanServerActions(source).find((a) => a.name === "act")!.writes,
+    ).toEqual(["task"]);
+  });
+
   it("does not credit a revalidation nested in a block", () => {
     const source = [
       "export async function act() {",
