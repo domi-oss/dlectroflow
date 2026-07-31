@@ -619,6 +619,10 @@ export function FocusTimer({
     // requeue screen was telling — and it would show "+0 points" while doing
     // it. The session stays on screen so the CTA can be pressed again.
     if (!res.ok) {
+      // `stale: false` is not a default — it is known. The action RETURNED,
+      // which means the browser's action id was recognised and the server ran
+      // it; deploy skew can only ever surface as a rejection, never as a
+      // well-formed `ok: false`. Offering a reload here would be wrong advice.
       setFailure({ handler: "complete", stale: false });
       return;
     }
@@ -657,6 +661,8 @@ export function FocusTimer({
     // ownership checks) landed the user on the "🌱 bumped to N min" success
     // screen. A failed requeue was indistinguishable from a successful one.
     if (!outcome.value.ok) {
+      // Known-not-stale for the same reason as `finishComplete` above: a
+      // returned `ok: false` proves the action was found and ran.
       setFailure({ handler: "requeue", stale: false });
       return;
     }

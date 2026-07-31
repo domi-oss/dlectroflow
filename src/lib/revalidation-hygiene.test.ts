@@ -124,6 +124,29 @@ describe("scanServerActions", () => {
     expect(scanServerActions(source)[0].writes).toContain("step");
   });
 
+  // Duo review round 5 (!223) — the other half of the asymmetry, pinned. The
+  // write walk goes INTO callbacks; the revalidation check does not credit one
+  // found there, because `statement.parent` is the inner body. That looks
+  // inconsistent and is the same rule stated twice: **when in doubt, be
+  // stricter.** A write in a callback is counted, so the action is REQUIRED to
+  // revalidate; a revalidation in a callback is not counted, so the action is
+  // not LET OFF by it. Both directions demand `revalidatePath("/")` at the top
+  // level, which is the only place it is guaranteed to run.
+  it("does not credit a revalidation made inside a callback", () => {
+    const source = [
+      "export async function act() {",
+      "  await prisma.$transaction(async (tx) => {",
+      "    await prisma.step.update({});",
+      "    revalidatePath('/');",
+      "  });",
+      "}",
+    ].join("\n");
+    const act = scanServerActions(source)[0];
+    expect(act.writes).toEqual(["step"]);
+    expect(act.revalidates).toEqual([]);
+    expect(act.conditionalRevalidates).toEqual(["/"]);
+  });
+
   it("follows a helper called from inside a callback for the same reason", () => {
     const source = [
       "async function closeIt() { await prisma.focusSession.update({}); }",
