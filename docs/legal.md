@@ -360,7 +360,7 @@ Two consequences that save work if this comes round again:
    terms permit training. All Anthropic API access sits under the same
    Commercial Terms of Service, which prohibit training on inputs and outputs —
    so "paid Anthropic API access, not a consumer Claude.ai plan" is the
-   responsive answer, and it stays true across a change of key or account.
+   responsive answer, and it stays true regardless of billing arrangement.
 
 The affirmative statement Google requires is published in the "Connecting Google
 Tasks" section of /privacy, verbatim, and pinned by a test. Reviewers match on
