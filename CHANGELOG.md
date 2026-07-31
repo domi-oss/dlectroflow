@@ -116,6 +116,37 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Changed
 
+- **A brand-new account's empty inbox no longer congratulates you for clearing a
+  queue you never had (#111).** Signing in produced "Inbox zero. Nothing to
+  review." — or "🎉 Inbox zero! Nothing to review." in playful voice — whether
+  the account had just emptied itself or had never held anything, so a first
+  sign-in told you something you owned was gone. It now reads **"Nothing here yet
+  — this is a new account (`handle`, signed in with GitLab)"**, naming the
+  account as well as the state.
+  - **Why the account is named.** The failure this sentence exists for is signing
+    in with the *wrong* provider account, which yields a perfectly empty
+    workspace that looks like data loss. The provider is the fact that resolves
+    it, so it is included; the role is not, because it answers "what may I do
+    here?" rather than "whose workspace is this?".
+  - **New versus emptied is decided honestly, not by counting rows.** The inbox
+    query excludes archived items and captures are hard-deleted, so "captured
+    three things and deleted them all" renders exactly as many rows as an account
+    five seconds old. `workspaceHasHistory()` probes four tables instead —
+    captures of any status, tasks (which outlive their capture through
+    `onDelete: SetNull`), reward events (the inbox-zero award the deletion does
+    not remove) and badges (awarded once ever, never deleted). Anything at all
+    counts as history, because being wrong in the generous direction is the worse
+    error here.
+  - **No cost on the hot path.** The probe runs only when the page has already
+    rendered zero items for a signed-in account — the one request where the
+    answer changes anything. Guests and the first-run preview never reach it, and
+    every probe is workspace-scoped and selects `id` only.
+  - **Guests are unchanged** — no account to name, and they already get the
+    sandbox banner, so the copy is byte-identical to before.
+  - **Accessibility:** the same node and the same tokens as the string it
+    replaces, so the zero-tolerance `color-contrast` gate on guest surfaces sees
+    no new pairing — asserted in a unit test rather than by eye, and the copy sits
+    inside the existing e2e contrast scan of `/` in both themes.
 - **`shadcn` is a `devDependency`, not a runtime one (#93).** It is the
   component-scaffolding CLI; nothing in the shipped app imports it. Declaring it
   under `dependencies` meant `npm ci --omit=dev` resolved **412 packages instead
@@ -206,6 +237,43 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **Review-app namespaces no longer leak forever (#145).** `stop_review` was
+  failing with **`missing_dependency_failure`** — `started_at: null`, empty log,
+  script never reached — so `kubectl delete namespace` never ran. Six
+  environments were wedged in `stopping`, the oldest since **11 July**, and two of
+  them were still running an app pod *and* a Postgres StatefulSet for merge
+  requests that had already merged: roughly **$20/month each** on Autopilot,
+  against a total bill of £80–120.
+  - **The cause is a GitLab default that only bites teardown jobs.** A job with
+    no explicit `needs:` inherits an implicit dependency on **every job in every
+    earlier stage**. `stop_review` sits in `deploy`, so that meant `build`,
+    `build_image` and `test` — and once those artifacts expired the dependency
+    could never be satisfied again, permanently. `needs: []` is both the fix and
+    the honest declaration: teardown consumes no artifacts at all, only `helm`
+    and `kubectl` against a live cluster. It now also starts immediately instead
+    of queueing behind a build it does not use.
+  - **It concealed itself twice over.** `allow_failure: true` kept the pipeline
+    green so merge requests merged normally, and GitLab's Environments page lists
+    `stopping` under **Active** — so the auto-stop timer looked healthy while
+    being entirely decorative. `allow_failure: true` stays, because a teardown
+    that cannot reach the cluster should not block a merge and the script is
+    already written not to fail (`|| true`, `--ignore-not-found`), but its
+    reasoning is now recorded inline.
+  - **Operators running review environments on their own cluster should sweep
+    once for orphans** — compare `dlectroflow-mr-*` namespaces against open merge
+    requests. One non-obvious step, worth writing down: `DELETE
+    /environments/:id` returns **403 while an environment is `stopping`**, which
+    reads as a permissions error and is not one. `POST /environments/:id/stop`
+    with `force=true` skips the `on_stop` action, moves it to `stopped`, and then
+    the delete succeeds.
+  - **Guarded by `ci-job-deps`**, a new repo-invariant test: every job declaring
+    `environment.action: stop` must still exist, and must declare `needs:`
+    explicitly and empty. **`extends:` is deliberately not followed** —
+    inheriting "no `needs`" from a shared base is precisely how this happened, so
+    a job that satisfied the check only through a template would reproduce the
+    bug with the test green.
+  - Still open on #145: a scheduled sweep comparing `dlectroflow-mr-*` namespaces
+    against open merge requests, which would have caught all six on its own.
 - **The focus timer no longer hangs forever when a server action fails (#137).**
   Finishing a session, choosing "Not yet", or confirming a requeue could leave
   the screen on "Claude is re-estimating…" indefinitely — no error, no timeout,
@@ -289,6 +357,37 @@ operators upgrading a self-hosted instance don't get surprised.
   - **Contributors:** a documentation typo fix no longer waits on a security
     approval.
 
+- **The accessibility contrast gate can be trusted again (#110).** The guest
+  settings axe spec failed roughly **2 runs in 4**, in a different theme each
+  time, always reporting `--foreground` over `--primary` — a pairing nobody ever
+  chose. The number was real; the layout was not. Two sticky section headers were
+  overlapping mid-handover and axe, which reads once with no retries, sampled one
+  band's text against another band's magenta.
+  - **This is in a changelog because of what it was hiding.** `retries: 1` in
+    `playwright.config.ts` meant the retry passed and CI never showed the
+    failure, and **a retry-masked flake in a contrast gate is indistinguishable
+    from a genuine AA regression**. It also burned unrelated merge requests at
+    random.
+  - **The overlap was proven, not assumed** — a MutationObserver on
+    `data-current` plus a timestamp at the test helper's return showed a **1 ms
+    margin, every run**: the scroll-spy released its override from an
+    IntersectionObserver callback one frame after the helper had already returned.
+    Green only because CDP round trips outlasted a frame of browser work. Under
+    8× CPU throttling the margin inverted and 2 of 10 runs scanned a page mid
+    change.
+  - **The wait is a positive, terminal condition, not a timeout or an "unchanged
+    for N frames" heuristic:** at the top of the page exactly one band may claim
+    `data-current`, and it must be the topmost one — an invariant verified across
+    desktop and mobile × light and dark × owner and guest before anything was
+    built on it. A leftover `waitForFunction` guarding a CSS transition that does
+    not exist on `[data-section-header]` was removed rather than carried forward.
+  - **And the colours were checked separately**, so a genuine failure cannot hide
+    behind the fix. Verified 10× for determinism; a companion test reads scroll
+    position and highlight inside a single `page.evaluate`, where an
+    IntersectionObserver callback cannot run mid-task, so it catches the bad state
+    on any machine however fast.
+  - Still open: `retries: 1` continues to mask flakes in CI generally, tracked
+    separately.
 - **The documented quick start now works on a fresh clone (#91).** Following the
   README could not get a new checkout running, and three faults compounded:
   `.env.example` shipped a `CHANGEME` database password while
@@ -311,6 +410,98 @@ operators upgrading a self-hosted instance don't get surprised.
     GitLab Secrets Manager.
 
 ### Security
+
+- **The generic-SSRF SAST rule is replaced by a repo-owned guard, not merely
+  silenced (#83).** `javascript-node-ssrf-generic-taint` produced **five findings
+  in this repo and zero true positives**, all on OAuth token-exchange code whose
+  request target is a module-level string constant. What the taint engine follows
+  is user input reaching the request **body** — the `code` and `refresh_token`
+  form fields, which is what an authorization-code exchange *is*. CWE-918
+  requires control of the request **target**. Worse, the findings
+  **re-fingerprint whenever a line moves**, resurfacing as "new High" and
+  tripping the "require approval for new Critical or High" policy on merge
+  requests that changed nothing relevant; that blocked one unrelated merge request
+  six times.
+  - **A severity override, not `disable = true`.** `.gitlab/sast-ruleset.toml`
+    (new) demotes the rule to `Info`. Disabling would mark everything it had ever
+    found as "No longer detected", silently retiring three documented dismissals
+    and losing the audit trail; the override keeps every finding visible with its
+    history intact and is reversible. The ruleset schema was checked first — it
+    supports only `disable`, an `identifier` selector and a metadata `override`,
+    so a **path-scoped** disable of one rule is not expressible at all. Which
+    analyzer sections needed the override was answered from a real
+    `gl-sast-report.json` artifact rather than assumed: all four findings come
+    from `gitlab-advanced-sast`, and the `[semgrep]` entries are included but
+    labelled as currently inert.
+  - **The compensating control is a hard gate, not an approval prompt.**
+    `src/lib/fetch-host-hygiene.ts` walks the TypeScript AST and asserts that
+    every `fetch()` and `new Request()` target in `src/`, `prisma/` and
+    `scripts/` has a **host that is constant at build time**. It fails the unit
+    test job, and it does not re-fingerprint when a line shifts. `e2e/` is
+    deliberately out of scope — it hits dynamic local URLs, and including it would
+    reintroduce exactly the noise this replaces.
+  - **It rejects the subtle shapes, each with its own test:** a template whose
+    constant prefix does not close the URL authority (`` `${GITLAB}${tail}` ``
+    with `tail = "@evil.com/x"`), a protocol-relative `` `/${p}` ``, a `let`-bound
+    or parameter target, an imported builder, a ternary with a dynamic arm, and
+    `fetch(new Request(u))` — reporting **both** sites. It accepts a
+    caller-supplied *path segment*, because the host is still pinned by the
+    builder's leading constant; conflating path traversal (#79, fixed in !165
+    with per-segment encoding) with SSRF is what produced the original noise.
+  - **Watched failing in both directions.** Two dynamic hosts were injected into
+    `src/lib/google.ts` — a direct interpolated host and a `tasksUrl` rewritten to
+    take its host from a parameter — and all four resulting call sites were
+    reported before the tree was restored. A separate read of the module then
+    found a real hole and fixed it: the constant resolver walked past shadowing
+    bindings, so a parameter shadowing a module-level const reported its host as
+    constant — the exact attacker-reachable case the guard exists for. It now
+    stops at the first binding of a name, whatever kind, and fails closed.
+  - **`REVIEWED_DYNAMIC_HOSTS` is empty**, and keyed by `<file>:<target
+    expression>` rather than by line so it cannot rot the way the SAST
+    fingerprints did. An env-derived host (a bring-your-own `LLM_BASE_URL`, #59)
+    would belong there with a stated reason; a request-derived one never does.
+  - **Self-hosters forking the repo inherit `.gitlab/sast-ruleset.toml`.** If you
+    add `fetch()` calls of your own, `fetch-host-hygiene` is a **hard failure**
+    rather than an approval prompt — that is the trade this makes, and relaxing
+    the test means reopening the CWE-918 hole rather than tidying a style rule.
+
+- **The eight HIGH findings sitting untriaged in the vulnerability baseline are
+  dispositioned, and the security assessment finally has a schedule (#134).** The
+  Vulnerability Report held **70 findings, 8 of them HIGH**, none individually
+  triaged. Both halves of #134 are the same failure. The scan-result policy gates
+  on **new** Critical/High, so the standing baseline is never "new" and is
+  invisible by construction — and `docs/quality-audit-prompts.md` had prescribed a
+  monthly security assessment since the cadence was written, with nothing to run
+  it. A gate that only catches new problems plus a review that only happens when
+  remembered leaves everything already in the baseline unread.
+  - **The headline finding is that none of the eight were live.** All 8 were
+    `resolvedOnDefaultBranch: true` — no scan of `main` reported them any more.
+    They sat as `DETECTED` because GitLab holds that state until someone acts, and
+    the report's default view does not surface the distinction. Three were the
+    #83 SSRF false positives, dismissed as `FALSE_POSITIVE` with evidence; the
+    other five (four Next.js CVEs — **CVE-2026-64649**, **CVE-2026-64641**,
+    **CVE-2026-64645**, **CVE-2026-64642** — and `sharp`'s inherited libvips
+    advisory **GHSA-f88m-g3jw-g9cj**) were marked **resolved rather than
+    dismissed**, because they applied perfectly well and were genuinely fixed by
+    the `next@16.2.11` and `sharp@0.35.3` bumps already in the lockfile.
+    Dismissing a real finding that a version bump fixed would misrecord why it
+    went away. **Zero HIGH and zero Critical now sit in a `DETECTED` or
+    `CONFIRMED` state project-wide.**
+  - **A monthly `security_assessment` job**, on the 1st at 08:00, files the dated
+    work item the Duo assessment prompt requires, pre-filled with the data the run
+    needs — so the documented cadence has a mechanism instead of a memory. It
+    declares `needs: []` and is not `interruptible`: the point is that it always
+    runs and always finishes. **Its digest leads with the number the Vulnerability
+    Report does not show — how many findings are still detected on `main`** —
+    because a digest that printed "8 HIGH" and stopped would reproduce the exact
+    confusion above. With no `GL_TOKEN` configured it previews to the log, posts
+    nothing and exits 0.
+  - **The 62 MEDIUM are deliberately not triaged**, with a measurement to make
+    that decision cheaper later: `main`'s own scan reports **18 MEDIUM** against
+    64 in the project baseline, so roughly three quarters of the MEDIUM baseline is
+    in the same already-fixed-never-resolved state the HIGH ones were. Left to the
+    first scheduled assessment run, which will report the live number rather than
+    the baseline's.
 
 - **`brace-expansion` is on the patched 5.0.8 wherever it can go (#82).** This
   is **CVE-2026-14257** (High) — a DoS via unbounded expansion length that
