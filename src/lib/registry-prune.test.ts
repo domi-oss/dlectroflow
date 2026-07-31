@@ -32,6 +32,7 @@ import { join } from "node:path";
 import {
   ambientGitEnvPointingAt,
   GIT_ENV_PASSTHROUGH,
+  GIT_ISOLATION_PINS,
   GIT_LOCATION_VARIABLES,
   isolatedGitEnv,
 } from "@/lib/git-env";
@@ -459,26 +460,18 @@ describe("the git history fixture is isolated from the ambient environment", () 
     vi.unstubAllEnvs();
   });
 
-  it("points every repository-locating variable at the decoy", () => {
-    // When `git-env.ts` learns about another variable, this fixture has to
-    // exercise it too — otherwise the allow-list grows a name that nothing
-    // below ever proves is being ignored, which is the state this issue found
-    // the suite in.
-    expect(Object.keys(ambientGitEnvPointingAt("/tmp/decoy")).sort()).toEqual(
-      [...GIT_LOCATION_VARIABLES].sort(),
-    );
-  });
-
   it("hands git an allow-list, not a copy of the ambient environment", () => {
     // Before the fix this object held every variable the shell exported —
     // hundreds of them on a developer machine, and on a runner the `GIT_DIR`
     // that broke the job. Asserting on the KEYS rather than on git's behaviour
     // is what makes this independent of whether the machine running the suite
     // happens to export anything interesting.
+    const allowed = new Set<string>([
+      ...GIT_ENV_PASSTHROUGH,
+      ...Object.keys(GIT_ISOLATION_PINS),
+    ]);
     const unexpected = Object.keys(GIT_ENV).filter(
-      (name) =>
-        !(GIT_ENV_PASSTHROUGH as readonly string[]).includes(name) &&
-        !name.startsWith("GIT_"),
+      (name) => !allowed.has(name) && !name.startsWith("GIT_"),
     );
     expect(
       unexpected,

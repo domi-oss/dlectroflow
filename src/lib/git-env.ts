@@ -60,6 +60,10 @@ export const GIT_LOCATION_VARIABLES = [
  * read a home directory. It cannot reach `~/.gitconfig` through it: the pins
  * below point global config at /dev/null.
  *
+ * Two names, and adding a third needs an argument: every entry here is a value
+ * the child gets from whatever happens to be in the parent's environment, which
+ * is the class of problem #146 is about.
+ *
  * Anything else a caller needs is passed explicitly. That includes the git
  * author/committer identity, which belongs to the fixture creating the commits
  * and not to this module.
@@ -67,19 +71,29 @@ export const GIT_LOCATION_VARIABLES = [
 export const GIT_ENV_PASSTHROUGH = ["PATH", "HOME"] as const;
 
 /**
- * Set on every child git regardless of what the caller asks for.
+ * Set on every child regardless of what the caller asks for. These are
+ * LITERALS, not passthroughs — nothing here is read from the parent — so they
+ * narrow the environment rather than widening it.
  *
  * The two config pins mean a developer's global config — signing hooks,
  * templates, a different `init.defaultBranch` — cannot change what a fixture
  * produces, so the fixture is identical locally and in CI.
  * `GIT_TERMINAL_PROMPT=0` turns a credential prompt into an error instead of a
  * child process that blocks until the job times out.
+ * `NODE_ENV=test` is pinned rather than inherited: every caller is a test
+ * fixture, and a child that lost it behaves as though it were in development.
+ * `security-assessment.test.ts` hardcodes the same value for the same reason.
+ * It also happens to be what makes the return type below work — see there.
+ *
+ * `as const` matters: it keeps `NODE_ENV`'s literal type, which is what lets the
+ * result satisfy `NodeJS.ProcessEnv`.
  */
-const GIT_ISOLATION_PINS: Readonly<Record<string, string>> = {
+export const GIT_ISOLATION_PINS = {
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_SYSTEM: "/dev/null",
   GIT_TERMINAL_PROMPT: "0",
-};
+  NODE_ENV: "test",
+} as const;
 
 /**
  * The environment for a child process that will run git: the allow-listed
@@ -94,6 +108,17 @@ const GIT_ISOLATION_PINS: Readonly<Record<string, string>> = {
  * business: the fixture's `GIT_AUTHOR_*`/`GIT_COMMITTER_*` identity, a stub
  * directory prepended to `PATH`, or the `CI_*` variables a shell script under
  * test reads.
+ *
+ * ── Why the return type is `NodeJS.ProcessEnv` and not `Record<string,string>` ─
+ * `Record<string, string>` would describe what this builds more precisely — an
+ * allow-list of variables that are all present, every value a defined string,
+ * where `ProcessEnv` says `string | undefined`. It does not typecheck. Next.js
+ * augments `NodeJS.ProcessEnv` so that `NODE_ENV` is a REQUIRED property rather
+ * than part of the optional index signature, and `child_process`'s `env` option
+ * is typed `NodeJS.ProcessEnv`, so every call site would fail with "Property
+ * 'NODE_ENV' is missing in type 'Record<string, string>'". Pinning `NODE_ENV` in
+ * {@link GIT_ISOLATION_PINS} satisfies that without widening the allow-list: it
+ * is a literal, so nothing is inherited to satisfy the compiler (#146).
  */
 export function isolatedGitEnv(
   overrides: Readonly<Record<string, string>> = {},
@@ -109,16 +134,16 @@ export function isolatedGitEnv(
     );
   }
 
-  const env: NodeJS.ProcessEnv = {};
+  const copied: Record<string, string> = {};
   for (const name of GIT_ENV_PASSTHROUGH) {
     const value = process.env[name];
     // An absent passthrough stays absent rather than becoming the string
     // "undefined", which is what assigning `process.env[name]` blindly would
     // hand the child.
-    if (value !== undefined) env[name] = value;
+    if (value !== undefined) copied[name] = value;
   }
 
-  return { ...env, ...GIT_ISOLATION_PINS, ...overrides };
+  return { ...copied, ...GIT_ISOLATION_PINS, ...overrides };
 }
 
 /**
