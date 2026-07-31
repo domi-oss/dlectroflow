@@ -77,19 +77,27 @@ describe("legal: published text is pinned to the effective date (#141)", () => {
   it.each([
     ["privacy", () => <PrivacyPage />, PUBLISHED.privacy],
     ["terms", () => <TermsPage />, PUBLISHED.terms],
-  ] as const)("/%s text is unchanged since %s", (name, page, recorded) => {
-    const actual = fingerprint(page());
-    expect(
-      actual,
-      `The rendered text of /${name} has changed.\n\n` +
-        `  Current LEGAL_EFFECTIVE_DATE: ${LEGAL_EFFECTIVE_DATE}\n` +
-        `  New fingerprint:              ${actual}\n\n` +
-        `If the change is SUBSTANTIVE (a new disclosure, a changed promise, a\n` +
-        `different recipient, scope or retention period), bump\n` +
-        `LEGAL_EFFECTIVE_DATE in src/lib/legal.ts to today IN THE SAME COMMIT.\n` +
-        `If it is a typo or a rewording that says the same thing, leave the date.\n` +
-        `Then update PUBLISHED.${name} in this file to the fingerprint above.\n` +
-        `See the docblock at the top of this file and docs/legal.md.`,
-    ).toBe(recorded);
-  });
+    // `it.each` fills `%s` POSITIONALLY from the tuple, so a second `%s` here
+    // would print the page factory — in practice the whole transpiled JSX
+    // expression — not the date. The date is interpolated at collection time
+    // instead, which is also what makes the reported name state the version
+    // the fingerprints belong to.
+  ] as const)(
+    `/%s text is unchanged as of ${LEGAL_EFFECTIVE_DATE}`,
+    (name, page, recorded) => {
+      const actual = fingerprint(page());
+      expect(
+        actual,
+        `The rendered text of /${name} has changed.\n\n` +
+          `  Current LEGAL_EFFECTIVE_DATE: ${LEGAL_EFFECTIVE_DATE}\n` +
+          `  New fingerprint:              ${actual}\n\n` +
+          `If the change is SUBSTANTIVE (a new disclosure, a changed promise, a\n` +
+          `different recipient, scope or retention period), bump\n` +
+          `LEGAL_EFFECTIVE_DATE in src/lib/legal.ts to today IN THE SAME COMMIT.\n` +
+          `If it is a typo or a rewording that says the same thing, leave the date.\n` +
+          `Then update PUBLISHED.${name} in this file to the fingerprint above.\n` +
+          `See the docblock at the top of this file and docs/legal.md.`,
+      ).toBe(recorded);
+    },
+  );
 });
