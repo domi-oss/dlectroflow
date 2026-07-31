@@ -51,6 +51,8 @@ NODES="$WORK/nodes.ndjson"
 # ── 1. Every active finding, paginated ───────────────────────────────────────
 # DETECTED + CONFIRMED only — dismissed and resolved ones are answered
 # questions, and including them is how a report becomes unreadable.
+# shellcheck disable=SC2016  # `$p` and `$after` are GRAPHQL variables — they
+# must reach the server unexpanded, so single quotes are the correct quoting.
 QUERY='query($p: ID!, $after: String) {
   project(fullPath: $p) {
     vulnerabilities(state: [DETECTED, CONFIRMED], first: 100, after: $after) {
@@ -104,6 +106,9 @@ done
 # `resolvedOnDefaultBranch != true` rather than `== false`: a null (an older
 # finding, or a scanner that does not report it) counts as still live. Failing
 # towards "someone should look at this" is the correct direction.
+# Every `count '...'` program below is single-quoted for the same reason
+# (shellcheck SC2016): `$order`, `$all`, `$s` and `$g` are JQ variables, and
+# letting the shell expand them would silently blank the whole aggregation.
 count() { jq -s -r "$1" "$NODES"; }
 
 TOTAL="$(count 'length')"
@@ -111,6 +116,7 @@ STILL="$(count '[.[] | select(.resolvedOnDefaultBranch != true)] | length')"
 GONE=$((TOTAL - STILL))
 CH_STILL="$(count '[.[] | select((.severity == "CRITICAL" or .severity == "HIGH") and .resolvedOnDefaultBranch != true)] | length')"
 
+# shellcheck disable=SC2016  # jq variables, not shell — see count() above.
 SEV_TABLE="$(count '
   ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO", "UNKNOWN"] as $order
   | . as $all
@@ -124,6 +130,7 @@ SEV_TABLE="$(count '
 
 # Every Critical and High by name. A count cannot be triaged — #134 exists
 # because eight findings were a number rather than a list.
+# shellcheck disable=SC2016  # jq variables, not shell — see count() above.
 CH_TABLE="$(count '
   [ .[] | select(.severity == "CRITICAL" or .severity == "HIGH") ]
   | if length == 0 then "| _none_ | | | |"
@@ -136,6 +143,7 @@ CH_TABLE="$(count '
       | join("\n")
     end')"
 
+# shellcheck disable=SC2016  # jq variables, not shell — see count() above.
 BY_SCANNER="$(count '
   [ .[] | select(.resolvedOnDefaultBranch != true) ]
   | group_by(.reportType)
