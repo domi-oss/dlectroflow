@@ -100,6 +100,64 @@ describe("scanServerActions", () => {
     ).toEqual(["task"]);
   });
 
+  // Duo review (!223) — deliberate, and deliberately in this direction. Duo
+  // suggested stopping the walk at function-scope boundaries so a write inside
+  // a callback is not attributed to the outer action. That is the right call
+  // for a lint that reports suspicion, and the wrong one for a guard whose job
+  // is to notice an omission: `prisma.$transaction(async (tx) => …)`, a write
+  // inside an `await Promise.all([...])`, and a write in a `.then()` all
+  // genuinely execute, and skipping them would make the guard quietly stop
+  // catching the exact class of bug (#139) it was written for.
+  //
+  // Over-attributing costs at most one spurious `revalidatePath("/")` — or one
+  // allowlist entry with a reason. Under-attributing costs a silent regression.
+  // A guard that fails closed is the only kind worth having, so this pins the
+  // behaviour rather than leaving it to be "fixed" later.
+  it("attributes a write inside a callback to the enclosing action (fails closed)", () => {
+    const source = [
+      "export async function act(ids: string[]) {",
+      "  await prisma.$transaction(async (tx) => {",
+      "    await prisma.step.update({});",
+      "  });",
+      "}",
+    ].join("\n");
+    expect(scanServerActions(source)[0].writes).toContain("step");
+  });
+
+  it("follows a helper called from inside a callback for the same reason", () => {
+    const source = [
+      "async function closeIt() { await prisma.focusSession.update({}); }",
+      "export async function act(ids: string[]) {",
+      "  await Promise.all(ids.map(() => closeIt()));",
+      "}",
+    ].join("\n");
+    expect(
+      scanServerActions(source).find((a) => a.name === "act")!.writes,
+    ).toEqual(["focusSession"]);
+  });
+
+  // Duo review (!223) — `$executeRaw` is a TAGGED TEMPLATE in ordinary Prisma
+  // use (`prisma.$executeRaw`UPDATE …``), which is a TaggedTemplateExpression
+  // and not a CallExpression. The doc comment claimed the raw escape hatch was
+  // covered while the visitor only looked at calls, so the claim was false.
+  it("sees a raw write written as a tagged template, not just as a call", () => {
+    const source = [
+      "export async function act() {",
+      '  await prisma.$executeRaw`UPDATE "Step" SET "done" = true`;',
+      "}",
+    ].join("\n");
+    expect(scanServerActions(source)[0].writes).toEqual(["prisma"]);
+  });
+
+  it("does not treat a raw READ template as a write", () => {
+    const source = [
+      "export async function act() {",
+      "  return prisma.$queryRaw`SELECT 1`;",
+      "}",
+    ].join("\n");
+    expect(scanServerActions(source)[0].writes).toEqual([]);
+  });
+
   it("separates an unconditional revalidation from a branched one", () => {
     const source = [
       "export async function act(id: string) {",

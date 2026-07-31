@@ -169,9 +169,19 @@ function declaredFunctions(source: ts.SourceFile): Declared[] {
   return found;
 }
 
-/** `prisma.<model>.<writeMethod>(…)` → `<model>`, else null. */
-function writtenModel(call: ts.CallExpression): string | null {
-  const callee = unwrap(call.expression);
+/**
+ * The model written by the thing being invoked, given the expression in
+ * callee/tag position: `prisma.<model>.<writeMethod>` → `<model>`, else null.
+ *
+ * Takes the callee rather than the whole node so it serves both invocation
+ * forms — `prisma.step.update({…})` is a `CallExpression`, while
+ * ``prisma.$executeRaw`UPDATE …` `` is a `TaggedTemplateExpression` (Duo
+ * review, !223). Listing `$executeRaw` in `WRITE_METHODS` while only ever
+ * looking at calls would have made the doc comment's claim about the raw
+ * escape hatch false, which is worse than not claiming it.
+ */
+function writtenModel(invoked: ts.Expression): string | null {
+  const callee = unwrap(invoked);
   if (!ts.isPropertyAccessExpression(callee)) return null;
   if (!WRITE_METHODS.has(callee.name.text)) return null;
 
@@ -206,8 +216,13 @@ function scanBody(fn: FunctionLike): Direct {
   const body = fn.body;
 
   const visit = (node: ts.Node): void => {
+    // ``prisma.$executeRaw`UPDATE …` `` — a write, and not a CallExpression.
+    if (ts.isTaggedTemplateExpression(node)) {
+      const model = writtenModel(node.tag);
+      if (model) direct.models.add(model);
+    }
     if (ts.isCallExpression(node)) {
-      const model = writtenModel(node);
+      const model = writtenModel(node.expression);
       if (model) direct.models.add(model);
 
       const callee = unwrap(node.expression);
@@ -233,6 +248,16 @@ function scanBody(fn: FunctionLike): Direct {
         }
       }
     }
+    // Deliberately walks INTO nested functions (Duo review, !223 — which
+    // suggested stopping at function-scope boundaries). A write inside
+    // `prisma.$transaction(async (tx) => …)`, inside `await Promise.all([…])`,
+    // or inside a `.then()` genuinely executes, so scoping the walk would make
+    // this guard silently miss the exact class of omission (#139) it exists to
+    // catch. The cost of the other direction is bounded and visible: at worst
+    // one spurious `revalidatePath("/")`, or one allowlist entry with a stated
+    // reason. A guard that fails closed is the only kind worth having, and
+    // `revalidation-hygiene.test.ts` pins both cases so this stays a decision
+    // rather than an accident.
     ts.forEachChild(node, visit);
   };
   visit(body);
