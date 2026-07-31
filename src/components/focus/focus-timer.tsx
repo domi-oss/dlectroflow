@@ -860,18 +860,23 @@ export function FocusTimer({
             {t("focus.error.retry", voice)}
           </button>
         )}
-        {/* Offered whatever the cause, including a stale deployment: picking a
-            time by hand needs no further server round-trip until Requeue, so a
-            failed re-estimate never ends the session in a dead end. */}
-        {phase === "reestimate" && failure.handler === "reestimate" && (
-          <button
-            type="button"
-            onClick={skipReestimate}
-            className="hover:bg-accent inline-flex min-h-[44px] items-center rounded-md border px-4 font-medium"
-          >
-            {t("focus.error.pickTime", voice)}
-          </button>
-        )}
+        {/* The escape hatch from a failed re-estimate — but NOT when the
+            deployment moved on. Skipping only reveals the number field; the
+            Requeue behind it is another server action, which would post
+            another dead id and fail the same way. Offering it there would be
+            walking the user into a second dead end, which is the opposite of
+            what detecting the stale case is for. */}
+        {phase === "reestimate" &&
+          failure.handler === "reestimate" &&
+          !failure.stale && (
+            <button
+              type="button"
+              onClick={skipReestimate}
+              className="hover:bg-accent inline-flex min-h-[44px] items-center rounded-md border px-4 font-medium"
+            >
+              {t("focus.error.pickTime", voice)}
+            </button>
+          )}
       </div>
     </div>
   ) : null;

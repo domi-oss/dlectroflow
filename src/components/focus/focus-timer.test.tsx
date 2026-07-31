@@ -1839,13 +1839,19 @@ describe("FocusTimer — server-action failures (#137, #139)", () => {
       expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
     });
 
-    it("still offers Skip, so the session can finish without a reload", async () => {
+    // Skip only reveals the number field; the Requeue behind it is another
+    // server action, which would post another dead id and fail identically. So
+    // it is withheld here too — the point of detecting this case is to stop
+    // offering things that cannot work, not to offer a different one.
+    it("does not offer Skip either, since the Requeue behind it would fail too", async () => {
       vi.mocked(proposeNewEstimate).mockRejectedValueOnce(staleActionError());
       await askForNewEstimate();
 
       expect(
-        screen.getByRole("button", { name: /pick a time myself/i }),
-      ).toBeInTheDocument();
+        screen.queryByRole("button", { name: /pick a time myself/i }),
+      ).toBeNull();
+      // Reload is the only thing on offer, and it has focus.
+      expect(screen.getByRole("button", { name: /reload/i })).toHaveFocus();
     });
 
     it("puts focus on the reload, which is the only thing that can work", async () => {
