@@ -45,3 +45,26 @@ Trade-off: 2× compute-minute cost for those jobs.
   check whether the `Jobs/Secret-Detection.gitlab-ci.yml` include is redundant.
 - `deploy_production` (332s) is dominated by `helm --atomic` rollout wait — not addressable in CI config.
 - `e2e_test`'s repeated `npm run build` is required (musl vs glibc Prisma engines).
+
+## Follow-up: what the docs-only fast path cost (#116)
+
+Recorded here because the review above proposed the fast path without noticing this.
+
+Skipping a scanner is not free even when there is nothing to scan. The approval
+policy compares the set of security report **types** in a merge request's
+pipeline against the set in `main`'s, and treats a type `main` has and the merge
+request lacks as unresolved rather than as inapplicable. So the fast path made
+every docs-only merge request unmergeable until one specific human approved it —
+a slow path for the safest class of change, on an OSS repo where a drive-by
+documentation fix should be easy. It took months to spot because the failure
+message blames security, not CI configuration.
+
+Fixed by `docs_only_scan_stub` in `.gitlab-ci.yml`, which emits an empty,
+schema-valid report for each of the three types the fast path skips
+(`secret_detection` is ungated and still runs for real). Its rule is the exact
+inverse of the one that runs the real scanners, so it can only fire on a diff
+containing no code path at all.
+
+**The general lesson for any future `changes:`-gated job: check what consumes
+its output.** A gate that silently stops producing an artifact something else
+compares against fails somewhere unrelated, and the error points at the consumer.
