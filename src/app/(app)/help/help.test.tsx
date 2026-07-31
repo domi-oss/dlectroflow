@@ -114,8 +114,14 @@ describe("HelpPage", () => {
       .map((a) => a.getAttribute("href"));
     // Settings deep-links carry the origin so Settings can offer "Back to Help".
     expect(hrefs).toContain("/settings?from=help");
-    // With no `?from=`, the shared back link falls back to the inbox.
-    expect(hrefs).toContain("/");
+    // With no `?from=`, the shared back link falls back to the inbox. Asserted
+    // on the NAMED control rather than on the href list (review on !216): since
+    // #131 the page renders two back controls, so `toContain("/")` would be
+    // satisfied twice over and would no longer say anything about this one.
+    expect(document.querySelector('[data-back-link="page"]')).toHaveAttribute(
+      "href",
+      "/",
+    );
   });
 
   it("is origin-aware: ?from=settings sends the '← Back' link to Settings", async () => {
