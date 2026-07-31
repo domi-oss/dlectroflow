@@ -9,7 +9,10 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { FocusTimer } from "@/components/focus/focus-timer";
+import {
+  FocusTimer,
+  REESTIMATE_TIMEOUT_MS,
+} from "@/components/focus/focus-timer";
 import type { TrackerStep } from "@/components/focus/focus-step-tracker";
 
 const refresh = vi.fn();
@@ -146,6 +149,8 @@ import {
   beginFocus,
   completeFocus,
   pauseFocus,
+  proposeNewEstimate,
+  requeueFocus,
   resumeFocus,
 } from "@/app/actions/focus";
 import {
@@ -1639,6 +1644,276 @@ describe("FocusTimer — setup screen: one number, one action (#66)", () => {
         "true",
       );
       expect(screen.getByText("10:00")).toBeInTheDocument();
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #137 / #139 — the failure paths.
+//
+// Both bugs were hit in production on 2026-07-31, and both were invisible to
+// the tests above, because every one of them exercises the happy path. A timer
+// that never says a server action failed passes all of them.
+//
+// #137: `startReestimate` had no try/catch, so a rejection left `pending` true
+// and the phase stuck on "Claude is re-estimating…" forever — no error, no
+// timeout, no way out. `finishComplete` and `confirmRequeue` had the same
+// shape. What actually threw was `Failed to find Server Action "…"`: a tab open
+// across three prod deploys posted an action id the running deployment no
+// longer had.
+//
+// #139: `confirmRequeue` discarded `requeueFocus`'s `{ok:false}` and showed the
+// success screen regardless, and never called `router.refresh()`.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("FocusTimer — server-action failures (#137, #139)", () => {
+  /** Start the 1-minute step and let the clock run out. Fake timers only. */
+  async function runToTimeUp() {
+    render(<FocusTimer {...base()} />); // step estMinutes = 1 → 60s
+    // userEvent is avoided under fake timers (see the alarm suite above): a
+    // native click inside act() is what the rest of this file uses.
+    await act(async () => {
+      screen.getByRole("button", { name: /start focusing/i }).click();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+  }
+
+  /** …then choose "Not yet", which is what asks Claude for a new estimate. */
+  async function askForNewEstimate() {
+    await runToTimeUp();
+    await act(async () => {
+      screen.getByRole("button", { name: /not yet/i }).click();
+    });
+  }
+
+  async function click(name: RegExp) {
+    await act(async () => {
+      screen.getByRole("button", { name }).click();
+    });
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  describe("re-estimate (#137)", () => {
+    it("a rejected re-estimate leaves the pending state instead of spinning forever", async () => {
+      vi.mocked(proposeNewEstimate).mockRejectedValueOnce(
+        new Error("LLM unavailable"),
+      );
+      await askForNewEstimate();
+
+      expect(screen.queryByText(/claude is re-estimating/i)).toBeNull();
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        /couldn't get a new estimate/i,
+      );
+    });
+
+    it("offers Retry and Skip, so a failed session is never a dead end", async () => {
+      vi.mocked(proposeNewEstimate).mockRejectedValueOnce(new Error("nope"));
+      await askForNewEstimate();
+
+      expect(
+        screen.getByRole("button", { name: /try again/i }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /pick a time myself/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("Retry re-runs the action and shows the estimate when it works", async () => {
+      vi.mocked(proposeNewEstimate)
+        .mockRejectedValueOnce(new Error("nope"))
+        .mockResolvedValueOnce(35);
+      await askForNewEstimate();
+      await click(/try again/i);
+
+      expect(vi.mocked(proposeNewEstimate)).toHaveBeenCalledTimes(2);
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(screen.getByRole("spinbutton")).toHaveValue(35);
+    });
+
+    it("Skip hands over the number field without another server call", async () => {
+      vi.mocked(proposeNewEstimate).mockRejectedValueOnce(new Error("nope"));
+      await askForNewEstimate();
+      await click(/pick a time myself/i);
+
+      expect(vi.mocked(proposeNewEstimate)).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(screen.getByRole("spinbutton")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /requeue/i }),
+      ).toBeInTheDocument();
+    });
+
+    // WCAG 2.4.3 — the same precedent the #66 disclosure and the #65 coupled
+    // transport already set in this component: when a transition unmounts the
+    // control that was pressed, hand focus to whatever is now primary.
+    it("moves focus to the error's primary action rather than dropping it to <body>", async () => {
+      vi.mocked(proposeNewEstimate).mockRejectedValueOnce(new Error("nope"));
+      await askForNewEstimate();
+
+      expect(screen.getByRole("button", { name: /try again/i })).toHaveFocus();
+    });
+
+    // The third failure mode: not a rejection, silence. A pod rolling
+    // mid-request leaves the request hanging, and an un-timed-out await looks
+    // exactly like the original bug from the user's side.
+    it("a request that never answers surfaces once the timeout elapses", async () => {
+      vi.mocked(proposeNewEstimate).mockReturnValueOnce(
+        new Promise<number>(() => {}),
+      );
+      await askForNewEstimate();
+      expect(screen.getByText(/claude is re-estimating/i)).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(REESTIMATE_TIMEOUT_MS);
+      });
+      expect(screen.queryByText(/claude is re-estimating/i)).toBeNull();
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /try again/i }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  describe("a stale deployment (#137)", () => {
+    /** What Next 16's client throws when the action id is from another build. */
+    function staleActionError() {
+      return Object.assign(
+        new Error(
+          'Server Action "40bef5efc6c80527f80d35d95a902c7e0bc4056eb0" was not found on the server.',
+        ),
+        { name: "UnrecognizedActionError" },
+      );
+    }
+
+    it("says the app updated and offers a reload", async () => {
+      vi.mocked(proposeNewEstimate).mockRejectedValueOnce(staleActionError());
+      await askForNewEstimate();
+
+      expect(screen.getByRole("alert")).toHaveTextContent(/app updated/i);
+      expect(
+        screen.getByRole("button", { name: /reload/i }),
+      ).toBeInTheDocument();
+    });
+
+    // The whole reason for detecting this case: a retry re-posts the same dead
+    // action id, so offering one is offering something that cannot work.
+    it("does not offer a retry, which could never succeed against a stale bundle", async () => {
+      vi.mocked(proposeNewEstimate).mockRejectedValueOnce(staleActionError());
+      await askForNewEstimate();
+
+      expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
+    });
+
+    it("still offers Skip, so the session can finish without a reload", async () => {
+      vi.mocked(proposeNewEstimate).mockRejectedValueOnce(staleActionError());
+      await askForNewEstimate();
+
+      expect(
+        screen.getByRole("button", { name: /pick a time myself/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("puts focus on the reload, which is the only thing that can work", async () => {
+      vi.mocked(proposeNewEstimate).mockRejectedValueOnce(staleActionError());
+      await askForNewEstimate();
+
+      expect(screen.getByRole("button", { name: /reload/i })).toHaveFocus();
+    });
+  });
+
+  describe("requeue (#139)", () => {
+    it("a rejected requeue does not show the success screen", async () => {
+      vi.mocked(requeueFocus).mockRejectedValueOnce(new Error("network"));
+      await askForNewEstimate();
+      await click(/requeue/i);
+
+      expect(screen.queryByText(/bumped to/i)).toBeNull();
+      expect(screen.getByRole("alert")).toHaveTextContent(/couldn't save/i);
+    });
+
+    // requeueFocus returns {ok:false} on four separate guard failures — session
+    // not found, no step, and the two ownership checks. Every one of them used
+    // to land on the "🌱 bumped to N min" screen.
+    it("an {ok:false} requeue does not show the success screen either", async () => {
+      vi.mocked(requeueFocus).mockResolvedValueOnce({ ok: false });
+      await askForNewEstimate();
+      await click(/requeue/i);
+
+      expect(screen.queryByText(/bumped to/i)).toBeNull();
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+
+    it("keeps the number field so a retry does not lose the chosen time", async () => {
+      vi.mocked(requeueFocus).mockResolvedValueOnce({ ok: false });
+      await askForNewEstimate();
+      await click(/requeue/i);
+
+      expect(screen.getByRole("spinbutton")).toHaveValue(20);
+    });
+
+    it("a successful requeue refreshes the router, as finishComplete already did", async () => {
+      await askForNewEstimate();
+      await click(/requeue/i);
+
+      expect(screen.getByText(/bumped to 20 min/i)).toBeInTheDocument();
+      expect(refresh).toHaveBeenCalled();
+    });
+  });
+
+  describe("completing a step (#137)", () => {
+    it("a rejected completion keeps the session on screen instead of celebrating", async () => {
+      vi.mocked(completeFocus).mockRejectedValueOnce(new Error("boom"));
+      await runToTimeUp();
+      await click(/yes, done/i);
+
+      expect(screen.queryByText(/step done|that's one off/i)).toBeNull();
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+
+    it("re-enables the controls, so the user is not stuck behind a disabled button", async () => {
+      vi.mocked(completeFocus).mockRejectedValueOnce(new Error("boom"));
+      await runToTimeUp();
+      await click(/yes, done/i);
+
+      expect(screen.getByRole("button", { name: /yes, done/i })).toBeEnabled();
+      expect(screen.getByRole("button", { name: /not yet/i })).toBeEnabled();
+    });
+
+    it("does not celebrate a completion the server refused", async () => {
+      vi.mocked(completeFocus).mockResolvedValueOnce({
+        ok: false,
+        nextStepId: null,
+        points: 0,
+        googleSynced: false,
+        streak: null,
+        freshStart: false,
+      });
+      await runToTimeUp();
+      await click(/yes, done/i);
+
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+      expect(screen.queryByText("🎉")).toBeNull();
+    });
+  });
+
+  describe("starting a session (#137)", () => {
+    it("a rejected start leaves the CTA usable instead of permanently disabled", async () => {
+      vi.mocked(beginFocus).mockRejectedValueOnce(new Error("boom"));
+      render(<FocusTimer {...base()} />);
+      await act(async () => {
+        screen.getByRole("button", { name: /start focusing/i }).click();
+      });
+
+      const cta = screen.getByRole("button", { name: /start focusing/i });
+      expect(cta).toBeEnabled();
+      expect(screen.getByRole("alert")).toBeInTheDocument();
     });
   });
 });

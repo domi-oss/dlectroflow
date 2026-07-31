@@ -1,7 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Check, Minus, Pause, Play, Plus, RotateCcw } from "lucide-react";
+import {
+  Check,
+  Minus,
+  Pause,
+  Play,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  TriangleAlert,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -27,6 +36,10 @@ import {
 import { TimerCustomizationHint } from "@/components/focus/timer-customization-hint";
 import { resolveTimerStyle } from "@/lib/focus-timer-style";
 import {
+  isStaleActionError,
+  withActionTimeout,
+} from "@/lib/server-action-failure";
+import {
   applyTimeDelta,
   durationChoices,
   netAddedMin,
@@ -42,7 +55,7 @@ import { useFocusSound } from "@/lib/use-focus-sound";
 import { FocusSoundPlayer } from "@/components/focus/focus-sound-player";
 import { FocusSound } from "@/lib/constants";
 import { usePrefersReducedMotion } from "@/lib/use-prefers-reduced-motion";
-import { t } from "@/lib/strings";
+import { t, type StringKey } from "@/lib/strings";
 import { cn } from "@/lib/utils";
 import { useVoice } from "@/components/voice-provider";
 
@@ -70,6 +83,51 @@ type Phase =
   | "reestimate"
   | "done"
   | "requeued";
+
+/**
+ * #137 — how long the UI waits on the re-estimate before saying so.
+ *
+ * The generous end of reasonable: `proposeNewEstimate` is a real LLM round-trip
+ * (`maxTokens: 200`, low effort), and a timeout that fires while the answer is
+ * still coming would trade a hang for a false alarm. The request itself is not
+ * cancelled — a server action cannot be aborted from the client — so nothing is
+ * lost by waiting; this only bounds how long the user stares at a spinner
+ * before being offered a way forward. Exported so the test asserts against the
+ * real value rather than a copy of it.
+ */
+export const REESTIMATE_TIMEOUT_MS = 30_000;
+
+/**
+ * The rest of the focus actions are plain database writes behind one Prisma
+ * round-trip. Ten seconds is already pathological for those.
+ */
+const ACTION_TIMEOUT_MS = 10_000;
+
+/**
+ * Which handler failed. Not cosmetic: it decides where the notice renders,
+ * which affordances it offers, and what Retry re-runs.
+ */
+type FailedHandler =
+  | "start"
+  | "resumeExisting"
+  | "togglePause"
+  | "complete"
+  | "reestimate"
+  | "requeue";
+
+type ActionFailure = {
+  handler: FailedHandler;
+  /**
+   * The browser is running a different deployment than the server. Next
+   * regenerates server-action ids on every build, so a retry re-posts the same
+   * dead id — the ONLY thing that can work is a reload, and offering a retry
+   * would be offering something that cannot.
+   */
+  stale: boolean;
+};
+
+/** `run()`'s result — distinguishes "threw" from "returned a falsy value". */
+type Outcome<T> = { ok: true; value: T } | { ok: false };
 
 type StepInfo = {
   id: string;
@@ -102,6 +160,28 @@ export type NextStepPeek = {
   text: string;
   subtaskEmoji: string | null;
 };
+
+/**
+ * #137 — which message a failure gets. The stale-deployment case overrides the
+ * handler entirely: what the user needs to know is not "the requeue failed" but
+ * "your tab is older than the server", because that is what decides whether
+ * pressing the button again could ever work.
+ */
+function failureMessageKey(failure: ActionFailure): StringKey {
+  if (failure.stale) return "focus.error.stale";
+  switch (failure.handler) {
+    case "reestimate":
+      return "focus.error.reestimate";
+    case "requeue":
+      return "focus.error.requeue";
+    case "complete":
+      return "focus.error.complete";
+    // start / resumeExisting / togglePause — all "the session couldn't be
+    // reached", and the affordance (press it again) is the same for each.
+    default:
+      return "focus.error.session";
+  }
+}
 
 /** #27 — a TRULY paused (not merely abandoned) open session for this step,
  * loaded by the page so the setup screen can offer a real "Resume" instead of
@@ -182,6 +262,10 @@ export function FocusTimer({
   const elapsedRef = useRef(0);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // #137 — null while nothing has gone wrong. Set by `run()` below (and by the
+  // two handlers whose action reports failure through its RETURN value rather
+  // than by throwing), cleared when the next attempt starts.
+  const [failure, setFailure] = useState<ActionFailure | null>(null);
   const [newEst, setNewEst] = useState(step.estMinutes);
   const [result, setResult] = useState<CompleteResult | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -196,6 +280,9 @@ export function FocusTimer({
   // drift from it); useId keeps that association collision-free, matching
   // focus-sound-player's popover id.
   const durationLabelId = useId();
+  // #137 — ties the failure message to the notice's primary action, so the
+  // reason is announced with the remedy. See failureNotice below.
+  const failureMessageId = useId();
   // The setup screen's primary CTA (Resume or Start), focused after a
   // disclosure toggle — see the effect below.
   const setupCtaRef = useRef<HTMLButtonElement | null>(null);
@@ -206,6 +293,12 @@ export function FocusTimer({
   // mini-player unmounts the button that was pressed — see the effect below.
   const sessionCtaRef = useRef<HTMLButtonElement | null>(null);
   const pauseHandoffRef = useRef(false);
+  // #137 a11y (WCAG 2.4.3) — the error notice's own primary action (Retry, or
+  // Reload when the deployment moved on). Focus lands here when the notice
+  // appears, for the same reason the two refs above exist: the transition can
+  // unmount the control that was just pressed, and a screen-reader user who is
+  // dropped to <body> has no idea a message appeared.
+  const failureCtaRef = useRef<HTMLButtonElement | null>(null);
   // #23 — the celebration line is rolled when the step is actually completed
   // (an event), not during render into a ref: Math.random() in render is impure
   // (react-hooks/purity) and reading a ref during render is unsafe
@@ -332,10 +425,53 @@ export function FocusTimer({
     [stopSound],
   );
 
+  /**
+   * #137 — every focus server action goes through here.
+   *
+   * Three handlers (`finishComplete`, `startReestimate`, `confirmRequeue`) had
+   * the identical unguarded shape: `setPending(true)`, `await`, `setPending
+   * (false)`. A rejection skipped the third line, so `pending` stayed true and
+   * the UI silently stopped responding while *looking* like it was working —
+   * which is worse than an error, because it gives no reason to try anything
+   * else. It stranded the owner at the worst possible moment: the alarm had
+   * gone off, they were mid-decision, and the only way out was a reload that
+   * lost their place.
+   *
+   * Three properties, all load-bearing:
+   *
+   *  - `setPending(false)` lives in a `finally`, so **no path can leave the UI
+   *    pending** — including one added later by someone who hasn't read this.
+   *  - the call is bounded by `withActionTimeout`, because silence is a third
+   *    failure mode alongside "resolved" and "rejected", and an un-timed-out
+   *    `await` on a hung request reproduces the original bug exactly.
+   *  - the returned `Outcome` distinguishes "threw" from "returned falsy", so a
+   *    caller can tell a real failure from `beginFocus` legitimately answering
+   *    `null`.
+   */
+  const run = useCallback(
+    async <T,>(
+      handler: FailedHandler,
+      call: () => Promise<T>,
+      timeoutMs: number = ACTION_TIMEOUT_MS,
+    ): Promise<Outcome<T>> => {
+      setFailure(null);
+      setPending(true);
+      try {
+        return { ok: true, value: await withActionTimeout(call(), timeoutMs) };
+      } catch (error) {
+        setFailure({ handler, stale: isStaleActionError(error) });
+        return { ok: false };
+      } finally {
+        setPending(false);
+      }
+    },
+    [],
+  );
+
   const start = async () => {
-    setPending(true);
-    const id = await beginFocus(step.id, plannedMin);
-    setPending(false);
+    const outcome = await run("start", () => beginFocus(step.id, plannedMin));
+    if (!outcome.ok) return;
+    const id = outcome.value;
     if (!id) return;
     // Prime device effects inside the user gesture (unlocks audio playback).
     if (settings.alarmEnabled) alarmRef.current = createAlarm();
@@ -353,9 +489,11 @@ export function FocusTimer({
   // the countdown, same as start().
   const resumeExisting = async () => {
     if (!existingSession) return;
-    setPending(true);
-    const res = await resumeFocus(existingSession.id);
-    setPending(false);
+    const outcome = await run("resumeExisting", () =>
+      resumeFocus(existingSession.id),
+    );
+    if (!outcome.ok) return;
+    const res = outcome.value;
     if (!res.ok) return;
     if (settings.alarmEnabled) alarmRef.current = createAlarm();
     if (!soundOff) playSound();
@@ -390,17 +528,23 @@ export function FocusTimer({
         goToPhase("paused");
         return;
       }
-      setPending(true);
-      const res = await pauseFocus(sessionId, { totalSec });
-      setPending(false);
-      if (!res.ok) return; // server disagrees — stay running, don't show a paused state it doesn't have
+      const outcome = await run("togglePause", () =>
+        pauseFocus(sessionId, { totalSec }),
+      );
+      if (!outcome.ok) return; // #137 — threw; the notice says so, stay running
+      if (!outcome.value.ok) return; // server disagrees — stay running, don't show a paused state it doesn't have
       goToPhase("paused");
       return;
     }
     if (phase !== "paused" || !sessionId) return;
-    setPending(true);
-    const res = await resumeFocus(sessionId);
-    setPending(false);
+    const outcome = await run("togglePause", () => resumeFocus(sessionId));
+    // #137 — a THROW is not the same as a server "no". The `!res.ok` fail-safe
+    // below reconciles to "running" because the server has told us the session
+    // is not paused; a rejection tells us nothing about the session at all, so
+    // claiming it resumed would be inventing state. Stay paused, show the
+    // notice, let Retry re-ask.
+    if (!outcome.ok) return;
+    const res = outcome.value;
     if (!res.ok) {
       goToPhase("running");
       return;
@@ -408,7 +552,7 @@ export function FocusTimer({
     setRemainingSec(res.remainingSec);
     elapsedRef.current = Math.max(0, res.totalSec - res.remainingSec);
     goToPhase(res.remainingSec <= 0 ? "timeup" : "running");
-  }, [phase, sessionId, totalSec, goToPhase]);
+  }, [phase, sessionId, totalSec, goToPhase, run]);
 
   /**
    * #65 — the mini-player's transport press, WHEN this workspace opted into the
@@ -461,41 +605,110 @@ export function FocusTimer({
 
   const finishComplete = useCallback(async () => {
     if (!sessionId) return;
-    setPending(true);
-    const res = await completeFocus(sessionId, {
-      durationMin: durationMin(),
-      addedMin: Math.max(0, net),
-    });
-    setPending(false);
+    const outcome = await run("complete", () =>
+      completeFocus(sessionId, {
+        durationMin: durationMin(),
+        addedMin: Math.max(0, net),
+      }),
+    );
+    if (!outcome.ok) return;
+    const res = outcome.value;
+    // #139's sibling on the completion path: `completeFocus` answers
+    // `ok: false` when the session isn't this workspace's, or has vanished.
+    // Celebrating a session the server refused to close is the same lie the
+    // requeue screen was telling — and it would show "+0 points" while doing
+    // it. The session stays on screen so the CTA can be pressed again.
+    if (!res.ok) {
+      setFailure({ handler: "complete", stale: false });
+      return;
+    }
     setResult(res);
     stopSound();
     releaseWake();
     setDoneMsg(DONE_MESSAGES[Math.floor(Math.random() * DONE_MESSAGES.length)]);
     goToPhase("done");
     router.refresh();
-  }, [sessionId, net, router, stopSound, goToPhase]);
+  }, [sessionId, net, router, stopSound, goToPhase, run]);
 
-  const startReestimate = async () => {
+  const startReestimate = useCallback(async () => {
     goToPhase("reestimate");
-    setPending(true);
-    const suggested = await proposeNewEstimate(step.id);
-    setNewEst(suggested);
-    setPending(false);
-  };
+    const outcome = await run(
+      "reestimate",
+      () => proposeNewEstimate(step.id),
+      // The one call in this component that waits on an LLM.
+      REESTIMATE_TIMEOUT_MS,
+    );
+    if (!outcome.ok) return;
+    setNewEst(outcome.value);
+  }, [goToPhase, run, step.id]);
 
-  const confirmRequeue = async () => {
+  const confirmRequeue = useCallback(async () => {
     if (!sessionId) return;
-    setPending(true);
-    await requeueFocus(sessionId, {
-      durationMin: durationMin(),
-      addedMin: Math.max(0, net),
-      newEstMinutes: newEst,
-    });
-    setPending(false);
+    const outcome = await run("requeue", () =>
+      requeueFocus(sessionId, {
+        durationMin: durationMin(),
+        addedMin: Math.max(0, net),
+        newEstMinutes: newEst,
+      }),
+    );
+    if (!outcome.ok) return;
+    // #139 — this return value used to be discarded entirely, so all four of
+    // `requeueFocus`'s guard failures (session not found, no step, and the two
+    // ownership checks) landed the user on the "🌱 bumped to N min" success
+    // screen. A failed requeue was indistinguishable from a successful one.
+    if (!outcome.value.ok) {
+      setFailure({ handler: "requeue", stale: false });
+      return;
+    }
     stopSound();
     releaseWake();
     goToPhase("requeued");
+    // #139 — the client half of the staleness. The server now revalidates `/`,
+    // but the router also holds its own cache of the page this session came
+    // from; `finishComplete` has always refreshed and this path never did, so
+    // the two omissions compounded instead of covering for each other.
+    router.refresh();
+  }, [sessionId, net, newEst, router, stopSound, goToPhase, run]);
+
+  /**
+   * #137 — re-run whatever failed. Dispatching on the recorded handler (rather
+   * than storing a closure in state) keeps the retry honest: it re-reads the
+   * live `sessionId` / `newEst` at press time instead of replaying whatever
+   * they were when the failure happened.
+   *
+   * Never reachable for a stale-deployment failure — that notice offers a
+   * reload instead, because the retry would post the same dead action id.
+   */
+  const retryFailed = () => {
+    switch (failure?.handler) {
+      case "start":
+        void start();
+        return;
+      case "resumeExisting":
+        void resumeExisting();
+        return;
+      case "togglePause":
+        void togglePause();
+        return;
+      case "complete":
+        void finishComplete();
+        return;
+      case "reestimate":
+        void startReestimate();
+        return;
+      case "requeue":
+        void confirmRequeue();
+        return;
+    }
   };
+
+  /**
+   * #137 — "Skip — pick a time myself". Clearing the failure while the phase
+   * stays `reestimate` reveals the number field seeded with the step's own
+   * estimate, so a re-estimate Claude could not produce still ends in a
+   * requeue rather than a dead end.
+   */
+  const skipReestimate = () => setFailure(null);
 
   const dismissTip = () => {
     setTipVisible(false);
@@ -521,8 +734,25 @@ export function FocusTimer({
   useEffect(() => {
     if (!pauseHandoffRef.current) return;
     pauseHandoffRef.current = false;
+    // #137 — a failed coupled press does not change the phase, so this effect
+    // would not otherwise re-run and the flag would stay armed for the next,
+    // unrelated transition to consume. Disarm above this line, then stand
+    // down: the error notice has taken focus, and yanking it back to the
+    // session control would bounce a screen-reader user away from the message
+    // that just appeared.
+    if (failure) return;
     if (!showSoundPlayer) sessionCtaRef.current?.focus();
-  }, [phase, showSoundPlayer]);
+  }, [phase, showSoundPlayer, failure]);
+
+  // #137 a11y (WCAG 2.4.3) — when the notice appears, put focus on the one
+  // thing that can move the user forward. Same precedent as the #66 setup
+  // disclosure and the #65 coupled transport above: a transition that unmounts
+  // (or disables) the control that was pressed must hand focus somewhere
+  // sensible rather than dropping it to <body>. `role="alert"` announces the
+  // text; this makes the remedy reachable without hunting for it.
+  useEffect(() => {
+    if (failure) failureCtaRef.current?.focus();
+  }, [failure]);
   const remainingInTask = steps
     .filter((s) => !s.done)
     .reduce((n, s) => n + s.estMinutes, 0);
@@ -576,6 +806,74 @@ export function FocusTimer({
     <p className="text-muted-foreground text-center text-xs tabular-nums">
       {taskTotalText}
     </p>
+  ) : null;
+
+  // ── #137: the failure notice ───────────────────────────────────────────────
+  // One notice, rendered wherever the user currently is (inside the reestimate
+  // block for that phase, under the controls everywhere else), so the message
+  // and its remedies are written once.
+  //
+  // a11y: `role="alert"` announces it the moment it mounts, and the effect
+  // above then puts focus on its primary action. Doing both risks a screen
+  // reader cutting the alert short as focus moves, so the primary action also
+  // carries `aria-describedby` — whichever announcement wins, the user hears
+  // the reason along with the remedy. The icon is decorative and the state is
+  // carried by the text, never by the red alone (WCAG 1.4.1);
+  // `text-destructive` on --background/--card is the token globals.css
+  // documents as AA in both themes (5.2:1+); every control is a ≥44px target.
+  const failureNotice = failure ? (
+    <div
+      role="alert"
+      className="border-destructive/40 bg-destructive/5 mx-auto flex max-w-md flex-col items-center gap-2 rounded-md border p-3"
+    >
+      <p
+        id={failureMessageId}
+        className="text-destructive flex items-start gap-1.5 text-sm font-medium"
+      >
+        <TriangleAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+        <span>{t(failureMessageKey(failure), voice)}</span>
+      </p>
+      <div className="flex flex-wrap justify-center gap-2">
+        {failure.stale ? (
+          // Retrying re-posts the same action id the running deployment has
+          // already forgotten, so a reload is the ONLY thing on offer here.
+          <button
+            ref={failureCtaRef}
+            type="button"
+            aria-describedby={failureMessageId}
+            onClick={() => window.location.reload()}
+            className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium"
+          >
+            <RefreshCw aria-hidden="true" className="h-4 w-4 shrink-0" />
+            {t("focus.error.reload", voice)}
+          </button>
+        ) : (
+          <button
+            ref={failureCtaRef}
+            type="button"
+            aria-describedby={failureMessageId}
+            onClick={retryFailed}
+            disabled={pending}
+            className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium disabled:opacity-50"
+          >
+            <RotateCcw aria-hidden="true" className="h-4 w-4 shrink-0" />
+            {t("focus.error.retry", voice)}
+          </button>
+        )}
+        {/* Offered whatever the cause, including a stale deployment: picking a
+            time by hand needs no further server round-trip until Requeue, so a
+            failed re-estimate never ends the session in a dead end. */}
+        {phase === "reestimate" && failure.handler === "reestimate" && (
+          <button
+            type="button"
+            onClick={skipReestimate}
+            className="hover:bg-accent inline-flex min-h-[44px] items-center rounded-md border px-4 font-medium"
+          >
+            {t("focus.error.pickTime", voice)}
+          </button>
+        )}
+      </div>
+    </div>
   ) : null;
 
   // Single-task focus uses the auto-created ensureFocusStep step, whose text
@@ -957,11 +1255,17 @@ export function FocusTimer({
           <p className="font-medium">
             No problem. Here&apos;s a kinder estimate:
           </p>
-          {pending ? (
-            <p className="text-muted-foreground text-sm">
+          {/* #137 — three outcomes, not two. `pending` is the spinner; a failed
+              RE-ESTIMATE replaces the number field (there is no estimate to
+              edit, so the notice offers Retry and Skip instead); a failed
+              REQUEUE keeps the field, because the number in it is the user's
+              own and a retry must not throw it away. */}
+          {pending && (
+            <p role="status" className="text-muted-foreground text-sm">
               Claude is re-estimating…
             </p>
-          ) : (
+          )}
+          {!pending && failure?.handler !== "reestimate" && (
             <div className="flex items-center justify-center gap-2">
               <input
                 type="number"
@@ -975,14 +1279,21 @@ export function FocusTimer({
               <span className="text-muted-foreground text-sm">min</span>
               <button
                 onClick={confirmRequeue}
-                className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center rounded-md px-4 font-medium"
+                disabled={pending}
+                className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center rounded-md px-4 font-medium disabled:opacity-50"
               >
                 Requeue
               </button>
             </div>
           )}
+          {!pending && failureNotice}
         </div>
       )}
+
+      {/* #137 — everywhere else the notice sits under the controls it belongs
+          to (setup's Start/Resume, the live session's Complete/Pause, time's-up
+          Yes/Not yet), so the remedy is next to the thing that failed. */}
+      {phase !== "reestimate" && failureNotice}
 
       {/* #66 — the same quiet task-total line for the live/time's-up phases (in
           setup it's rendered inside the controls, directly under the CTA, per
