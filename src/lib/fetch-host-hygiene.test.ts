@@ -37,6 +37,19 @@ import {
  * the two is how this repo got the noise in the first place, so this guard
  * measures the host prefix and nothing else — and those call sites are NOT in
  * `REVIEWED_DYNAMIC_HOSTS`, because their host is fully constant.
+ *
+ * ── What this does NOT cover, stated rather than left to be discovered ──────
+ * It sees `fetch()` and `new Request()` in repo source. It does not see an HTTP
+ * client that builds its own requests internally — `src/lib/llm/` hands a
+ * `baseURL` to the `openai` and `@anthropic-ai/sdk` clients, and
+ * `openai-compatible.ts` reads that base URL from `LLM_BASE_URL`. That host is
+ * genuinely env-derived and genuinely intentional: BYO-LLM (#59) exists to let
+ * a self-hoster point the app at their own endpoint, and it is operator
+ * configuration rather than request input, which is the line that matters for
+ * CWE-918. But it is outside this guard's reach, not inside it and approved, so
+ * do not read a green run as "no outbound request in this repo has a variable
+ * host". Extending the same rule to SDK constructor options is a separate
+ * change with a separate argument to make.
  */
 
 // ── Reviewed dynamic hosts ────────────────────────────────────────────────
