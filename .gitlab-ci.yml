@@ -765,6 +765,27 @@ deploy_review:
 stop_review:
   extends: .deploy_base
   resource_group: review/$CI_MERGE_REQUEST_IID
+  # #145 — needs: [] is load-bearing, not tidiness. Without an explicit needs:,
+  # GitLab gives a job an implicit dependency on EVERY job in every earlier
+  # stage. This job is in `deploy`, so that meant build + build_image + test.
+  # Once those artifacts expired the dependency could no longer be satisfied and
+  # the job failed with `missing_dependency_failure` BEFORE running its script
+  # (`started_at: null`, empty log) — permanently, for that pipeline.
+  #
+  # The consequence was not a red pipeline, because of allow_failure below. It
+  # was that `kubectl delete namespace` never ran: the environment wedged in
+  # `stopping` (GitLab lists those as *Active*) and an app pod plus a Postgres
+  # StatefulSet kept running for merged MRs at ~$20/month each. Six environments
+  # were stuck this way, the oldest since 11 July, and the auto-stop timer was
+  # decorative the whole time. .deploy_base deliberately declares no needs — the
+  # deploy jobs each state their own — so inheriting from it is what left this
+  # one implicit.
+  #
+  # [] rather than a list because this job consumes no artifacts at all: it runs
+  # helm and kubectl against a live cluster. It also lets teardown start
+  # immediately instead of queueing behind a build it does not use.
+  # Asserted by src/lib/ci-job-deps.test.ts.
+  needs: []
   script:
     - helm uninstall "dlectroflow-mr-$CI_MERGE_REQUEST_IID" --namespace "dlectroflow-mr-$CI_MERGE_REQUEST_IID" || true
     - kubectl delete namespace "dlectroflow-mr-$CI_MERGE_REQUEST_IID" --ignore-not-found
@@ -775,6 +796,11 @@ stop_review:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes: *code_changes
       when: manual
+  # Kept true: a teardown that cannot reach the cluster must not block a merge,
+  # and the script is already written not to fail (`|| true`, --ignore-not-found).
+  # With needs: [] the one failure mode it was masking is gone. The remaining
+  # risk — a genuine cluster-side failure passing unnoticed — is covered by the
+  # orphan sweep tracked in #145, not by making this gate a merge.
   allow_failure: true
 
 deploy_production:
