@@ -44,6 +44,7 @@ import {
   durationChoices,
   netAddedMin,
   normalizeEstMin,
+  DURATION_PRESET_MIN,
 } from "@/lib/focus-timer-clock";
 import {
   createAlarm,
@@ -280,6 +281,9 @@ export function FocusTimer({
   // drift from it); useId keeps that association collision-free, matching
   // focus-sound-player's popover id.
   const durationLabelId = useId();
+  // #138 — same trick for the time-up screen's "Keep going for" row, named by
+  // its own visible label so the four bare numbers are not the whole message.
+  const keepGoingLabelId = useId();
   // #137 — ties the failure message to the notice's primary action, so the
   // reason is announced with the remedy. See failureNotice below.
   const failureMessageId = useId();
@@ -606,7 +610,17 @@ export function FocusTimer({
     const next = applyTimeDelta({ totalSec, remainingSec }, mins * 60);
     setTotalSec(next.totalSec);
     setRemainingSec(next.remainingSec);
-    if (phase === "timeup" && mins > 0) goToPhase("running");
+    if (phase === "timeup" && mins > 0) {
+      // #138 a11y (WCAG 2.4.3) — this transition unmounts the whole time-up
+      // block, including the keep-going button that was just pressed, so focus
+      // would land on <body>. Reuse the #65 coupled-transport hand-off: the
+      // effect below moves focus to sessionCtaRef, which in the running block is
+      // the Pause control. Armed only on THIS branch — the running screen's ±5
+      // buttons also call changeTime and they stay mounted, so hijacking focus
+      // there would yank it off the button the user is still tapping.
+      pauseHandoffRef.current = true;
+      goToPhase("running");
+    }
   };
 
   const finishComplete = useCallback(async () => {
@@ -1251,6 +1265,14 @@ export function FocusTimer({
         </div>
       )}
 
+      {/* #138 — three answers, not two. The middle one is a row of preset
+          minutes: in practice the commonest answer to "how did that go?" is
+          "not yet, and I already know roughly how much longer I need", which
+          the old two-option screen forced through an AI re-estimate for a
+          decision the user had already made.
+
+          Ordered done → keep going → not sure, i.e. cheapest answer first and
+          the one that costs a server round-trip last. */}
       {phase === "timeup" && (
         <div className="space-y-3 text-center">
           <p className="text-lg font-medium">{t("focus.timesUp", voice)}</p>
@@ -1271,20 +1293,40 @@ export function FocusTimer({
               {stripLeadingGlyph(t("focus.yesDone", voice))}
             </button>
             <button
-              onClick={() => changeTime(inc)}
-              aria-label={`Add ${inc} minutes`}
-              className="hover:bg-accent inline-flex min-h-[44px] items-center gap-0.5 rounded-md border px-4"
-            >
-              <Plus aria-hidden="true" className="h-4 w-4 shrink-0" />
-              {inc}m
-            </button>
-            <button
               onClick={startReestimate}
               disabled={pending}
               className="hover:bg-accent inline-flex min-h-[44px] items-center rounded-md border px-4 disabled:opacity-50"
             >
               {t("focus.notYet", voice)}
             </button>
+          </div>
+          {/* A `group` with its own label, not four loose buttons: without it a
+              screen-reader user hears "15m, 30m, 45m, 60m" with nothing saying
+              what the numbers do. Same shape as the setup screen's "Focus for"
+              chip group. Each button also carries a spoken "Add N minutes",
+              because "30m" alone is a quantity, not an action.
+
+              These are NOT aria-pressed toggles like the setup chips — tapping
+              one is a one-shot action that immediately returns the timer to
+              `running`, so there is no selected state to report. */}
+          <div
+            role="group"
+            aria-labelledby={keepGoingLabelId}
+            className="flex flex-wrap items-center justify-center gap-2"
+          >
+            <span id={keepGoingLabelId} className="text-muted-foreground">
+              {stripLeadingGlyph(t("focus.keepGoingFor", voice))}
+            </span>
+            {DURATION_PRESET_MIN.map((mins) => (
+              <button
+                key={mins}
+                onClick={() => changeTime(mins)}
+                aria-label={`Add ${mins} minutes`}
+                className="hover:bg-accent inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border px-3"
+              >
+                {mins}m
+              </button>
+            ))}
           </div>
         </div>
       )}

@@ -844,7 +844,7 @@ describe("FocusTimer — breathing pacer through the live session (#89)", () => 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(60_000);
       });
-      expect(screen.getByText(/time's up/i)).toBeInTheDocument();
+      expect(screen.getByText("How did that go?")).toBeInTheDocument();
       expect(ringSvg()).not.toHaveAttribute("data-breathing");
     } finally {
       vi.useRealTimers();
@@ -953,7 +953,7 @@ describe("FocusTimer — alarm + auto-expand at time's-up (fake timers)", () => 
         "aria-expanded",
         "true",
       );
-      expect(screen.getByText(/time's up/i)).toBeInTheDocument();
+      expect(screen.getByText("How did that go?")).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -993,7 +993,7 @@ describe("FocusTimer — green CTA contrast (#99 a11y)", () => {
     expect(complete.className).toContain("text-white");
   });
 
-  it("the time's-up 'Yes, done!' CTA uses the same AA green-700", async () => {
+  it("the time's-up 'All done' CTA uses the same AA green-700", async () => {
     vi.useFakeTimers();
     try {
       render(<FocusTimer {...base()} />); // step estMinutes = 1 → 60s
@@ -1003,13 +1003,138 @@ describe("FocusTimer — green CTA contrast (#99 a11y)", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(60_000);
       });
-      const yesDone = screen.getByRole("button", { name: /yes, done/i });
+      const yesDone = screen.getByRole("button", { name: /^all done$/i });
       expect(yesDone.className).toContain("bg-green-700");
       expect(yesDone.className).not.toContain("bg-green-600");
       expect(yesDone.className).toContain("text-white");
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// #138 — the time-up screen used to offer two answers, done or re-estimate. In
+// real use the commonest answer is a third one: "no, and I already know roughly
+// how much longer I need" — which the old screen forced through an AI round-trip
+// for a decision the user had already made.
+//
+// The heading is now a question the three options each COMPLETE, so they read as
+// parallel answers rather than a verdict plus a menu. Re-estimation is reframed
+// as "not sure" rather than "no", because once the keep-going row exists, "no"
+// is answered by tapping a number.
+describe("FocusTimer — time-up: keep going for N more minutes (#138)", () => {
+  /** Start the 1-minute step and let the clock run out. Fake timers only. */
+  async function runToTimeUp() {
+    render(<FocusTimer {...base()} />); // step estMinutes = 1 → 60s
+    await act(async () => {
+      screen.getByRole("button", { name: /start focusing/i }).click();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("asks the question the three options answer", async () => {
+    await runToTimeUp();
+    expect(screen.getByText("How did that go?")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^all done$/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: /not sure how much longer — ask claude/i,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("offers 15/30/45/60 as a labelled group, not four bare numbers", async () => {
+    await runToTimeUp();
+    const group = screen.getByRole("group", { name: /keep going for/i });
+    expect(
+      within(group)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["15m", "30m", "45m", "60m"]);
+  });
+
+  it("tapping one adds that time and returns to a running countdown", async () => {
+    await runToTimeUp();
+    const group = screen.getByRole("group", { name: /keep going for/i });
+    await act(async () => {
+      within(group)
+        .getByRole("button", { name: /^add 30 minutes$/i })
+        .click();
+    });
+    // Back to running: the pause control is the running screen's, and the
+    // question is gone. 30:00 exactly, because the countdown was at 0:00.
+    expect(screen.queryByText("How did that go?")).not.toBeInTheDocument();
+    expect(screen.getByText("30:00")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /pause/i })).toBeInTheDocument();
+  });
+
+  it("drops the old bare +5m button — the row supersedes it", async () => {
+    await runToTimeUp();
+    expect(
+      screen.queryByRole("button", { name: /^add 5 minutes$/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("each keep-going button is a ≥44px target with a spoken label", async () => {
+    await runToTimeUp();
+    const group = screen.getByRole("group", { name: /keep going for/i });
+    for (const b of within(group).getAllByRole("button")) {
+      expect(b.tagName).toBe("BUTTON");
+      expect(b).toHaveAccessibleName(/^Add \d+ minutes$/);
+      expect(b.className).toMatch(/min-h-\[44px\]/);
+      expect(b.className).toMatch(/min-w-\[44px\]/);
+    }
+  });
+
+  // The alarm firing is not a user action, so time-up must NOT grab focus —
+  // that would be WCAG 3.2.1, and it would yank a screen reader mid-sentence.
+  it("does not steal focus when the alarm fires", async () => {
+    await runToTimeUp();
+    expect(
+      screen.getByRole("button", { name: /^all done$/i }),
+    ).not.toHaveFocus();
+  });
+
+  // …but a keep-going TAP is a user action, and it unmounts the button that was
+  // pressed. WCAG 2.4.3: hand focus to the running screen's primary control
+  // rather than dropping it to <body>. Same hand-off the #65 coupled transport
+  // uses, deliberately reused rather than reimplemented.
+  it("hands focus to the running control instead of dropping it to body", async () => {
+    await runToTimeUp();
+    const group = screen.getByRole("group", { name: /keep going for/i });
+    await act(async () => {
+      within(group)
+        .getByRole("button", { name: /^add 45 minutes$/i })
+        .click();
+    });
+    expect(screen.getByRole("button", { name: /pause/i })).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
+  });
+
+  it("playful voice keeps the food register the app already ships", async () => {
+    mockVoice = "playful";
+    await runToTimeUp();
+    expect(screen.getByText("Plate cleared?")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^devoured it$/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("group", { name: /back for seconds/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^no idea — ask claude$/i }),
+    ).toBeInTheDocument();
   });
 });
 
@@ -1328,16 +1453,19 @@ describe("FocusTimer — setup screen: one number, one action (#66)", () => {
       render(<FocusTimer {...base(singleTask)} />);
       expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
       const group = screen.getByRole("group", { name: /focus for/i });
+      // #138 — the ladder is 15/30/45/60 now; this step's 10m estimate is no
+      // longer a preset, so it splices in as its own chip (the #66 invariant:
+      // the offered set always contains the value the ring is showing).
       expect(
         within(group)
           .getAllByRole("button")
           .map((b) => b.textContent),
-      ).toEqual(["5m", "10m", "15m", "25m"]);
+      ).toEqual(["10m", "15m", "30m", "45m", "60m"]);
       expect(screen.getByRole("button", { name: "10m" })).toHaveAttribute(
         "aria-pressed",
         "true",
       );
-      expect(screen.getByRole("button", { name: "25m" })).toHaveAttribute(
+      expect(screen.getByRole("button", { name: "60m" })).toHaveAttribute(
         "aria-pressed",
         "false",
       );
@@ -1346,9 +1474,9 @@ describe("FocusTimer — setup screen: one number, one action (#66)", () => {
     it("tapping a chip moves the ring AND the minutes Start submits (one source of truth)", async () => {
       const user = userEvent.setup();
       render(<FocusTimer {...base(singleTask)} />);
-      await user.click(screen.getByRole("button", { name: "25m" }));
-      expect(screen.getByText("25:00")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "25m" })).toHaveAttribute(
+      await user.click(screen.getByRole("button", { name: "45m" }));
+      expect(screen.getByText("45:00")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "45m" })).toHaveAttribute(
         "aria-pressed",
         "true",
       );
@@ -1359,7 +1487,7 @@ describe("FocusTimer — setup screen: one number, one action (#66)", () => {
       await user.click(
         screen.getByRole("button", { name: /^start focusing$/i }),
       );
-      expect(beginFocus).toHaveBeenCalledWith("s1", 25);
+      expect(beginFocus).toHaveBeenCalledWith("s1", 45);
     });
 
     it("an off-preset estimate gets its own chip, so the ring's number stays reachable", () => {
@@ -1377,7 +1505,7 @@ describe("FocusTimer — setup screen: one number, one action (#66)", () => {
         within(group)
           .getAllByRole("button")
           .map((b) => b.textContent),
-      ).toEqual(["5m", "7m", "10m", "15m", "25m"]);
+      ).toEqual(["7m", "15m", "30m", "45m", "60m"]);
       expect(screen.getByRole("button", { name: "7m" })).toHaveAttribute(
         "aria-pressed",
         "true",
@@ -1679,11 +1807,12 @@ describe("FocusTimer — server-action failures (#137, #139)", () => {
     });
   }
 
-  /** …then choose "Not yet", which is what asks Claude for a new estimate. */
+  /** …then choose "ask Claude", which is what asks for a new estimate (#138
+   * renamed this from "Not yet": the keep-going row now answers plain "no"). */
   async function askForNewEstimate() {
     await runToTimeUp();
     await act(async () => {
-      screen.getByRole("button", { name: /not yet/i }).click();
+      screen.getByRole("button", { name: /ask claude/i }).click();
     });
   }
 
@@ -1943,7 +2072,7 @@ describe("FocusTimer — server-action failures (#137, #139)", () => {
     it("a rejected completion keeps the session on screen instead of celebrating", async () => {
       vi.mocked(completeFocus).mockRejectedValueOnce(new Error("boom"));
       await runToTimeUp();
-      await click(/yes, done/i);
+      await click(/^all done$/i);
 
       expect(screen.queryByText(/step done|that's one off/i)).toBeNull();
       expect(screen.getByRole("alert")).toBeInTheDocument();
@@ -1952,10 +2081,10 @@ describe("FocusTimer — server-action failures (#137, #139)", () => {
     it("re-enables the controls, so the user is not stuck behind a disabled button", async () => {
       vi.mocked(completeFocus).mockRejectedValueOnce(new Error("boom"));
       await runToTimeUp();
-      await click(/yes, done/i);
+      await click(/^all done$/i);
 
-      expect(screen.getByRole("button", { name: /yes, done/i })).toBeEnabled();
-      expect(screen.getByRole("button", { name: /not yet/i })).toBeEnabled();
+      expect(screen.getByRole("button", { name: /^all done$/i })).toBeEnabled();
+      expect(screen.getByRole("button", { name: /ask claude/i })).toBeEnabled();
     });
 
     it("does not celebrate a completion the server refused", async () => {
@@ -1968,7 +2097,7 @@ describe("FocusTimer — server-action failures (#137, #139)", () => {
         freshStart: false,
       });
       await runToTimeUp();
-      await click(/yes, done/i);
+      await click(/^all done$/i);
 
       expect(screen.getByRole("alert")).toBeInTheDocument();
       expect(screen.queryByText("🎉")).toBeNull();

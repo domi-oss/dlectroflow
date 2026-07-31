@@ -185,12 +185,41 @@ export const STRINGS = {
   "focus.complete": { plain: "✅ Complete", playful: "✅ Complete" },
   "focus.pause": { plain: "⏸️ Pause", playful: "⏸️ Pause" },
   "focus.resume": { plain: "▶ Resume", playful: "▶ Resume" },
+  // ── #138 — the time-up screen's three answers ──────────────────────────────
+  // Decided with the owner on 2026-07-31. The heading asks a question and each
+  // option COMPLETES it, so the three read as parallel answers rather than a
+  // verdict plus a menu. The old set ("Time's up — did you finish?" / "Yes,
+  // done!" / "Not yet") named the mechanism instead of the choice.
+  //
+  // Two decisions here are easy to undo by accident, so they are written down:
+  //
+  // 1. Re-estimation is reframed as "not sure", NOT as "no". Once the keep-going
+  //    row exists, plain "no" is answered by tapping 15/30/45/60. What
+  //    re-estimation is actually FOR is the case where the user cannot judge it
+  //    themselves — so the label describes that state, not the mechanism.
+  // 2. It names Claude, not "AI". The very next screen already says "Claude is
+  //    re-estimating…", so "ask Claude" is consistent and concrete, and tells
+  //    the user what will happen. "with AI" describes the implementation and
+  //    ages badly.
+  //
+  // The playful twins stay inside the food register already shipped (🍱 Larder,
+  // 🍽️ Devoured, Cleared plate) rather than inventing a new metaphor — that is
+  // what lets them survive being seen several times a day.
   "focus.timesUp": {
-    plain: "Time's up — did you finish?",
-    playful: "⏰ Time's up — did you finish?",
+    plain: "How did that go?",
+    playful: "Plate cleared?",
   },
-  "focus.yesDone": { plain: "✅ Yes, done!", playful: "✅ Yes, done!" },
-  "focus.notYet": { plain: "Not yet", playful: "🔁 Not yet" },
+  "focus.yesDone": { plain: "All done", playful: "Devoured it" },
+  // The label for the 15/30/45/60 row. Composed with a trailing "min" in the
+  // component, mirroring focus.setup.focusFor's "Focus for [chips]" shape.
+  "focus.keepGoingFor": {
+    plain: "Keep going for",
+    playful: "Back for seconds",
+  },
+  "focus.notYet": {
+    plain: "Not sure how much longer — ask Claude",
+    playful: "No idea — ask Claude",
+  },
   "focus.nextStep": {
     plain: "Focus the next step",
     playful: "Focus the next bite",
