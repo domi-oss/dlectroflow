@@ -207,6 +207,24 @@ operators upgrading a self-hosted instance don't get surprised.
     screen, a 44px touch target, the bar's visible focus ring, and the same
     accessible name as the control it stands in for. axe unchanged on both
     pages, both themes.
+- **Documentation changes can merge again (#116).** Every docs-only merge
+  request came back `security_policy_violations` and needed an approval from the
+  single eligible approver — including changes made specifically to correct
+  misleading docs. Two things the project built separately were in conflict: the
+  docs-only fast path (#53) skips the four code scanners, correctly, because
+  there is no code to scan; and the approval policy compares the set of security
+  report **types** in a merge request's pipeline against main's, reading a
+  missing type as unresolved rather than as inapplicable. A new
+  `docs_only_scan_stub` job supplies the three missing types as empty,
+  schema-valid reports. Its rule is the exact inverse of the one that runs the
+  real scanners — the same `.code_changes` anchor — so it can only fire on a
+  diff containing no code path at all, and its log opens with
+  `THIS JOB SCANS NOTHING` and prints the diff it is making that claim about.
+  - **Nothing about scanning a code change moved.** `fallback_behavior: fail:
+    open` on the policy would have fixed this in one line and was rejected: it
+    would also pass a merge request whose SAST job had errored out.
+  - **Contributors:** a documentation typo fix no longer waits on a security
+    approval.
 
 - **The documented quick start now works on a fresh clone (#91).** Following the
   README could not get a new checkout running, and three faults compounded:
