@@ -97,7 +97,17 @@ describe("isStaleActionError", () => {
   it.each([
     ["a network failure", new TypeError("Failed to fetch")],
     ["an LLM rate limit", new Error("429 Too Many Requests")],
-    ["a database error", new Error("Server Components render failed")],
+    [
+      "a database error",
+      new Error("Unique constraint failed on the fields: (`id`)"),
+    ],
+    // A near miss on purpose: it contains every word of the real message but
+    // not the contiguous phrase, so it proves the patterns are not so loose
+    // that any sentence mentioning a server action reads as deploy skew.
+    [
+      "a message that merely mentions server actions",
+      new Error("Failed to find the Server Action Registry entry point"),
+    ],
     ["our own timeout", new ActionTimeoutError(30000)],
     ["a non-error", "Server Action not found"],
     ["null", null],

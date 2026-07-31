@@ -274,9 +274,9 @@ function scanBody(fn: FunctionLike): Direct {
             //    expression, so the call runs iff it is that expression, seen
             //    through the wrappers that do not gate it. `x && …` and
             //    `c ? … : …` are not, and stay conditional.
+            const statement = enclosingStatement(node);
             const unconditional = ts.isBlock(body)
-              ? ts.isExpressionStatement(enclosingStatement(node)) &&
-                enclosingStatement(node).parent === body
+              ? ts.isExpressionStatement(statement) && statement.parent === body
               : unwrap(body) === node;
             (unconditional
               ? direct.revalidates

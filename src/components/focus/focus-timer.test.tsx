@@ -1885,11 +1885,15 @@ describe("FocusTimer — server-action failures (#137, #139)", () => {
     });
 
     it("keeps the number field so a retry does not lose the chosen time", async () => {
+      // The estimate is set explicitly rather than leaning on the default mock,
+      // so the assertion documents its own precondition (Duo review round 4).
+      vi.mocked(proposeNewEstimate).mockResolvedValueOnce(45);
       vi.mocked(requeueFocus).mockResolvedValueOnce({ ok: false });
       await askForNewEstimate();
+      expect(screen.getByRole("spinbutton")).toHaveValue(45);
       await click(/requeue/i);
 
-      expect(screen.getByRole("spinbutton")).toHaveValue(20);
+      expect(screen.getByRole("spinbutton")).toHaveValue(45);
     });
 
     it("a successful requeue refreshes the router, as finishComplete already did", async () => {
