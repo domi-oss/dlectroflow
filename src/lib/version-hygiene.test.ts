@@ -256,6 +256,17 @@ describe("versionDisagreement", () => {
  * If this fails, the repo drifted: a release was cut without bringing every
  * source with it. Fix the files, do not relax the test — the whole point is
  * that the four numbers below are one number.
+ *
+ * **One limitation, stated rather than left to be discovered.** `CHANGELOG.md`
+ * is documentation to `.code_changes` (#53), so an MR touching *only* it takes
+ * the docs-only fast path and never runs `test_app` — meaning a lone commit that
+ * renamed `## [Unreleased]` to `## [0.5.0]` would not be gated here. Root
+ * `*.json` and everything under `charts/` are both code paths, so the cut
+ * described in `CLAUDE.md`
+ * ("CI & release" → "Cutting a release") *is* gated: it does the heading and
+ * both bumps in one commit, which runs the full pipeline. A CHANGELOG-only cut
+ * would slip past until the next code change to `main`, which is the reason the
+ * ritual says one commit.
  */
 describe("release version hygiene (#148)", () => {
   const read = (...parts: string[]) =>
