@@ -30,6 +30,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  ambientGitEnvPointingAt,
   GIT_ENV_PASSTHROUGH,
   GIT_LOCATION_VARIABLES,
   isolatedGitEnv,
@@ -415,26 +416,6 @@ function run(scenario: Scenario = {}): Result {
 }
 
 // ── the fixture itself: isolation from the ambient git environment ───────────
-
-/**
- * Every variable git reads to decide WHICH repository it is looking at, mapped
- * onto a decoy repo. Set together they are the shape that reddened `main` in
- * #146 — a `GIT_DIR` inherited from the runner, pointing at a shallow clone.
- */
-function ambientGitEnvPointingAt(dir: string): Record<string, string> {
-  const gitDir = join(dir, ".git");
-  return {
-    GIT_DIR: gitDir,
-    GIT_COMMON_DIR: gitDir,
-    GIT_WORK_TREE: dir,
-    GIT_INDEX_FILE: join(gitDir, "index"),
-    GIT_OBJECT_DIRECTORY: join(gitDir, "objects"),
-    GIT_ALTERNATE_OBJECT_DIRECTORIES: join(gitDir, "objects"),
-    GIT_CEILING_DIRECTORIES: dir,
-    GIT_DISCOVERY_ACROSS_FILESYSTEM: "1",
-    GIT_NAMESPACE: "refs/namespaces/decoy",
-  };
-}
 
 /** A decoy repo, labelled so its commits cannot hash-collide with a fixture's. */
 function makeDecoy(): { dir: string; shas: string[] } {

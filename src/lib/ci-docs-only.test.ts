@@ -1,7 +1,9 @@
-import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ambientGitEnvPointingAt, isolatedGitEnv } from "@/lib/git-env";
 import {
   CODE_GATED_SCANNERS,
   DOCS_ONLY_PATHS,
@@ -25,14 +27,77 @@ const codeGlobs = parseCodeChangeGlobs(gitlabCiYml);
  * Committed top-level entries only. `git ls-tree` rather than `readdirSync` so
  * the set is identical locally and in CI — an untracked `node_modules/`, `.env`
  * or editor droppings must not influence a CI invariant.
+ *
+ * `-C REPO_ROOT` *and* `cwd`, with an allow-listed environment: #146. Wanting
+ * this repository is not the same as being pinned to it — the call inherited the
+ * whole ambient environment, so a `GIT_DIR` exported anywhere upstream pointed
+ * it at a different repository entirely, and `cwd` had no say in the matter.
  */
 function committedTopLevelPaths(): string[] {
-  const out = execFileSync("git", ["ls-tree", "--name-only", "HEAD"], {
-    cwd: REPO_ROOT,
-    encoding: "utf8",
-  });
+  const out = execFileSync(
+    "git",
+    ["-C", REPO_ROOT, "ls-tree", "--name-only", "HEAD"],
+    { cwd: REPO_ROOT, encoding: "utf8", env: isolatedGitEnv() },
+  );
   return out.split("\n").filter(Boolean);
 }
+
+/**
+ * A repository that is NOT this one, holding a file no top-level path list of
+ * this repo could contain. #146: an ambient `GIT_DIR` makes git read whatever
+ * repository it names, whatever `cwd` says — and the failure mode is a
+ * confident wrong answer, not a crash, so the decoy has to be a real repo with
+ * a real tree rather than an empty directory.
+ */
+function makeDecoyRepo(): string {
+  const dir = mkdtempSync(join(tmpdir(), "ci-docs-only-decoy-"));
+  const env = isolatedGitEnv({
+    GIT_AUTHOR_NAME: "Docs Only Test",
+    GIT_AUTHOR_EMAIL: "docs-only@example.test",
+    GIT_COMMITTER_NAME: "Docs Only Test",
+    GIT_COMMITTER_EMAIL: "docs-only@example.test",
+  });
+  const git = (...args: string[]): string =>
+    execFileSync("git", ["-C", dir, ...args], {
+      cwd: dir,
+      encoding: "utf8",
+      env,
+    });
+  git("init", "--quiet", "--initial-branch=main");
+  writeFileSync(join(dir, "DECOY.md"), "not this repository\n");
+  git("add", "DECOY.md");
+  git("commit", "--quiet", "-m", "decoy");
+  return dir;
+}
+
+/**
+ * #146 — this fixture legitimately wants THIS repository, which is exactly why
+ * it needs the same hardening as the prune fixture that wanted its own temp
+ * one. It passed no `env` at all, so the child inherited everything: an ambient
+ * `GIT_DIR` made `git ls-tree` enumerate a different repository, and the
+ * classification below then decided which CI jobs a merge request needs based
+ * on somebody else's file list. That answer is wrong and confident, and #116
+ * showed what a wrongly-skipped gate costs.
+ */
+describe("committedTopLevelPaths is git-isolated", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("reads this repository even when the environment names another", () => {
+    const decoy = makeDecoyRepo();
+    for (const [name, value] of Object.entries(
+      ambientGitEnvPointingAt(decoy),
+    )) {
+      vi.stubEnv(name, value);
+    }
+
+    const paths = committedTopLevelPaths();
+    expect(paths, "read the decoy repository").not.toContain("DECOY.md");
+    expect(paths).toContain("package.json");
+    expect(paths).toContain("src");
+  });
+});
 
 describe("parseCodeChangeGlobs", () => {
   it("reads the quoted items of the .code_changes block", () => {

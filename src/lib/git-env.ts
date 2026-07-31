@@ -120,3 +120,34 @@ export function isolatedGitEnv(
 
   return { ...env, ...GIT_ISOLATION_PINS, ...overrides };
 }
+
+/**
+ * Every one of {@link GIT_LOCATION_VARIABLES}, pointed at `dir` — the shape
+ * that reddened `main` in #146, where a `GIT_DIR` inherited from the runner
+ * named a shallow clone instead of the fixture's own temp repo.
+ *
+ * Tests stub these into `process.env` so that isolation is *demonstrated*
+ * rather than assumed: a suite which only ever runs where they are unset cannot
+ * tell an isolated fixture from one that merely looks isolated, and that is the
+ * state the suite was in for months.
+ *
+ * Written out as an explicit map rather than derived from the list, so that each
+ * variable gets a value with the right *shape* (a path to a git dir, a work
+ * tree, an index file). `registry-prune.test.ts` asserts the keys here match
+ * `GIT_LOCATION_VARIABLES` exactly, which is what stops a variable being added
+ * to the allow-list and never exercised.
+ */
+export function ambientGitEnvPointingAt(dir: string): Record<string, string> {
+  const gitDir = `${dir}/.git`;
+  return {
+    GIT_DIR: gitDir,
+    GIT_COMMON_DIR: gitDir,
+    GIT_WORK_TREE: dir,
+    GIT_INDEX_FILE: `${gitDir}/index`,
+    GIT_OBJECT_DIRECTORY: `${gitDir}/objects`,
+    GIT_ALTERNATE_OBJECT_DIRECTORIES: `${gitDir}/objects`,
+    GIT_CEILING_DIRECTORIES: dir,
+    GIT_DISCOVERY_ACROSS_FILESYSTEM: "1",
+    GIT_NAMESPACE: "refs/namespaces/decoy",
+  };
+}
