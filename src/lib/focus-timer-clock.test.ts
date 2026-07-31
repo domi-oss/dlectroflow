@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   MIN_REMAINING_SEC,
   DURATION_PRESET_MIN,
+  DEFAULT_DURATION_MIN,
   durationChoices,
   normalizeEstMin,
   mmss,
@@ -194,21 +195,25 @@ describe("openSessionRemainingSec", () => {
 // so the offered set must always contain the value the ring is showing (or the
 // user could not get back to it after tapping another chip).
 describe("durationChoices", () => {
+  // #138 — the ladder moved from 5/10/15/25 to 15/30/45/60. 25m was the largest
+  // offer and real sessions routinely run longer, so anything over 25 needed
+  // fiddling with the in-timer ±5 control to reach.
   it("offers the four presets, with the current estimate already among them", () => {
-    expect(durationChoices(10)).toEqual([...DURATION_PRESET_MIN]);
-    expect(durationChoices(25)).toEqual([5, 10, 15, 25]);
+    expect(durationChoices(30)).toEqual([...DURATION_PRESET_MIN]);
+    expect(durationChoices(60)).toEqual([15, 30, 45, 60]);
   });
 
   it("adds a chip for an off-preset estimate, in ascending order", () => {
-    expect(durationChoices(7)).toEqual([5, 7, 10, 15, 25]);
-    expect(durationChoices(1)).toEqual([1, 5, 10, 15, 25]);
-    expect(durationChoices(45)).toEqual([5, 10, 15, 25, 45]);
+    expect(durationChoices(7)).toEqual([7, 15, 30, 45, 60]);
+    expect(durationChoices(1)).toEqual([1, 15, 30, 45, 60]);
+    expect(durationChoices(25)).toEqual([15, 25, 30, 45, 60]);
+    expect(durationChoices(90)).toEqual([15, 30, 45, 60, 90]);
   });
 
   it("never offers a sub-minute or non-integer chip (bad data clamps to 1m)", () => {
-    expect(durationChoices(0)).toEqual([1, 5, 10, 15, 25]);
-    expect(durationChoices(-30)).toEqual([1, 5, 10, 15, 25]);
-    expect(durationChoices(7.4)).toEqual([5, 7, 10, 15, 25]);
+    expect(durationChoices(0)).toEqual([1, 15, 30, 45, 60]);
+    expect(durationChoices(-30)).toEqual([1, 15, 30, 45, 60]);
+    expect(durationChoices(7.4)).toEqual([7, 15, 30, 45, 60]);
     expect(durationChoices(Number.NaN)).toEqual([...DURATION_PRESET_MIN]);
   });
 
@@ -235,7 +240,20 @@ describe("normalizeEstMin", () => {
     expect(normalizeEstMin(24.5)).toBe(25);
   });
 
-  it("falls back to the middle preset when the estimate isn't a number", () => {
-    expect(normalizeEstMin(Number.NaN)).toBe(10);
+  // #138 — the fallback used to be DURATION_PRESET_MIN[1], which the new ladder
+  // would have silently turned into 30m. An unusable estimate is the LEAST
+  // reason to commit someone to half an hour, so the fallback is now the
+  // shortest offer, named rather than positional.
+  it("falls back to the shortest preset when the estimate isn't a number", () => {
+    expect(normalizeEstMin(Number.NaN)).toBe(15);
+    expect(normalizeEstMin(Number.NaN)).toBe(DEFAULT_DURATION_MIN);
+    // Not `toBe(Math.min(...DURATION_PRESET_MIN))` any more — since Duo review
+    // that IS the definition, so asserting it would be a tautology. The concrete
+    // 15 above is what still notices a ladder change.
+    expect(DURATION_PRESET_MIN).toContain(DEFAULT_DURATION_MIN);
+  });
+
+  it("keeps the fallback among the offered chips, so Start is never 0m", () => {
+    expect(durationChoices(Number.NaN)).toContain(DEFAULT_DURATION_MIN);
   });
 });

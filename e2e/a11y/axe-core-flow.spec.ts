@@ -122,7 +122,7 @@ test.describe("accessibility: core-flow routes (axe)", () => {
     //
     // Both keys went into axe-baseline.json carrying ONE pre-existing violation
     // that this new coverage found on its first run: white on `bg-green-600`
-    // ("Complete step" / "Yes, done!") is 3.27:1, filed as #99. Baselined rather
+    // ("Complete step" / "All done", renamed in #138) is 3.27:1, filed as #99. Baselined rather
     // than fixed here because it is a palette decision on the session's primary
     // CTA, not part of #89 — anything further on this surface still fails.
     //

@@ -337,22 +337,48 @@ describe("Task 2 — inbox/focus/breakdown keys (plain vs playful)", () => {
   it('t("focus.resume", "plain") → "▶ Resume"', () => {
     expect(t("focus.resume", "plain")).toBe("▶ Resume");
   });
-  it('t("focus.timesUp", "plain") → "Time\'s up — did you finish?"', () => {
-    expect(t("focus.timesUp", "plain")).toBe("Time's up — did you finish?");
+  // #138 — the time-up copy, decided 2026-07-31. Each option COMPLETES the
+  // sentence the heading asks, so the three read as parallel answers rather than
+  // a verdict plus a menu. "ask Claude" names the model, not "AI": the very next
+  // screen already says "Claude is re-estimating…", and "with AI" describes the
+  // implementation instead of what the user gets.
+  it('t("focus.timesUp", "plain") → "How did that go?"', () => {
+    expect(t("focus.timesUp", "plain")).toBe("How did that go?");
   });
-  it('t("focus.timesUp", "playful") → "⏰ Time\'s up — did you finish?"', () => {
-    expect(t("focus.timesUp", "playful")).toBe(
-      "⏰ Time's up — did you finish?",
+  it('t("focus.timesUp", "playful") → "Plate cleared?"', () => {
+    expect(t("focus.timesUp", "playful")).toBe("Plate cleared?");
+  });
+  it('t("focus.yesDone", "plain") → "All done"', () => {
+    expect(t("focus.yesDone", "plain")).toBe("All done");
+  });
+  it('t("focus.yesDone", "playful") → "Devoured it"', () => {
+    expect(t("focus.yesDone", "playful")).toBe("Devoured it");
+  });
+  it('t("focus.keepGoingFor", "plain") → "Keep going for"', () => {
+    expect(t("focus.keepGoingFor", "plain")).toBe("Keep going for");
+  });
+  it('t("focus.keepGoingFor", "playful") → "Back for seconds"', () => {
+    expect(t("focus.keepGoingFor", "playful")).toBe("Back for seconds");
+  });
+  // Voice-neutral, but asserted in both voices anyway (Duo review): the
+  // completeness test only rejects an empty string, so "min" drifting to
+  // "minutes" — or the two voices quietly diverging — would pass unnoticed.
+  it('t("focus.keepGoingUnit", "plain") → "min"', () => {
+    expect(t("focus.keepGoingUnit", "plain")).toBe("min");
+  });
+  it('t("focus.keepGoingUnit", "playful") → "min"', () => {
+    expect(t("focus.keepGoingUnit", "playful")).toBe("min");
+  });
+  // Re-estimate is reframed as "not sure", not as "no": once the keep-going row
+  // exists, "no" is answered by picking 15/30/45/60. What re-estimation is FOR
+  // is the case where the user cannot judge it themselves.
+  it('t("focus.notYet", "plain") → "Not sure how much longer — ask Claude"', () => {
+    expect(t("focus.notYet", "plain")).toBe(
+      "Not sure how much longer — ask Claude",
     );
   });
-  it('t("focus.yesDone", "plain") → "✅ Yes, done!"', () => {
-    expect(t("focus.yesDone", "plain")).toBe("✅ Yes, done!");
-  });
-  it('t("focus.notYet", "plain") → "Not yet"', () => {
-    expect(t("focus.notYet", "plain")).toBe("Not yet");
-  });
-  it('t("focus.notYet", "playful") → "🔁 Not yet"', () => {
-    expect(t("focus.notYet", "playful")).toBe("🔁 Not yet");
+  it('t("focus.notYet", "playful") → "No idea — ask Claude"', () => {
+    expect(t("focus.notYet", "playful")).toBe("No idea — ask Claude");
   });
   it('t("focus.nextStep", "plain") → "Focus the next step"', () => {
     expect(t("focus.nextStep", "plain")).toBe("Focus the next step");
@@ -576,6 +602,11 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     "action.backToInbox",
     "focus.timesUp",
     "focus.yesDone",
+    // #138 — the keep-going row's label and the reframed re-estimate answer.
+    // Plain stays literal; the playful twins carry the food register instead.
+    "focus.keepGoingFor",
+    "focus.keepGoingUnit",
+    "focus.notYet",
     "link.seeAll",
     "pill.toDo",
     "progress.done",

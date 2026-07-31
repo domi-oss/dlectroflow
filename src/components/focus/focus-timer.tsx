@@ -44,6 +44,7 @@ import {
   durationChoices,
   netAddedMin,
   normalizeEstMin,
+  DURATION_PRESET_MIN,
 } from "@/lib/focus-timer-clock";
 import {
   createAlarm,
@@ -280,6 +281,9 @@ export function FocusTimer({
   // drift from it); useId keeps that association collision-free, matching
   // focus-sound-player's popover id.
   const durationLabelId = useId();
+  // #138 — same trick for the time-up screen's "Keep going for" row, named by
+  // its own visible label so the four bare numbers are not the whole message.
+  const keepGoingLabelId = useId();
   // #137 — ties the failure message to the notice's primary action, so the
   // reason is announced with the remedy. See failureNotice below.
   const failureMessageId = useId();
@@ -292,7 +296,23 @@ export function FocusTimer({
   // one is ever mounted). Focus lands here when a coupled resume from the
   // mini-player unmounts the button that was pressed — see the effect below.
   const sessionCtaRef = useRef<HTMLButtonElement | null>(null);
-  const pauseHandoffRef = useRef(false);
+  // Why focus needs handing off after the next phase commit, or null for "it
+  // doesn't". A reason rather than a boolean (#138) because the two cases want
+  // *different* behaviour when the sound player is on screen, and a second
+  // boolean ref would have let a third case pick the wrong one silently:
+  //
+  // - "coupled-transport" (#65): the button pressed was the mini-player's, which
+  //   is still mounted when the player stays visible — so stand down, because
+  //   moving focus off a control the user is still pointing at is the rudeness
+  //   the `showSoundPlayer` guard exists to prevent.
+  // - "keep-going" (#138): the button pressed lived in the `timeup` block, which
+  //   has just unmounted. Focus has nowhere to be and MUST move, whether or not
+  //   the player is showing. `showSoundPlayer` is false during `timeup` and true
+  //   once `running` commits, so guarding on it here skipped the hand-off in
+  //   exactly the case that needed it (Duo review; WCAG 2.4.3).
+  const handoffReasonRef = useRef<"coupled-transport" | "keep-going" | null>(
+    null,
+  );
   // #137 a11y (WCAG 2.4.3) — the error notice's own primary action (Retry, or
   // Reload when the deployment moved on). Focus lands here when the notice
   // appears, for the same reason the two refs above exist: the transition can
@@ -598,7 +618,8 @@ export function FocusTimer({
     // togglePause schedules a React update, so the disarm would win the race
     // against the commit and the hand-off would silently stop happening. That
     // exact suggestion was tried and it fails the minimal-mode focus test.
-    pauseHandoffRef.current = phase === "paused" && sessionId != null;
+    handoffReasonRef.current =
+      phase === "paused" && sessionId != null ? "coupled-transport" : null;
     await togglePause();
   }, [phase, sessionId, togglePause]);
 
@@ -606,7 +627,23 @@ export function FocusTimer({
     const next = applyTimeDelta({ totalSec, remainingSec }, mins * 60);
     setTotalSec(next.totalSec);
     setRemainingSec(next.remainingSec);
-    if (phase === "timeup" && mins > 0) goToPhase("running");
+    if (phase === "timeup" && mins > 0) {
+      // #138 a11y (WCAG 2.4.3) — this transition unmounts the whole time-up
+      // block, including the keep-going button that was just pressed, so focus
+      // would land on <body>. The effect below moves it to sessionCtaRef, which
+      // in the running block is the Pause control. Armed only on THIS branch —
+      // the running screen's ±5 buttons also call changeTime and they stay
+      // mounted, so hijacking focus there would yank it off the button the user
+      // is still tapping.
+      //
+      // Tagged "keep-going" rather than reusing #65's reason (Duo review): #65
+      // stands down while the sound player is visible, and here that guard is
+      // actively wrong — showSoundPlayer is false during `timeup` and true once
+      // `running` commits, so it suppressed the hand-off precisely when the
+      // pressed button had gone.
+      handoffReasonRef.current = "keep-going";
+      goToPhase("running");
+    }
   };
 
   const finishComplete = useCallback(async () => {
@@ -737,8 +774,9 @@ export function FocusTimer({
   // — so there is no second copy of that condition to drift. Unconditional and
   // above every early return, so hook order is stable.
   useEffect(() => {
-    if (!pauseHandoffRef.current) return;
-    pauseHandoffRef.current = false;
+    const reason = handoffReasonRef.current;
+    if (!reason) return;
+    handoffReasonRef.current = null;
     // #137 — a failed coupled press does not change the phase, so this effect
     // would not otherwise re-run and the flag would stay armed for the next,
     // unrelated transition to consume. Disarm above this line, then stand
@@ -746,7 +784,12 @@ export function FocusTimer({
     // session control would bounce a screen-reader user away from the message
     // that just appeared.
     if (failure) return;
-    if (!showSoundPlayer) sessionCtaRef.current?.focus();
+    // See handoffReasonRef: only the coupled-transport case defers to a visible
+    // sound player. A keep-going tap always hands off, because the button it was
+    // made on no longer exists.
+    if (reason === "keep-going" || !showSoundPlayer) {
+      sessionCtaRef.current?.focus();
+    }
   }, [phase, showSoundPlayer, failure]);
 
   // #137 a11y (WCAG 2.4.3) — when the notice appears, put focus on the one
@@ -1251,6 +1294,14 @@ export function FocusTimer({
         </div>
       )}
 
+      {/* #138 — three answers, not two. The middle one is a row of preset
+          minutes: in practice the commonest answer to "how did that go?" is
+          "not yet, and I already know roughly how much longer I need", which
+          the old two-option screen forced through an AI re-estimate for a
+          decision the user had already made.
+
+          Ordered done → keep going → not sure, i.e. cheapest answer first and
+          the one that costs a server round-trip last. */}
       {phase === "timeup" && (
         <div className="space-y-3 text-center">
           <p className="text-lg font-medium">{t("focus.timesUp", voice)}</p>
@@ -1270,14 +1321,75 @@ export function FocusTimer({
               <Check aria-hidden="true" className="h-4 w-4 shrink-0" />
               {stripLeadingGlyph(t("focus.yesDone", voice))}
             </button>
-            <button
-              onClick={() => changeTime(inc)}
-              aria-label={`Add ${inc} minutes`}
-              className="hover:bg-accent inline-flex min-h-[44px] items-center gap-0.5 rounded-md border px-4"
+          </div>
+          {/* A `group` with its own label, not four loose buttons: without it a
+              screen-reader user hears "15, 30, 45, 60" with nothing saying what
+              the numbers mean. Same shape as the setup screen's "Focus for" chip
+              group. Each button also carries a spoken "Add N minutes", because a
+              bare number is a quantity, not an action.
+
+              The row reads as one sentence — "Keep going for 15 / 30 / 45 / 60
+              min" — so the buttons hold bare numbers and the unit is said once at
+              the end. That is deliberately UNLIKE the setup screen's chips, which
+              each carry their own "10m" because there a chip is a standalone
+              value you select rather than part of a phrase. Owner-approved copy
+              (#138); the alternative, four "15m"-style buttons, repeats the unit
+              four times and leaves the label dangling.
+
+              These are NOT aria-pressed toggles like the setup chips — tapping
+              one is a one-shot action that immediately returns the timer to
+              `running`, so there is no selected state to report.
+
+              `disabled={pending}` matches the two buttons above, and is load-
+              bearing rather than cosmetic (Duo review): the block stays mounted
+              while a `completeFocus` is in flight, because the phase only moves
+              once the server answers. Without the guard a tap here would set
+              phase to `running` and then have `finishComplete` resolve and
+              override it with `done`, silently discarding the choice. */}
+          {/* The label and the unit sit OUTSIDE the group (Duo review): inside,
+              "Keep going for" is both the group's accessible name via
+              `aria-labelledby` AND a text node in its traversal content, so some
+              screen readers announce it twice — once on entry, once while
+              reading the children. The setup screen's "Focus for" group already
+              gets this right; this now matches it. */}
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {/* No `stripLeadingGlyph` here, unlike the buttons above (Duo
+                review): that call exists because those render their own lucide
+                icon, so a leading glyph in the string would double it up. This
+                is a plain text label with no icon beside it — stripping would be
+                a no-op today and would silently eat a playful emoji if one is
+                ever added, which for a label is the wrong default. */}
+            <span id={keepGoingLabelId} className="text-muted-foreground">
+              {t("focus.keepGoingFor", voice)}
+            </span>
+            <div
+              role="group"
+              aria-labelledby={keepGoingLabelId}
+              className="flex flex-wrap items-center justify-center gap-2"
             >
-              <Plus aria-hidden="true" className="h-4 w-4 shrink-0" />
-              {inc}m
-            </button>
+              {DURATION_PRESET_MIN.map((mins) => (
+                <button
+                  key={mins}
+                  onClick={() => changeTime(mins)}
+                  disabled={pending}
+                  aria-label={`Add ${mins} minutes`}
+                  className="hover:bg-accent inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border px-3 disabled:opacity-50"
+                >
+                  {mins}
+                </button>
+              ))}
+            </div>
+            <span aria-hidden="true" className="text-muted-foreground">
+              {t("focus.keepGoingUnit", voice)}
+            </span>
+          </div>
+          {/* Last, not beside "All done" (Duo review). The comment above claims
+              the order is done -> keep going -> not sure, and this button sitting
+              in the same flex row as "All done" made that false in the DOM: tab
+              and screen-reader order announced the AI round-trip BEFORE the four
+              immediate choices, which is the opposite of the rationale. Cheapest
+              answer first, the one that costs a server round-trip last. */}
+          <div className="flex justify-center">
             <button
               onClick={startReestimate}
               disabled={pending}

@@ -10,8 +10,33 @@ export const MIN_REMAINING_SEC = 60;
 /**
  * #66 — the setup screen's duration chips (a Pomodoro-ish ladder). Deliberately
  * four: one tap, no free-type field to second-guess.
+ *
+ * #138 — was 5/10/15/25. From production use: 25m was the LARGEST offer, which
+ * is shorter than a lot of real sessions, so anything longer had to be reached
+ * by repeatedly tapping the in-timer +5. The ladder now spans the range people
+ * actually pick, and the in-timer ±5 goes back to being a nudge rather than the
+ * only way to express an hour.
+ *
+ * The same four minutes are the "keep going for" offers on the time-up screen
+ * (#138): the question there — "how much longer?" — has the same useful answers
+ * as "how long to start?", and two ladders that agree are one thing to learn.
  */
-export const DURATION_PRESET_MIN = [5, 10, 15, 25] as const;
+export const DURATION_PRESET_MIN = [15, 30, 45, 60] as const;
+
+/**
+ * The duration to fall back on when an estimate is unusable.
+ *
+ * #138 — this used to be the positional `DURATION_PRESET_MIN[1]`, which the new
+ * ladder would have silently changed from 10m to 30m. Having no usable estimate
+ * is the weakest possible reason to commit someone to half an hour, so it is the
+ * *shortest* offer.
+ *
+ * Derived with `Math.min` rather than `DURATION_PRESET_MIN[0]` (Duo review):
+ * index 0 is only the smallest while the array happens to stay sorted, so the
+ * positional form leaves a reordered ladder to be caught by a test after the
+ * fact. This way the definition IS the invariant.
+ */
+export const DEFAULT_DURATION_MIN = Math.min(...DURATION_PRESET_MIN);
 
 /**
  * #66 — the whole-minute duration a raw estimate means. Nothing in the schema
@@ -22,7 +47,7 @@ export const DURATION_PRESET_MIN = [5, 10, 15, 25] as const;
  * estimate would preselect nothing and Start would open a 0-minute session.
  */
 export function normalizeEstMin(estMin: number): number {
-  if (!Number.isFinite(estMin)) return DURATION_PRESET_MIN[1];
+  if (!Number.isFinite(estMin)) return DEFAULT_DURATION_MIN;
   return Math.max(1, Math.round(estMin));
 }
 
