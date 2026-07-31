@@ -653,6 +653,52 @@ export default function PrivacyPage() {
         </p>
 
         <LegalSubheading>
+          Google data and the AI provider — they never meet
+        </LegalSubheading>
+        <p>
+          dlectroflow uses an AI model to break tasks into steps, and it uses
+          Google Tasks to schedule them. Those two things never touch, and that
+          is a property of how the connection is built rather than a rule
+          somebody has to remember to follow.
+        </p>
+        <p>
+          <strong>
+            Nothing from your Google account is ever sent to the AI provider.
+          </strong>{" "}
+          The Google connection only ever <em>writes</em>: it creates and
+          updates tasks in your list. The one thing it reads is the names of
+          your task lists, so it knows which list to write into — and a list
+          name is not something the breakdown coach is given, because the coach
+          is only ever given the text you typed here plus counts and dates. Put
+          plainly, there is no path by which Google data could reach the model,
+          because no Google data is held here to send.
+        </p>
+        <p>
+          It follows that nothing from your Google account is used to train,
+          improve or evaluate any AI model, by me or by anyone else. Anthropic,
+          the provider this instance uses, does not train on what is sent
+          through its API either — see{" "}
+          <Link href={`#${s("ai").id}`} className="underline">
+            Sending your text to an AI provider
+          </Link>{" "}
+          for what does get sent, and what happens to it.
+        </p>
+        <p>
+          Google requires an explicit statement of this, so here it is in
+          Google&rsquo;s own words:
+        </p>
+        {/* Deliberately NOT `text-muted-foreground italic`, the house style for
+            an aside. This is the one sentence a Google reviewer is looking for,
+            and it is a formal undertaking rather than a footnote — full-contrast
+            body text at normal weight-plus keeps it prominent and keeps the
+            contrast ratio at the AA figure the rest of the page holds. */}
+        <blockquote className="border-border border-l-2 pl-4 font-medium">
+          The use of raw or derived user data received from Workspace APIs will
+          adhere to the Google User Data Policy, including the Limited Use
+          requirements.
+        </blockquote>
+
+        <LegalSubheading>
           Whose Google account it goes into — yours
         </LegalSubheading>
         <p>
