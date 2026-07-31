@@ -378,8 +378,21 @@ export const PLATFORM_DIVERGENCES: readonly PlatformDivergence[] = [
  * merely being handed. The `- name:` form covers those anyway, since a
  * secretKeyRef always sits under one.
  */
+// The invariant both of these lean on, stated because it is a convention rather
+// than a YAML rule (Duo review on !230): in these manifests an ALL_CAPS key is an
+// env variable and a lowercase one is Kubernetes structure. That is what lets the
+// first regex match a `stringData:` entry without also matching `metadata:` or
+// `spec:`. It would match an all-caps structural key — `NODE_PORT: 3000` in a
+// Service, say — so a new file added to CHART_CONFIG_SURFACE_FILES has to hold to
+// the same convention.
 const MANIFEST_STRING_DATA_KEY_RE = /^\s*([A-Z_][A-Z0-9_]*):/;
-const MANIFEST_ENV_NAME_RE = /^\s*-\s*name:\s*([A-Z_][A-Z0-9_]*)\s*$/;
+// The trailing `(#.*)?` is not decoration: anchoring straight to `$` meant an
+// inline comment — `- name: PUBLIC_ORIGIN # injected by the review deploy` —
+// silently failed to count the key, and this check reports uncounted keys as
+// DRIFT. So a passing comment on a manifest line would have manufactured a gap
+// that does not exist, and the fix for the phantom gap would have been to edit
+// the config surface. Fails loud, not quietly wrong.
+const MANIFEST_ENV_NAME_RE = /^\s*-\s*name:\s*([A-Z_][A-Z0-9_]*)\s*(#.*)?$/;
 
 /**
  * The sorted, deduped set of env keys a chart manifest declares. Sorted so a

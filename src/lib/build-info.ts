@@ -35,6 +35,14 @@ const SHORT_SHA_LENGTH = 7;
  *
  * The lower bound is SHORT_SHA_LENGTH — anything shorter cannot identify a
  * commit — and the upper bound is 40, the length of a SHA-1.
+ *
+ * **SHA-1 only, deliberately** (Duo review on !230). GitLab issues SHA-1 today,
+ * so a 64-character SHA-256 hash would be rejected and /api/health would answer
+ * `sha: null` with nothing saying why. Widening it pre-emptively is the wrong
+ * trade: the bound is a validation boundary on a value that gets reflected to any
+ * unauthenticated caller, and loosening it to admit a length nothing produces
+ * weakens the check to buy nothing. If GitLab migrates, change the 40 to 64 —
+ * and this comment is the diagnostic that makes a null answer legible.
  */
 const SHA_RE = new RegExp(`^[0-9a-f]{${SHORT_SHA_LENGTH},40}$`);
 

@@ -161,6 +161,25 @@ stringData:
     ]);
   });
 
+  // Duo review (!230): the `- name:` pattern used to anchor straight to `$`, so
+  // an inline comment made the key uncountable — and an uncounted key is reported
+  // as DRIFT. A passing comment on a manifest line would therefore have
+  // manufactured a gap that does not exist, and the obvious "fix" for the phantom
+  // gap would have been to edit the config surface to match it.
+  it("counts a `- name: KEY` entry that carries an inline comment", () => {
+    const deployment = `
+          env:
+            - name: PUBLIC_ORIGIN # injected by the review deploy
+              value: "https://{{ .Values.host }}"
+            - name: GOOGLE_CLIENT_ID   #  optional, self-host only
+              value: {{ .Values.google.clientId | quote }}
+`;
+    expect(extractManifestEnvKeys(deployment)).toEqual([
+      "GOOGLE_CLIENT_ID",
+      "PUBLIC_ORIGIN",
+    ]);
+  });
+
   it("finds a key inside a conditional block", () => {
     const secret = `
 stringData:
