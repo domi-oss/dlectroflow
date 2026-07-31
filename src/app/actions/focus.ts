@@ -352,10 +352,16 @@ export async function completeFocus(
   });
   if (openCount === 0) {
     await markTaskCompleted(workspaceId, step.taskId);
-    revalidatePath("/");
   }
 
+  // #139 — `/` unconditionally. This used to sit inside the branch above, so
+  // finishing the LAST step of a task refreshed the list and finishing any
+  // earlier one did not — even though every completion marks a step done and
+  // changes the task's remaining minutes, both of which the list renders. Same
+  // omission as `requeueFocus`, just wearing an `if`; `revalidation-hygiene`
+  // now checks the position of the call, not merely its presence.
   revalidatePath(`/tasks/${step.taskId}`);
+  revalidatePath("/");
   revalidatePath("/dashboard");
   return {
     ok: true,
@@ -449,7 +455,15 @@ export async function requeueFocus(
     }
   }
 
+  // #139 — `/` is where the estimate is actually displayed, and this action
+  // used to be the ONE mutation in this file that didn't invalidate it: the new
+  // estimate was written (verified in the production database) while the list
+  // kept rendering the old one, so a working feature looked broken. The trio
+  // below matches `completeFocus`; `revalidation-hygiene.test.ts` now fails the
+  // build if any mutating action here drifts back off `/`.
   revalidatePath(`/tasks/${step.taskId}`);
+  revalidatePath("/");
+  revalidatePath("/dashboard");
   return { ok: true };
 }
 

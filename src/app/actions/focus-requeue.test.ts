@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { revalidatePath } from "next/cache";
 
 // Unit test for issue #21 P5.4: requeueFocus must not blow up on a corrupt
 // Step.estimateHistory. JSON.parse of malformed JSON was uncaught, breaking the
@@ -102,5 +103,56 @@ describe("requeueFocus — estimateHistory JSON guard", () => {
       newEstMinutes: 30,
     });
     expect(lastUpdateHistory()).toEqual([20]);
+  });
+});
+
+/**
+ * #139 — a requeue wrote the new estimate correctly and then left `/` showing
+ * the old one. `requeueFocus` revalidated `/tasks/{id}` and nothing else, while
+ * every sibling mutation in this file also revalidates `/` — and `/` is exactly
+ * where the estimate is rendered. The production database read
+ * (`estMinutes` 10 → 60, `estimateHistory` `[10]`) proved the write landed, so
+ * only the invalidation was missing: the feature looked broken while working.
+ *
+ * Asserted on the paths rather than on a rendered list because that is the
+ * actual contract between the action and the router — a test that only checks
+ * the database passes against this bug, which is how it reached production.
+ */
+describe("requeueFocus — cache invalidation (#139)", () => {
+  beforeEach(() => {
+    prismaMock.focusSession.update.mockResolvedValue({
+      step: stepWith("[10]"),
+    });
+  });
+
+  async function revalidatedPaths(): Promise<string[]> {
+    const { requeueFocus } = await import("./focus");
+    await requeueFocus("sess", {
+      durationMin: 25,
+      addedMin: 0,
+      newEstMinutes: 60,
+    });
+    return vi.mocked(revalidatePath).mock.calls.map(([p]) => p);
+  }
+
+  it("revalidates the home list, where the estimate is displayed", async () => {
+    expect(await revalidatedPaths()).toContain("/");
+  });
+
+  it("revalidates the dashboard, matching completeFocus", async () => {
+    expect(await revalidatedPaths()).toContain("/dashboard");
+  });
+
+  it("still revalidates the task page", async () => {
+    expect(await revalidatedPaths()).toContain("/tasks/t1");
+  });
+
+  it("does not revalidate when the ownership guard rejects the step", async () => {
+    prismaMock.step.findFirst.mockResolvedValue(null);
+    const { requeueFocus } = await import("./focus");
+    await expect(
+      requeueFocus("sess", { durationMin: 25, addedMin: 0, newEstMinutes: 60 }),
+    ).resolves.toEqual({ ok: false });
+    expect(vi.mocked(revalidatePath)).not.toHaveBeenCalled();
   });
 });
