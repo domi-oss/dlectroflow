@@ -323,6 +323,34 @@ describe("scanFetchTargets — dynamic hosts it must reject", () => {
     rejects(src);
   });
 
+  it("a parameter shadowing a module const of the same name", () => {
+    // The scope walk goes inner-to-outer, so it has to STOP at the first
+    // binding of the name. Skipping the parameter and carrying on outwards
+    // finds `API` and calls this constant — while the value actually reaching
+    // fetch is the caller's. Found reviewing !218, after Duo's round on this
+    // file returned only fabricated findings.
+    const src = `
+      const API = "https://good.example/";
+      export async function go(API: string) {
+        return fetch(API);
+      }
+    `;
+    rejects(src);
+  });
+
+  it("a let shadowing a module const of the same name", () => {
+    // Same failure, rebindable flavour: `let` is unresolvable by design, so
+    // meeting one must end the walk rather than fall through to the const.
+    const src = `
+      const API = "https://good.example/";
+      export async function go(userInput: string) {
+        let API = userInput;
+        return fetch(API);
+      }
+    `;
+    rejects(src);
+  });
+
   it("a property access", () => {
     rejects(
       `export async function go(req: Request) { return fetch(req.url); }`,

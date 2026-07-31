@@ -143,17 +143,44 @@ function isFunctionLike(node: ts.Node): node is FunctionLike {
  * as constant as the last write to it, and proving that needs flow analysis
  * this module does not do. Parameters are not resolved either — a parameter is
  * precisely the attacker-reachable case.
+ *
+ * ── Shadowing must stop the walk, not be skipped ────────────────────────────
+ * The walk goes innermost-scope-outwards, so it MUST stop at the first binding
+ * of `name` it meets, whatever kind that binding is. Merely `continue`-ing past
+ * a parameter or a `let` and carrying on outwards finds a same-named module
+ * const and reports the target as constant — while the value actually reaching
+ * `fetch` is the shadowing one. That inverts the guard on exactly the case it
+ * exists for:
+ *
+ *   const API = "https://good.example/";
+ *   async function go(API: string) { return fetch(API); }   // attacker-controlled
+ *
+ * So an inner parameter, `let` or `var` of the same name resolves to null,
+ * which `constantPrefix` turns into UNRESOLVED — failing closed. Found by
+ * review of !218; Duo's own round on this file produced only fabricated
+ * findings, so it was not going to catch this.
  */
 function resolveConst(name: string, from: ts.Node): ts.Expression | null {
   for (let scope: ts.Node | undefined = from; scope; scope = scope.parent) {
+    // A parameter binds `name` for everything inside this function. Nothing
+    // further out can be what reaches the call site.
+    if (isFunctionLike(scope)) {
+      for (const parameter of scope.parameters) {
+        if (ts.isIdentifier(parameter.name) && parameter.name.text === name) {
+          return null;
+        }
+      }
+    }
     for (const statement of statementsOf(scope)) {
       if (!ts.isVariableStatement(statement)) continue;
       const isConst =
         (statement.declarationList.flags & ts.NodeFlags.Const) !== 0;
-      if (!isConst) continue;
       for (const declaration of statement.declarationList.declarations) {
         if (!ts.isIdentifier(declaration.name)) continue;
         if (declaration.name.text !== name) continue;
+        // A `let`/`var` binding shadows anything outside it: stop here rather
+        // than continuing the walk, and report it as unresolvable.
+        if (!isConst) return null;
         return declaration.initializer ?? null;
       }
     }
