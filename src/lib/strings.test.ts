@@ -460,6 +460,41 @@ describe("Task 2 — inbox/focus/breakdown keys (plain vs playful)", () => {
   });
 });
 
+// #136 — the lane-level cleared state. `focus.launcher.allClear` is the PAGE
+// saying "there is nothing left anywhere"; this is one lane saying "you just
+// emptied me", and the pair has to stay distinguishable from `bucket.empty`,
+// which is what a lane that never held anything says.
+describe("focus.lane.cleared (#136)", () => {
+  it('t("focus.lane.cleared", "plain") is the plain celebration', () => {
+    expect(t("focus.lane.cleared", "plain")).toBe(
+      "Cleared — nothing left here right now. ✅",
+    );
+  });
+
+  it('t("focus.lane.cleared", "playful") is the playful celebration', () => {
+    expect(t("focus.lane.cleared", "playful")).toBe(
+      "🎉 Plate cleared! Nothing left here right now.",
+    );
+  });
+
+  // The distinction the issue is about, asserted rather than assumed: emptying a
+  // lane must not render the same sentence as never having filled it.
+  it("never reads as the neutral bucket.empty in either voice", () => {
+    for (const voice of ["plain", "playful"] as const) {
+      expect(t("focus.lane.cleared", voice)).not.toBe(t("bucket.empty", voice));
+    }
+  });
+
+  // It reads as an ACKNOWLEDGEMENT, not as an absence — the /focus page already
+  // draws this line with `clearedToday`, and "nothing here" is the wrong half of
+  // it to show somebody who just finished the last thing in a lane.
+  it("says 'cleared' in both voices", () => {
+    for (const voice of ["plain", "playful"] as const) {
+      expect(t("focus.lane.cleared", voice).toLowerCase()).toContain("cleared");
+    }
+  });
+});
+
 describe("library strings", () => {
   it("renames Everything → Library (plain) keeping Larder (playful)", () => {
     expect(t("nav.everything", "plain")).toBe("Library");
@@ -623,6 +658,9 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     // #111 — the brand-new-account empty inbox. Plain stays literal; the 🍳 is
     // playful-only flavour.
     "inbox.newAccount",
+    // #136 — the emptied focus lane. Plain keeps only the functional ✅ (same
+    // allowance `focus.launcher.allClear` uses); the 🎉 is playful-only.
+    "focus.lane.cleared",
   ];
 
   for (const key of plainOnlyKeys) {

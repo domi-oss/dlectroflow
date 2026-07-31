@@ -102,7 +102,11 @@ describe("FocusLauncher shell", () => {
     expect(within(meta).getByText(/42m/)).toBeInTheDocument();
   });
 
-  it("renders both lanes with the exact inbox SubHeader labels, counts + see-all hrefs", () => {
+  // #136 — the shell hands each lane its rows and nothing else. The SubHeader
+  // label, the count badge and the see-all deep link moved INTO the lane, whose
+  // own tests assert them, because a count rendered out here could only ever
+  // report the server's rows and so could not follow an optimistic ✓.
+  it("hands each lane its rows, and renders no header of its own", () => {
     render(
       <FocusLauncher
         voice="plain"
@@ -117,18 +121,36 @@ describe("FocusLauncher shell", () => {
         })}
       />,
     );
-    expect(screen.getByText("Single-task to-dos")).toBeInTheDocument();
-    expect(screen.getByText("Multi-step to-dos")).toBeInTheDocument();
-    const seeAll = screen.getAllByRole("link", { name: /see all/i });
-    const hrefs = seeAll.map((a) => a.getAttribute("href"));
-    expect(hrefs).toContain("/library?tab=plated");
-    expect(hrefs).toContain("/library?tab=sorted");
     expect(
       within(screen.getByTestId("single-lane")).getByText("Buy milk"),
     ).toBeInTheDocument();
     expect(
       within(screen.getByTestId("multi-lane")).getByText("Draft intro"),
     ).toBeInTheDocument();
+    // With the lanes stubbed out, nothing is left to render either header —
+    // which is the assertion that the shell no longer owns a second count.
+    expect(screen.queryByText("Single-task to-dos")).not.toBeInTheDocument();
+    expect(screen.queryByText("Multi-step to-dos")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /see all/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  // A lane the server handed nothing is still rendered (the OTHER lane has rows
+  // to show), and it is the lane that decides what an empty lane says.
+  it("still renders a lane the server handed no rows", () => {
+    render(
+      <FocusLauncher
+        voice="plain"
+        focusMinToday={0}
+        currentStreak={0}
+        clearedToday={false}
+        data={data({
+          singleTasks: [{ itemId: "i1", text: "Buy milk", estMinutes: 8 }],
+        })}
+      />,
+    );
+    expect(screen.getByTestId("multi-lane")).toBeInTheDocument();
   });
 
   it("renders the resume hero with step X/Y, ~Nm left, a progressbar, and ▶ Resume → /focus/[stepId]", () => {

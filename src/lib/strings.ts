@@ -329,6 +329,22 @@ export const STRINGS = {
     plain: "All caught up — nothing left to focus right now. ✅",
     playful: "🎉 Plates cleared! Nothing left to focus right now.",
   },
+  // #136 — ONE lane emptied, as opposed to the whole page (allClear above) and
+  // as opposed to a lane that never held anything (`bucket.empty`, which stays
+  // exactly as it is). Completing the last row in a lane used to leave a blank
+  // box; the copy it now gets has to read as an ACKNOWLEDGEMENT, because the
+  // /focus page already draws that line with `clearedToday` and "nothing here"
+  // is the wrong half of it to show somebody who just finished something.
+  //
+  // Deliberately "right now", echoing allClear: a multi-step row is replaced by
+  // its task's next step once `router.refresh()` lands, so this must not claim
+  // more than "there is nothing in this lane at this moment". ✅ is a functional
+  // glyph (allowed in plain, same as allClear); the 🎉 is playful-only, and
+  // "plate" is the playful vocabulary's word for a cleared lane (section.completed).
+  "focus.lane.cleared": {
+    plain: "Cleared — nothing left here right now. ✅",
+    playful: "🎉 Plate cleared! Nothing left here right now.",
+  },
 
   // ── Focus timer redesign (MR ②) — timer page, hint, settings group ──────────
   // ✓ / ⏰ / 🎧 / ⏱️ are functional or playful-only glyphs (see the voice note
