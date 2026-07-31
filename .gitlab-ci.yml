@@ -222,6 +222,164 @@ container_scanning:
   interruptible: true
   rules: *code_scanner_rules
 
+# ── Docs-only scan stubs (#116) ──────────────────────────────────────────────
+# Skipping the four jobs above is not free. The approval policy "Require
+# approval for new Critical or High vulnerabilities" (in the linked
+# security-policy project) compares the security report TYPES present in the
+# merge request's pipeline against those in main's. A type main has and the MR
+# does not is a `scan_removed` violation, and the policy's
+# `fallback_behavior: fail: closed` turns an unevaluable rule into a required
+# approval. So EVERY docs-only MR came back
+# `detailed_merge_status: security_policy_violations` and could not merge until
+# the single eligible approver clicked approve — on a README typo. Measured on
+# !193's pipeline: `sast`, `dependency_scanning` and `container_scanning` all
+# absent, `secret_detection` present. Those three are exactly what this job
+# supplies, as EMPTY reports.
+#
+# Why not the alternatives:
+#   • Scope the policy to "only when code changed" — not expressible. Approval
+#     policy scoping is by project, group, compliance framework and target
+#     branch; there is no changed-path predicate.
+#   • `fallback_behavior: fail: open` — one line, and it would fix this. It
+#     would also make every OTHER unevaluable rule pass, including a code MR
+#     whose SAST job errored out. That is precisely the fail-open that
+#     `allow_failure: false` above was written to close. Rejected: it trades a
+#     docs papercut for a hole in the gate that matters.
+#   • Run the real scanners on docs-only MRs — correct, and hands back most of
+#     what #53 bought. container_scanning alone drags in build_app +
+#     build_image, i.e. the whole pipeline.
+#
+# What makes an empty report honest rather than a lie: the rule below is the
+# exact inverse of the merge-request rule in *code_scanner_rules — same
+# `changes: *code_changes` anchor — so this job can only run on a diff in which
+# no code path changed at all. Nothing was scanned because nothing changed that
+# main's own scan of the same code does not already cover. The job says so, in
+# those words, in its log, and prints the diff it is making that claim about.
+#
+# The failure mode this replaces was silent, so the replacement is guarded:
+# `src/lib/ci-docs-only.ts` + its test assert that the jobs gated on
+# *code_scanner_rules and the report types stubbed here stay in step. Add a
+# fifth code-gated scanner and the suite fails until it is stubbed too.
+docs_only_scan_stub:
+  stage: test
+  # Same pinned digest as build_app/test_app — one image for Renovate to bump,
+  # and node writes the reports (JSON.stringify cannot emit malformed JSON the
+  # way a shell heredoc can).
+  image: node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
+  needs: []          # nothing to wait for; finishes in seconds
+  interruptible: true
+  variables:
+    # The diff base is an ancestor of the checked-out MR head, and a shallow
+    # clone can cut it off — take the whole history so the audit line below is
+    # always printable. ~33 MB, a couple of seconds.
+    GIT_DEPTH: 0
+  before_script:
+    - apk add --no-cache git   # node:22-alpine ships without it (see test_app)
+  script:
+    - |
+      echo "=============================================================="
+      echo " docs_only_scan_stub — THIS JOB SCANS NOTHING."
+      echo "=============================================================="
+      echo " This merge request's diff matched none of the .code_changes"
+      echo " globs in .gitlab-ci.yml, so the docs-only fast path (#53) did"
+      echo " not run semgrep-sast, gitlab-advanced-sast,"
+      echo " gemnasium-dependency_scanning or container_scanning."
+      echo ""
+      echo " The reports written below are EMPTY BY CONSTRUCTION. They are"
+      echo " not scan results. They exist so the approval policy can compare"
+      echo " this pipeline against main's and see the same set of scan"
+      echo " types, instead of reading 'scanner absent' as 'unresolved"
+      echo " finding' and blocking the merge request (#116)."
+      echo ""
+      echo " They assert nothing about the code: no code path is in this"
+      echo " diff, so main's scan of that code is still the current answer."
+      echo "--------------------------------------------------------------"
+      echo " Files changed in this merge request:"
+      if changed="$(git diff --name-only "$CI_MERGE_REQUEST_DIFF_BASE_SHA" HEAD 2>&1)"; then
+        echo "$changed" | sed 's/^/   /'
+      else
+        echo "   (diff base $CI_MERGE_REQUEST_DIFF_BASE_SHA unreachable:"
+        echo "    $changed)"
+        echo "   See the merge request's Changes tab instead."
+      fi
+      echo "=============================================================="
+    - |
+      # Schema version is pinned, not latest: GitLab rejects a report whose
+      # version it has no schema for, and a rejected report registers no scan
+      # type — which would silently restore the bug. 15.2.1 sits inside the
+      # range GitLab.com accepted on 2026-07-31 (semgrep-sast emitted 15.2.2,
+      # container_scanning 15.1.1 on pipeline 2720996501). If a docs-only MR is
+      # ever blocked again, check this first: the pipeline's
+      # securityReportSummary shows null for a report type GitLab refused.
+      node -e '
+        const { writeFileSync } = require("node:fs");
+        const stamp = new Date().toISOString().slice(0, 19);
+        const tool = {
+          id: "dlectroflow-docs-only-fast-path",
+          name: "dlectroflow docs-only fast path (no scan performed)",
+          url: "https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/issues/116",
+          version: "1.0.0",
+          vendor: { name: "dlectroflow CI (.gitlab-ci.yml)" },
+        };
+        const report = (type) =>
+          JSON.stringify(
+            {
+              version: "15.2.1",
+              scan: {
+                type,
+                status: "success",
+                start_time: stamp,
+                end_time: stamp,
+                analyzer: tool,
+                scanner: tool,
+              },
+              vulnerabilities: [],
+            },
+            null,
+            2,
+          );
+        // These pairs and the artifacts:reports: block below are two lists of
+        // the same thing, so they are compared by
+        // src/lib/ci-docs-only.test.ts. Declaring a report and forgetting to
+        // write it is the quietest way back to #116: the runner logs
+        // `no matching files`, the job still SUCCEEDS, and GitLab registers no
+        // scan for that type.
+        for (const [type, file] of [
+          ["sast", "gl-sast-report.json"],
+          ["dependency_scanning", "gl-dependency-scanning-report.json"],
+          ["container_scanning", "gl-container-scanning-report.json"],
+        ]) {
+          writeFileSync(file, report(type));
+          console.log(`wrote empty ${type} report -> ${file}`);
+        }
+      '
+  artifacts:
+    # `reports:` is what registers the scan type with GitLab and is the whole
+    # point. `paths:` keeps the same files browsable so anyone auditing the
+    # merge request can open them and confirm `"vulnerabilities": []`.
+    # Every entry under `reports:` must have a matching pair in the script
+    # above — asserted by src/lib/ci-docs-only.test.ts, filenames included.
+    paths:
+      - gl-sast-report.json
+      - gl-dependency-scanning-report.json
+      - gl-container-scanning-report.json
+    reports:
+      sast: gl-sast-report.json
+      dependency_scanning: gl-dependency-scanning-report.json
+      container_scanning: gl-container-scanning-report.json
+    expire_in: 1 week
+  rules:
+    # Exact inverse of *code_scanner_rules, by construction: the same
+    # *code_changes anchor. A diff that runs the real scanners never runs this
+    # job, and a diff that runs this job never had a scanner to skip.
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: *code_changes
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    # No main / tag / schedule rules on purpose: there the real scanners always
+    # run, and a stub report alongside them would put a scanner that scanned
+    # nothing into the Vulnerability Report.
+
 # ── Build: compile (build_app) then assemble image (build_image) ─────────────
 # Runs npm ci + next build in a standard Node runner with GitLab file cache.
 # .next/cache is preserved between runs for Next.js incremental compilation;

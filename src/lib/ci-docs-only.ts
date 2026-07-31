@@ -50,6 +50,37 @@ export const DOCS_ONLY_PATHS = [
   "docs",
 ] as const;
 
+/**
+ * Every scanner job `.code_scanner_rules` gates, mapped to the security report
+ * type it feeds GitLab. Two SAST jobs share one report type, which is exactly
+ * why this is a map and not a list: the stub owes one empty report per *type*,
+ * not per job.
+ *
+ * #116: skipping these jobs is not free. The approval policy in the linked
+ * security-policy project compares the report types present in a merge
+ * request's pipeline against those in main's; a type main has and the merge
+ * request lacks is a `scan_removed` violation, and the policy's
+ * `fallback_behavior: fail: closed` converts that into a required approval. So
+ * every docs-only merge request was unmergeable until one specific human
+ * approved it — on a diff that cannot contain a vulnerability.
+ *
+ * `docs_only_scan_stub` in `.gitlab-ci.yml` supplies the missing types. Keeping
+ * this map honest is what stops the fix rotting: add a fifth code-gated scanner
+ * and the test fails until it is listed here AND stubbed there.
+ *
+ * `secret_detection` is deliberately absent — it is gated on `*scanner_rules`,
+ * not `*code_scanner_rules`, so it runs on the fast path and needs no stand-in.
+ */
+export const CODE_GATED_SCANNERS: Readonly<Record<string, string>> = {
+  "semgrep-sast": "sast",
+  "gitlab-advanced-sast": "sast",
+  "gemnasium-dependency_scanning": "dependency_scanning",
+  container_scanning: "container_scanning",
+};
+
+/** The `.gitlab-ci.yml` job that emits the empty stand-in reports (#116). */
+export const DOCS_ONLY_STUB_JOB = "docs_only_scan_stub";
+
 /** How a top-level entry is treated by the merge-request fast path. */
 export type PathClass = "code" | "docs" | "unclassified";
 
@@ -128,6 +159,187 @@ export function globCoversTopLevel(glob: string, name: string): boolean {
     .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
     .join("[^/]*");
   return new RegExp(`^${pattern}$`).test(name);
+}
+
+/**
+ * Names of the jobs whose `rules:` are the YAML alias `*<anchor>`.
+ *
+ * Line-based for the same reason `parseCodeChangeGlobs` is: no YAML parser
+ * dependency, and the shape being read is unambiguous. A job name is a key at
+ * column 0; everything indented under it belongs to the last such key seen. The
+ * `.code_scanner_rules:` anchor definition itself is a column-0 key too, but it
+ * defines the alias rather than using it, so it never matches the `rules:` line
+ * and never appears in the result.
+ */
+export function parseJobsGatedOn(
+  gitlabCiYml: string,
+  anchor: string,
+): string[] {
+  const jobs = new Set<string>();
+  let currentKey: string | null = null;
+
+  for (const line of gitlabCiYml.split("\n")) {
+    const topLevelKey = /^([^\s#][^:]*):/.exec(line);
+    if (topLevelKey) {
+      currentKey = topLevelKey[1];
+      continue;
+    }
+    // Match on the parsed alias rather than the literal line: `rules:  *x`
+    // with two spaces is valid YAML, and a literal comparison would drop the
+    // job and then fail the coverage assertion with a message about
+    // CODE_GATED_SCANNERS drifting instead of about the whitespace.
+    const alias = /^rules:\s*\*(\S+)$/.exec(withoutComment(line));
+    if (currentKey && alias?.[1] === anchor) jobs.add(currentKey);
+  }
+  return [...jobs];
+}
+
+/**
+ * A line with its trailing YAML comment removed, trimmed.
+ *
+ * YAML only starts a comment at a `#` preceded by whitespace, so `\s+#` is the
+ * correct test and `value#notacomment` is left alone. The list-item parser
+ * above already tolerates inline comments; the job/report parsers below do the
+ * same, because this file's YAML uses them freely and a parser that silently
+ * skipped a commented line would fail its assertion with a message about the
+ * wrong thing (Duo review on !217).
+ */
+function withoutComment(line: string): string {
+  return line.replace(/\s+#.*$/, "").trim();
+}
+
+/**
+ * The lines of one column-0 job block, excluding the `job:` line itself.
+ *
+ * The start line must be the job key exactly: at column 0, not a comment, and
+ * with nothing after the colon but an optional comment. `startsWith` would also
+ * accept `job: some-value`, which is not a job at all.
+ */
+function jobBlock(gitlabCiYml: string, job: string): string[] {
+  const lines = gitlabCiYml.split("\n");
+  const start = lines.findIndex(
+    (l) => /^[^\s#]/.test(l) && withoutComment(l) === `${job}:`,
+  );
+  if (start === -1) {
+    throw new Error(
+      `\`${job}:\` not found in .gitlab-ci.yml. Without it a docs-only merge request produces none of the report types main's pipeline has, and the approval policy blocks it as \`scan_removed\` (#116).`,
+    );
+  }
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((l) => /^[^\s#]/.test(l)); // next column-0 key
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
+/**
+ * The docs-only stub job's `artifacts:reports:` block, as report type → file.
+ *
+ * Throws rather than returning `{}` when the job or its reports block is
+ * missing: an empty result would make the coverage assertions in the test pass
+ * by vacuity at precisely the moment the job that closes the gap was deleted,
+ * which is the silent failure this whole guard exists to prevent.
+ */
+export function parseStubDeclaredReports(
+  gitlabCiYml: string,
+  job: string = DOCS_ONLY_STUB_JOB,
+): Record<string, string> {
+  const declared: Record<string, string> = {};
+  // Only `reports:` nested under `artifacts:` counts. The job's `script:` is a
+  // YAML block scalar that this line-based parser reads as plain text, so a log
+  // line or comment inside it that happened to read `reports:` would otherwise
+  // open a phantom block and capture script text as report declarations (Duo
+  // review on !217).
+  let artifactsIndent: number | null = null;
+  let reportsIndent: number | null = null;
+
+  for (const line of jobBlock(gitlabCiYml, job)) {
+    const trimmed = withoutComment(line);
+    if (trimmed === "" || trimmed.startsWith("#")) continue;
+
+    const indent = line.length - line.trimStart().length;
+    if (reportsIndent !== null) {
+      if (indent > reportsIndent) {
+        // The value is the rest of the line rather than one token, so a
+        // filename containing a space is captured instead of skipped.
+        // Hyphens are allowed in the type even though every GitLab report
+        // type is snake_case today: a type neither parser recognised would be
+        // dropped from BOTH sides, so the two lists would agree about a report
+        // neither of them had actually checked.
+        const entry = /^([A-Za-z_][\w-]*):\s*(.+)$/.exec(trimmed);
+        if (entry) {
+          const [, type, value] = entry;
+          if (value.startsWith("*") || value.startsWith("&")) {
+            throw new Error(
+              `\`${job}:\` declares \`${type}: ${value}\` — artifacts:reports: must name a literal filename here, because the guard compares it against the filename the inline script writes. A YAML alias cannot be compared and would fail as a phantom mismatch (#116).`,
+            );
+          }
+          declared[type] = value;
+        }
+        continue;
+      }
+      reportsIndent = null; // dedented back out of the reports block
+    }
+    if (artifactsIndent !== null && indent <= artifactsIndent) {
+      artifactsIndent = null; // dedented back out of artifacts:
+    }
+    if (trimmed === "artifacts:") {
+      artifactsIndent = indent;
+      continue;
+    }
+    if (artifactsIndent !== null && indent > artifactsIndent) {
+      if (trimmed === "reports:") reportsIndent = indent;
+    }
+  }
+
+  if (Object.keys(declared).length === 0) {
+    throw new Error(
+      `\`${job}:\` declares no artifacts:reports:, so it registers no scan types with GitLab and cannot unblock a docs-only merge request (#116).`,
+    );
+  }
+  return declared;
+}
+
+/** The report types the stub job declares in `artifacts:reports:`. */
+export function parseStubReportTypes(
+  gitlabCiYml: string,
+  job: string = DOCS_ONLY_STUB_JOB,
+): string[] {
+  return Object.keys(parseStubDeclaredReports(gitlabCiYml, job));
+}
+
+/**
+ * The report type → file pairs the stub job's inline `node -e` script actually
+ * writes, read from its `["type", "file"],` array literal.
+ *
+ * Declaring a report in `artifacts:reports:` and forgetting to write the file
+ * is the one way left to reintroduce #116 silently: the runner logs
+ * `no matching files`, the job still SUCCEEDS, GitLab registers no scan for
+ * that type, and the next docs-only merge request is blocked again with a
+ * message about security rather than about this file. So the two lists are
+ * compared, and a script that writes nothing throws rather than comparing
+ * equal to an empty set.
+ */
+export function parseStubWrittenReports(
+  gitlabCiYml: string,
+  job: string = DOCS_ONLY_STUB_JOB,
+): Record<string, string> {
+  const written: Record<string, string> = {};
+  // Trailing `//` comment tolerated for the same reason the YAML parsers
+  // tolerate `#`: this list is meant to be annotated. The type character class
+  // matches the one in parseStubDeclaredReports, hyphens included — the two
+  // must recognise the same set of types or they agree by both skipping.
+  const PAIR = /^\["([A-Za-z_][\w-]*)",\s*"([^"]+)"\],?(?:\s*\/\/.*)?$/;
+
+  for (const line of jobBlock(gitlabCiYml, job)) {
+    const pair = PAIR.exec(line.trim());
+    if (pair) written[pair[1]] = pair[2];
+  }
+
+  if (Object.keys(written).length === 0) {
+    throw new Error(
+      `\`${job}:\` writes no report files. Expected a \`["type", "file"],\` pair per declared report in its inline node script — without one, artifacts:reports: points at a file that never exists, the job still passes, and #116 comes back silently.`,
+    );
+  }
+  return written;
 }
 
 /**
