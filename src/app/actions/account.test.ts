@@ -55,6 +55,7 @@ import {
   ownLlmKeyPresent,
   deleteOwnAccount,
 } from "./account";
+import { PURGE_GRACE_DAYS } from "@/lib/account-lifecycle";
 
 const ME = "user_alice";
 const me = () => ({
@@ -269,7 +270,13 @@ describe("deleteOwnAccount", () => {
     expect(call.data.status).toBe("revoked");
     const revokedAt = call.data.revokedAt as Date;
     const purgeAfter = call.data.purgeAfter as Date;
-    expect(purgeAfter.getTime() - revokedAt.getTime()).toBe(30 * 86_400_000);
+    // Derived from the exported constant, not a literal 30: `account-lifecycle`
+    // is deliberately NOT mocked here, so the real `freezeAccount` computes this.
+    // Hardcoding the number would fail a future change to PURGE_GRACE_DAYS with
+    // an opaque number mismatch instead of pointing at the constant that moved.
+    expect(purgeAfter.getTime() - revokedAt.getTime()).toBe(
+      PURGE_GRACE_DAYS * 86_400_000,
+    );
     // The recovery window is the point: an accidental self-deletion has to be
     // as recoverable as an owner-initiated revoke, so no row is destroyed here.
     expect(userDeleteManyMock).not.toHaveBeenCalled();
