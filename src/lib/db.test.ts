@@ -131,8 +131,13 @@ describe.each(singletons)(
         .mockResolvedValueOnce(null);
       delegate.createManyAndReturn.mockResolvedValueOnce([]);
 
+      // A plain string rather than a constructed regular expression: semgrep's
+      // "regular expression with non-literal value" rule flags a pattern built
+      // from a variable even inside a test, and asserting the whole sentence is
+      // the stronger check anyway.
       await expect(read()).rejects.toThrow(
-        new RegExp(`${model}.*ws-1.*deleted concurrently`),
+        `${model} row for workspace ws-1 vanished during first-use creation ` +
+          `— the workspace was deleted concurrently.`,
       );
     });
   },
