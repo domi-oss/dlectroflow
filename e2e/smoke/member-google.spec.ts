@@ -13,7 +13,7 @@ import { seedConnectedGoogle, clearGoogleTokens } from "../google-credential";
  * fallback, and a 🔒 owner-only shell in Settings. Every assertion below was
  * false a commit ago.
  *
- * Runs in the `member-google` Playwright project, which carries the member's own
+ * Runs in the `member` Playwright project, which carries the member's own
  * storageState (the owner's cookie cannot exercise any of this) against its own
  * server on its own port. Google is CONFIGURED on both servers — `bootGuardEnv`
  * has set a dummy client id since #106 — so what makes these controls reachable is
