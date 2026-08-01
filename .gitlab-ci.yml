@@ -859,10 +859,14 @@ deploy_production:
     # complete a sign-in. Changing `host` is therefore atomic, not gradual, and it
     # invalidates existing Google connections — the redirect URI moves with it.
     #
-    # This cluster is the corp-facing instance: colleagues signing in with a work
-    # Google account, which only the Internal OAuth client in the work GCP project
-    # can serve. The apex is reserved for the instance that outlives it, so the
-    # canonical host here is the subdomain.
+    # This cluster is served on a subdomain rather than the apex, deliberately.
+    # Its sign-ins are tied to one OAuth client, and the apex is reserved for a
+    # deployment with a longer expected life than this one — so the canonical
+    # host here is the subdomain and the apex stays uncommitted.
+    #
+    # Kept deliberately non-specific: this file is public and mirrored, and the
+    # deployment topology behind it is not the reader's business. The operational
+    # detail lives in the linked issue.
     #
     # legacyHosts[1] is the apex, served by this SAME cluster during the overlap
     # and served WITHOUT a redirect — the subtle bit. `legacyHosts` only adds a
