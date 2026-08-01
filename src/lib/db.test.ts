@@ -1,68 +1,167 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Hoisted so the vi.mock factory (also hoisted) can reference them.
-const { settingsUpsert, settingsFindUnique, PrismaClientKnownRequestError } =
-  vi.hoisted(() => {
-    class PrismaClientKnownRequestError extends Error {
-      code: string;
-      constructor(message: string, code: string) {
-        super(message);
-        this.code = code;
-      }
+const { delegates, PrismaClientKnownRequestError } = vi.hoisted(() => {
+  class PrismaClientKnownRequestError extends Error {
+    code: string;
+    constructor(message: string, code: string) {
+      super(message);
+      this.code = code;
     }
-    return {
-      settingsUpsert: vi.fn(),
-      settingsFindUnique: vi.fn(),
-      PrismaClientKnownRequestError,
-    };
+  }
+  // `upsert` is mocked even though nothing should call it any more: #156
+  // replaced the upsert-and-catch shape precisely because a lost upsert prints
+  // at error level, so a silent regression back to it is worth catching.
+  const makeDelegate = () => ({
+    findUnique: vi.fn(),
+    createManyAndReturn: vi.fn(),
+    upsert: vi.fn(),
   });
+  return {
+    delegates: { settings: makeDelegate(), streak: makeDelegate() },
+    PrismaClientKnownRequestError,
+  };
+});
 
 vi.mock("@prisma/client", () => ({
   PrismaClient: class {
-    settings = { upsert: settingsUpsert, findUnique: settingsFindUnique };
-    streak = { upsert: vi.fn(), findUnique: vi.fn() };
+    settings = delegates.settings;
+    streak = delegates.streak;
   },
   Prisma: { PrismaClientKnownRequestError },
 }));
 
-import { getSettings } from "./db";
+import { getSettings, getStreak, isUniqueViolation } from "./db";
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  // reset, not clear: these delegates are queued per test with
+  // `mockResolvedValueOnce`, and `clearAllMocks` leaves an unconsumed queue
+  // behind to bleed into the next test.
+  vi.resetAllMocks();
 });
 
-describe("getSettings — race-safe first-use create", () => {
-  it("returns the upserted row on the happy path (no refetch)", async () => {
-    const row = { id: "ws-1", workspaceId: "ws-1" };
-    settingsUpsert.mockResolvedValueOnce(row);
+// getSettings and getStreak are the same algorithm over two per-workspace
+// singleton tables, so they get the same battery rather than a hand-copied one
+// that can drift — #156 was reported against Settings and only then found to
+// apply identically to Streak.
+const singletons = [
+  {
+    name: "getSettings",
+    model: "Settings",
+    read: () => getSettings("ws-1"),
+    delegate: delegates.settings,
+  },
+  {
+    name: "getStreak",
+    model: "Streak",
+    read: () => getStreak("ws-1"),
+    delegate: delegates.streak,
+  },
+] as const;
 
-    const result = await getSettings("ws-1");
+describe.each(singletons)(
+  "$name — first use must never raise (#156)",
+  ({ model, read, delegate }) => {
+    it("returns the existing row from one read, attempting no write", async () => {
+      const row = { id: "ws-1", workspaceId: "ws-1" };
+      delegate.findUnique.mockResolvedValueOnce(row);
 
-    expect(result).toBe(row);
-    expect(settingsFindUnique).not.toHaveBeenCalled();
-  });
-
-  it("re-fetches the existing row when a concurrent create loses with P2002", async () => {
-    const existing = { id: "ws-1", workspaceId: "ws-1" };
-    settingsUpsert.mockRejectedValueOnce(
-      new PrismaClientKnownRequestError("Unique constraint failed", "P2002"),
-    );
-    settingsFindUnique.mockResolvedValueOnce(existing);
-
-    const result = await getSettings("ws-1");
-
-    expect(result).toBe(existing);
-    expect(settingsFindUnique).toHaveBeenCalledWith({
-      where: { workspaceId: "ws-1" },
+      expect(await read()).toBe(row);
+      expect(delegate.findUnique).toHaveBeenCalledTimes(1);
+      expect(delegate.createManyAndReturn).not.toHaveBeenCalled();
+      expect(delegate.upsert).not.toHaveBeenCalled();
     });
+
+    it("creates the row on first use and returns it without re-reading", async () => {
+      const row = { id: "ws-1", workspaceId: "ws-1" };
+      delegate.findUnique.mockResolvedValueOnce(null);
+      delegate.createManyAndReturn.mockResolvedValueOnce([row]);
+
+      expect(await read()).toBe(row);
+      expect(delegate.findUnique).toHaveBeenCalledTimes(1);
+      // `skipDuplicates` is the load-bearing flag: it is what makes Prisma emit
+      // INSERT ... ON CONFLICT DO NOTHING, so a concurrent first use loses
+      // silently instead of raising P2002 and printing `prisma:error`.
+      expect(delegate.createManyAndReturn).toHaveBeenCalledWith({
+        data: { id: "ws-1", workspaceId: "ws-1" },
+        skipDuplicates: true,
+      });
+    });
+
+    it("resolves a lost race from the winner's row, raising nothing", async () => {
+      const winner = { id: "ws-1", workspaceId: "ws-1" };
+      delegate.findUnique
+        .mockResolvedValueOnce(null) // nothing there yet
+        .mockResolvedValueOnce(winner); // …the other request got there first
+      // ON CONFLICT DO NOTHING inserted no row, so Prisma returns an empty
+      // array. Crucially it does *not* reject, so nothing is logged.
+      delegate.createManyAndReturn.mockResolvedValueOnce([]);
+
+      expect(await read()).toBe(winner);
+      expect(delegate.findUnique).toHaveBeenCalledTimes(2);
+      expect(delegate.upsert).not.toHaveBeenCalled();
+    });
+
+    it("propagates a genuine Prisma error from the read", async () => {
+      delegate.findUnique.mockRejectedValueOnce(
+        new PrismaClientKnownRequestError("connection lost", "P1001"),
+      );
+
+      await expect(read()).rejects.toMatchObject({ code: "P1001" });
+      expect(delegate.createManyAndReturn).not.toHaveBeenCalled();
+    });
+
+    it("propagates a genuine Prisma error from the create, unmasked", async () => {
+      delegate.findUnique.mockResolvedValueOnce(null);
+      delegate.createManyAndReturn.mockRejectedValueOnce(
+        new PrismaClientKnownRequestError("FK violation", "P2003"),
+      );
+
+      await expect(read()).rejects.toMatchObject({ code: "P2003" });
+      // No catch swallows this into a re-read: a missing workspace is a real
+      // failure and must still reach the caller — and Prisma's own error log.
+      expect(delegate.findUnique).toHaveBeenCalledTimes(1);
+    });
+
+    it("names the workspace when the row vanishes mid-create", async () => {
+      // Only reachable if the Workspace was deleted between the two statements
+      // (both tables cascade from it, and nothing else deletes them).
+      delegate.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+      delegate.createManyAndReturn.mockResolvedValueOnce([]);
+
+      await expect(read()).rejects.toThrow(
+        new RegExp(`${model}.*ws-1.*deleted concurrently`),
+      );
+    });
+  },
+);
+
+describe("isUniqueViolation", () => {
+  // Not used by getSettings/getStreak any more (#156 removed the need to catch
+  // P2002 at all), but still the shared guard for the call sites that *do* have
+  // to tolerate a duplicate — src/lib/rewards.ts, guest-quota.ts, user-quota.ts
+  // and src/app/actions/people.ts. It is exported API, not dead code.
+  it("matches any P2002, whichever column collided", () => {
+    expect(
+      isUniqueViolation(
+        new PrismaClientKnownRequestError(
+          "Unique constraint failed on the fields: (`id`)",
+          "P2002",
+        ),
+      ),
+    ).toBe(true);
   });
 
-  it("rethrows non-P2002 errors", async () => {
-    settingsUpsert.mockRejectedValueOnce(
-      new PrismaClientKnownRequestError("connection lost", "P1001"),
-    );
-
-    await expect(getSettings("ws-1")).rejects.toMatchObject({ code: "P1001" });
-    expect(settingsFindUnique).not.toHaveBeenCalled();
+  it("does not match other Prisma errors or plain throwables", () => {
+    expect(
+      isUniqueViolation(
+        new PrismaClientKnownRequestError("connection lost", "P1001"),
+      ),
+    ).toBe(false);
+    expect(isUniqueViolation(new Error("P2002"))).toBe(false);
+    expect(isUniqueViolation({ code: "P2002" })).toBe(false);
+    expect(isUniqueViolation(undefined)).toBe(false);
   });
 });
