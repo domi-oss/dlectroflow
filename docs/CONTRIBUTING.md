@@ -59,6 +59,32 @@ the API can both see it, instead of prose only a human can parse.
 Dependency Dashboard, the weekly ops digest, and the scheduled security
 assessment. Don't rewrite those by hand; they get regenerated.
 
+### Shortening a title that already exists
+
+A title is not a place to *store* information, but on an old issue it is often
+where information ended up. Before trimming one, check the description already
+carries what the title was doing — and fix it there first if it doesn't.
+Otherwise the trim is a quiet delete.
+
+The check is mechanical: take the words the old title had and the new one
+doesn't, and confirm each concept appears in the description. Most misses are
+grammatical (`gets`, `said`, `beyond`) and mean nothing; what you are looking
+for is a **fact** — a number, a filename, a symptom, a constraint — that exists
+nowhere else.
+
+**A retitle sweep is also the cheapest moment to notice a stale description**,
+because it is the one time somebody reads all of them in a sitting. When #113's
+title was shortened, the audit found the description underneath it describing
+three registry repositories and 500 tags; there were two and 412, `latest` had
+moved, and the cleanup policy's `next_run_at` had been stuck in the past for two
+days — which changed the issue's conclusion, not just its wording. None of that
+was found by looking for it. It was found by checking whether a shortened title
+had left anything behind.
+
+So: re-read the description while you are in there, and date any figures you
+re-measure. An issue whose numbers silently expired is worse than a long title,
+because a long title is at least honest about being long.
+
 ### Referring to an issue elsewhere
 
 In merge request descriptions, commit bodies, plans and discussion, write the
