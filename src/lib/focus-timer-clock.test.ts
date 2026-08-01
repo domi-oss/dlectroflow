@@ -52,6 +52,60 @@ describe("applyTimeDelta", () => {
       remainingSec: 60,
     });
   });
+
+  // #151 — the sub-floor case, which the tests above never reached because
+  // they all start at or above MIN_REMAINING_SEC. The old implementation
+  // clamped `remainingSec` up to the floor and then credited the LIFT to
+  // `totalSec`, so a subtraction grew the clock: {600, 30} with −5m returned
+  // {totalSec: 630, remainingSec: 60}. Below the floor there is nothing left
+  // to remove, so the only answer that can't grow the clock is no change.
+  it("is a no-op when a removal is asked for below the floor", () => {
+    expect(applyTimeDelta({ totalSec: 600, remainingSec: 30 }, -300)).toEqual({
+      totalSec: 600,
+      remainingSec: 30,
+    });
+  });
+
+  it("never grows the clock on a negative delta, from any remaining value", () => {
+    // The invariant the doc comment claims, asserted across the floor rather
+    // than on one side of it: 0 and 1 are what a session actually passes
+    // through on the way to time-up, 59/60/61 straddle the clamp.
+    for (const remainingSec of [0, 1, 30, 59, 60, 61, 120, 600]) {
+      const before = { totalSec: 900, remainingSec };
+      const after = applyTimeDelta(before, -300);
+      expect(after.totalSec).toBeLessThanOrEqual(before.totalSec);
+      expect(after.remainingSec).toBeLessThanOrEqual(before.remainingSec);
+      expect(after.remainingSec).toBeGreaterThanOrEqual(
+        Math.min(before.remainingSec, MIN_REMAINING_SEC),
+      );
+      // Elapsed time is preserved: both sides move by the same amount.
+      expect(before.totalSec - after.totalSec).toBe(
+        before.remainingSec - after.remainingSec,
+      );
+    }
+  });
+
+  it("adds exactly the delta below the floor, rather than rounding up to it", () => {
+    // Same clamp artefact in the other direction: max(60, 30 + 10) used to
+    // return remaining 60 and bill totalSec for 30s the caller never asked
+    // for. The floor limits what a −time tap may remove; it is not a target
+    // that a +time tap has to reach.
+    expect(applyTimeDelta({ totalSec: 600, remainingSec: 30 }, 10)).toEqual({
+      totalSec: 610,
+      remainingSec: 40,
+    });
+  });
+
+  it("ignores a non-finite delta instead of poisoning the clock with NaN", () => {
+    // No UI path produces one (`inc` is Math.max(1, …) over a settings Int),
+    // but this is an exported helper: arithmetic on NaN/Infinity propagates
+    // silently into React state and blanks the whole timer, so a bad delta
+    // has to stop here. Same fallback shape as normalizeEstMin.
+    const clock = { totalSec: 600, remainingSec: 300 };
+    expect(applyTimeDelta(clock, Number.NaN)).toEqual(clock);
+    expect(applyTimeDelta(clock, Number.POSITIVE_INFINITY)).toEqual(clock);
+    expect(applyTimeDelta(clock, Number.NEGATIVE_INFINITY)).toEqual(clock);
+  });
 });
 
 describe("netAddedMin", () => {
