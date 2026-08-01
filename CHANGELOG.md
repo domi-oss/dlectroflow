@@ -665,6 +665,16 @@ container image is roughly a quarter of the size it was.
   exercises what actually ships (#97); and guest-only UI is scanned by axe, which
   caught real issues now fixed (#90).
 
+- **A schedule-menu test no longer passes or fails depending on the time of
+  day.** Two tests set a deadline of *today* and asserted the menu's
+  infeasibility warning, on the premise that today could never hold the
+  fixture's 2h15m of work. It can, before mid-afternoon —
+  `workingMinutesBetween(now, dueAt)` is a function of `now`, so the same tree
+  was green at 23:34 and red at 06:43. Both now use a deadline already in the
+  past, which scores zero available minutes at every hour, and a clock-sweeping
+  unit test pins that premise so the next change to the hours model cannot
+  quietly unpin it.
+
 ### Security
 
 - **Freezing or deleting an account now revokes its Google grant at Google, not
