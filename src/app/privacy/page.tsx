@@ -1130,10 +1130,22 @@ export default function PrivacyPage() {
         <LegalSubheading>How that actually works here</LegalSubheading>
         <p>
           <strong>There is no self-service export button yet.</strong> I am
-          telling you rather than implying otherwise: access, portability and
-          erasure requests are handled <em>by me, by hand</em>, from that email
-          address. It is less slick than a download link and it is exactly as
-          binding.
+          telling you rather than implying otherwise: access and portability
+          requests are handled <em>by me, by hand</em>, from that email address.
+          It is less slick than a download link and it is exactly as binding.
+        </p>
+        {/* #153 — erasure came off that list, so this paragraph had to stop
+            saying it was on it. The caveat is not a hedge: the control freezes
+            the account and starts the retention window, and removing the
+            content sooner than that window is still a hand operation, so
+            somebody who wants it gone today has to ask. */}
+        <p>
+          <strong>Erasure is the one you can do yourself.</strong>{" "}
+          <strong>Settings → Account → Delete my account</strong> ends your
+          access straight away and starts the retention window. You can still
+          email instead — and you will need to if you want the content itself
+          removed before that window is up, because that last step is done by
+          hand.
         </p>
         <p>
           I will respond <strong>within one month</strong> of your request,

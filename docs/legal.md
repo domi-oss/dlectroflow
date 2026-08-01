@@ -197,7 +197,6 @@ and until then, please do not "improve" the wording into a promise.
 | Not shipped | What the page says instead |
 |---|---|
 | Self-service data export (still no `src/app/api/account/` directory — the `/api/account/` entry in `AUTHENTICATED_PREFIXES` reserves the prefix, it does not implement a route) | Access and portability are handled **by hand** from the contact address, within the statutory one month |
-| ~~Self-service account deletion~~ — **shipped in #153.** Settings → Account has a *Delete my account* control (`deleteOwnAccount`, `src/app/actions/account.ts`). It freezes rather than destroys, so the row above is what governs what happens next; the owner is refused, because an instance with no owner has no way back through the UI | The confirmation dialog states the window AND that the final deletion is done by hand today, matching the retention list |
 | Automatic revoke → freeze → 30-day purge (`User.purgeAfter` is written by `freezeAccount` and read by nothing — `prisma/scheduled-purge.ts` sweeps guest workspaces and guest counters only; #126 added `deleteAccount` as the one safe way to delete an account and nothing calls it yet) | Revocation does **not** delete content today; email and it will be deleted |
 | **Per-account choice of AI provider (#125)** | The key is used against *this instance's* configured provider; "it is a key, not a destination", and choosing your own provider is not something dlectroflow can do today |
 
@@ -208,6 +207,22 @@ asserts each honest wording is still present.
 > Two rows left this table in #118 Phase C, because they **shipped**: per-member
 > Google connections, and a per-account BYO LLM key. Their claims are now pinned
 > by the `per-user integrations (#118 Phase C)` block in the same test file.
+
+> [!IMPORTANT]
+> **#153 split the export row in half, and only half of it is still true.** The
+> "handled by me, by hand" wording covers **access and portability**. Erasure no
+> longer belongs to it: Settings → Account → *Delete my account*
+> (`deleteOwnAccount`, `src/app/actions/account.ts`) is a real self-service
+> control, and /privacy names it under the Erasure right.
+>
+> What it does **not** do is destroy anything. It goes through the same
+> `freezeAccount` the owner's Revoke goes through, so the automatic-purge row
+> above is what governs what happens next — which is why the confirmation dialog
+> and /privacy both say the final deletion is still a hand operation. **If you
+> ever ship the purge sweep, three wordings move together**: that row, the
+> retention list on /privacy, and the dialog's "done by hand today" sentence
+> (pinned by `src/components/settings/delete-account.test.tsx` and
+> `e2e/smoke/member-delete-account.spec.ts`, so the build will tell you).
 
 ### The BYO-key / BYO-provider line
 
