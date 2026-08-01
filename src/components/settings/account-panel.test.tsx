@@ -34,6 +34,10 @@ const props = {
   provider: "gitlab",
   keyPresent: false,
   activeModelName: "claude-sonnet-4-6",
+  // #153 — a MEMBER by default: the delete control is the member's, and the
+  // owner's refusal has its own specs in delete-account.test.tsx.
+  isOwner: false,
+  purgeGraceDays: 30,
   defaultExpanded: true,
 } as const;
 

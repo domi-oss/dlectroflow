@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { saveOwnLlmKey, removeOwnLlmKey } from "@/app/actions/account";
 import { CollapsibleSection } from "@/components/nav/collapsible-section";
+import { DeleteAccount } from "@/components/settings/delete-account";
 import { t, type Voice } from "@/lib/strings";
 import { cn, touchTarget } from "@/lib/utils";
 
@@ -30,6 +31,8 @@ export function AccountPanel({
   provider,
   keyPresent,
   activeModelName,
+  isOwner,
+  purgeGraceDays,
   voice = "plain",
   defaultExpanded,
 }: {
@@ -45,6 +48,12 @@ export function AccountPanel({
    *  own-key tier), resolved server-side because env is not readable from this
    *  client bundle. Shown read-only: there is nothing per-user to choose. */
   activeModelName: string;
+  /** #153 — the owner cannot delete their own account, so they get the sentence
+   *  explaining why instead of a control that could only fail. */
+  isOwner: boolean;
+  /** #153 — `PURGE_GRACE_DAYS`, resolved server-side: the module that owns it
+   *  imports Prisma, which has no business in a client bundle. */
+  purgeGraceDays: number;
   voice?: Voice;
   defaultExpanded?: boolean;
 }) {
@@ -241,6 +250,16 @@ export function AccountPanel({
         >
           {message}
         </p>
+      </div>
+
+      {/* #153 — leaving. Its own bordered block at the FOOT of the section, and
+          deliberately not folded in with the key controls above: the panel's
+          other affordances are things you tune, and this one ends the account.
+          Same reasoning as People closing the settings page (#101) — the
+          irreversible thing does not greet you. */}
+      <div className="space-y-2 rounded-lg border p-4">
+        <h3 className="text-sm font-medium">Delete your account</h3>
+        <DeleteAccount isOwner={isOwner} purgeGraceDays={purgeGraceDays} />
       </div>
     </CollapsibleSection>
   );

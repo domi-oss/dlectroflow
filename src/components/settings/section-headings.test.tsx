@@ -117,6 +117,8 @@ function AllSections({ voice = "plain" as Voice }) {
         provider="gitlab"
         keyPresent={false}
         activeModelName="claude-sonnet-4-6"
+        isOwner={false}
+        purgeGraceDays={30}
         voice={voice}
       />
     </>
