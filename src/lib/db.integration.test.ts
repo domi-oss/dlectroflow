@@ -23,9 +23,11 @@ import { prisma, getSettings, getStreak } from "@/lib/db";
 
 const WS_PREFIX = "test-ws-first-use-race";
 // Fresh workspace per trial — a first-use race can only happen once per
-// workspace, so one trial would be a single coin flip. Five, at four
-// concurrent readers each, makes a lost race effectively certain: measured
-// against the pre-fix upsert, 4 of 5 trials printed `prisma:error`.
+// workspace, so one trial would be a single coin flip. Five trials, each with
+// four concurrent readers of both tables, makes a lost race effectively
+// certain: run as-is against the pre-fix upsert, this captured 26 `prisma:error`
+// lines. (If a run ever does serialise completely it still passes, correctly —
+// no race, no line — it just proves less that time.)
 const TRIALS = 5;
 const CONCURRENCY = 4;
 const workspaceIds = Array.from(
