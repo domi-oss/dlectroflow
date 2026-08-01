@@ -73,21 +73,58 @@ export function mmss(totalSec: number): string {
 }
 
 /**
- * Apply a signed time delta (seconds) to the clock. Positive grows total +
- * remaining equally; negative shrinks both, but remaining is clamped to a 60s
- * floor and total only shrinks by the amount actually applied (so elapsed time
- * is preserved and the timer can't be pushed to time-up by a −time tap).
+ * Apply a signed time delta (seconds) to the clock. `totalSec` and
+ * `remainingSec` always move by the SAME amount, so elapsed time (total −
+ * remaining) is preserved whatever the delta.
+ *
+ * - Positive: both grow by exactly `deltaSec`.
+ * - Negative: both shrink, but a removal can only consume the time sitting
+ *   ABOVE `MIN_REMAINING_SEC` — so remaining lands at the floor at worst and a
+ *   −time tap can't push the timer to time-up. Ask to remove more than that and
+ *   the surplus is dropped, not applied.
+ * - Negative at or below the floor: nothing is available to remove, so the
+ *   clock is returned unchanged.
+ *
+ * #151 — that last case used to be the bug, and the reason this comment is
+ * written as three cases rather than one sentence about a clamp. The old
+ * implementation clamped remaining with `Math.max(MIN_REMAINING_SEC, …)` and
+ * then credited whatever the clamp moved to `totalSec`. Below the floor the
+ * clamp LIFTS remaining, so the credit was positive and a *subtraction* grew
+ * the clock: {600, 30} with −5m returned {630, 60}, the exact opposite of what
+ * the comment here used to promise. The same lift also over-applied positive
+ * deltas below the floor ({600, 30} +10s returned {630, 60}, not {610, 40}).
+ *
+ * Capping the removal instead of clamping the result fixes both, because the
+ * floor is expressed as a limit on what may be *removed* rather than as a
+ * target the result is dragged to. Both of the options weighed in #151 — "no-op
+ * below the floor" and Duo's `Math.max(0, …)` cap — collapse to this same
+ * arithmetic: the cap is zero exactly when remaining is already at or under the
+ * floor, which IS the no-op.
+ *
+ * Unreachable from the UI either way — `atFloor` in `focus-timer.tsx` disables
+ * the only control that sends a negative delta — but this is exported, so it
+ * has to be right on its own terms rather than because a caller happens to
+ * guard it.
  */
 export function applyTimeDelta(
   clock: { totalSec: number; remainingSec: number },
   deltaSec: number,
 ): { totalSec: number; remainingSec: number } {
-  const newRemaining = Math.max(
-    MIN_REMAINING_SEC,
-    clock.remainingSec + deltaSec,
-  );
-  const applied = newRemaining - clock.remainingSec;
-  return { totalSec: clock.totalSec + applied, remainingSec: newRemaining };
+  // A NaN/Infinity delta would otherwise propagate into both fields and blank
+  // the rendered clock, with no clue where it came from. Same "unusable input
+  // means no change" fallback as normalizeEstMin above.
+  if (!Number.isFinite(deltaSec)) {
+    return { totalSec: clock.totalSec, remainingSec: clock.remainingSec };
+  }
+  // How much of `remainingSec` a removal is allowed to eat. Clamped at 0 so a
+  // clock already under the floor yields no room rather than negative room.
+  const removableSec = Math.max(0, clock.remainingSec - MIN_REMAINING_SEC);
+  const appliedSec =
+    deltaSec >= 0 ? deltaSec : -Math.min(-deltaSec, removableSec);
+  return {
+    totalSec: clock.totalSec + appliedSec,
+    remainingSec: clock.remainingSec + appliedSec,
+  };
 }
 
 /** Signed net minutes added vs the planned duration (drives the "±Xm" note). */

@@ -358,6 +358,23 @@ describe("FocusTimer — ±time with clamp + signed note", () => {
       screen.getByRole("button", { name: /subtract 5 minutes/i }),
     ).toBeInTheDocument();
   });
+
+  // #151 — the guard that makes the sub-floor case unreachable from the UI.
+  // `applyTimeDelta` no longer grows the clock without it, but it is still the
+  // thing that stops the button being tappable when it would do nothing, so it
+  // gets a test of its own: deleting `disabled={atFloor}` failed nothing here
+  // before, which is how the floor came to be enforced in exactly one place.
+  // `base()` estimates the step at 1m, so the session opens sitting ON the
+  // floor (remaining 60s) with no ticking needed.
+  it("disables −5m at the 60s floor, and re-enables it once there is room", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimer {...base()} />);
+    await start(user);
+    const minus = screen.getByRole("button", { name: /subtract 5 minutes/i });
+    expect(minus).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /add 5 minutes/i }));
+    expect(minus).toBeEnabled();
+  });
 });
 
 describe("FocusTimer — multi-step context + minimal mode", () => {

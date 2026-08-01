@@ -45,6 +45,7 @@ import {
   netAddedMin,
   normalizeEstMin,
   DURATION_PRESET_MIN,
+  MIN_REMAINING_SEC,
 } from "@/lib/focus-timer-clock";
 import {
   createAlarm,
@@ -354,7 +355,14 @@ export function FocusTimer({
   const inc = Math.max(1, addTimeIncrementMin || 5);
   const durationMin = () => Math.max(0, Math.round(elapsedRef.current / 60));
   const net = netAddedMin(totalSec, plannedMin * 60);
-  const atFloor = remainingSec <= 60;
+  // #151 — the −time button's guard, and the same threshold `applyTimeDelta`
+  // caps a removal at. Read from the constant rather than a literal 60 so the
+  // two can't drift: this condition is now exactly when that helper is a
+  // no-op, so the button is disabled precisely when pressing it would do
+  // nothing. Kept as defence in depth even though the helper is safe on its
+  // own — a control that silently does nothing is a worse answer than one that
+  // says it is unavailable.
+  const atFloor = remainingSec <= MIN_REMAINING_SEC;
 
   const releaseWake = () => {
     wakeRef.current?.release();
