@@ -10,28 +10,51 @@ const {
   userUpdateMock,
   userUpdateManyMock,
   userFindUniqueMock,
+  userDeleteManyMock,
   revalidateMock,
+  cookieDeleteMock,
+  tryDisconnectGoogleMock,
 } = vi.hoisted(() => ({
   currentUserMock: vi.fn(),
   userUpdateMock: vi.fn(),
   userUpdateManyMock: vi.fn(),
   userFindUniqueMock: vi.fn(),
+  userDeleteManyMock: vi.fn(),
   revalidateMock: vi.fn(),
+  cookieDeleteMock: vi.fn(),
+  tryDisconnectGoogleMock: vi.fn(),
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: revalidateMock }));
+// #153 — the session cookie is the only thing still naming the account after a
+// self-serve deletion, so ending it is part of the action, not of the UI.
+vi.mock("next/headers", () => ({
+  cookies: async () => ({ delete: cookieDeleteMock }),
+}));
 vi.mock("@/lib/db", () => ({
   prisma: {
     user: {
       update: userUpdateMock,
       updateMany: userUpdateManyMock,
       findUnique: userFindUniqueMock,
+      deleteMany: userDeleteManyMock,
     },
   },
 }));
 vi.mock("@/lib/workspace", () => ({ currentUser: currentUserMock }));
+// #126 — deliberately NOT mocking @/lib/account-lifecycle. The freeze it
+// performs is the thing this entry point could most easily have bypassed, so
+// the real one runs and the Google revoke underneath it is asserted here.
+vi.mock("@/lib/google", () => ({
+  tryDisconnectGoogle: tryDisconnectGoogleMock,
+}));
 
-import { saveOwnLlmKey, removeOwnLlmKey, ownLlmKeyPresent } from "./account";
+import {
+  saveOwnLlmKey,
+  removeOwnLlmKey,
+  ownLlmKeyPresent,
+  deleteOwnAccount,
+} from "./account";
 
 const ME = "user_alice";
 const me = () => ({
@@ -47,6 +70,7 @@ beforeEach(() => {
   currentUserMock.mockResolvedValue(me());
   userUpdateMock.mockResolvedValue({});
   userUpdateManyMock.mockResolvedValue({ count: 1 });
+  tryDisconnectGoogleMock.mockResolvedValue(true);
 });
 
 describe("saveOwnLlmKey", () => {
@@ -192,5 +216,127 @@ describe("ownLlmKeyPresent", () => {
     expect(await ownLlmKeyPresent()).toBe(false);
     // And no query was made for a caller with no account.
     expect(userFindUniqueMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * #153 — a member deleting their OWN account.
+ *
+ * The rule this file's other actions are built on ("NO ID PARAMETER") is doing
+ * the heaviest lifting it has done yet: this action ends an account, so an id
+ * parameter would be an IDOR that destroys somebody. The first block below is
+ * the scoping invariant, asserted structurally rather than by review.
+ */
+describe("deleteOwnAccount — the scoping invariant", () => {
+  it("takes no arguments at all, so there is no other account to name", () => {
+    // A server action is a public POST endpoint. `length` is the arity the
+    // client can actually supply, and zero is the only value that makes
+    // "your own account only" true by construction instead of by validation.
+    expect(deleteOwnAccount.length).toBe(0);
+  });
+
+  it("freezes the SESSION's account, never one the caller supplies", async () => {
+    // Called with an id anyway — which a hand-rolled POST to this endpoint can
+    // do whatever the signature says. It must be ignored.
+    await (deleteOwnAccount as (...args: unknown[]) => Promise<unknown>)(
+      "user_mallory",
+    );
+
+    const call = userUpdateManyMock.mock.calls[0][0];
+    expect(call.where).toEqual({ id: ME, status: "active" });
+    expect(JSON.stringify(call)).not.toContain("user_mallory");
+    expect(tryDisconnectGoogleMock).toHaveBeenCalledWith(ME);
+    expect(tryDisconnectGoogleMock).not.toHaveBeenCalledWith("user_mallory");
+  });
+
+  it("refuses a caller with no signed-in account, and writes nothing", async () => {
+    currentUserMock.mockResolvedValue(null);
+    expect(await deleteOwnAccount()).toEqual({
+      ok: false,
+      error: "not_signed_in",
+    });
+    expect(userUpdateManyMock).not.toHaveBeenCalled();
+    expect(tryDisconnectGoogleMock).not.toHaveBeenCalled();
+    expect(cookieDeleteMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("deleteOwnAccount", () => {
+  it("freezes the account and schedules its purge, rather than deleting inline", async () => {
+    expect(await deleteOwnAccount()).toEqual({ ok: true });
+
+    const call = userUpdateManyMock.mock.calls[0][0];
+    expect(call.data.status).toBe("revoked");
+    const revokedAt = call.data.revokedAt as Date;
+    const purgeAfter = call.data.purgeAfter as Date;
+    expect(purgeAfter.getTime() - revokedAt.getTime()).toBe(30 * 86_400_000);
+    // The recovery window is the point: an accidental self-deletion has to be
+    // as recoverable as an owner-initiated revoke, so no row is destroyed here.
+    expect(userDeleteManyMock).not.toHaveBeenCalled();
+  });
+
+  it("withdraws the Google grant AT GOOGLE, before the freeze (#126)", async () => {
+    // The self-serve path must not be the one entry point that skips this. A
+    // frozen account resolves to null in currentUser() and can no longer reach
+    // its own Disconnect control, so a grant left live here is one its owner
+    // cannot withdraw through the product at all.
+    await deleteOwnAccount();
+
+    expect(tryDisconnectGoogleMock).toHaveBeenCalledWith(ME);
+    expect(tryDisconnectGoogleMock.mock.invocationCallOrder[0]).toBeLessThan(
+      userUpdateManyMock.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("completes even when Google refuses the revoke", async () => {
+    // An erasure request has a statutory clock on it; an unreachable Google
+    // cannot be allowed to block it.
+    tryDisconnectGoogleMock.mockResolvedValue(false);
+    expect(await deleteOwnAccount()).toEqual({ ok: true });
+    expect(userUpdateManyMock).toHaveBeenCalled();
+  });
+
+  it("ends the session, so the caller is signed out on the next request", async () => {
+    await deleteOwnAccount();
+    expect(cookieDeleteMock).toHaveBeenCalledWith("df_owner");
+  });
+
+  it("revalidates /settings so the page cannot re-render the old account", async () => {
+    await deleteOwnAccount();
+    expect(revalidateMock).toHaveBeenCalledWith("/settings");
+  });
+
+  it("refuses the instance owner, and writes nothing", async () => {
+    // The same reason revokePerson refuses owner self-revocation: the owner is
+    // the only account that can manage people, so an instance whose owner
+    // deleted themselves has no route back through the UI.
+    currentUserMock.mockResolvedValue({ ...me(), role: "owner" });
+    expect(await deleteOwnAccount()).toEqual({
+      ok: false,
+      error: "owner_cannot_delete",
+    });
+    expect(userUpdateManyMock).not.toHaveBeenCalled();
+    expect(tryDisconnectGoogleMock).not.toHaveBeenCalled();
+    expect(cookieDeleteMock).not.toHaveBeenCalled();
+  });
+
+  it("is idempotent when the account was already frozen concurrently", async () => {
+    // currentUser() already proved the row was ACTIVE, so a zero-row update is
+    // only reachable when the owner revoked the same account in between. The
+    // caller's outcome holds either way, and telling them it failed would
+    // invite them to press it again.
+    userUpdateManyMock.mockResolvedValue({ count: 0 });
+    expect(await deleteOwnAccount()).toEqual({ ok: true });
+    expect(cookieDeleteMock).toHaveBeenCalledWith("df_owner");
+  });
+
+  it("does not touch aiPolicy, aiQuota, role or the stored key", async () => {
+    await deleteOwnAccount();
+    const { data } = userUpdateManyMock.mock.calls[0][0];
+    expect(Object.keys(data).sort()).toEqual([
+      "purgeAfter",
+      "revokedAt",
+      "status",
+    ]);
   });
 });
