@@ -85,6 +85,19 @@ So: re-read the description while you are in there, and date any figures you
 re-measure. An issue whose numbers silently expired is worse than a long title,
 because a long title is at least honest about being long.
 
+### Keep re-measurable numbers out of the title
+
+A count in a title is stale the moment the thing it counts changes, and unlike a
+number in the body nobody re-reads a title to check it. `19 MEDIUM SAST findings
+on main are untriaged` was accurate when filed and read 12 seven days later —
+and because it sat in the title, it kept asserting 19 to everyone scanning the
+list. `SAST findings on main have never been triaged` stays true at any count.
+
+Put the figure in the description with the date it was measured, so it is
+obviously a snapshot rather than a standing claim. Stable identifiers —
+`60s floor`, `166-track catalog`, an error code, a version — are fine; those are
+names, not measurements.
+
 ### Referring to an issue elsewhere
 
 In merge request descriptions, commit bodies, plans and discussion, write the
