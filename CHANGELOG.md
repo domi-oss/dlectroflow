@@ -29,6 +29,20 @@ operators upgrading a self-hosted instance don't get surprised.
 > (#148), so the image published as `:v0.4.0` was built from a tree that called
 > itself 0.3.0.
 
+### Fixed
+
+- **A signing-in user no longer makes the logs report an incident that never
+  happened (#156).** The first authenticated render for a new workspace creates
+  its settings and streak rows, and the app layout and the page beneath it do
+  that concurrently within one request — so one of them lost the insert and
+  Prisma printed `Unique constraint failed on the fields: (id)` at error level.
+  The loss was expected, handled and invisible to the user, but the log line was
+  not distinguishable from a real failure and got escalated as one. The two
+  helpers now create with `INSERT ... ON CONFLICT DO NOTHING`, so the loser is
+  told "already there" instead of raising. Nothing about error logging changed:
+  a genuine Prisma failure still prints exactly as before, and a test asserts
+  both halves against a real database.
+
 ## [0.5.0] - 2026-08-01
 
 **More than one person can use it now.** dlectroflow stops being a single-owner
