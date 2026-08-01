@@ -16,16 +16,171 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ## [Unreleased]
 
-> Shipped to production but not yet tagged. At cut time this becomes
-> `## [X.Y.Z] - <date>` and a fresh empty `## [Unreleased]` is added above it —
-> **in the same commit that bumps `package.json` and `charts/dlectroflow/Chart.yaml`
-> to that version, before the tag is pushed.** `src/lib/version-hygiene.test.ts`
-> fails until all three agree; the full cut checklist is in `CLAUDE.md`
+> Shipped to production but not yet tagged. At cut time the entries below move
+> under a new `## [X.Y.Z] - <date>` heading, leaving `## [Unreleased]` empty and
+> **this note with it** — the note describes the ritual, so it belongs to
+> whichever section is currently open, not to the release just closed. (Read the
+> older wording literally and the note migrates into the released section, taking
+> the instructions with it.) The move happens **in the same commit that bumps
+> `package.json`, `package-lock.json` and `charts/dlectroflow/Chart.yaml` to that
+> version, before the tag is pushed.** `src/lib/version-hygiene.test.ts` fails
+> until the three it checks agree; the full cut checklist is in `CLAUDE.md`
 > ("CI & release" → "Cutting a release"). v0.4.0 was tagged without the bump
 > (#148), so the image published as `:v0.4.0` was built from a tree that called
 > itself 0.3.0.
 
+## [0.5.0] - 2026-08-01
+
+**More than one person can use it now.** dlectroflow stops being a single-owner
+instance. Invited people get real accounts, their own Google connection, their own
+model key and their own AI budget, and the owner sets all of it from
+Settings → People. Alongside that, scheduling gained a menu that remembers what you
+told it last time, and a focus session gained longer presets, a "keep going for…"
+answer when time runs out, and a breathing pacer on the paused ring. Under it,
+the two deployment surfaces are now pinned to each other by a test, and the
+container image is roughly a quarter of the size it was.
+
+### ⚠️ Upgrade notes
+
+- **This release migrates the database. Eight Prisma migrations run before the
+  app container starts** — on Kubernetes via the `migrate` initContainer, on
+  Docker Compose via the `migrate` service. Take a backup first. The set:
+  new `User` / `Allowlist` / `UserAiUsage` tables and the Google credential
+  re-keying (#35, #118), `Task.scheduleDueAt` / `schedulePriority` /
+  `scheduleHours` (#106), `Settings.focusPauseTogether` (#65), CHECK constraints
+  on `Step.estMinutes` (#78), `BrainDumpItem.estMinutes` (#80) and
+  `User.aiQuota` (#35), and two data statements described below.
+- **Your Google Tasks connection is destroyed by this upgrade and has to be
+  reconnected once (#118).** Before accounts existed, one instance-wide Google
+  credential row served everybody. Phase C keys every read and write on the
+  acting user, which leaves that row unreachable, unrevocable and outside the
+  `User` cascade — a live credential nobody can see or withdraw. The
+  `google_auth_orphan_purge` migration deletes it rather than silently binding
+  it to whoever looks like the owner, and logs how many rows it removed. **After
+  deploying, go to Settings → Integrations and connect Google again.** Until you
+  do, the UI reports a plain "Not connected"; nothing errors.
+- **Sign-in is invite-only from this release onward.** An identity that is not in
+  the `Allowlist` table cannot sign in at all. `OWNER_ALLOWLIST` is no longer just
+  a comparison at login — it is seeded into that table by a `seed-allowlist` step
+  that both deploy targets run automatically, after migrations and before the app
+  starts, so **the owner cannot be locked out of their own instance by their own
+  invite gate.** It is idempotent and re-asserts on every deploy. Set
+  `OWNER_ALLOWLIST` before upgrading if it was ever left blank. Guest sandboxes
+  are unaffected and still need no account.
+- **The owner's own account is repaired to `uncapped` on upgrade.** Per-account AI
+  metering starts being *enforced* in this release, and accounts provisioned by
+  the earlier phase were created on the schema default of `capped`. Without the
+  `owner_uncapped_repair` statement the owner would begin hitting a
+  50-breakdown rolling cap on their own instance the moment it deployed. It only
+  touches owner rows still carrying the default, so a deliberately capped owner
+  is left alone.
+- **One new environment variable, optional: `USER_AI_WINDOW_HOURS`** (default
+  `720`, i.e. 30 days) — the rolling window per-account AI usage is measured over.
+  It slides from each person's first breakdown rather than following the calendar.
+  The quota itself is not an env var; the owner sets it per account in
+  Settings → People. **No new *required* variables, and none removed.**
+
 ### Added
+
+- **More than one person can use one instance — real accounts, roles and an
+  invite allowlist (#35, Phase A).** The `OWNER_WORKSPACE_ID = "owner"` binary is
+  gone, replaced by `User` records that own workspaces and are provisioned only
+  from an `Allowlist`. Sessions are per-user rather than a single owner session,
+  and the provider profile now supplies a username and email so an account is
+  identifiable rather than anonymous.
+  - **The data layer did not have to change**, because it was already
+    workspace-scoped from the earlier workspace-access work. This changes *who a
+    workspace belongs to*, not how content is partitioned — and a scoping test
+    harness was added to keep it that way as models gain a `userId`.
+  - **The owner role is keyed off a dedicated `Allowlist.isOwnerSeed` boolean**,
+    not a role string and emphatically not a sentinel value in the free-text
+    `note` column. A free-text field deciding a privilege level is a
+    privilege-escalation hole; only the seed script sets the flag.
+  - A missing workspace now self-heals on sign-in, tolerating two requests racing
+    to create it.
+
+- **Settings → People: the owner decides who gets AI, and how much (#35,
+  Phase B).** A People panel lists every provisioned account with its role,
+  status and AI policy, and lets the owner switch an account between capped and
+  uncapped and set its quota. Enforcement is live — a capped account that has
+  spent its allowance is refused rather than quietly billed to the owner.
+  - **Uncapped accounts are metered too, including the owner's own.** They are
+    never refused, but the count is visible in the panel, so "who is spending the
+    AI budget" is answerable rather than guessed. An account on its own key is
+    not counted at all: their key, their bill.
+  - The panel is a collapsible disclosure, collapsed by default, and stays
+    visually stable while a policy is mid-edit rather than reflowing under the
+    cursor.
+
+- **Everyone brings their own Google account and their own model key (#118,
+  Phase C).** The Google credential is keyed on the acting user instead of being
+  one instance-wide singleton, so any signed-in member can connect their own
+  Google account, and their calendar control and Schedule-menu prefill use their
+  own connection. A member can also supply their own LLM key and provider, which
+  takes their usage off the instance's budget entirely.
+  - **Both OAuth routes are gated on the acting user throughout (#119).** During
+    this release's development the owner gate was briefly keyed off the removed
+    owner constant; it is now an explicit per-user check on both the start and
+    callback routes, proven by tests covering the non-owner case.
+  - Disconnecting is a real disconnect — see the revocation change under
+    **Security**.
+
+- **The Schedule menu — one place to say when, how urgent, and whose hours
+  (#106).** The 📅 control opens a menu with a due date, a priority and a
+  work/personal hours choice, shows a summary line of what will happen, and turns
+  that line into a warning when the combination cannot be honoured. The three
+  fields are persisted on the task, so re-opening the menu prefills what you said
+  last time instead of asking again.
+  - **They are nullable with no column default, deliberately.** A column default
+    would freeze "three days from the migration date", and it would make "the
+    owner chose this" indistinguishable from "nobody has said" — which is exactly
+    the distinction prefill depends on. The fallback comes from application code.
+
+- **Scheduling gained a real intent model, and steps stop arriving reversed
+  (#104).** A timezone-aware working-hours calendar lays steps into disjoint
+  windows, so a breakdown pushed to a calendar arrives in the order you read it.
+  Reclaim gets a properly briefed title and notes, plain Google Tasks gets its own
+  encoder (detected from the list), re-scheduling upserts instead of duplicating,
+  and each `VEVENT` in an exported `.ics` deep-links to its own step. Single
+  to-dos go through the same intent path as broken-down ones.
+  - `SCHEDULING_SYNTAX` and `SCHEDULING_TIMEZONE` are documented in
+    `.env.example` — both optional, and both previously undiscoverable.
+
+- **Pausing the music can pause the timer too (#65).** The timer already drove
+  the music; this adds the other direction, so reaching for the mini-player's
+  pause button stops the focus session as well and playing it resumes both.
+  **Off by default** — it has to be asked for, because otherwise a reflexive
+  reach for the volume control ends your session. Workspace-scoped, like every
+  other focus preference, so guests keep their own value.
+
+- **A paced breathing guide on the paused ring (#89).** Pausing gives you
+  something to breathe with rather than a frozen dial, and the pacing runs across
+  the whole live session rather than only the pause. Respects
+  `prefers-reduced-motion`.
+
+- **Longer focus presets, and a "keep going for…" answer when time is up
+  (#138).** The preset row covers longer sessions, and reaching zero now offers
+  extending in place as a first-class answer alongside the existing ones, with
+  the hand-off keeping sound on.
+
+- **Settings and Help have a collapsible sticky section nav (#72, #101).**
+  Collapsed by default, with iOS-style sticky section headers, every section
+  collapsible, and the sections reordered by how often they are actually used.
+  It survives the section list shrinking underneath a stale current id rather
+  than crashing.
+
+- **The header names the account you are signed in as (#100)**, and the nav shows
+  *Account* rather than *Sign in* once you are.
+
+- **The breakdown coach is given app and user context (#14)**, so its proposals
+  are shaped by how you actually work instead of being generated cold.
+
+- **The Integrations panel says which Google account to connect (#128)** — and
+  documents that a managed work account can be blocked outright by its Workspace
+  admin, which is otherwise a silent, unexplained failure.
+
+- **A scheduled job bounds the container registry (#114).** `main-*` tags are
+  pruned on a schedule instead of accumulating forever.
 
 - **The Kubernetes and Docker Compose deployments can no longer drift apart, and
   `/api/health` says which commit it is running (#135).**
@@ -158,6 +313,29 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Changed
 
+- **A new task's deadline defaults to a week out, not three days.** Three days
+  was optimistic often enough that the default was being edited more than it was
+  accepted, which is the definition of a wrong default.
+
+- **A step estimate under one minute is now rejected by the database (#78).**
+  The `>= 1` invariant lived in four scattered writers, so it held only while all
+  four stayed correct and a fifth writer added later inherited nothing. A single
+  bad row distorted the step-size summary handed to the breakdown coach —
+  `[-5, 0, 0.4, 10, 20]` read out as "5 steps (0–20 min, ~0 median)", telling the
+  coach this person likes zero-minute steps and sizing its next proposal to match.
+  The read side was fixed earlier; this is the cure the guard was standing in for.
+
+- **A brain-dump item's estimate is now constrained too — but to `NULL` or
+  `>= 1`, not `>= 1` (#80).** The difference from the step constraint above was
+  accidental rather than recorded, and copying `>= 1` across would have made
+  every estimate-less item unwritable. `NULL` is meaningful here: it says "the
+  user never gave an estimate", and the read side substitutes a display default
+  rather than a stored one. The distinction is now written down in three places,
+  one of which fails the suite if the `NULL` allowance is ever dropped.
+
+- **The corp instance is served on `work.dlectroflow.dev` (#130).** Hosted
+  deployment only; self-hosters are unaffected.
+
 - **A brand-new account's empty inbox no longer congratulates you for clearing a
   queue you never had (#111).** Signing in produced "Inbox zero. Nothing to
   review." — or "🎉 Inbox zero! Nothing to review." in playful voice — whether
@@ -278,6 +456,34 @@ operators upgrading a self-hosted instance don't get surprised.
     rather than a requirement.
 
 ### Fixed
+
+- **An emptied focus lane says it is empty, instead of showing a stale count
+  (#136).** Moving the last card out of a lane left the old count behind and no
+  zero-state, so the lane read as populated when it was not. Each lane now names
+  its own landmark and reports one count from it, rather than the count being
+  recovered by walking the DOM.
+
+- **A member is no longer treated as a guest when picking a model (#96).** An
+  invited account fell through to the guest model because the check tested for
+  "not the owner" rather than "not signed in", so members silently got the
+  cheaper model they had not asked for.
+
+- **Row-action popups stay inside the viewport at 390px (#92).** On a phone the
+  inbox row menus opened partly off-screen, putting the destructive action under
+  the edge of the display.
+
+- **The inbox keeps dark mode through hydration (#105).** The inbox clock was
+  read on the client, so the server and client markup disagreed and React
+  discarded the server tree — taking the resolved theme with it and flashing
+  light. The clock is now stamped on the server.
+
+- **The guest banner uses the owner's copy, not the voice-aware variant (#73).**
+  A guest was being addressed in a voice setting that belongs to an account they
+  do not have.
+
+- **The React Compiler's `react-hooks` findings are burned down (#23).** The rule
+  had been left at warn level with a stale comment claiming otherwise; the
+  findings are fixed and the comment now matches the config.
 
 - **Review-app namespaces no longer leak forever (#145).** `stop_review` was
   failing with **`missing_dependency_failure`** — `started_at: null`, empty log,
@@ -451,7 +657,42 @@ operators upgrading a self-hosted instance don't get surprised.
     a developer's own machine, and production credentials still come from
     GitLab Secrets Manager.
 
+- **The test suite is honest about what it needs and what it covers.** Unit tests
+  no longer silently require Postgres — the one route test that did now fails
+  with a clear message instead of an obscure connection error (#84); the
+  registry-prune suite is hermetic against ambient CI environment variables
+  (#120); e2e boots the `standalone` output rather than `next start`, so it
+  exercises what actually ships (#97); and guest-only UI is scanned by axe, which
+  caught real issues now fixed (#90).
+
+- **A schedule-menu test no longer passes or fails depending on the time of
+  day.** Two tests set a deadline of *today* and asserted the menu's
+  infeasibility warning, on the premise that today could never hold the
+  fixture's 2h15m of work. It can, before mid-afternoon —
+  `workingMinutesBetween(now, dueAt)` is a function of `now`, so the same tree
+  was green at 23:34 and red at 06:43. Both now use a deadline already in the
+  past, which scores zero available minutes at every hour, and a clock-sweeping
+  unit test pins that premise so the next change to the hours model cannot
+  quietly unpin it.
+
 ### Security
+
+- **Freezing or deleting an account now revokes its Google grant at Google, not
+  just locally (#126).** Deleting the stored credential left the OAuth grant
+  standing in the user's Google account, so an offboarded person's data remained
+  reachable by anyone who could restore a token. Revocation is attempted at
+  Google first; **a refused revoke is treated as a failure rather than a
+  success**, is logged before the local delete, and is reported to the user
+  instead of showing a disconnect that did not happen. The Privacy Policy is
+  updated to state that the grant goes with the access.
+
+- **Hygiene tests can no longer be steered by the ambient git environment
+  (#146).** Several repo-asserting tests shelled out to `git` inheriting the
+  caller's environment and current directory, so a stray `GIT_DIR`, a `-C` in an
+  arg list, or simply running from a subdirectory changed what they scanned — a
+  guard that quietly scans the wrong tree is a guard that has stopped guarding.
+  Scans are anchored to the repo root, git children get an allow-listed
+  environment, and the guard fails closed on an unreadable arg list.
 
 - **The generic-SSRF SAST rule is replaced by a repo-owned guard, not merely
   silenced (#83).** `javascript-node-ssrf-generic-taint` produced **five findings
@@ -908,7 +1149,8 @@ Baseline — first tracked release of the shipped app.
 - GKE Autopilot deployment with valid TLS, per-MR review apps, and the full
   GitLab security-scanner suite.
 
-[Unreleased]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.4.0...main
+[Unreleased]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.5.0...main
+[0.5.0]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.4.0...v0.5.0
 [0.4.0]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.3.0...v0.4.0
 [0.3.0]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.2.0...v0.3.0
 [0.2.0]: https://gitlab.com/gl-demo-ultimate-dtop/domi-oss/dlectroflow/-/compare/v0.1.0...v0.2.0
