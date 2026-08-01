@@ -26,8 +26,8 @@ type: application
 # without the source tree. Then chart-only fixes need their own semver, these
 # two must decouple, and `Chart.yaml version` comes out of that guard's claim
 # list with a note saying why.
-version: 0.4.0
-appVersion: "0.4.0"
+version: 0.5.0
+appVersion: "0.5.0"
 # unhealthyPodEvictionPolicy (pdb.yaml) is GA in 1.27 / on-by-default beta in
 # 1.26; the -0 suffix lets GKE's prerelease version strings (e.g. 1.29.5-gke.x)
 # satisfy the constraint.
