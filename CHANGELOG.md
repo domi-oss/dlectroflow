@@ -333,7 +333,7 @@ container image is roughly a quarter of the size it was.
   rather than a stored one. The distinction is now written down in three places,
   one of which fails the suite if the `NULL` allowance is ever dropped.
 
-- **The corp instance is served on `work.dlectroflow.dev` (#130).** Hosted
+- **One hosted deployment moved from the apex to a subdomain (#130).** Hosted
   deployment only; self-hosters are unaffected.
 
 - **A brand-new account's empty inbox no longer congratulates you for clearing a
