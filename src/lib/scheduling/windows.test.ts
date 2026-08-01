@@ -190,6 +190,27 @@ describe("deriveWindows — feasibility", () => {
     expect(plan.feasible).toBe(false);
     expect(plan.windows).toHaveLength(3);
   });
+
+  // The case above pins one hour. This pins the property the schedule-menu e2e
+  // now leans on: a passed deadline is infeasible *whatever time it is*.
+  //
+  // That test used to set the deadline to TODAY and assert the warning, on the
+  // stated premise that today could never hold the work. Today is not a
+  // constant — at 23:34 the working day is spent and the menu warns, at 06:43 it
+  // is entirely ahead and the menu does not. Same tree, green on the late run
+  // and red on the early one. Sweeping the clock is what makes the replacement
+  // premise a claim the suite checks rather than one a comment asserts.
+  it("is infeasible for a passed deadline at every hour of the day", () => {
+    for (let hour = 0; hour < 24; hour++) {
+      const now = bst(`2026-07-29T${String(hour).padStart(2, "0")}:00`);
+      const plan = deriveWindows(
+        intent({ dueAt: bst("2026-07-28T17:00") }),
+        now,
+      );
+      expect(plan.feasible, `hour ${hour}`).toBe(false);
+      expect(plan.availableMin, `hour ${hour}`).toBe(0);
+    }
+  });
 });
 
 describe("deriveWindows — personal hours", () => {

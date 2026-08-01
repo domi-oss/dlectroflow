@@ -75,9 +75,26 @@ async function removeFixtures(client: PrismaClient): Promise<void> {
   await clearGoogleTokens(client, OWNER_USER_ID);
 }
 
-/** Today, as the date field spells it — a deadline that cannot hold 2h15m. */
-function todayInputValue(): string {
+/**
+ * Yesterday, as the date field spells it — a deadline that has already passed,
+ * so it can never hold the fixture's 2h15m of work.
+ *
+ * **This used to be today, and today is not a constant.** `deriveWindows` asks
+ * `workingMinutesBetween(now, dueAt)` how much working time is left, so whether
+ * today can hold 2h15m depends on what time the suite runs: at 23:34 it cannot
+ * and the menu warns, at 06:43 the whole working day is still ahead and it does
+ * not. `main` was green on the late run and red on the early one, from the same
+ * tree — the comment here claimed "whatever time it is" and that was the bug.
+ *
+ * A deadline in the past has no such hinge: `workingMinutesBetween` returns 0
+ * for an inverted range (`hours.ts`, `to > from` guard), so `availableMin` is 0
+ * at every hour of every day and `scheduleSummary` takes its "leaves no working
+ * time before the deadline — N steps need …" branch. Same warning mood, same
+ * amber colour pair, which is what these two tests are actually here to look at.
+ */
+function passedDeadlineInputValue(): string {
   const d = new Date();
+  d.setDate(d.getDate() - 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
@@ -272,8 +289,9 @@ test.describe("schedule menu — the feasibility warning's contrast", () => {
       const row = multiStepRow(page);
       await row.getByRole("button", { name: "Schedule", exact: true }).click();
       const dialog = row.getByRole("dialog");
-      // A deadline of today cannot hold 2h15m of work, whatever time it is.
-      await dialog.getByLabel("Done by").fill(todayInputValue());
+      // A deadline that has already passed cannot hold 2h15m of work, at any
+      // hour — see passedDeadlineInputValue for why "today" was not that.
+      await dialog.getByLabel("Done by").fill(passedDeadlineInputValue());
       await expect(dialog.getByRole("status")).toContainText(/need/i);
 
       expectNoContrastViolations(await scanColorContrast(page));
@@ -305,11 +323,12 @@ test.describe("schedule menu — screenshots", () => {
         await page.screenshot({ path: `${SHOTS}/${size}-${theme}-open.png` });
 
         // The warning mood, which is the other half of the surface: a deadline
-        // today cannot hold 2h15m of work, and the menu says so without blocking.
+        // already past cannot hold 2h15m of work, and the menu says so without
+        // blocking.
         await row
           .getByRole("dialog")
           .getByLabel("Done by")
-          .fill(todayInputValue());
+          .fill(passedDeadlineInputValue());
         await expect(row.getByRole("dialog").getByRole("status")).toContainText(
           /need/i,
         );
