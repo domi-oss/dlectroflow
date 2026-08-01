@@ -1,30 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  importedPackages,
-  packageNameOf,
-  stripComments,
-} from "./manifest-hygiene";
+import { importedPackages, packageNameOf } from "./manifest-hygiene";
 
-describe("stripComments", () => {
-  it("drops a line comment", () => {
-    expect(stripComments('// import x from "ghost";\nconst a = 1;')).toBe(
-      "\nconst a = 1;",
-    );
-  });
-
-  it("drops a block comment spanning several lines", () => {
-    expect(
-      stripComments('/*\n * import x from "ghost";\n */\nconst a = 1;'),
-    ).toBe("\nconst a = 1;");
-  });
-
-  it("does not truncate a line at the // inside a URL", () => {
-    const source = 'const u = "https://example.test/x";';
-    expect(stripComments(source)).toBe(source);
-  });
-});
+// `stripComments` is exercised in source-text.test.ts, where it now lives
+// (#150). The cases that matter to THIS module — a specifier quoted inside a
+// comment is not an import — stay below, asserted through `importedPackages`.
 
 describe("packageNameOf", () => {
   it("keeps a bare package name as-is", () => {

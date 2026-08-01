@@ -15,6 +15,8 @@
  * the other repo-invariant guards (dockerfile-hygiene, manifest-hygiene).
  */
 
+import { stripComments } from "./source-text";
+
 /**
  * Keys the drift check intentionally ignores in BOTH directions. Extend this
  * deliberately — every entry must say why it's exempt, either because it's a
@@ -78,9 +80,9 @@ export function computeEnvDrift(
 
 // Matches dot-notation (process.env.<KEY>) and bracket-notation
 // (process.env["<KEY>"] / process.env['<KEY>']) reads. Deliberately a plain
-// regex scan over raw source text (not an AST parse) — simple, dependency-
-// free, and matches how the acceptance criteria describes the check
-// ("greps/parses process.env usage").
+// regex scan (not an AST parse) — simple, dependency-free, and matches how the
+// acceptance criteria describes the check ("greps/parses process.env usage").
+// It runs over COMMENT-STRIPPED source, not raw text; see extractUsedEnvKeys.
 const USED_ENV_KEY_RE =
   /process\.env(?:\.([A-Za-z_][A-Za-z0-9_]*)|\[["']([A-Za-z_][A-Za-z0-9_]*)["']\])/g;
 
@@ -94,14 +96,32 @@ const USED_ENV_KEY_RE =
 const DESTRUCTURED_ENV_RE = /\{([^{}]*)\}\s*=\s*process\.env\b/g;
 const BINDING_HEAD_RE = /^([A-Za-z_][A-Za-z0-9_]*)/;
 
-/** Extracts the deduped set of env keys read via `process.env` in `source`. */
+/**
+ * Extracts the deduped set of env keys read via `process.env` in `source`.
+ *
+ * Comments come out FIRST (#150). Both patterns above scan text, so prose that
+ * *describes* an env read is indistinguishable from code that *performs* one —
+ * and the modules most likely to contain such prose are the hygiene modules,
+ * whose subject matter is precisely `process.env` handling. !227 (#146) failed
+ * this gate twice on a new module's doc comments, reporting `PATH` and an
+ * example binding called `A` as undocumented reads. Neither is a variable this
+ * app has ever read, and the fix at the time was to reword the documentation:
+ * a scanner limitation deciding what a comment is allowed to say.
+ *
+ * Stripping also repairs a false NEGATIVE the raw-text scan had: a trailing
+ * comment on one line of a multi-line destructuring hid the binding on the
+ * next, because the comment text ran into the following comma-separated
+ * segment. That direction is the more dangerous one — an undocumented read
+ * silently passing the gate.
+ */
 export function extractUsedEnvKeys(source: string): string[] {
+  const code = stripComments(source);
   const keys = new Set<string>();
-  for (const match of source.matchAll(USED_ENV_KEY_RE)) {
+  for (const match of code.matchAll(USED_ENV_KEY_RE)) {
     const key = match[1] ?? match[2];
     if (key) keys.add(key);
   }
-  for (const match of source.matchAll(DESTRUCTURED_ENV_RE)) {
+  for (const match of code.matchAll(DESTRUCTURED_ENV_RE)) {
     for (const segment of match[1].split(",")) {
       const name = segment.trim().match(BINDING_HEAD_RE);
       if (name) keys.add(name[1]);

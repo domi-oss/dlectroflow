@@ -14,19 +14,12 @@
 
 import { isBuiltin } from "node:module";
 
-/**
- * `source` with comments removed, so a specifier quoted inside a comment (the
- * `// npm install --save-dev prisma dotenv` header Prisma generates, say) is
- * never mistaken for a real import.
- *
- * The line-comment pass refuses to fire when `//` is preceded by `:`, which
- * keeps a `https://…` inside a string from truncating the rest of the line.
- */
-export function stripComments(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|[^:])\/\/.*$/gm, "$1");
-}
+// `stripComments` was defined here until #150, when `env-drift` turned out to
+// need it for the identical reason — a doc comment quoting the construct being
+// scanned for. It moved to source-text.ts rather than being imported from this
+// module, so that neither scanner depends on the other's invariant; see that
+// file's header for the reasoning.
+import { stripComments } from "./source-text";
 
 /**
  * The package a bare specifier resolves to: `dotenv/config` → `dotenv`,
