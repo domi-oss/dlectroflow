@@ -57,9 +57,16 @@ export const SOURCE_REPO_URL =
 /**
  * ISO date the current text took effect. Bump when the substance changes.
  *
- * Bumped for #140: /privacy now carries the Google Limited Use undertaking and
- * an explicit statement that no Google data reaches the AI provider. A new
- * undertaking to a reader is substance by any reading, so it moves this date.
+ * Bumped for #153: erasure is now exercisable from Settings rather than only by
+ * emailing the controller, and the retention section says what deleting your
+ * own account actually does. HOW a data subject exercises an Art. 17 right is
+ * part of the Art. 12/13 disclosure, not presentation, so it moves this date —
+ * and the exception (the owner's own account cannot be deleted from the app) is
+ * a limit on the right, which would move it on its own.
+ *
+ * Previously bumped for #140: /privacy carries the Google Limited Use
+ * undertaking and an explicit statement that no Google data reaches the AI
+ * provider. A new undertaking to a reader is substance by any reading.
  *
  * It did not move it in #140's own commit — the rule lived only in the prose
  * above and nothing enforced it, so the page shipped new material text under
@@ -69,7 +76,7 @@ export const SOURCE_REPO_URL =
  * Previously bumped for #126: freezing or deleting an account also revokes the
  * Google grant, which changed what the app does with somebody's Google account.
  */
-export const LEGAL_EFFECTIVE_DATE = "2026-07-31";
+export const LEGAL_EFFECTIVE_DATE = "2026-08-02";
 
 /** Where the hosted instance and its backups physically sit. */
 export const HOSTING_REGION = "London, United Kingdom (GCP europe-west2)";

@@ -197,7 +197,8 @@ and until then, please do not "improve" the wording into a promise.
 | Not shipped | What the page says instead |
 |---|---|
 | Self-service data export (still no `src/app/api/account/` directory — the `/api/account/` entry in `AUTHENTICATED_PREFIXES` reserves the prefix, it does not implement a route) | Access and portability are handled **by hand** from the contact address, within the statutory one month |
-| Automatic revoke → freeze → 30-day purge (`User.purgeAfter` is written but never read; #126 added `deleteAccount` as the one safe way to delete an account, but nothing calls it yet) | Revocation does **not** delete content today; email and it will be deleted |
+| ~~Self-service account deletion~~ — **shipped in #153.** Settings → Account has a *Delete my account* control (`deleteOwnAccount`, `src/app/actions/account.ts`). It freezes rather than destroys, so the row above is what governs what happens next; the owner is refused, because an instance with no owner has no way back through the UI | The confirmation dialog states the window AND that the final deletion is done by hand today, matching the retention list |
+| Automatic revoke → freeze → 30-day purge (`User.purgeAfter` is written by `freezeAccount` and read by nothing — `prisma/scheduled-purge.ts` sweeps guest workspaces and guest counters only; #126 added `deleteAccount` as the one safe way to delete an account and nothing calls it yet) | Revocation does **not** delete content today; email and it will be deleted |
 | **Per-account choice of AI provider (#125)** | The key is used against *this instance's* configured provider; "it is a key, not a destination", and choosing your own provider is not something dlectroflow can do today |
 
 `src/app/privacy/page.test.tsx` has a `promises nothing unshipped` block that
@@ -239,21 +240,31 @@ as the member, so it lands in their own account with the provider and their own
 agreement governs it — the controller's processor terms cover requests on the
 controller's key only.
 
-### Google revocation: the gap the pages admit
+### Google revocation: closed by #126, and the residue the pages still admit
 
-`disconnectGoogle` (Settings → Disconnect) is the **only** code path that calls
-Google's revoke endpoint. Two other states exist and neither revokes:
+**This section described a gap that no longer exists; #126 (v0.5.0) closed it and
+the wording below is the corrected version.** Every path that ends an account's
+access now asks Google to revoke the grant BEFORE touching the local state:
 
-- **Frozen** (`revokePerson`): sets `status`/`revokedAt`/`purgeAfter` and touches
-  no tokens. The account's ciphertext stays in `GoogleAuth`, unusable because
-  `currentUser()` resolves a revoked account to `null` — which *also* means the
-  member can no longer reach Disconnect.
-- **Deleted**: `GoogleAuth.userId` has `onDelete: Cascade`, so the row goes with
-  the `User` — silently, without a revoke call.
+- **Disconnected** (Settings → Disconnect): `disconnectGoogle`, the original.
+- **Frozen** (`revokePerson`, and #153's self-serve `deleteOwnAccount`): both go
+  through `freezeAccount` in `src/lib/account-lifecycle.ts`, which calls
+  `tryDisconnectGoogle` first and freezes whatever comes back. The ordering is
+  the point — a frozen account resolves to `null` in `currentUser()` and can no
+  longer reach Disconnect, so a grant left live at that moment is one its owner
+  cannot withdraw through the product at all.
+- **Deleted** (`deleteAccount`): same order. `GoogleAuth.userId` has
+  `onDelete: Cascade`, so the row goes with the `User` — but the cascade is the
+  BACKSTOP that guarantees no token survives, not the mechanism that ends the
+  connection.
 
-Both pages therefore point at the user's own Google security settings as the route
-that always works. **Do not soften that into "disconnecting revokes your access"
-without also making the freeze/delete paths revoke.**
+What is still true, and what both pages still say: **the revoke is a request
+Google can refuse.** The tokens at this end are deleted either way; the grant may
+stay listed until the person clears it. So both pages continue to point at the
+user's own Google permissions page as the route that always works, and
+`google_disconnect_failed` is logged with its reason rather than being papered
+over. **Do not soften "asks Google to revoke" into "revokes" — the verb is
+carrying the uncertainty on purpose.**
 
 #### The pre-accounts credential destroyed by Phase C — and why it is not in the notice
 
