@@ -75,9 +75,13 @@ type WorkspaceSingletonDelegate<Row extends WorkspaceSingletonRow> = {
  * statement, so it genuinely inserts and genuinely fails with P2002.
  *
  * Catching that P2002 (what this used to do) was correct but not enough — see
- * the note on `log` above. The trade is one extra round trip on the single
- * first-use call per workspace, in exchange for the steady-state path becoming
- * one indexed read instead of an upsert.
+ * the note on `log` above.
+ *
+ * It is also cheaper, which was not the goal but is worth recording. Prisma
+ * 6.19 compiles the old `upsert` to BEGIN, three SELECTs and COMMIT even when
+ * the row already exists — five statements in an explicit transaction on every
+ * authenticated render. The steady-state path here is one indexed SELECT and no
+ * transaction; only a genuine first use pays for the write.
  */
 async function firstUseByWorkspace<Row extends WorkspaceSingletonRow>(
   model: string,
