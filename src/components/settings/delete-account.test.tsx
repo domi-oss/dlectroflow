@@ -159,6 +159,36 @@ describe("DeleteAccount — a deliberate act, not one click", () => {
     expect(refreshMock).toHaveBeenCalled();
   });
 
+  it("submits once for repeated Enter presses while the request is in flight", async () => {
+    // Duo review on !237: the confirm button carries `disabled={!confirmed ||
+    // pending}` and the field's Enter handler only ever checked `confirmed`, so
+    // the keyboard path could start a second delete while the first was still
+    // running. The second one arrives after the session cookie is already gone,
+    // comes back `not_signed_in`, and paints a "you are no longer signed in"
+    // error over a deletion that in fact succeeded. Both paths go through
+    // `submit()`, so the guard belongs there rather than being spelled twice.
+    let release: (value: { ok: true }) => void = () => {};
+    deleteMock.mockReturnValue(
+      new Promise<{ ok: true }>((resolve) => {
+        release = resolve;
+      }),
+    );
+
+    await open();
+    const field = screen.getByLabelText(/type/i);
+    await userEvent.type(field, "delete");
+
+    await userEvent.type(field, "{Enter}");
+    await waitFor(() => expect(deleteMock).toHaveBeenCalledTimes(1));
+    await userEvent.type(field, "{Enter}");
+    await userEvent.type(field, "{Enter}");
+
+    expect(deleteMock).toHaveBeenCalledTimes(1);
+    release({ ok: true });
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/"));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("reports a refusal in an alert and stays put", async () => {
     // Reachable when the role changed under the open dialog: the server is the
     // gate, not this component.

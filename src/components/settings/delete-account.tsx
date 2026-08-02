@@ -122,7 +122,14 @@ export function DeleteAccount({
   const confirmed = typed.trim().toLowerCase() === CONFIRM_WORD;
 
   const submit = () => {
-    if (!confirmed) return;
+    // Both guards live HERE rather than only on the button, because there are
+    // two ways in and `disabled` only closes one of them. `pending` in
+    // particular: a second delete started while the first is in flight arrives
+    // after the session cookie has already gone, comes back `not_signed_in`,
+    // and paints that error over a deletion that actually succeeded. Duo caught
+    // the keyboard path on !237; keeping the condition in one place is what
+    // stops the next call site reintroducing it.
+    if (!confirmed || pending) return;
     setError(null);
     startTransition(async () => {
       try {
