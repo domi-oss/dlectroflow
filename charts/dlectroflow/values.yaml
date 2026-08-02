@@ -205,11 +205,11 @@ backup:
   # has no equivalent, so enabling this puts a long-lived credential in the
   # cluster. Keeping both means that credential can be revoked at any moment
   # without losing the backup, and a B2 outage cannot take the backup with it.
-  # Scope the B2 application key to this bucket: listBuckets, listFiles and
-  # writeFiles. Deliberately no readFiles and no deleteFiles, so a leaked key
-  # can see filenames and sizes and add objects, but cannot download a backup
-  # or destroy one. listFiles is required — the upload stage verifies by
-  # reading the object's size back, which calls b2_list_file_names.
+  # Scope the B2 application key to this bucket, Write Only, restricted to the
+  # `pg/` prefix. Verified against a real key: it can upload, and is denied both
+  # downloading a dump and listing anything outside pg/ — so a cluster
+  # compromise cannot read backups out, destroy them, or reach the other
+  # prefixes in the bucket. No listFiles needed; see backup.yaml for why.
   b2:
     enabled: false
     bucket: ""                     # B2 bucket name, no b2: prefix

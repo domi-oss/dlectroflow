@@ -197,16 +197,20 @@ spec:
                   set -euo pipefail
                   STAMP="$(cat /backup/stamp)"
                   DEST="b2:{{ .Values.backup.b2.bucket }}/{{ .Values.backup.b2.prefix }}/dlectroflow-${STAMP}.sql.gz"
-                  rclone copyto /backup/dump.sql.gz "$DEST"
-                  # A copy that exits 0 is not evidence the object exists at the
-                  # right size — read the size back off B2 and compare. The whole
-                  # point of a second destination is defeated if nobody checks it
-                  # arrived.
-                  LOCAL="$(wc -c < /backup/dump.sql.gz)"
-                  REMOTE="$(rclone size --json "$DEST" | sed -n 's/.*"bytes":\([0-9]*\).*/\1/p')"
-                  [ "${REMOTE:-0}" = "${LOCAL}" ] || {
-                    echo "ERROR: B2 size mismatch (remote=${REMOTE:-none} local=${LOCAL})" >&2; exit 1; }
-                  echo "uploaded ${DEST} (${REMOTE} bytes, size verified remotely)"
+                  # --no-check-dest skips the HEAD rclone would otherwise do on
+                  # the destination first. That HEAD is a read, and this key
+                  # deliberately cannot read (verified against a real key: it is
+                  # denied both downloading a dump and listing outside pg/).
+                  # Without the flag every run fails 401 before uploading anything.
+                  rclone copyto --no-check-dest /backup/dump.sql.gz "$DEST"
+                  # No read-back check, and that is not a gap. b2_upload_file
+                  # REQUIRES an X-Bz-Content-Sha1 header and rejects the upload if
+                  # the stored bytes do not match it, so a success here is B2
+                  # confirming the content hash server-side — strictly stronger
+                  # evidence than comparing a byte count, which an earlier version
+                  # of this did. Reading it back would also need listFiles, i.e. a
+                  # wider credential buying a weaker check.
+                  echo "uploaded ${DEST} ($(wc -c < /backup/dump.sql.gz) bytes, sha1 verified by B2 on write)"
               volumeMounts:
                 - name: dump
                   mountPath: /backup

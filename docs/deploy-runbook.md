@@ -265,10 +265,29 @@ because it is additive — the key can be revoked at any moment without losing
 the backup.
 
 **Create the key with the narrowest scope that works:** restricted to the one
-bucket, capabilities `listBuckets`, `listFiles` and `writeFiles`. Deliberately **no
-`readFiles` and no `deleteFiles`** — a key that leaks out of the cluster can
-then write junk, but cannot read your backups out or destroy them. B2 keeps
-prior versions of overwritten objects, so it cannot quietly replace them either.
+bucket, **Type of Access: Write Only**, and **File name prefix: `pg/`**.
+
+This was verified against a real key rather than assumed, because the console's
+access types do not map obviously onto B2's underlying capabilities:
+
+| Operation | Result |
+|---|---|
+| Upload to `pg/` | works (needs `--no-check-dest`, see below) |
+| List `pg/` | denied |
+| Download a dump | **denied** |
+| Reach `claude-memory/` | **denied** — the prefix restriction holds |
+
+So a key leaking out of the cluster can add objects under `pg/` and nothing
+else. It cannot read a backup, delete one, or see the other prefixes sharing
+the bucket. B2 also versions overwritten objects, so it cannot quietly replace
+an existing dump.
+
+Two consequences for the job. `rclone copyto` needs `--no-check-dest`, because
+its default HEAD on the destination is a read and fails 401 before uploading
+anything. And there is no read-back verification: `b2_upload_file` requires an
+`X-Bz-Content-Sha1` and rejects a mismatch, so a successful upload is B2
+confirming the content hash server-side — stronger than comparing a byte count,
+and it needs no extra permission.
 
 Set four CI variables (all **protected + masked**):
 
@@ -291,9 +310,9 @@ producing a CronJob that uploads nowhere.
 kubectl -n dlectroflow-prod logs job/<latest> -c upload-b2
 rclone ls b2:<bucket>/pg | tail
 ```
-The container reads the object size back off B2 and fails the job on a
-mismatch, so a green `upload-b2` means the bytes are actually there — not just
-that the copy command exited 0.
+The upload is verified by B2 against the SHA1 rclone sends with it, so a green
+`upload-b2` means B2 stored exactly those bytes — not just that the copy
+command exited 0.
 
 Because both containers must succeed for the Job to succeed, **a B2 outage
 turns the whole backup run red even though GCS succeeded.** That is the
