@@ -8,7 +8,7 @@ import path from "node:path";
 // nothing: the grant stays live in the person's Google account, and every route
 // the product had to withdraw it has just been deleted along with the account.
 const { prismaMock, tryDisconnectGoogleMock } = vi.hoisted(() => ({
-  prismaMock: { user: { deleteMany: vi.fn() } },
+  prismaMock: { user: { deleteMany: vi.fn(), updateMany: vi.fn() } },
   tryDisconnectGoogleMock: vi.fn(),
 }));
 
@@ -17,13 +17,18 @@ vi.mock("@/lib/google", () => ({
   tryDisconnectGoogle: tryDisconnectGoogleMock,
 }));
 
-import { deleteAccount } from "./account-lifecycle";
+import {
+  deleteAccount,
+  freezeAccount,
+  PURGE_GRACE_DAYS,
+} from "./account-lifecycle";
 
 const USER = "user_alice";
 
 beforeEach(() => {
   vi.clearAllMocks();
   prismaMock.user.deleteMany.mockResolvedValue({ count: 1 });
+  prismaMock.user.updateMany.mockResolvedValue({ count: 1 });
   tryDisconnectGoogleMock.mockResolvedValue(true);
 });
 
@@ -62,6 +67,64 @@ describe("deleteAccount", () => {
     // caller wanted, not a P2025 thrown at a purge sweep mid-batch.
     prismaMock.user.deleteMany.mockResolvedValue({ count: 0 });
     expect(await deleteAccount("ghost")).toBe(false);
+  });
+});
+
+// #153 — the freeze half of the same lifecycle. `revokePerson` grew it first,
+// owner-gated; the self-serve entry point needs the identical sequence, so it
+// moved here rather than being written a second time. Every assertion below is
+// about a property the SECOND caller could otherwise have quietly lost.
+describe("freezeAccount", () => {
+  it("freezes the account and schedules its purge 30 days out", async () => {
+    expect(await freezeAccount(USER)).toBe(true);
+
+    const call = prismaMock.user.updateMany.mock.calls[0][0];
+    expect(call.where).toEqual({ id: USER, status: "active" });
+    expect(call.data.status).toBe("revoked");
+    const revokedAt = call.data.revokedAt as Date;
+    const purgeAfter = call.data.purgeAfter as Date;
+    expect(purgeAfter.getTime() - revokedAt.getTime()).toBe(
+      PURGE_GRACE_DAYS * 86_400_000,
+    );
+  });
+
+  it("leaves the account's DATA alone — a freeze is not a delete", async () => {
+    await freezeAccount(USER);
+    const { data } = prismaMock.user.updateMany.mock.calls[0][0];
+    expect(Object.keys(data).sort()).toEqual([
+      "purgeAfter",
+      "revokedAt",
+      "status",
+    ]);
+    expect(prismaMock.user.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("withdraws the Google grant BEFORE the freeze", async () => {
+    await freezeAccount(USER);
+
+    expect(tryDisconnectGoogleMock).toHaveBeenCalledWith(USER);
+    // #126 — whichever step runs first is the one that survives a crash between
+    // them, and "active account, no Google connection" is recoverable by
+    // reconnecting while "frozen account, live grant" is the state that cannot
+    // be: a frozen account resolves to null in currentUser() and can no longer
+    // reach its own Disconnect control.
+    expect(tryDisconnectGoogleMock.mock.invocationCallOrder[0]).toBeLessThan(
+      prismaMock.user.updateMany.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("freezes anyway when the revoke could not complete", async () => {
+    // Stopping access is the part that cannot wait for Google to be reachable.
+    tryDisconnectGoogleMock.mockResolvedValue(false);
+    expect(await freezeAccount(USER)).toBe(true);
+    expect(prismaMock.user.updateMany).toHaveBeenCalled();
+  });
+
+  it("reports a miss for an account that is not active", async () => {
+    // `status: active` in the filter is what makes a re-freeze idempotent AND
+    // keeps the original `revokedAt` — re-revoking must not push the purge out.
+    prismaMock.user.updateMany.mockResolvedValue({ count: 0 });
+    expect(await freezeAccount("ghost")).toBe(false);
   });
 });
 

@@ -880,6 +880,12 @@ export default function PrivacyPage() {
           <li>
             <strong>Account data</strong> is kept for as long as you have an
             account, and until you ask for it to go.{" "}
+            {/* #153 — deleting your own account reaches exactly the same state
+                the owner's Revoke reaches (both go through `freezeAccount`), so
+                the honest sentence below covers both and is not weakened for
+                the new control. */}
+            Deleting your own account, or having your access revoked, freezes it
+            and marks its content to be removed 30 days later.{" "}
             <strong>Being honest about a gap:</strong> if an account&rsquo;s
             access is revoked, its content is <em>not</em> deleted automatically
             today. It stays until it is deleted by hand. Email me and it will
@@ -1084,7 +1090,20 @@ export default function PrivacyPage() {
             or incomplete. Most of it you can edit yourself in the app.
           </li>
           <li>
-            <strong>Erasure</strong> — deletion of your data. Ask, and it goes.
+            {/* #153 — Art. 12(2) asks me to facilitate the exercise of these
+                rights, and "email a human" is a weaker facilitation than a
+                control you can reach yourself. So the control is named here.
+                It is described as what it DOES — sign you out, end the Google
+                connection, start the window — rather than as an instant
+                erasure, because the retention list above is what governs what
+                happens next and the two must not disagree. */}
+            <strong>Erasure</strong> — deletion of your data. If you have an
+            account, <strong>Settings → Account → Delete my account</strong>{" "}
+            does it: you are signed out, your Google connection here ends, and
+            the retention window described above starts. Or ask, and it goes.
+            The instance owner&rsquo;s own account is the exception — it is the
+            only one that can administer the instance, so it cannot be deleted
+            from the app.
           </li>
           <li>
             <strong>Restriction</strong> — you can ask me to stop using your
@@ -1111,10 +1130,22 @@ export default function PrivacyPage() {
         <LegalSubheading>How that actually works here</LegalSubheading>
         <p>
           <strong>There is no self-service export button yet.</strong> I am
-          telling you rather than implying otherwise: access, portability and
-          erasure requests are handled <em>by me, by hand</em>, from that email
-          address. It is less slick than a download link and it is exactly as
-          binding.
+          telling you rather than implying otherwise: access and portability
+          requests are handled <em>by me, by hand</em>, from that email address.
+          It is less slick than a download link and it is exactly as binding.
+        </p>
+        {/* #153 — erasure came off that list, so this paragraph had to stop
+            saying it was on it. The caveat is not a hedge: the control freezes
+            the account and starts the retention window, and removing the
+            content sooner than that window is still a hand operation, so
+            somebody who wants it gone today has to ask. */}
+        <p>
+          <strong>Erasure is the one you can do yourself.</strong>{" "}
+          <strong>Settings → Account → Delete my account</strong> ends your
+          access straight away and starts the retention window. You can still
+          email instead — and you will need to if you want the content itself
+          removed before that window is up, because that last step is done by
+          hand.
         </p>
         <p>
           I will respond <strong>within one month</strong> of your request,

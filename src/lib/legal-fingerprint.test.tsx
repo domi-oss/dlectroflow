@@ -86,7 +86,7 @@ function fingerprint(node: React.ReactElement): string {
  * putting it there would invite it into a page.
  */
 const PUBLISHED = {
-  privacy: "de21f43f26544d19cd3f3e4b8ac66d7690ae5d279c2e98b23cd3d56aff258cc0",
+  privacy: "cc762724a83c47439dade1e9711ccffe486213bbac86542fe47a0255faf30dbe",
   terms: "a2f663c5edbd5ebd2d5bba3e64bcb4ff4d97c6ce1ed58af81facd34541efa942",
 } as const;
 

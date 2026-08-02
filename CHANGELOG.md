@@ -29,6 +29,52 @@ operators upgrading a self-hosted instance don't get surprised.
 > (#148), so the image published as `:v0.4.0` was built from a tree that called
 > itself 0.3.0.
 
+### Added
+
+- **A member can delete their own account (#153).** Settings → Account gains a
+  **Delete my account** control. v0.5.0 put other people's data in the database
+  and the published Privacy Policy names an individual as data controller, so
+  UK GDPR Art. 17 erasure is an obligation that already existed — and until now
+  the only way to exercise it was to ask the owner to run it on your behalf,
+  because every route into the account lifecycle was `isOwnerRequest()`-gated.
+  - **It freezes, it does not destroy.** The action writes the same
+    `revokedAt` / `purgeAfter` window the owner's Revoke writes, so an accidental
+    self-deletion is exactly as recoverable as an accidental revoke. The
+    confirmation says so — including the part that is not automatic yet: nothing
+    reads `purgeAfter`, so the final deletion is still a hand operation, which
+    is what /privacy has said since #123.
+  - **The Google grant is withdrawn at Google first (#126).** The freeze
+    sequence moved into `freezeAccount` (`src/lib/account-lifecycle.ts`) rather
+    than being written a second time, so the new entry point cannot skip the
+    revoke — a frozen account resolves to `null` in `currentUser()` and can no
+    longer reach its own Disconnect control, which is precisely the state that
+    ordering exists to prevent.
+  - **The action takes no arguments.** The account it ends is the session's, so
+    there is nothing for a hand-rolled POST to point at somebody else's row.
+  - **The owner is refused**, for the reason `revokePerson` already refuses
+    owner self-revocation: an instance whose owner deleted themselves has no
+    route back through the UI. They get the sentence explaining why, not a
+    control that could only fail.
+  - **The confirmation is a real modal dialog**, not an inline row and not
+    `confirm()`: `role="alertdialog"`, focus trapped and restored to the
+    trigger, Escape and Cancel both an exit, and the word `delete` typed before
+    the destructive button enables. The destructive read is carried by the word
+    "Permanent" and by the button's own label, not by colour (WCAG 1.4.1), and
+    both controls meet the 44px target size at 390px (WCAG 2.5.5).
+
+### Changed
+
+- **Privacy Policy — effective date 2 August 2026.** The Erasure right now names
+  the self-serve control and its one exception (the owner's own account), and
+  the retention section says what deleting your own account does. How a data
+  subject exercises an Art. 17 right is part of the Art. 12/13 disclosure, so it
+  is a substantive change rather than a copy tweak.
+- `docs/legal.md`'s "Google revocation: the gap the pages admit" section was
+  stale — it still described freeze and delete as paths that never call Google's
+  revoke endpoint, which #126 fixed in v0.5.0. Corrected, and the residue that
+  *is* still true (the revoke is a request Google can refuse) is stated
+  separately so it does not get lost with it.
+
 ### Fixed
 
 - **A signing-in user no longer makes the logs report an incident that never

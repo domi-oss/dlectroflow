@@ -19,9 +19,17 @@ vi.mock("@/app/actions/settings", () => ({
 vi.mock("@/app/actions/google-schedule", () => ({
   disconnectGoogleTasks: vi.fn().mockResolvedValue(undefined),
 }));
+// All three exports, not only the two this file exercises. `AccountPanel` is
+// rendered here with `isOwner={false}`, which since #153 renders `DeleteAccount`
+// and pulls `deleteOwnAccount` in from the same module — a factory mock replaces
+// the module wholesale, so an omitted export is `undefined` rather than absent.
+// Nothing here triggers the delete flow, so it passes either way today; the cost
+// lands on whoever adds that interaction and gets "not a function" instead of a
+// failing assertion. Raised in review on !237.
 vi.mock("@/app/actions/account", () => ({
   saveOwnLlmKey: vi.fn().mockResolvedValue({ ok: true }),
   removeOwnLlmKey: vi.fn().mockResolvedValue({ ok: true }),
+  deleteOwnAccount: vi.fn().mockResolvedValue({ ok: true }),
 }));
 vi.mock("@/app/actions/people", () => ({
   invitePerson: vi.fn().mockResolvedValue({ ok: true }),
@@ -117,6 +125,8 @@ function AllSections({ voice = "plain" as Voice }) {
         provider="gitlab"
         keyPresent={false}
         activeModelName="claude-sonnet-4-6"
+        isOwner={false}
+        purgeGraceDays={30}
         voice={voice}
       />
     </>

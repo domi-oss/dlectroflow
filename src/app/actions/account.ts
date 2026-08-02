@@ -1,9 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { currentUser } from "@/lib/workspace";
 import { encryptToken } from "@/lib/crypto/token-cipher";
+import { freezeAccount } from "@/lib/account-lifecycle";
+import { OWNER_COOKIE } from "@/lib/auth/session";
+import { UserRole } from "@/lib/constants";
 
 /**
  * #35 Phase C (#118) — the caller's OWN account settings.
@@ -36,6 +40,15 @@ import { encryptToken } from "@/lib/crypto/token-cipher";
 export type AccountActionResult =
   | { ok: true }
   | { ok: false; error: "not_signed_in" | "invalid_key" | "not_found" };
+
+/**
+ * #153 — the self-serve deletion's outcomes. A separate union from
+ * `AccountActionResult` on purpose: `invalid_key` and `not_found` are not
+ * reachable here, and a panel that has to handle impossible cases stops
+ * describing what can actually happen.
+ */
+export type DeleteAccountResult =
+  { ok: true } | { ok: false; error: "not_signed_in" | "owner_cannot_delete" };
 
 /**
  * Longest key we will store. Anthropic and OpenAI-compatible keys are ~100–200
@@ -127,4 +140,67 @@ export async function ownLlmKeyPresent(): Promise<boolean> {
     select: { id: true },
   });
   return row != null;
+}
+
+/**
+ * #153 — delete your own account. UK GDPR Art. 17, served by a control instead
+ * of by asking the owner to run it on your behalf.
+ *
+ * Rule 1 at the top of this file is doing the heaviest lifting it has done yet.
+ * **This action takes no arguments**, so the account it ends is the session's
+ * and there is nothing for a hand-rolled POST to point at somebody else's row.
+ * A `userId` parameter with an `=== me.id` check would be the same feature and a
+ * far worse one: the guard would be a line of code that a later refactor can
+ * drop, rather than an argument that does not exist.
+ * `account.test.ts` asserts the arity, and asserts that an id passed anyway is
+ * ignored.
+ *
+ * IT FREEZES, IT DOES NOT DESTROY. `freezeAccount` writes the same
+ * `revokedAt`/`purgeAfter` window an owner-initiated revoke writes, so a
+ * mis-tap here is exactly as recoverable as a mis-click there — and the Google
+ * grant is withdrawn AT GOOGLE on the way through (#126), which is the one part
+ * of the sequence a new entry point could most easily have skipped. The window
+ * is honest copy rather than an automatic countdown: nothing reads `purgeAfter`
+ * yet, so the confirmation says the final deletion is done by hand today (see
+ * `src/components/settings/delete-account.tsx`, and /privacy's retention list,
+ * which has said so since #123).
+ *
+ * THE OWNER IS REFUSED. `revokePerson` refuses owner self-revocation because the
+ * owner is the only account that can manage people; an instance whose owner
+ * froze themselves has no route back through the UI. That reasoning does not
+ * change when the request arrives from the account's own settings page, so the
+ * refusal is repeated here rather than assumed to be somebody else's job.
+ */
+export async function deleteOwnAccount(): Promise<DeleteAccountResult> {
+  const me = await currentUser();
+  if (!me) return NOT_SIGNED_IN;
+  if (me.role === UserRole.Owner) {
+    return { ok: false, error: "owner_cannot_delete" };
+  }
+
+  // The return value is deliberately not turned into an error. `currentUser()`
+  // has already proved this row exists AND is active, so `false` is only
+  // reachable when the owner revoked the same account between the two queries —
+  // in which case the caller's outcome holds, and reporting a failure would
+  // only invite them to press it again.
+  await freezeAccount(me.id);
+
+  // End the session HERE, not in the panel. The account is frozen, so
+  // `currentUser()` already resolves it to null — but `resolveWorkspace()`
+  // reads the workspace id straight out of the signed cookie without consulting
+  // `status`, so a surviving cookie would keep serving that workspace's content
+  // to a browser whose account no longer exists. Deleting the cookie is also
+  // simply what the person asked for: "delete my account" means signed out.
+  (await cookies()).delete(OWNER_COOKIE);
+
+  // Kept despite the cookie above already being gone, and the reason is not the
+  // server cache: `/settings` reads cookies, so it renders dynamically and was
+  // never in the Full Route Cache to invalidate. What this does reach is the
+  // CLIENT Router Cache of the browser that invoked the action — a server action
+  // that calls it returns a revalidation signal with its response, so the stale
+  // `/settings` payload cannot be replayed from a Back navigation before
+  // `router.refresh()` lands. Belt and braces with the panel's `refresh()`, and
+  // consistent with the two mutating actions above. Raised in review on !237.
+  revalidatePath("/settings");
+  return { ok: true };
 }

@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { tryDisconnectGoogle } from "@/lib/google";
+import { UserStatus } from "@/lib/constants";
 
 /**
  * #126 — deleting an account, and the ONE place allowed to do it.
@@ -23,9 +24,9 @@ import { tryDisconnectGoogle } from "@/lib/google";
  * the connection is ended.
  *
  * There is deliberately no UI behind this. `User.purgeAfter` is written by
- * `revokePerson` and not yet read by anything (Phase D owns that sweep), and
- * erasure requests are served by hand from the published contact address. This
- * function exists so that whatever finally deletes an account — the Phase D
+ * `freezeAccount` below and not yet read by anything (Phase D owns that sweep),
+ * and the final erasure is served by hand from the published contact address.
+ * This function exists so that whatever finally deletes an account — the Phase D
  * purge job, an operator script, a self-service route — cannot do it the wrong
  * way by default; `account-lifecycle.test.ts` enforces that no other module in
  * `src/` deletes a `User` at all.
@@ -43,5 +44,64 @@ export async function deleteAccount(userId: string): Promise<boolean> {
   // `deleteMany`, not `delete`: deleting an account that is already gone is the
   // outcome the caller asked for, not a P2025 thrown into the middle of a batch.
   const { count } = await prisma.user.deleteMany({ where: { id: userId } });
+  return count > 0;
+}
+
+/**
+ * Freeze-then-purge window, in days. Phase D's sweep is what will act on
+ * `purgeAfter`; until then the window is a RECOVERY period rather than a
+ * countdown, and every piece of copy that mentions it says so (see
+ * `src/components/settings/delete-account.tsx` and /privacy's retention list).
+ */
+export const PURGE_GRACE_DAYS = 30;
+
+/**
+ * #153 — freeze one account: withdraw its Google grant, stop it acting now, and
+ * stamp the 30-day window its data is kept for.
+ *
+ * This lived inline in `revokePerson` (src/app/actions/people.ts) until a SECOND
+ * caller needed it. It moved here rather than being written twice, because the
+ * sequence has three properties that a re-implementation would lose one at a
+ * time, and two of them are silent when lost:
+ *
+ *  1. THE GOOGLE REVOKE COMES FIRST, and it is a revoke AT GOOGLE, not a local
+ *     token delete (#126). Whichever step runs first is the one that survives a
+ *     crash between them, and "active account, no Google connection" is
+ *     recoverable by reconnecting while "frozen account, live grant" is exactly
+ *     the state this ordering exists to prevent: a frozen account resolves to
+ *     `null` in `currentUser()` and can no longer reach its own Disconnect
+ *     control, so the grant becomes one its owner cannot withdraw through the
+ *     product. Consent that cannot be withdrawn as easily as it was given is
+ *     what UK GDPR Art. 7(3) forbids.
+ *  2. IT IS BEST-EFFORT ABOUT GOOGLE AND UNCONDITIONAL ABOUT THE FREEZE.
+ *     `tryDisconnectGoogle` reports rather than raises, so an unreachable Google
+ *     can never leave an account unfrozen — stopping access is the part that
+ *     cannot wait. Both ways it can fall short are logged there
+ *     (`google_disconnect_failed`, with the reason) rather than papered over.
+ *  3. `status: active` IS PART OF THE FILTER, not merely something the caller
+ *     checked. That is what makes a second freeze idempotent AND keeps the
+ *     original `revokedAt`: re-revoking must not push the purge date out.
+ *
+ * The freeze takes effect on the NEXT REQUEST rather than at the next sign-in,
+ * because `currentUser()` re-reads `status` on every request
+ * (src/lib/workspace.ts). No data is touched: this schedules, it does not
+ * destroy. `deleteAccount` above is the only thing in `src/` that destroys.
+ *
+ * Returns whether an ACTIVE account was frozen — false for an unknown id and
+ * for one that was already revoked. The two are deliberately indistinguishable
+ * from here; the caller knows which it asked for.
+ */
+export async function freezeAccount(userId: string): Promise<boolean> {
+  await tryDisconnectGoogle(userId);
+
+  const now = new Date();
+  const { count } = await prisma.user.updateMany({
+    where: { id: userId, status: UserStatus.Active },
+    data: {
+      status: UserStatus.Revoked,
+      revokedAt: now,
+      purgeAfter: new Date(now.getTime() + PURGE_GRACE_DAYS * 86_400_000),
+    },
+  });
   return count > 0;
 }

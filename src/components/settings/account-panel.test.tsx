@@ -12,9 +12,17 @@ const { saveMock, removeMock, refreshMock } = vi.hoisted(() => ({
   removeMock: vi.fn(),
   refreshMock: vi.fn(),
 }));
+// `deleteOwnAccount` is here because the panel REACHES it, not because this
+// file exercises it: `AccountPanel` renders `DeleteAccount` whenever `isOwner`
+// is false, and that pulls the export in from this same module. A factory mock
+// replaces the module wholesale, so an omission is `undefined` rather than the
+// real function. Passes either way today; the cost lands on whoever first opens
+// the dialog here and gets "not a function" instead of a failing assertion.
+// Second site of the same miss — see section-headings.test.tsx (!237).
 vi.mock("@/app/actions/account", () => ({
   saveOwnLlmKey: saveMock,
   removeOwnLlmKey: removeMock,
+  deleteOwnAccount: vi.fn().mockResolvedValue({ ok: true }),
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: refreshMock }),
@@ -34,6 +42,10 @@ const props = {
   provider: "gitlab",
   keyPresent: false,
   activeModelName: "claude-sonnet-4-6",
+  // #153 — a MEMBER by default: the delete control is the member's, and the
+  // owner's refusal has its own specs in delete-account.test.tsx.
+  isOwner: false,
+  purgeGraceDays: 30,
   defaultExpanded: true,
 } as const;
 

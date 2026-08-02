@@ -170,6 +170,17 @@ const memberServerEnv = {
   PORT: String(new URL(MEMBER_BASE_URL).port),
 };
 
+/**
+ * The specs that must run as the invited MEMBER rather than as the owner.
+ *
+ * A filename prefix rather than a list, and stated ONCE so the two projects
+ * cannot disagree: `chromium` ignores exactly what `member` claims. A spec that
+ * matched neither would silently never run, and one that matched both would run
+ * a member's assertions against the owner's session and fail for the wrong
+ * reason. Name a new one `member-*.spec.ts` and it lands in the right project.
+ */
+const MEMBER_SPECS = /member-[\w-]+\.spec\.ts/;
+
 export default defineConfig({
   testDir: "./e2e",
   testMatch: "**/*.spec.ts",
@@ -189,15 +200,18 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      // The member specs need the Google-configured server, so they are excluded
+      // The member specs need the member's own session, so they are excluded
       // here rather than skipped inside the spec: a spec that silently passes
       // against the wrong server is worse than one that does not run.
-      testIgnore: /member-google\.spec\.ts/,
+      testIgnore: MEMBER_SPECS,
       use: { ...devices["Desktop Chrome"] },
     },
     {
-      name: "member-google",
-      testMatch: /member-google\.spec\.ts/,
+      // #153 renamed this from `member-google`: the project is "the member's own
+      // session", and Google was merely its first occupant. Self-serve account
+      // deletion is the second, and it is not a Google feature.
+      name: "member",
+      testMatch: MEMBER_SPECS,
       use: {
         ...devices["Desktop Chrome"],
         baseURL: MEMBER_BASE_URL,

@@ -389,7 +389,7 @@ for (const theme of THEMES) {
     // `google.configured` is false here and IntegrationsPanel renders no
     // Disconnect control at all.
     //
-    // #118 Phase C made it reachable, in the `member-google` project: that
+    // #118 Phase C made it reachable, in the `member` project: that
     // server has a dummy Google client and global-setup seeds the member an
     // encrypted credential, so e2e/smoke/member-google.spec.ts opens the confirm
     // state and measures the CTA's touch target at 390px. It still shares the

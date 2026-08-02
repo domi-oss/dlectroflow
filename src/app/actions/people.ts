@@ -3,8 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { prisma, isUniqueViolation } from "@/lib/db";
 import { isOwnerRequest, currentUser } from "@/lib/workspace";
-import { tryDisconnectGoogle } from "@/lib/google";
-import { AiPolicy, UserStatus } from "@/lib/constants";
+import { freezeAccount } from "@/lib/account-lifecycle";
+import { AiPolicy } from "@/lib/constants";
 
 /**
  * #35 Phase B — the owner-only People actions.
@@ -157,21 +157,27 @@ export async function updatePersonAiPolicy(input: {
   return { ok: true };
 }
 
-/** Freeze-then-purge window. Phase D's sweep is what acts on `purgeAfter`. */
-const PURGE_GRACE_DAYS = 30;
-
 /**
  * Revoke an account: withdraw its Google grant, freeze it now, and schedule its
  * data for purge in 30 days.
  *
- * Freezing takes effect on the NEXT REQUEST, not at the next sign-in, because
- * `currentUser()` re-reads `status` on every request (src/lib/workspace.ts). The
- * data is untouched here; Phase D owns the sweep that acts on `purgeAfter`, so a
- * mistaken revoke is recoverable for a month.
+ * The sequence itself is `freezeAccount` (src/lib/account-lifecycle.ts) — #153
+ * gave it a second caller, so it moved next to `deleteAccount` where the rest of
+ * the account lifecycle lives. Read its docblock for why the Google revoke comes
+ * first, why the freeze runs whatever Google says, and why `status: active` is
+ * in the filter. What stays HERE is the only part that is about this panel: who
+ * is allowed to ask.
  *
  * The owner cannot revoke themselves: they are the only account that can manage
  * people, so freezing it would lock the instance's administration away with no
- * route back through the UI.
+ * route back through the UI. #153's self-serve deletion carries the same refusal
+ * for the same reason (`owner_cannot_delete` in src/app/actions/account.ts).
+ *
+ * The Google result is deliberately not surfaced to the owner. `false` is only
+ * reachable when a token EXISTED, so a message about it would tell the owner
+ * whether that member had connected Google — the one thing the People panel is
+ * designed never to disclose (src/lib/people.ts, and the Privacy Policy's "does
+ * not even disclose whether you have one").
  */
 export async function revokePerson(
   userId: string,
@@ -183,57 +189,7 @@ export async function revokePerson(
     return { ok: false, error: "cannot_revoke_self" };
   }
 
-  // #126 — the owner's revoke takes the Google grant with it.
-  //
-  // These are arguably two different acts: ending someone's access to this
-  // instance, and withdrawing the consent they gave Google on their own
-  // account. The call made here is that a grant which only ever existed to
-  // serve this app must not outlive the app's access to them — the alternative
-  // leaves a live grant its owner CANNOT withdraw through the product, because
-  // a frozen account resolves to `null` in `currentUser()` and can no longer
-  // reach the Disconnect control. Consent that cannot be withdrawn as easily as
-  // it was given is the thing UK GDPR Art. 7(3) forbids, and a stale grant the
-  // member never revisits is the larger risk of the two.
-  //
-  // BEFORE the freeze, not after: whichever step runs first is the one that
-  // survives a crash between them, and "active account, no Google connection"
-  // is recoverable by reconnecting while "frozen account, live grant" is the
-  // exact state this fixes.
-  //
-  // Best-effort, and the freeze runs whatever comes back — stopping access is
-  // the part that cannot wait for Google. `tryDisconnectGoogle` reports rather
-  // than raises, so an unreachable Google can never leave an account unfrozen.
-  // It does NOT promise a clean end state, and both ways it can fall short are
-  // logged (`google_disconnect_failed`, with the reason) rather than papered
-  // over here:
-  //   • Google refused the revoke — the stored tokens are deleted regardless,
-  //     but the grant may stay listed in that person's Google account until
-  //     they clear it. The Privacy Policy says exactly this and points at
-  //     Google's permissions page.
-  //   • the tokens could not be deleted — the credential row may survive on an
-  //     account that is now unreachable. `deleteAccount` has the FK cascade
-  //     behind it for that; a freeze has no backstop at all, so it needs
-  //     clearing by hand.
-  //
-  // The result is deliberately not surfaced to the owner. `false` is only
-  // reachable when a token EXISTED, so a message about it would tell the owner
-  // whether that member had connected Google — the one thing the People panel
-  // is designed never to disclose (src/lib/people.ts, and the Privacy Policy's
-  // "does not even disclose whether you have one").
-  await tryDisconnectGoogle(userId);
-
-  const now = new Date();
-  const res = await prisma.user.updateMany({
-    // `status: active` in the filter makes this idempotent AND keeps the
-    // original `revokedAt` — re-revoking must not push the purge date out.
-    where: { id: userId, status: UserStatus.Active },
-    data: {
-      status: UserStatus.Revoked,
-      revokedAt: now,
-      purgeAfter: new Date(now.getTime() + PURGE_GRACE_DAYS * 86_400_000),
-    },
-  });
-  if (res.count === 0) return { ok: false, error: "not_found" };
+  if (!(await freezeAccount(userId))) return { ok: false, error: "not_found" };
 
   revalidatePath("/settings");
   return { ok: true };

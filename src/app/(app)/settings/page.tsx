@@ -20,6 +20,7 @@ import { AppearanceSection } from "@/components/settings/appearance-section";
 import { FocusTimerSection } from "@/components/settings/focus-timer-section";
 import { IntegrationsPanel } from "@/components/settings/integrations-panel";
 import { AccountPanel } from "@/components/settings/account-panel";
+import { PURGE_GRACE_DAYS } from "@/lib/account-lifecycle";
 import { BackLink } from "@/components/nav/back-link";
 import { SectionNav } from "@/components/nav/section-nav";
 import { SETTINGS_SECTIONS } from "@/lib/section-nav";
@@ -197,6 +198,13 @@ export default async function SettingsPage({
               tier: "member",
               hasOwnKey: true,
             })}
+            // #153 — the owner is refused a self-serve deletion (the action
+            // refuses it too; this only decides whether they are shown a
+            // control that could never succeed). The window is resolved here
+            // because @/lib/account-lifecycle imports Prisma, so a client
+            // component must be handed the number rather than import it.
+            isOwner={owner}
+            purgeGraceDays={PURGE_GRACE_DAYS}
             voice={voice}
           />
         </div>
