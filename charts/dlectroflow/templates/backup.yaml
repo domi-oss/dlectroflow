@@ -93,6 +93,13 @@ spec:
                   echo "dump bytes: ${SIZE}"
                   # Guard against a degenerate/empty dump silently becoming "the backup".
                   [ "${SIZE}" -gt 1024 ] || { echo "ERROR: dump suspiciously small (${SIZE} bytes)" >&2; exit 1; }
+                  # One stamp, written once and shared by every upload stage, so the
+                  # copies in different buckets carry the SAME object name. Letting
+                  # each uploader call date(1) separately makes two names that differ
+                  # by a second or two, and then nothing can prove the B2 copy and the
+                  # GCS copy are the same dump — which is the only question that
+                  # matters while migrating between them.
+                  date -u +%Y%m%dT%H%M%SZ > /backup/stamp
               volumeMounts:
                 - name: dump
                   mountPath: /backup
@@ -125,7 +132,7 @@ spec:
               args:
                 - |
                   set -euo pipefail
-                  STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+                  STAMP="$(cat /backup/stamp)"
                   DEST="gs://{{ .Values.backup.gcsBucket }}/pg/dlectroflow-${STAMP}.sql.gz"
                   gcloud storage cp /backup/dump.sql.gz "$DEST"
                   echo "uploaded ${DEST}"
@@ -142,4 +149,98 @@ spec:
                 limits:
                   cpu: 250m
                   memory: 512Mi
+            {{- if .Values.backup.b2.enabled }}
+            {{- if not .Values.backup.b2.bucket }}
+            {{- fail "backup.b2.enabled is true but backup.b2.bucket is empty — refusing to render a CronJob that would upload nowhere" }}
+            {{- end }}
+            {{- /* Both values are interpolated into a double-quoted shell string,
+                   so a stray quote or backtick would escape it. Neither is legal
+                   in a B2 bucket name or a sane object prefix, so reject them at
+                   render time rather than shipping a CronJob that mangles its
+                   own destination. */}}
+            {{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._/-]*$" .Values.backup.b2.bucket) }}
+            {{- fail (printf "backup.b2.bucket %q contains characters that are unsafe to interpolate into a shell command" .Values.backup.b2.bucket) }}
+            {{- end }}
+            {{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._/-]*$" .Values.backup.b2.prefix) }}
+            {{- fail (printf "backup.b2.prefix %q contains characters that are unsafe to interpolate into a shell command" .Values.backup.b2.prefix) }}
+            {{- end }}
+            {{- /* Declared defaults make the surface discoverable; this makes an
+                   unset value loud. Without it a deploy that forgot the CI flags
+                   renders empty credentials and the CronJob fails nightly with a
+                   401 that looks like a B2 problem rather than a config one. */}}
+            {{- if or (not .Values.secrets.b2KeyId) (not .Values.secrets.b2AppKey) }}
+            {{- fail "backup.b2.enabled is true but secrets.b2KeyId / secrets.b2AppKey are empty — set BACKUP_B2_KEY_ID and BACKUP_B2_APP_KEY" }}
+            {{- end }}
+            # Second destination, running alongside the GCS upload rather than
+            # replacing it. GCS auth is keyless (Workload Identity); B2 has no
+            # equivalent and needs a long-lived key, so this is a strictly worse
+            # credential posture — worth it only because it is ADDITIVE. Revoking
+            # the B2 key, or B2 being unreachable, still leaves a good backup.
+            #
+            # Both containers must exit 0 for the Job to succeed, so a B2 failure
+            # turns the run RED. That is deliberate: a destination that quietly
+            # stops receiving backups is the failure this whole job exists to
+            # avoid, and a red CronJob is the only thing anyone will notice.
+            - name: upload-b2
+              image: {{ .Values.backup.b2.image | quote }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                # rclone writes a token cache next to its config even when fully
+                # configured by environment, so both point at the writable tmpfs.
+                - name: HOME
+                  value: /tmp
+                - name: RCLONE_CONFIG
+                  value: /tmp/rclone.conf
+                # Remote defined entirely by env so no config file is baked into
+                # the image and no secret is ever written to disk.
+                - name: RCLONE_CONFIG_B2_TYPE
+                  value: b2
+                - name: RCLONE_CONFIG_B2_ACCOUNT
+                  valueFrom:
+                    secretKeyRef:
+                      name: dlectroflow-secrets
+                      key: B2_KEY_ID
+                - name: RCLONE_CONFIG_B2_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: dlectroflow-secrets
+                      key: B2_APP_KEY
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  STAMP="$(cat /backup/stamp)"
+                  DEST="b2:{{ .Values.backup.b2.bucket }}/{{ .Values.backup.b2.prefix }}/dlectroflow-${STAMP}.sql.gz"
+                  # --no-check-dest skips the HEAD rclone would otherwise do on
+                  # the destination first. That HEAD is a read, and this key
+                  # deliberately cannot read (verified against a real key: it is
+                  # denied both downloading a dump and listing outside pg/).
+                  # Without the flag every run fails 401 before uploading anything.
+                  rclone copyto --no-check-dest /backup/dump.sql.gz "$DEST"
+                  # No read-back check, and that is not a gap. b2_upload_file
+                  # REQUIRES an X-Bz-Content-Sha1 header and rejects the upload if
+                  # the stored bytes do not match it, so a success here is B2
+                  # confirming the content hash server-side — strictly stronger
+                  # evidence than comparing a byte count, which an earlier version
+                  # of this did. Reading it back would also need listFiles, i.e. a
+                  # wider credential buying a weaker check.
+                  echo "uploaded ${DEST} ($(wc -c < /backup/dump.sql.gz) bytes, sha1 verified by B2 on write)"
+              volumeMounts:
+                - name: dump
+                  mountPath: /backup
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 250m
+                  memory: 256Mi
+            {{- end }}
 {{- end }}

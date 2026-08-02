@@ -219,6 +219,26 @@ export interface ConfigSurfaceException {
  */
 export const CONFIG_SURFACE_ALLOWLIST: readonly ConfigSurfaceException[] = [
   {
+    key: "B2_KEY_ID",
+    declaredOn: "chart",
+    reason:
+      "Read only by the backup CronJob's `upload-b2` container, never by the " +
+      "app process — nothing in src/ references it. The Compose path has no " +
+      "equivalent because it has no backup job at all: docs/self-host-vps.md " +
+      "points self-hosters at pg_dump plus their own object storage or " +
+      "provider snapshots. Publishing it in .env.prod.example would advertise " +
+      "config that does nothing on that path, which is the opposite of what " +
+      "#135 is for.",
+  },
+  {
+    key: "B2_APP_KEY",
+    declaredOn: "chart",
+    reason:
+      "Pair of B2_KEY_ID; same reasoning. Scope the application key to the one " +
+      "bucket with writeFiles only, so the credential this puts in the cluster " +
+      "cannot read existing backups out or delete them.",
+  },
+  {
     key: "DLECTROFLOW_DOMAIN",
     declaredOn: "compose",
     reason:

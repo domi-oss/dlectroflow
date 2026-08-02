@@ -231,6 +231,7 @@ note above.
 
 1. Branch from `main` (e.g. `feat/short-description` or `fix/short-description`).
 2. Use clear, [Conventional-Commits](https://www.conventionalcommits.org/)-style messages (`feat:`, `fix:`, `docs:`, `chore:` …).
+   **The title-length rule above applies to MR titles too** — aim for 60 characters, treat 72 as the ceiling. The reasoning in ["Writing an issue title"](#writing-an-issue-title) is about titles being read in a list and quoted inline, and an MR title is read and quoted in exactly the same places. The `type(scope):` prefix counts toward the budget, so `feat(backup):` has already spent 13 of it.
 3. Open the MR against `main`. Every MR gets its **own review app** — you and reviewers can click around the change live.
 4. Make sure the pipeline is green and describe what you changed and why.
 5. GitLab Duo reviews MRs automatically; the maintainer gives the final approval and merge.

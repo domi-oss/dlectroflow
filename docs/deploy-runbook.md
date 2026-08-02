@@ -212,7 +212,7 @@ ingress `X-Forwarded-Proto` header and Task 3's `requestOrigin`.
 - Google "Connect" completes on the prod host.
 - Close the MR → review namespace is deleted.
 
-## 12. Database backups (GCS, prod only)
+## 12. Database backups (GCS + optional B2, prod only)
 
 The in-cluster Postgres is a single-replica StatefulSet on one PVC, so a logical
 backup is the recovery path (see #21). A daily CronJob dumps the DB to GCS.
@@ -243,6 +243,82 @@ gcloud storage ls -l gs://dlectroflow-db-backups-YOUR_GCP_PROJECT/pg/ | tail
 ```
 kubectl -n dlectroflow-prod create job --from=cronjob/dlectroflow-db-backup manual-backup-$(date +%s)
 ```
+
+### Second destination: Backblaze B2 (optional, off by default)
+
+The GCS bucket lives in the same cloud project as the cluster it backs up, which
+means the backups share a failure domain with the thing they exist to recover.
+One deleted project, one revoked credential or one lapsed billing account takes
+the database and every copy of it in the same stroke. Keeping a copy with a
+second provider is the standard mitigation (3-2-1: at least one copy off the
+primary platform), and it matters most here because restoring the database is
+the one recovery path with no alternative — the image rebuilds from source, the
+data does not.
+
+It is **additive** — GCS keeps running exactly as before, and both uploads write
+the same `${STAMP}` filename so the two copies are provably the same dump.
+
+Why it is off by default: GCS uploads keylessly via Workload Identity, while B2
+has no equivalent and needs a long-lived application key held as a Kubernetes
+Secret. That is a worse credential posture, and it is only worth accepting
+because it is additive — the key can be revoked at any moment without losing
+the backup.
+
+**Create the key with the narrowest scope that works:** restricted to the one
+bucket, **Type of Access: Write Only**, and **File name prefix: `pg/`**.
+
+This was verified against a real key rather than assumed, because the console's
+access types do not map obviously onto B2's underlying capabilities:
+
+| Operation | Result |
+|---|---|
+| Upload to `pg/` | works (needs `--no-check-dest`, see below) |
+| List `pg/` | denied |
+| Download a dump | **denied** |
+| Reach `claude-memory/` | **denied** — the prefix restriction holds |
+
+So a key leaking out of the cluster can add objects under `pg/` and nothing
+else. It cannot read a backup, delete one, or see the other prefixes sharing
+the bucket. B2 also versions overwritten objects, so it cannot quietly replace
+an existing dump.
+
+Two consequences for the job. `rclone copyto` needs `--no-check-dest`, because
+its default HEAD on the destination is a read and fails 401 before uploading
+anything. And there is no read-back verification: `b2_upload_file` requires an
+`X-Bz-Content-Sha1` and rejects a mismatch, so a successful upload is B2
+confirming the content hash server-side — stronger than comparing a byte count,
+and it needs no extra permission.
+
+Set four CI variables (all **protected + masked**):
+
+| Variable | Value |
+|---|---|
+| `BACKUP_B2_ENABLED` | `true` |
+| `BACKUP_B2_BUCKET` | bucket name, no `b2:` prefix |
+| `BACKUP_B2_KEY_ID` | application key ID |
+| `BACKUP_B2_APP_KEY` | application key |
+
+`BACKUP_B2_ENABLED` is read at deploy time, so **turning B2 off during an
+incident is a variable change plus a redeploy, not a code change.**
+
+The chart refuses to render if `backup.b2.enabled` is true with an empty
+bucket, so a half-configured deploy fails at `helm template` rather than
+producing a CronJob that uploads nowhere.
+
+**Verify after the next scheduled run:**
+```
+kubectl -n dlectroflow-prod logs job/<latest> -c upload-b2
+rclone ls b2:<bucket>/pg | tail
+```
+The upload is verified by B2 against the SHA1 rclone sends with it, so a green
+`upload-b2` means B2 stored exactly those bytes — not just that the copy
+command exited 0.
+
+Because both containers must succeed for the Job to succeed, **a B2 outage
+turns the whole backup run red even though GCS succeeded.** That is the
+intended trade: a destination silently receiving nothing is the failure this
+job exists to prevent, and a red CronJob is the only version of it anyone
+notices.
 
 ### Restore (into a scratch DB first — never straight over prod)
 1. Pull the dump you want:

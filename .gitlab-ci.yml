@@ -903,6 +903,10 @@ deploy_production:
         --set backup.enabled=true
         --set-string backup.gcsBucket="$BACKUP_GCS_BUCKET"
         --set-string backup.gcpServiceAccount="$BACKUP_GCP_SA"
+        --set backup.b2.enabled="${BACKUP_B2_ENABLED:-false}"
+        --set-string backup.b2.bucket="$BACKUP_B2_BUCKET"
+        --set-string secrets.b2KeyId="$BACKUP_B2_KEY_ID"
+        --set-string secrets.b2AppKey="$BACKUP_B2_APP_KEY"
         --atomic --timeout 20m
   environment:
     name: production
