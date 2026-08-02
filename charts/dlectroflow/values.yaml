@@ -193,6 +193,27 @@ backup:
   # renovate: datasource=docker depName=google/cloud-sdk
   uploadImage: google/cloud-sdk:slim@sha256:4ff69e21bec9a7d0ed54d0134a9b9682fc8008252cb5f173a23ddd70b8e024a4
 
+  # Second backup destination, written ALONGSIDE GCS rather than instead of it.
+  # The GCS bucket sits in the same cloud project as the cluster it backs up, so
+  # today a single deleted project, revoked credential or lapsed billing account
+  # takes the database and every copy of it together. A second provider is the
+  # standard answer (3-2-1: one copy off the primary platform), and restoring a
+  # database is the one recovery path with no alternative — the image rebuilds
+  # from source, the data does not.
+  #
+  # This is additive on purpose. GCS uploads keylessly via Workload Identity; B2
+  # has no equivalent, so enabling this puts a long-lived credential in the
+  # cluster. Keeping both means that credential can be revoked at any moment
+  # without losing the backup, and a B2 outage cannot take the backup with it.
+  # Scope the B2 application key to this bucket with writeFiles only — no
+  # readFiles, no deleteFiles — so a leak cannot exfiltrate or destroy backups.
+  b2:
+    enabled: false
+    bucket: ""                     # B2 bucket name, no b2: prefix
+    prefix: "pg"                   # path within the bucket; matches the GCS layout
+    # renovate: datasource=docker depName=rclone/rclone
+    image: rclone/rclone:1.75@sha256:b06aed988cf5967de7c25be5925240983981c757f4ed1ac9d2fa659d51d60548
+
 # Daily purge of expired guest workspaces + stale guest counters (#21; prod
 # only; see templates/purge-cronjob.yaml). Enabled by default — unlike backup,
 # this needs no external infra (just DATABASE_URL, already in every env), but

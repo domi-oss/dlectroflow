@@ -31,6 +31,13 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Added
 
+- Optional second backup destination: the prod database CronJob can now upload
+  each dump to a Backblaze B2 bucket alongside the existing GCS upload, writing
+  the same timestamped filename to both. Off by default; enabled per-environment
+  with `BACKUP_B2_ENABLED`. The B2 container verifies the uploaded object's size
+  against the local dump and fails the job on a mismatch, and a new
+  `backup-hygiene` guard fails the build if either destination is removed.
+
 - **A member can delete their own account (#153).** Settings → Account gains a
   **Delete my account** control. v0.5.0 put other people's data in the database
   and the published Privacy Policy names an individual as data controller, so

@@ -93,6 +93,13 @@ spec:
                   echo "dump bytes: ${SIZE}"
                   # Guard against a degenerate/empty dump silently becoming "the backup".
                   [ "${SIZE}" -gt 1024 ] || { echo "ERROR: dump suspiciously small (${SIZE} bytes)" >&2; exit 1; }
+                  # One stamp, written once and shared by every upload stage, so the
+                  # copies in different buckets carry the SAME object name. Letting
+                  # each uploader call date(1) separately makes two names that differ
+                  # by a second or two, and then nothing can prove the B2 copy and the
+                  # GCS copy are the same dump — which is the only question that
+                  # matters while migrating between them.
+                  date -u +%Y%m%dT%H%M%SZ > /backup/stamp
               volumeMounts:
                 - name: dump
                   mountPath: /backup
@@ -125,7 +132,7 @@ spec:
               args:
                 - |
                   set -euo pipefail
-                  STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+                  STAMP="$(cat /backup/stamp)"
                   DEST="gs://{{ .Values.backup.gcsBucket }}/pg/dlectroflow-${STAMP}.sql.gz"
                   gcloud storage cp /backup/dump.sql.gz "$DEST"
                   echo "uploaded ${DEST}"
@@ -142,4 +149,76 @@ spec:
                 limits:
                   cpu: 250m
                   memory: 512Mi
+            {{- if .Values.backup.b2.enabled }}
+            {{- if not .Values.backup.b2.bucket }}
+            {{- fail "backup.b2.enabled is true but backup.b2.bucket is empty — refusing to render a CronJob that would upload nowhere" }}
+            {{- end }}
+            # Second destination, running alongside the GCS upload rather than
+            # replacing it. GCS auth is keyless (Workload Identity); B2 has no
+            # equivalent and needs a long-lived key, so this is a strictly worse
+            # credential posture — worth it only because it is ADDITIVE. Revoking
+            # the B2 key, or B2 being unreachable, still leaves a good backup.
+            #
+            # Both containers must exit 0 for the Job to succeed, so a B2 failure
+            # turns the run RED. That is deliberate: a destination that quietly
+            # stops receiving backups is the failure this whole job exists to
+            # avoid, and a red CronJob is the only thing anyone will notice.
+            - name: upload-b2
+              image: {{ .Values.backup.b2.image | quote }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                # rclone writes a token cache next to its config even when fully
+                # configured by environment, so both point at the writable tmpfs.
+                - name: HOME
+                  value: /tmp
+                - name: RCLONE_CONFIG
+                  value: /tmp/rclone.conf
+                # Remote defined entirely by env so no config file is baked into
+                # the image and no secret is ever written to disk.
+                - name: RCLONE_CONFIG_B2_TYPE
+                  value: b2
+                - name: RCLONE_CONFIG_B2_ACCOUNT
+                  valueFrom:
+                    secretKeyRef:
+                      name: dlectroflow-secrets
+                      key: B2_KEY_ID
+                - name: RCLONE_CONFIG_B2_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: dlectroflow-secrets
+                      key: B2_APP_KEY
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  STAMP="$(cat /backup/stamp)"
+                  DEST="b2:{{ .Values.backup.b2.bucket }}/{{ .Values.backup.b2.prefix }}/dlectroflow-${STAMP}.sql.gz"
+                  rclone copyto /backup/dump.sql.gz "$DEST"
+                  # A copy that exits 0 is not evidence the object exists at the
+                  # right size — read the size back off B2 and compare. The whole
+                  # point of a second destination is defeated if nobody checks it
+                  # arrived.
+                  LOCAL="$(wc -c < /backup/dump.sql.gz)"
+                  REMOTE="$(rclone size --json "$DEST" | sed -n 's/.*"bytes":\([0-9]*\).*/\1/p')"
+                  [ "${REMOTE:-0}" = "${LOCAL}" ] || {
+                    echo "ERROR: B2 size mismatch (remote=${REMOTE:-none} local=${LOCAL})" >&2; exit 1; }
+                  echo "uploaded ${DEST} (${REMOTE} bytes, size verified remotely)"
+              volumeMounts:
+                - name: dump
+                  mountPath: /backup
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 250m
+                  memory: 256Mi
+            {{- end }}
 {{- end }}
