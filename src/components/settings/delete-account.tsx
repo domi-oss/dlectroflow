@@ -104,6 +104,12 @@ export function DeleteAccount({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const fieldId = useId();
+  // `HTMLDivElement` is required, not incidental. Review on !237 suggested
+  // widening this to `HTMLElement` as the more defensive choice; it does not
+  // compile. `AlertDialog.Popup` renders a div and types `initialFocus` as
+  // `Ref<HTMLDivElement>`, and `RefObject` is invariant in its parameter, so the
+  // WIDER type is the one TypeScript rejects — "Property 'align' is missing in
+  // type 'HTMLElement'". Narrow it to whatever the popup actually renders.
   const popupRef = useRef<HTMLDivElement | null>(null);
 
   if (isOwner) {

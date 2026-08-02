@@ -193,6 +193,14 @@ export async function deleteOwnAccount(): Promise<DeleteAccountResult> {
   // simply what the person asked for: "delete my account" means signed out.
   (await cookies()).delete(OWNER_COOKIE);
 
+  // Kept despite the cookie above already being gone, and the reason is not the
+  // server cache: `/settings` reads cookies, so it renders dynamically and was
+  // never in the Full Route Cache to invalidate. What this does reach is the
+  // CLIENT Router Cache of the browser that invoked the action — a server action
+  // that calls it returns a revalidation signal with its response, so the stale
+  // `/settings` payload cannot be replayed from a Back navigation before
+  // `router.refresh()` lands. Belt and braces with the panel's `refresh()`, and
+  // consistent with the two mutating actions above. Raised in review on !237.
   revalidatePath("/settings");
   return { ok: true };
 }
