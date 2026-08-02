@@ -50,9 +50,17 @@ export interface BackupTemplateFacts {
 /** Matches `{{- /* … *​/ -}}`, including the multi-line header comment. */
 const HELM_COMMENT = /\{\{-?\s*\/\*[\s\S]*?\*\/\s*-?\}\}/g;
 
-/** Control actions produce no output, so they are removed outright. */
+/**
+ * Control actions produce no output, so they are removed outright.
+ *
+ * `fail` belongs here and `printf` does not, which is easy to get backwards:
+ * `fail` aborts the render and emits nothing, while `printf` renders a value.
+ * Deleting a `printf` would drop a scalar the document expects and shift the
+ * structure the walk below depends on; leaving `fail` out would turn the
+ * bucket guard in backup.yaml into a stray `"HELM_VALUE"` line.
+ */
 const HELM_CONTROL =
-  /\{\{-?\s*(if|else|else\s+if|end|range|with|define|block|printf)\b[\s\S]*?-?\}\}/g;
+  /\{\{-?\s*(if|else|else\s+if|end|range|with|define|block|fail)\b[\s\S]*?-?\}\}/g;
 
 /** Everything else interpolates a value; keep a scalar so YAML stays valid. */
 const HELM_VALUE = /\{\{[\s\S]*?\}\}/g;
@@ -151,6 +159,11 @@ function collectStages(lines: string[]): BackupStage[] {
     if (name && script.length > 0) {
       stages.push({ name, script: script.join("\n") });
     }
+
+    // Skip past this container's body. Without it the outer loop re-examines
+    // every line inside it, and a nested `- name:` that happened to carry its
+    // own `args:` would be emitted a second time as a phantom stage.
+    i += body.length;
   }
 
   return stages;
@@ -158,15 +171,23 @@ function collectStages(lines: string[]): BackupStage[] {
 
 export function parseBackupTemplate(source: string): BackupTemplateFacts {
   const stages = collectStages(stripHelmActions(source).split("\n"));
-  const allScripts = stages.map((s) => s.script).join("\n");
+
+  // Only the upload stages count. Searching every script concatenated would let
+  // a `# see gs://…` comment in the dump stage satisfy the GCS check, which is
+  // the precise opposite of what this guard is for.
+  const uploadScripts = stages
+    .filter((s) => s.name.includes("upload"))
+    .map((s) => s.script)
+    .join("\n");
 
   return {
     stages,
+    // Match the destination URI, not the tool: `rclone` alone would be
+    // satisfied by an rclone call to some other S3-compatible target, while
+    // the test that reads this claims specifically that B2 is written to.
     destinations: {
-      gcs: /gs:\/\//.test(allScripts),
-      // rclone is how the chart reaches any S3-compatible target; matching the
-      // tool rather than a bucket name keeps this from breaking on a rename.
-      b2: /\brclone\b/.test(allScripts),
+      gcs: /gs:\/\//.test(uploadScripts),
+      b2: /\bb2:/.test(uploadScripts),
     },
   };
 }

@@ -153,6 +153,17 @@ spec:
             {{- if not .Values.backup.b2.bucket }}
             {{- fail "backup.b2.enabled is true but backup.b2.bucket is empty — refusing to render a CronJob that would upload nowhere" }}
             {{- end }}
+            {{- /* Both values are interpolated into a double-quoted shell string,
+                   so a stray quote or backtick would escape it. Neither is legal
+                   in a B2 bucket name or a sane object prefix, so reject them at
+                   render time rather than shipping a CronJob that mangles its
+                   own destination. */}}
+            {{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._/-]*$" .Values.backup.b2.bucket) }}
+            {{- fail (printf "backup.b2.bucket %q contains characters that are unsafe to interpolate into a shell command" .Values.backup.b2.bucket) }}
+            {{- end }}
+            {{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._/-]*$" .Values.backup.b2.prefix) }}
+            {{- fail (printf "backup.b2.prefix %q contains characters that are unsafe to interpolate into a shell command" .Values.backup.b2.prefix) }}
+            {{- end }}
             # Second destination, running alongside the GCS upload rather than
             # replacing it. GCS auth is keyless (Workload Identity); B2 has no
             # equivalent and needs a long-lived key, so this is a strictly worse

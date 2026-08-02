@@ -90,8 +90,51 @@ describe("backup CronJob hygiene", () => {
     }
   });
 
-  it("fails a template that dropped one destination", () => {
-    const gcsOnly = TEMPLATE.replace(/rclone[\s\S]*?\n/g, "\n");
-    expect(parseBackupTemplate(gcsOnly).destinations.b2).toBe(false);
+  // The guard is only worth having if it actually fails when the thing it
+  // guards is removed, so both halves are exercised by deleting a whole upload
+  // stage — the shape a real "tidy-up" would take. An earlier version stripped
+  // `rclone` lines instead, which stopped simulating anything once the B2 check
+  // matched the `b2:` destination rather than the tool name.
+  const withoutStage = (name: string) => {
+    const lines = TEMPLATE.split("\n");
+    const start = lines.findIndex((l) => l.trim() === `- name: ${name}`);
+    expect(
+      start,
+      `stage "${name}" should exist in the template`,
+    ).toBeGreaterThan(-1);
+    const indent = lines[start]!.length - lines[start]!.trimStart().length;
+    let end = start + 1;
+    while (
+      end < lines.length &&
+      (lines[end]!.trim() === "" ||
+        lines[end]!.length - lines[end]!.trimStart().length > indent)
+    ) {
+      end++;
+    }
+    return [...lines.slice(0, start), ...lines.slice(end)].join("\n");
+  };
+
+  it("fails when the B2 upload stage is removed", () => {
+    const facts = parseBackupTemplate(withoutStage("upload-b2"));
+    expect(facts.destinations.b2).toBe(false);
+    expect(facts.destinations.gcs).toBe(true);
+  });
+
+  it("fails when the GCS upload stage is removed", () => {
+    const facts = parseBackupTemplate(withoutStage("upload"));
+    expect(facts.destinations.gcs).toBe(false);
+    expect(facts.destinations.b2).toBe(true);
+  });
+
+  it("does not count a destination mentioned only in the dump stage", () => {
+    // A comment in the dump script must not satisfy an upload check — this is
+    // why the destination scan is scoped to stages named `upload*`.
+    const withComment = TEMPLATE.replace(
+      "                  set -euo pipefail\n                  # Connection literals",
+      "                  set -euo pipefail\n                  # see gs:// and b2: for where this ends up\n                  # Connection literals",
+    );
+    const facts = parseBackupTemplate(withoutStage("upload-b2"));
+    expect(facts.destinations.b2).toBe(false);
+    expect(parseBackupTemplate(withComment).stages.length).toBe(3);
   });
 });
