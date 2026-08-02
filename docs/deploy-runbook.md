@@ -265,7 +265,7 @@ because it is additive — the key can be revoked at any moment without losing
 the backup.
 
 **Create the key with the narrowest scope that works:** restricted to the one
-bucket, capabilities `writeFiles` and `listBuckets` only. Deliberately **no
+bucket, capabilities `listBuckets`, `listFiles` and `writeFiles`. Deliberately **no
 `readFiles` and no `deleteFiles`** — a key that leaks out of the cluster can
 then write junk, but cannot read your backups out or destroy them. B2 keeps
 prior versions of overwritten objects, so it cannot quietly replace them either.
