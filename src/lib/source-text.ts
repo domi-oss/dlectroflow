@@ -1,0 +1,52 @@
+/**
+ * #150 — the step every regex-based source scanner in this repo has to take
+ * before it looks at anything: source with the comments removed.
+ *
+ * Prose that *describes* a construct is indistinguishable from code that *uses*
+ * it once the reader is a regex, and this repo writes long explanatory comments
+ * on purpose — so the modules most likely to trip a scanner are the ones whose
+ * subject matter IS the thing being scanned for. It has now happened twice:
+ * `manifest-hygiene` (#76) read a package name out of the `npm install` header
+ * Prisma generates, and `env-drift` (#30) read `PATH` and an example binding
+ * called `A` out of a doc comment on !227 (#146), failing CI on two variables
+ * that do not exist.
+ *
+ * ── Why this is its own module ───────────────────────────────────────────────
+ * The helper started life inside `manifest-hygiene`, and the obvious fix for
+ * #150 was to import it from there. That works and is wrong: it would make
+ * env-documentation hygiene depend on package-declaration hygiene, two
+ * invariants with nothing to do with each other, and the next person editing
+ * `stripComments` for one scanner's needs would silently change the other's
+ * verdict with no signal that a second caller exists. A neutral text helper is
+ * a dependency a reader accepts at a glance; one scanner reaching into another
+ * is one they have to go and check.
+ *
+ * ── Who does NOT need it ─────────────────────────────────────────────────────
+ * The AST-based scanners (`fetch-host-hygiene`, `git-env-hygiene`) get comment
+ * removal for free, because a parser never sees comments as code. The regex
+ * ones stay regex-based deliberately — dependency-free, and short enough that
+ * the whole rule fits on screen — so this is the price they pay instead.
+ */
+
+/**
+ * `source` with comments removed, so a construct quoted inside a comment (the
+ * `// npm install --save-dev prisma dotenv` header Prisma generates, say, or a
+ * doc comment naming an env variable as an example) is never mistaken for the
+ * real thing.
+ *
+ * The line-comment pass refuses to fire when `//` is preceded by `:`, which
+ * keeps a `https://…` inside a string from truncating the rest of the line.
+ *
+ * Text-level, not a parser: a `//` or `/*` sequence inside a string literal can
+ * still be read as the start of a comment. That errs towards seeing LESS, so
+ * the failure mode is a scanner missing a real occurrence rather than inventing
+ * one — and every caller reports what it finds as a hard CI failure, where a
+ * phantom finding costs a pipeline and a debugging session while a miss costs
+ * nothing until the construct appears again in plain code. Callers that cannot
+ * accept that trade should parse, as the AST-based scanners do.
+ */
+export function stripComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1");
+}

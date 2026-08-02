@@ -36,6 +36,15 @@ const SOURCE_EXTENSIONS = new Set([".ts", ".tsx"]);
 // register as false "used" keys — this repo's own env-drift.test.ts is an
 // example. In practice every real key is also read by the non-test module
 // it's testing, so this loses no genuine drift signal.
+//
+// #150 taught extractUsedEnvKeys to strip comments before scanning. That does
+// NOT make this exclusion redundant, and deleting it as dead weight would
+// re-break the gate immediately: the two cover different halves of the same
+// problem. Comment-stripping removes env-shaped text from PROSE; this removes
+// it from string literals and mock objects, which are real code and survive
+// stripping intact. env-drift.test.ts alone contains a dozen synthetic sources
+// naming keys like FOO_BAR and GHOST — none of them a read, all of them
+// invisible to a comment stripper. Complementary, not overlapping.
 const TEST_FILE_RE = /\.test\.tsx?$/;
 
 function listSourceFiles(dir: string): string[] {

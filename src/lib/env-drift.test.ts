@@ -59,6 +59,85 @@ describe("extractUsedEnvKeys", () => {
   it("returns an empty array when there is no process.env usage", () => {
     expect(extractUsedEnvKeys("const x = 1;")).toEqual([]);
   });
+
+  // ── #150: prose that DESCRIBES an env read is not an env read ──────────────
+  // The scan is a regex over raw source text, so a doc comment explaining
+  // `process.env` handling was indistinguishable from code performing it. Not
+  // hypothetical: it failed the gate twice on !227 (#146), on `PATH` and on an
+  // example destructuring binding called `A` — neither a variable this app
+  // reads, and the fix at the time was to reword the documentation. Each case
+  // below also reads a REAL key, so a test cannot pass by stripping too much.
+
+  it("ignores a dot-read written inside a // line comment", () => {
+    const src = `
+      // Reading one variable by name — process.env.GHOST — is not a spread.
+      const real = process.env.REAL_KEY;
+    `;
+    expect(extractUsedEnvKeys(src)).toEqual(["REAL_KEY"]);
+  });
+
+  it("ignores a dot-read written inside a /* */ block comment", () => {
+    const src = `
+      /**
+       * A regex cannot tell \`process.env\` spread wholesale from
+       * \`process.env.GHOST\` read by name.
+       */
+      const real = process.env.REAL_KEY;
+    `;
+    expect(extractUsedEnvKeys(src)).toEqual(["REAL_KEY"]);
+  });
+
+  it("ignores a bracket-read written inside a comment", () => {
+    const src = `
+      // Bracket notation — process.env["GHOST"] — is the same read spelled out.
+      const real = process.env.REAL_KEY;
+    `;
+    expect(extractUsedEnvKeys(src)).toEqual(["REAL_KEY"]);
+  });
+
+  it("ignores the !227 doc-comment dot-read that failed the gate on PATH (#146)", () => {
+    const src = `
+      /**
+       * \`{ ...process.env }\`, \`process.env\` and \`Object.assign({}, process.env)\`
+       * all carry the whole environment. \`process.env.PATH\` read by name does
+       * not — that is exactly how an allow-list is meant to be built.
+       */
+      const real = process.env.REAL_KEY;
+    `;
+    expect(extractUsedEnvKeys(src)).toEqual(["REAL_KEY"]);
+  });
+
+  it("ignores the !227 doc-comment destructuring example that yielded A (#146)", () => {
+    const src = `
+      /**
+       * \`"ambient-rest"\` is the \`const { A: _a, ...rest } = process.env\`
+       * shape — the one registry-prune.test.ts used to launder the ambient
+       * environment through a list of exclusions.
+       */
+      const real = process.env.REAL_KEY;
+    `;
+    expect(extractUsedEnvKeys(src)).toEqual(["REAL_KEY"]);
+  });
+
+  it("keeps the code before a trailing line comment", () => {
+    const src = `const a = process.env.REAL_KEY; // unlike process.env.GHOST`;
+    expect(extractUsedEnvKeys(src)).toEqual(["REAL_KEY"]);
+  });
+
+  it("keeps a destructuring whose bindings carry trailing comments", () => {
+    const src = `
+      const {
+        FOO, // why FOO is read
+        BAR, /* and why BAR is */
+      } = process.env;
+    `;
+    expect(extractUsedEnvKeys(src).sort()).toEqual(["BAR", "FOO"]);
+  });
+
+  it("does not lose a read on a line holding a // inside a URL string", () => {
+    const src = `const u = "https://example.test/x"; const a = process.env.FOO;`;
+    expect(extractUsedEnvKeys(src)).toEqual(["FOO"]);
+  });
 });
 
 describe("extractDocumentedEnvKeys", () => {
