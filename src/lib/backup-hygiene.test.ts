@@ -95,8 +95,8 @@ describe("backup CronJob hygiene", () => {
   // stage — the shape a real "tidy-up" would take. An earlier version stripped
   // `rclone` lines instead, which stopped simulating anything once the B2 check
   // matched the `b2:` destination rather than the tool name.
-  const withoutStage = (name: string) => {
-    const lines = TEMPLATE.split("\n");
+  const withoutStage = (source: string, name: string) => {
+    const lines = source.split("\n");
     const start = lines.findIndex((l) => l.trim() === `- name: ${name}`);
     expect(
       start,
@@ -115,26 +115,33 @@ describe("backup CronJob hygiene", () => {
   };
 
   it("fails when the B2 upload stage is removed", () => {
-    const facts = parseBackupTemplate(withoutStage("upload-b2"));
+    const facts = parseBackupTemplate(withoutStage(TEMPLATE, "upload-b2"));
     expect(facts.destinations.b2).toBe(false);
     expect(facts.destinations.gcs).toBe(true);
   });
 
   it("fails when the GCS upload stage is removed", () => {
-    const facts = parseBackupTemplate(withoutStage("upload"));
+    const facts = parseBackupTemplate(withoutStage(TEMPLATE, "upload"));
     expect(facts.destinations.gcs).toBe(false);
     expect(facts.destinations.b2).toBe(true);
   });
 
   it("does not count a destination mentioned only in the dump stage", () => {
-    // A comment in the dump script must not satisfy an upload check — this is
-    // why the destination scan is scoped to stages named `upload*`.
+    // Put both destination markers in the DUMP stage as a comment, then remove
+    // the real B2 upload stage. If the scan were not scoped to `upload*`
+    // stages, the comment alone would keep `b2` true and the removal would go
+    // unnoticed — which is the regression this exists to catch.
     const withComment = TEMPLATE.replace(
       "                  set -euo pipefail\n                  # Connection literals",
       "                  set -euo pipefail\n                  # see gs:// and b2: for where this ends up\n                  # Connection literals",
     );
-    const facts = parseBackupTemplate(withoutStage("upload-b2"));
+    // Sanity-check the fixture itself: the comment must have landed, otherwise
+    // this test would pass by testing nothing at all.
+    expect(withComment).not.toBe(TEMPLATE);
+    expect(parseBackupTemplate(withComment).stages).toHaveLength(3);
+
+    const facts = parseBackupTemplate(withoutStage(withComment, "upload-b2"));
     expect(facts.destinations.b2).toBe(false);
-    expect(parseBackupTemplate(withComment).stages.length).toBe(3);
+    expect(facts.destinations.gcs).toBe(true);
   });
 });

@@ -108,6 +108,14 @@ secrets:
   # requires it in all envs. Prod: masked+hidden+protected CI var TOKEN_ENC_KEY.
   # Review: dummy generated per-deploy by CI.
   tokenEncKey: ""
+  # Backblaze B2 application key for the backup CronJob's second destination.
+  # Read by that job only, never by the app, and rendered into the Secret only
+  # when backup.b2.enabled. Prod: BACKUP_B2_KEY_ID (masked) and
+  # BACKUP_B2_APP_KEY (masked+hidden). Empty here rather than absent so the
+  # surface is discoverable without reading .gitlab-ci.yml — and backup.yaml
+  # refuses to render if B2 is enabled while either is still empty.
+  b2KeyId: ""
+  b2AppKey: ""
 
 # Owner auth config (non-secret). ownerAllowlist = comma-separated allowed
 # identities (GitLab numeric user id for the gitlab provider).

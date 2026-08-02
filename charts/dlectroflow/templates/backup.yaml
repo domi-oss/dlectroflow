@@ -164,6 +164,13 @@ spec:
             {{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._/-]*$" .Values.backup.b2.prefix) }}
             {{- fail (printf "backup.b2.prefix %q contains characters that are unsafe to interpolate into a shell command" .Values.backup.b2.prefix) }}
             {{- end }}
+            {{- /* Declared defaults make the surface discoverable; this makes an
+                   unset value loud. Without it a deploy that forgot the CI flags
+                   renders empty credentials and the CronJob fails nightly with a
+                   401 that looks like a B2 problem rather than a config one. */}}
+            {{- if or (not .Values.secrets.b2KeyId) (not .Values.secrets.b2AppKey) }}
+            {{- fail "backup.b2.enabled is true but secrets.b2KeyId / secrets.b2AppKey are empty — set BACKUP_B2_KEY_ID and BACKUP_B2_APP_KEY" }}
+            {{- end }}
             # Second destination, running alongside the GCS upload rather than
             # replacing it. GCS auth is keyless (Workload Identity); B2 has no
             # equivalent and needs a long-lived key, so this is a strictly worse
