@@ -371,8 +371,13 @@ describe("Terms of Service page: no per-user restore (#164)", () => {
     // The narrow honest claim is "no individual restore", never "no
     // responsibility". Asserted in both directions so a future tightening
     // cannot quietly widen it.
+    //
+    // The obligation is asserted as CONDUCT ("I treat it as one"), not as a
+    // claim that nothing in these Terms disclaims it. The liability section does
+    // exclude liability for loss of data, and a page whose clauses look like
+    // they argue with each other is a worse page — see the source comment.
     const text = pageText();
-    expect(text).toMatch(/a real obligation and nothing here disclaims it/i);
+    expect(text).toMatch(/a real obligation and I treat it as one/i);
     expect(text).not.toMatch(
       /no responsibility for (?:your |the |any )?(?:data|content)/i,
     );

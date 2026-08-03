@@ -566,13 +566,22 @@ export default function TermsPage() {
             docblock at the top of this file records why this page keeps its
             exclusions narrow. The first paragraph is load-bearing for that: the
             claim being made is "no individual restore", never "no
-            responsibility for your data". */}
+            responsibility for your data".
+
+            It asserts the obligation ("I treat it as one") rather than saying
+            nothing in these Terms disclaims it, which was the first draft. The
+            broader phrasing invited an argument it would lose: the liability
+            section DOES exclude liability for loss of data and the cost of
+            reconstructing it, and while excluding a liability is not the same as
+            dropping a duty, a legal page should not leave two of its own clauses
+            looking like they disagree. A claim about conduct cannot conflict
+            with a limit on liability. */}
         <LegalSubheading>What the backups can and cannot do</LegalSubheading>
         <p>
           There are nightly backups, and they do one job: if this instance were
           lost — a failed disk, a bad deployment, a mistake of mine — they are
-          how it comes back, with everybody&rsquo;s work in it. That job is a
-          real obligation and nothing here disclaims it.
+          how it comes back, with everybody&rsquo;s work in it. That is a real
+          obligation and I treat it as one.
         </p>
         <p>
           <strong>What they are not is a personal undo.</strong> There is no
