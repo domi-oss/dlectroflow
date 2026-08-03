@@ -53,6 +53,25 @@ const PALETTE_TEXT = /^text-[a-z]+-\d{2,3}$/;
  * not circular — the assertion worth making is *"no scope in `src/` spells a
  * tinted banner the table does not define"*, and after centralisation the table is
  * legitimately the only place one is spelled.
+ *
+ * ── And it deliberately does NOT exclude `a11y-class-hygiene.ts` ────────────
+ * `scannedFiles()` in that module's own spec does exclude it, and Duo review
+ * (!250) asked for the same here on symmetry grounds. Declined, because the two
+ * exclusions are not the same kind of thing.
+ *
+ * That one is a **targeted workaround for a specific self-reference**: the
+ * module's `OUTLINE_KILLERS` array literally holds the class names Rule D bans,
+ * so the scanner reads its own rule table as an element's class list. Rule C has
+ * no equivalent problem — verified, see the test below: `findTintedBannerText`
+ * reports nothing at all from that file, because a tinted banner needs a
+ * translucent chromatic background token and the module contains none as a
+ * string (its patterns are regex literals, and its family list has no hyphens).
+ *
+ * Copying an exclusion where it is not needed **removes coverage for nothing**,
+ * which is the opposite of the `.mts` change above: that one widened what counts,
+ * this one would narrow it. If the module ever does start spelling a tinted
+ * banner, the gate should make somebody think about it rather than have it
+ * silently skipped.
  */
 function sourceFiles(): string[] {
   return (
@@ -132,6 +151,17 @@ describe("src/ tinted-banner hygiene (#109)", () => {
     expect(tinted.length).toBeGreaterThanOrEqual(
       Object.keys(STATUS_BANNER_TONE).length,
     );
+  });
+
+  it("needs no exclusion for a11y-class-hygiene.ts, unlike Rule D", () => {
+    // The evidence for the declined exclusion (see sourceFiles' doc comment).
+    // Rule D's spec must skip that file because its `OUTLINE_KILLERS` array holds
+    // the very tokens Rule D bans; Rule C has no such self-reference, so skipping
+    // it here would cost coverage for nothing. If this ever stops being empty,
+    // that is the signal to think about it — not to add an exclusion quietly.
+    const self = path.join("src", "lib", "a11y-class-hygiene.ts");
+    expect(sourceFiles()).toContain(self);
+    expect(findTintedBannerText(readFileSync(self, "utf8"), self)).toEqual([]);
   });
 
   it("takes every translucent-tinted banner's colours from the tone table", () => {
