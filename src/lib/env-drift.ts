@@ -223,12 +223,16 @@ export const CONFIG_SURFACE_ALLOWLIST: readonly ConfigSurfaceException[] = [
     declaredOn: "chart",
     reason:
       "Read only by the backup CronJob's `upload-b2` container, never by the " +
-      "app process — nothing in src/ references it. The Compose path has no " +
-      "equivalent because it has no backup job at all: docs/self-host-vps.md " +
-      "points self-hosters at pg_dump plus their own object storage or " +
-      "provider snapshots. Publishing it in .env.prod.example would advertise " +
-      "config that does nothing on that path, which is the opposite of what " +
-      "#135 is for.",
+      "app process — nothing in src/ references it. The Compose path has a " +
+      "`backup` service (docker/docker-compose.prod.yml) but it writes the " +
+      "dump to a host directory and has no off-host upload, so there is no " +
+      "Compose consumer of these credentials. Publishing them in " +
+      ".env.prod.example would advertise config that does nothing on that " +
+      "path, which is the opposite of what #135 is for. NOTE: if the Compose " +
+      "backup ever gains an off-host upload, delete this entry and its pair " +
+      "in the SAME commit — staleAllowlistEntries fails when an allowlisted " +
+      "key appears on both surfaces, so adding the vars alone turns env-drift " +
+      "red.",
   },
   {
     key: "B2_APP_KEY",
