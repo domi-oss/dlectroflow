@@ -24,7 +24,8 @@ function pageText(): string {
  * plans to use. Deliberately does not require an object after the verb: the
  * claim is the problem regardless of how the sentence names the data.
  */
-const EXPORT_CLAIM = /you (?:can|may|could) (?:export|download)\s+(?:your|a copy of)/i;
+const EXPORT_CLAIM =
+  /you (?:can|may|could) (?:export|download)\s+(?:your|a copy of)/i;
 
 describe("Terms of Service page: structure", () => {
   it("has one h1 naming the document", () => {
