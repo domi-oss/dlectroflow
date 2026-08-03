@@ -447,6 +447,52 @@ describe("findWeakFocusIndicators", () => {
     ).toHaveLength(1);
   });
 
+  // Duo review, !250: `border-0` slipped the rule, because `border(-\d+)?`
+  // accepts it. A `-0` width utility REMOVES the edge it looks like it adds, so a
+  // scope could satisfy 2.4.11 by painting nothing. Every width family is
+  // asserted, not just the one that was reported — `border-0` was missed
+  // precisely because the others were closed by special case, one at a time.
+  it.each([
+    "focus-visible:border-0",
+    "focus-visible:ring-0",
+    "focus-visible:inset-ring-0",
+    "focus-visible:outline-0",
+    "focus-visible:decoration-0",
+  ])("rejects %s, which sets a width of zero and draws nothing", (token) => {
+    expect(
+      findWeakFocusIndicators(
+        `const x = <a className="outline-none ${token}" />;`,
+      ),
+      token,
+    ).toHaveLength(1);
+  });
+
+  it.each([
+    "focus-visible:border",
+    "focus-visible:border-2",
+    "focus-visible:ring",
+    "focus-visible:inset-ring-4",
+    "focus-visible:outline-2",
+    "focus-visible:decoration-2",
+  ])("accepts %s, which draws a real edge", (token) => {
+    expect(
+      findWeakFocusIndicators(
+        `const x = <a className="outline-none ${token}" />;`,
+      ),
+      token,
+    ).toEqual([]);
+  });
+
+  it("does not accept a 10-wide ring being mistaken for ring-1 then a zero", () => {
+    // Guards the `[1-9]\d*` shape itself: `ring-10` must still pass, so the
+    // "no zero" rule cannot have been written as `[1-9]` alone.
+    expect(
+      findWeakFocusIndicators(
+        `const x = <a className="outline-none focus-visible:ring-10" />;`,
+      ),
+    ).toEqual([]);
+  });
+
   it("stays quiet about an element that keeps the UA outline", () => {
     // move-to-menu.tsx: `data-[highlighted]:bg-accent` with no outline-none, so
     // the browser's own outline still draws. Correctly not a finding.

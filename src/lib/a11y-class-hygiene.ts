@@ -84,7 +84,7 @@ import ts from "typescript";
  * So 700 is the floor, and it is the floor for the *most forgiving* family in
  * the set rather than an average.
  */
-const CHROMATIC_FAMILIES = [
+export const CHROMATIC_FAMILIES = [
   "red",
   "orange",
   "amber",
@@ -494,15 +494,20 @@ const OUTLINE_KILLERS = ["outline-none", "outline-hidden", "outline-0"];
  */
 function drawsIndicator(base: string): boolean {
   if (OUTLINE_KILLERS.includes(base)) return false;
-  if (base === "ring-0" || base === "inset-ring-0" || base === "outline-0") {
-    return false;
-  }
-  // `ring`, `ring-2`, `inset-ring`, `inset-ring-4`, `outline-2`, `border-2`.
-  if (/^(inset-)?ring(-\d+)?$/.test(base)) return true;
-  if (/^outline-\d+$/.test(base)) return true;
-  if (/^border(-\d+)?$/.test(base)) return true;
-  // `underline` / `decoration-2` — the indicator legal-page links use.
-  if (base === "underline" || /^decoration-\d+$/.test(base)) return true;
+  // Every width family matches `-[1-9]\d*`, never `-0`. A `-0` utility sets the
+  // width to zero, so it REMOVES the edge it appears to add: `border-0`,
+  // `ring-0`, `inset-ring-0` and `decoration-0` all draw nothing, and accepting
+  // any of them would let a scope satisfy Rule D by painting nothing at all.
+  // Duo review, !250 — `border-0` was the live hole; the others are closed the
+  // same way rather than by a special case each, which is how `border-0` was
+  // missed in the first place.
+  //
+  // A bare `ring`, `inset-ring` or `border` is a real 1px edge, so it counts.
+  if (/^(inset-)?ring(-[1-9]\d*)?$/.test(base)) return true;
+  if (/^outline-[1-9]\d*$/.test(base)) return true;
+  if (/^border(-[1-9]\d*)?$/.test(base)) return true;
+  // `underline` / `decoration-2` — the indicator the legal-page links use.
+  if (base === "underline" || /^decoration-[1-9]\d*$/.test(base)) return true;
   return false;
 }
 

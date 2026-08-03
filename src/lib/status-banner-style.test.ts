@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { STATUS_BANNER_TONE } from "@/lib/status-banner-style";
-import { scanClassScopes } from "@/lib/a11y-class-hygiene";
+import { scanClassScopes, CHROMATIC_FAMILIES } from "@/lib/a11y-class-hygiene";
 
 /**
  * #109 — the composite half of the contrast problem, which
@@ -28,26 +28,13 @@ import { scanClassScopes } from "@/lib/a11y-class-hygiene";
  * how the table's amber was chosen.)
  */
 
-/** Tailwind's chromatic families, as `a11y-class-hygiene.ts` defines them. */
-const CHROMATIC = new Set([
-  "red",
-  "orange",
-  "amber",
-  "yellow",
-  "lime",
-  "green",
-  "emerald",
-  "teal",
-  "cyan",
-  "sky",
-  "blue",
-  "indigo",
-  "violet",
-  "purple",
-  "fuchsia",
-  "pink",
-  "rose",
-]);
+/**
+ * Imported, not re-listed. A hand-copied family list diverges the moment
+ * `CHROMATIC_FAMILIES` grows, and it diverges *silently* in the direction that
+ * matters: a banner using the new family on a translucent tint would stop being
+ * checked, which is the exact gap this file exists to close. Duo review, !250.
+ */
+const CHROMATIC = new Set<string>(CHROMATIC_FAMILIES);
 
 // Literal patterns with the family checked by Set membership, matching
 // `a11y-class-hygiene.ts` — a membership test belongs in a Set, and building the
@@ -109,6 +96,17 @@ describe("STATUS_BANNER_TONE", () => {
     for (const tone of Object.values(STATUS_BANNER_TONE)) {
       expect(tone).not.toMatch(/\b(rounded|p-|px-|py-|text-(xs|sm|base|lg))/);
     }
+  });
+
+  it("shares its family list with a11y-class-hygiene rather than copying it", () => {
+    // Duo review, !250. The two files agreeing today is not the property worth
+    // asserting — the property is that they cannot disagree tomorrow. If this
+    // file ever re-lists the families, a family added to CHROMATIC_FAMILIES
+    // stops being checked here, silently, in the direction that hides a bug.
+    for (const family of ["green", "amber", "red"]) {
+      expect(CHROMATIC.has(family), family).toBe(true);
+    }
+    expect(CHROMATIC.size).toBe(CHROMATIC_FAMILIES.length);
   });
 });
 
