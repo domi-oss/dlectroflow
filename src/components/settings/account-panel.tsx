@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { saveOwnLlmKey, removeOwnLlmKey } from "@/app/actions/account";
 import { CollapsibleSection } from "@/components/nav/collapsible-section";
 import { DeleteAccount } from "@/components/settings/delete-account";
+import { ExportData } from "@/components/settings/export-data";
 import { t, type Voice } from "@/lib/strings";
 import { cn, touchTarget } from "@/lib/utils";
 
@@ -171,6 +172,14 @@ export function AccountPanel({
             <button
               type="button"
               disabled={pending}
+              // #129 — the outcome of pressing this is announced in the live
+              // region at the foot of the block, so say so. The "Yes, remove"
+              // button below has always been associated with it; Save was not,
+              // which left the one control whose result a screen-reader user most
+              // needs ("saved" vs "not accepted") describing itself as nothing.
+              // #129 also put a SECOND status region in this section (the data
+              // export's), so the association is now what tells the two apart.
+              aria-describedby={statusId}
               onClick={save}
               className={cn(
                 "bg-primary text-primary-foreground rounded-md px-3 py-2 text-sm font-medium disabled:opacity-50",
@@ -250,6 +259,17 @@ export function AccountPanel({
         >
           {message}
         </p>
+      </div>
+
+      {/* #129 — taking your data with you. Deliberately ABOVE the delete block
+          and in its own bordered block: the two are the same family of thing
+          (leaving), and this is the one you want to have done FIRST. Somebody who
+          reads "Delete your account" before "Download my data" can only find out
+          about the export afterwards, which is exactly when it stops being
+          useful. */}
+      <div className="space-y-2 rounded-lg border p-4">
+        <h3 className="text-sm font-medium">Export your data</h3>
+        <ExportData />
       </div>
 
       {/* #153 — leaving. Its own bordered block at the FOOT of the section, and

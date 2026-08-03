@@ -132,7 +132,12 @@ type Prepared = {
 export function buildZip(
   entries: readonly ZipEntry[],
   opts?: { modifiedAt?: Date },
-): Uint8Array {
+  // `Uint8Array<ArrayBuffer>`, not the default `Uint8Array<ArrayBufferLike>`.
+  // The distinction is load-bearing rather than pedantic: `BodyInit` accepts only
+  // a view over a real `ArrayBuffer`, so the plain alias does not compile when the
+  // result is handed to `new Response(...)` — which is the only thing the export
+  // route does with it. Pinning it here is better than a cast at the call site.
+): Uint8Array<ArrayBuffer> {
   if (entries.length > MAX_ENTRIES) {
     throw new Error(
       `${entries.length} entries is past the ${MAX_ENTRIES}-entry limit of a non-ZIP64 archive`,
@@ -240,5 +245,11 @@ export function buildZip(
   eocd.writeUInt16LE(0, 20); // no archive comment
   chunks.push(eocd);
 
-  return new Uint8Array(Buffer.concat(chunks));
+  // Copied into a freshly allocated ArrayBuffer rather than wrapping the Buffer's
+  // own: `Buffer.concat` returns a view onto pooled memory typed as
+  // `ArrayBufferLike`, which is exactly what the return type above rules out.
+  const merged = Buffer.concat(chunks);
+  const out = new Uint8Array(merged.byteLength);
+  out.set(merged);
+  return out;
 }
