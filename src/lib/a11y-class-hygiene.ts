@@ -336,6 +336,23 @@ export function splitVariants(token: string): {
   }
 }
 
+/**
+ * Does `token` set `<basePrefix>…` **in dark mode**, anywhere in its variant
+ * chain? `isDarkVariant("dark:hover:bg-amber-950/20", "bg-")` is true.
+ *
+ * Exported, and the only sanctioned way to ask. Three separate call sites reached
+ * for `token.startsWith("dark:bg-")` / `("dark:text-")` instead, and Duo review
+ * caught the same bug in each on !250 — the prefix reads a compound chain as a
+ * non-match, so `dark:hover:bg-*` and `dark:sm:text-*` slip through. Three
+ * identical bugs from three hand-rolled copies is a missing function, not three
+ * mistakes, so this is it. Nothing outside this module should call
+ * {@link splitVariants} to reimplement it.
+ */
+export function isDarkVariant(token: string, basePrefix: string): boolean {
+  const { variants, base } = splitVariants(token);
+  return variants.includes("dark") && base.startsWith(basePrefix);
+}
+
 /** Is this token an unprefixed (light-mode, all-states) utility? */
 function isUnprefixed(token: string): boolean {
   return splitVariants(token).variants.length === 0;
@@ -385,10 +402,7 @@ function pinsOwnBackground(tokens: readonly string[]): boolean {
   if (!hasOpaqueBg) return false;
   // A `dark:bg-*` means the background DOES move with the theme, so the text
   // needs a partner after all.
-  return !tokens.some((token) => {
-    const { variants, base } = splitVariants(token);
-    return variants.includes("dark") && base.startsWith("bg-");
-  });
+  return !tokens.some((token) => isDarkVariant(token, "bg-"));
 }
 
 /**
@@ -432,10 +446,7 @@ export function findTextContrastRisks(
      * so this is a tightening with no new findings — verified, not assumed.
      */
     const hasDarkPartnerFor = (family: string): boolean =>
-      scope.tokens.some((token) => {
-        const { variants, base } = splitVariants(token);
-        return variants.includes("dark") && base.startsWith(`text-${family}-`);
-      });
+      scope.tokens.some((token) => isDarkVariant(token, `text-${family}-`));
     const pinned = pinsOwnBackground(scope.tokens);
 
     for (const token of scope.tokens) {
@@ -492,10 +503,7 @@ const TINTED_BG = /^bg-([a-z]+)-\d{2,3}\/\d{1,3}$/;
 
 /** Does any token set a dark-mode background, at any point in its variant chain? */
 function hasDarkBackground(tokens: readonly string[]): boolean {
-  return tokens.some((token) => {
-    const { variants, base } = splitVariants(token);
-    return variants.includes("dark") && base.startsWith("bg-");
-  });
+  return tokens.some((token) => isDarkVariant(token, "bg-"));
 }
 
 /**

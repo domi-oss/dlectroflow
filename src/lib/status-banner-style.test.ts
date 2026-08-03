@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { STATUS_BANNER_TONE } from "@/lib/status-banner-style";
-import { findTintedBannerText, splitVariants } from "@/lib/a11y-class-hygiene";
+import { findTintedBannerText, isDarkVariant } from "@/lib/a11y-class-hygiene";
 
 /**
  * #109 — the composite half of the contrast problem, which Rules A and B in
@@ -74,10 +74,7 @@ describe("STATUS_BANNER_TONE", () => {
         // been removed: a tone written `dark:hover:text-green-400` would satisfy
         // a prefix test while `findTextContrastRisks` correctly reported the
         // partner as missing, so the two guards would disagree about the table.
-        tokens.some((t) => {
-          const { variants, base } = splitVariants(t);
-          return variants.includes("dark") && base.startsWith("text-");
-        }),
+        tokens.some((t) => isDarkVariant(t, "text-")),
         `${name} must carry a dark: text partner — a -700/-800 reads 2.3-4.0:1 on the dark --background`,
       ).toBe(true);
     }

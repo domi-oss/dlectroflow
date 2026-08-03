@@ -5,6 +5,7 @@ import {
   findTextContrastRisks,
   findTintedBannerText,
   findWeakFocusIndicators,
+  isDarkVariant,
   scanClassScopes,
   splitVariants,
   MIN_AA_TEXT_SHADE,
@@ -281,6 +282,42 @@ describe("splitVariants", () => {
       variants: [],
       base: "bg-[color:var(--x)]",
     });
+  });
+});
+
+describe("isDarkVariant", () => {
+  // The whole point of this function existing. Three call sites hand-rolled
+  // `startsWith("dark:bg-")` / `("dark:text-")` and Duo review found the same bug
+  // in each across rounds 4, 5 and 7 of !250. Three identical bugs from three
+  // copies is a missing function, not three mistakes.
+  it("matches a compound variant chain, which a `dark:` prefix test does not", () => {
+    for (const token of [
+      "dark:hover:bg-amber-950/20",
+      "dark:sm:bg-amber-950/20",
+      "dark:focus-visible:bg-accent",
+    ]) {
+      expect(isDarkVariant(token, "bg-"), token).toBe(true);
+      // The shortcut this replaces, shown failing on the same input.
+      expect(token.startsWith("dark:bg-"), token).toBe(false);
+    }
+  });
+
+  it("matches the simple form too", () => {
+    expect(isDarkVariant("dark:text-green-400", "text-")).toBe(true);
+    expect(isDarkVariant("dark:text-green-400", "text-green-")).toBe(true);
+  });
+
+  it("does not match a light-mode utility or another family", () => {
+    expect(isDarkVariant("text-green-400", "text-")).toBe(false);
+    expect(isDarkVariant("hover:text-green-400", "text-")).toBe(false);
+    expect(isDarkVariant("dark:text-green-400", "text-red-")).toBe(false);
+    expect(isDarkVariant("dark:bg-green-950", "text-")).toBe(false);
+  });
+
+  it("is not fooled by a variant merely containing 'dark'", () => {
+    // `darker:` is not `dark:`, and an exact chain-member check is what makes
+    // that true — another thing a prefix test gets wrong.
+    expect(isDarkVariant("darker:text-green-400", "text-")).toBe(false);
   });
 });
 
@@ -686,7 +723,7 @@ describe("src/ WCAG-AA class hygiene (#109, #117)", () => {
       scopes.filter((s) => s.tokens.includes("outline-none")).length,
     ).toBeGreaterThan(15);
     expect(
-      scopes.filter((s) => s.tokens.some((t) => t.startsWith("dark:text-")))
+      scopes.filter((s) => s.tokens.some((t) => isDarkVariant(t, "text-")))
         .length,
     ).toBeGreaterThan(20);
   });
