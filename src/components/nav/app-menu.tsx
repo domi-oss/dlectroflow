@@ -87,9 +87,15 @@ export function AppMenu({ voice }: { voice: Voice }) {
                 // 8.83:1 / 7.55:1 in dark — clear of 3:1 against BOTH adjacent
                 // colours in both themes. Inset because these entries are flush
                 // to the popup's edge; an outset ring would sit outside the
-                // border. The background swap stays: it is the hover affordance,
-                // and losing it would be a redesign. Kept identical to
-                // account-menu.tsx's entries, which open inches away.
+                // border. That flush geometry means the ring's left and right
+                // edges abut the popup's own --border, so that adjacency is
+                // measured too: 4.25:1 in light, 6.58:1 in dark. The tightest
+                // pairing anywhere on this indicator is 4.25:1 against a 3:1
+                // requirement. The background swap stays: it is the hover
+                // affordance, and losing it would be a redesign. Kept identical
+                // to account-menu.tsx's entries, which open inches away — the
+                // corner radius differs only because these entries are
+                // full-bleed and those are inset, which is pre-existing.
                 className={cn(
                   "flex min-h-[44px] items-center px-4 py-2 text-sm outline-none hover:bg-muted hover:text-primary focus-visible:bg-muted focus-visible:text-primary focus-visible:inset-ring-2 focus-visible:inset-ring-ring",
                   active && "text-primary font-medium",
