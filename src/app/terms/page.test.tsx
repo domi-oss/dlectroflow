@@ -17,6 +17,15 @@ function pageText(): string {
   return container.textContent!.replace(/\s+/g, " ");
 }
 
+/**
+ * Any assertion in the Terms that a member can get their own data out. Kept as
+ * one pattern so the guard and its positive control cannot drift apart, which
+ * is exactly how the original narrow version came to miss the wording #129
+ * plans to use. Deliberately does not require an object after the verb: the
+ * claim is the problem regardless of how the sentence names the data.
+ */
+const EXPORT_CLAIM = /you (?:can|may|could) (?:export|download)\s+(?:your|a copy of)/i;
+
 describe("Terms of Service page: structure", () => {
   it("has one h1 naming the document", () => {
     render(<TermsPage />);
@@ -393,13 +402,27 @@ describe("Terms of Service page: no per-user restore (#164)", () => {
     // legal document is worse than no link.
     const { container } = render(<TermsPage />);
     const text = container.textContent!.replace(/\s+/g, " ");
-    expect(text).not.toMatch(
-      /you (?:can|may|could) (?:export|download) (?:your|a copy of your)/i,
-    );
+    expect(text).not.toMatch(EXPORT_CLAIM);
     const hrefs = Array.from(
       container.querySelectorAll<HTMLAnchorElement>("a[href]"),
     ).map((a) => a.getAttribute("href")!);
     expect(hrefs.filter((h) => /export/i.test(h))).toEqual([]);
+  });
+
+  it("the export guard actually matches the sentence #129 plans to add", () => {
+    // A guard nobody has seen fire is a comment. The wording #129 will add is
+    // recorded verbatim in a comment in page.tsx; the original pattern required
+    // "your" or "a copy of your" and so would NOT have matched "a copy of
+    // everything" — it would have stayed green while the claim went live.
+    // Raised by GitLab Duo on !252 and verified against the recorded sentence.
+    expect("You can download a copy of everything from Settings.").toMatch(
+      EXPORT_CLAIM,
+    );
+    // And the narrower phrasings it already covered.
+    expect("You can export your data at any time.").toMatch(EXPORT_CLAIM);
+    expect("You may download a copy of your data.").toMatch(EXPORT_CLAIM);
+    // Not a claim about export, so it must not trip the guard.
+    expect("You can download the source code.").not.toMatch(EXPORT_CLAIM);
   });
 
   it("links the as-is warning to the fuller clause so the two cannot drift", () => {
