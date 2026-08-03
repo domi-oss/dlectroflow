@@ -2,69 +2,62 @@ import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { STATUS_BANNER_TONE } from "@/lib/status-banner-style";
-import { scanClassScopes, CHROMATIC_FAMILIES } from "@/lib/a11y-class-hygiene";
+import { findTintedBannerText } from "@/lib/a11y-class-hygiene";
 
 /**
- * #109 — the composite half of the contrast problem, which
- * `a11y-class-hygiene.ts` explicitly cannot see.
+ * #109 — the composite half of the contrast problem, which Rules A and B in
+ * `a11y-class-hygiene.ts` explicitly cannot judge.
  *
- * That guard checks the TOKEN: no bare `-600`, always a `dark:` partner. Six
- * banners in this repo satisfied the token rule and still failed AA, because a
- * translucent `bg-<family>-<n>/10` composites over `--background` and pulls the
- * background toward the text. `text-green-700` is 4.65:1 on the bare light
- * background and 4.16:1 once its own tint is in the way.
+ * Those rules check the TOKEN: no bare `-600`, always a `dark:` partner. Six
+ * banners in this repo satisfied them and still failed AA, because a translucent
+ * `bg-<family>-<n>/10` composites over `--background` and pulls the effective
+ * background *toward* the text. `text-green-700` is 4.65:1 on the bare light
+ * background and **4.16:1** once its own tint is in the way. One of the six
+ * carried a comment asserting the opposite.
  *
- * There is no cheap way to measure a composite from source, so this asserts the
- * next best thing: **any banner with a translucent chromatic tint and no dark
- * background of its own takes its colours from the one measured table.** That is
- * a structural rule with the same effect — it makes the seventh banner
- * impossible rather than merely unlikely.
+ * Measuring a composite from source is not something a class scanner can do, so
+ * the split is: `findTintedBannerText` reports the *shape* (a translucent
+ * chromatic tint with no dark background of its own, plus the chromatic text
+ * colours on it), and this file requires those colours to come from the one table
+ * whose ratios were actually measured. Structural rather than photometric, with
+ * the same effect — it makes the seventh banner impossible rather than unlikely.
  *
- * The `dark:bg-*` carve-out is not a loophole, it is the boundary of the claim.
- * `guest-indicator.tsx` tints with `bg-amber-500/10` AND overrides
- * `dark:bg-amber-950/20`, so it composites over a background it chose rather than
- * over `--background`, and the table's numbers say nothing about it. (It measures
- * 6.24:1 in light on `text-amber-800` — the same shade the table uses, which is
- * how the table's amber was chosen.)
+ * The measured numbers live in `status-banner-style.ts` next to the values they
+ * describe; the shape detection lives in the pure module where it can be
+ * exercised on synthetic input, which is this repo's convention for a guard (a
+ * guard whose predicate can only be run against the real tree cannot be shown to
+ * fail). Both halves were review findings on !250.
  */
-
-/**
- * Imported, not re-listed. A hand-copied family list diverges the moment
- * `CHROMATIC_FAMILIES` grows, and it diverges *silently* in the direction that
- * matters: a banner using the new family on a translucent tint would stop being
- * checked, which is the exact gap this file exists to close. Duo review, !250.
- */
-const CHROMATIC = new Set<string>(CHROMATIC_FAMILIES);
-
-// Literal patterns with the family checked by Set membership, matching
-// `a11y-class-hygiene.ts` — a membership test belongs in a Set, and building the
-// pattern from an interpolated string trips semgrep's ReDoS rule for no benefit.
-
-/** `bg-amber-500/10` — a palette background with an alpha modifier. */
-const TINTED_BG = /^bg-([a-z]+)-\d{2,3}\/\d{1,3}$/;
-/** An unprefixed palette text colour. */
-const PALETTE_TEXT = /^text-([a-z]+)-\d{2,3}$/;
-
-const isTintedBg = (t: string): boolean => {
-  const m = TINTED_BG.exec(t);
-  return m !== null && CHROMATIC.has(m[1]);
-};
-const isChromaticText = (t: string): boolean => {
-  const m = PALETTE_TEXT.exec(t);
-  return m !== null && CHROMATIC.has(m[1]);
-};
 
 const TONE_TOKENS = new Set(
   Object.values(STATUS_BANNER_TONE).flatMap((tone) => tone.split(/\s+/)),
 );
 
+/** An unprefixed palette text colour, for the table's own shape assertions. */
+const PALETTE_TEXT = /^text-[a-z]+-\d{2,3}$/;
+
+/**
+ * All of `src/`, **including `status-banner-style.ts` itself.**
+ *
+ * It was excluded at first, on the reflex that a guard should not scan its own
+ * subject. That was wrong here, and the "the scan is not a no-op" test below is
+ * what proved it: once all six banners took their tone from the table, the tint
+ * classes stopped appearing at any call site — `cn("rounded-lg border p-3
+ * text-sm", STATUS_BANNER_TONE.ok)` contains no tinted background at all — so the
+ * scan over the rest of `src/` found **nothing**, and a green run meant "there is
+ * nothing to look at" rather than "everything is fine". Exactly the failure mode
+ * this MR is about.
+ *
+ * Including the table gives the scan a real, non-synthetic subject on the real
+ * tree: the three tone strings. They pass, because they are the table. That is
+ * not circular — the assertion worth making is *"no scope in `src/` spells a
+ * tinted banner the table does not define"*, and after centralisation the table is
+ * legitimately the only place one is spelled.
+ */
 function sourceFiles(): string[] {
   return readdirSync("src", { recursive: true, encoding: "utf8" })
     .filter((entry) => /\.tsx?$/.test(entry) && !/\.test\.tsx?$/.test(entry))
-    .map((entry) => path.join("src", entry))
-    .filter(
-      (file) => file !== path.join("src", "lib", "status-banner-style.ts"),
-    );
+    .map((entry) => path.join("src", entry));
 }
 
 describe("STATUS_BANNER_TONE", () => {
@@ -72,7 +65,7 @@ describe("STATUS_BANNER_TONE", () => {
     for (const [name, tone] of Object.entries(STATUS_BANNER_TONE)) {
       const tokens = tone.split(/\s+/);
       expect(
-        tokens.filter((t) => isChromaticText(t)),
+        tokens.filter((t) => PALETTE_TEXT.test(t)),
         `${name} must set exactly one unprefixed text colour`,
       ).toHaveLength(1);
       expect(
@@ -98,43 +91,46 @@ describe("STATUS_BANNER_TONE", () => {
     }
   });
 
-  it("shares its family list with a11y-class-hygiene rather than copying it", () => {
-    // Duo review, !250. The two files agreeing today is not the property worth
-    // asserting — the property is that they cannot disagree tomorrow. If this
-    // file ever re-lists the families, a family added to CHROMATIC_FAMILIES
-    // stops being checked here, silently, in the direction that hides a bug.
-    for (const family of ["green", "amber", "red"]) {
-      expect(CHROMATIC.has(family), family).toBe(true);
+  it("is itself the shape the scanner reports, so the two cannot drift apart", () => {
+    // If a tone stopped being a translucent tint, or gained a `dark:bg-*`, the
+    // scanner would stop reporting banners built from it and this file's main
+    // assertion would pass by measuring nothing.
+    for (const [name, tone] of Object.entries(STATUS_BANNER_TONE)) {
+      const reported = findTintedBannerText(
+        `const x = <div className="${tone}" />;`,
+      );
+      expect(
+        reported.map((r) => r.token),
+        name,
+      ).toHaveLength(1);
+      expect(TONE_TOKENS.has(reported[0].token), name).toBe(true);
     }
-    expect(CHROMATIC.size).toBe(CHROMATIC_FAMILIES.length);
   });
 });
 
 describe("src/ tinted-banner hygiene (#109)", () => {
-  it("finds banner-shaped scopes at all (the scan is not a no-op)", () => {
+  it("finds banner-shaped scopes on the real tree (the scan is not a no-op)", () => {
+    // One per tone, from the table. If this drops to zero the assertion below
+    // stops meaning anything, which is how a clean run turns into a hollow one.
     const tinted = sourceFiles().flatMap((file) =>
-      scanClassScopes(readFileSync(file, "utf8"), file).filter((scope) =>
-        scope.tokens.some((t) => isTintedBg(t)),
-      ),
+      findTintedBannerText(readFileSync(file, "utf8"), file),
     );
-    expect(tinted.length).toBeGreaterThan(0);
+    expect(tinted.length).toBeGreaterThanOrEqual(
+      Object.keys(STATUS_BANNER_TONE).length,
+    );
   });
 
   it("takes every translucent-tinted banner's colours from the tone table", () => {
     const offenders: string[] = [];
     for (const file of sourceFiles()) {
-      for (const scope of scanClassScopes(readFileSync(file, "utf8"), file)) {
-        if (!scope.tokens.some((t) => isTintedBg(t))) continue;
-        // Its own dark background means it does not composite over
-        // --background, so the table's measurements do not apply to it.
-        if (scope.tokens.some((t) => t.startsWith("dark:bg-"))) continue;
-        for (const token of scope.tokens) {
-          if (!isChromaticText(token)) continue;
-          if (TONE_TOKENS.has(token)) continue;
-          offenders.push(
-            `${file}:${scope.line} — \`${token}\` on a translucent tint is not from STATUS_BANNER_TONE; the composite ratio is unmeasured`,
-          );
-        }
+      for (const { line, token } of findTintedBannerText(
+        readFileSync(file, "utf8"),
+        file,
+      )) {
+        if (TONE_TOKENS.has(token)) continue;
+        offenders.push(
+          `${file}:${line} — \`${token}\` sits on a translucent tint but is not from STATUS_BANNER_TONE, so its composite ratio is unmeasured`,
+        );
       }
     }
     expect(offenders).toEqual([]);

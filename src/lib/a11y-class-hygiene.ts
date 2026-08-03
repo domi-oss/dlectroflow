@@ -297,8 +297,17 @@ export function scanClassScopes(
 
 /** Strip and return a token's variant chain. `dark:hover:text-x` → ["dark",
  *  "hover"] plus the base `text-x`. Arbitrary variants (`[&_svg]:`) are kept as
- *  opaque strings; nothing here needs to interpret them. */
-function splitVariants(token: string): { variants: string[]; base: string } {
+ *  opaque strings; nothing here needs to interpret them.
+ *
+ *  Exported because every caller that wants to ask "is this a dark-mode
+ *  something" must ask it this way. A `token.startsWith("dark:bg-")` prefix test
+ *  looks equivalent and silently misses `dark:hover:bg-*` and `dark:sm:bg-*` —
+ *  that exact bug shipped in `status-banner-style.test.ts` and was caught by Duo
+ *  review on !250. */
+export function splitVariants(token: string): {
+  variants: string[];
+  base: string;
+} {
   const parts: string[] = [];
   let rest = token;
   for (;;) {
@@ -470,6 +479,64 @@ export function findTextContrastRisks(
     }
   }
   return findings;
+}
+
+// ── Rule C: the tinted-banner shape ───────────────────────────────────────
+
+/** `bg-amber-500/10` — a palette background carrying an alpha modifier. */
+const TINTED_BG = /^bg-([a-z]+)-\d{2,3}\/\d{1,3}$/;
+
+/** Does any token set a dark-mode background, at any point in its variant chain? */
+function hasDarkBackground(tokens: readonly string[]): boolean {
+  return tokens.some((token) => {
+    const { variants, base } = splitVariants(token);
+    return variants.includes("dark") && base.startsWith("bg-");
+  });
+}
+
+/**
+ * Rule C — scopes whose text sits on a **translucent chromatic tint composited
+ * over `--background`**, with the chromatic text colours they use.
+ *
+ * This is the shape Rules A and B cannot judge. A translucent tint pulls the
+ * effective background *toward* the text: `text-green-700` is 4.65:1 on the bare
+ * light `--background` and **4.16:1** once its own `bg-green-600/10` is in the
+ * way. Six banners in this repo passed the token rules and failed AA that way,
+ * and one of them carried a comment asserting it did not.
+ *
+ * Measuring a composite from source is not something this module can do, so it
+ * reports the *shape* and lets `status-banner-style.test.ts` require that those
+ * colours come from the one table whose ratios were measured. That keeps the
+ * measured numbers next to the table they describe, and keeps the shape
+ * detection here where it can be exercised on synthetic input.
+ *
+ * A scope that sets its own `dark:bg-*` is excluded: it composites over a
+ * background it chose rather than over `--background`, so the table's numbers say
+ * nothing about it (`guest-indicator.tsx` is the real case). That exclusion has
+ * to be variant-aware — `dark:hover:bg-amber-950/20` is a dark background — which
+ * is why it goes through {@link splitVariants} rather than a string prefix.
+ */
+export function findTintedBannerText(
+  source: string,
+  fileName = "input.tsx",
+): { line: number; token: string }[] {
+  const found: { line: number; token: string }[] = [];
+  for (const scope of scanClassScopes(source, fileName)) {
+    const tinted = scope.tokens.some((token) => {
+      const match = TINTED_BG.exec(token);
+      return match !== null && CHROMATIC.has(match[1]);
+    });
+    if (!tinted) continue;
+    if (hasDarkBackground(scope.tokens)) continue;
+    for (const token of scope.tokens) {
+      if (!isUnprefixed(token)) continue;
+      const match = TEXT_COLOR.exec(token);
+      if (match && CHROMATIC.has(match[1])) {
+        found.push({ line: scope.line, token });
+      }
+    }
+  }
+  return found;
 }
 
 // ── Rule D: focus indicator ────────────────────────────────────────────────

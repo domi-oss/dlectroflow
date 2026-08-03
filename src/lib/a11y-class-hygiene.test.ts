@@ -3,8 +3,10 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import {
   findTextContrastRisks,
+  findTintedBannerText,
   findWeakFocusIndicators,
   scanClassScopes,
+  splitVariants,
   MIN_AA_TEXT_SHADE,
 } from "@/lib/a11y-class-hygiene";
 
@@ -230,6 +232,40 @@ describe("scanClassScopes", () => {
   });
 });
 
+describe("splitVariants", () => {
+  // Exported so no caller reaches for a `startsWith("dark:")` prefix test. That
+  // shortcut reads a compound chain as a non-match, which is how the
+  // `dark:hover:bg-*` bug reached review on !250.
+  it("returns the whole variant chain, not just the first", () => {
+    expect(splitVariants("dark:hover:bg-amber-950/20")).toEqual({
+      variants: ["dark", "hover"],
+      base: "bg-amber-950/20",
+    });
+  });
+
+  it("leaves an unprefixed utility alone", () => {
+    expect(splitVariants("text-amber-700")).toEqual({
+      variants: [],
+      base: "text-amber-700",
+    });
+  });
+
+  it("does not split on a colon inside an arbitrary variant or value", () => {
+    expect(splitVariants("data-[highlighted]:bg-accent")).toEqual({
+      variants: ["data-[highlighted]"],
+      base: "bg-accent",
+    });
+    expect(splitVariants("[&:has(:focus)]:ring-2")).toEqual({
+      variants: ["[&:has(:focus)]"],
+      base: "ring-2",
+    });
+    expect(splitVariants("bg-[color:var(--x)]")).toEqual({
+      variants: [],
+      base: "bg-[color:var(--x)]",
+    });
+  });
+});
+
 // ── Rule A / B: text colour ────────────────────────────────────────────────
 
 describe("findTextContrastRisks", () => {
@@ -387,6 +423,77 @@ describe("findTextContrastRisks", () => {
     expect(
       findTextContrastRisks(
         `const x = <p className="hover:text-green-700" />;`,
+      ),
+    ).toEqual([]);
+  });
+});
+
+// ── Rule C: the tinted-banner shape ───────────────────────────────────────
+
+describe("findTintedBannerText", () => {
+  it("reports the chromatic text sitting on a translucent chromatic tint", () => {
+    // The `(app)/page.tsx` banner shape. Its token pair can be correct and its
+    // composite ratio still fail — green-700 is 4.65:1 on the bare light
+    // --background and 4.16:1 once the banner's own /10 tint is in the way.
+    const found = findTintedBannerText(
+      `const x = <div className="rounded-lg border border-green-600/30 bg-green-600/10 text-sm text-green-800 dark:text-green-400" />;`,
+    );
+    expect(found.map((f) => f.token)).toEqual(["text-green-800"]);
+  });
+
+  it("ignores an OPAQUE coloured background, which pins its own ratio", () => {
+    // `integrations-panel.tsx`'s pill: bg-green-100 does not composite over
+    // --background, so the tint reasoning does not apply to it.
+    expect(
+      findTintedBannerText(
+        `const p = "bg-green-100 text-green-800";`,
+        "input.ts",
+      ),
+    ).toEqual([]);
+  });
+
+  it("ignores a scope that supplies its own dark background", () => {
+    // `guest-indicator.tsx`: it composites over a background it chose, so the
+    // tone table's measured ratios say nothing about it.
+    expect(
+      findTintedBannerText(
+        `const x = <div className="bg-amber-500/10 text-amber-800 dark:bg-amber-950/20 dark:text-amber-300" />;`,
+      ),
+    ).toEqual([]);
+  });
+
+  it("recognises a COMPOUND dark variant as a dark background", () => {
+    // Duo review round 4, !250. This was a `token.startsWith("dark:bg-")` prefix
+    // test, which reads `dark:hover:bg-*` as not-a-dark-background and reported
+    // the scope anyway. Fixed by going through `splitVariants`, and asserted here
+    // for both orderings because the variant chain's order is the author's choice.
+    for (const dark of [
+      "dark:hover:bg-amber-950/20",
+      "dark:sm:bg-amber-950/20",
+    ]) {
+      expect(
+        findTintedBannerText(
+          `const x = <div className="bg-amber-500/10 text-amber-800 ${dark}" />;`,
+        ),
+        dark,
+      ).toEqual([]);
+    }
+  });
+
+  it("does not treat a non-palette tint as a banner", () => {
+    expect(
+      findTintedBannerText(
+        `const x = <div className="bg-primary/10 text-amber-800" />;`,
+      ),
+    ).toEqual([]);
+  });
+
+  it("does not report a variant-prefixed text colour on a tint", () => {
+    // Rule A already covers `hover:text-*`; this rule is about the resting value
+    // whose composite ratio the tone table measured.
+    expect(
+      findTintedBannerText(
+        `const x = <div className="bg-green-600/10 hover:text-green-800" />;`,
       ),
     ).toEqual([]);
   });
