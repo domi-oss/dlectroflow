@@ -246,6 +246,13 @@ export interface ComposeBackupService {
   script: string;
   /** The service's volume entries, verbatim minus the list dash. */
   volumes: string[];
+  /**
+   * The service's own `key: value` lines, verbatim. Carries the hardening
+   * settings (`read_only`, `cap_drop`, `security_opt`, `tmpfs`) so a tidy-up
+   * cannot drop them silently — which is why this file writes those in flow
+   * style rather than as block lists.
+   */
+  directives: string[];
 }
 
 export interface ComposeBackupFacts {
@@ -293,6 +300,30 @@ function listUnder(body: string[], key: string): string[] {
     items.push(trimmed.slice(2).trim());
   }
   return items;
+}
+
+/**
+ * A service's own `key: value` lines — those at the shallowest indent inside its
+ * body — with comments and nested mapping content excluded.
+ *
+ * Deliberately only the service's OWN level: `POSTGRES_DB: ${…}` sits under
+ * `environment:` and is not a service directive, and treating it as one would let
+ * an env var satisfy a hardening assertion.
+ */
+function directivesOf(body: string[]): string[] {
+  const indents = body
+    .filter((line) => line.trim() !== "" && !line.trimStart().startsWith("#"))
+    .map(indentOf);
+  if (indents.length === 0) return [];
+  const own = Math.min(...indents);
+
+  return body
+    .filter((line) => indentOf(line) === own)
+    .map((line) => line.trim())
+    .filter(
+      (trimmed) =>
+        trimmed !== "" && !trimmed.startsWith("#") && !trimmed.startsWith("- "),
+    );
 }
 
 /**
@@ -361,6 +392,7 @@ export function parseComposeBackup(source: string): ComposeBackupFacts {
       name,
       script: stripShellComments(script),
       volumes: listUnder(body, "volumes"),
+      directives: directivesOf(body),
     });
   }
 

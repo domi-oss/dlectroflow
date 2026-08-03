@@ -470,6 +470,42 @@ describe("Compose backup stack hygiene (#162)", () => {
     }
   });
 
+  it("runs both stages with no writable root, no capabilities and no escalation", () => {
+    // Duo review (!249) asked for security-posture parity with the chart, which
+    // gives its backup containers readOnlyRootFilesystem, capabilities drop ALL
+    // and allowPrivilegeEscalation false. Cheap to match here because neither
+    // container writes outside its mounts — verified 2026-08-03 that pg_dump,
+    // gzip, date and rclone all run under exactly these flags.
+    //
+    // `user:` is the one piece NOT matched, and its absence is deliberate rather
+    // than forgotten: /backups is a host bind mount Docker creates as root, so
+    // pinning a non-root uid would leave the dump unable to write on every
+    // existing install. PLATFORM_DIVERGENCES ("Container hardening") in
+    // src/lib/env-drift.ts records it.
+    for (const stage of facts.services) {
+      const where = `service "${stage.name}"`;
+      expect(stage.directives, where).toContain("read_only: true");
+      expect(stage.directives, where).toContain('cap_drop: ["ALL"]');
+      expect(stage.directives, where).toContain(
+        'security_opt: ["no-new-privileges:true"]',
+      );
+      // The read-only root needs somewhere writable, or rclone's config write
+      // and gzip's scratch both fail at run time rather than at review time.
+      expect(stage.directives, where).toContain('tmpfs: ["/tmp"]');
+    }
+  });
+
+  it("does not mistake an env var for a service directive", () => {
+    // The control for the assertion above: `PGPASSWORD: …` lives under
+    // `environment:` and must not read as the service's own setting, or an env
+    // var named read_only would satisfy a hardening check.
+    expect(service("backup").directives).toContain(
+      "image: postgres:16@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20",
+    );
+    expect(service("backup").directives.join("\n")).not.toMatch(/PGPASSWORD/);
+    expect(service("backup").directives.join("\n")).not.toMatch(/POSTGRES_DB/);
+  });
+
   it("never echoes a credential to the cron log", () => {
     for (const stage of facts.services) {
       expect(stage.script, `service "${stage.name}"`).not.toMatch(

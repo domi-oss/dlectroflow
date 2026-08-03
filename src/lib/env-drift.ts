@@ -382,14 +382,21 @@ export const PLATFORM_DIVERGENCES: readonly PlatformDivergence[] = [
       "RuntimeDefault, capabilities drop ALL, and an optional NetworkPolicy " +
       "fencing Postgres :5432 to the app pods.",
     compose:
-      "The image's own USER node (uid 1000) and Docker's default seccomp " +
-      "profile.",
+      "For the app: the image's own USER node (uid 1000) and Docker's default " +
+      "seccomp profile. For the two backup services (#162): read_only, " +
+      "cap_drop ALL, no-new-privileges and a /tmp tmpfs, but no `user:`.",
     reason:
-      "These are pod-spec fields with no single-file Compose equivalent that " +
-      "behaves the same way, and the writable-path work the read-only root " +
-      "filesystem needs (emptyDir mounts for /tmp and /app/.next/cache) has no " +
-      "counterpart a self-hoster could be expected to get right. The image " +
-      "still never runs as root on either platform.",
+      "For the long-running services these are pod-spec fields with no " +
+      "single-file Compose equivalent that behaves the same way, and the " +
+      "writable-path work the read-only root filesystem needs (emptyDir mounts " +
+      "for /tmp and /app/.next/cache) has no counterpart a self-hoster could be " +
+      "expected to get right. The image still never runs as root on either " +
+      "platform. The backup services are the exception and do carry the " +
+      "hardening, because their whole job is one pipe into two mounts and " +
+      "nothing needs the root filesystem writable. `user:` is the one piece " +
+      "still missing there, and deliberately: /backups is a host bind mount " +
+      "Docker creates as root, so pinning a non-root uid would leave the dump " +
+      "unable to write on every install that already exists.",
   },
   {
     area: "Availability: replicas and PodDisruptionBudget",

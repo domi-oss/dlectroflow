@@ -167,6 +167,19 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Hardening, matching what the chart's dump initContainer gets. Cheap here
+    # because this container's whole job is `pg_dump | gzip` into two mounts:
+    # nothing needs the root filesystem writable, no capability, and no chance to
+    # gain one. Verified 2026-08-03 that pg_dump, gzip and date all run under
+    # exactly this. `user:` is deliberately NOT set — /backups is a host bind
+    # mount that Docker creates as root, so pinning a non-root uid would leave
+    # the dump unable to write on every existing install. That divergence is
+    # recorded in PLATFORM_DIVERGENCES ("Container hardening") rather than
+    # silently skipped.
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
     environment:
       # All three are read by the command below; PGPASSWORD is what lets pg_dump
       # authenticate without an interactive prompt.
@@ -264,6 +277,15 @@ services:
       # a single `run --rm backup-upload` takes a fresh dump and uploads it.
       backup:
         condition: service_completed_successfully
+    # Same hardening as the dump stage, and it matters more here: this is the one
+    # container in the stack holding a credential for something outside the host.
+    # rclone needs a writable HOME/config path and nothing else, which the tmpfs
+    # covers — RCLONE_CONFIG below points into it. Verified under exactly these
+    # flags on 2026-08-03.
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
     environment:
       # The remote is defined entirely by environment, so no config file is
       # baked into the image and the key is never written to disk. RCLONE_CONFIG
