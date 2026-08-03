@@ -340,6 +340,36 @@ describe("Compose backup stack hygiene (#162)", () => {
     expect(service("backup").script).toMatch(/-gt\s+\d+/);
   });
 
+  it("never lets the pipeline write straight to the name the uploaders read", () => {
+    // Measured during the #162 drill: a pg_dump that fails at the head of
+    // `pg_dump | gzip` still leaves gzip's 20-byte output behind. Written
+    // straight to dump.sql.gz, that sits in the handover looking like a dump.
+    // Only the mv AFTER the size guard promotes it to the name anything reads.
+    const dump = service("backup").script;
+    expect(dump).toMatch(/> \/stage\/dump\.sql\.gz\.partial/);
+    expect(dump).toMatch(
+      /mv \/stage\/dump\.sql\.gz\.partial \/stage\/dump\.sql\.gz/,
+    );
+    // No redirect ENDS at the promoted name, which is what the check above
+    // cannot see on its own — `.partial` is a prefix match of it.
+    expect(dump).not.toMatch(/> \/stage\/dump\.sql\.gz$/m);
+  });
+
+  it("would notice if the dump were promoted before the size guard", () => {
+    // The control for the assertion above: collapse the two-step write back to
+    // the shape it replaced and confirm all three halves report it.
+    const collapsed = COMPOSE.replaceAll(
+      "/stage/dump.sql.gz.partial",
+      "/stage/dump.sql.gz",
+    );
+    expect(collapsed).not.toBe(COMPOSE);
+    const dump = parseComposeBackup(collapsed).services.find(
+      (s) => s.name === "backup",
+    )!.script;
+    expect(dump).not.toMatch(/> \/stage\/dump\.sql\.gz\.partial/);
+    expect(dump).toMatch(/> \/stage\/dump\.sql\.gz$/m);
+  });
+
   it("mints the timestamp exactly once, in the dump stage", () => {
     const stampWrites = service("backup").script.match(/> \/stage\/stamp/g);
     expect(stampWrites).toHaveLength(1);

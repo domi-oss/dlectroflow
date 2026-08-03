@@ -194,27 +194,39 @@ services:
     command:
       - |
         set -euo pipefail
-        # Clear the handover first. A previous run's dump left in place could
-        # otherwise be uploaded a second time if this one failed part-way.
-        rm -f /stage/dump.sql.gz /stage/stamp
+        # Clear the handover first, so nothing a previous run left behind can be
+        # mistaken for this one's output.
+        rm -f /stage/dump.sql.gz /stage/dump.sql.gz.partial /stage/stamp
+        trap 'rm -f /stage/dump.sql.gz.partial' EXIT
+        # gzip writes to .partial, never to the name the uploaders read. Measured
+        # during the #162 drill: a pg_dump that fails at the head of the pipe
+        # still leaves gzip's 20-byte output behind, so writing straight to
+        # dump.sql.gz would leave a file that looks like a dump sitting in the
+        # handover. It is `mv` below, after the size guard, that promotes it.
+        #
         # --clean --if-exists so the dump restores over an existing schema.
         # --no-owner --no-privileges so it restores under ANY role name — a
         # scratch database on a rescue host will not have your `dlectroflow`
         # role, and without these the restore fails on every GRANT and OWNER TO.
         pg_dump --clean --if-exists --no-owner --no-privileges \
           -h db -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" \
-          | gzip -9 > /stage/dump.sql.gz
-        SIZE=$$(wc -c < /stage/dump.sql.gz)
+          | gzip -9 > /stage/dump.sql.gz.partial
+        SIZE=$$(wc -c < /stage/dump.sql.gz.partial)
         echo "dump bytes: $${SIZE}"
-        # Guard against a degenerate dump silently becoming "the backup". An
-        # empty-database dump measures 394 bytes, so this fires on the real case
-        # rather than only on a hypothetical zero-byte one.
-        [ "$${SIZE}" -gt 1024 ] || { echo "ERROR: dump suspiciously small ($${SIZE} bytes)" >&2; rm -f /stage/dump.sql.gz; exit 1; }
-        # Written LAST and exactly once: the stamp's existence is what says a
-        # good dump is ready to upload.
+        # Guard against a degenerate dump silently becoming "the backup". A dump
+        # of an empty database measures a little under 400 bytes (390-393
+        # observed), so this fires on the real case rather than only on a
+        # hypothetical zero-byte one.
+        [ "$${SIZE}" -gt 1024 ] || { echo "ERROR: dump suspiciously small ($${SIZE} bytes)" >&2; exit 1; }
+        mv /stage/dump.sql.gz.partial /stage/dump.sql.gz
+        # Written LAST and exactly once: the stamp's existence is what tells the
+        # uploaders a good dump is ready, and it is the ONE timestamp every copy
+        # of this dump is named with.
         date -u +%Y%m%dT%H%M%SZ > /stage/stamp
         STAMP="$$(cat /stage/stamp)"
         out="/backups/dlectroflow-$${STAMP}.sql.gz"
+        # Supersedes the trap above; by here the staged partial has been moved,
+        # so nothing is left unguarded.
         trap 'rm -f "$$out.partial"' EXIT
         cp /stage/dump.sql.gz "$$out.partial"
         mv "$$out.partial" "$$out"
