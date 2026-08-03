@@ -356,8 +356,10 @@ describe("Privacy Policy page: promises nothing unshipped", () => {
   //
   // #118 Phase C shipped two of the original three (per-member Google
   // connections, and a per-account BYO LLM key), so their "not yet" wording is
-  // GONE and the claims are pinned in the Phase C block below instead. What
-  // remains unshipped is asserted here.
+  // GONE and the claims are pinned in the Phase C block below instead. #129
+  // shipped a third — the self-service export — so the first test here is now the
+  // same guard pointed the other way. What remains unshipped is asserted below.
+  // The table of not-shipped claims lives in docs/legal.md and moves with this.
   it("names the self-service export, now that there is one (#129)", () => {
     // This test used to assert the OPPOSITE — "no self-service export button" —
     // which was the honest thing to publish until #129 shipped one. The
