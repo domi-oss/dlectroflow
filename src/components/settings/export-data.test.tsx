@@ -177,6 +177,20 @@ describe("ExportData", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/60 seconds/);
   });
 
+  it("keeps a flex formatting context on the control, so gap-2 is not inert", () => {
+    // Raised by review on !253 as a defect: `gap-2` with no flex context. It is
+    // not one — `touchTarget` supplies `inline-flex items-center justify-center`
+    // — but the review was reasonable, because the context arrives from a shared
+    // constant in another file and nothing here says so. Pinning it: if a future
+    // edit to `touchTarget` drops `inline-flex`, the icon/label gap silently
+    // collapses and no visual test would catch it.
+    render(<ExportData />);
+    const cls = control().getAttribute("class") ?? "";
+    expect(cls).toContain("gap-2");
+    expect(cls).toMatch(/\b(inline-)?flex\b/);
+    expect(cls).toContain("items-center");
+  });
+
   it("tells the reader to sign in again on a 401", async () => {
     // Raised by review on !253: this spec previously said 401 in its name and
     // mocked a 429, so the branch it claimed to cover was never executed. A
