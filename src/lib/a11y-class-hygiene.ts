@@ -261,7 +261,13 @@ export function scanClassScopes(
   const scopes: ClassScope[] = [];
   const visit = (node: ts.Node): void => {
     if (isScopeRoot(node)) {
+      // A `Set` for membership alongside the array that keeps source order — the
+      // public contract is "in source order, duplicates collapsed", so the order
+      // has to be an array while the de-duplication should not be a linear rescan
+      // per token. Duo review, !250. `cn("text-xs", cond && "text-xs …")` really
+      // does repeat tokens, so the de-duplication is not hypothetical.
       const tokens: string[] = [];
+      const seen = new Set<string>();
       let line: number | null = null;
       const visitOwn = (inner: ts.Node): void => {
         if (inner !== node && isScopeRoot(inner)) return;
@@ -275,7 +281,9 @@ export function scanClassScopes(
           const text = inner.text;
           if (looksLikeClasses(text)) {
             for (const token of classTokens(text)) {
-              if (!tokens.includes(token)) tokens.push(token);
+              if (seen.has(token)) continue;
+              seen.add(token);
+              tokens.push(token);
             }
             if (line === null) {
               line =

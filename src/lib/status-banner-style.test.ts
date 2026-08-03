@@ -142,14 +142,36 @@ describe("STATUS_BANNER_TONE", () => {
 });
 
 describe("src/ tinted-banner hygiene (#109)", () => {
-  it("finds banner-shaped scopes on the real tree (the scan is not a no-op)", () => {
-    // One per tone, from the table. If this drops to zero the assertion below
-    // stops meaning anything, which is how a clean run turns into a hollow one.
+  it("reports exactly the tone table and nothing else (the scan is not a no-op)", () => {
+    // Asserts the EXACT set, not a floor.
+    //
+    // Duo review (!250) spotted that a `>= tones` floor is satisfied by the table
+    // alone, so it proved nothing about any call site being reached. Correct. But
+    // the suggested fix — `> tones`, to force at least one finding beyond the
+    // table — cannot work here and would fail the build: after centralisation
+    // there ARE no call-site tinted banners, by design. Making the test demand one
+    // would mean re-introducing a hand-rolled banner to keep it green, which is
+    // the opposite of what the table exists for.
+    //
+    // The available strengthening is to stop asserting a bound at all and assert
+    // the whole set. That fails if the file walk or the parser breaks (the set
+    // empties), AND if a call site starts spelling its own tinted banner (the set
+    // grows) — both directions, no floor to be satisfied vacuously. The evidence
+    // that the RULE itself is not vacuous lives where it belongs, in
+    // `a11y-class-hygiene.test.ts`'s fixtures for `findTintedBannerText`.
     const tinted = sourceFiles().flatMap((file) =>
-      findTintedBannerText(readFileSync(file, "utf8"), file),
+      findTintedBannerText(readFileSync(file, "utf8"), file).map(
+        ({ token }) => `${file}:${token}`,
+      ),
     );
-    expect(tinted.length).toBeGreaterThanOrEqual(
-      Object.keys(STATUS_BANNER_TONE).length,
+    const table = path.join("src", "lib", "status-banner-style.ts");
+    expect(tinted.sort()).toEqual(
+      Object.values(STATUS_BANNER_TONE)
+        .map(
+          (tone) =>
+            `${table}:${tone.split(/\s+/).find((t) => PALETTE_TEXT.test(t))}`,
+        )
+        .sort(),
     );
   });
 

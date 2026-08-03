@@ -11,6 +11,28 @@ import {
 } from "@/components/ui/anchored-popup";
 import { identityLine, type AccountIdentity } from "@/lib/identity";
 
+// Popup entries: full-width rows at the 44px minimum (WCAG 2.5.5), matching
+// the app menu's entries directly above them in the same corner.
+//
+// At module scope: it depends on nothing, so there is no reason to re-bind it per
+// render (Duo review, !250), and app-menu.tsx hoists its own the same way — #117
+// is about the two menus agreeing, so keeping them structurally identical is the
+// point rather than a nicety.
+//
+// #117 — the focus indicator is an INSET RING, not just the background swap
+// this used to rely on. WCAG 2.4.11 Focus Appearance is AA in WCAG 2.2 and axe
+// does not implement it, so the whole a11y suite was structurally blind to it:
+// --accent against the popup's --background surface is 1.09:1 in light and
+// 1.24:1 in dark, against the 3:1 an indicator needs. --ring reads 5.09:1 on
+// that surface and 4.65:1 on the focused --accent in light, 8.83:1 / 7.14:1 in
+// dark — clear of 3:1 against BOTH adjacent colours in both themes. Inset so
+// the ring follows the entry's own rounded box rather than spilling into the
+// popup's 4px padding. Identical to app-menu.tsx's entries by design: the two
+// popups open inches apart and #117 was declined inside !192 precisely because
+// fixing one would make them behave differently.
+const ENTRY =
+  "hover:bg-accent hover:text-primary focus-visible:bg-accent focus-visible:text-primary focus-visible:inset-ring-2 focus-visible:inset-ring-ring flex min-h-11 w-full items-center rounded-md px-3 text-left outline-none";
+
 /**
  * #100 — who you are signed in as, in the header.
  *
@@ -52,23 +74,6 @@ export function AccountMenu({ identity }: { identity: AccountIdentity }) {
   // A pointer user gets the provider — and the untruncated handle — on hover,
   // without opening anything. Same convention as the theme toggle (#103).
   const triggerTitle = `Signed in as ${identity.label} (${identity.provider})`;
-
-  // Popup entries: full-width rows at the 44px minimum (WCAG 2.5.5), matching
-  // the app menu's entries directly above them in the same corner.
-  //
-  // #117 — the focus indicator is an INSET RING, not just the background swap
-  // this used to rely on. WCAG 2.4.11 Focus Appearance is AA in WCAG 2.2 and axe
-  // does not implement it, so the whole a11y suite was structurally blind to it:
-  // --accent against the popup's --background surface is 1.09:1 in light and
-  // 1.24:1 in dark, against the 3:1 an indicator needs. --ring reads 5.09:1 on
-  // that surface and 4.65:1 on the focused --accent in light, 8.83:1 / 7.14:1 in
-  // dark — clear of 3:1 against BOTH adjacent colours in both themes. Inset so
-  // the ring follows the entry's own rounded box rather than spilling into the
-  // popup's 4px padding. Identical to app-menu.tsx's entries by design: the two
-  // popups open inches apart and #117 was declined inside !192 precisely because
-  // fixing one would make them behave differently.
-  const entry =
-    "hover:bg-accent hover:text-primary focus-visible:bg-accent focus-visible:text-primary focus-visible:inset-ring-2 focus-visible:inset-ring-ring flex min-h-11 w-full items-center rounded-md px-3 text-left outline-none";
 
   return (
     <div ref={rootRef} className="relative">
@@ -120,14 +125,14 @@ export function AccountMenu({ identity }: { identity: AccountIdentity }) {
               {/* The deep link the header used to hold. The Account group itself
                   lands in #35 Phase C; until then this resolves to /settings and
                   the fragment is inert. */}
-              <Link href="/settings#account" className={entry}>
+              <Link href="/settings#account" className={ENTRY}>
                 Account settings
               </Link>
               {/* Logout is a state change → POST-only (CSRF-safe), so it stays a
                   form/button rather than becoming a link now that it lives in a
                   popup. See #21 (P5 batch B). */}
               <form action="/api/auth/logout" method="post" className="flex">
-                <button type="submit" className={entry}>
+                <button type="submit" className={ENTRY}>
                   Sign out
                 </button>
               </form>
