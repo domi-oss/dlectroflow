@@ -31,6 +31,43 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Added
 
+- **The self-host Compose stack now copies each database dump off the host
+  (#162).** It previously dumped to `./backups` on the same disk it was
+  protecting: a backup should not share a failure domain with the thing it backs
+  up, and the database is the one asset in that stack that cannot be rebuilt from
+  source. A new `backup-upload` service copies every dump to a Backblaze B2
+  bucket; the host's own retained copy stays, and both now carry the same
+  filename so they can be matched and verified against each other.
+  - **New optional environment variables**: `B2_BUCKET`, `B2_PREFIX`,
+    `B2_KEY_ID`, `B2_APP_KEY` in `.env.prod`. Leave them unset and nothing
+    changes — `backup` alone still works for anyone copying dumps off some other
+    way, and `backup-upload` refuses to run rather than appearing to succeed.
+  - **The crontab line changes** from `run --rm backup` to
+    `run --rm backup-upload`, which takes the dump and uploads it in one
+    invocation. `docs/self-host-vps.md` has the walkthrough, including how to
+    scope the B2 application key: one bucket, one prefix, `writeFiles` only, so a
+    compromised host can neither read existing backups out nor delete them. The
+    read-capable key stays off the host, which makes a restore drill an off-host
+    task by construction.
+  - **The dump gained `--no-owner --no-privileges`**, so it restores under any
+    role name — without them a restore into a scratch database on a rescue host
+    fails on every `GRANT` and `OWNER TO`.
+  - **A size guard and a two-step write.** The dump is written to a `.partial`
+    name and only promoted after passing a minimum-size check, so a degenerate
+    dump cannot become "the backup". Measured: a dump of an empty database is
+    under 400 bytes, and a `pg_dump` that fails at the head of `pg_dump | gzip`
+    leaves gzip's 20-byte output behind — which is also why every stage uses
+    `set -euo pipefail` rather than a bare `set -eu`, under which that pipeline
+    exits 0.
+  - **Rehearsed end to end**, not just written: a dump taken by the stack,
+    uploaded, pulled back down, restored into a fresh digest-pinned
+    `postgres:16.14` under a different role name, and compared per table against
+    the source — row counts and a content hash for all 20 tables. The comparison
+    was itself checked against an empty database and against a five-row deletion,
+    so the match means something. Both guards were made to fire on purpose.
+  - `backup-hygiene` grows a Compose walk beside its Helm one and fails the build
+    if any of these properties is removed.
+
 - Optional second backup destination: the prod database CronJob can now upload
   each dump to a Backblaze B2 bucket alongside the existing GCS upload, writing
   the same timestamped filename to both. Off by default; enabled per-environment
