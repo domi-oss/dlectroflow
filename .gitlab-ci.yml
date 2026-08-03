@@ -265,7 +265,7 @@ docs_only_scan_stub:
   # Same pinned digest as build_app/test_app — one image for Renovate to bump,
   # and node writes the reports (JSON.stringify cannot emit malformed JSON the
   # way a shell heredoc can).
-  image: node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
+  image: node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
   needs: []          # nothing to wait for; finishes in seconds
   interruptible: true
   variables:
@@ -388,7 +388,7 @@ build_app:
   stage: build
   # alpine (musl) so npm ci + next build produce musl-matched native binaries
   # (esp. the Prisma engine) that the alpine runtime image can execute.
-  image: node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
+  image: node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
   interruptible: true  # superseded pipelines on the same ref cancel this job
   before_script:
     - apk add --no-cache openssl   # Prisma engine needs libssl; targets come from schema.prisma
@@ -445,7 +445,7 @@ build_app:
 # benefit.
 test_app:
   stage: build
-  image: node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
+  image: node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
   interruptible: true
   needs: []          # starts at pipeline start, in parallel with build_app
   # Real Postgres for the *.integration.test.ts files (they exercise actual
