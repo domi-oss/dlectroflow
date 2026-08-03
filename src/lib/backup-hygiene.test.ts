@@ -329,14 +329,30 @@ describe("Compose backup stack hygiene (#162)", () => {
     }
   });
 
+  it("proves pipefail is in effect rather than trusting the flag", () => {
+    // Duo review (!249) asked the right question: `pipefail` is not POSIX, so a
+    // shell that ACCEPTS the option and ignores it turns the line above into
+    // decoration — and the uploader has no bash to fall back on (the rclone
+    // image ships none), so /bin/sh is not a choice. Verified 2026-08-03 that
+    // busybox 1.37 and dash both honour it, but an image bump is exactly the
+    // edit that would change that without anyone noticing. `false | true`
+    // succeeds without pipefail and fails with it, so it is the cheapest
+    // possible proof, and it runs before anything is dumped or uploaded.
+    for (const stage of facts.services) {
+      expect(stage.script, `service "${stage.name}"`).toMatch(
+        /set -o pipefail 2>\/dev\/null; false \| true/,
+      );
+    }
+  });
+
   it("dumps with --no-owner --no-privileges so any role name can restore it", () => {
     expect(service("backup").script).toMatch(/--no-owner/);
     expect(service("backup").script).toMatch(/--no-privileges/);
   });
 
   it("keeps a minimum-size guard before the dump is promoted", () => {
-    // An empty-database dump is 394 bytes, measured during the #162 drill, so
-    // the guard fires on the case that actually happens.
+    // A dump of an empty database is a little under 400 bytes, measured during
+    // the #162 drill, so the guard fires on the case that actually happens.
     expect(service("backup").script).toMatch(/-gt\s+\d+/);
   });
 

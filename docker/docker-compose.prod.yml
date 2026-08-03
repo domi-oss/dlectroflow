@@ -194,6 +194,15 @@ services:
     command:
       - |
         set -euo pipefail
+        # Prove pipefail is in EFFECT, not merely accepted. `pipefail` is not in
+        # POSIX, and a shell that takes the flag and ignores it would turn the
+        # line above into decoration — the whole point of this job is that its
+        # failures cannot be silent, so an unverified guard is worse than none.
+        # `false | true` succeeds without pipefail and fails with it.
+        if ( set -o pipefail 2>/dev/null; false | true ); then
+          echo "ERROR: this shell does not honour 'set -o pipefail' — refusing to take a backup whose failures could pass as success" >&2
+          exit 1
+        fi
         # Clear the handover first, so nothing a previous run left behind can be
         # mistaken for this one's output.
         rm -f /stage/dump.sql.gz /stage/dump.sql.gz.partial /stage/stamp
@@ -278,6 +287,16 @@ services:
     command:
       - |
         set -euo pipefail
+        # Same self-check as the dump stage, and it earns its place harder here:
+        # this image ships no bash, so /bin/sh is the only option and it is
+        # busybox ash. Verified 2026-08-03 that busybox 1.37 honours pipefail —
+        # `false | true` exits 1 with it and 0 without — but a Renovate bump to
+        # an image whose /bin/sh only ACCEPTS the flag would silently downgrade
+        # every pipeline added here later. Checking costs one subshell a day.
+        if ( set -o pipefail 2>/dev/null; false | true ); then
+          echo "ERROR: this shell does not honour 'set -o pipefail' — refusing to upload a backup whose failures could pass as success" >&2
+          exit 1
+        fi
         if [ -z "$${RCLONE_CONFIG_B2_ACCOUNT}" ] || [ -z "$${RCLONE_CONFIG_B2_KEY}" ] || [ -z "$${B2_BUCKET}" ]; then
           echo "ERROR: set B2_BUCKET, B2_KEY_ID and B2_APP_KEY in .env.prod — see the Backups section of docs/self-host-vps.md" >&2
           exit 1
