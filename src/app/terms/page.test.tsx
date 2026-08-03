@@ -19,13 +19,23 @@ function pageText(): string {
 
 /**
  * Any assertion in the Terms that a member can get their own data out. Kept as
- * one pattern so the guard and its positive control cannot drift apart, which
- * is exactly how the original narrow version came to miss the wording #129
- * plans to use. Deliberately does not require an object after the verb: the
- * claim is the problem regardless of how the sentence names the data.
+ * one pattern so the guard and its positive control cannot drift apart, which is
+ * how the original narrow version came to miss the wording #129 plans to use.
+ *
+ * The object list is deliberate, and the comment is deliberately precise about
+ * it — an earlier version of this comment claimed the pattern "does not require
+ * an object after the verb", which was false and overstated the reach. It DOES
+ * require one of the listed data-referring objects.
+ *
+ * Why not drop the object requirement entirely: `you can download` alone would
+ * match a sentence about the source code, which is a plausible addition to a
+ * section that already discusses the AGPL licence, and a guard that fires on
+ * that gets relaxed. Known gap, accepted: a phrasing that names the data some
+ * other way again ("you can download the lot") would evade it. Add it here when
+ * it appears rather than widening to the point of false positives.
  */
 const EXPORT_CLAIM =
-  /you (?:can|may|could) (?:export|download)\s+(?:your|a copy of)/i;
+  /you (?:can|may|could) (?:export|download)\s+(?:your|a copy of|everything|all your|all of your)/i;
 
 describe("Terms of Service page: structure", () => {
   it("has one h1 naming the document", () => {
@@ -422,6 +432,9 @@ describe("Terms of Service page: no per-user restore (#164)", () => {
     // And the narrower phrasings it already covered.
     expect("You can export your data at any time.").toMatch(EXPORT_CLAIM);
     expect("You may download a copy of your data.").toMatch(EXPORT_CLAIM);
+    // Raised by review on !252: these two evaded the earlier pattern.
+    expect("You can export all your data.").toMatch(EXPORT_CLAIM);
+    expect("You can download everything from Settings.").toMatch(EXPORT_CLAIM);
     // Not a claim about export, so it must not trip the guard.
     expect("You can download the source code.").not.toMatch(EXPORT_CLAIM);
   });
