@@ -219,6 +219,24 @@ describe("scanClassScopes", () => {
     expect(scopes[0].tokens).toEqual(["text-2xl", "font-semibold"]);
   });
 
+  it("accepts every character class strings really contain", () => {
+    // Pins the utility-shape character class after the hyphen moved to the front
+    // of it (Duo review, !250 — literal in both positions, but only obviously so
+    // in one). Each of these appears in the real tree.
+    const scopes = scanClassScopes(
+      `const x = <div className="min-h-[44px] bg-[color:var(--tick-color)] data-[highlighted]:bg-accent bg-green-600/10 [&_svg]:size-4 active:not-aria-[haspopup]:translate-y-px" />;`,
+    );
+    expect(scopes).toHaveLength(1);
+    expect(scopes[0].tokens).toEqual([
+      "min-h-[44px]",
+      "bg-[color:var(--tick-color)]",
+      "data-[highlighted]:bg-accent",
+      "bg-green-600/10",
+      "[&_svg]:size-4",
+      "active:not-aria-[haspopup]:translate-y-px",
+    ]);
+  });
+
   it("ignores class names that appear only in a comment", () => {
     // Not hypothetical: status-pill.tsx and inbox-view.tsx both name
     // `text-amber-600` in a comment documenting the bug they fixed. A regex

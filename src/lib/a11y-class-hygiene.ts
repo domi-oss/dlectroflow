@@ -222,14 +222,18 @@ function classTokens(text: string): string[] {
  * `"underline"`) is dropped, and that is safe by construction: every rule in
  * this module keys off a hyphenated utility, so such a scope has nothing to say.
  */
+// The hyphen leads the character class so it is unambiguously literal. It was
+// last, which is also literal — a trailing `-` cannot open a range, so the
+// behaviour is identical and the two forms were verified to accept the same
+// tokens. But "is `*+-]` a range?" is a question a reader should not have to
+// answer, and Duo review asked it on !250. `[` and `]` are for arbitrary values
+// (`bg-[color:var(--x)]`), `/` for alpha modifiers, `:` for variants.
+const UTILITY_SHAPED = /^[-a-z0-9[\]:_@.,/%!&<>()#*+]+$/i;
+
 function looksLikeClasses(text: string): boolean {
   const tokens = classTokens(text);
   if (tokens.length === 0) return false;
-  if (
-    !tokens.every((token) => /^[a-z0-9[\]:_@.,/%!&<>()#*+-]+$/i.test(token))
-  ) {
-    return false;
-  }
+  if (!tokens.every((token) => UTILITY_SHAPED.test(token))) return false;
   return tokens.some((token) => token.includes("-") || token.includes(":"));
 }
 
