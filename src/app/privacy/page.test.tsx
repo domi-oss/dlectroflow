@@ -356,14 +356,29 @@ describe("Privacy Policy page: promises nothing unshipped", () => {
   //
   // #118 Phase C shipped two of the original three (per-member Google
   // connections, and a per-account BYO LLM key), so their "not yet" wording is
-  // GONE and the claims are pinned in the Phase C block below instead. What
-  // remains unshipped is asserted here.
-  it("says access and erasure are handled by hand, not self-service", () => {
-    // `src/app/api/account/` still does not exist. (The `/api/account/` entry in
-    // AUTHENTICATED_PREFIXES reserves the prefix; it does not implement a route.)
+  // GONE and the claims are pinned in the Phase C block below instead. #129
+  // shipped a third — the self-service export — so the first test here is now the
+  // same guard pointed the other way. What remains unshipped is asserted below.
+  // The table of not-shipped claims lives in docs/legal.md and moves with this.
+  it("names the self-service export, now that there is one (#129)", () => {
+    // This test used to assert the OPPOSITE — "no self-service export button" —
+    // which was the honest thing to publish until #129 shipped one. The
+    // replacement is the same guard pointed the other way: the page must name the
+    // control, and must keep naming the two credentials the export withholds, so
+    // a reader cannot infer that their Google connection travelled with the file.
     const text = pageText();
-    expect(text).toMatch(/no self-service export button/i);
-    expect(text).toMatch(/by me, by hand/i);
+    expect(text).toMatch(/Settings\s*→\s*Account\s*→\s*Export your data/i);
+    expect(text).toMatch(/OAuth tokens for your Google connection/i);
+    expect(text).toMatch(/LLM API key/i);
+    // And it must not still be claiming the old state of the world.
+    expect(text).not.toMatch(/no self-service export button/i);
+  });
+
+  it("says a guest sandbox can export too", () => {
+    // The one right a sandbox can exercise in full, because the export needs no
+    // identity — only the sandbox's own signed session.
+    const text = pageText();
+    expect(text).toMatch(/The export is the exception/i);
   });
 
   it("admits revocation does not auto-delete content", () => {

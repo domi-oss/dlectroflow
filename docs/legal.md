@@ -196,7 +196,6 @@ and until then, please do not "improve" the wording into a promise.
 
 | Not shipped | What the page says instead |
 |---|---|
-| Self-service data export (still no `src/app/api/account/` directory — the `/api/account/` entry in `AUTHENTICATED_PREFIXES` reserves the prefix, it does not implement a route) | Access and portability are handled **by hand** from the contact address, within the statutory one month |
 | Automatic revoke → freeze → 30-day purge (`User.purgeAfter` is written by `freezeAccount` and read by nothing — `prisma/scheduled-purge.ts` sweeps guest workspaces and guest counters only; #126 added `deleteAccount` as the one safe way to delete an account and nothing calls it yet) | Revocation does **not** delete content today; email and it will be deleted |
 | **Per-account choice of AI provider (#125)** | The key is used against *this instance's* configured provider; "it is a key, not a destination", and choosing your own provider is not something dlectroflow can do today |
 
@@ -207,13 +206,28 @@ asserts each honest wording is still present.
 > Two rows left this table in #118 Phase C, because they **shipped**: per-member
 > Google connections, and a per-account BYO LLM key. Their claims are now pinned
 > by the `per-user integrations (#118 Phase C)` block in the same test file.
+>
+> **A third left it in #129: self-service data export.** Settings → Account →
+> *Export your data* and `GET /api/export` are real, so /privacy names the control
+> under both Access and Portability and no longer says requests are answered by
+> hand. (The `/api/account/` prefix in `AUTHENTICATED_PREFIXES` is still a
+> reservation with no route behind it — the export lives at `/api/export`, and
+> deliberately outside that prefix, because a guest sandbox may export too.) Pinned
+> by `src/app/privacy/page.test.tsx` — the block that used to assert "no
+> self-service export button" now asserts the control IS named, and that the two
+> withheld credentials are still disclosed.
 
 > [!IMPORTANT]
-> **#153 split the export row in half, and only half of it is still true.** The
-> "handled by me, by hand" wording covers **access and portability**. Erasure no
-> longer belongs to it: Settings → Account → *Delete my account*
-> (`deleteOwnAccount`, `src/app/actions/account.ts`) is a real self-service
-> control, and /privacy names it under the Erasure right.
+> **All three rights are self-service now, and each one still has a caveat the
+> pages must keep stating.** #153 made erasure a control (Settings → Account →
+> *Delete my account*, `deleteOwnAccount` in `src/app/actions/account.ts`) and #129
+> made access and portability one (`GET /api/export`). /privacy names both.
+>
+> The export's caveat is what it withholds: the Google OAuth tokens and any stored
+> LLM API key. Both are credentials, both are named on /privacy AND in the
+> archive's own `README.md` (`src/lib/export/readme.ts`), and those two wordings
+> move together — `readme.test.ts` asserts the archive states the Google omission,
+> and `page.test.tsx` asserts /privacy does.
 >
 > What it does **not** do is destroy anything. It goes through the same
 > `freezeAccount` the owner's Revoke goes through, so the automatic-purge row

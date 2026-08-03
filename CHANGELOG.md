@@ -31,6 +31,29 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Added
 
+- **A member can export their own data (#129).** Settings → Account gains
+  **Download my data (.zip)**, and `GET /api/export` behind it. The archive holds
+  the same data written four ways, because no single format does every job: a
+  `tasks.md` you can read in any text editor with the steps nested under their
+  task, three RFC 4180 CSVs (`tasks.csv`, `steps.csv`, `inbox.csv`) joined on
+  `task_id` for spreadsheets, a `scheduled.ics` for calendars, and a lossless
+  `export.json` carrying `schemaVersion: 1`. A `README.md` inside explains every
+  file and states what is deliberately absent — the OAuth tokens for a Google
+  connection and any stored LLM API key are never exported, and the README says so
+  rather than leaving a user to assume their Google connection travelled with it.
+  UK GDPR Art. 15 and Art. 20 are the obligation; the archive is built to be
+  usable long after that, which is why the human tier is Markdown.
+
+  A guest sandbox can export too, deliberately: it expires within about a day, so
+  the export is the only way anything done in one survives. `/privacy` now
+  documents self-service access and portability instead of promising to answer by
+  hand, and the legal effective date moves with it.
+
+  No new dependency: the archive is a ZIP written with `node:zlib`, verified in
+  tests against a reader written from the specification. The endpoint is metered
+  per workspace (one export a minute) so a retry loop cannot make the instance
+  rebuild a whole account's archive repeatedly.
+
 - **The self-host Compose stack now copies each database dump off the host
   (#162).** It previously dumped to `./backups` on the same disk it was
   protecting: a backup should not share a failure domain with the thing it backs
@@ -108,11 +131,23 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Changed
 
-- **Privacy Policy — effective date 2 August 2026.** The Erasure right now names
-  the self-serve control and its one exception (the owner's own account), and
-  the retention section says what deleting your own account does. How a data
-  subject exercises an Art. 17 right is part of the Art. 12/13 disclosure, so it
-  is a substantive change rather than a copy tweak.
+- **`.ics` downloads now fold long lines (RFC 5545 §3.1).** The per-task calendar
+  download has emitted content lines over the 75-octet limit since #39 put a focus
+  deep-link in every event's `DESCRIPTION`; #129's export made it unavoidable, so
+  the shared serialiser now folds, backing off UTF-8 continuation bytes so a fold
+  can never split an emoji. Every calendar client unfolds, so imported events are
+  unchanged — but a strict parser will now accept the file.
+
+- **Privacy Policy — effective date 3 August 2026.** Two substantive changes,
+  both about how a data subject actually exercises a right rather than about what
+  the policy promises. The Erasure right now names the self-serve control and its
+  one exception (the owner's own account), and the retention section says what
+  deleting your own account does (#153). Access and Portability now name the
+  export control instead of promising an answer by hand, disclose the two things
+  it withholds (the Google OAuth tokens and any stored LLM API key), and state
+  that a guest sandbox can exercise the right in full (#129). How a right is
+  exercised, and what is withheld from it, are both part of the Art. 12/13
+  disclosure rather than copy tweaks.
 - `docs/legal.md`'s "Google revocation: the gap the pages admit" section was
   stale — it still described freeze and delete as paths that never call Google's
   revoke endpoint, which #126 fixed in v0.5.0. Corrected, and the residue that

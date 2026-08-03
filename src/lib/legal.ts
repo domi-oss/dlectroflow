@@ -57,7 +57,16 @@ export const SOURCE_REPO_URL =
 /**
  * ISO date the current text took effect. Bump when the substance changes.
  *
- * Bumped for #153: erasure is now exercisable from Settings rather than only by
+ * Bumped for #129: access and portability are now exercisable from Settings
+ * rather than only by emailing the controller, and /privacy says so — the
+ * paragraph that used to read "there is no self-service export button yet" would
+ * otherwise be a false statement on a published legal page. It also newly
+ * discloses two deliberate exclusions (the Google OAuth tokens and any stored
+ * LLM API key), and that a guest sandbox can exercise the right in full. HOW a
+ * data subject exercises an Art. 15/20 right, and what is withheld from it, are
+ * both part of the Art. 12/13 disclosure rather than presentation.
+ *
+ * Previously bumped for #153: erasure is now exercisable from Settings rather than only by
  * emailing the controller, and the retention section says what deleting your
  * own account actually does. HOW a data subject exercises an Art. 17 right is
  * part of the Art. 12/13 disclosure, not presentation, so it moves this date —
@@ -76,7 +85,7 @@ export const SOURCE_REPO_URL =
  * Previously bumped for #126: freezing or deleting an account also revokes the
  * Google grant, which changed what the app does with somebody's Google account.
  */
-export const LEGAL_EFFECTIVE_DATE = "2026-08-02";
+export const LEGAL_EFFECTIVE_DATE = "2026-08-03";
 
 /** Where the hosted instance and its backups physically sit. */
 export const HOSTING_REGION = "London, United Kingdom (GCP europe-west2)";

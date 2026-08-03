@@ -1,5 +1,25 @@
 import { describe, it, expect } from "vitest";
-import { buildTaskIcs, icsFilename } from "./ics";
+import { buildTaskIcs, buildIcsCalendar, icsFilename } from "./ics";
+
+/**
+ * Undo RFC 5545 §3.1 line folding: CRLF followed by a single space or tab is a
+ * continuation, not a line break. Written here rather than exported from
+ * `ics.ts` because nothing in the app unfolds — calendar clients do — so it is a
+ * test affordance, and a test that used the production folder's own inverse
+ * would prove only that the two agree with each other.
+ */
+function unfoldIcs(ics: string): string {
+  return ics.replace(/\r\n[ \t]/g, "");
+}
+
+/** Every physical line's length in OCTETS — folding is a byte limit, not a
+ *  character limit, which is what makes emoji and accents the interesting case. */
+function octetLengths(ics: string): number[] {
+  return ics
+    .split("\r\n")
+    .filter((l) => l.length > 0)
+    .map((l) => Buffer.byteLength(l, "utf8"));
+}
 
 describe("buildTaskIcs", () => {
   // Local-time construction (month is 0-indexed: 6 = July) so local accessors
@@ -66,9 +86,13 @@ describe("buildTaskIcs", () => {
     });
     // One DESCRIPTION per VEVENT (2 steps → 2)
     expect((s.match(/DESCRIPTION:/g) ?? []).length).toBe(2);
-    expect(s).toContain("https://app.example/focus/s1");
+    // #129 — this DESCRIPTION is 76 octets, so it is now FOLDED (RFC 5545 §3.1)
+    // and the URL is split across two physical lines. Asserted against the
+    // unfolded text, which is what every calendar client sees: the property
+    // under test is the escaping, not the line breaking.
+    expect(unfoldIcs(s)).toContain("https://app.example/focus/s1");
     // newline in the note is ICS-escaped (RFC 5545 §3.3.11)
-    expect(s).toContain("for this:\\nhttps://app.example/focus/s1");
+    expect(unfoldIcs(s)).toContain("for this:\\nhttps://app.example/focus/s1");
   });
 
   it("embeds the note on the fallback (no-steps) VEVENT too (#39)", () => {
@@ -149,5 +173,212 @@ describe("icsFilename", () => {
   });
   it("falls back to 'task' for an empty title", () => {
     expect(icsFilename("")).toBe("dlectroflow-task.ics");
+  });
+});
+
+/**
+ * #129 — the shared calendar emitter.
+ *
+ * `buildTaskIcs` used to be the whole serialiser: one task, steps laid
+ * back-to-back from an implied start, floating local times. The data export
+ * needs the other shape — many tasks, events at the instants they were actually
+ * scheduled for — and #154's subscription feed will need the same. So the
+ * escaping, structure, DTSTAMP and folding moved into `buildIcsCalendar`, which
+ * `buildTaskIcs` now calls. One serialiser, three callers.
+ */
+describe("buildIcsCalendar (#129)", () => {
+  const stamp = new Date(Date.UTC(2026, 7, 3, 9, 30, 0));
+  const one = {
+    uid: "step-abc@dlectroflow",
+    start: new Date(Date.UTC(2026, 7, 3, 10, 0, 0)),
+    end: new Date(Date.UTC(2026, 7, 3, 10, 25, 0)),
+    summary: "Write the thing",
+  };
+
+  it("wraps events in a VCALENDAR with VERSION and PRODID", () => {
+    const ics = buildIcsCalendar({ events: [one], stamp });
+    expect(ics.startsWith("BEGIN:VCALENDAR\r\n")).toBe(true);
+    expect(ics).toContain("VERSION:2.0");
+    expect(ics).toContain("PRODID:-//dlectroflow//");
+    expect(ics).toContain("CALSCALE:GREGORIAN");
+    expect(ics.endsWith("END:VCALENDAR\r\n")).toBe(true);
+  });
+
+  it("uses CRLF throughout, with no bare LF anywhere (RFC 5545 §3.1)", () => {
+    const ics = buildIcsCalendar({ events: [one], stamp });
+    expect(ics.replace(/\r\n/g, "")).not.toContain("\n");
+  });
+
+  it("writes UTC instants with a trailing Z by default", () => {
+    const ics = buildIcsCalendar({ events: [one], stamp });
+    expect(ics).toContain("DTSTART:20260803T100000Z");
+    expect(ics).toContain("DTEND:20260803T102500Z");
+    expect(ics).toContain("DTSTAMP:20260803T093000Z");
+  });
+
+  it("writes floating local wall-clock when asked (§3.3.5), for the per-task download", () => {
+    // Local-time construction so local accessors are deterministic on any host.
+    const ics = buildIcsCalendar({
+      events: [
+        {
+          uid: "u",
+          start: new Date(2026, 6, 8, 9, 0, 0),
+          end: new Date(2026, 6, 8, 9, 15, 0),
+          summary: "s",
+        },
+      ],
+      timeMode: "floating",
+      stamp,
+    });
+    expect(ics).toContain("DTSTART:20260708T090000");
+    expect(ics).not.toContain("DTSTART:20260708T090000Z");
+  });
+
+  it("passes the UID through verbatim, so a re-import is idempotent", () => {
+    const ics = buildIcsCalendar({ events: [one], stamp });
+    expect(ics).toContain("UID:step-abc@dlectroflow");
+  });
+
+  it("emits one VEVENT per event, in the order given", () => {
+    const ics = buildIcsCalendar({
+      events: [one, { ...one, uid: "step-def@dlectroflow", summary: "Second" }],
+      stamp,
+    });
+    expect((ics.match(/BEGIN:VEVENT/g) ?? []).length).toBe(2);
+    expect(ics.indexOf("Write the thing")).toBeLessThan(ics.indexOf("Second"));
+  });
+
+  it("escapes backslash, semicolon, comma and newline in text values (§3.3.11)", () => {
+    const ics = buildIcsCalendar({
+      events: [{ ...one, summary: "a\\b;c,d\ne", description: "x;y" }],
+      stamp,
+    });
+    // Doubled again for the JS literal: the file really contains
+    // `SUMMARY:a\\b\;c\,d\ne`.
+    expect(unfoldIcs(ics)).toContain("SUMMARY:a\\\\b\\;c\\,d\\ne");
+    expect(ics).toContain("DESCRIPTION:x\\;y");
+  });
+
+  it("omits DESCRIPTION for an absent, empty or whitespace-only note", () => {
+    for (const description of [undefined, null, "", "   "]) {
+      const ics = buildIcsCalendar({
+        events: [{ ...one, description }],
+        stamp,
+      });
+      expect(ics, JSON.stringify(description)).not.toContain("DESCRIPTION:");
+    }
+  });
+
+  it("marks events busy only when asked", () => {
+    expect(
+      buildIcsCalendar({ events: [{ ...one, busy: true }], stamp }),
+    ).toContain("TRANSP:OPAQUE");
+    expect(buildIcsCalendar({ events: [one], stamp })).not.toContain(
+      "TRANSP:OPAQUE",
+    );
+  });
+
+  it("names the calendar when asked, and escapes the name", () => {
+    // X-WR-CALNAME is what Google and Apple label an imported calendar with; an
+    // import of seven months of tasks called "Untitled" is technically fine and
+    // practically useless.
+    expect(
+      buildIcsCalendar({
+        events: [one],
+        calendarName: "dlectroflow, all",
+        stamp,
+      }),
+    ).toContain("X-WR-CALNAME:dlectroflow\\, all");
+    expect(buildIcsCalendar({ events: [one], stamp })).not.toContain(
+      "X-WR-CALNAME",
+    );
+  });
+
+  it("emits an event-less VCALENDAR rather than throwing", () => {
+    // The empty state: an account with nothing scheduled still gets the file, so
+    // the archive's contents do not depend on how much data you happen to have.
+    const ics = buildIcsCalendar({ events: [], stamp });
+    expect(ics).toContain("BEGIN:VCALENDAR");
+    expect(ics).not.toContain("BEGIN:VEVENT");
+  });
+});
+
+describe("RFC 5545 §3.1 line folding (#129)", () => {
+  const stamp = new Date(Date.UTC(2026, 7, 3, 9, 30, 0));
+
+  it("keeps every physical line inside 75 octets", () => {
+    // Real data: an export's SUMMARY is "<task title>: <step text>", which
+    // passes 75 characters routinely. Unfolded, a strict parser is entitled to
+    // reject the file — and this serialiser has been emitting over-long
+    // DESCRIPTION lines for the focus deep-link since #39.
+    const ics = buildIcsCalendar({
+      events: [
+        {
+          uid: "u",
+          start: new Date(Date.UTC(2026, 7, 3, 10, 0)),
+          end: new Date(Date.UTC(2026, 7, 3, 11, 0)),
+          summary: "Ship the enormous thing ".repeat(12),
+          description: "https://app.example/focus/".repeat(8),
+        },
+      ],
+      stamp,
+    });
+    for (const length of octetLengths(ics))
+      expect(length).toBeLessThanOrEqual(75);
+  });
+
+  it("continues folded lines with a single leading space, and unfolds losslessly", () => {
+    const summary = "x".repeat(400);
+    const ics = buildIcsCalendar({
+      events: [
+        {
+          uid: "u",
+          start: new Date(Date.UTC(2026, 7, 3, 10, 0)),
+          end: new Date(Date.UTC(2026, 7, 3, 11, 0)),
+          summary,
+        },
+      ],
+      stamp,
+    });
+    expect(ics).toMatch(/\r\n x/);
+    expect(unfoldIcs(ics)).toContain(`SUMMARY:${summary}`);
+  });
+
+  it("never splits a multi-byte character across the fold", () => {
+    // The reason folding counts octets and not characters. A fold landing inside
+    // a UTF-8 sequence produces two invalid lines, and an emoji title is not an
+    // edge case in this app — every task can carry a parentEmoji.
+    const summary = "🚀".repeat(60);
+    const ics = buildIcsCalendar({
+      events: [
+        {
+          uid: "u",
+          start: new Date(Date.UTC(2026, 7, 3, 10, 0)),
+          end: new Date(Date.UTC(2026, 7, 3, 11, 0)),
+          summary,
+        },
+      ],
+      stamp,
+    });
+    for (const length of octetLengths(ics))
+      expect(length).toBeLessThanOrEqual(75);
+    expect(ics).not.toContain("�");
+    expect(unfoldIcs(ics)).toContain(`SUMMARY:${summary}`);
+  });
+
+  it("leaves a line that already fits exactly alone", () => {
+    const ics = buildIcsCalendar({
+      events: [
+        {
+          uid: "u",
+          start: new Date(Date.UTC(2026, 7, 3, 10, 0)),
+          end: new Date(Date.UTC(2026, 7, 3, 11, 0)),
+          // "SUMMARY:" is 8 octets, so 67 more makes exactly 75.
+          summary: "y".repeat(67),
+        },
+      ],
+      stamp,
+    });
+    expect(ics).toContain(`\r\nSUMMARY:${"y".repeat(67)}\r\n`);
   });
 });

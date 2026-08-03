@@ -49,6 +49,26 @@ const props = {
   defaultExpanded: true,
 } as const;
 
+/**
+ * The LLM-key panel's OWN live region.
+ *
+ * #129 put a second `role="status"` in this section — the data export's — so an
+ * unqualified `getByRole("status")` is now ambiguous. Resolved through the
+ * `aria-describedby` the panel already promises on its own controls, which makes
+ * these assertions more precise than they were rather than merely unambiguous: it
+ * checks the message reached the region the control points at.
+ */
+function keyStatus(): HTMLElement {
+  const describer =
+    screen.queryByRole("button", { name: /^save/i }) ??
+    screen.getByRole("button", { name: /yes, remove/i });
+  const id = describer.getAttribute("aria-describedby");
+  const region = id ? document.getElementById(id) : null;
+  if (!region)
+    throw new Error("no status region is associated with the control");
+  return region;
+}
+
 describe("AccountPanel", () => {
   it("names the signed-in account and the provider that authenticated it", () => {
     // #74 — the provider has to be stated wherever identity is shown, and
@@ -97,7 +117,7 @@ describe("AccountPanel", () => {
     render(<AccountPanel {...props} />);
     await userEvent.type(screen.getByLabelText(/api key/i), "sk-ant-secret");
     await userEvent.click(screen.getByRole("button", { name: /^save/i }));
-    const status = screen.getByRole("status");
+    const status = keyStatus();
     expect(status).toHaveTextContent(/saved/i);
     expect(status).not.toHaveTextContent("sk-ant-secret");
   });
@@ -107,9 +127,7 @@ describe("AccountPanel", () => {
     render(<AccountPanel {...props} />);
     await userEvent.type(screen.getByLabelText(/api key/i), "sk-nope");
     await userEvent.click(screen.getByRole("button", { name: /^save/i }));
-    expect(screen.getByRole("status")).toHaveTextContent(
-      /not accepted|invalid/i,
-    );
+    expect(keyStatus()).toHaveTextContent(/not accepted|invalid/i);
     // Not cleared on failure — clearing a rejected value forces a re-paste.
     expect(screen.getByLabelText(/api key/i)).toHaveValue("sk-nope");
   });
@@ -121,7 +139,7 @@ describe("AccountPanel", () => {
     render(<AccountPanel {...props} />);
     await userEvent.type(screen.getByLabelText(/api key/i), "sk-ant-secret");
     await userEvent.click(screen.getByRole("button", { name: /^save/i }));
-    expect(screen.getByRole("status")).toHaveTextContent(/sign(ed)? in/i);
+    expect(keyStatus()).toHaveTextContent(/sign(ed)? in/i);
   });
 
   it("refuses to submit an empty field without calling the server", async () => {
@@ -151,7 +169,7 @@ describe("AccountPanel", () => {
     render(<AccountPanel {...props} keyPresent />);
     await userEvent.click(screen.getByRole("button", { name: /^remove/i }));
     expect(removeMock).not.toHaveBeenCalled();
-    expect(screen.getByRole("status")).toHaveTextContent(/instance/i);
+    expect(keyStatus()).toHaveTextContent(/instance/i);
     await userEvent.click(screen.getByRole("button", { name: /yes, remove/i }));
     expect(removeMock).toHaveBeenCalled();
   });

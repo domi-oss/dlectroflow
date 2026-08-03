@@ -1082,8 +1082,14 @@ export default function PrivacyPage() {
         </p>
         <ul className="ml-5 list-disc space-y-2">
           <li>
+            {/* #129 — Art. 12(2) again: the control is named because a control
+                you can reach yourself is a stronger facilitation than an email
+                to a human. Worded as what it DOES, so it cannot come to
+                disagree with the archive's own README. */}
             <strong>Access</strong> — a copy of the personal data I hold about
-            you, and confirmation of how it is used.
+            you, and confirmation of how it is used.{" "}
+            <strong>Settings → Account → Export your data</strong> downloads it,
+            straight away, without asking me.
           </li>
           <li>
             <strong>Rectification</strong> — correction of anything inaccurate
@@ -1112,7 +1118,12 @@ export default function PrivacyPage() {
           </li>
           <li>
             <strong>Portability</strong> — your data in a structured,
-            machine-readable form. I will send it as JSON.
+            machine-readable form. The same export gives you one .zip holding
+            your tasks and their steps, your brain-dump inbox, the coaching
+            conversations, your settings, your scheduled work as a calendar
+            file, and a lossless JSON copy of all of it. A README inside
+            explains each file and says what is deliberately not there. Ask
+            instead if you would rather, or if you want another format.
           </li>
           <li>
             <strong>Objection</strong> — you can object to anything I do on the
@@ -1128,11 +1139,22 @@ export default function PrivacyPage() {
         </ul>
 
         <LegalSubheading>How that actually works here</LegalSubheading>
+        {/* #129 — this paragraph said the opposite until the export shipped
+            ("there is no self-service export button yet"), which was the honest
+            thing to publish at the time and would be a false statement now. The
+            omission is named here as well as in the archive's own README: a
+            reader who never opens the zip must not assume their Google
+            connection travelled with it. */}
         <p>
-          <strong>There is no self-service export button yet.</strong> I am
-          telling you rather than implying otherwise: access and portability
-          requests are handled <em>by me, by hand</em>, from that email address.
-          It is less slick than a download link and it is exactly as binding.
+          <strong>Access and portability you can do yourself.</strong>{" "}
+          <strong>Settings → Account → Export your data</strong> downloads
+          everything this app holds about your account, in formats that open
+          with no special software. Two things are deliberately left out: the
+          OAuth tokens for your Google connection, and any LLM API key you have
+          stored — both are credentials, and putting a copy of them in a file
+          you might forward to somebody would be the opposite of protecting your
+          data. Anything the export does not cover, email <ContactLink /> and I
+          will send it by hand.
         </p>
         {/* #153 — erasure came off that list, so this paragraph had to stop
             saying it was on it. The caveat is not a hedge: the control freezes
@@ -1163,11 +1185,18 @@ export default function PrivacyPage() {
           <strong>One real limitation, for guests.</strong> A guest sandbox has
           no identity attached to it — that is the point of it — so I have no
           way to find &ldquo;your&rdquo; sandbox from an email address. It will
-          expire and be deleted on its own within about a day. To be rid of it
-          sooner, clear the <code className="text-xs">df_guest</code> cookie or
-          use a private window. If you want it deleted now and can read the
-          sandbox identifier out of that cookie in your browser&rsquo;s
-          developer tools, send it to me and I will delete it.
+          expire and be deleted on its own within about a day.{" "}
+          {/* #129 — the export needs no identity, only the sandbox's own signed
+              session, so it is the one right a guest can exercise in full. Worth
+              saying here rather than only in Settings: this paragraph is where
+              somebody goes to find out what a sandbox cannot do. */}
+          <strong>The export is the exception</strong> — it works in a sandbox
+          exactly as it does for an account, and it is the only way anything you
+          did in one outlives it. To be rid of it sooner, clear the{" "}
+          <code className="text-xs">df_guest</code> cookie or use a private
+          window. If you want it deleted now and can read the sandbox identifier
+          out of that cookie in your browser&rsquo;s developer tools, send it to
+          me and I will delete it.
         </p>
         <p>
           Nothing in this policy or in the Terms limits your rights under UK
