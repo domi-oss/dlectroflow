@@ -47,7 +47,13 @@ API="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}"
 ISSUE_IID="${ALERT_ISSUE_IID:-${OPS_DIGEST_ISSUE_IID:-}}"
 REF="${CI_COMMIT_REF_NAME:-main}"
 SELF="${CI_JOB_NAME:-alert_pipeline_failure}"
-DRIFT_REF="${DRIFT_REF:-$REF}"
+# `main`, NOT the pipeline's own ref. Production only ever deploys `main`, so
+# "has production caught up?" is always a question about `main` — comparing prod
+# against some other branch's HEAD asks nothing. The job's rules keep this to
+# `main` anyway; the default is pinned here because the verification run on this
+# branch produced `HTTP 404` and an "undetermined" verdict when it was `$REF`,
+# which is a latent bug the moment those rules are ever broadened.
+DRIFT_REF="${DRIFT_REF:-main}"
 export DRIFT_REF
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
@@ -132,7 +138,7 @@ deploy_status="$(jq -s -r '[ .[] | select(.name == "deploy_production") ] | .[0]
 
 case "$deploy_status" in
   skipped)
-    DEPLOY_LINE="**\`deploy_production\`: \`skipped\` — this commit never reached production.** It sits in a later stage than the failure above, so an earlier failure *skips* it rather than failing it, and the pipeline's own red tick is the only trace. On \`${REF}\` a skipped \`deploy_production\` always means \"should have deployed, did not\"; on a docs-only merge-request pipeline the same status is correct and expected, which is exactly what made the two indistinguishable (#147, #116)."
+    DEPLOY_LINE="**\`deploy_production\`: \`skipped\` — this commit never reached production.** It sits in a later stage than the failure above, so an earlier failure *skips* it rather than failing it, and the pipeline's own red tick is the only trace. On \`${DRIFT_REF}\` a skipped \`deploy_production\` always means \"should have deployed, did not\"; on a docs-only merge-request pipeline the same status is correct and expected, which is exactly what made the two indistinguishable (#147, #116)."
     ;;
   failed)
     DEPLOY_LINE="**\`deploy_production\`: \`failed\` — the deploy itself failed.** \`helm upgrade --atomic\` rolls a failed release back, so production is still on the previous commit. \`docs/deploy-runbook.md\` §14 covers going further back."
@@ -141,7 +147,7 @@ case "$deploy_status" in
     DEPLOY_LINE="**\`deploy_production\`: \`success\`** — production deployed this commit despite the failure above, so the comparison below should read in sync. A green deploy on a red pipeline means the failing job is not gating the deploy; that is worth a look on its own."
     ;;
   absent)
-    DEPLOY_LINE="**\`deploy_production\`: not present in this pipeline.** On \`${REF}\` it should always be created — check the job's \`rules:\`."
+    DEPLOY_LINE="**\`deploy_production\`: not present in this pipeline.** On \`${DRIFT_REF}\` it should always be created — check the job's \`rules:\`."
     ;;
   *)
     DEPLOY_LINE="**\`deploy_production\`: \`${deploy_status}\`** — not a terminal state when this alert ran, so treat it as undecided rather than as a deploy."
@@ -205,13 +211,21 @@ ${DEPLOY_LINE}
 
 ${DRIFT}
 
-**Recovery** — roll forward on \`${REF}\` (the next green pipeline deploys), or re-run \`deploy_production\` on this pipeline if the failure is unrelated to the image it would ship. Going backwards instead: \`docs/deploy-runbook.md\` §14.
+**Recovery** — roll forward on \`${DRIFT_REF}\` (the next green pipeline deploys), or re-run \`deploy_production\` on this pipeline if the failure is unrelated to the image it would ship. Going backwards instead: \`docs/deploy-runbook.md\` §14.
 
 ${MENTION_LINE}
 
 _Posted by the \`alert_pipeline_failure\` CI job (pipeline ${CI_PIPELINE_ID}). Mechanism: #147._
 EOF
-BODY="$(cat "$WORK/body.md")"
+# `${NON_BLOCKING_LINE}` and `${MENTION_LINE}` are empty in the common case, and
+# a heredoc keeps their blank line, so the note rendered with three consecutive
+# blanks in the verification run. Collapse any run of blank lines to one and drop
+# trailing ones — presentation only, and the note IS the product here.
+awk 'BEGIN { blank = 0 }
+     /^[[:space:]]*$/ { blank++; next }
+     { if (blank > 0 && NR > blank) print ""; blank = 0; print }' \
+  "$WORK/body.md" > "$WORK/body.squeezed.md"
+BODY="$(cat "$WORK/body.squeezed.md")"
 
 # ── 6. Post, or preview ──────────────────────────────────────────────────────
 if [ -z "${GL_TOKEN:-}" ]; then

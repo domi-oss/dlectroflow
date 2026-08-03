@@ -493,6 +493,28 @@ describe("scripts/alert-pipeline-failure.sh", () => {
     expect(body).toContain(OLD_SHORT);
   });
 
+  it("compares production against `main`, not against the pipeline's own ref", () => {
+    // Found by the verification run on this branch: with the drift ref defaulting
+    // to $CI_COMMIT_REF_NAME the note read `HTTP 404` and "undetermined", because
+    // production only ever deploys `main` and no other ref answers the question.
+    // The job's rules keep it to `main` today, so this is a latent bug rather
+    // than a live one — which is exactly the kind that survives a rule change.
+    const body =
+      alert({ env: { CI_COMMIT_REF_NAME: "some/other-branch" } }).note?.body ??
+      "";
+    expect(body).toContain("Production vs `main`");
+    expect(body).not.toMatch(/Production vs `some\/other-branch`/);
+  });
+
+  it("never renders a run of blank lines", () => {
+    // The optional mention and non-blocking-failure lines are empty in the
+    // common case and a heredoc keeps their blank line. Cosmetic, but the note
+    // is the whole product, and the verification run rendered three in a row.
+    const body = alert().note?.body ?? "";
+    expect(body).not.toMatch(/\n[ \t]*\n[ \t]*\n/);
+    expect(body).not.toMatch(/\n\s*$/);
+  });
+
   it("posts JSON, never form-encoded", () => {
     // The note body carries Markdown tables and backticks; URL-encoding these
     // POSTs is how they come back 400/415 (the repo's standing rule).
