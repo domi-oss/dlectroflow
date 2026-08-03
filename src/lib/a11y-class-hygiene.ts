@@ -115,26 +115,40 @@ const NEUTRAL_FAMILIES = ["slate", "gray", "zinc", "neutral", "stone"] as const;
 /** The lowest Tailwind shade that is AA (4.5:1) as text on `--background`. */
 export const MIN_AA_TEXT_SHADE = 700;
 
-const FAMILY_ALTERNATION = [...CHROMATIC_FAMILIES, ...NEUTRAL_FAMILIES].join(
-  "|",
-);
+const CHROMATIC = new Set<string>(CHROMATIC_FAMILIES);
 
 /**
- * `text-amber-600` → family + shade, plus an optional `/alpha` modifier.
+ * `text-amber-600`, `text-red-800/70` → family, shade, optional alpha.
  *
- * Neutral families match too, so Rule A can exclude them explicitly rather than
- * by silently not recognising them. The alpha group is captured rather than
- * excluded because `text-red-600/80` is *strictly worse* than the opaque
- * `text-red-600` that Rule A already bans — reducing a text colour's opacity
- * blends it toward the background. A regex that ended at `$` would let the
- * modifier slip the entire rule.
+ * The alpha group is captured rather than excluded because `text-red-600/80` is
+ * *strictly worse* than the opaque `text-red-600` Rule A already bans — reducing
+ * a text colour's opacity blends it toward the background. A pattern that ended
+ * at `$` after the shade would let the modifier slip the entire rule.
+ *
+ * `([a-z]+)` matches any family and the caller checks {@link CHROMATIC}
+ * membership, rather than interpolating the family list into the pattern. Two
+ * reasons, and the second is the one that made the change:
+ *
+ *  1. A membership test belongs in a `Set`, not in a regex alternation.
+ *  2. Building the pattern from an interpolated string trips semgrep's
+ *     `javascript-regex-non-literal` (ReDoS). That finding was a false positive —
+ *     the interpolated value was a joined pair of module-level `as const` arrays
+ *     of literals, reachable by no input — but a hardcoded pattern is both what
+ *     the rule asks for and better code, so there is nothing to dismiss. A
+ *     dismissal would also have to be re-argued after every repo-wide reformat,
+ *     which re-fingerprints triaged SAST findings.
+ *
+ * (Written without the offending syntax on purpose: semgrep reads the AST and
+ * would not see it in a comment, but env-drift's scanner and Duo have both read
+ * this repo's doc comments as real code before.)
+ *
+ * Non-colour utilities are excluded by shape, not by list: `text-muted-foreground`
+ * fails `\d{2,3}` on its last segment and `text-2xl` has no second hyphen.
  */
-const TEXT_COLOR = new RegExp(
-  `^text-(${FAMILY_ALTERNATION})-(\\d{2,3})(?:/(\\d{1,3}))?$`,
-);
+const TEXT_COLOR = /^text-([a-z]+)-(\d{2,3})(?:\/(\d{1,3}))?$/;
 
-/** `bg-green-100` → family + shade. */
-const BG_COLOR = new RegExp(`^bg-(${FAMILY_ALTERNATION})-(\\d{2,3})$`);
+/** `bg-green-100` → family + shade. Family checked by the caller, as above. */
+const BG_COLOR = /^bg-([a-z]+)-(\d{2,3})$/;
 
 /** One element's (or one shared class constant's) complete set of classes. */
 export interface ClassScope {
@@ -343,9 +357,18 @@ function appliesInLightMode(token: string): boolean {
  * `(app)/page.tsx`'s Google banners (3.06:1 in dark).
  */
 function pinsOwnBackground(tokens: readonly string[]): boolean {
-  const hasOpaqueBg = tokens.some(
-    (token) => isUnprefixed(token) && BG_COLOR.test(token),
-  );
+  const hasOpaqueBg = tokens.some((token) => {
+    if (!isUnprefixed(token)) return false;
+    const match = BG_COLOR.exec(token);
+    // A neutral `bg-gray-100` pins the ratio just as well as a chromatic one, so
+    // both count here — but a `bg-<not-a-family>-100` must not, or a typo would
+    // silently earn the waiver.
+    return (
+      match !== null &&
+      (CHROMATIC.has(match[1]) ||
+        (NEUTRAL_FAMILIES as readonly string[]).includes(match[1]))
+    );
+  });
   if (!hasOpaqueBg) return false;
   // A `dark:bg-*` means the background DOES move with the theme, so the text
   // needs a partner after all.
@@ -397,7 +420,10 @@ export function findTextContrastRisks(
       const match = TEXT_COLOR.exec(splitVariants(token).base);
       if (!match) continue;
       const [, family, shadeText, alphaText] = match;
-      if ((NEUTRAL_FAMILIES as readonly string[]).includes(family)) continue;
+      // Chromatic families only. This also filters anything that merely LOOKS
+      // like a palette colour — the neutrals are excluded by measurement (see
+      // NEUTRAL_FAMILIES) and a non-family word is not a colour at all.
+      if (!CHROMATIC.has(family)) continue;
       const shade = Number(shadeText);
 
       if (alphaText !== undefined) {

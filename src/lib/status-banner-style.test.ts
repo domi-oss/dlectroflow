@@ -29,13 +29,43 @@ import { scanClassScopes } from "@/lib/a11y-class-hygiene";
  */
 
 /** Tailwind's chromatic families, as `a11y-class-hygiene.ts` defines them. */
-const CHROMATIC =
-  "red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose";
+const CHROMATIC = new Set([
+  "red",
+  "orange",
+  "amber",
+  "yellow",
+  "lime",
+  "green",
+  "emerald",
+  "teal",
+  "cyan",
+  "sky",
+  "blue",
+  "indigo",
+  "violet",
+  "purple",
+  "fuchsia",
+  "pink",
+  "rose",
+]);
 
-/** `bg-amber-500/10` — a chromatic background with an alpha modifier. */
-const TINTED_BG = new RegExp(`^bg-(?:${CHROMATIC})-\\d{2,3}/\\d{1,3}$`);
-/** An unprefixed chromatic text colour. */
-const CHROMATIC_TEXT = new RegExp(`^text-(?:${CHROMATIC})-\\d{2,3}$`);
+// Literal patterns with the family checked by Set membership, matching
+// `a11y-class-hygiene.ts` — a membership test belongs in a Set, and building the
+// pattern from an interpolated string trips semgrep's ReDoS rule for no benefit.
+
+/** `bg-amber-500/10` — a palette background with an alpha modifier. */
+const TINTED_BG = /^bg-([a-z]+)-\d{2,3}\/\d{1,3}$/;
+/** An unprefixed palette text colour. */
+const PALETTE_TEXT = /^text-([a-z]+)-\d{2,3}$/;
+
+const isTintedBg = (t: string): boolean => {
+  const m = TINTED_BG.exec(t);
+  return m !== null && CHROMATIC.has(m[1]);
+};
+const isChromaticText = (t: string): boolean => {
+  const m = PALETTE_TEXT.exec(t);
+  return m !== null && CHROMATIC.has(m[1]);
+};
 
 const TONE_TOKENS = new Set(
   Object.values(STATUS_BANNER_TONE).flatMap((tone) => tone.split(/\s+/)),
@@ -55,7 +85,7 @@ describe("STATUS_BANNER_TONE", () => {
     for (const [name, tone] of Object.entries(STATUS_BANNER_TONE)) {
       const tokens = tone.split(/\s+/);
       expect(
-        tokens.filter((t) => CHROMATIC_TEXT.test(t)),
+        tokens.filter((t) => isChromaticText(t)),
         `${name} must set exactly one unprefixed text colour`,
       ).toHaveLength(1);
       expect(
@@ -86,7 +116,7 @@ describe("src/ tinted-banner hygiene (#109)", () => {
   it("finds banner-shaped scopes at all (the scan is not a no-op)", () => {
     const tinted = sourceFiles().flatMap((file) =>
       scanClassScopes(readFileSync(file, "utf8"), file).filter((scope) =>
-        scope.tokens.some((t) => TINTED_BG.test(t)),
+        scope.tokens.some((t) => isTintedBg(t)),
       ),
     );
     expect(tinted.length).toBeGreaterThan(0);
@@ -96,12 +126,12 @@ describe("src/ tinted-banner hygiene (#109)", () => {
     const offenders: string[] = [];
     for (const file of sourceFiles()) {
       for (const scope of scanClassScopes(readFileSync(file, "utf8"), file)) {
-        if (!scope.tokens.some((t) => TINTED_BG.test(t))) continue;
+        if (!scope.tokens.some((t) => isTintedBg(t))) continue;
         // Its own dark background means it does not composite over
         // --background, so the table's measurements do not apply to it.
         if (scope.tokens.some((t) => t.startsWith("dark:bg-"))) continue;
         for (const token of scope.tokens) {
-          if (!CHROMATIC_TEXT.test(token)) continue;
+          if (!isChromaticText(token)) continue;
           if (TONE_TOKENS.has(token)) continue;
           offenders.push(
             `${file}:${scope.line} — \`${token}\` on a translucent tint is not from STATUS_BANNER_TONE; the composite ratio is unmeasured`,
