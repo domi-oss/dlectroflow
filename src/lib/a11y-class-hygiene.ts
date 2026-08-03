@@ -573,7 +573,37 @@ export function findTintedBannerText(
 
 // ── Rule D: focus indicator ────────────────────────────────────────────────
 
-/** Variants that mean "while focused". */
+/**
+ * Variants that mean "while focused".
+ *
+ * **`focus-within` belongs here.** Duo review (!250) argued it is a false
+ * negative on the grounds that it "fires when a child is focused, not when the
+ * element itself receives keyboard focus", so `outline-none focus-within:ring-2`
+ * would leave a directly-focused element bare. That is not what `:focus-within`
+ * does. Selectors Level 4 defines it as matching "any element for which the
+ * `:focus` pseudo-class applies, **as well as** an element whose descendant …
+ * matches the conditions for matching `:focus`" — the element's own focus is
+ * included, not excluded.
+ *
+ * Confirmed in a real browser rather than from the spec alone, because a
+ * dismissal needs evidence:
+ *
+ *     <style>a { outline: none } a:focus-within { box-shadow: 0 0 0 2px red }</style>
+ *     <a href="#" id="t">link</a>
+ *     → locator("#t").focus(); getComputedStyle(el).boxShadow
+ *     → "rgb(255, 0, 0) 0px 0px 0px 2px"
+ *
+ * The indicator is painted on the directly-focused element with nothing but a
+ * `:focus-within` rule. Dropping the variant would have made
+ * `focus-within:ring-2` a finding needing an allowlist entry, for a style that
+ * works.
+ *
+ * The one real difference is the opposite of the reported one: `:focus-within`
+ * keys off `:focus`, not `:focus-visible`, so it also paints on a mouse click.
+ * That is a visual-noise question, not a missing-indicator one, and it errs
+ * toward showing the indicator more often — which is not what Rule D guards
+ * against. Nothing in the tree uses `focus-within:` today.
+ */
 const FOCUS_VARIANTS = ["focus-visible", "focus", "focus-within"];
 
 /**

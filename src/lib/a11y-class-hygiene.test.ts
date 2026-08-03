@@ -63,6 +63,19 @@ import {
 // A defensible reason states the MEASURED ratio and the background it was
 // measured against. "Looks fine" is not a reason. Empty today: every site in the
 // tree either passes the rule or was fixed.
+//
+// ── The key's known trade-off, and what bounds it ──────────────────────────
+// `<file>:<token>` is coarser than `<file>:<line>:<token>`: it excuses EVERY
+// occurrence of that token in that file, so a second, unjustified use could
+// shelter behind a reviewed first one. Duo review raised this on !250, correctly,
+// as informational.
+//
+// Keying by line is not the fix — a line-keyed map rots on every move, which is
+// the exact failure that made #83's SAST rule unusable and the reason this map is
+// shaped the way it is. Instead the risk is made visible: `expectNoStaleEntries`
+// asserts each key excuses **exactly one** finding, so a second occurrence fails
+// the suite and has to be argued for rather than inherited. If two really are
+// justified, that is a deliberate edit to the assertion with the reason to match.
 const REVIEWED_TEXT_COLORS: Record<string, string> = {};
 
 // ── Reviewed focus indicators ──────────────────────────────────────────────
@@ -154,13 +167,23 @@ function expectNoStaleEntries(
   reviewed: Record<string, string>,
   mapName: string,
 ): void {
-  const live = new Set(repoFindings(scan).map(({ key }) => key));
+  const found = repoFindings(scan);
+  const live = new Set(found.map(({ key }) => key));
   for (const [key, reason] of Object.entries(reviewed)) {
     expect(live, `${mapName}: ${key} is no longer flagged`).toContain(key);
     expect(
       reason.length,
       `${mapName}: ${key} needs a real reason with a measured ratio`,
     ).toBeGreaterThan(40);
+    // The key is `<file>:<token>`, so it excuses every occurrence of that token
+    // in that file. Asserting exactly one keeps a second, unreviewed use from
+    // sheltering behind a reviewed first one — the coarseness Duo flagged on
+    // !250. Two genuinely-justified occurrences are still possible, but only as a
+    // deliberate edit here with the reason to match, not by inheritance.
+    expect(
+      found.filter((f) => f.key === key).length,
+      `${mapName}: ${key} now excuses more than one finding — review each`,
+    ).toBe(1);
   }
 }
 
@@ -690,6 +713,25 @@ describe("findWeakFocusIndicators", () => {
       ),
     ).toEqual([]);
   });
+
+  it.each(["focus-visible", "focus", "focus-within"])(
+    "accepts a ring under the %s variant",
+    (variant) => {
+      // `focus-within` is deliberately included. Duo review (!250) argued it only
+      // fires for a focused CHILD, making it a false negative. Selectors Level 4
+      // says otherwise — it matches "any element for which the `:focus`
+      // pseudo-class applies, as well as" one with a focused descendant — and a
+      // real browser agrees: with only `a:focus-within { box-shadow: … }`, a
+      // directly-focused `<a>` computes that box-shadow. Removing it would have
+      // made a working style need an allowlist entry.
+      expect(
+        findWeakFocusIndicators(
+          `const x = <a className="outline-none ${variant}:ring-2 ${variant}:ring-ring" />;`,
+        ),
+        variant,
+      ).toEqual([]);
+    },
+  );
 
   it("stays quiet about an element that keeps the UA outline", () => {
     // move-to-menu.tsx: `data-[highlighted]:bg-accent` with no outline-none, so
