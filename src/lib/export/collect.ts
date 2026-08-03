@@ -48,6 +48,12 @@ import type { ExportSnapshot } from "./types";
  * brand-new account that has never opened Settings has no row, which is a fact
  * about that account, not an error to paper over. Both are typed nullable and
  * every serialiser handles null.
+ *
+ * Stated precisely, because the claim is worth being exact about: nothing in THIS
+ * function writes. The request around it does touch `Workspace.lastSeenAt`, since
+ * `currentWorkspaceId()` upserts it for every request in the app — that is a fact
+ * about being seen, not about the content being exported, and `collect.integration.test.ts`
+ * asserts the settings and streak rows are still absent afterwards.
  */
 export async function collectExport(input: {
   /** Resolved from the session by the caller. There is no request-controlled

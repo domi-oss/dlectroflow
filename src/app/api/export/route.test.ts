@@ -24,10 +24,17 @@ const {
   cooldownCheckMock: vi.fn(),
 }));
 
-vi.mock("@/lib/workspace", () => ({
-  currentWorkspaceId: currentWorkspaceIdMock,
-  currentUser: currentUserMock,
-}));
+// `MissingWorkspaceError` is the REAL class, not a stub: the route narrows on
+// `instanceof`, so a fake would make the 401 branch untestable and the rethrow
+// branch pass for the wrong reason.
+vi.mock("@/lib/workspace", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/workspace")>();
+  return {
+    MissingWorkspaceError: actual.MissingWorkspaceError,
+    currentWorkspaceId: currentWorkspaceIdMock,
+    currentUser: currentUserMock,
+  };
+});
 vi.mock("@/lib/export/collect", () => ({ collectExport: collectExportMock }));
 vi.mock("@/lib/export/bundle", () => ({
   buildExportArchive: buildExportArchiveMock,
@@ -36,6 +43,7 @@ vi.mock("@/lib/export/cooldown", () => ({
   exportCooldown: { check: cooldownCheckMock },
 }));
 
+import { MissingWorkspaceError } from "@/lib/workspace";
 import { GET } from "./route";
 
 const ARCHIVE_BYTES = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3]);
@@ -102,11 +110,20 @@ describe("GET /api/export", () => {
   });
 
   it("answers 401 with no session of any kind, and reads nothing", async () => {
-    currentWorkspaceIdMock.mockRejectedValue(new Error("no workspace"));
+    currentWorkspaceIdMock.mockRejectedValue(new MissingWorkspaceError());
     const res = await GET();
     expect(res.status).toBe(401);
     expect(collectExportMock).not.toHaveBeenCalled();
     expect(cooldownCheckMock).not.toHaveBeenCalled();
+  });
+
+  it("does NOT turn a database failure into 401", async () => {
+    // `currentWorkspaceId()` upserts `lastSeenAt`, so it can fail for reasons that
+    // have nothing to do with the caller's session. Reporting "not signed in" for
+    // an outage sends somebody to re-authenticate over a problem they cannot fix,
+    // and hides a 500 from whoever is watching the logs.
+    currentWorkspaceIdMock.mockRejectedValue(new Error("connection refused"));
+    await expect(GET()).rejects.toThrow(/connection refused/);
   });
 
   it("answers 429 with Retry-After when the cooldown refuses, without doing the work", async () => {

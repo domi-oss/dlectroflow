@@ -1,4 +1,8 @@
-import { currentWorkspaceId, currentUser } from "@/lib/workspace";
+import {
+  currentWorkspaceId,
+  currentUser,
+  MissingWorkspaceError,
+} from "@/lib/workspace";
 import { collectExport } from "@/lib/export/collect";
 import { buildExportArchive } from "@/lib/export/bundle";
 import { exportCooldown } from "@/lib/export/cooldown";
@@ -43,13 +47,21 @@ export async function GET(): Promise<Response> {
   let workspaceId: string;
   try {
     workspaceId = await currentWorkspaceId();
-  } catch {
-    // `MissingWorkspaceError` — no session of any kind. `src/proxy.ts` redirects
-    // browsers before they reach here, so this is a direct call with no cookie;
-    // 401 with a plain body is the honest answer to it.
+  } catch (err) {
+    // ONLY the missing-session case becomes a 401. A bare `catch {}` here would
+    // also swallow a database failure — `currentWorkspaceId()` upserts the
+    // workspace's `lastSeenAt` on the way through — and report "not signed in" to
+    // somebody whose session is perfectly good, sending them to re-authenticate
+    // over an outage. Anything else rethrows and is a 500, which is what it is.
+    if (!(err instanceof MissingWorkspaceError)) throw err;
+    // `src/proxy.ts` redirects browsers before they reach here, so this is a
+    // direct call with no cookie; a plain-text 401 is the honest answer.
     return new Response("Not signed in", {
       status: 401,
-      headers: { "Cache-Control": "no-store" },
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store",
+      },
     });
   }
 
