@@ -404,10 +404,25 @@ export function findTextContrastRisks(
 ): StyleFinding[] {
   const findings: StyleFinding[] = [];
   for (const scope of scanClassScopes(source, fileName)) {
-    const hasDarkText = scope.tokens.some((token) => {
-      const { variants, base } = splitVariants(token);
-      return variants.includes("dark") && base.startsWith("text-");
-    });
+    /**
+     * Does the scope carry a `dark:` text partner **of this family**?
+     *
+     * Per-family, not per-scope. A scope-wide "some dark text exists" flag lets
+     * one token's partner clear another's: `"text-green-700 text-red-700
+     * dark:text-green-400"` would pass Rule B for `text-red-700`, which has no
+     * partner at all. Duo review, !250 — a real false negative, and the sort a
+     * scope-level boolean invites.
+     *
+     * Per-family is also what the tree already does: every `dark:text-*` in
+     * `src/` pairs with the same family as the light value it overrides
+     * (`text-red-800 dark:text-red-200`, `text-amber-800 dark:text-amber-300`),
+     * so this is a tightening with no new findings — verified, not assumed.
+     */
+    const hasDarkPartnerFor = (family: string): boolean =>
+      scope.tokens.some((token) => {
+        const { variants, base } = splitVariants(token);
+        return variants.includes("dark") && base.startsWith(`text-${family}-`);
+      });
     const pinned = pinsOwnBackground(scope.tokens);
 
     for (const token of scope.tokens) {
@@ -445,11 +460,11 @@ export function findTextContrastRisks(
       // Only an UNPREFIXED colour is the resting light-mode value a `dark:`
       // partner is meant to override; see the note above.
       if (!isUnprefixed(token)) continue;
-      if (!hasDarkText && !pinned) {
+      if (!hasDarkPartnerFor(family) && !pinned) {
         findings.push({
           line: scope.line,
           token,
-          reason: `\`${token}\` has no \`dark:text-*\` partner and the scope does not pin an opaque background, so it renders at 2.3-4.0:1 on the dark --background`,
+          reason: `\`${token}\` has no \`dark:text-${family}-*\` partner and the scope does not pin an opaque background, so it renders at 2.3-4.0:1 on the dark --background`,
         });
       }
     }

@@ -103,23 +103,62 @@ function scannedFiles(): string[] {
   return files;
 }
 
-/** Findings from the real tree, minus anything reviewed, as readable lines. */
-function repoOffenders(
-  scan: (
-    source: string,
-    fileName: string,
-  ) => { line: number; token: string; reason: string }[],
-  reviewed: Record<string, string>,
-): string[] {
-  const offenders: string[] = [];
+type Scan = (
+  source: string,
+  fileName: string,
+) => { line: number; token: string; reason: string }[];
+
+/**
+ * Every finding in the real tree, as an allowlist key plus a readable message.
+ *
+ * Both are returned rather than just the message, so the stale-allowlist guard
+ * below can compare real keys instead of parsing them back out of prose. (Duo
+ * suggested a regex over the formatted line; a guard whose correctness depends on
+ * a message's punctuation is a guard that breaks when someone rewords it.)
+ */
+function repoFindings(scan: Scan): { key: string; message: string }[] {
+  const found: { key: string; message: string }[] = [];
   for (const file of scannedFiles()) {
     for (const finding of scan(readFileSync(file, "utf8"), file)) {
-      const key = `${file}:${finding.token}`;
-      if (reviewed[key]) continue;
-      offenders.push(`${file}:${finding.line} — ${finding.reason}`);
+      found.push({
+        key: `${file}:${finding.token}`,
+        message: `${file}:${finding.line} — ${finding.reason}`,
+      });
     }
   }
-  return offenders;
+  return found;
+}
+
+/** Findings the reviewed map does not excuse, as readable lines. */
+function repoOffenders(scan: Scan, reviewed: Record<string, string>): string[] {
+  return repoFindings(scan)
+    .filter(({ key }) => !reviewed[key])
+    .map(({ message }) => message);
+}
+
+/**
+ * A stale exemption reads like considered coverage. Every key must still name
+ * something the scanner actually flags, and every reason must be long enough to
+ * be a reason — the same two assertions `fetch-host-hygiene.test.ts` makes about
+ * `REVIEWED_DYNAMIC_HOSTS`.
+ *
+ * Both maps are empty today, so this passes trivially. That is the point: it is
+ * armed before the first entry is added, not after somebody notices the first
+ * entry outlived its bug. Raised by Duo review on !250.
+ */
+function expectNoStaleEntries(
+  scan: Scan,
+  reviewed: Record<string, string>,
+  mapName: string,
+): void {
+  const live = new Set(repoFindings(scan).map(({ key }) => key));
+  for (const [key, reason] of Object.entries(reviewed)) {
+    expect(live, `${mapName}: ${key} is no longer flagged`).toContain(key);
+    expect(
+      reason.length,
+      `${mapName}: ${key} needs a real reason with a measured ratio`,
+    ).toBeGreaterThan(40);
+  }
 }
 
 // ── The parser, on synthetic input ─────────────────────────────────────────
@@ -225,7 +264,8 @@ describe("findTextContrastRisks", () => {
       `const x = <p className="text-sm font-medium text-green-700" />;`,
     );
     expect(findings).toHaveLength(1);
-    expect(findings[0].reason).toContain("dark:text-*");
+    // The remedy names the family, so it can be pasted rather than worked out.
+    expect(findings[0].reason).toContain("dark:text-green-*");
   });
 
   it("waives the dark: partner when the scope pins its own OPAQUE background", () => {
@@ -305,6 +345,38 @@ describe("findTextContrastRisks", () => {
     expect(
       findTextContrastRisks(`const x = <p className="text-red-500/70" />;`),
     ).toHaveLength(1);
+  });
+
+  it("does not let one family's dark: partner clear another family's token", () => {
+    // Duo review, !250. A scope-level "some dark text exists" flag passed
+    // `text-red-700` here because `dark:text-green-400` was in the same scope —
+    // a real false negative, and exactly the shape a per-scope boolean invites.
+    const findings = findTextContrastRisks(
+      `const x = <p className="text-green-700 text-red-700 dark:text-green-400" />;`,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].token).toBe("text-red-700");
+    expect(findings[0].reason).toContain("dark:text-red-*");
+  });
+
+  it("accepts two families when each has its own partner (the people-panel shape)", () => {
+    expect(
+      findTextContrastRisks(
+        `const c = tone === "error" ? "text-red-700 dark:text-red-400" : "text-green-700 dark:text-green-400";`,
+        "input.ts",
+      ),
+    ).toEqual([]);
+  });
+
+  it("accepts a dark partner at any shade of the same family", () => {
+    // `people-panel.tsx` pairs `text-red-800` with `dark:text-red-200`, and
+    // `inbox-view.tsx` pairs `text-amber-800` with `dark:text-amber-300`. The
+    // rule is that a partner EXISTS for that family, not which shade it is.
+    expect(
+      findTextContrastRisks(
+        `const x = <p className="text-amber-800 dark:text-amber-300" />;`,
+      ),
+    ).toEqual([]);
   });
 
   it("does not demand a dark: partner for a variant-prefixed colour", () => {
@@ -431,6 +503,19 @@ describe("src/ WCAG-AA class hygiene (#109, #117)", () => {
         `const x = <a className="outline-none focus-visible:bg-muted" />;`,
       ),
     ).toHaveLength(1);
+  });
+
+  it("keeps no stale entry in either reviewed map", () => {
+    expectNoStaleEntries(
+      findTextContrastRisks,
+      REVIEWED_TEXT_COLORS,
+      "REVIEWED_TEXT_COLORS",
+    );
+    expectNoStaleEntries(
+      findWeakFocusIndicators,
+      REVIEWED_FOCUS_INDICATORS,
+      "REVIEWED_FOCUS_INDICATORS",
+    );
   });
 
   it("uses no sub-AA chromatic text colour, and no un-partnered -700 (#109)", () => {
