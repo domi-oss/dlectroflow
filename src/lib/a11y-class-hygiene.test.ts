@@ -370,6 +370,35 @@ describe("findTextContrastRisks", () => {
     ).toEqual([]);
   });
 
+  it.each(["bg-white", "bg-black"])(
+    "waives the partner for %s, a fixed value the theme cannot move",
+    (bg) => {
+      // Duo review, !250. These carry no shade number, so the shade-shaped
+      // pattern missed them — but "does not move with the theme" is the only
+      // property the carve-out depends on, and a fixed sRGB value has it.
+      expect(
+        findTextContrastRisks(
+          `const x = <p className="${bg} text-green-700" />;`,
+        ),
+        bg,
+      ).toEqual([]);
+    },
+  );
+
+  it.each(["bg-white/10", "bg-black/50"])(
+    "does NOT waive it for %s, which the theme still shows through",
+    (bg) => {
+      // Both of these are real occurrences in the tree, and both are washes over
+      // whatever is behind them — the same reason `bg-green-600/10` is excluded.
+      expect(
+        findTextContrastRisks(
+          `const x = <p className="${bg} text-green-700" />;`,
+        ),
+        bg,
+      ).toHaveLength(1);
+    },
+  );
+
   it("does NOT waive it for a translucent tint, which the theme still shows through", () => {
     // `(app)/page.tsx`'s Google banners: bg-green-600/10 over --background is
     // still dark in dark mode, and text-green-700 measures 3.62:1 there.
@@ -691,6 +720,26 @@ describe("findWeakFocusIndicators", () => {
       expect(findings[0].token).toBe(killer);
     },
   );
+
+  // Duo review, !250, argued a variant-prefixed killer leaves the FOCUS outline
+  // alone and should be ignored. Dismissed: hover and focus co-occur constantly —
+  // click a control and leave the pointer on it and both `:hover` and
+  // `:focus-visible` apply, so `hover:outline-none` removes a focused element's
+  // outline for every mouse user. Same for `dark:` (in dark mode) and `sm:` (at
+  // that breakpoint). Treating every killer as a killer is the conservative
+  // reading and the permissive one has no case, so it is pinned here.
+  it.each([
+    "hover:outline-none",
+    "dark:outline-none",
+    "sm:outline-none",
+    "group-hover:outline-hidden",
+  ])("treats %s as a killer, because it can apply while focused", (killer) => {
+    const findings = findWeakFocusIndicators(
+      `const x = <a className="${killer} focus-visible:bg-accent" />;`,
+    );
+    expect(findings, killer).toHaveLength(1);
+    expect(findings[0].token).toBe(killer);
+  });
 
   it("still passes outline-hidden once a real indicator is present", () => {
     expect(

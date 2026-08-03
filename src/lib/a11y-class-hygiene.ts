@@ -385,10 +385,22 @@ function appliesInLightMode(token: string): boolean {
  * still shows through and the ratio still moves. That is not a technicality —
  * it is the difference between `integrations-panel.tsx` (fine) and
  * `(app)/page.tsx`'s Google banners (3.06:1 in dark).
+ *
+ * `bg-white` and `bg-black` count too. They carry no shade number, so the
+ * shade-shaped pattern missed them — but they are fixed sRGB values that do not
+ * move with the theme, which is the only property this carve-out depends on.
+ * Nothing in the tree pairs one with chromatic text today (the two occurrences
+ * are `bg-black/50` and `bg-white/10`, both alpha and therefore correctly still
+ * excluded), so this prevents a future false positive rather than fixing a
+ * current one — and a false positive here costs an allowlist entry nobody can
+ * defend, which is how an allowlist stops meaning anything. Duo review, !250.
  */
 function pinsOwnBackground(tokens: readonly string[]): boolean {
   const hasOpaqueBg = tokens.some((token) => {
     if (!isUnprefixed(token)) return false;
+    // Opaque only: `bg-white/10` is a 10% wash over whatever is behind it, so the
+    // theme still shows through exactly as it does through `bg-green-600/10`.
+    if (token === "bg-white" || token === "bg-black") return true;
     const match = BG_COLOR.exec(token);
     // A neutral `bg-gray-100` pins the ratio just as well as a chromatic one, so
     // both count here — but a `bg-<not-a-family>-100` must not, or a typo would
@@ -647,6 +659,21 @@ export function findWeakFocusIndicators(
 ): StyleFinding[] {
   const findings: StyleFinding[] = [];
   for (const scope of scanClassScopes(source, fileName)) {
+    // A killer counts whatever its variant chain — the base is what matters.
+    //
+    // Duo review (!250) argued a variant-prefixed killer such as
+    // `hover:outline-none` leaves the focus outline unaffected and should be
+    // ignored. It does not: **hover and focus co-occur constantly.** Click a
+    // control and leave the pointer on it and both `:hover` and `:focus-visible`
+    // apply, so `hover:outline-none` removes the outline of a focused element for
+    // every mouse user — which is most of them. The same holds for
+    // `dark:outline-none` (in dark mode), `sm:outline-none` (at that breakpoint)
+    // and `group-hover:outline-none`. Treating every killer as a killer is the
+    // conservative reading, and the permissive one has no case.
+    //
+    // It costs nothing today either: the tree's only variant-prefixed killer is
+    // `auth-actions.tsx`'s `focus-visible:outline-none`, which is unambiguously a
+    // focus-outline killer and passes the rule on its own `focus-visible:ring-2`.
     const killer = scope.tokens.find((token) =>
       OUTLINE_KILLERS.includes(splitVariants(token).base),
     );

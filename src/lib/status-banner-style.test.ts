@@ -55,9 +55,18 @@ const PALETTE_TEXT = /^text-[a-z]+-\d{2,3}$/;
  * legitimately the only place one is spelled.
  */
 function sourceFiles(): string[] {
-  return readdirSync("src", { recursive: true, encoding: "utf8" })
-    .filter((entry) => /\.tsx?$/.test(entry) && !/\.test\.tsx?$/.test(entry))
-    .map((entry) => path.join("src", entry));
+  return (
+    readdirSync("src", { recursive: true, encoding: "utf8" })
+      // `.mts` included to match `scannedFiles()` in `a11y-class-hygiene.test.ts`.
+      // No `.mts` file exists under `src/` today, so this changes nothing now — but
+      // two gates over the same tree disagreeing about which files count is how one
+      // of them quietly stops covering something. Duo review, !250.
+      .filter(
+        (entry) =>
+          /\.(ts|tsx|mts)$/.test(entry) && !/\.test\.(ts|tsx)$/.test(entry),
+      )
+      .map((entry) => path.join("src", entry))
+  );
 }
 
 describe("STATUS_BANNER_TONE", () => {
