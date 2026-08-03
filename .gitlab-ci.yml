@@ -19,7 +19,12 @@ stages:
   - build_image   # build_image: Kaniko assembles the image from build_app's artifacts
   - test          # security scanners (container_scanning needs the built image → after build_image)
   - deploy
-  - maintenance   # scheduled housekeeping only: renovate, ops_digest, prune_registry
+  # Scheduled housekeeping (renovate, ops_digest, prune_registry,
+  # security_assessment) plus one job that is NOT scheduled:
+  # alert_pipeline_failure runs `when: on_failure` on main. It lives here because
+  # it must read deploy_production's FINAL status, which means a stage after
+  # `deploy` (#147).
+  - maintenance
 
 # ── Scheduled pipelines (issue #2, task 4.3 — base-image refresh cadence) ─────
 # Four pipeline schedules drive maintenance (create in Settings → CI/CD → Schedules):
@@ -1073,3 +1078,58 @@ security_assessment:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $SECURITY_ASSESSMENT == "true"'
 
+# ── Pipeline-failure alert (#147, split out of #146) ──────────────────────────
+# Pipeline 2721968532 on `main` failed in `test_app`. `deploy_production` is in a
+# LATER stage, so it was **skipped, not failed**: the pipeline's own red tick was
+# the only signal that the merge had not deployed. `main` stayed red for 86
+# minutes, that merge never reached production, and prod only caught up by
+# accident when the next MR merged. It was noticed while auditing environments
+# for an unrelated reason.
+#
+# So this job is keyed on the awkward shape rather than the obvious one. A check
+# that waited for `deploy_production` to FAIL would not have caught the incident
+# that prompted the issue, because it never ran at all.
+#
+# It also settles the sharper half of #147: a skipped `deploy_production` is
+# otherwise indistinguishable from a docs-only pipeline where skipping is
+# correct (#116's fast path). On `main` it never is, and the note says so.
+#
+# Channel: a note on the standing ops issue — the mechanism `ops_digest` already
+# uses to get a message from CI to a human here. That means NO new one-time
+# setup: `GL_TOKEN` and `OPS_DIGEST_ISSUE_IID` are already configured, so this
+# works the first time `main` goes red rather than the first time somebody
+# remembers to wire a webhook. An unwired alert is the bug being fixed.
+# Optional: `ALERT_ISSUE_IID` to send it elsewhere, `ALERT_MENTION` (a single
+# `@handle`) to have GitLab raise a to-do rather than just an email.
+#
+# Behaviour is covered by src/lib/pipeline-failure-alert.test.ts, which drives
+# both scripts with curl stubbed and asserts the settings below.
+alert_pipeline_failure:
+  stage: maintenance          # must be AFTER deploy: it reads deploy_production's final status
+  image: alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
+  # No `needs:` key here, deliberately. `when: on_failure` scopes itself to a
+  # job's `needs` when it has any, so writing `needs: []` would scope it to an
+  # EMPTY set of jobs and this alert would never fire. Without the key it takes
+  # stage semantics — "at least one job in an earlier stage failed" — which is
+  # exactly the incident shape: a `build`-stage failure skipping a `deploy`-stage
+  # job. `dependencies: []` stops that from also downloading every earlier
+  # stage's artifacts (the #145 expiry trap) while leaving stage ordering intact.
+  dependencies: []
+  interruptible: false        # an alert should finish, not be cancelled mid-post
+  before_script:
+    - apk add --no-cache curl jq bash
+  script:
+    - bash scripts/alert-pipeline-failure.sh
+  rules:
+    # Never from a scheduled pipeline. A scheduled rescan never deploys, so it
+    # cannot cause the divergence this job exists to catch, and the weekly digest
+    # already counts failed `main` pipelines. One blanket guard rather than one
+    # per flag, matching deploy_production — it covers RENOVATE_RUN,
+    # REGISTRY_PRUNE and SECURITY_ASSESSMENT by construction.
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+      when: never
+    # `main` only. A red merge-request pipeline is already in front of the person
+    # who pushed it and cannot make main and production diverge; alerting on those
+    # would be the noise that gets the real alert filtered.
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: on_failure

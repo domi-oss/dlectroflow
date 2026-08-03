@@ -27,8 +27,46 @@ API="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}"
 # to `?` and the IID guard below skips posting (preview mode). A *bad* token with
 # the issue iid set still fails loudly at the POST (curl -f), as intended.
 AUTH="PRIVATE-TOKEN: ${GL_TOKEN:-}"
-SINCE="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)"
 DATE="$(date -u +%Y-%m-%d)"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+
+# `date -d '7 days ago'` is a GNU extension. The ops_digest job installs
+# `coreutils` so it has it, but this script is also driven by
+# src/lib/pipeline-failure-alert.test.ts, which runs on macOS (BSD date, wants
+# `-v-7d`) and in `test_app`'s node:22-alpine (busybox date, which has neither
+# spelling). Under `set -e` a failing command substitution in an assignment
+# aborts the script, so the un-guarded single form made the whole digest depend
+# on one optional apk package. Try each spelling; if none works, drop the window
+# and say so in the digest rather than sending `updated_after=` empty.
+SINCE="$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+if [ -z "$SINCE" ]; then
+  SINCE="$(date -u -v-7d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+fi
+if [ -z "$SINCE" ]; then
+  # The epoch is read into a variable and range-checked FIRST, rather than nested
+  # as `date -d "@$(($(date +%s) - 604800))"`. Duo review on !251 flagged the
+  # nested form; its stated mechanism (a `set -e` abort) is wrong — measured on
+  # bash 3.2, `$(( $(true) - 604800 ))` quietly evaluates to `-604800` and exits
+  # 0 — but the conclusion was right and the real failure is worse than the one
+  # described. On a box where `date +%s` yields nothing usable while `date -d @…`
+  # still works, that -604800 becomes a perfectly valid `1969-12-25`, and the
+  # digest silently reports "failed pipelines in the last 7 days" for a window
+  # starting in 1969. A wrong number with a confident label is the exact failure
+  # class #147 is about, so the guard rejects anything that is not a plain epoch
+  # and falls through to the honest "no window" label below.
+  _now="$(date -u +%s 2>/dev/null || true)"
+  case "$_now" in
+    '' | *[!0-9]*) ;;
+    *) SINCE="$(date -u -d "@$((_now - 604800))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)" ;;
+  esac
+fi
+if [ -n "$SINCE" ]; then
+  WINDOW="&updated_after=${SINCE}"
+  WINDOW_LABEL="last 7d"
+else
+  WINDOW=""
+  WINDOW_LABEL="all time, capped at 100 — no \`date\` on this image could compute a 7-day window"
+fi
 
 # ── 1. Production health (public endpoints — no auth needed) ──────────────────
 health_code="$(curl -s -o /tmp/health.json -w '%{http_code}' --max-time 15 "${PROD_URL}/api/health" || echo 000)"
@@ -45,8 +83,30 @@ case "$site_code" in
 esac
 
 # ── 2. CI health — failed main pipelines, last 7d ────────────────────────────
-failed_pipes="$(curl -s -H "$AUTH" "${API}/pipelines?ref=main&status=failed&updated_after=${SINCE}&per_page=100" \
+failed_pipes="$(curl -s -H "$AUTH" "${API}/pipelines?ref=main&status=failed${WINDOW}&per_page=100" \
   | jq -r 'length | if . == 100 then "100+" else . end' 2>/dev/null || echo '?')"
+
+# ── 2b. Is production actually running `main`? (#147) ─────────────────────────
+# The on-failure alert (alert_pipeline_failure) covers divergence caused by a red
+# pipeline. This covers everything else: a `helm rollback`, an `--atomic` rollback
+# of a deploy that timed out, a manual `helm upgrade` — all of which leave prod on
+# a different commit with a GREEN pipeline and no event to hook onto. Comparing
+# the outcome rather than the cause is what makes it catch failure modes nobody
+# has thought of yet, which is why it is here as well as on the failure path.
+#
+# WEEKLY is the honest latency of this backstop, and it is not an incident
+# response: #147's divergence lasted 86 minutes. Tightening it is a
+# settings-only change once this exists — a schedule running the same script
+# hourly and posting only when it reads drift.
+set +e
+drift_block="$(bash "${HERE}/check-prod-drift.sh")"
+drift_status=$?
+set -e
+case "$drift_status" in
+  0) drift_headline="✅ production is running \`main\`" ;;
+  1) drift_headline="🔴 **production is not running \`main\`** — see below" ;;
+  *) drift_headline="⚠️ **undetermined** — this is an unknown, not an all-clear" ;;
+esac
 
 # ── 3. Dependency upgrades — open Renovate MRs awaiting triage ────────────────
 # The API has no source-branch filter, so we fetch open MRs and filter for
@@ -73,15 +133,28 @@ sec_issues="$(curl -s -H "$AUTH" "${API}/issues?state=opened&labels=security&per
   | jq -r 'length | if . == 100 then "100+" else . end' 2>/dev/null || echo '?')"
 
 # ── 5. Digest body ───────────────────────────────────────────────────────────
-BODY="$(cat <<EOF
+# Heredoc into a file, then read it back — NOT `$(cat <<EOF …)`. bash 3.2 (the
+# system bash on macOS, where `npm test` drives this script) mis-parses a heredoc
+# inside a command substitution and dies with `bad substitution: no closing ')'`;
+# alpine's bash 5 does not, so the naive form is green in the ops_digest job and
+# broken on every contributor's laptop. It was written that way and never run
+# locally, because until #147 nothing drove this script from the suite.
+# `security-assessment.sh` carries the same note for the same reason.
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+cat > "$WORK/body.md" <<EOF
 ### 🗓️ Weekly ops digest — ${DATE}
 
 **Health**
 - ${health_line}
 - ${site_line}
 
+**Deploy** — is production running \`main\`? (#147)
+- ${drift_headline}
+${drift_block}
+
 **CI**
-- Failed \`main\` pipelines (last 7d): **${failed_pipes}**
+- Failed \`main\` pipelines (${WINDOW_LABEL}): **${failed_pipes}**
 
 **Security**
 - Active Vulnerability Report findings (detected+confirmed): **${vulns}**
@@ -97,7 +170,7 @@ BODY="$(cat <<EOF
 
 _Automated by the \`ops_digest\` CI job (pipeline ${CI_PIPELINE_ID}). Cadence: docs/quality-audit-prompts.md ## Cadence + #16._
 EOF
-)"
+BODY="$(cat "$WORK/body.md")"
 
 # ── 6. Post as a note on the standing digest issue ───────────────────────────
 if [ -n "${OPS_DIGEST_ISSUE_IID:-}" ]; then
