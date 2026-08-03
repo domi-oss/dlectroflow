@@ -71,11 +71,29 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Changed
 
-- **Privacy Policy — effective date 2 August 2026.** The Erasure right now names
+- **Terms of Service — the backups are not a personal undo (#164).** *Your data*
+  gains a short clause saying what the nightly backups do and do not do for one
+  person: they exist to bring the whole instance back after a disaster, and that
+  obligation is stated rather than disclaimed — but there is no per-person
+  restore, and nothing brings back a capture, task or step you deleted. The page
+  previously mentioned backups once, in the as-is section, and left a reader to
+  infer the rest; the likely inference was the wrong one. That sentence now
+  carries the gist and links to the full clause, so the two cannot drift apart.
+  Deliberately **not** filed under *Limits on my liability*: it describes how the
+  service works, and the narrow claim is *no individual restore*, never *no
+  responsibility for your data*. Tests assert both directions. Nothing is said
+  or linked about exporting your data, because #129 is unshipped.
+
+- **Privacy Policy — the Erasure right (#153).** The Erasure right now names
   the self-serve control and its one exception (the owner's own account), and
   the retention section says what deleting your own account does. How a data
   subject exercises an Art. 17 right is part of the Art. 12/13 disclosure, so it
   is a substantive change rather than a copy tweak.
+
+- **Both legal pages now carry an effective date of 3 August 2026**, moved by
+  the Terms change above. The date is shared by the two documents on purpose — a
+  reader comparing them should not have to hold two version numbers — so
+  /privacy's date moves with it even though its text has not changed since #153.
 - `docs/legal.md`'s "Google revocation: the gap the pages admit" section was
   stale — it still described freeze and delete as paths that never call Google's
   revoke endpoint, which #126 fixed in v0.5.0. Corrected, and the residue that

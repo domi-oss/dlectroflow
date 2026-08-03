@@ -312,3 +312,97 @@ describe("Terms of Service page: non-commercial framing", () => {
     );
   });
 });
+
+// ── #164: the backups are not a personal undo ───────────────────────────────
+//
+// Before this clause the page mentioned backups once, in the as-is section, and
+// never said what they do for ONE reader. To somebody who has just deleted the
+// wrong task, "there are nightly backups" reads like a copy of their work is
+// sitting somewhere and can be fetched. It cannot: a dump is whole-database and
+// is restored whole, and a deleted capture, task or step is a hard delete
+// (`deleteMany`, no soft-delete column on those models — see
+// src/app/actions/braindump.ts and src/app/actions/breakdown.ts).
+//
+// Both halves are pinned, because they fail in opposite directions:
+//
+//   • Lose the "no per-person restore" half and the page publishes an implied
+//     promise the operator cannot keep.
+//   • Lose the "whole-instance recovery is a real obligation" half and a
+//     description of how the service works turns into a blanket disclaimer of
+//     responsibility for data — exactly what the docblock at the top of page.tsx
+//     says the liability drafting is careful NOT to do, because an over-broad
+//     exclusion risks the whole section rather than strengthening it.
+describe("Terms of Service page: no per-user restore (#164)", () => {
+  function sectionText(id: string): string {
+    const { container } = render(<TermsPage />);
+    const section = container.querySelector(`section[aria-labelledby="${id}"]`);
+    expect(section, `no <section aria-labelledby="${id}">`).not.toBeNull();
+    return section!.textContent!.replace(/\s+/g, " ");
+  }
+
+  it("carries the clause in Your data, not in the liability section", () => {
+    // Placement is deliberate: this describes how the service works, so it sits
+    // with the data section. Putting it under "Limits on my liability" would
+    // frame an operational fact as an exclusion, which is the reading the clause
+    // is written to avoid.
+    expect(sectionText("data")).toMatch(/no per-person restore/i);
+    expect(sectionText("liability")).not.toMatch(/per-person restore/i);
+  });
+
+  it("says the backups exist to bring the whole instance back", () => {
+    const text = sectionText("data");
+    expect(text).toMatch(/nightly backups/i);
+    expect(text).toMatch(/they are how it comes back/i);
+  });
+
+  it("says plainly there is no per-person restore and no undo for a deletion", () => {
+    const text = pageText();
+    expect(text).toMatch(/What they are not is a personal undo/i);
+    expect(text).toMatch(/There is no per-person restore/i);
+    expect(text).toMatch(/not something I can offer you/i);
+    expect(text).toMatch(/gone from the app there and then/i);
+    // The advice the clause exists to justify.
+    expect(text).toMatch(
+      /the one piece of advice on this page I would most like you to take/i,
+    );
+  });
+
+  it("states the whole-instance obligation instead of disclaiming data at all", () => {
+    // The narrow honest claim is "no individual restore", never "no
+    // responsibility". Asserted in both directions so a future tightening
+    // cannot quietly widen it.
+    const text = pageText();
+    expect(text).toMatch(/a real obligation and nothing here disclaims it/i);
+    expect(text).not.toMatch(
+      /no responsibility for (?:your |the |any )?(?:data|content)/i,
+    );
+    expect(text).not.toMatch(
+      /not responsible for (?:your |the |any )?(?:data|content)/i,
+    );
+  });
+
+  it("does not promise or link to an export that is not built yet (#129)", () => {
+    // #129 is what makes "keep your own copy" actionable and it is unshipped:
+    // there is still no `src/app/api/account/` route. The clause leaves a slot
+    // for one line, and until that line is true a dead link in a published
+    // legal document is worse than no link.
+    const { container } = render(<TermsPage />);
+    const text = container.textContent!.replace(/\s+/g, " ");
+    expect(text).not.toMatch(
+      /you (?:can|may|could) (?:export|download) (?:your|a copy of your)/i,
+    );
+    const hrefs = Array.from(
+      container.querySelectorAll<HTMLAnchorElement>("a[href]"),
+    ).map((a) => a.getAttribute("href")!);
+    expect(hrefs.filter((h) => /export/i.test(h))).toEqual([]);
+  });
+
+  it("links the as-is warning to the fuller clause so the two cannot drift", () => {
+    // Two statements of the same fact in one document is how a document
+    // contradicts itself. The as-is section keeps the one-line gist and points
+    // here for the detail, rather than half-stating it a second time.
+    const { container } = render(<TermsPage />);
+    const free = container.querySelector('section[aria-labelledby="free"]')!;
+    expect(free.querySelector('a[href="#data"]')).not.toBeNull();
+  });
+});

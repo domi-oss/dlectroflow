@@ -191,12 +191,21 @@ export default function TermsPage() {
             particular needs, or that any AI suggestion it produces is correct.
           </li>
         </ul>
+        {/* #164 — this sentence used to end "not as a promise to you", which
+            half-stated the point and left the reader to guess at the other
+            half. The full clause now lives in ONE place, under Your data, and
+            this is the pointer to it: two statements of the same fact in one
+            document is how a document ends up contradicting itself. */}
         <p>
           <strong>
             So please keep your own copy of anything that matters.
           </strong>{" "}
-          There are nightly backups, but they exist for disaster recovery, not
-          as a promise to you.
+          There are nightly backups, but they are for disaster recovery and not
+          a personal undo — see{" "}
+          <Link href={`#${s("data").id}`} className="underline">
+            Your data
+          </Link>{" "}
+          for what they can and cannot do.
         </p>
       </LegalSection>
 
@@ -549,6 +558,40 @@ export default function TermsPage() {
           For anything about your data, write to{" "}
           <Mail address={LEGAL_CONTACT_EMAIL} /> rather than the general address
           — that inbox is the statutory route and it is monitored as one.
+        </p>
+
+        {/* #164 — the honest scope of the backups, and deliberately NOT in the
+            liability section. This describes how the service works; filing it as
+            an exclusion would frame an operational fact as a limitation, and the
+            docblock at the top of this file records why this page keeps its
+            exclusions narrow. The first paragraph is load-bearing for that: the
+            claim being made is "no individual restore", never "no
+            responsibility for your data". */}
+        <LegalSubheading>What the backups can and cannot do</LegalSubheading>
+        <p>
+          There are nightly backups, and they do one job: if this instance were
+          lost — a failed disk, a bad deployment, a mistake of mine — they are
+          how it comes back, with everybody&rsquo;s work in it. That job is a
+          real obligation and nothing here disclaims it.
+        </p>
+        <p>
+          <strong>What they are not is a personal undo.</strong> There is no
+          per-person restore. A backup is a snapshot of the whole database and
+          it is restored whole, so lifting one person&rsquo;s tasks out of one
+          and putting them back into a running instance is not something I can
+          offer you. Nor is there anything that brings back what you deleted:
+          delete a capture, a task or a step and it is gone from the app there
+          and then.
+        </p>
+        {/* #129 — when a member can export their own data, the addition goes at
+            the end of the paragraph below and is one sentence: "You can
+            download a copy of everything from Settings." It is not written yet
+            because it is not true yet: there is no `src/app/api/account/`
+            route, and a dead link in a published legal document is worse than
+            no link at all. */}
+        <p>
+          So the one piece of advice on this page I would most like you to take:{" "}
+          <strong>keep your own copy of anything that matters.</strong>
         </p>
       </LegalSection>
 
