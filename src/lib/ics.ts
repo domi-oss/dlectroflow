@@ -70,6 +70,14 @@ function foldLine(line: string): string {
     while (end > start && end < bytes.length && (bytes[end] & 0xc0) === 0x80) {
       end--;
     }
+    // Guarantee forward progress. Backing off past `start` happens only for
+    // invalid UTF-8 — a lead byte followed by 75+ continuation bytes — which
+    // cannot arise here, because the only inputs are JS strings and
+    // Buffer.from(s, "utf8") never emits an ill-formed sequence. But if it ever
+    // did, `end === start` would push "" and leave `start` unmoved, and the
+    // outer loop would spin forever. Splitting mid-sequence is a mangled
+    // character; hanging is a wedged request. Raised by review on !253.
+    if (end === start) end = Math.min(bytes.length, start + limit);
     parts.push(bytes.subarray(start, end).toString("utf8"));
     start = end;
   }
