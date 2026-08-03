@@ -120,13 +120,31 @@ function parseContainerStart(
  *
  * Returning null rather than "" matters: an empty script satisfies no assertion,
  * so inventing one would turn a parse failure into a green build.
+ *
+ * The search for the block marker is bounded to lines indented UNDER the key,
+ * not merely to lines after it. Duo review (!249) caught that as a real latent
+ * bug: a `command:` holding a plain list, followed by any sibling key that does
+ * carry a block scalar (`healthcheck: test: - |`), otherwise looked like an
+ * inline script and would satisfy every script-level assertion using text the
+ * service never runs. Bounded by indentation rather than adjacency, so a blank
+ * line between the key and its marker still parses.
  */
 function scriptBlockUnder(body: string[], key: string): string | null {
   const keyAt = body.findIndex((line) => line.trim() === `${key}:`);
   if (keyAt === -1) return null;
-  const blockAt = body.findIndex(
-    (line, k) => k > keyAt && (line.trim() === "- |" || line.trim() === "- >"),
-  );
+
+  const keyIndent = indentOf(body[keyAt] ?? "");
+  let blockAt = -1;
+  for (let k = keyAt + 1; k < body.length; k++) {
+    const line = body[k] ?? "";
+    const trimmed = line.trim();
+    if (trimmed === "") continue;
+    if (indentOf(line) <= keyIndent) break;
+    if (trimmed === "- |" || trimmed === "- >") {
+      blockAt = k;
+      break;
+    }
+  }
   if (blockAt === -1) return null;
 
   const blockIndent = indentOf(body[blockAt] ?? "");

@@ -311,7 +311,12 @@ services:
             exit 1
             ;;
         esac
-        if [ ! -s /stage/stamp ]; then
+        # The stamp is written last, so its presence is the dump stage's ready
+        # signal — but check the dump itself too, or a stamp with nothing beside
+        # it reaches rclone and fails with a generic file-not-found instead of
+        # the sentence that says what to do. `-s` on both, not `-f`, so a
+        # zero-byte file is never mistaken for a dump.
+        if [ ! -s /stage/stamp ] || [ ! -s /stage/dump.sql.gz ]; then
           echo "ERROR: no staged dump — run the backup service first" >&2
           exit 1
         fi

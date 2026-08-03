@@ -289,6 +289,49 @@ describe("parseComposeBackup", () => {
     ]);
   });
 
+  it("does not adopt a SIBLING key's block scalar as the command script", () => {
+    // Duo review (!249), verified as a real latent bug: the block-scalar search
+    // was bounded only by "after `command:`", not by "indented under it". A
+    // service whose `command:` is a plain list, followed by any sibling key that
+    // does carry a block scalar, therefore looked like it had an inline script —
+    // and would satisfy every script-level assertion using text it never runs.
+    // Worst case is a `healthcheck:` supplying the `b2:` destination.
+    const decoy = `name: dlectroflow-prod
+
+services:
+  backup-decoy:
+    image: x
+    command:
+      - npx
+      - tsx
+    healthcheck:
+      test:
+        - |
+          set -euo pipefail
+          rclone copyto /x "b2:bucket/pg/y"
+
+volumes:
+  backup_stage:
+`;
+    const facts = parseComposeBackup(decoy);
+    expect(facts.services.map((s) => s.name)).toEqual([]);
+    expect(facts.destinations.b2).toBe(false);
+  });
+
+  it("still reads a block scalar separated from its key by a blank line", () => {
+    // The bound is on indentation, not adjacency, so legal YAML that puts a
+    // blank line between `command:` and `- |` must still parse. Guards the fix
+    // above against being over-tightened into "the very next line".
+    const spaced = composeFixture(REAL_UPLOAD).replace(
+      "    command:\n      - |\n        set -euo pipefail\n        pg_dump",
+      "    command:\n\n      - |\n        set -euo pipefail\n        pg_dump",
+    );
+    expect(spaced).not.toBe(composeFixture(REAL_UPLOAD));
+    expect(parseComposeBackup(spaced).services[0]!.script).toMatch(
+      /set -euo pipefail/,
+    );
+  });
+
   it("returns nothing for a file with no services block", () => {
     expect(parseComposeBackup("volumes:\n  pgdata:\n").services).toEqual([]);
   });
@@ -389,6 +432,22 @@ describe("Compose backup stack hygiene (#162)", () => {
   it("mints the timestamp exactly once, in the dump stage", () => {
     const stampWrites = service("backup").script.match(/> \/stage\/stamp/g);
     expect(stampWrites).toHaveLength(1);
+  });
+
+  it("refuses unless BOTH the staged dump and its stamp are there", () => {
+    // Duo review (!249). The stamp is written last, so its presence is the
+    // ready signal — but a stamp with no dump beside it would reach `rclone`
+    // and fail with a generic file-not-found instead of the sentence that says
+    // what to do. Both are checked, and both with -s rather than -f so a
+    // zero-byte file is not mistaken for a dump.
+    for (const stage of uploaders()) {
+      expect(stage.script, `service "${stage.name}"`).toMatch(
+        /! -s \/stage\/stamp/,
+      );
+      expect(stage.script, `service "${stage.name}"`).toMatch(
+        /! -s \/stage\/dump\.sql\.gz/,
+      );
+    }
   });
 
   it("makes every uploader read that stamp instead of calling date itself", () => {
