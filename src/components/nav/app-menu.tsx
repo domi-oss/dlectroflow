@@ -77,8 +77,21 @@ export function AppMenu({ voice }: { voice: Voice }) {
                 key={href}
                 href={href}
                 aria-current={active ? "page" : undefined}
+                // #117 — the focus indicator is an INSET RING, not just the
+                // background swap this used to rely on. WCAG 2.4.11 Focus
+                // Appearance is AA in WCAG 2.2 and axe does not implement it, so
+                // nothing in the suite was ever going to catch this: --muted
+                // against --background is 1.07:1 in light and 1.17:1 in dark,
+                // against the 3:1 an indicator needs. --ring reads 5.09:1 on the
+                // popup surface and 4.75:1 on the focused --muted in light,
+                // 8.83:1 / 7.55:1 in dark — clear of 3:1 against BOTH adjacent
+                // colours in both themes. Inset because these entries are flush
+                // to the popup's edge; an outset ring would sit outside the
+                // border. The background swap stays: it is the hover affordance,
+                // and losing it would be a redesign. Kept identical to
+                // account-menu.tsx's entries, which open inches away.
                 className={cn(
-                  "flex min-h-[44px] items-center px-4 py-2 text-sm outline-none hover:bg-muted hover:text-primary focus-visible:bg-muted focus-visible:text-primary",
+                  "flex min-h-[44px] items-center px-4 py-2 text-sm outline-none hover:bg-muted hover:text-primary focus-visible:bg-muted focus-visible:text-primary focus-visible:inset-ring-2 focus-visible:inset-ring-ring",
                   active && "text-primary font-medium",
                 )}
               >

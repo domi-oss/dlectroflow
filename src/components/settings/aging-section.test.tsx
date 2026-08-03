@@ -56,6 +56,20 @@ describe("AgingSection auto-save", () => {
     expect(screen.queryByRole("button", { name: /save/i })).toBeNull();
   });
 
+  // #109 — #95's twin: literally the same colour, size and semantic on a
+  // different route, missed by the same gate for the same reason. The note only
+  // renders when a demo override is set, so /settings' zero-tolerance contrast
+  // gate has always scanned a page without it. `text-amber-600` is 3.01:1 at
+  // 12px on the light --background; the tuned pair #57 settled on for
+  // "attention, not alarm" is 4.75:1 / 11.44:1.
+  it("paints the demo-override note with the AA-tuned amber pair (#109)", () => {
+    renderSection({ demoOverrideSeconds: 10 });
+    const note = screen.getByText(/demo override: 10s/);
+    expect(note.className).toContain("text-amber-700");
+    expect(note.className).toContain("dark:text-amber-400");
+    expect(note.className).not.toContain("text-amber-600");
+  });
+
   it("auto-saves (debounced) when a freshness input changes", async () => {
     const user = userEvent.setup();
     renderSection();

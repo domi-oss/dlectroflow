@@ -184,4 +184,23 @@ describe("RoundupCard demo override timing", () => {
     });
     expect(triggerRollup).toHaveBeenCalledTimes(1);
   });
+
+  // #109 — the note inherits the <summary>'s 12px, so the 4.5:1 normal-text
+  // threshold applies. `text-amber-600` was 3.01:1 on the light --background and
+  // only ever renders with the override on, so /dashboard's contrast gate never
+  // measured it. amber-700/amber-400 (4.75:1 / 11.44:1) is the pair the "still
+  // needed?" link in this same file already uses.
+  it("paints the demo note with the AA-tuned amber pair (#109)", () => {
+    render(
+      <RoundupCard
+        initialRollup={null}
+        settings={{ ...settings(false), roundupDemoOverride: true }}
+        emailConfigured={false}
+      />,
+    );
+    const note = screen.getByText(/demo: auto-fires on load/);
+    expect(note.className).toContain("text-amber-700");
+    expect(note.className).toContain("dark:text-amber-400");
+    expect(note.className).not.toContain("text-amber-600");
+  });
 });

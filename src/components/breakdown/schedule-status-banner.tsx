@@ -3,6 +3,7 @@
 import { useVoice } from "@/components/voice-provider";
 import { t, type Voice } from "@/lib/strings";
 import { cn } from "@/lib/utils";
+import { STATUS_BANNER_TONE } from "@/lib/status-banner-style";
 
 /**
  * Ground-truth scheduling banner for a confirmed breakdown.
@@ -28,11 +29,13 @@ export function ScheduleStatusBanner({
       role="status"
       className={cn(
         "rounded-lg border p-3 text-sm font-medium",
-        // Per-theme text tone: -700 is AA on the light tint, but fails AA on the
-        // dark tint, so dark mode uses the lighter -400 (a11y contrast).
-        scheduled
-          ? "border-green-600/30 bg-green-600/10 text-green-700 dark:text-green-400"
-          : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+        // #109 — the tone table, not a local copy. The comment that used to sit
+        // here claimed "-700 is AA on the light tint": measured, green-700 on
+        // this banner's own tint is 4.16:1 and amber-700 is 4.42:1, both under
+        // 4.5:1. The claim came from measuring the token against the bare
+        // --background instead of against the composite the banner actually
+        // paints. status-banner-style.ts carries the corrected numbers.
+        scheduled ? STATUS_BANNER_TONE.ok : STATUS_BANNER_TONE.warn,
       )}
     >
       {t(scheduled ? "banner.scheduled" : "banner.notScheduled", voice)}

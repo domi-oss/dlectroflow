@@ -55,8 +55,20 @@ export function AccountMenu({ identity }: { identity: AccountIdentity }) {
 
   // Popup entries: full-width rows at the 44px minimum (WCAG 2.5.5), matching
   // the app menu's entries directly above them in the same corner.
+  //
+  // #117 — the focus indicator is an INSET RING, not just the background swap
+  // this used to rely on. WCAG 2.4.11 Focus Appearance is AA in WCAG 2.2 and axe
+  // does not implement it, so the whole a11y suite was structurally blind to it:
+  // --accent against the popup's --background surface is 1.09:1 in light and
+  // 1.24:1 in dark, against the 3:1 an indicator needs. --ring reads 5.09:1 on
+  // that surface and 4.65:1 on the focused --accent in light, 8.83:1 / 7.14:1 in
+  // dark — clear of 3:1 against BOTH adjacent colours in both themes. Inset so
+  // the ring follows the entry's own rounded box rather than spilling into the
+  // popup's 4px padding. Identical to app-menu.tsx's entries by design: the two
+  // popups open inches apart and #117 was declined inside !192 precisely because
+  // fixing one would make them behave differently.
   const entry =
-    "hover:bg-accent hover:text-primary focus-visible:bg-accent focus-visible:text-primary flex min-h-11 w-full items-center rounded-md px-3 text-left outline-none";
+    "hover:bg-accent hover:text-primary focus-visible:bg-accent focus-visible:text-primary focus-visible:inset-ring-2 focus-visible:inset-ring-ring flex min-h-11 w-full items-center rounded-md px-3 text-left outline-none";
 
   return (
     <div ref={rootRef} className="relative">

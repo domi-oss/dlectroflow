@@ -20,12 +20,18 @@ export default async function LoginPage({
           This unlocks the private owner workspace. Everyone else can keep using
           the app as a guest.
         </p>
+        {/* #109 — `text-red-500` is 3.58:1 at 14px on the light --background.
+            Both of these only render on an error redirect, so /login's
+            zero-tolerance contrast gate has always scanned the happy path and
+            passed. red-700/red-400 is 6.04:1 / 6.79:1, the error pair the rest of
+            the app already uses. Colour is not the only signal either way — the
+            copy says what went wrong. */}
         {error === "not_authorized" ? (
-          <p className="text-sm text-red-500">
+          <p className="text-sm text-red-700 dark:text-red-400">
             That account isn&apos;t the owner of this instance.
           </p>
         ) : error ? (
-          <p className="text-sm text-red-500">
+          <p className="text-sm text-red-700 dark:text-red-400">
             Sign-in failed. Please try again.
           </p>
         ) : null}
