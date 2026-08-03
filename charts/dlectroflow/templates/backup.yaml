@@ -7,8 +7,20 @@ job and pg_dump matches the server major version exactly:
   1. initContainer `dump`  — postgres:16, pg_dump | gzip → shared emptyDir file
   2. container    `upload` — cloud-sdk, gcloud storage cp → gs://<bucket>/pg/
 Upload auth is keyless via Workload Identity (the KSA below is bound to a GCP
-service account); no key file is ever mounted. Retention is enforced by the
-bucket's lifecycle policy, not here.
+service account); no key file is ever mounted.
+
+Retention is enforced by each bucket's own policy, not here — but the two
+buckets do NOT behave the same way, so do not read this as "both are capped":
+  - GCS: an age-based lifecycle rule deletes objects outright, so the cap holds.
+  - B2: measured `daysFromHidingToDeleting: 90`, `daysFromUploadingToHiding:
+    null`. B2 only starts that 90-day clock once an object is *hidden*, and an
+    object is hidden only when a new version reuses its name. Object names here
+    carry a unique timestamp, so no name is ever reused, nothing is ever
+    hidden, and nothing is ever deleted. B2 growth is therefore unbounded.
+Check with `rclone backend lifecycle b2:<bucket>`. At roughly 42 KB/day this is
+~15 MB/year, which is why it is documented rather than fixed; if that stops
+being true, add an explicit prune to the upload stage rather than expecting the
+bucket to do it.
 */ -}}
 {{- if and .Values.backup.enabled (eq .Values.env "production") }}
 apiVersion: v1
