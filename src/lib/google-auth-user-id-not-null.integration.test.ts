@@ -40,7 +40,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 import { UserRole, UserStatus } from "@/lib/constants";
 
 // Dedicated client + a unique, never-reused providerSub prefix, wiped before and
@@ -127,11 +127,29 @@ describe("GoogleAuth.userId is NOT NULL in the database (#122)", () => {
   });
 
   it("rejects a raw insert that belongs to nobody", async () => {
-    // The BITES half. Postgres raises not_null_violation (23502), whose message
-    // names both the column and the relation.
-    await expect(insertGoogleAuth(ORPHAN_ID, null)).rejects.toThrow(
-      /null value in column "userId" of relation "GoogleAuth"/,
+    // The BITES half. Postgres raises not_null_violation, SQLSTATE 23502.
+    //
+    // Asserted on the STRUCTURED code rather than a regex over the message, and
+    // that is not a style preference: the obvious
+    // `/null value in column "userId"/` was tried first and does not match,
+    // because Prisma replaces the driver's primary message with its own
+    // "Raw query failed" wrapper and keeps only Postgres' secondary DETAIL line
+    // ("Failing row contains (…)"), which names no column at all. `meta.code` is
+    // the one part of the shape that carries the actual database verdict.
+    //
+    // A NOT NULL violation also has no constraint NAME to match on, which is why
+    // this file cannot follow step-est-minutes-check.integration.test.ts in
+    // matching `/Step_estMinutes_check/` — a CHECK constraint has a name, a
+    // column's nullability does not.
+    const err = await insertGoogleAuth(ORPHAN_ID, null).then(
+      () => null,
+      (e: unknown) => e,
     );
+
+    expect(err).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+    const known = err as Prisma.PrismaClientKnownRequestError;
+    expect(known.code).toBe("P2010"); // raw query failed
+    expect((known.meta as { code?: string } | undefined)?.code).toBe("23502");
 
     // And nothing was written — the whole statement rolled back. Counted by
     // primary key rather than by `userId: null`, which the generated types no
