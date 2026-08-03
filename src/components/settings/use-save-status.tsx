@@ -60,7 +60,11 @@ export function SaveIndicator({
   if (status === "saved")
     return (
       <span
-        className="text-xs text-green-600 dark:text-green-400"
+        // #109 — `text-green-600` is 3.03:1 at 12px on the light --background,
+        // and only ever painted for the moment after a save lands, so every
+        // /settings contrast gate scanned an idle page and passed. green-700 is
+        // 4.65:1; the dark partner was already correct at 11.06:1.
+        className="text-xs text-green-700 dark:text-green-400"
         role="status"
         data-save-status="saved"
       >
@@ -70,7 +74,11 @@ export function SaveIndicator({
   if (status === "error")
     return (
       <span
-        className="text-xs text-red-600 dark:text-red-400"
+        // #109 — `text-red-600` is 4.48:1 at 12px on the light --background: it
+        // fails AA by 0.02, which is exactly why nobody caught it by eye.
+        // red-700 is 6.04:1, matching the error red already used by
+        // status-pill.tsx, people-panel.tsx and delete-account.tsx.
+        className="text-xs text-red-700 dark:text-red-400"
         role="alert"
         data-save-status="error"
       >

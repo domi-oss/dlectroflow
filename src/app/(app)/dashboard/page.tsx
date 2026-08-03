@@ -43,7 +43,12 @@ export default async function DashboardPage({
         <Stat
           label={t("stat.pointsToday", voice)}
           value={data.todayPoints}
-          accent="text-amber-600"
+          // #109 — the points value is 24px semibold, so WCAG's large-scale 3:1
+          // allowance applies and `text-amber-600` measured 3.00:1: it did not
+          // pass, it landed exactly ON the threshold, which is not a margin
+          // anyone should rely on. amber-700/amber-400 is 4.75:1 / 11.44:1, past
+          // even the stricter normal-text bar, so the question stops being close.
+          accent="text-amber-700 dark:text-amber-400"
         />
         <Stat
           label={t("stat.currentStreak", voice)}

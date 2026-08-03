@@ -111,3 +111,36 @@ describe("AppMenu", () => {
     expect(button).toHaveAttribute("aria-expanded", "false");
   });
 });
+
+/**
+ * #117 — WCAG 2.4.11 Focus Appearance, which is AA in WCAG 2.2 and which **axe
+ * does not implement**. The repo's contrast gate, guest-surface scans and axe
+ * baseline all passed on the broken version, so this is not a belt-and-braces
+ * duplicate of an e2e assertion — it is the only run-time check that exists.
+ *
+ * `a11y-class-hygiene.test.ts` enforces the same thing on the source string. This
+ * asserts it on the DOM node a keyboard user actually lands on, which is the part
+ * a refactor (moving the classes onto a wrapper, say) could silently break.
+ */
+describe("AppMenu — menu entries have a real focus indicator (#117)", () => {
+  it("gives every entry an indicator that is not solely a background swap", async () => {
+    render(<AppMenu voice="plain" />);
+    await userEvent.click(screen.getByRole("button", { name: /menu/i }));
+    const entries = screen.getAllByRole("link");
+    expect(entries.length).toBeGreaterThan(0);
+    for (const entry of entries) {
+      // The old style was `outline-none` + `focus-visible:bg-muted` and nothing
+      // else — --muted against --background is 1.07:1 in light, 1.17:1 in dark.
+      expect(entry.className).toContain("focus-visible:inset-ring-2");
+      expect(entry.className).toContain("focus-visible:inset-ring-ring");
+    }
+  });
+
+  it("keeps the background swap as well, so the hover affordance is unchanged", async () => {
+    render(<AppMenu voice="plain" />);
+    await userEvent.click(screen.getByRole("button", { name: /menu/i }));
+    const entry = screen.getByRole("link", { name: /Inbox/ });
+    expect(entry.className).toContain("hover:bg-muted");
+    expect(entry.className).toContain("focus-visible:bg-muted");
+  });
+});

@@ -130,9 +130,15 @@ export function TaskSchedule({
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
       <span
+        // #109 — a NINTH instance of the bare-`-600` class, found by the
+        // a11y-class-hygiene gate rather than by either issue's inventory, which
+        // is the whole argument for having the gate. `text-emerald-600` is
+        // 3.45:1 at 14px on the light --background and only renders once a task
+        // is scheduled. emerald-700/emerald-400 is 5.05:1 / 10.16:1, the same
+        // pair row-actions.tsx and inbox-view.tsx already use for "scheduled".
         className={
           scheduledAt != null
-            ? "font-medium text-emerald-600"
+            ? "font-medium text-emerald-700 dark:text-emerald-400"
             : "text-muted-foreground"
         }
         title={scheduledAt != null ? "Scheduled" : undefined}

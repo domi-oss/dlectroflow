@@ -133,6 +133,41 @@ operators upgrading a self-hosted instance don't get surprised.
   a genuine Prisma failure still prints exactly as before, and a test asserts
   both halves against a real database.
 
+- **The WCAG-AA failures the accessibility suite could not see, and the gate that
+  now catches them (#109, #117).** Both issues are one structural blind
+  spot: the automated gates only measure what is painted during the scan, so a
+  green suite meant "the gate cannot see this", not "this is fine".
+  - **Text colour.** On this palette a bare Tailwind `-600` is not AA as text
+    (3.00–4.48:1 on the light background), and a `-700` used as text needs a
+    `dark:` partner (it drops to 2.34–3.97:1 in dark). Every instance was data-
+    or state-dependent — the save indicator only paints its green mid-save, the
+    aging note only appears with a demo override set, the sign-in error copy only
+    on an error redirect — so the routes' zero-tolerance contrast gates scanned
+    the idle page and passed. Fixed at the save indicator, the aging and round-up
+    demo notes, the points stat, the sign-in errors, the task-schedule label and
+    the five Google/breakdown status banners.
+  - **Focus indicators.** Every popup menu entry in the header used a background
+    swap as its only focus indicator, with the outline explicitly removed. That
+    is 1.07:1 (light) and 1.17:1 (dark) between focused and unfocused, where WCAG
+    2.4.11 Focus Appearance — AA in WCAG 2.2 — needs 3:1. Both menus now draw an
+    inset ring at 4.65–8.83:1 against both adjacent colours, in both themes, and
+    keep the background swap as the hover affordance. Nothing had caught this
+    because **axe does not implement 2.4.11 at all.**
+  - **Two more found by the new gate, in neither issue's inventory**: a bare
+    `text-emerald-600` on the task-schedule label, and the scheduling banner,
+    whose in-code comment asserted its colours were AA on its own tint. They are
+    not: a translucent `/10` tint composites over the page background and pulls
+    it toward the text, so `text-green-700` reads 4.16:1 there rather than the
+    4.65:1 the bare token gives. The tinted banners are now driven from one
+    measured table (`src/lib/status-banner-style.ts`) instead of six copies.
+  - **The durable half** is `src/lib/a11y-class-hygiene.ts`: a TypeScript-AST
+    scan of the class strings in `src/`, asserting no sub-AA chromatic text
+    shade, a `dark:` partner on every dark-side text colour, and a non-colour
+    focus indicator wherever the UA outline is removed. It runs in the unit job
+    with no browser and no database, catches the *class* rather than the
+    instance, and carries a reason-bearing allowlist per rule — the same contract
+    `fetch-host-hygiene` uses. Verified failing on the unfixed tree first: 15
+    text findings across 9 files, 2 focus findings, 4 unmeasured banner tones.
 ### Security
 
 - **The dependency bot can no longer walk a security override back into a CVE
