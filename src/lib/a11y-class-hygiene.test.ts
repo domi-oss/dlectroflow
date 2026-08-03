@@ -503,6 +503,34 @@ describe("findWeakFocusIndicators", () => {
     ).toEqual([]);
   });
 
+  // Duo review round 3, !250, argued `outline-hidden` should not count as an
+  // outline-removing utility because it is "the standard technique for Windows
+  // High Contrast Mode". Tailwind 4.3.3 compiles it to `outline-style: none` plus
+  // a TRANSPARENT outline inside `@media (forced-colors: active)` — so outside
+  // forced-colors mode, which is nearly every user, it removes the outline just
+  // like `outline-none`. It is the HCM-safe way to remove an outline, not a way
+  // to keep one. Locked in with a test so the argument is not re-litigated from
+  // memory: dropping it would let `outline-hidden focus-visible:bg-accent` pass
+  // while giving an ordinary user a 1.07:1 background swap and nothing else.
+  it.each(["outline-none", "outline-hidden", "outline-0"])(
+    "treats %s as removing the UA outline, so a replacement is still required",
+    (killer) => {
+      const findings = findWeakFocusIndicators(
+        `const x = <a className="${killer} focus-visible:bg-accent" />;`,
+      );
+      expect(findings, killer).toHaveLength(1);
+      expect(findings[0].token).toBe(killer);
+    },
+  );
+
+  it("still passes outline-hidden once a real indicator is present", () => {
+    expect(
+      findWeakFocusIndicators(
+        `const x = <a className="outline-hidden focus-visible:ring-2 focus-visible:ring-ring" />;`,
+      ),
+    ).toEqual([]);
+  });
+
   it("reports an outline-none with no focus treatment at all", () => {
     const findings = findWeakFocusIndicators(
       `const x = <a className="rounded outline-none" />;`,

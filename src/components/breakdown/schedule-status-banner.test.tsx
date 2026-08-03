@@ -48,22 +48,23 @@ describe("ScheduleStatusBanner — AA on its own tint (#109)", () => {
   ])(
     "takes the %s banner's colours from STATUS_BANNER_TONE",
     (scheduled, tone) => {
-      const { container } = render(
-        <ScheduleStatusBanner scheduled={scheduled} voice="plain" />,
-      );
-      const banner = container.querySelector('[role="status"]');
-      expect(banner).not.toBeNull();
+      render(<ScheduleStatusBanner scheduled={scheduled} voice="plain" />);
+      // `getByRole` throws if the banner is missing and returns a non-nullable
+      // HTMLElement, so there is no null check to guard and no optional chaining
+      // to explain — and the failure points at the missing banner rather than at
+      // a `toContain(undefined)`. Duo review, !250, which suggested `banner!`;
+      // this locates the element the way a user does instead, and matches the
+      // idiom the rest of this file already uses.
+      const banner = screen.getByRole("status");
       for (const token of STATUS_BANNER_TONE[tone].split(/\s+/)) {
-        expect(banner?.className).toContain(token);
+        expect(banner.className).toContain(token);
       }
     },
   );
 
   it("no longer uses the -700 shades that failed on the tint", () => {
-    const { container } = render(
-      <ScheduleStatusBanner scheduled voice="plain" />,
-    );
-    expect(container.querySelector('[role="status"]')?.className).not.toContain(
+    render(<ScheduleStatusBanner scheduled voice="plain" />);
+    expect(screen.getByRole("status").className).not.toContain(
       "text-green-700",
     );
     cleanup();

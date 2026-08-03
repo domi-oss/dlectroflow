@@ -477,7 +477,35 @@ export function findTextContrastRisks(
 /** Variants that mean "while focused". */
 const FOCUS_VARIANTS = ["focus-visible", "focus", "focus-within"];
 
-/** Utilities that remove the browser's own focus outline. */
+/**
+ * Utilities that remove the browser's own focus outline.
+ *
+ * **`outline-hidden` belongs here, and this is the load-bearing bit.** Duo review
+ * (!250) argued it should be removed on the grounds that it "is the standard
+ * accessibility technique for Windows High Contrast Mode". Half true, and the
+ * wrong half to act on. Tailwind 4.3.3 compiles it to:
+ *
+ *     .outline-hidden {
+ *       --tw-outline-style: none;
+ *       outline-style: none;
+ *       @media (forced-colors: active) {
+ *         outline: 2px solid transparent;
+ *         outline-offset: 2px;
+ *       }
+ *     }
+ *
+ * The forced-colors block only applies **in** forced-colors mode, where the OS
+ * repaints that transparent outline. Outside it — which is nearly every user —
+ * `outline-style: none` removes the outline exactly as `outline-none` does. So
+ * `outline-hidden` is the HCM-*safe* way to remove an outline, not a way to keep
+ * one, and an element using it still owes everyone else a replacement indicator.
+ *
+ * Dropping it from this list would have created the precise false negative Rule D
+ * exists to prevent: `outline-hidden focus-visible:bg-accent` would pass while
+ * giving an ordinary user a 1.07:1 background swap and nothing else. Nothing in
+ * the tree uses `outline-hidden` today, so this is future-proofing — and the
+ * permissive direction is the expensive one to get wrong.
+ */
 const OUTLINE_KILLERS = ["outline-none", "outline-hidden", "outline-0"];
 
 /**
