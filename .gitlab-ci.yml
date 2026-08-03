@@ -1128,46 +1128,8 @@ alert_pipeline_failure:
     # REGISTRY_PRUNE and SECURITY_ASSESSMENT by construction.
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
       when: never
-    # TEMPORARY (#147 verification, reverted in the next commit): let the alert
-    # fire on this branch's own merge-request pipeline so it can be OBSERVED
-    # firing rather than reasoned about.
-    - if: '$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "feat/147-pipeline-failure-alerting"'
-      when: on_failure
     # `main` only. A red merge-request pipeline is already in front of the person
     # who pushed it and cannot make main and production diverge; alerting on those
     # would be the noise that gets the real alert filtered.
     - if: '$CI_COMMIT_BRANCH == "main"'
       when: on_failure
-
-# ── TEMPORARY (#147 verification — reverted in the next commit) ───────────────
-# "It must be verified by making it fire." These two jobs exist only to make
-# alert_pipeline_failure fire in a real pipeline on this branch, and are removed
-# before the MR leaves Draft.
-deliberate_failure:
-  stage: build
-  image: alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
-  needs: []
-  script:
-    - echo "Failing on purpose so alert_pipeline_failure has an earlier-stage failure to react to (#147)."
-    - exit 1
-  rules:
-    - if: '$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "feat/147-pipeline-failure-alerting"'
-
-# Replays the REAL incident pipeline 2721968532, where deploy_production was
-# genuinely `skipped` after test_app failed. An MR pipeline has no
-# deploy_production at all, so this is the only way to exercise the branch of the
-# script that matters most. `|| true` because it is evidence, not a gate.
-verify_147_replay:
-  stage: build
-  image: alpine:3.21@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d
-  needs: []
-  before_script:
-    - apk add --no-cache curl jq bash
-  script:
-    - CI_PIPELINE_ID=2721968532
-      CI_PIPELINE_URL="$CI_PROJECT_URL/-/pipelines/2721968532"
-      CI_COMMIT_REF_NAME=main
-      CI_COMMIT_SHORT_SHA=b6e2b945
-      bash scripts/alert-pipeline-failure.sh || true
-  rules:
-    - if: '$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "feat/147-pipeline-failure-alerting"'
