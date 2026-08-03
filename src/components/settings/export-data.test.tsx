@@ -164,15 +164,36 @@ describe("ExportData", () => {
     expect(downloadBlobMock).not.toHaveBeenCalled();
   });
 
-  it("tells the reader to sign in again on a 401", async () => {
+  it("falls back to 60 seconds when a 429 carries no Retry-After", async () => {
+    // `DEFAULT_HEADERS` deliberately has no Retry-After, so this is the
+    // header-missing path: the sentence still has to name a number, or it tells
+    // somebody to wait for an unspecified length of time.
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(zipResponse({ status: 429 })),
     );
     render(<ExportData />);
-    // A 429 with no Retry-After still produces a usable sentence.
     await userEvent.click(control());
     expect(await screen.findByRole("alert")).toHaveTextContent(/60 seconds/);
+  });
+
+  it("tells the reader to sign in again on a 401", async () => {
+    // Raised by review on !253: this spec previously said 401 in its name and
+    // mocked a 429, so the branch it claimed to cover was never executed. A
+    // session lapsing while the settings page sits open is the realistic way to
+    // reach it, and "did not go through — check your connection" would send
+    // somebody to debug their network over an expired cookie.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(zipResponse({ status: 401 })),
+    );
+    render(<ExportData />);
+    await userEvent.click(control());
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/no longer signed in/i);
+    expect(alert).toHaveTextContent(/reload the page/i);
+    expect(alert).not.toHaveTextContent(/seconds/);
+    expect(downloadBlobMock).not.toHaveBeenCalled();
   });
 
   it("reports a network failure rather than failing silently", async () => {
