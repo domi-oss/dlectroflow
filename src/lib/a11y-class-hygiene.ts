@@ -119,9 +119,19 @@ const FAMILY_ALTERNATION = [...CHROMATIC_FAMILIES, ...NEUTRAL_FAMILIES].join(
   "|",
 );
 
-/** `text-amber-600` → family + shade. Neutral families match too, so Rule A can
- *  exclude them explicitly rather than by silently not recognising them. */
-const TEXT_COLOR = new RegExp(`^text-(${FAMILY_ALTERNATION})-(\\d{2,3})$`);
+/**
+ * `text-amber-600` → family + shade, plus an optional `/alpha` modifier.
+ *
+ * Neutral families match too, so Rule A can exclude them explicitly rather than
+ * by silently not recognising them. The alpha group is captured rather than
+ * excluded because `text-red-600/80` is *strictly worse* than the opaque
+ * `text-red-600` that Rule A already bans — reducing a text colour's opacity
+ * blends it toward the background. A regex that ended at `$` would let the
+ * modifier slip the entire rule.
+ */
+const TEXT_COLOR = new RegExp(
+  `^text-(${FAMILY_ALTERNATION})-(\\d{2,3})(?:/(\\d{1,3}))?$`,
+);
 
 /** `bg-green-100` → family + shade. */
 const BG_COLOR = new RegExp(`^bg-(${FAMILY_ALTERNATION})-(\\d{2,3})$`);
@@ -181,18 +191,32 @@ function classTokens(text: string): string[] {
 }
 
 /**
- * Is this string literal plausibly a class list rather than prose? Two or more
- * hyphenated-or-variant tokens, or a single token that looks like a utility.
- * Only used to pick which literals seed a scope — over-inclusion is harmless
- * because the rules match exact utility shapes, but this keeps a sentence of UI
- * copy from producing a `ClassScope` with a line number and no classes.
+ * Is this string literal plausibly a class list rather than prose?
+ *
+ * Every token must be shaped like a utility, AND at least one must carry a `-`
+ * or a `:` — the two characters no single English word in this app's UI copy
+ * needs but every Tailwind utility the rules care about has
+ * (`text-amber-600`, `outline-none`, `dark:text-amber-400`, `bg-green-600/10`).
+ *
+ * Without the second condition, "Sign in with GitLab" scores as a four-class
+ * scope: 3192 scopes over `src/`, of which ~1900 are sentences. That costs no
+ * correctness — the rules match exact utility shapes, so prose can never trip
+ * one — but it does make the "the scanner is not a no-op" count in the test
+ * measure mostly copy, which is the wrong thing to assert on. With it: 1263.
+ *
+ * A scope whose entire class list is a single bare utility (`"flex"`,
+ * `"underline"`) is dropped, and that is safe by construction: every rule in
+ * this module keys off a hyphenated utility, so such a scope has nothing to say.
  */
 function looksLikeClasses(text: string): boolean {
   const tokens = classTokens(text);
   if (tokens.length === 0) return false;
-  return tokens.every((token) =>
-    /^[a-z0-9[\]:_@.,/%!&<>()#*+-]+$/i.test(token),
-  );
+  if (
+    !tokens.every((token) => /^[a-z0-9[\]:_@.,/%!&<>()#*+-]+$/i.test(token))
+  ) {
+    return false;
+  }
+  return tokens.some((token) => token.includes("-") || token.includes(":"));
 }
 
 /**
@@ -291,6 +315,23 @@ function isUnprefixed(token: string): boolean {
 }
 
 /**
+ * Does this token paint in the LIGHT theme?
+ *
+ * Anything without a `dark:` in its variant chain does — which is the property
+ * Rules A and B actually depend on, and it is strictly wider than "unprefixed".
+ * `hover:text-red-600` and `sm:text-red-600` are both sub-AA light-mode text and
+ * would walk straight past an unprefixed-only check. Neither shape exists in the
+ * tree today, which is exactly why the rule has to cover them: the eight sites
+ * #109 inventoried did not exist either, until somebody wrote one.
+ *
+ * A hover or focus state is held to the same 4.5:1 bar as the resting state —
+ * WCAG makes no allowance for "only while pointing at it".
+ */
+function appliesInLightMode(token: string): boolean {
+  return !splitVariants(token).variants.includes("dark");
+}
+
+/**
  * Rule B's carve-out: does the scope pin its own background opaquely?
  *
  * `bg-green-100 text-green-800` (integrations-panel's status pill) is safe with
@@ -317,14 +358,22 @@ function pinsOwnBackground(tokens: readonly string[]): boolean {
 /**
  * Rules A and B over one source file.
  *
- * **Rule A** — an unprefixed `text-<chromatic>-<shade>` below
+ * **Rule A** — a light-painting `text-<chromatic>-<shade>` below
  * {@link MIN_AA_TEXT_SHADE} is a finding. No pairing can rescue it: the light
- * theme has no fallback.
+ * theme has no fallback. An `/alpha` modifier on ANY shade is a finding too — it
+ * blends the text toward the background, so it can only be worse than the opaque
+ * shade, and 700 is already the floor.
  *
  * **Rule B** — an unprefixed `text-<chromatic>-<shade>` at or above the floor
  * needs a `dark:text-*` partner in the same scope, because `-700` and darker run
  * 2.3–4.0:1 against the dark `--background`. Waived when the scope pins its own
  * opaque background (see {@link pinsOwnBackground}).
+ *
+ * Rule B stays unprefixed-only on purpose: whether `hover:text-green-700` and
+ * `dark:text-green-400` resolve in the right order in dark mode is a Tailwind
+ * variant-ordering question, and asserting a partner for a variant-prefixed
+ * colour would be asserting something this module has not established. Rule A
+ * still covers those tokens, which is where the sub-AA risk actually is.
  */
 export function findTextContrastRisks(
   source: string,
@@ -339,13 +388,26 @@ export function findTextContrastRisks(
     const pinned = pinsOwnBackground(scope.tokens);
 
     for (const token of scope.tokens) {
-      if (!isUnprefixed(token)) continue;
-      const match = TEXT_COLOR.exec(token);
+      if (!appliesInLightMode(token)) continue;
+      // Match the BASE, not the whole token: `hover:text-amber-600` is a
+      // light-mode sub-AA text colour and a `^text-`-anchored match against the
+      // full token silently misses it. The finding still reports the full token,
+      // because that is what the allowlist has to key on and what a reader has
+      // to find in the file.
+      const match = TEXT_COLOR.exec(splitVariants(token).base);
       if (!match) continue;
-      const [, family, shadeText] = match;
+      const [, family, shadeText, alphaText] = match;
       if ((NEUTRAL_FAMILIES as readonly string[]).includes(family)) continue;
       const shade = Number(shadeText);
 
+      if (alphaText !== undefined) {
+        findings.push({
+          line: scope.line,
+          token,
+          reason: `\`${token}\` fades the text toward the background, so it reads below the opaque \`${family}-${shade}\`; drop the /${alphaText} or allowlist it with a measured ratio`,
+        });
+        continue;
+      }
       if (shade < MIN_AA_TEXT_SHADE) {
         findings.push({
           line: scope.line,
@@ -354,6 +416,9 @@ export function findTextContrastRisks(
         });
         continue;
       }
+      // Only an UNPREFIXED colour is the resting light-mode value a `dark:`
+      // partner is meant to override; see the note above.
+      if (!isUnprefixed(token)) continue;
       if (!hasDarkText && !pinned) {
         findings.push({
           line: scope.line,

@@ -274,6 +274,50 @@ describe("findTextContrastRisks", () => {
     );
     expect(finding.reason).toContain(`text-emerald-${MIN_AA_TEXT_SHADE}`);
   });
+
+  // Two shapes that do not exist in the tree today. That is the point: the eight
+  // sites #109 inventoried did not exist either, until somebody wrote one. A rule
+  // that only covers the syntax already in use catches the instance, not the
+  // class — which is what this whole file exists to stop.
+  it("catches a sub-AA colour hidden behind a non-dark variant", () => {
+    // `hover:` and `sm:` both paint in the light theme, and WCAG makes no
+    // allowance for "only while pointing at it".
+    for (const token of ["hover:text-amber-600", "sm:text-red-500"]) {
+      const findings = findTextContrastRisks(
+        `const x = <p className="${token}" />;`,
+      );
+      expect(findings, token).toHaveLength(1);
+      expect(findings[0].token).toBe(token);
+    }
+  });
+
+  it("catches an /alpha modifier, which a $-anchored shade regex would let past", () => {
+    // Fading a text colour blends it toward the background, so it can only be
+    // worse than the opaque shade — and 700 is already the floor.
+    const findings = findTextContrastRisks(
+      `const x = <p className="text-red-800/70 dark:text-red-400" />;`,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].reason).toContain("fades the text");
+  });
+
+  it("does not double-report an alpha shade as also being too light", () => {
+    expect(
+      findTextContrastRisks(`const x = <p className="text-red-500/70" />;`),
+    ).toHaveLength(1);
+  });
+
+  it("does not demand a dark: partner for a variant-prefixed colour", () => {
+    // Rule B is about the RESTING light value a `dark:` partner overrides.
+    // Whether `hover:text-green-700` and `dark:text-green-400` resolve in the
+    // right order is a Tailwind variant-ordering question this module has not
+    // established, so it does not assert on it. Rule A still covers the shade.
+    expect(
+      findTextContrastRisks(
+        `const x = <p className="hover:text-green-700" />;`,
+      ),
+    ).toEqual([]);
+  });
 });
 
 // ── Rule D: focus indicator ────────────────────────────────────────────────
@@ -353,14 +397,27 @@ describe("findWeakFocusIndicators", () => {
 // ── The real tree ──────────────────────────────────────────────────────────
 
 describe("src/ WCAG-AA class hygiene (#109, #117)", () => {
-  it("scans a non-trivial number of class scopes", () => {
+  it("actually reaches the classes it is meant to police", () => {
     // Guards the guard. A path change, a syntax-kind mistake or an over-eager
     // exclusion would make every assertion below pass by measuring nothing —
     // which is the failure mode that let eight of these ship in the first place.
+    //
+    // Counted, not guessed (2026-08-03): 1263 class-bearing scopes, 25 carrying
+    // `outline-none`, 32 carrying a `dark:text-*` partner. The floors are set
+    // well below those so ordinary churn does not trip them, but a scan that
+    // stopped seeing `outline-none` or `dark:` — the two tokens Rules B and D are
+    // built on — could no longer report a clean run as meaningful.
     const scopes = scannedFiles().flatMap((file) =>
       scanClassScopes(readFileSync(file, "utf8"), file),
     );
-    expect(scopes.length).toBeGreaterThan(500);
+    expect(scopes.length).toBeGreaterThan(800);
+    expect(
+      scopes.filter((s) => s.tokens.includes("outline-none")).length,
+    ).toBeGreaterThan(15);
+    expect(
+      scopes.filter((s) => s.tokens.some((t) => t.startsWith("dark:text-")))
+        .length,
+    ).toBeGreaterThan(20);
   });
 
   it("still SEES the pattern it bans (the scanner is not a no-op)", () => {
