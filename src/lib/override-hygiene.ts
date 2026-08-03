@@ -153,6 +153,13 @@ export function coveringRules(
   return rules.filter(
     (rule) =>
       rule.matchPackageNames?.includes(scope.name) === true &&
+      // Renovate extracts these deps with depType "overrides". A rule that
+      // restricts itself to some other depType is not applied to them, so
+      // counting it as covering would leave the scope silently unguarded — the
+      // one failure mode this module exists to catch. An absent matchDepTypes
+      // matches every depType, so that case is still covering.
+      (rule.matchDepTypes === undefined ||
+        rule.matchDepTypes.includes("overrides")) &&
       rule.matchCurrentValue !== undefined &&
       matchesCurrentValue(rule.matchCurrentValue, scope.value),
   );

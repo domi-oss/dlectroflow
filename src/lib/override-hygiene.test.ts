@@ -171,6 +171,46 @@ describe("coveringRules", () => {
     { matchPackageNames: ["eslint"], allowedVersions: "<10" },
   ];
 
+  it("ignores a rule whose matchDepTypes excludes overrides", () => {
+    // Renovate extracts these deps with depType "overrides". A rule that matches
+    // the name and the value but restricts itself to another depType would not be
+    // applied to the override, so reporting it as covering would leave the scope
+    // silently unguarded — the exact failure this module exists to prevent.
+    const wrongDepType: PackageRule[] = [
+      {
+        matchPackageNames: ["brace-expansion"],
+        matchCurrentValue: "/^\\^?5\\./",
+        matchDepTypes: ["dependencies"],
+        allowedVersions: ">=5.0.8",
+      },
+    ];
+    expect(
+      coveringRules(wrongDepType, {
+        parents: [],
+        name: "brace-expansion",
+        value: "^5.0.8",
+      }),
+    ).toEqual([]);
+  });
+
+  it("accepts a rule that names overrides explicitly, as renovate.json does", () => {
+    const explicit: PackageRule[] = [
+      {
+        matchPackageNames: ["brace-expansion"],
+        matchCurrentValue: "/^\\^?5\\./",
+        matchDepTypes: ["overrides"],
+        allowedVersions: ">=5.0.8",
+      },
+    ];
+    expect(
+      coveringRules(explicit, {
+        parents: [],
+        name: "brace-expansion",
+        value: "^5.0.8",
+      }),
+    ).toHaveLength(1);
+  });
+
   it("picks the rule whose current-value pattern matches the scope", () => {
     expect(
       coveringRules(rules, {
