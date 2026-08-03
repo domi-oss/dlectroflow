@@ -98,4 +98,16 @@ describe("toCsv", () => {
     // loudly at the call site instead.
     expect(() => toCsv(["a", "b"], [["1"]])).toThrow(/2 columns/);
   });
+
+  it("pluralises the counts in that message", () => {
+    // Raised by review on !253. The message is read at the moment somebody is
+    // already puzzled about a column shift; "1 columns" adds a second thing to
+    // squint at. Both counts are pluralised, and both directions are covered.
+    expect(() => toCsv(["a", "b"], [["1"]])).toThrow(
+      "CSV row 0 has 1 column, expected 2 columns",
+    );
+    expect(() => toCsv(["a"], [["1", "2"]])).toThrow(
+      "CSV row 0 has 2 columns, expected 1 column",
+    );
+  });
 });

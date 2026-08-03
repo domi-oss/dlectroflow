@@ -79,6 +79,13 @@ export function csvRow(values: readonly CsvValue[]): string {
   return values.map(csvField).join(",");
 }
 
+/** Pluralised count, so a one-field row does not report "1 columns". The message
+ *  is what a developer sees at the moment they are already confused about a
+ *  column shift; it should not add a second thing to squint at. */
+function columns(n: number): string {
+  return `${n} ${n === 1 ? "column" : "columns"}`;
+}
+
 /**
  * A complete CSV document: header record, then one record per row, CRLF
  * throughout and a final CRLF.
@@ -97,7 +104,7 @@ export function toCsv(
   for (const [index, row] of rows.entries()) {
     if (row.length !== header.length) {
       throw new Error(
-        `CSV row ${index} has ${row.length} columns, expected ${header.length} columns`,
+        `CSV row ${index} has ${columns(row.length)}, expected ${columns(header.length)}`,
       );
     }
     lines.push(csvRow(row));
