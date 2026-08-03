@@ -43,7 +43,22 @@ if [ -z "$SINCE" ]; then
   SINCE="$(date -u -v-7d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
 fi
 if [ -z "$SINCE" ]; then
-  SINCE="$(date -u -d "@$(($(date -u +%s) - 604800))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+  # The epoch is read into a variable and range-checked FIRST, rather than nested
+  # as `date -d "@$(($(date +%s) - 604800))"`. Duo review on !251 flagged the
+  # nested form; its stated mechanism (a `set -e` abort) is wrong — measured on
+  # bash 3.2, `$(( $(true) - 604800 ))` quietly evaluates to `-604800` and exits
+  # 0 — but the conclusion was right and the real failure is worse than the one
+  # described. On a box where `date +%s` yields nothing usable while `date -d @…`
+  # still works, that -604800 becomes a perfectly valid `1969-12-25`, and the
+  # digest silently reports "failed pipelines in the last 7 days" for a window
+  # starting in 1969. A wrong number with a confident label is the exact failure
+  # class #147 is about, so the guard rejects anything that is not a plain epoch
+  # and falls through to the honest "no window" label below.
+  _now="$(date -u +%s 2>/dev/null || true)"
+  case "$_now" in
+    '' | *[!0-9]*) ;;
+    *) SINCE="$(date -u -d "@$((_now - 604800))" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)" ;;
+  esac
 fi
 if [ -n "$SINCE" ]; then
   WINDOW="&updated_after=${SINCE}"

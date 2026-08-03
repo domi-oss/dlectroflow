@@ -149,7 +149,46 @@ interface Harness {
   env?: Record<string, string | undefined>;
   /** Drop GL_TOKEN — the "never configured" case. */
   noToken?: boolean;
+  /** Extra executables to shadow on PATH, keyed by name (see DATE_STUB). */
+  bin?: Record<string, string>;
 }
+
+/**
+ * Test double for `date`, modelling the awkward implementation: relative parsing
+ * unsupported (busybox, and BSD for the GNU spelling), `@epoch` supported, and
+ * `+%s` answering with something that is not an epoch.
+ *
+ * That last part is the one that matters. Duo review on !251 flagged
+ * `date -d "@$(($(date +%s) - 604800))"` as a `set -e` hazard; measured on bash
+ * 3.2 it is not — but the nested arithmetic quietly evaluates junk to `0`, so
+ * the offset becomes `-604800` and the digest reports "failed pipelines in the
+ * last 7 days" for a window starting in **1969**. A wrong number under a
+ * confident label, which is the failure class #147 exists to close.
+ */
+const DATE_STUB = `#!/usr/bin/env bash
+set -u
+fmt=""; dflag=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -u) shift ;;
+    -d) dflag="$2"; shift 2 ;;
+    -v*) exit 1 ;;
+    +*) fmt="$1"; shift ;;
+    *) shift ;;
+  esac
+done
+if [ -n "$dflag" ]; then
+  case "$dflag" in
+    @-*) echo "1969-12-25T00:00:00Z"; exit 0 ;;
+    @*) echo "2026-07-27T00:00:00Z"; exit 0 ;;
+    *) exit 1 ;;
+  esac
+fi
+case "$fmt" in
+  "+%s") echo "not-an-epoch"; exit 0 ;;
+  *) echo "2026-08-03"; exit 0 ;;
+esac
+`;
 
 interface Result {
   status: number;
@@ -166,6 +205,9 @@ function drive(script: string, harness: Harness): Result {
   const bin = join(work, "bin");
   mkdirSync(bin);
   writeFileSync(join(bin, "curl"), CURL_STUB, { mode: 0o755 });
+  for (const [name, source] of Object.entries(harness.bin ?? {})) {
+    writeFileSync(join(bin, name), source, { mode: 0o755 });
+  }
   writeFileSync(join(work, "served"), "");
 
   const lines = harness.routes.map((route, i) => {
@@ -565,6 +607,42 @@ describe("scripts/alert-pipeline-failure.sh", () => {
     expect(body).not.toMatch(/\|\s*\[?`?alert_pipeline_failure/);
   });
 
+  it("names the endpoint, status and response body when the POST is rejected", () => {
+    // Duo review on !251. `curl -f` aborts with nothing but "The requested URL
+    // returned error: 422". This is the one write the job performs and the whole
+    // point of it, so an alert about a silent failure must not fail silently.
+    const result = drive(ALERT_SCRIPT, {
+      routes: [
+        { method: "GET", match: "/jobs", body: INCIDENT_JOBS },
+        {
+          method: "GET",
+          match: "/repository/compare",
+          body: { commits: [{}] },
+        },
+        {
+          method: "GET",
+          match: "/repository/commits/",
+          body: { id: HEAD_SHA },
+        },
+        {
+          method: "GET",
+          match: "/api/health",
+          body: { status: "ok", sha: OLD_SHORT },
+        },
+        {
+          method: "POST",
+          match: "/notes",
+          code: 422,
+          body: { message: { body: ["is missing"] } },
+        },
+      ],
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/422/);
+    expect(result.stderr).toMatch(/\/issues\/33\/notes/);
+    expect(result.stderr).toMatch(/is missing/);
+  });
+
   it("fails loudly when the jobs API cannot be read", () => {
     // "0 failed jobs" because the API returned 403 is a false all-clear with a
     // timestamp on it — the highest-risk report there is.
@@ -622,6 +700,48 @@ describe("scripts/alert-pipeline-failure.sh", () => {
 // ── the weekly digest's drift backstop ───────────────────────────────────────
 
 describe("scripts/ops-digest.sh", () => {
+  const digestRoutes = (behind: number): Route[] => [
+    {
+      method: "GET",
+      match: "/repository/compare",
+      body: { commits: Array.from({ length: behind }, () => ({})) },
+    },
+    { method: "GET", match: "/repository/commits/", body: { id: HEAD_SHA } },
+    {
+      method: "GET",
+      match: "/api/health",
+      body: { status: "ok", sha: OLD_SHORT },
+    },
+    { method: "GET", match: `=${PROD_URL}/`, body: {} },
+    { method: "GET", match: "/pipelines", body: [] },
+    { method: "GET", match: "/merge_requests", body: [] },
+    { method: "GET", match: "/vulnerabilities", body: [] },
+    { method: "GET", match: "/issues?state=opened", body: [] },
+    { method: "POST", match: "/notes", body: { id: 1 } },
+  ];
+
+  it("drops the 7-day window rather than inventing a 1969 one", () => {
+    // Duo review on !251, mechanism corrected — see DATE_STUB. With a `date`
+    // that cannot parse relative strings and answers `+%s` with junk, the
+    // nested-arithmetic form produced `updated_after=1969-12-25`, i.e. an
+    // all-time count under a "last 7d" label. Degrading to a stated "all time"
+    // is the only honest option.
+    const result = drive(DIGEST_SCRIPT, {
+      routes: digestRoutes(2),
+      bin: { date: DATE_STUB },
+      env: { OPS_DIGEST_ISSUE_IID: "16", ALERT_ISSUE_IID: undefined },
+    });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.calls.some((c) => c.includes("updated_after"))).toBe(false);
+    expect(result.calls.some((c) => c.includes("1969"))).toBe(false);
+    const body = result.bodies.find(
+      (b) => typeof b === "string" && b.includes("ops digest"),
+    ) as string;
+    expect(body).toMatch(/all time/);
+    expect(body).not.toMatch(/last 7d/);
+  });
+
   it("reports whether production is running main", () => {
     // The on-failure hook only catches divergence caused by a failed pipeline.
     // A `helm rollback`, a manual scale-down or an --atomic rollback of a

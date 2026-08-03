@@ -242,6 +242,29 @@ fi
 # JSON body, never form-encoded: the note carries a Markdown table and backticks,
 # and URL-encoding these POSTs is how they come back 400/415.
 jq -n --arg b "$BODY" '{body: $b}' > "$WORK/note.json"
-curl -sS -f -X POST -H "$AUTH" -H "Content-Type: application/json" \
-  --max-time 30 -d "@$WORK/note.json" "${API}/issues/${ISSUE_IID}/notes" > /dev/null
+
+# Status captured rather than `curl -f`, which aborts with nothing but "The
+# requested URL returned error: 422" (Duo review on !251). This is the one write
+# this job performs and it is the whole point of it, so a rejection has to name
+# the endpoint, the status and the response body — otherwise the alert about a
+# silent failure fails silently, which would be its own punchline. `-o` also
+# keeps the created note's JSON out of the job log, which `> /dev/null` did.
+post_code="$(curl -sS -o "$WORK/post.json" -w '%{http_code}' \
+  -X POST -H "$AUTH" -H "Content-Type: application/json" \
+  --max-time 30 -d "@$WORK/note.json" "${API}/issues/${ISSUE_IID}/notes" \
+  || echo 000)"
+# 201 is what the notes endpoint returns; 200 is accepted so a future API change
+# to the success code cannot turn a posted alert into a red job.
+case "$post_code" in
+  200 | 201) ;;
+  *)
+    echo "alert-pipeline-failure: POST ${API}/issues/${ISSUE_IID}/notes failed — HTTP ${post_code}" >&2
+    # The body, not the token: this is a response, and it is where GitLab says
+    # which field it rejected. 401/403 means GL_TOKEN's scope or role; 404 means
+    # the issue iid; 422 means the payload.
+    head -c 2000 "$WORK/post.json" >&2 || true
+    echo >&2
+    exit 1
+    ;;
+esac
 echo "Posted failure alert to issue #${ISSUE_IID}"
