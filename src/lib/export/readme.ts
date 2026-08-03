@@ -68,8 +68,7 @@ export function exportReadme(snapshot: ExportSnapshot): string {
     "| `steps.csv` | One row per step: `id`, `task_id`, `order`, `total`, `text`, `est_minutes`, `done`, `scheduled_at`. Join to `tasks.csv` on `task_id`. | Same, for the steps. |",
     "| `inbox.csv` | One row per brain-dump item: `id`, `text`, `status`, `est_minutes`, `task_id`, `created_at`, `triaged_at`, `completed_at`. | Same, for your inbox. |",
     "| `scheduled.ics` | The scheduled work as calendar events. | You want it in Google Calendar, Apple Calendar or Outlook. |",
-    "| `export.json` | Everything, losslessly, with `schemaVersion` " +
-      `${EXPORT_SCHEMA_VERSION}. | You want to move it into another copy of dlectroflow, or write your own script over it. |`,
+    `| \`export.json\` | Everything, losslessly, with \`schemaVersion\` ${EXPORT_SCHEMA_VERSION}. | You want to move it into another copy of dlectroflow, or write your own script over it. |`,
     "",
     '**Why three CSV files and not one sheet?** CSV cannot express "a task has steps". Flattening them into one sheet would either repeat every task on every step row or drop the steps — and the steps are most of what this app produces. Two files joined on `task_id` is the shape spreadsheets, databases and pandas already understand.',
     "",

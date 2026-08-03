@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getGoogleStatus } from "@/lib/google";
 import type { ExportSnapshot } from "./types";
@@ -34,8 +35,14 @@ import type { ExportSnapshot } from "./types";
  * every one of them is policed by name.
  *
  * The array form of `$transaction` then buys back the property the nested read
- * would have had for free: all ten statements see one snapshot, so the archive
- * cannot contain a task whose steps were written after the tasks were read.
+ * would have had for free — but only at `RepeatableRead`, which is why the
+ * isolation level is set explicitly. Postgres's default `READ COMMITTED` takes a
+ * FRESH snapshot per statement even inside a transaction, so eleven statements
+ * would see up to eleven different states of the database and an export could
+ * contain a brain-dump item pointing at a task that is not in the same archive.
+ * `RepeatableRead` pins one snapshot for all of them. It costs nothing here: the
+ * transaction is read-only, so it cannot hit the serialization failures that make
+ * a higher isolation level expensive for writers.
  *
  * `Step` and `BreakdownTurn` are the exception, and cannot help it: neither
  * carries a `workspaceId`, so both are reached through the scoped `task` read as
@@ -79,53 +86,58 @@ export async function collectExport(input: {
     rewardEvents,
     dayRollups,
     dailySparks,
-  ] = await prisma.$transaction([
-    prisma.workspace.findUnique({
-      where: { id: workspaceId },
-      select: { id: true, kind: true, createdAt: true, expiresAt: true },
-    }),
-    prisma.settings.findUnique({ where: { workspaceId } }),
-    prisma.task.findMany({
-      where: { workspaceId },
-      // Steps and turns are reached through this scoped read; ordering is fixed
-      // so two exports of unchanged data are byte-identical, which is what makes
-      // an export diffable and a test assertable.
-      include: {
-        steps: { orderBy: { order: "asc" } },
-        turns: { orderBy: { createdAt: "asc" } },
-      },
-      orderBy: { createdAt: "asc" },
-    }),
-    prisma.brainDumpItem.findMany({
-      where: { workspaceId },
-      orderBy: { createdAt: "asc" },
-    }),
-    prisma.focusSession.findMany({
-      where: { workspaceId },
-      orderBy: { startedAt: "asc" },
-    }),
-    prisma.streak.findUnique({ where: { workspaceId } }),
-    prisma.streakRecord.findMany({
-      where: { workspaceId },
-      orderBy: { startedAt: "asc" },
-    }),
-    prisma.badge.findMany({
-      where: { workspaceId },
-      orderBy: { earnedAt: "asc" },
-    }),
-    prisma.rewardEvent.findMany({
-      where: { workspaceId },
-      orderBy: { createdAt: "asc" },
-    }),
-    prisma.dayRollup.findMany({
-      where: { workspaceId },
-      orderBy: { date: "asc" },
-    }),
-    prisma.dailySpark.findMany({
-      where: { workspaceId },
-      orderBy: { date: "asc" },
-    }),
-  ]);
+  ] = await prisma.$transaction(
+    [
+      prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { id: true, kind: true, createdAt: true, expiresAt: true },
+      }),
+      prisma.settings.findUnique({ where: { workspaceId } }),
+      prisma.task.findMany({
+        where: { workspaceId },
+        // Steps and turns are reached through this scoped read; ordering is fixed
+        // so two exports of unchanged data are byte-identical, which is what makes
+        // an export diffable and a test assertable.
+        include: {
+          steps: { orderBy: { order: "asc" } },
+          turns: { orderBy: { createdAt: "asc" } },
+        },
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.brainDumpItem.findMany({
+        where: { workspaceId },
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.focusSession.findMany({
+        where: { workspaceId },
+        orderBy: { startedAt: "asc" },
+      }),
+      prisma.streak.findUnique({ where: { workspaceId } }),
+      prisma.streakRecord.findMany({
+        where: { workspaceId },
+        orderBy: { startedAt: "asc" },
+      }),
+      prisma.badge.findMany({
+        where: { workspaceId },
+        orderBy: { earnedAt: "asc" },
+      }),
+      prisma.rewardEvent.findMany({
+        where: { workspaceId },
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.dayRollup.findMany({
+        where: { workspaceId },
+        orderBy: { date: "asc" },
+      }),
+      prisma.dailySpark.findMany({
+        where: { workspaceId },
+        orderBy: { date: "asc" },
+      }),
+    ],
+    // See the note above: at the default READ COMMITTED these eleven statements
+    // would each get their own snapshot.
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+  );
 
   // The account, and the integration metadata that hangs off it. Outside the
   // transaction because neither is workspace content: `User` is keyed by the id
