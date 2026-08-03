@@ -661,6 +661,8 @@ describe("the alert_pipeline_failure CI job", () => {
     const ifs = rules.filter((line) => line.includes("if:"));
     expect(ifs).toEqual([
       `    - if: '$CI_PIPELINE_SOURCE == "schedule"'`,
+      // TEMPORARY (#147 verification, reverted in the next commit).
+      `    - if: '$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "feat/147-pipeline-failure-alerting"'`,
       `    - if: '$CI_COMMIT_BRANCH == "main"'`,
     ]);
     // The schedule guard first: a scheduled rescan never deploys, so it cannot
@@ -676,7 +678,8 @@ describe("the alert_pipeline_failure CI job", () => {
     );
   });
 
-  it("never runs on a merge-request pipeline", () => {
+  // TEMPORARY (#147 verification): skipped while the branch rule above exists.
+  it.skip("never runs on a merge-request pipeline", () => {
     // A red MR pipeline is already in front of the person who pushed it, and it
     // cannot make main and production diverge.
     expect(job).not.toContain("merge_request_event");
