@@ -133,6 +133,37 @@ operators upgrading a self-hosted instance don't get surprised.
   a genuine Prisma failure still prints exactly as before, and a test asserts
   both halves against a real database.
 
+### Security
+
+- **The dependency bot can no longer walk a security override back into a CVE
+  range (#161).** `brace-expansion` is held at the patched `^5.0.8` by a
+  top-level npm `override` because CVE-2026-14257 / GHSA-mh99-v99m-4gvg has no
+  patched 2.x/3.x/4.x backport. A Renovate MR titled "update dependency
+  brace-expansion to v2.1.4" nevertheless rewrote that entry to `^2.1.3` — back
+  inside the affected range — and it was classified as a `patch`, which this
+  repo automerges; only an unresolved review discussion stopped it. The
+  scanners were not a backstop, because the head pipeline's security summary was
+  identical to `main`'s.
+  - **It was a mis-read, not a rollback.** Renovate resolves the top-level
+    override's current version from the *hoisted* `node_modules/brace-expansion`,
+    which a second, deliberately different override pins to 2.1.3 for the lint
+    toolchain — while the copy the top-level entry actually governs sits nested
+    under `@ts-morph/common` and is the only production-reachable one. So
+    Renovate saw "currently 2.1.3", offered 2.1.3 → 2.1.4 as a patch, and wrote
+    the range it inferred over the deliberate one. That recurs on every 2.x
+    release, and the MR is recreated even when closed, so the fix had to be in
+    config.
+  - **Each override scope is now capped inside its own major.** The two entries
+    cannot share one rule — forcing 5.x on the lint-tooling copy raises
+    `TypeError: expand is not a function` and makes ESLint exit having linted
+    zero files — and Renovate reports both scopes under the same dependency
+    name, so the cap keys on the current value instead. The wanted 5.0.8 → 5.0.9
+    bump is still proposed, and a new `override-hygiene` guard fails the build if
+    either override drifts out from under the rule that protects it.
+  - `postgres` majors are capped in the same pass: the version is pinned in three
+    places that must move together, and moving it is a dump/restore migration
+    rather than an image swap.
+
 ## [0.5.0] - 2026-08-01
 
 **More than one person can use it now.** dlectroflow stops being a single-owner
