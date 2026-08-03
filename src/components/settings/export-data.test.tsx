@@ -8,18 +8,63 @@ vi.mock("@/lib/download-file", () => ({ downloadBlob: downloadBlobMock }));
 
 import { ExportData } from "./export-data";
 
+/**
+ * The slice of `Response` this component actually reads: `status`, `ok`,
+ * `headers.get()` and `blob()`.
+ *
+ * DUCK-TYPED, not a real `Response`, and that is not laziness — `new Response(new
+ * Blob([...]))` is not portable across the environments this suite runs in. Under
+ * jsdom on Node 22 (which is what CI's `node:22-alpine` gives it) it throws
+ * `TypeError: object.stream is not a function`, because the global `Blob` jsdom
+ * installs is not the one undici's body mixin expects; on Node 26 it happens to
+ * work, so the failure appeared only in CI. Nothing about that reflects the
+ * component or the browser it really runs in, so the fix belongs in the fake
+ * rather than anywhere near `export-data.tsx`.
+ */
+type FakeResponse = {
+  status: number;
+  ok: boolean;
+  headers: { get(name: string): string | null };
+  blob(): Promise<Blob>;
+};
+
+const DEFAULT_HEADERS: Record<string, string> = {
+  "content-type": "application/zip",
+  "content-disposition":
+    'attachment; filename="dlectroflow-export-sam-2026-08-03.zip"',
+};
+
 function zipResponse(
-  init: { status?: number; headers?: Record<string, string> } = {},
-) {
-  return new Response(new Blob([new Uint8Array([0x50, 0x4b])]), {
-    status: init.status ?? 200,
-    headers: {
-      "Content-Type": "application/zip",
-      "Content-Disposition":
-        'attachment; filename="dlectroflow-export-sam-2026-08-03.zip"',
-      ...init.headers,
-    },
-  });
+  init: {
+    status?: number;
+    /** Merged over the defaults. `null` sends NO headers at all, which is the
+     *  Content-Disposition-stripped-by-a-proxy case. */
+    headers?: Record<string, string> | null;
+  } = {},
+): FakeResponse {
+  const status = init.status ?? 200;
+  const headers =
+    init.headers === null
+      ? {}
+      : {
+          ...DEFAULT_HEADERS,
+          // Header lookup is case-insensitive, so the fake lower-cases both sides
+          // rather than pretending the test always picks the component's casing.
+          ...Object.fromEntries(
+            Object.entries(init.headers ?? {}).map(([k, v]) => [
+              k.toLowerCase(),
+              v,
+            ]),
+          ),
+        };
+  return {
+    status,
+    ok: status >= 200 && status < 300,
+    headers: { get: (name) => headers[name.toLowerCase()] ?? null },
+    // A real Blob: CONSTRUCTING one is portable, it is only handing one to
+    // `Response` that is not. The assertions check `expect.any(Blob)`.
+    blob: async () => new Blob([new Uint8Array([0x50, 0x4b])]),
+  };
 }
 
 const control = () => screen.getByRole("link", { name: /download my data/i });
@@ -91,11 +136,7 @@ describe("ExportData", () => {
   it("falls back to a sensible filename if the header is missing", async () => {
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(
-          new Response(new Blob([new Uint8Array([1])]), { status: 200 }),
-        ),
+      vi.fn().mockResolvedValue(zipResponse({ headers: null })),
     );
     render(<ExportData />);
     await userEvent.click(control());
@@ -159,7 +200,7 @@ describe("ExportData", () => {
     // not by rewriting the control's label mid-request.
     vi.stubGlobal(
       "fetch",
-      vi.fn(() => new Promise<Response>(() => {})),
+      vi.fn(() => new Promise<FakeResponse>(() => {})),
     );
     render(<ExportData />);
     const before = control().textContent;
@@ -169,10 +210,10 @@ describe("ExportData", () => {
   });
 
   it("announces progress politely and marks itself busy while in flight", async () => {
-    let release: (r: Response) => void = () => {};
+    let release: (r: FakeResponse) => void = () => {};
     vi.stubGlobal(
       "fetch",
-      vi.fn(() => new Promise<Response>((resolve) => (release = resolve))),
+      vi.fn(() => new Promise<FakeResponse>((resolve) => (release = resolve))),
     );
     render(<ExportData />);
     await userEvent.click(control());
@@ -188,7 +229,7 @@ describe("ExportData", () => {
   });
 
   it("does not fire twice while a request is in flight", async () => {
-    const fetchMock = vi.fn(() => new Promise<Response>(() => {}));
+    const fetchMock = vi.fn(() => new Promise<FakeResponse>(() => {}));
     vi.stubGlobal("fetch", fetchMock);
     render(<ExportData />);
     await userEvent.click(control());
