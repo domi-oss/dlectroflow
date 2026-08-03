@@ -18,7 +18,7 @@
 # ---- build ----
 # alpine (musl) to match the runtime + the CI Dockerfile.ci image, so native
 # binaries (Prisma engine) are built for the right libc.
-FROM node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2 AS build
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS build
 WORKDIR /app
 RUN apk add --no-cache openssl
 COPY package.json package-lock.json prisma.config.ts ./
@@ -28,7 +28,7 @@ COPY . .
 RUN npm run build
 
 # ---- runtime ----
-FROM node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2 AS runner
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS runner
 WORKDIR /app
 RUN apk upgrade --no-cache && apk add --no-cache openssl
 ENV NODE_ENV=production
