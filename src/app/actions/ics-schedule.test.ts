@@ -138,8 +138,13 @@ describe("scheduleViaIcs", () => {
     expect(res.ok).toBe(true);
     if (res.ok) {
       expect((res.ics.match(/DESCRIPTION:/g) ?? []).length).toBe(2);
-      expect(res.ics).toContain("https://app.example/focus/step-A");
-      expect(res.ics).toContain("https://app.example/focus/step-B");
+      // #129 — these DESCRIPTIONs are over 75 octets, so they are now folded
+      // (RFC 5545 §3.1) and the URL is split across two physical lines. The
+      // property under test is which step each event links to, so it is asserted
+      // against the unfolded text — which is what a calendar client sees.
+      const unfolded = res.ics.replace(/\r\n[ \t]/g, "");
+      expect(unfolded).toContain("https://app.example/focus/step-A");
+      expect(unfolded).toContain("https://app.example/focus/step-B");
       expect(res.ics).toContain("🍽️"); // playful voice resolved from settings
       // The owner asked for defended time and an .ics can say so (#104).
       expect((res.ics.match(/TRANSP:OPAQUE/g) ?? []).length).toBe(2);

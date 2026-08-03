@@ -59,10 +59,16 @@ test("scheduling a to-do downloads an .ics with a focus link and busy time", asy
   for await (const c of stream) chunks.push(Buffer.from(c));
   const ics = Buffer.concat(chunks).toString("utf8");
 
+  // #129 — content lines are folded at 75 octets (RFC 5545 §3.1), so anything
+  // long enough to matter is split across physical lines. Unfold before matching:
+  // this is exactly what a calendar client does, and asserting on the folded
+  // form would make these checks pass or fail on where the 76th byte happens to
+  // land rather than on what the file says.
+  const unfolded = ics.replace(/\r\n[ \t]/g, "");
   expect(ics).toContain("BEGIN:VEVENT");
-  expect(ics).toContain(label);
+  expect(unfolded).toContain(label);
   // The per-step deep link (#104): a real absolute URL into /focus.
-  expect(ics).toMatch(/DESCRIPTION:.*\/focus/);
+  expect(unfolded).toMatch(/DESCRIPTION:.*\/focus/);
   // busy, not free — the one place the intent's `busy` flag is literal.
   expect(ics).toContain("TRANSP:OPAQUE");
 });
