@@ -113,19 +113,36 @@ test("a member's Account section offers a key field and never echoes one", async
   const field = account.getByLabel(/api key/i);
   await expect(field).toHaveAttribute("type", "password");
 
+  /**
+   * The KEY panel's own live region.
+   *
+   * #129 put a second `role="status"` in this section — the data export's — so
+   * `account.getByRole("status")` is now two elements and fails Playwright's strict
+   * mode. Resolved through the `aria-describedby` the Save button carries, which
+   * makes the assertion stronger than it was rather than merely unambiguous: it
+   * checks the outcome reached the region the control actually points at.
+   */
+  const keyStatus = async () => {
+    const id = await account
+      .getByRole("button", { name: /^save key$/i })
+      .getAttribute("aria-describedby");
+    expect(id, "the Save button must describe its live region").toBeTruthy();
+    return page.locator(`#${id}`);
+  };
+
   await field.fill("sk-e2e-not-a-real-key");
   await account.getByRole("button", { name: /^save key$/i }).click();
 
   // Cleared on success, and the value is nowhere in the delivered page.
   await expect(field).toHaveValue("");
-  await expect(account.getByRole("status")).toContainText(/saved/i);
+  await expect(await keyStatus()).toContainText(/saved/i);
   expect(await page.content()).not.toContain("sk-e2e-not-a-real-key");
 
   // Clean up so the next run starts without a key (global-setup also clears it,
   // but leaving one behind would make the specs order-dependent).
   await account.getByRole("button", { name: /^remove key$/i }).click();
   await account.getByRole("button", { name: /yes, remove/i }).click();
-  await expect(account.getByRole("status")).toContainText(/removed/i);
+  await expect(await keyStatus()).toContainText(/removed/i);
 });
 
 test("a member's inbox calendar control leads with Google, not the .ics fallback", async ({
