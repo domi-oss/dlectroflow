@@ -109,6 +109,37 @@ function parseContainerStart(
 }
 
 /**
+ * The inline shell script held in the block scalar under `<key>:`, or null when
+ * the key is absent or carries something other than a block scalar.
+ *
+ * Shared by the chart walk (`args:`) and the Compose walk (`command:`) because
+ * the two YAML shapes are identical below the key. Both `- |` (literal) and
+ * `- >` (folded) count: the Compose service shipped before #162 used `>`, and a
+ * parser blind to one form would report "no script", which every caller here
+ * treats as "nothing to assert on" — a silent pass.
+ *
+ * Returning null rather than "" matters: an empty script satisfies no assertion,
+ * so inventing one would turn a parse failure into a green build.
+ */
+function scriptBlockUnder(body: string[], key: string): string | null {
+  const keyAt = body.findIndex((line) => line.trim() === `${key}:`);
+  if (keyAt === -1) return null;
+  const blockAt = body.findIndex(
+    (line, k) => k > keyAt && (line.trim() === "- |" || line.trim() === "- >"),
+  );
+  if (blockAt === -1) return null;
+
+  const blockIndent = indentOf(body[blockAt] ?? "");
+  const script: string[] = [];
+  for (let k = blockAt + 1; k < body.length; k++) {
+    const line = body[k] ?? "";
+    if (line.trim() !== "" && indentOf(line) <= blockIndent) break;
+    script.push(line.trim());
+  }
+  return script.length > 0 ? script.join("\n") : null;
+}
+
+/**
  * Collect every container's inline script by walking indentation.
  *
  * Hand-rolled rather than delegating to a YAML library on purpose: `js-yaml` is
@@ -139,26 +170,11 @@ function collectStages(lines: string[]): BackupStage[] {
       body.push(line);
     }
 
-    // The script is the literal block that follows `args:` — `- |` then the
-    // indented lines under it.
-    const argsAt = body.findIndex((l) => l.trim() === "args:");
-    if (argsAt === -1) continue;
-    const blockAt = body.findIndex((l, k) => k > argsAt && l.trim() === "- |");
-    if (blockAt === -1) continue;
-
-    const scriptIndent = indentOf(body[blockAt] ?? "");
-    const script: string[] = [];
-    for (let k = blockAt + 1; k < body.length; k++) {
-      const line = body[k] ?? "";
-      if (line.trim() !== "" && indentOf(line) <= scriptIndent) break;
-      script.push(line.trim());
-    }
-
     // A stage with no inline script has nothing to assert on; skipping it is
     // safer than inventing an empty one that would pass every check.
-    if (name && script.length > 0) {
-      stages.push({ name, script: script.join("\n") });
-    }
+    const script = scriptBlockUnder(body, "args");
+    if (script === null) continue;
+    if (name) stages.push({ name, script });
 
     // Skip past this container's body. Without it the outer loop re-examines
     // every line inside it, and a nested `- name:` that happened to carry its
@@ -189,5 +205,157 @@ export function parseBackupTemplate(source: string): BackupTemplateFacts {
       gcs: /gs:\/\//.test(uploadScripts),
       b2: /\bb2:/.test(uploadScripts),
     },
+  };
+}
+
+// ── The Compose self-host path (#162) ───────────────────────────────────────
+//
+// Same question as above, asked of docker/docker-compose.prod.yml: would a
+// failure here be silent? It is the harder case, because that stack's backup ran
+// for two releases writing only to the host's own disk — a copy in the same
+// failure domain as the database it protects, which is the one failure a backup
+// exists to survive. The database is also the only asset here that cannot be
+// rebuilt from source.
+//
+// A Compose file IS valid YAML, so nothing needs neutralising first; the walk is
+// the same indentation walk, keyed on `command:` instead of `args:`.
+
+/** One backup-family Compose service and the facts worth pinning about it. */
+export interface ComposeBackupService {
+  /** Service name, e.g. "backup" or "backup-upload". */
+  name: string;
+  /** The inline shell script, whole-line comments removed. */
+  script: string;
+  /** The service's volume entries, verbatim minus the list dash. */
+  volumes: string[];
+}
+
+export interface ComposeBackupFacts {
+  /** Services whose name starts with `backup`, in file order. */
+  services: ComposeBackupService[];
+  /** Which off-host destinations the upload service(s) write to. */
+  destinations: { b2: boolean };
+}
+
+/** Compose service keys sit two spaces in, directly under `services:`. */
+const COMPOSE_SERVICE_INDENT = 2;
+
+/**
+ * `  backup-upload:` → `"backup-upload"`, or null for anything else at that
+ * indent (a prose comment, a mapping entry with a value, a list item).
+ *
+ * A plain character-class regex, not the `\s*`…`\s*` shape the SAST ReDoS rule
+ * (`javascript-dos-rule-regex_dos`, CWE-185) flags — the line is trimmed first,
+ * so no leading/trailing whitespace quantifier is needed at all.
+ */
+function parseComposeServiceKey(line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed.endsWith(":")) return null;
+  const name = trimmed.slice(0, -1);
+  return /^[a-z0-9][a-z0-9._-]*$/.test(name) ? name : null;
+}
+
+/**
+ * The list items under `<key>:` within one service's body, each with its `- `
+ * stripped. Comments and nested mappings are skipped rather than returned as
+ * phantom entries.
+ */
+function listUnder(body: string[], key: string): string[] {
+  const keyAt = body.findIndex((line) => line.trim() === `${key}:`);
+  if (keyAt === -1) return [];
+
+  const keyIndent = indentOf(body[keyAt] ?? "");
+  const items: string[] = [];
+  for (let i = keyAt + 1; i < body.length; i++) {
+    const line = body[i] ?? "";
+    const trimmed = line.trim();
+    if (trimmed === "") continue;
+    if (indentOf(line) <= keyIndent) break;
+    if (!trimmed.startsWith("- ")) continue;
+    items.push(trimmed.slice(2).trim());
+  }
+  return items;
+}
+
+/**
+ * Whole-line `#` comments out of a shell script.
+ *
+ * Needed here and not in the chart walk because #162's Compose scripts are
+ * literal block scalars carrying their own prose, and two tools in this repo
+ * have already read a comment as the code it describes (#146, #150 — see
+ * extractUsedEnvKeys in env-drift.ts). Without this, commenting out the rclone
+ * call would leave every destination assertion still passing.
+ *
+ * Deliberately only WHOLE-line comments: deciding whether a mid-line `#` opens
+ * a comment or sits inside a quoted string needs a shell parser, and guessing
+ * wrong in the permissive direction is what this function exists to prevent. The
+ * scripts it reads therefore keep their comments on their own lines.
+ */
+function stripShellComments(script: string): string {
+  return script
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .join("\n");
+}
+
+/**
+ * The backup-family services of a Compose file and what they write to.
+ *
+ * Scoped to services named `backup*` for the same reason the chart walk scopes
+ * destinations to `upload*` stages: the file also defines `db`, `app`, `caddy`
+ * and `purge`, and letting an unrelated service's script answer these questions
+ * is precisely the false green this module exists to prevent.
+ */
+export function parseComposeBackup(source: string): ComposeBackupFacts {
+  const lines = source.split("\n");
+  const servicesAt = lines.findIndex((line) => line.trimEnd() === "services:");
+  const services: ComposeBackupService[] = [];
+
+  for (let i = servicesAt + 1; servicesAt !== -1 && i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (line.trim() === "") continue;
+    // Back at column 0 is a sibling of `services:` (`volumes:`, `networks:`),
+    // so the services block is over.
+    const indent = indentOf(line);
+    if (indent === 0) break;
+    if (indent !== COMPOSE_SERVICE_INDENT) continue;
+
+    const name = parseComposeServiceKey(line);
+    if (!name) continue;
+
+    const body: string[] = [];
+    for (let j = i + 1; j < lines.length; j++) {
+      const bodyLine = lines[j] ?? "";
+      if (bodyLine.trim() !== "" && indentOf(bodyLine) <= indent) break;
+      body.push(bodyLine);
+    }
+    // Skip the body wholesale. Without this the outer loop walks back into it,
+    // and a nested two-space-indented key would surface as a phantom service.
+    i += body.length;
+
+    if (!name.startsWith("backup")) continue;
+    const script = scriptBlockUnder(body, "command");
+    // `command: ["npx", …]` is an exec array, not a script. Treating its absence
+    // as an empty script would make every script-level assertion vacuous.
+    if (script === null) continue;
+
+    services.push({
+      name,
+      script: stripShellComments(script),
+      volumes: listUnder(body, "volumes"),
+    });
+  }
+
+  const uploadScripts = services
+    .filter((service) => service.name !== "backup")
+    .map((service) => service.script)
+    .join("\n");
+
+  return {
+    services,
+    // The destination URI, not the tool: `rclone` alone would be satisfied by a
+    // copy to some other S3-compatible target, while the claim being made is
+    // specifically that the dump leaves this host.
+    destinations: { b2: /\bb2:/.test(uploadScripts) },
   };
 }

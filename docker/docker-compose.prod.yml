@@ -18,9 +18,10 @@
 # invite-only (#35): without it the owner is locked out of their own instance on
 # first boot. Both reuse the app image exactly as the chart's initContainers do.
 #
-# Two services are deliberately NOT started by `up`. `backup` and `purge` sit
-# behind profiles because Compose has no scheduler — the host's cron runs them.
-# See docs/self-host-vps.md for the two crontab lines.
+# Three services are deliberately NOT started by `up`. `backup`,
+# `backup-upload` and `purge` sit behind profiles because Compose has no
+# scheduler — the host's cron runs them. See docs/self-host-vps.md for the two
+# crontab lines.
 
 # A DISTINCT project name from the dev stack in docker-compose.yml, which pins
 # itself to `dlectroflow`. Without this they share container names, and bringing
@@ -140,11 +141,26 @@ services:
   # Compose has no scheduler, so these carry a profile and stay out of `up`.
   # docs/self-host-vps.md has the crontab lines.
 
-  # Logical backup to ../backups on the host — i.e. backups/ at the REPO ROOT,
-  # because Compose resolves a relative bind mount against this file's directory
-  # and this file lives in docker/. Mirrors the chart's backup CronJob, except
-  # the chart uploads to GCS. Keep a copy OFF this machine — a backup that only
-  # exists on the disk you are protecting is not a backup.
+  # Stage 1 of 2: take the dump. Mirrors the chart's `dump` initContainer
+  # (charts/dlectroflow/templates/backup.yaml), whose header explains every
+  # invariant below in more detail.
+  #
+  # It writes the dump TWICE, on purpose:
+  #
+  #   /stage  — a named volume holding exactly one `dump.sql.gz` and one `stamp`.
+  #             This is the handover to `backup-upload`, and to any further
+  #             uploader added later. One dump, one stamp, N uploaders: every
+  #             uploader pushes THAT file under THAT name, so two copies in two
+  #             places can be shown to be the same dump. Letting each uploader
+  #             call date(1) itself produces names a second or two apart, and
+  #             then nothing can prove they match — the only question a restore
+  #             actually asks.
+  #   /backups — the host's own retained copy, newest 14, named with the same
+  #             stamp as the remote object so the two are matchable by eye.
+  #             Fast to restore from, and it survives a B2 outage. It is NOT the
+  #             backup: it shares a failure domain with the database it protects,
+  #             and the database is the only thing here that cannot be rebuilt
+  #             from source. That is what `backup-upload` is for.
   backup:
     image: postgres:16@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20
     profiles: ["tools"]
@@ -165,21 +181,124 @@ services:
       # from being committed. The restore step in docs/self-host-vps.md also
       # looks at the repo root.
       - ../backups:/backups
-    # --clean --if-exists so the dump can be restored over an existing schema.
+      # A named volume, not a bind mount: this is a handover between two
+      # containers, never something an operator edits, and it must not be
+      # somewhere a stray `rm -rf` in the checkout can reach.
+      - backup_stage:/stage
     # bash, not sh: pipefail is what makes a failed pg_dump fail the command.
-    # Without it `pg_dump | gzip` exits 0 on a dump error, gzip writes a
-    # truncated file, and a broken backup is kept as if it had worked.
+    # Measured — `pg_dump -h nosuchhost | gzip` under a bare `set -eu` exits 0
+    # and leaves a 20-byte .sql.gz that looks like a backup, because a
+    # pipeline's exit status is the LAST command's and gzip succeeds at
+    # compressing nothing.
     entrypoint: ["/bin/bash", "-c"]
     command:
-      - >
-        set -euo pipefail;
-        out="/backups/dlectroflow-$$(date -u +%Y%m%dT%H%M%SZ).sql.gz";
-        trap 'rm -f "$$out.partial"' EXIT;
-        pg_dump --clean --if-exists -h db -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
-        | gzip -9 > "$$out.partial";
-        mv "$$out.partial" "$$out";
-        echo "wrote $$out";
+      - |
+        set -euo pipefail
+        # Clear the handover first. A previous run's dump left in place could
+        # otherwise be uploaded a second time if this one failed part-way.
+        rm -f /stage/dump.sql.gz /stage/stamp
+        # --clean --if-exists so the dump restores over an existing schema.
+        # --no-owner --no-privileges so it restores under ANY role name — a
+        # scratch database on a rescue host will not have your `dlectroflow`
+        # role, and without these the restore fails on every GRANT and OWNER TO.
+        pg_dump --clean --if-exists --no-owner --no-privileges \
+          -h db -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" \
+          | gzip -9 > /stage/dump.sql.gz
+        SIZE=$$(wc -c < /stage/dump.sql.gz)
+        echo "dump bytes: $${SIZE}"
+        # Guard against a degenerate dump silently becoming "the backup". An
+        # empty-database dump measures 394 bytes, so this fires on the real case
+        # rather than only on a hypothetical zero-byte one.
+        [ "$${SIZE}" -gt 1024 ] || { echo "ERROR: dump suspiciously small ($${SIZE} bytes)" >&2; rm -f /stage/dump.sql.gz; exit 1; }
+        # Written LAST and exactly once: the stamp's existence is what says a
+        # good dump is ready to upload.
+        date -u +%Y%m%dT%H%M%SZ > /stage/stamp
+        STAMP="$$(cat /stage/stamp)"
+        out="/backups/dlectroflow-$${STAMP}.sql.gz"
+        trap 'rm -f "$$out.partial"' EXIT
+        cp /stage/dump.sql.gz "$$out.partial"
+        mv "$$out.partial" "$$out"
+        echo "wrote $$out"
         ls -1t /backups/dlectroflow-*.sql.gz | tail -n +15 | xargs -r rm --
+
+  # Stage 2 of 2: get the dump OFF this host (#162). Mirrors the chart's
+  # `upload-b2` container, and is the reason the stack can now claim a backup at
+  # all: a copy on the disk being protected does not survive losing the disk.
+  #
+  # Not merged into `backup` because the two need different images — pg_dump
+  # must match the server's major version exactly, and rclone is not in the
+  # postgres image. Splitting them is also what makes a second destination a
+  # copy-paste of this service rather than a rewrite of the dump.
+  #
+  # A failed upload exits non-zero, so the cron run is loud. That is deliberate:
+  # a destination that quietly stops receiving backups is exactly the failure
+  # this service exists to prevent, and cron's own mail is the only signal a
+  # single-host stack has.
+  backup-upload:
+    # renovate: datasource=docker depName=rclone/rclone
+    image: rclone/rclone:1.75@sha256:b06aed988cf5967de7c25be5925240983981c757f4ed1ac9d2fa659d51d60548
+    profiles: ["tools"]
+    depends_on:
+      # Ordering only — `docker compose run` re-runs a completed dependency, so
+      # a single `run --rm backup-upload` takes a fresh dump and uploads it.
+      backup:
+        condition: service_completed_successfully
+    environment:
+      # The remote is defined entirely by environment, so no config file is
+      # baked into the image and the key is never written to disk. RCLONE_CONFIG
+      # still points somewhere writable because rclone touches it regardless.
+      RCLONE_CONFIG: /tmp/rclone.conf
+      RCLONE_CONFIG_B2_TYPE: b2
+      # NOT `${B2_KEY_ID:?…}`. Compose interpolates the WHOLE file on every
+      # command, so a required-variable guard here would break `up -d` for
+      # anyone who has not set up B2 — including everyone who backs up off-host
+      # some other way. The script below checks them instead, so the failure is
+      # loud but scoped to the one service that needs them.
+      RCLONE_CONFIG_B2_ACCOUNT: ${B2_KEY_ID:-}
+      RCLONE_CONFIG_B2_KEY: ${B2_APP_KEY:-}
+      B2_BUCKET: ${B2_BUCKET:-}
+      B2_PREFIX: ${B2_PREFIX:-pg}
+    volumes:
+      # Read-only: this service consumes the handover and must not be able to
+      # alter the dump the host's own retained copy was taken from.
+      - backup_stage:/stage:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        if [ -z "$${RCLONE_CONFIG_B2_ACCOUNT}" ] || [ -z "$${RCLONE_CONFIG_B2_KEY}" ] || [ -z "$${B2_BUCKET}" ]; then
+          echo "ERROR: set B2_BUCKET, B2_KEY_ID and B2_APP_KEY in .env.prod — see the Backups section of docs/self-host-vps.md" >&2
+          exit 1
+        fi
+        # Both values are interpolated into a double-quoted shell string below.
+        # Neither a quote nor a backtick is legal in a B2 bucket name or a sane
+        # object prefix, so reject them here rather than mangling the
+        # destination. The chart does the same check at render time.
+        case "$${B2_BUCKET}/$${B2_PREFIX}" in
+          *[!A-Za-z0-9._/-]*)
+            echo "ERROR: B2_BUCKET and B2_PREFIX may only contain A-Z a-z 0-9 . _ - /" >&2
+            exit 1
+            ;;
+        esac
+        if [ ! -s /stage/stamp ]; then
+          echo "ERROR: no staged dump — run the backup service first" >&2
+          exit 1
+        fi
+        STAMP="$$(cat /stage/stamp)"
+        DEST="b2:$${B2_BUCKET}/$${B2_PREFIX}/dlectroflow-$${STAMP}.sql.gz"
+        # --no-check-dest skips the HEAD rclone would otherwise do on the
+        # destination. That HEAD is a read, and the key this stack should carry
+        # deliberately cannot read: scope it to this one bucket and prefix with
+        # writeFiles ONLY, so a compromised host can neither read existing
+        # backups out nor delete them. Without the flag every run fails 401
+        # before uploading anything.
+        rclone copyto --no-check-dest /stage/dump.sql.gz "$$DEST"
+        # No read-back check, and that is not a gap: b2_upload_file REQUIRES an
+        # X-Bz-Content-Sha1 header and rejects the upload if the stored bytes do
+        # not match, so success here IS B2 confirming the content hash
+        # server-side. Reading it back would need listFiles — a wider credential
+        # buying a weaker check.
+        echo "uploaded $$DEST ($$(wc -c < /stage/dump.sql.gz) bytes, sha1 verified by B2 on write)"
 
   # Deletes expired guest workspaces and stale guest counters (#21). Mirrors the
   # chart's purge CronJob. Safe to run at any time; it touches no owner data.
@@ -199,3 +318,8 @@ volumes:
   pgdata:
   caddy_data:
   caddy_config:
+  # The one-dump handover between `backup` and `backup-upload` (#162). Holds a
+  # single dump.sql.gz and its stamp between the two containers of one run, and
+  # nothing that is not reproduced by the next run — losing it costs the run in
+  # flight, not any backup.
+  backup_stage:
