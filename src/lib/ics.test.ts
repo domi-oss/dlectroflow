@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { buildTaskIcs, buildIcsCalendar, icsFilename } from "./ics";
+import {
+  buildTaskIcs,
+  buildIcsCalendar,
+  icsFilename,
+  scheduledStepEvents,
+  type ScheduledTask,
+} from "./ics";
 
 /**
  * Undo RFC 5545 §3.1 line folding: CRLF followed by a single space or tab is a
@@ -380,5 +386,146 @@ describe("RFC 5545 §3.1 line folding (#129)", () => {
       stamp,
     });
     expect(ics).toContain(`\r\nSUMMARY:${"y".repeat(67)}\r\n`);
+  });
+});
+
+/**
+ * #154 — the step/due-date mapping, lifted out of `src/lib/export/calendar.ts`
+ * so the subscription feed is a second caller rather than a second copy.
+ *
+ * These tests exercise it directly on hand-built rows. The export's own
+ * behaviour is still asserted end-to-end in `src/lib/export/calendar.test.ts`;
+ * this block is what makes the RULES testable without an `ExportSnapshot`.
+ */
+describe("scheduledStepEvents (#154)", () => {
+  const at = (h: number, m = 0) => new Date(Date.UTC(2026, 7, 3, h, m));
+
+  function task(over: Partial<ScheduledTask> = {}): ScheduledTask {
+    return {
+      id: "t1",
+      title: "Renew the passport",
+      parentEmoji: null,
+      scheduleDueAt: null,
+      steps: [],
+      ...over,
+    };
+  }
+
+  function step(over: Partial<ScheduledTask["steps"][number]> = {}) {
+    return {
+      id: "s1",
+      text: "Find the old one",
+      estMinutes: 15,
+      subtaskEmoji: null,
+      scheduledAt: at(9),
+      ...over,
+    };
+  }
+
+  it("emits one event per scheduled step, at the instant it was scheduled for", () => {
+    const [event] = scheduledStepEvents([task({ steps: [step()] })]);
+    expect(event).toMatchObject({
+      uid: "step-s1@dlectroflow",
+      start: at(9),
+      end: at(9, 15),
+      summary: "Renew the passport: Find the old one",
+    });
+  });
+
+  it("emits nothing for a step with no scheduled time", () => {
+    expect(
+      scheduledStepEvents([task({ steps: [step({ scheduledAt: null })] })]),
+    ).toEqual([]);
+  });
+
+  it("emits a due-date marker for a task that has one", () => {
+    const [event] = scheduledStepEvents([task({ scheduleDueAt: at(12) })]);
+    expect(event.summary).toBe("Renew the passport (due)");
+    expect(event.uid).toBe("task-t1@dlectroflow");
+  });
+
+  it("emits nothing at all for Task.scheduledAt — it is not a time to do it", () => {
+    // The rule the export's README states: `scheduledAt` records WHEN IT WAS
+    // SCHEDULED, so an event there is an appointment at the moment somebody
+    // pressed a button.
+    expect(scheduledStepEvents([task()])).toEqual([]);
+  });
+
+  it("collapses whitespace in a summary — a calendar title is one line", () => {
+    const [event] = scheduledStepEvents([
+      task({ steps: [step({ text: "Write it\nacross   two lines" })] }),
+    ]);
+    expect(event.summary).toBe("Renew the passport: Write it across two lines");
+  });
+
+  it("prefixes the task and step emoji when present", () => {
+    const [event] = scheduledStepEvents([
+      task({
+        parentEmoji: "🛂",
+        steps: [step({ subtaskEmoji: "🔍" })],
+      }),
+    ]);
+    expect(event.summary).toBe("🛂 Renew the passport: 🔍 Find the old one");
+  });
+
+  it("clamps a zero-or-negative estimate so DTEND never precedes DTSTART", () => {
+    const [event] = scheduledStepEvents([
+      task({ steps: [step({ estMinutes: 0 })] }),
+    ]);
+    expect(event.end.getTime()).toBeGreaterThan(event.start.getTime());
+  });
+
+  it("returns events in chronological order across tasks", () => {
+    const events = scheduledStepEvents([
+      task({
+        id: "late",
+        steps: [step({ id: "s-late", scheduledAt: at(16) })],
+      }),
+      task({
+        id: "early",
+        steps: [step({ id: "s-early", scheduledAt: at(8) })],
+      }),
+    ]);
+    expect(events.map((e) => e.uid)).toEqual([
+      "step-s-early@dlectroflow",
+      "step-s-late@dlectroflow",
+    ]);
+  });
+
+  it("marks nothing busy — neither the archive nor the feed may block a calendar", () => {
+    const [event] = scheduledStepEvents([task({ steps: [step()] })]);
+    expect(event.busy).toBeUndefined();
+  });
+
+  /**
+   * The one thing the feed needs and the export must not have. A subscription is
+   * "what is coming up", so it drops events that finished before the window
+   * opens; an archive is everything, so it passes no window at all.
+   */
+  describe("the optional `since` window (#154)", () => {
+    it("drops an event that ENDED before the window opens", () => {
+      const events = scheduledStepEvents(
+        [task({ steps: [step({ scheduledAt: at(8) })] })],
+        { since: at(9) },
+      );
+      expect(events).toEqual([]);
+    });
+
+    it("keeps an event still running when the window opens", () => {
+      // Starts 08:50, ends 09:05 — it straddles the boundary, and dropping it
+      // would put a hole in today.
+      const events = scheduledStepEvents(
+        [task({ steps: [step({ scheduledAt: at(8, 50) })] })],
+        { since: at(9) },
+      );
+      expect(events).toHaveLength(1);
+    });
+
+    it("keeps everything when no window is given", () => {
+      const events = scheduledStepEvents([
+        task({ steps: [step({ scheduledAt: new Date(0) })] }),
+      ]);
+      expect(events).toHaveLength(1);
+    });
   });
 });
