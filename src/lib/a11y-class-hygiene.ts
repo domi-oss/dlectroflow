@@ -609,9 +609,22 @@ function drawsIndicator(base: string): boolean {
   // same way rather than by a special case each, which is how `border-0` was
   // missed in the first place.
   //
-  // A bare `ring`, `inset-ring` or `border` is a real 1px edge, so it counts.
+  // A bare `ring`, `inset-ring`, `outline` or `border` is a real 1px edge, so it
+  // counts. Verified against Tailwind 4.3.3 rather than assumed — all four
+  // compile to the same shape, and `outline` was the odd one out here until Duo
+  // review round 8 (!250) pointed out the asymmetry:
+  //
+  //   .outline    { outline-style: var(--tw-outline-style); outline-width: 1px }
+  //   .ring       { --tw-ring-shadow: … 0 0 0 calc(1px + …) …; box-shadow: … }
+  //   .border     { border-style: var(--tw-border-style); border-width: 1px }
+  //   .inset-ring { inset 0 0 0 1px … }
+  //
+  // Requiring a numeric width for `outline` alone made `focus-visible:outline` a
+  // false positive, which would have cost an allowlist entry for a perfectly good
+  // indicator — and an allowlist entry nobody can defend is how an allowlist
+  // stops meaning anything.
   if (/^(inset-)?ring(-[1-9]\d*)?$/.test(base)) return true;
-  if (/^outline-[1-9]\d*$/.test(base)) return true;
+  if (/^outline(-[1-9]\d*)?$/.test(base)) return true;
   if (/^border(-[1-9]\d*)?$/.test(base)) return true;
   // `underline` / `decoration-2` — the indicator the legal-page links use.
   if (base === "underline" || /^decoration-[1-9]\d*$/.test(base)) return true;

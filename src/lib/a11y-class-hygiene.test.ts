@@ -633,7 +633,14 @@ describe("findWeakFocusIndicators", () => {
     "focus-visible:border",
     "focus-visible:border-2",
     "focus-visible:ring",
+    "focus-visible:inset-ring",
     "focus-visible:inset-ring-4",
+    // Bare `outline` was rejected until Duo review round 8, !250. Tailwind 4.3.3
+    // compiles it to `outline-width: 1px` — the same shape as bare `ring` and
+    // bare `border`, both of which were already accepted. The asymmetry made a
+    // perfectly good indicator a false positive, and an allowlist entry nobody
+    // can defend is how an allowlist stops meaning anything.
+    "focus-visible:outline",
     "focus-visible:outline-2",
     "focus-visible:decoration-2",
   ])("accepts %s, which draws a real edge", (token) => {
