@@ -26,6 +26,7 @@ import {
   dismissFocusTimerTip,
   updateFocusShuffle,
 } from "@/app/actions/settings";
+import { AutoAdvance } from "@/components/focus/auto-advance";
 import { Celebration } from "@/components/focus/celebration";
 import { TimerVisual } from "@/components/focus/timer-visual";
 import { Button } from "@/components/ui/button";
@@ -320,6 +321,10 @@ export function FocusTimer({
   // unmount the control that was just pressed, and a screen-reader user who is
   // dropped to <body> has no idea a message appeared.
   const failureCtaRef = useRef<HTMLButtonElement | null>(null);
+  // #142 — the finished-step screen's deliberate focus landing spot: the
+  // celebration + points + streak block, which is the whole reason the phase
+  // changed. See the effect below for why it is not the auto-advance panel.
+  const doneSummaryRef = useRef<HTMLDivElement | null>(null);
   // #23 — the celebration line is rolled when the step is actually completed
   // (an event), not during render into a ref: Math.random() in render is impure
   // (react-hooks/purity) and reading a ref during render is unsafe
@@ -760,6 +765,17 @@ export function FocusTimer({
    */
   const skipReestimate = () => setFailure(null);
 
+  /**
+   * #142 — where the auto-advance goes at the end of the countdown.
+   *
+   * A plain route push, deliberately: `/focus/[stepId]` opens in the `setup`
+   * phase, so the user lands on the next step's start screen with its own
+   * Start button rather than mid-countdown on work they have not agreed to.
+   */
+  const goToNextStep = useCallback(() => {
+    if (nextStep) router.push(`/focus/${nextStep.id}`);
+  }, [nextStep, router]);
+
   const dismissTip = () => {
     setTipVisible(false);
     void dismissFocusTimerTip();
@@ -809,6 +825,19 @@ export function FocusTimer({
   useEffect(() => {
     if (failure) failureCtaRef.current?.focus();
   }, [failure]);
+
+  // #142 a11y (WCAG 2.4.3) — the `done` phase replaces the entire screen,
+  // including the Complete button that was just pressed, so focus would drop to
+  // <body> at the one moment there is something to say. It goes to the outcome
+  // summary rather than to the auto-advance panel on purpose: focusing a control
+  // inside the panel would HOLD its countdown (see AutoAdvance), so the feature
+  // would never fire for anyone. Reading the result first and hearing the
+  // pending navigation second is also the right order — the polite live region
+  // in the panel follows on behind.
+  useEffect(() => {
+    if (phase === "done") doneSummaryRef.current?.focus();
+  }, [phase]);
+
   const remainingInTask = steps
     .filter((s) => !s.done)
     .reduce((n, s) => n + s.estMinutes, 0);
@@ -1002,33 +1031,58 @@ export function FocusTimer({
     return (
       <div className="space-y-5 text-center">
         {stepHeading}
-        <div className="flex justify-center pt-6">
-          <Celebration />
+        {/* #142 — one focusable block, not five loose paragraphs: focus lands
+            here on the phase change (see the effect above) and a screen-reader
+            user hears the whole outcome — message, points, streak — as one
+            unit, before the auto-advance announcement follows. tabIndex={-1}
+            keeps it out of the tab order; it is a target, not a stop. The UA
+            outline is deliberately NOT suppressed (a11y-class-hygiene Rule D /
+            WCAG 2.4.11): a visible ring around what just changed is correct. */}
+        <div
+          ref={doneSummaryRef}
+          tabIndex={-1}
+          data-testid="focus-done-summary"
+          className="space-y-3"
+        >
+          <div className="flex justify-center pt-6">
+            <Celebration />
+          </div>
+          <div aria-hidden="true" className="text-6xl">
+            🎉
+          </div>
+          <p className="text-lg font-medium">{doneMsg}</p>
+          {result && (
+            <p className="text-muted-foreground text-sm">
+              +{result.points} points
+              {result.googleSynced
+                ? " · marked complete in Google Tasks ✅"
+                : ""}
+            </p>
+          )}
+          {result?.streak ? (
+            <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+              {result.freshStart
+                ? "🌱 Fresh start — day 1 again, and that's completely okay."
+                : `🔥 ${result.streak}-day streak!`}
+            </p>
+          ) : null}
         </div>
-        <div className="text-6xl">🎉</div>
-        <p className="text-lg font-medium">{doneMsg}</p>
-        {result && (
-          <p className="text-muted-foreground text-sm">
-            +{result.points} points
-            {result.googleSynced ? " · marked complete in Google Tasks ✅" : ""}
-          </p>
-        )}
-        {result?.streak ? (
-          <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
-            {result.freshStart
-              ? "🌱 Fresh start — day 1 again, and that's completely okay."
-              : `🔥 ${result.streak}-day streak!`}
-          </p>
-        ) : null}
-        <div className="flex flex-col items-center gap-2">
+        <div className="flex flex-col items-center gap-3">
           {nextStep ? (
-            <Link
-              href={`/focus/${nextStep.id}`}
-              className="bg-primary text-primary-foreground inline-flex items-center gap-1.5 rounded-md px-4 py-2 font-medium"
-            >
-              <Play aria-hidden="true" className="h-4 w-4 shrink-0" />
-              {t("focus.nextStep", voice)}
-            </Link>
+            // #142 — this used to be a bare link, which is where the momentum
+            // went: the highest-energy moment in the app asked for one more
+            // decision. It now moves on by itself after five seconds, onto the
+            // next step's SETUP screen (a plain route push — nothing starts a
+            // timer there), with an escape that is announced before it is
+            // needed. See AutoAdvance for the WCAG reasoning.
+            <AutoAdvance
+              label={t("focus.advance.nextStep", voice)}
+              targetText={nextStep.text}
+              targetEmoji={nextStep.subtaskEmoji}
+              voice={voice}
+              reducedMotion={reducedMotion}
+              onAdvance={goToNextStep}
+            />
           ) : (
             <p className="text-sm">That was the last step of this task. 🏁</p>
           )}

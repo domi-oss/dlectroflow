@@ -13,11 +13,16 @@ import {
   FocusTimer,
   REESTIMATE_TIMEOUT_MS,
 } from "@/components/focus/focus-timer";
+import { AUTO_ADVANCE_SEC } from "@/components/focus/auto-advance";
 import type { TrackerStep } from "@/components/focus/focus-step-tracker";
 
 const refresh = vi.fn();
+// #142 — `push` is module-level rather than created inside `useRouter()`: the
+// auto-advance asserts on where it navigates, and a fresh spy per hook call
+// records nothing the test can read.
+const push = vi.fn();
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), refresh }),
+  useRouter: () => ({ push, refresh }),
 }));
 vi.mock("next/link", () => ({
   default: ({
@@ -2249,5 +2254,110 @@ describe("FocusTimer — server-action failures (#137, #139)", () => {
       expect(cta).toBeEnabled();
       expect(screen.getByRole("alert")).toBeInTheDocument();
     });
+  });
+});
+
+// ── #142 — finishing a step no longer dead-ends ────────────────────────
+//
+// The fake-timer tests here follow the same shape as the alarm block above:
+// native `.click()` inside `act`, never userEvent, because userEvent's own
+// scheduler interacts awkwardly with fake timers around an async server action.
+describe("FocusTimer — auto-advance after a completed step (#142)", () => {
+  /** Start → Complete step, on fake timers, leaving the done screen mounted. */
+  async function finishOnFakeTimers() {
+    await act(async () => {
+      screen.getByRole("button", { name: /start focusing/i }).click();
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: /complete step/i }).click();
+    });
+  }
+
+  it("offers the next step as a countdown, naming where it is going", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimer {...base()} />);
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /complete step/i }));
+    expect(await screen.findByText("Polish")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/next step/i);
+    expect(
+      screen.getByRole("button", { name: /stay here/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("lands on the next step's START screen — it does not begin the next timer", async () => {
+    vi.useFakeTimers();
+    try {
+      render(<FocusTimer {...base()} />);
+      await finishOnFakeTimers();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(AUTO_ADVANCE_SEC * 1000);
+      });
+      expect(push).toHaveBeenCalledWith("/focus/s3");
+      // beginFocus was called ONCE — by the step just finished, never by the
+      // arrival. Landing mid-countdown on work you have not agreed to is worse
+      // than an extra tap.
+      expect(beginFocus).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("'Stay here' stops the navigation but keeps the next step reachable", async () => {
+    vi.useFakeTimers();
+    try {
+      render(<FocusTimer {...base()} />);
+      await finishOnFakeTimers();
+      await act(async () => {
+        screen.getByRole("button", { name: /stay here/i }).click();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(push).not.toHaveBeenCalled();
+      await act(async () => {
+        screen.getByRole("button", { name: /go now/i }).click();
+      });
+      expect(push).toHaveBeenCalledWith("/focus/s3");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("focus lands on the celebration, deliberately, rather than on <body>", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimer {...base()} />);
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /complete step/i }));
+    await waitFor(() =>
+      expect(screen.getByTestId("focus-done-summary")).toHaveFocus(),
+    );
+  });
+
+  it("respects reduced motion on the countdown", async () => {
+    mockReducedMotion = true;
+    const user = userEvent.setup();
+    const { container } = render(<FocusTimer {...base()} />);
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /complete step/i }));
+    expect(await screen.findByText("Polish")).toBeInTheDocument();
+    expect(container.querySelector("[data-auto-advance-progress]")).toBeNull();
+  });
+
+  it("no next step → no countdown, and nothing navigates on its own", async () => {
+    vi.useFakeTimers();
+    try {
+      render(<FocusTimer {...base({ nextStep: null })} />);
+      await finishOnFakeTimers();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(push).not.toHaveBeenCalled();
+      expect(
+        screen.queryByRole("button", { name: /stay here/i }),
+      ).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
