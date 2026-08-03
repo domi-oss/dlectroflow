@@ -241,6 +241,33 @@ export const STRINGS = {
   // (mirrors focus.hero.left's "~Xm left" pattern on the launcher hero).
   "focus.startFresh": { plain: "↻ Start fresh", playful: "↻ Start fresh" },
 
+  // ── #142 — the auto-advance countdown after a step is completed ────────────
+  //
+  // Deliberately IDENTICAL across voices, for the same reason as the #137 error
+  // strings above but the opposite emotion: this copy is a *timed navigation*
+  // notice, and it is the only thing standing between the user and a screen
+  // change they did not ask for. A playful synonym for "Stay here" would make
+  // the escape harder to find at exactly the wrong moment, and the announcement
+  // names the button by its literal label — if the two ever drift, the spoken
+  // instruction points at a control that isn't there.
+  "focus.advance.in": { plain: "in", playful: "in" },
+  "focus.advance.seconds": { plain: "seconds", playful: "seconds" },
+  "focus.advance.goNow": { plain: "Go now", playful: "Go now" },
+  "focus.advance.stayHere": { plain: "Stay here", playful: "Stay here" },
+  // WCAG 2.2.1 — the non-visual half of "turn the time limit off". Spoken
+  // before the countdown can run out, and Escape needs no tabbing to reach, so
+  // a screen-reader user is not racing the clock to find a button.
+  "focus.advance.escapeHint": {
+    plain: 'Press Escape, or choose "Stay here", to stay on this screen.',
+    playful: 'Press Escape, or choose "Stay here", to stay on this screen.',
+  },
+  "focus.advance.cancelled": {
+    plain: "Staying here. Move on whenever you're ready.",
+    playful: "Staying here. Move on whenever you're ready.",
+  },
+  "focus.advance.nextStep": { plain: "Next step", playful: "Next step" },
+  "focus.advance.nextTodo": { plain: "Next to-do", playful: "Next to-do" },
+
   // ── #137 — what the timer says when a server action fails ──────────────────
   // It used to say nothing: a rejected action left the screen on "Claude is
   // re-estimating…" indefinitely. These are the words that replace the spinner.
