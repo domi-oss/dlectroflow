@@ -1,26 +1,31 @@
 # Self-hosting dlectroflow on one small server
 
-_Last verified: 2026-07-28._
+_Last verified: 2026-08-03._
 
 This is the cheapest honest way to run dlectroflow 24/7 on your own domain:
 **one small VPS, around $6/month**, with automatic HTTPS. It is the option
 `docs/running-costs.md` recommends, and this page is the walkthrough for it.
 
 You get: your own instance at your own domain, valid auto-renewing HTTPS,
-Postgres, a nightly backup and a nightly guest-data purge.
+Postgres, a nightly backup that is copied off the host, and a nightly guest-data
+purge.
 
 You do not get what the Kubernetes chart gives you: high availability (this is one
-machine — a reboot is downtime), a preview environment per merge request, or
-off-host backups (you have to add that last one yourself; see
-[Backups](#backups)).
+machine — a reboot is downtime), a preview environment per merge request, or a
+second independent backup destination — the chart writes to two, this writes to
+one plus a copy on the host itself (see [Backups](#backups)).
 
 **What has actually been tested:** the whole stack was stood up end-to-end on a
-developer machine — migrations, owner seeding, the app serving through Caddy,
-the purge job and the backup job all verified. What has **not** been tested is a
-real Let's Encrypt certificate being issued against a public domain, because that
-needs public DNS and port 80. Everything up to that point is known to work; if
-you hit a certificate problem, [Troubleshooting](#troubleshooting) is the place to
-start, and a merge request improving this page is very welcome.
+developer machine — migrations, owner seeding, the app serving through Caddy, and
+the purge job. The backup path was rehearsed in full on 2026-08-03: a dump taken
+by this stack, uploaded to B2, pulled back down, restored into a fresh
+digest-pinned `postgres:16.14` under a *different* role name, and compared to the
+source per table — row counts and a content hash of every table, all 20 matching.
+Both failure guards were made to fire on purpose. What has **not** been tested is
+a real Let's Encrypt certificate being issued against a public domain, because
+that needs public DNS and port 80. Everything up to that point is known to work;
+if you hit a certificate problem, [Troubleshooting](#troubleshooting) is the place
+to start, and a merge request improving this page is very welcome.
 
 ---
 
@@ -257,27 +262,95 @@ rebuild and `up -d` again (see [Upgrading](#upgrading)).
 
 ## Backups
 
-The stack ships a backup job. Compose has no scheduler, so the host's cron runs
-it. `crontab -e` and add:
+The stack ships a two-stage backup job. Compose has no scheduler, so the host's
+cron runs it. `crontab -e` and add:
 
 ```cron
-# Nightly database dump at 02:00, keeping the last 14 in ./backups
-0 2 * * * cd /path/to/dlectroflow && docker compose --env-file .env.prod -f docker/docker-compose.prod.yml run --rm backup >> /var/log/dlectroflow-backup.log 2>&1
+# Nightly database dump at 02:00 — dumps, keeps the newest 14 in ./backups, and
+# uploads that same dump off this host
+0 2 * * * cd /path/to/dlectroflow && docker compose --env-file .env.prod -f docker/docker-compose.prod.yml run --rm backup-upload >> /var/log/dlectroflow-backup.log 2>&1
 
 # Nightly guest-data purge at 03:30
 30 3 * * * cd /path/to/dlectroflow && docker compose --env-file .env.prod -f docker/docker-compose.prod.yml run --rm purge >> /var/log/dlectroflow-purge.log 2>&1
 ```
 
-> **A dump that only exists on the machine you are protecting is not a backup.**
-> The job writes to `./backups` at the repo root on the host (the compose file
-> mounts it as `../backups`, since the file itself sits in `docker/`) and prunes
-> to the newest 14. Getting a
-> copy somewhere else is the part it cannot do for you — add `rclone`, `restic`,
-> `rsync` to another host, or your provider's snapshots. Backblaze B2 gives you
-> 10 GB free, which is far more than these dumps need.
+One line, not two: `backup-upload` declares `backup` as a dependency, and
+`docker compose run` re-runs a completed dependency, so each invocation takes a
+fresh dump and uploads that one. If you have not set up an off-host destination
+yet, use `run --rm backup` instead and read the next section — that variant
+writes only to this machine's disk.
 
-**To restore**, decompress into `psql`. Do this into a scratch database first and
-confirm it looks right before going anywhere near your live one:
+### Why the second stage exists
+
+**A backup should not share a failure domain with the thing it backs up.** The
+`backup` service alone writes to `./backups` at the repo root on this host (the
+compose file mounts it as `../backups`, since the file itself sits in `docker/`)
+and prunes to the newest 14. That copy is useful — it is the fastest thing to
+restore from — but the one failure a backup exists to survive is losing this
+machine, and it does not survive that. The database is also the only thing here
+that cannot be rebuilt from source: the code, the image and the config all exist
+somewhere else.
+
+So `backup-upload` copies each dump to a Backblaze B2 bucket. Both copies carry
+the **same filename**, taken from one timestamp written once per run, so a local
+file and a remote object can be matched by name and verified byte for byte.
+
+### Setting up the off-host copy
+
+In [Backblaze](https://www.backblaze.com/cloud-storage) — the free tier is 10 GB
+and these dumps are tens of kilobytes each:
+
+1. Create a **private** bucket.
+2. Create an **application key** and restrict it: this one bucket, the file-name
+   prefix `pg/`, and the `writeFiles` capability **only**.
+3. Put the four values in `.env.prod`:
+
+```
+B2_BUCKET=your-bucket-name
+B2_PREFIX=pg
+B2_KEY_ID=...
+B2_APP_KEY=...
+```
+
+**Write-only is the point, not an oversight.** The two things an attacker wants
+from a backup credential are to read your backups out and to delete them, and a
+key with `writeFiles` alone can do neither. The cost is that this host cannot
+list, download or verify its own backups — so keep a **second, read-capable key
+on your own machine** and do that work there. That is where a restore drill
+belongs anyway: rehearsing a restore on the machine you are rehearsing losing
+proves nothing.
+
+Leave the four values unset if you copy the dumps off some other way (`restic`,
+`rsync` to another host, your provider's snapshots). `backup-upload` then refuses
+to run and says so, rather than appearing to succeed. Nothing else in the stack
+is affected — `up -d` works with none of them set.
+
+### To restore
+
+Do this into a **scratch database** first, and check it before going anywhere
+near your live one.
+
+From your own machine, with the read-capable key configured in `rclone`:
+
+```bash
+rclone lsl b2:YOUR-BUCKET/pg/ | tail -5
+OBJ=$(rclone lsf b2:YOUR-BUCKET/pg/ | sort | tail -1)
+rclone copy "b2:YOUR-BUCKET/pg/$OBJ" ./
+docker run -d --name pg-restore -e POSTGRES_PASSWORD=scratch postgres:16.14
+gunzip -c "$OBJ" | docker exec -i pg-restore psql -U postgres -d postgres -v ON_ERROR_STOP=1
+```
+
+Then compare row counts against the live database, per table, before trusting it:
+
+```bash
+docker exec pg-restore psql -U postgres -d postgres -At -c "select table_name, (xpath('/row/c/text()', query_to_xml(format('select count(*) as c from %I.%I', table_schema, table_name), false, true, '')))[1]::text::bigint from information_schema.tables where table_schema='public' and table_type='BASE TABLE' order by table_name;"
+```
+
+Note the role in that restore is `postgres`, not `dlectroflow`. The dumps are
+taken with `--no-owner --no-privileges`, so they restore under **any** role name
+— which is what makes a rescue host usable — and with `--clean --if-exists`, so
+they can also be restored over an existing schema. To go back into the live
+database on the host instead:
 
 ```bash
 gunzip -c backups/dlectroflow-YYYYMMDDTHHMMSSZ.sql.gz \
@@ -285,8 +358,39 @@ gunzip -c backups/dlectroflow-YYYYMMDDTHHMMSSZ.sql.gz \
     psql -U dlectroflow -d dlectroflow
 ```
 
-The dumps are taken with `--clean --if-exists`, so they can be restored over an
-existing schema.
+### What a failed run looks like
+
+Both stages use `set -euo pipefail`, and the dump is only promoted to the name
+the uploader reads **after** a minimum-size check. That combination is what stops
+a broken backup being kept as if it had worked:
+
+| Failure | What you see |
+|---|---|
+| `pg_dump` cannot connect or authenticate | Exit 1. Without `pipefail` this exits **0** and leaves a 20-byte `.sql.gz`, because a pipeline's status is the last command's and `gzip` succeeds at compressing nothing. |
+| The dump is degenerate or the database is empty | `ERROR: dump suspiciously small (393 bytes)`, exit 1, nothing promoted locally or uploaded. |
+| B2 is unreachable, or the key is wrong or revoked | Exit 1 after the local copy has already been written, so the run is loud but you still have a dump. |
+| `B2_BUCKET` / `B2_KEY_ID` / `B2_APP_KEY` unset | `ERROR: set B2_BUCKET, B2_KEY_ID and B2_APP_KEY in .env.prod`, exit 1. |
+
+Cron mails you a non-zero exit, so **make sure that mail goes somewhere you
+read** — on a single-host stack it is the only signal there is. There is no
+status object to query the way Kubernetes has for the chart's CronJob.
+
+A successful run prints the object it wrote and the size, and B2 verifies the
+content hash server-side on write (`rclone` sends `X-Bz-Content-Sha1` and B2
+rejects a mismatch), so a success line is stronger evidence than a byte count:
+
+```
+dump bytes: 18203
+wrote /backups/dlectroflow-20260803T101541Z.sql.gz
+uploaded b2:your-bucket/pg/dlectroflow-20260803T101541Z.sql.gz (18203 bytes, sha1 verified by B2 on write)
+```
+
+> **B2 never deletes these on its own.** Its measured lifecycle is
+> `daysFromHidingToDeleting: 90` with `daysFromUploadingToHiding: null`, and that
+> 90-day clock only starts once an object is *hidden* — which happens only when a
+> new version reuses its name. These names carry a unique timestamp, so nothing
+> is ever hidden and nothing is ever deleted. At tens of kilobytes a day that is
+> a few megabytes a year; prune from your own machine if it ever matters.
 
 ---
 
@@ -321,6 +425,8 @@ environment variables. Downgrades are not supported.
 | `app` exits with `refusing to boot with data reachable. Missing: …` | Working as designed — the app will not start half-configured. It names exactly which variables are missing or too short; fill them in and `up -d` again. |
 | `migrate` exited non-zero | Read `docker compose logs migrate`. The app will not start until migrations succeed, which is deliberate. |
 | Sign-in says you are not invited | `OWNER_ALLOWLIST` did not match your identity. Numeric GitLab id is the most reliable value. Fix it, then re-run the seed: `docker compose --env-file .env.prod -f docker/docker-compose.prod.yml up -d --force-recreate seed-allowlist`. |
+| `backup-upload` exits 1 with `no staged dump — run the backup service first` | Either the dump stage failed (its output is above this line in the same log) or you invoked the uploader with `--no-deps`. The stamp file is written last, so its absence means no good dump was produced — which is the uploader refusing to send yesterday's. |
+| `backup-upload` exits 1 with a B2 `401` | The application key is wrong, revoked, or scoped to a different bucket or prefix than `B2_BUCKET`/`B2_PREFIX`. Check it from your own machine with the read-capable key; this host's key deliberately cannot list, so it cannot tell you more. |
 | It took over a database container you were using for local development | The dev stack in `docker/docker-compose.yml` and this one use different Compose project names (`dlectroflow` vs `dlectroflow-prod`) precisely to avoid that. If you see it, you are probably running an older copy of this file. |
 | Someone says **Connect Google →** "does nothing" — they never return to the app, and your logs show no callback at all | Their Google account is probably managed by an organisation that has not allowlisted your OAuth client. Google refuses at its own consent step (`Error 400: access_not_configured`), so there is no callback to log and no error the app can render. Nothing to fix on this host: see [A managed work account can be blocked by its own administrator](../README.md#a-managed-work-account-can-be-blocked-by-its-own-administrator). A personal Google account is the reliable workaround, and `.ics` export needs no Google account at all. |
 
@@ -353,7 +459,10 @@ Deliberately, to keep it one cheap machine:
   rate limiter is a plugin that is not in the base image. The app's own guest AI
   quotas still cap the expensive path. Cloudflare's free tier in front is the
   easy fix.
-- **Off-host backups.** See [Backups](#backups).
+- **A second, independent backup destination.** The chart dual-writes to Google
+  Cloud Storage (keyless, via Workload Identity) *and* optionally to B2, so
+  losing either one still leaves a good backup. Here there is one off-host
+  destination plus the host's own copy. See [Backups](#backups).
 
 For what each alternative costs and what it buys, see
 [docs/running-costs.md](running-costs.md).
