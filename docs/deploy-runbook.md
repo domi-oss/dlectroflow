@@ -456,4 +456,90 @@ credentials — the order below assumes the worst anyway.
 7. **Afterwards:** take a fresh on-demand backup (§12), verify token columns
    show `v1:` ciphertext, and audit GCS bucket access
    (`gcloud logging read 'resource.type="gcs_bucket"' ...`) for reads you
-   don't recognise.
+   don't recognise. **That audit depends on §16 being in place** — with
+   project-level ingestion off the read answers `SERVICE_DISABLED`, which is
+   silent unless you check the exit status.
+
+## 16. Log retention (prod)
+
+**Two independent settings have to agree before a single log line is kept, and
+neither one can see the other.**
+
+1. The **cluster** decides what to ship: `loggingConfig` enabling
+   `SYSTEM_COMPONENTS` and `WORKLOADS`, with `loggingService` set to
+   `logging.googleapis.com/kubernetes`. §1's `create-auto` gives you this.
+2. The **project** decides whether anything accepts it: the
+   `logging.googleapis.com` service, enabled, with a retention window on the
+   bucket the logs land in.
+
+Do only the first and the cluster ships logs to somewhere that will not take
+them. Nothing errors, nothing warns, and **there is no retention at all** — an
+application log line then exists only in a running pod's buffer, and Autopilot
+recycles pods without warning or correlation to anything you did. The dangerous
+part is that each setting reads as correct on its own, so the contradiction is
+invisible from either end. Do not treat "logging is enabled on the cluster" as
+an answer to "are logs being kept".
+
+### Enable it
+
+```bash
+gcloud services enable logging.googleapis.com --project=YOUR_GCP_PROJECT
+gcloud logging buckets update _Default --location=global --retention-days=30 --project=YOUR_GCP_PROJECT
+```
+
+Enabling starts the clock; it does **not** backfill. Everything before this
+point is gone, and the first minutes after it hold nothing either — so generate
+some traffic and wait before believing any check.
+
+### Then prove it from the artefact
+
+```bash
+LOG_PROJECT=YOUR_GCP_PROJECT bash scripts/check-log-retention.sh
+```
+
+`scripts/check-log-retention.sh` **reads a log line back out**. It deliberately
+refuses to ask whether the API shows as enabled, because a status field can read
+correct while nothing is being kept — this project has been caught more than
+once by a green signal that meant nothing had been looked at. Exit codes follow
+`check-prod-drift.sh` — `0` retained, `1` proven not retained, `2` undetermined.
+**`2` is not a pass.** A successful query returning zero entries is reported as
+`1`, not `0`.
+
+Add `LOG_CLUSTER=dlectroflow LOG_CLUSTER_LOCATION=europe-west2` to have it read
+the cluster's `loggingConfig` too, so a failure report names the *contradiction*
+rather than only the symptom. Without that, a reader who is told "no logs" goes
+to the cluster config, finds it correct, and stops.
+
+The weekly `ops_digest` job calls the same script and publishes its verdict. It
+reports `⚠️ undetermined` there, and that is honest rather than broken: that job
+runs on `alpine` and authenticates to the cluster through the GitLab Kubernetes
+agent, so it holds no Google Cloud credential and cannot see project-level
+state. Giving CI a read-only credential is what would turn that line green or
+red; until then the digest's job is to keep the gap visible instead of silent.
+
+### Why 30 days, and not a number picked by default
+
+- 30 days is the `_Default` bucket's own default, and a bucket's default
+  retention is the longest window whose storage is not separately billed.
+  Extending past it adds a per-GiB-month charge on top of the ingestion charge
+  that is already unavoidable, so a longer window is a recurring cost decision
+  and a shorter one saves nothing.
+- It has to outlast the loop it exists to close: the gap between a production
+  event happening and someone asking about it. The signal that reports
+  production problems here is a **weekly** digest, so any window shorter than a
+  fortnight can lose an incident between two reports. 30 days covers four.
+- Longer retention buys trend analysis and audit history, which belong to the
+  durable alerting story — error rate, restart loops, `tag:"llm_failure"` —
+  tracked separately in #157. Retention is that work's prerequisite, not a
+  cheaper version of it, so the window is sized for diagnosis rather than for
+  analysis it is not going to be used for.
+- **If ingestion volume ever becomes the problem, the lever is an exclusion
+  filter on `_Default`, not a shorter window.** Dropping health-check and
+  static-asset lines cuts volume without costing you the lines an incident needs.
+
+### What this does not give you
+
+Retention, not alerting. Nothing here watches the logs — `/api/livez`'s
+in-memory `llmFailureCount` still resets on every pod recycle, and the only
+alert policy is a binary uptime check. That is deliberate and the reasoning is
+in #157.
