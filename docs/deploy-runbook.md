@@ -589,8 +589,9 @@ in #157.
 ## 17. Container registry — measure it, don't quote it (#113)
 
 Every number about this registry is stale within a pipeline: CI pushes a tag per
-build. #113 was re-diagnosed three times because each round quoted the previous
-round's figures. So this section records **commands, not numbers.**
+build. #113 was diagnosed four times; the first was right and each later round
+re-argued it from whatever figure was last written down. So this section records
+**commands, not numbers** — and dates the few numbers it cannot avoid.
 
 ### The one command
 
@@ -612,7 +613,7 @@ Worth knowing before reaching for one of them in an incident:
 | Signal | Why it misleads |
 |---|---|
 | Total tag count | Moved by GitLab's policy, by `prune_registry` (#114) and by manual passes, while CI pushes against all three. Attributes nothing. |
-| Bare-SHA count falling | It will not fall. At ~46 pushes/day against a 7-day horizon it sits near 400 **when the policy is working correctly.** |
+| Bare-SHA count falling | It will not fall. Measured 2026-08-04, ~46 pushes/day against a 7-day horizon settles near 400 **when the policy is working correctly** — re-derive both numbers before using them, they move with merge rate. |
 | `next_run_at` advancing | On gitlab.com the cadence is an earliest-start, not a schedule. Measured 2026-08-04: ~20h overdue while the tags proved the last run had drained exactly. |
 | `main-*` growing | The keep pattern retains those **forever** by design. That is #114's job to bound, not the policy's. |
 
