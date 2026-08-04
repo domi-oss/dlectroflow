@@ -40,8 +40,76 @@ describe("updateFocusTimerSettings", () => {
           focusKeepAwake: false,
           focusAlarmEnabled: true,
           focusSound: "lofi_calm",
+          focusSoundCategory: null,
           focusPauseTogether: false,
         },
+      }),
+    );
+  });
+
+  // #70 — the category playlist. A separate nullable column rather than a
+  // `category:*` value in focusSound, so both facts survive: which category is
+  // the playlist, and which track the session opens on.
+  it("persists an allowlisted category alongside the start track", async () => {
+    await updateFocusTimerSettings({
+      timerStyle: "ring",
+      minimalMode: false,
+      keepAwake: true,
+      alarmEnabled: true,
+      sound: "lofi_chillhop",
+      category: "chillhop",
+    });
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          focusSound: "lofi_chillhop",
+          focusSoundCategory: "chillhop",
+        }),
+        create: expect.objectContaining({ focusSoundCategory: "chillhop" }),
+      }),
+    );
+  });
+
+  it("coerces an out-of-set category to null (mirrors Settings_focusSoundCategory_check)", async () => {
+    // `ambient` is the slug #70's own description carried before it was corrected
+    // against the code, so it is the realistic bad value rather than an invented
+    // one. `lofi_chillhop` is the paired mistake: a track id in the category slot.
+    for (const category of ["ambient", "lofi_chillhop", "category:chillhop"]) {
+      await updateFocusTimerSettings({
+        timerStyle: "ring",
+        minimalMode: false,
+        keepAwake: true,
+        alarmEnabled: true,
+        sound: "lofi_chillhop",
+        category,
+      });
+      expect(upsert).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({ focusSoundCategory: null }),
+        }),
+      );
+    }
+  });
+
+  it("clears the category when the sound is off — the pair has no meaning", async () => {
+    // Unlike focusShuffle / focusPauseTogether, which are orthogonal tastes left
+    // inert while sound is off, the category IS part of the sound selection: it
+    // and "off" are options in the same radio group, so choosing one replaces the
+    // other. Storing (off, chillhop) would leave a state the picker cannot show.
+    await updateFocusTimerSettings({
+      timerStyle: "ring",
+      minimalMode: false,
+      keepAwake: true,
+      alarmEnabled: true,
+      sound: "off",
+      category: "chillhop",
+    });
+    expect(upsert).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          focusSound: "off",
+          focusSoundCategory: null,
+        }),
       }),
     );
   });

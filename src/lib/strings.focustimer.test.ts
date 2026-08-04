@@ -47,6 +47,24 @@ describe("focus-timer redesign strings (MR ②)", () => {
     }
   });
 
+  it("#70 — the category copy promises a pass, and the count has both grammatical forms", () => {
+    for (const voice of ["plain", "playful"] as const) {
+      // Same promise as the track picker's hint: a pass, never a loop.
+      expect(t("focusSettings.soundCategoryHint", voice)).toMatch(/category/i);
+      expect(t("focusSettings.soundCategoryHint", voice)).not.toMatch(/loop/i);
+    }
+    // Functional labels, identical across voices (the #43 picker convention).
+    for (const key of [
+      "focusSettings.soundWholeCategory",
+      "focusSettings.soundTrackCount",
+      "focusSettings.soundTrackCountOne",
+    ] as const) {
+      expect(t(key, "plain")).toBe(t(key, "playful"));
+    }
+    expect(t("focusSettings.soundTrackCount", "plain")).toBe("tracks");
+    expect(t("focusSettings.soundTrackCountOne", "plain")).toBe("track");
+  });
+
   it("#65 — the pause-coupling setting names its consequence and keeps plain emoji-free", () => {
     expect(t("focusSettings.pauseTogether", "plain")).toBe(
       "Pause music and timer together",

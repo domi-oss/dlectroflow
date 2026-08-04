@@ -246,6 +246,39 @@ describe("focus-sounds — category playlists (#70)", () => {
     expect(trackIndexIn(narrowed, FocusSound.LofiJazzhop)).toBe(-1);
     expect(trackIndexIn(narrowed, "off")).toBe(-1);
   });
+
+  it("offerableFocusCategories drops a category the database could not store", async () => {
+    // A self-hoster's manifest may declare categories outside open-lofi's ten.
+    // Those tracks still play (they are in the merged list), but the category
+    // cannot be SAVED — Settings_focusSoundCategory_check would reject it — so
+    // offering it would produce a radio that silently does not stick.
+    const {
+      offerableFocusCategories,
+      focusPlaylistCategories,
+      FOCUS_SOUND_TRACKS,
+    } = await import("@/lib/focus-sounds");
+    const grown = [
+      ...FOCUS_SOUND_TRACKS,
+      streamed("Wind One", "wind-chimes", "Wind chimes"),
+      streamed("Wind Two", "wind-chimes", "Wind chimes"),
+      streamed("Paper Cranes", "chillhop", "Chillhop"),
+    ];
+    expect(focusPlaylistCategories(grown).map((c) => c.slug)).toContain(
+      "wind-chimes",
+    );
+    expect(offerableFocusCategories(grown).map((c) => c.slug)).toEqual([
+      "chillhop",
+    ]);
+  });
+
+  it("focusTrackForCategory finds the bundled track a category selection opens on", async () => {
+    const { focusTrackForCategory } = await import("@/lib/focus-sounds");
+    expect(focusTrackForCategory("chillhop")?.id).toBe(FocusSound.LofiChillhop);
+    expect(focusTrackForCategory("seasonal-weather")?.id).toBe(
+      FocusSound.LofiSeasonal,
+    );
+    expect(focusTrackForCategory("wind-chimes")).toBeUndefined();
+  });
 });
 
 describe("focus-sounds — pure playlist helpers", () => {

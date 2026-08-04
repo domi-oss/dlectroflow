@@ -240,6 +240,45 @@ export function focusPlaylistCategories(
 }
 
 /**
+ * The categories a PICKER may offer — {@link focusPlaylistCategories}, minus any
+ * the database would refuse.
+ *
+ * `Settings.focusSoundCategory` is CHECK-constrained to `FocusSoundCategory`, so
+ * a self-hoster whose manifest declares its own category gets tracks that play
+ * (they are in the merged list, and they group) but a slug that cannot be SAVED.
+ * Offering it would be a control that silently does not stick, which is worse
+ * than not offering it — the server action coerces the unknown slug to null and
+ * the radio would spring back on the next load with no explanation.
+ *
+ * Widening the constraint to accept arbitrary manifest slugs is the alternative,
+ * and it was declined: a CHECK constraint over an open set is no constraint, and
+ * `enum-constraint-sync` would have nothing to mirror.
+ */
+export function offerableFocusCategories(
+  tracks: readonly FocusTrack[],
+  min: number = MIN_CATEGORY_PLAYLIST_TRACKS,
+): FocusPlaylistCategory[] {
+  const persistable = new Set<string>(Object.values(FocusSoundCategory));
+  return focusPlaylistCategories(tracks, min).filter((c) =>
+    persistable.has(c.slug),
+  );
+}
+
+/**
+ * The bundled track of a category — where a category selection opens.
+ *
+ * Picking a category still has to answer "which track first", and that answer has
+ * to be a value `Settings.focusSound` can hold. Each of the ten has exactly one
+ * bundled track (#43), which is both persistable and playable with no store
+ * reachable, so it is the only candidate that cannot fail.
+ */
+export function focusTrackForCategory(
+  category: string,
+): FocusTrack | undefined {
+  return FOCUS_SOUND_TRACKS.find((t) => t.category === category);
+}
+
+/**
  * The playlist a stored category selection resolves to.
  *
  * Three cases, and the last two are the ones that matter:
