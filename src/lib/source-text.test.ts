@@ -70,6 +70,40 @@ describe("stripShellComments", () => {
     expect(stripShellComments("DAYS=30 # and why")).toBe("DAYS=30 ");
   });
 
+  // GitLab Duo on !261, verified against bash before acting: whitespace is not
+  // the only thing that starts a word. Each of these was measured — `printf X
+  // |#c` runs the pipe and drops the comment, `(#c` opens a subshell and drops
+  // the comment, and `printf Z >#f` makes bash report a syntax error because
+  // the redirect has no target rather than writing a file called `#f`.
+  it.each([
+    [";", "cmd;# gone"],
+    ["&", "cmd &# gone"],
+    ["|", "cmd |# gone"],
+    ["(", "(# gone"],
+    [")", "cmd)# gone"],
+    ["<", "cmd <# gone"],
+    [">", "cmd ># gone"],
+  ])("treats `#` after %s as the start of a comment", (_char, source) => {
+    expect(stripShellComments(source)).not.toContain("gone");
+  });
+
+  it("does not let a comment after `;` hide a real later binding", () => {
+    // The failure the operator set exists to prevent: a commented-out example
+    // read as live code, which is the whole point of stripping in the first
+    // place. Without `;` in the set this returns the 7.
+    const source = ':;# DAYS="${DAYS:-7}"\nDAYS="${DAYS:-30}"';
+    expect(stripShellComments(source)).not.toContain("7");
+    expect(stripShellComments(source)).toContain("30");
+  });
+
+  it.each(["$", "{", "}", "=", "-", "a", "1", "_"])(
+    "does not treat `#` after %s as a comment",
+    (char) => {
+      const source = `keep${char}#still-here`;
+      expect(stripShellComments(source)).toBe(source);
+    },
+  );
+
   it("keeps a `#` that is parameter expansion, not a comment", () => {
     // `${sub#=}` appears in this repo's own scripts. Treating it as a comment
     // would truncate the line and lose everything after it.

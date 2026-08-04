@@ -68,6 +68,26 @@ export function stripComments(source: string): string {
  * binding and makes the caller's answer `null` — a loud miss, not a confident
  * wrong one.
  */
+
+/**
+ * Characters after which an unquoted `#` begins a word, and therefore a
+ * comment. Whitespace is the obvious half; the operators are the half that is
+ * easy to miss, and missing them fails in the direction that matters — a
+ * commented-out binding read as live code.
+ *
+ * Each one measured against bash rather than reasoned about, because the naive
+ * reading of "start of a word" is wrong for several of them:
+ *
+ *     printf X |#c        the `#c` is a comment; the pipe still runs
+ *     (#c \n printf Y)    the `#c` is a comment; the subshell still runs
+ *     printf Z >#f        the `#f` is a comment, so `>` has no target and bash
+ *                         reports a syntax error rather than writing to `#f`
+ *
+ * `$`, `{`, `}`, `=`, `-` and word characters are all in the tested set and all
+ * correctly excluded: `${sub#=}` and `severity#x` must survive.
+ */
+const WORD_START_BEFORE_HASH = "\n \t;&|()<>";
+
 export function stripShellComments(source: string): string {
   let out = "";
   let quote: '"' | "'" | null = null;
@@ -89,7 +109,7 @@ export function stripShellComments(source: string): string {
     // Unquoted `#` starts a comment only at the start of a word — otherwise it
     // is parameter expansion (`${v#p}`) or part of a bare token.
     const prev = i === 0 ? "\n" : source[i - 1];
-    if (ch === "#" && (prev === "\n" || prev === " " || prev === "\t")) {
+    if (ch === "#" && WORD_START_BEFORE_HASH.includes(prev)) {
       while (i < source.length && source[i] !== "\n") i += 1;
       continue;
     }
