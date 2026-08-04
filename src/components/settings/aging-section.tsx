@@ -113,7 +113,14 @@ export function AgingSection({
       headingExtras={
         <>
           {settings.demoOverrideSeconds != null && (
-            <span className="text-xs font-normal text-amber-600">
+            // #109 — #95's twin, missed by the same gate for the same reason:
+            // literally the same colour, size and semantic on a different route.
+            // `text-amber-600` is 3.01:1 at 12px on the light --background, and
+            // only renders when a demo override is set, so /settings passed its
+            // zero-tolerance contrast gate while this failed. The tuned pair
+            // (amber-700 4.75:1 / amber-400 11.44:1) is the one #57 settled on
+            // for "attention, not alarm".
+            <span className="text-xs font-normal text-amber-700 dark:text-amber-400">
               demo override: {settings.demoOverrideSeconds}s
             </span>
           )}

@@ -31,6 +31,66 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Added
 
+- **A member can export their own data (#129).** Settings → Account gains
+  **Download my data (.zip)**, and `GET /api/export` behind it. The archive holds
+  the same data written four ways, because no single format does every job: a
+  `tasks.md` you can read in any text editor with the steps nested under their
+  task, three RFC 4180 CSVs (`tasks.csv`, `steps.csv`, `inbox.csv`) joined on
+  `task_id` for spreadsheets, a `scheduled.ics` for calendars, and a lossless
+  `export.json` carrying `schemaVersion: 1`. A `README.md` inside explains every
+  file and states what is deliberately absent — the OAuth tokens for a Google
+  connection and any stored LLM API key are never exported, and the README says so
+  rather than leaving a user to assume their Google connection travelled with it.
+  UK GDPR Art. 15 and Art. 20 are the obligation; the archive is built to be
+  usable long after that, which is why the human tier is Markdown.
+
+  A guest sandbox can export too, deliberately: it expires within about a day, so
+  the export is the only way anything done in one survives. `/privacy` now
+  documents self-service access and portability instead of promising to answer by
+  hand, and the legal effective date moves with it.
+
+  No new dependency: the archive is a ZIP written with `node:zlib`, verified in
+  tests against a reader written from the specification. The endpoint is metered
+  per workspace (one export a minute) so a retry loop cannot make the instance
+  rebuild a whole account's archive repeatedly.
+
+- **The self-host Compose stack now copies each database dump off the host
+  (#162).** It previously dumped to `./backups` on the same disk it was
+  protecting: a backup should not share a failure domain with the thing it backs
+  up, and the database is the one asset in that stack that cannot be rebuilt from
+  source. A new `backup-upload` service copies every dump to a Backblaze B2
+  bucket; the host's own retained copy stays, and both now carry the same
+  filename so they can be matched and verified against each other.
+  - **New optional environment variables**: `B2_BUCKET`, `B2_PREFIX`,
+    `B2_KEY_ID`, `B2_APP_KEY` in `.env.prod`. Leave them unset and nothing
+    changes — `backup` alone still works for anyone copying dumps off some other
+    way, and `backup-upload` refuses to run rather than appearing to succeed.
+  - **The crontab line changes** from `run --rm backup` to
+    `run --rm backup-upload`, which takes the dump and uploads it in one
+    invocation. `docs/self-host-vps.md` has the walkthrough, including how to
+    scope the B2 application key: one bucket, one prefix, `writeFiles` only, so a
+    compromised host can neither read existing backups out nor delete them. The
+    read-capable key stays off the host, which makes a restore drill an off-host
+    task by construction.
+  - **The dump gained `--no-owner --no-privileges`**, so it restores under any
+    role name — without them a restore into a scratch database on a rescue host
+    fails on every `GRANT` and `OWNER TO`.
+  - **A size guard and a two-step write.** The dump is written to a `.partial`
+    name and only promoted after passing a minimum-size check, so a degenerate
+    dump cannot become "the backup". Measured: a dump of an empty database is
+    under 400 bytes, and a `pg_dump` that fails at the head of `pg_dump | gzip`
+    leaves gzip's 20-byte output behind — which is also why every stage uses
+    `set -euo pipefail` rather than a bare `set -eu`, under which that pipeline
+    exits 0.
+  - **Rehearsed end to end**, not just written: a dump taken by the stack,
+    uploaded, pulled back down, restored into a fresh digest-pinned
+    `postgres:16.14` under a different role name, and compared per table against
+    the source — row counts and a content hash for all 20 tables. The comparison
+    was itself checked against an empty database and against a five-row deletion,
+    so the match means something. Both guards were made to fire on purpose.
+  - `backup-hygiene` grows a Compose walk beside its Helm one and fails the build
+    if any of these properties is removed.
+
 - Optional second backup destination: the prod database CronJob can now upload
   each dump to a Backblaze B2 bucket alongside the existing GCS upload, writing
   the same timestamped filename to both. Off by default; enabled per-environment
@@ -71,29 +131,50 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Changed
 
-- **Terms of Service — the backups are not a personal undo (#164).** *Your data*
-  gains a short clause saying what the nightly backups do and do not do for one
-  person: they exist to bring the whole instance back after a disaster, and that
-  obligation is stated rather than disclaimed — but there is no per-person
-  restore, and nothing brings back a capture, task or step you deleted. The page
-  previously mentioned backups once, in the as-is section, and left a reader to
-  infer the rest; the likely inference was the wrong one. That sentence now
-  carries the gist and links to the full clause, so the two cannot drift apart.
-  Deliberately **not** filed under *Limits on my liability*: it describes how the
-  service works, and the narrow claim is *no individual restore*, never *no
-  responsibility for your data*. Tests assert both directions. Nothing is said
-  or linked about exporting your data, because #129 is unshipped.
+- **`.ics` downloads now fold long lines (RFC 5545 §3.1).** The per-task calendar
+  download has emitted content lines over the 75-octet limit since #39 put a focus
+  deep-link in every event's `DESCRIPTION`; #129's export made it unavoidable, so
+  the shared serialiser now folds, backing off UTF-8 continuation bytes so a fold
+  can never split an emoji. Every calendar client unfolds, so imported events are
+  unchanged — but a strict parser will now accept the file.
 
-- **Privacy Policy — the Erasure right (#153).** The Erasure right now names
-  the self-serve control and its one exception (the owner's own account), and
-  the retention section says what deleting your own account does. How a data
-  subject exercises an Art. 17 right is part of the Art. 12/13 disclosure, so it
-  is a substantive change rather than a copy tweak.
+- **Terms of Service — the backups are not a personal undo, and where to get
+  your own copy (#164).** *Your data* gains a short clause saying what the
+  nightly backups do and do not do for one person: they exist to bring the whole
+  instance back after a disaster, and that obligation is stated rather than
+  disclaimed — but there is no per-person restore, and nothing brings back a
+  capture, task or step you deleted. The page previously mentioned backups once,
+  in the as-is section, and left a reader to infer the rest; the likely inference
+  was the wrong one. That sentence now carries the gist and links to the full
+  clause, so the two cannot drift apart. Deliberately **not** filed under *Limits
+  on my liability*: it describes how the service works, and the narrow claim is
+  *no individual restore*, never *no responsibility for your data*. Tests assert
+  both directions.
 
-- **Both legal pages now carry an effective date of 3 August 2026**, moved by
-  the Terms change above. The date is shared by the two documents on purpose — a
+  The clause closes by telling you that you can download a copy of everything
+  from Settings, which #129 made true while this change was open. It is **prose,
+  not a link**: `/api/export` is an authenticated GET that returns a file, so a
+  link to it from a page written to be readable while signed out would answer a
+  reader with a 401 rather than their data. A test asserts the claim is present,
+  that it names Settings, that no `/export/` link appears — and, separately,
+  that the Settings control it describes still exists and still points at
+  `/api/export`, so the Terms cannot outlive their own premise.
+
+- **Privacy Policy — the Erasure right, and Access and Portability.** Two
+  substantive changes, both about how a data subject actually exercises a right
+  rather than about what the policy promises. The Erasure right now names the
+  self-serve control and its one exception (the owner's own account), and the
+  retention section says what deleting your own account does (#153). Access and
+  Portability now name the export control instead of promising an answer by hand,
+  disclose the two things it withholds (the Google OAuth tokens and any stored
+  LLM API key), and state that a guest sandbox can exercise the right in full
+  (#129). How a right is exercised, and what is withheld from it, are both part
+  of the Art. 12/13 disclosure rather than copy tweaks.
+
+- **Both legal pages now carry an effective date of 4 August 2026**, moved by the
+  Terms change above. The date is shared by the two documents on purpose — a
   reader comparing them should not have to hold two version numbers — so
-  /privacy's date moves with it even though its text has not changed since #153.
+  /privacy's date moves with it even though its text has not changed since #129.
 - `docs/legal.md`'s "Google revocation: the gap the pages admit" section was
   stale — it still described freeze and delete as paths that never call Google's
   revoke endpoint, which #126 fixed in v0.5.0. Corrected, and the residue that
@@ -113,6 +194,72 @@ operators upgrading a self-hosted instance don't get surprised.
   told "already there" instead of raising. Nothing about error logging changed:
   a genuine Prisma failure still prints exactly as before, and a test asserts
   both halves against a real database.
+
+- **The WCAG-AA failures the accessibility suite could not see, and the gate that
+  now catches them (#109, #117).** Both issues are one structural blind
+  spot: the automated gates only measure what is painted during the scan, so a
+  green suite meant "the gate cannot see this", not "this is fine".
+  - **Text colour.** On this palette a bare Tailwind `-600` is not AA as text
+    (3.00–4.48:1 on the light background), and a `-700` used as text needs a
+    `dark:` partner (it drops to 2.34–3.97:1 in dark). Every instance was data-
+    or state-dependent — the save indicator only paints its green mid-save, the
+    aging note only appears with a demo override set, the sign-in error copy only
+    on an error redirect — so the routes' zero-tolerance contrast gates scanned
+    the idle page and passed. Fixed at the save indicator, the aging and round-up
+    demo notes, the points stat, the sign-in errors, the task-schedule label and
+    the five Google/breakdown status banners.
+  - **Focus indicators.** Every popup menu entry in the header used a background
+    swap as its only focus indicator, with the outline explicitly removed. That
+    is 1.07:1 (light) and 1.17:1 (dark) between focused and unfocused, where WCAG
+    2.4.11 Focus Appearance — AA in WCAG 2.2 — needs 3:1. Both menus now draw an
+    inset ring at 4.65–8.83:1 against both adjacent colours, in both themes, and
+    keep the background swap as the hover affordance. Nothing had caught this
+    because **axe does not implement 2.4.11 at all.**
+  - **Two more found by the new gate, in neither issue's inventory**: a bare
+    `text-emerald-600` on the task-schedule label, and the scheduling banner,
+    whose in-code comment asserted its colours were AA on its own tint. They are
+    not: a translucent `/10` tint composites over the page background and pulls
+    it toward the text, so `text-green-700` reads 4.16:1 there rather than the
+    4.65:1 the bare token gives. The tinted banners are now driven from one
+    measured table (`src/lib/status-banner-style.ts`) instead of six copies.
+  - **The durable half** is `src/lib/a11y-class-hygiene.ts`: a TypeScript-AST
+    scan of the class strings in `src/`, asserting no sub-AA chromatic text
+    shade, a `dark:` partner on every dark-side text colour, and a non-colour
+    focus indicator wherever the UA outline is removed. It runs in the unit job
+    with no browser and no database, catches the *class* rather than the
+    instance, and carries a reason-bearing allowlist per rule — the same contract
+    `fetch-host-hygiene` uses. Verified failing on the unfixed tree first: 15
+    text findings across 9 files, 2 focus findings, 4 unmeasured banner tones.
+### Security
+
+- **The dependency bot can no longer walk a security override back into a CVE
+  range (#161).** `brace-expansion` is held at the patched `^5.0.8` by a
+  top-level npm `override` because CVE-2026-14257 / GHSA-mh99-v99m-4gvg has no
+  patched 2.x/3.x/4.x backport. A Renovate MR titled "update dependency
+  brace-expansion to v2.1.4" nevertheless rewrote that entry to `^2.1.3` — back
+  inside the affected range — and it was classified as a `patch`, which this
+  repo automerges; only an unresolved review discussion stopped it. The
+  scanners were not a backstop, because the head pipeline's security summary was
+  identical to `main`'s.
+  - **It was a mis-read, not a rollback.** Renovate resolves the top-level
+    override's current version from the *hoisted* `node_modules/brace-expansion`,
+    which a second, deliberately different override pins to 2.1.3 for the lint
+    toolchain — while the copy the top-level entry actually governs sits nested
+    under `@ts-morph/common` and is the only production-reachable one. So
+    Renovate saw "currently 2.1.3", offered 2.1.3 → 2.1.4 as a patch, and wrote
+    the range it inferred over the deliberate one. That recurs on every 2.x
+    release, and the MR is recreated even when closed, so the fix had to be in
+    config.
+  - **Each override scope is now capped inside its own major.** The two entries
+    cannot share one rule — forcing 5.x on the lint-tooling copy raises
+    `TypeError: expand is not a function` and makes ESLint exit having linted
+    zero files — and Renovate reports both scopes under the same dependency
+    name, so the cap keys on the current value instead. The wanted 5.0.8 → 5.0.9
+    bump is still proposed, and a new `override-hygiene` guard fails the build if
+    either override drifts out from under the rule that protects it.
+  - `postgres` majors are capped in the same pass: the version is pinned in three
+    places that must move together, and moving it is a dump/restore migration
+    rather than an image swap.
 
 ## [0.5.0] - 2026-08-01
 

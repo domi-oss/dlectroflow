@@ -12,6 +12,8 @@ import { firstResumableStep } from "@/components/inbox/resume-step";
 import { openSessionRemainingSec } from "@/lib/focus-timer-clock";
 import { mergePersistedIntent } from "@/lib/scheduling/intent";
 import type { ScheduleIntent } from "@/lib/scheduling/types";
+import { STATUS_BANNER_TONE } from "@/lib/status-banner-style";
+import { cn } from "@/lib/utils";
 
 // DB-backed, always fresh.
 export const dynamic = "force-dynamic";
@@ -182,14 +184,31 @@ export default async function InboxPage({
 
   return (
     <div className="space-y-4">
+      {/* #109 — both banners hard-coded a `-700` text colour with no `dark:`
+          partner, so they read 3.97:1 (green) and 3.06:1 (red) on the dark
+          --background, and only ever render on the OAuth return redirect. The
+          tone now comes from the one shared table, which also fixes the light
+          half nobody had measured: the banner's own `/10` tint lifts the
+          background toward the text, so green-700 was 4.16:1 there, not the
+          4.65:1 the bare token gives. See status-banner-style.ts. */}
       {sp.google === "connected" && (
-        <div className="rounded-lg border border-green-600/30 bg-green-600/10 px-4 py-2 text-sm font-medium text-green-700">
+        <div
+          className={cn(
+            "rounded-lg border px-4 py-2 text-sm font-medium",
+            STATUS_BANNER_TONE.ok,
+          )}
+        >
           ✅ Google Tasks connected — task breakdowns can now sync into Reclaim
           via your Google Tasks list.
         </div>
       )}
       {sp.google === "error" && (
-        <div className="rounded-lg border border-red-600/30 bg-red-600/10 px-4 py-2 text-sm text-red-700">
+        <div
+          className={cn(
+            "rounded-lg border px-4 py-2 text-sm",
+            STATUS_BANNER_TONE.error,
+          )}
+        >
           Google Tasks connection failed{sp.reason ? `: ${sp.reason}` : ""}. Try
           again from a task breakdown.
         </div>

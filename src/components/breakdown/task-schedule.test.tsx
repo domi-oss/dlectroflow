@@ -60,6 +60,28 @@ describe("TaskSchedule — scheduled indicator (driven by scheduledAt)", () => {
     );
     expect(screen.getByText("Not scheduled yet")).toBeInTheDocument();
   });
+
+  // #109 — a NINTH instance of the bare-`-600` class, found by
+  // a11y-class-hygiene rather than by #109's own inventory, which is exactly the
+  // argument for having the gate. `text-emerald-600` is 3.45:1 at 14px on the
+  // light --background; 14px is normal text, so 4.5:1 applies and it failed.
+  // emerald-700/emerald-400 is 5.05:1 / 10.16:1 — the pair row-actions.tsx and
+  // inbox-view.tsx already use for the same "scheduled" semantic.
+  it("paints the scheduled label with the AA-tuned emerald pair", () => {
+    render(
+      <TaskSchedule
+        taskId="t1"
+        taskTitle="Ship the thing"
+        scheduledAt={new Date()}
+        google={connected}
+        voice="plain"
+      />,
+    );
+    const label = screen.getByText("Scheduled ✓");
+    expect(label.className).toContain("text-emerald-700");
+    expect(label.className).toContain("dark:text-emerald-400");
+    expect(label.className).not.toContain("text-emerald-600");
+  });
 });
 
 describe("TaskSchedule — owner with Google connected", () => {

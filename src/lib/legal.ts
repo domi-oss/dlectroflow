@@ -63,12 +63,29 @@ export const SOURCE_REPO_URL =
  * has not. The fingerprint gate is what keeps that honest in the other
  * direction: the text cannot move without someone deciding about this date.
  *
- * Bumped for #164: the Terms now say what the backups do and do not do for one
- * person — whole-instance recovery, no per-person restore, and nothing that
- * brings back a deletion. Telling a reader that a copy of their work cannot be
- * fetched back for them changes what they can rely on, which is substance; the
- * page previously said only "there are nightly backups", which invited the
- * opposite inference.
+ * Bumped for #164, which lands two changes to the Terms at once:
+ *
+ *   1. The Terms now say what the backups do and do not do for one person —
+ *      whole-instance recovery, no per-person restore, and nothing that brings
+ *      back a deletion. Telling a reader that a copy of their work cannot be
+ *      fetched back for them changes what they can rely on, which is substance;
+ *      the page previously said only "there are nightly backups", which invited
+ *      the opposite inference.
+ *   2. The same clause now tells the reader they can download a copy of
+ *      everything from Settings. #129 shipped between the two halves of this
+ *      change, so the advice "keep your own copy" stopped being something the
+ *      reader had to arrange for themselves. Naming a route by which somebody
+ *      can act on their own data is substance in the reassuring direction, and
+ *      it moves the date for the same reason #153's erasure control did.
+ *
+ * Previously bumped for #129: access and portability are now exercisable from
+ * Settings rather than only by emailing the controller, and /privacy says so —
+ * the paragraph that used to read "there is no self-service export button yet"
+ * would otherwise be a false statement on a published legal page. It also newly
+ * discloses two deliberate exclusions (the Google OAuth tokens and any stored
+ * LLM API key), and that a guest sandbox can exercise the right in full. HOW a
+ * data subject exercises an Art. 15/20 right, and what is withheld from it, are
+ * both part of the Art. 12/13 disclosure rather than presentation.
  *
  * Previously bumped for #153: erasure is now exercisable from Settings rather than only by
  * emailing the controller, and the retention section says what deleting your

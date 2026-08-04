@@ -214,3 +214,37 @@ describe("AccountMenu — what it must not publish", () => {
     expect(text).not.toMatch(/gitlab_dlectronique/); // no other account
   });
 });
+
+/**
+ * #117 — WCAG 2.4.11 Focus Appearance. axe does not implement it, so no gate in
+ * the repo could see that these entries' only focus treatment was
+ * `focus-visible:bg-accent` — 1.09:1 against the popup surface in light, 1.24:1
+ * in dark, where an indicator needs 3:1.
+ *
+ * The pairing with app-menu.tsx is the point of the issue, not a coincidence:
+ * #117 was declined inside !192 because patching one of two popups that open
+ * inches apart is worse than patching neither. So both entry kinds here — the
+ * link and the submit button — and the app menu's links all assert the same
+ * token.
+ */
+describe("AccountMenu — popup entries have a real focus indicator (#117)", () => {
+  it("rings the link entry and the sign-out button alike", async () => {
+    render(<AccountMenu identity={OWNER} />);
+    const popup = await open();
+    const link = screen.getByRole("link", { name: /account settings/i });
+    const signOut = screen.getByRole("button", { name: /sign out/i });
+    expect(popup).toContainElement(link);
+    for (const entry of [link, signOut]) {
+      expect(entry.className).toContain("focus-visible:inset-ring-2");
+      expect(entry.className).toContain("focus-visible:inset-ring-ring");
+    }
+  });
+
+  it("still swaps the background, so nothing about the hover look changes", async () => {
+    render(<AccountMenu identity={OWNER} />);
+    await open();
+    const signOut = screen.getByRole("button", { name: /sign out/i });
+    expect(signOut.className).toContain("hover:bg-accent");
+    expect(signOut.className).toContain("focus-visible:bg-accent");
+  });
+});

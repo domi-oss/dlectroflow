@@ -15,6 +15,33 @@ const DESTINATIONS = [
   { key: "nav.help", href: "/help" },
 ] as const;
 
+// Popup entries, at the 44px minimum (WCAG 2.5.5).
+//
+// At module scope, and named rather than spelled inline, for two reasons. It
+// depends on nothing, so there is no reason to re-bind it per render (Duo review,
+// !250). And #117 is about the two menus *agreeing*, so their entry styles should
+// be as easy to diff as possible — account-menu.tsx hoists its own the same way.
+//
+// #117 — the focus indicator is an INSET RING, not just the background swap
+// this used to rely on. WCAG 2.4.11 Focus Appearance is AA in WCAG 2.2 and axe
+// does not implement it, so nothing in the suite was ever going to catch this:
+// --muted against --background is 1.07:1 in light and 1.17:1 in dark, against
+// the 3:1 an indicator needs. --ring reads 5.09:1 on the popup surface and
+// 4.75:1 on the focused --muted in light, 8.83:1 / 7.55:1 in dark.
+//
+// Inset because these entries are full-bleed to the popup's edge, so an outset
+// ring would sit outside its border. That geometry also means the ring's left
+// and right edges abut the popup's own --border, so that adjacency is measured
+// too: 4.25:1 light, 6.58:1 dark. The tightest pairing anywhere on this
+// indicator is 4.25:1 against a 3:1 requirement.
+//
+// The background swap stays — it is the hover affordance, and dropping it would
+// be a redesign. The ring token is identical to account-menu.tsx's entries; the
+// corner radius differs only because those entries are inset with a radius and
+// these are full-bleed, which is pre-existing and not what #117 is about.
+const ENTRY =
+  "flex min-h-[44px] items-center px-4 py-2 text-sm outline-none hover:bg-muted hover:text-primary focus-visible:bg-muted focus-visible:text-primary focus-visible:inset-ring-2 focus-visible:inset-ring-ring";
+
 export function AppMenu({ voice }: { voice: Voice }) {
   const pathname = usePathname();
   const menuRef = useRef<HTMLDivElement>(null);
@@ -77,10 +104,7 @@ export function AppMenu({ voice }: { voice: Voice }) {
                 key={href}
                 href={href}
                 aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex min-h-[44px] items-center px-4 py-2 text-sm outline-none hover:bg-muted hover:text-primary focus-visible:bg-muted focus-visible:text-primary",
-                  active && "text-primary font-medium",
-                )}
+                className={cn(ENTRY, active && "text-primary font-medium")}
               >
                 {t(key, voice)}
               </Link>

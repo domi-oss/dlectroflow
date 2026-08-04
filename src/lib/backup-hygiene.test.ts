@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseBackupTemplate, stripHelmActions } from "@/lib/backup-hygiene";
+import {
+  parseBackupTemplate,
+  parseComposeBackup,
+  stripHelmActions,
+} from "@/lib/backup-hygiene";
 
 /**
  * The database backup is the one job in this repo whose failure is **silent by
@@ -30,6 +34,11 @@ import { parseBackupTemplate, stripHelmActions } from "@/lib/backup-hygiene";
 
 const TEMPLATE = readFileSync(
   join(process.cwd(), "charts/dlectroflow/templates/backup.yaml"),
+  "utf8",
+);
+
+const COMPOSE = readFileSync(
+  join(process.cwd(), "docker/docker-compose.prod.yml"),
   "utf8",
 );
 
@@ -143,5 +152,365 @@ describe("backup CronJob hygiene", () => {
     const facts = parseBackupTemplate(withoutStage(withComment, "upload-b2"));
     expect(facts.destinations.b2).toBe(false);
     expect(facts.destinations.gcs).toBe(true);
+  });
+});
+
+/**
+ * The same class of guard for the Compose self-host path (#162).
+ *
+ * Until #162 that path dumped to a directory **on the disk it was protecting**,
+ * which is the one failure a backup has to survive: a backup should not share a
+ * failure domain with the thing it backs up, and the database is the only asset
+ * here that cannot be rebuilt from source. The properties below are the ones the
+ * chart path already proves, ported rather than reinvented — see the header of
+ * `charts/dlectroflow/templates/backup.yaml` for why each exists.
+ *
+ * Synthetic fixtures first, real file second, matching the split every other
+ * hygiene module uses: a guard that can only be run against the repo cannot be
+ * shown capable of failing.
+ */
+
+/**
+ * A minimal two-service stack in the real file's shape. `uploadScript` is
+ * injected already indented to the literal block's level.
+ */
+const composeFixture = (uploadScript: string) => `name: dlectroflow-prod
+
+services:
+  db:
+    image: postgres:16
+  backup:
+    image: postgres:16
+    volumes:
+      - ../backups:/backups
+      - backup_stage:/stage
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        pg_dump | gzip -9 > /stage/dump.sql.gz
+        date -u +%Y%m%dT%H%M%SZ > /stage/stamp
+  backup-upload:
+    image: rclone/rclone:1.75
+    volumes:
+      - backup_stage:/stage:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+${uploadScript}
+  purge:
+    image: dlectroflow:local
+    command: ["npx", "tsx", "prisma/scheduled-purge.ts"]
+
+volumes:
+  backup_stage:
+`;
+
+const REAL_UPLOAD = [
+  "        set -euo pipefail",
+  '        STAMP="$$(cat /stage/stamp)"',
+  '        rclone copyto --no-check-dest /stage/dump.sql.gz "b2:bucket/pg/x-$${STAMP}.sql.gz"',
+].join("\n");
+
+describe("parseComposeBackup", () => {
+  it("collects only the backup services, with their scripts and mounts", () => {
+    const facts = parseComposeBackup(composeFixture(REAL_UPLOAD));
+    // `db` and `purge` are services too. Narrowing to the backup family is what
+    // stops an unrelated service's script satisfying a destination check.
+    expect(facts.services.map((s) => s.name)).toEqual([
+      "backup",
+      "backup-upload",
+    ]);
+    expect(facts.services[0]!.volumes).toEqual([
+      "../backups:/backups",
+      "backup_stage:/stage",
+    ]);
+    expect(facts.services[1]!.volumes).toEqual(["backup_stage:/stage:ro"]);
+    expect(facts.destinations.b2).toBe(true);
+  });
+
+  it("reads a folded `- >` command block as well as a literal `- |` one", () => {
+    // The service shipped before #162 used `>`; both are legal Compose, and a
+    // parser that only understood one would report the script as absent —
+    // which this module treats as "nothing to assert on" and would pass.
+    const folded = composeFixture(REAL_UPLOAD).replace(
+      "    command:\n      - |\n        set -euo pipefail\n        pg_dump",
+      "    command:\n      - >\n        set -euo pipefail;\n        pg_dump",
+    );
+    expect(folded).not.toBe(composeFixture(REAL_UPLOAD));
+    const facts = parseComposeBackup(folded);
+    expect(facts.services.map((s) => s.name)).toEqual([
+      "backup",
+      "backup-upload",
+    ]);
+    expect(facts.services[0]!.script).toMatch(/set -euo pipefail/);
+  });
+
+  it("does not count a destination that only appears in a comment", () => {
+    // Two tools in this repo have already read a comment as code (#146, #150),
+    // and a literal block scalar is the one place a shell comment sits inside
+    // the very text being scanned. Whole-line comments come out first, so a
+    // stage that only *mentions* b2: does not register as uploading to it.
+    const commentOnly = [
+      "        set -euo pipefail",
+      "        # was: rclone copyto /stage/dump.sql.gz b2:bucket/pg/x.sql.gz",
+      "        echo skipped",
+    ].join("\n");
+    const facts = parseComposeBackup(composeFixture(commentOnly));
+    expect(facts.services.map((s) => s.name)).toEqual([
+      "backup",
+      "backup-upload",
+    ]);
+    expect(facts.destinations.b2).toBe(false);
+  });
+
+  it("reports no off-host destination when the upload service is gone", () => {
+    const source = composeFixture(REAL_UPLOAD);
+    const start = source.indexOf("  backup-upload:");
+    const end = source.indexOf("  purge:");
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const facts = parseComposeBackup(
+      source.slice(0, start) + source.slice(end),
+    );
+    expect(facts.services.map((s) => s.name)).toEqual(["backup"]);
+    expect(facts.destinations.b2).toBe(false);
+  });
+
+  it("ignores a service whose command is an exec array rather than a script", () => {
+    // `purge` is shaped that way in the real file. Treating its absent script
+    // as an empty one would make every script-level assertion below vacuous.
+    const facts = parseComposeBackup(
+      composeFixture(REAL_UPLOAD).replace("  purge:", "  backup-purge:"),
+    );
+    expect(facts.services.map((s) => s.name)).toEqual([
+      "backup",
+      "backup-upload",
+    ]);
+  });
+
+  it("does not adopt a SIBLING key's block scalar as the command script", () => {
+    // Duo review (!249), verified as a real latent bug: the block-scalar search
+    // was bounded only by "after `command:`", not by "indented under it". A
+    // service whose `command:` is a plain list, followed by any sibling key that
+    // does carry a block scalar, therefore looked like it had an inline script —
+    // and would satisfy every script-level assertion using text it never runs.
+    // Worst case is a `healthcheck:` supplying the `b2:` destination.
+    const decoy = `name: dlectroflow-prod
+
+services:
+  backup-decoy:
+    image: x
+    command:
+      - npx
+      - tsx
+    healthcheck:
+      test:
+        - |
+          set -euo pipefail
+          rclone copyto /x "b2:bucket/pg/y"
+
+volumes:
+  backup_stage:
+`;
+    const facts = parseComposeBackup(decoy);
+    expect(facts.services.map((s) => s.name)).toEqual([]);
+    expect(facts.destinations.b2).toBe(false);
+  });
+
+  it("still reads a block scalar separated from its key by a blank line", () => {
+    // The bound is on indentation, not adjacency, so legal YAML that puts a
+    // blank line between `command:` and `- |` must still parse. Guards the fix
+    // above against being over-tightened into "the very next line".
+    const spaced = composeFixture(REAL_UPLOAD).replace(
+      "    command:\n      - |\n        set -euo pipefail\n        pg_dump",
+      "    command:\n\n      - |\n        set -euo pipefail\n        pg_dump",
+    );
+    expect(spaced).not.toBe(composeFixture(REAL_UPLOAD));
+    expect(parseComposeBackup(spaced).services[0]!.script).toMatch(
+      /set -euo pipefail/,
+    );
+  });
+
+  it("returns nothing for a file with no services block", () => {
+    expect(parseComposeBackup("volumes:\n  pgdata:\n").services).toEqual([]);
+  });
+});
+
+describe("Compose backup stack hygiene (#162)", () => {
+  const facts = parseComposeBackup(COMPOSE);
+  const service = (name: string) => {
+    const found = facts.services.find((s) => s.name === name);
+    expect(found, `Compose service "${name}" should exist`).toBeDefined();
+    return found!;
+  };
+  const uploaders = () => facts.services.filter((s) => s.name !== "backup");
+
+  it("finds the dump service and an off-host upload service", () => {
+    // Pinned exactly, like the chart's stage list: a service silently leaving
+    // is the regression, and one silently arriving is a destination nobody
+    // agreed to.
+    expect(facts.services.map((s) => s.name).sort()).toEqual([
+      "backup",
+      "backup-upload",
+    ]);
+  });
+
+  it("copies the dump off the host", () => {
+    expect(facts.destinations.b2).toBe(true);
+  });
+
+  it("sets -euo pipefail in every shell stage", () => {
+    // Measured, not theoretical: `pg_dump -h nosuchhost | gzip` under a bare
+    // `set -eu` exits 0 and leaves a 20-byte .sql.gz that looks like a backup,
+    // because a pipeline's status is the LAST command's and gzip succeeds at
+    // compressing nothing.
+    for (const stage of facts.services) {
+      expect(stage.script, `service "${stage.name}"`).toMatch(
+        /set -euo pipefail/,
+      );
+    }
+  });
+
+  it("proves pipefail is in effect rather than trusting the flag", () => {
+    // Duo review (!249) asked the right question: `pipefail` is not POSIX, so a
+    // shell that ACCEPTS the option and ignores it turns the line above into
+    // decoration — and the uploader has no bash to fall back on (the rclone
+    // image ships none), so /bin/sh is not a choice. Verified 2026-08-03 that
+    // busybox 1.37 and dash both honour it, but an image bump is exactly the
+    // edit that would change that without anyone noticing. `false | true`
+    // succeeds without pipefail and fails with it, so it is the cheapest
+    // possible proof, and it runs before anything is dumped or uploaded.
+    for (const stage of facts.services) {
+      expect(stage.script, `service "${stage.name}"`).toMatch(
+        /set -o pipefail 2>\/dev\/null; false \| true/,
+      );
+    }
+  });
+
+  it("dumps with --no-owner --no-privileges so any role name can restore it", () => {
+    expect(service("backup").script).toMatch(/--no-owner/);
+    expect(service("backup").script).toMatch(/--no-privileges/);
+  });
+
+  it("keeps a minimum-size guard before the dump is promoted", () => {
+    // A dump of an empty database is a little under 400 bytes, measured during
+    // the #162 drill, so the guard fires on the case that actually happens.
+    expect(service("backup").script).toMatch(/-gt\s+\d+/);
+  });
+
+  it("never lets the pipeline write straight to the name the uploaders read", () => {
+    // Measured during the #162 drill: a pg_dump that fails at the head of
+    // `pg_dump | gzip` still leaves gzip's 20-byte output behind. Written
+    // straight to dump.sql.gz, that sits in the handover looking like a dump.
+    // Only the mv AFTER the size guard promotes it to the name anything reads.
+    const dump = service("backup").script;
+    expect(dump).toMatch(/> \/stage\/dump\.sql\.gz\.partial/);
+    expect(dump).toMatch(
+      /mv \/stage\/dump\.sql\.gz\.partial \/stage\/dump\.sql\.gz/,
+    );
+    // No redirect ENDS at the promoted name, which is what the check above
+    // cannot see on its own — `.partial` is a prefix match of it.
+    expect(dump).not.toMatch(/> \/stage\/dump\.sql\.gz$/m);
+  });
+
+  it("would notice if the dump were promoted before the size guard", () => {
+    // The control for the assertion above: collapse the two-step write back to
+    // the shape it replaced and confirm all three halves report it.
+    const collapsed = COMPOSE.replaceAll(
+      "/stage/dump.sql.gz.partial",
+      "/stage/dump.sql.gz",
+    );
+    expect(collapsed).not.toBe(COMPOSE);
+    const dump = parseComposeBackup(collapsed).services.find(
+      (s) => s.name === "backup",
+    )!.script;
+    expect(dump).not.toMatch(/> \/stage\/dump\.sql\.gz\.partial/);
+    expect(dump).toMatch(/> \/stage\/dump\.sql\.gz$/m);
+  });
+
+  it("mints the timestamp exactly once, in the dump stage", () => {
+    const stampWrites = service("backup").script.match(/> \/stage\/stamp/g);
+    expect(stampWrites).toHaveLength(1);
+  });
+
+  it("refuses unless BOTH the staged dump and its stamp are there", () => {
+    // Duo review (!249). The stamp is written last, so its presence is the
+    // ready signal — but a stamp with no dump beside it would reach `rclone`
+    // and fail with a generic file-not-found instead of the sentence that says
+    // what to do. Both are checked, and both with -s rather than -f so a
+    // zero-byte file is not mistaken for a dump.
+    for (const stage of uploaders()) {
+      expect(stage.script, `service "${stage.name}"`).toMatch(
+        /! -s \/stage\/stamp/,
+      );
+      expect(stage.script, `service "${stage.name}"`).toMatch(
+        /! -s \/stage\/dump\.sql\.gz/,
+      );
+    }
+  });
+
+  it("makes every uploader read that stamp instead of calling date itself", () => {
+    // One dump, one stamp, N uploaders. Two uploaders each calling date(1)
+    // produce object names a second or two apart, and then nothing can prove
+    // the two copies are the same dump — the only question a restore asks.
+    expect(uploaders().length).toBeGreaterThan(0);
+    for (const stage of uploaders()) {
+      expect(stage.script, `service "${stage.name}"`).toMatch(/\/stage\/stamp/);
+      expect(stage.script, `service "${stage.name}"`).not.toMatch(/\bdate\b/);
+    }
+  });
+
+  it("hands the dump over on a shared volume no uploader can write to", () => {
+    expect(service("backup").volumes).toContain("backup_stage:/stage");
+    for (const stage of uploaders()) {
+      expect(stage.volumes, `service "${stage.name}"`).toContain(
+        "backup_stage:/stage:ro",
+      );
+    }
+  });
+
+  it("runs both stages with no writable root, no capabilities and no escalation", () => {
+    // Duo review (!249) asked for security-posture parity with the chart, which
+    // gives its backup containers readOnlyRootFilesystem, capabilities drop ALL
+    // and allowPrivilegeEscalation false. Cheap to match here because neither
+    // container writes outside its mounts — verified 2026-08-03 that pg_dump,
+    // gzip, date and rclone all run under exactly these flags.
+    //
+    // `user:` is the one piece NOT matched, and its absence is deliberate rather
+    // than forgotten: /backups is a host bind mount Docker creates as root, so
+    // pinning a non-root uid would leave the dump unable to write on every
+    // existing install. PLATFORM_DIVERGENCES ("Container hardening") in
+    // src/lib/env-drift.ts records it.
+    for (const stage of facts.services) {
+      const where = `service "${stage.name}"`;
+      expect(stage.directives, where).toContain("read_only: true");
+      expect(stage.directives, where).toContain('cap_drop: ["ALL"]');
+      expect(stage.directives, where).toContain(
+        'security_opt: ["no-new-privileges:true"]',
+      );
+      // The read-only root needs somewhere writable, or rclone's config write
+      // and gzip's scratch both fail at run time rather than at review time.
+      expect(stage.directives, where).toContain('tmpfs: ["/tmp"]');
+    }
+  });
+
+  it("does not mistake an env var for a service directive", () => {
+    // The control for the assertion above: `PGPASSWORD: …` lives under
+    // `environment:` and must not read as the service's own setting, or an env
+    // var named read_only would satisfy a hardening check.
+    expect(service("backup").directives).toContain(
+      "image: postgres:16@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20",
+    );
+    expect(service("backup").directives.join("\n")).not.toMatch(/PGPASSWORD/);
+    expect(service("backup").directives.join("\n")).not.toMatch(/POSTGRES_DB/);
+  });
+
+  it("never echoes a credential to the cron log", () => {
+    for (const stage of facts.services) {
+      expect(stage.script, `service "${stage.name}"`).not.toMatch(
+        /echo[^\n]*\$\$?\{?(B2_[A-Z_]*KEY|PGPASSWORD|[A-Z_]*SECRET)/,
+      );
+    }
   });
 });

@@ -250,7 +250,13 @@ function RoundupSettingsPanel({
       <summary className="text-muted-foreground hover:text-foreground cursor-pointer list-none text-xs">
         ⚙️ Round-up settings
         {settings.roundupDemoOverride && (
-          <span className="ml-2 text-amber-600">demo: auto-fires on load</span>
+          // #109 — 3.01:1 on the light --background, inheriting the summary's
+          // 12px, and only rendered with the round-up demo override set. Same
+          // amber-700/amber-400 pair the "still needed?" link 60 lines above
+          // already uses.
+          <span className="ml-2 text-amber-700 dark:text-amber-400">
+            demo: auto-fires on load
+          </span>
         )}
       </summary>
       <div className="mt-3 space-y-3">

@@ -218,29 +218,33 @@ export interface ConfigSurfaceException {
  * already know the two deploy models.
  */
 export const CONFIG_SURFACE_ALLOWLIST: readonly ConfigSurfaceException[] = [
+  // B2_KEY_ID and B2_APP_KEY were here until #162, exempted because the Compose
+  // `backup` service had no off-host upload and so no use for a B2 credential.
+  // #162 gave it one (`backup-upload` in docker/docker-compose.prod.yml), which
+  // made both entries stale in the sense staleAllowlistEntries means: the key is
+  // now on BOTH surfaces. They were deleted in the same commit that added the
+  // vars to .env.prod.example, because either half alone fails this check.
   {
-    key: "B2_KEY_ID",
-    declaredOn: "chart",
+    key: "B2_BUCKET",
+    declaredOn: "compose",
     reason:
-      "Read only by the backup CronJob's `upload-b2` container, never by the " +
-      "app process — nothing in src/ references it. The Compose path has a " +
-      "`backup` service (docker/docker-compose.prod.yml) but it writes the " +
-      "dump to a host directory and has no off-host upload, so there is no " +
-      "Compose consumer of these credentials. Publishing them in " +
-      ".env.prod.example would advertise config that does nothing on that " +
-      "path, which is the opposite of what #135 is for. NOTE: if the Compose " +
-      "backup ever gains an off-host upload, delete this entry and its pair " +
-      "in the SAME commit — staleAllowlistEntries fails when an allowlisted " +
-      "key appears on both surfaces, so adding the vars alone turns env-drift " +
-      "red.",
+      "Which bucket the Compose `backup-upload` service writes to. The chart " +
+      "expresses the same choice as the Helm value `backup.b2.bucket`, read at " +
+      "render time by templates/backup.yaml to build the destination URI — a " +
+      "chart value, never a container env var, the same shape as " +
+      "DLECTROFLOW_IMAGE below. The credentials for it (B2_KEY_ID, " +
+      "B2_APP_KEY) are on both surfaces and so are not exempt.",
   },
   {
-    key: "B2_APP_KEY",
-    declaredOn: "chart",
+    key: "B2_PREFIX",
+    declaredOn: "compose",
     reason:
-      "Pair of B2_KEY_ID; same reasoning. Scope the application key to the one " +
-      "bucket with writeFiles only, so the credential this puts in the cluster " +
-      "cannot read existing backups out or delete them.",
+      "Pair of B2_BUCKET: the path within the bucket, defaulting to `pg` to " +
+      "match the chart's layout so both instances' dumps land side by side. " +
+      "The chart's equivalent is the Helm value `backup.b2.prefix`. Worth " +
+      "keeping settable rather than hardcoded because the host's application " +
+      "key should be scoped to exactly this prefix, and an operator using a " +
+      "shared bucket needs the two to agree.",
   },
   {
     key: "DLECTROFLOW_DOMAIN",
@@ -378,14 +382,21 @@ export const PLATFORM_DIVERGENCES: readonly PlatformDivergence[] = [
       "RuntimeDefault, capabilities drop ALL, and an optional NetworkPolicy " +
       "fencing Postgres :5432 to the app pods.",
     compose:
-      "The image's own USER node (uid 1000) and Docker's default seccomp " +
-      "profile.",
+      "For the app: the image's own USER node (uid 1000) and Docker's default " +
+      "seccomp profile. For the two backup services (#162): read_only, " +
+      "cap_drop ALL, no-new-privileges and a /tmp tmpfs, but no `user:`.",
     reason:
-      "These are pod-spec fields with no single-file Compose equivalent that " +
-      "behaves the same way, and the writable-path work the read-only root " +
-      "filesystem needs (emptyDir mounts for /tmp and /app/.next/cache) has no " +
-      "counterpart a self-hoster could be expected to get right. The image " +
-      "still never runs as root on either platform.",
+      "For the long-running services these are pod-spec fields with no " +
+      "single-file Compose equivalent that behaves the same way, and the " +
+      "writable-path work the read-only root filesystem needs (emptyDir mounts " +
+      "for /tmp and /app/.next/cache) has no counterpart a self-hoster could be " +
+      "expected to get right. The image still never runs as root on either " +
+      "platform. The backup services are the exception and do carry the " +
+      "hardening, because their whole job is one pipe into two mounts and " +
+      "nothing needs the root filesystem writable. `user:` is the one piece " +
+      "still missing there, and deliberately: /backups is a host bind mount " +
+      "Docker creates as root, so pinning a non-root uid would leave the dump " +
+      "unable to write on every install that already exists.",
   },
   {
     area: "Availability: replicas and PodDisruptionBudget",
@@ -405,14 +416,33 @@ export const PLATFORM_DIVERGENCES: readonly PlatformDivergence[] = [
       "backup.yaml and purge-cronjob.yaml are CronJobs, so last-run status and " +
       "failures are queryable objects in the cluster.",
     compose:
-      "The `backup` and `purge` services sit behind a Compose profile and are " +
-      "invoked by the host's crontab (docs/self-host-vps.md).",
+      "The `backup`, `backup-upload` and `purge` services sit behind a Compose " +
+      "profile and are invoked by the host's crontab (docs/self-host-vps.md).",
     reason:
       "Compose has no scheduler and therefore no status object to read. The " +
-      "operator's signal is cron's own mail/exit code and the contents of " +
-      "backups/, which is why the backup command uses `set -o pipefail` — " +
-      "without it a failed pg_dump would leave a truncated file looking like a " +
-      "successful backup.",
+      "operator's signal is cron's own mail/exit code plus what is actually in " +
+      "the bucket, which is why every backup command uses `set -euo pipefail` " +
+      "— without it a failed pg_dump leaves a truncated file looking like a " +
+      "successful backup (measured: exit 0 and a 20-byte .sql.gz).",
+  },
+  {
+    area: "Backup destinations and credential posture",
+    chart:
+      "backup.yaml dual-writes: GCS with keyless auth via Workload Identity, " +
+      "plus an optional B2 copy. Losing or revoking the B2 key still leaves a " +
+      "good backup, which is what makes a long-lived key acceptable there.",
+    compose:
+      "One off-host destination, B2, via the `backup-upload` service (#162), " +
+      "alongside the host's own retained copy in backups/.",
+    reason:
+      "Workload Identity is a GKE mechanism with no single-host equivalent, so " +
+      "the Compose path cannot have the keyless destination and there is " +
+      "nothing to dual-write against. The compensation is the key's scope " +
+      "rather than a second bucket: the host's application key is limited to " +
+      "one bucket, one prefix and writeFiles only, so a compromised host can " +
+      "neither read existing backups out nor delete them. The read-capable key " +
+      "stays on the operator's workstation, which is where listing, verifying " +
+      "and restore drills happen.",
   },
 ];
 

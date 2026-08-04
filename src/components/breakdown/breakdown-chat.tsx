@@ -17,6 +17,7 @@ import { withFrom } from "@/lib/nav/back";
 import { leadSchedulingMethod } from "@/lib/scheduling/providers";
 import type { GoogleConnStatus } from "@/lib/scheduling/types";
 import { cn } from "@/lib/utils";
+import { STATUS_BANNER_TONE } from "@/lib/status-banner-style";
 import { t } from "@/lib/strings";
 import { useVoice } from "@/components/voice-provider";
 
@@ -265,8 +266,11 @@ export function BreakdownChat({
         <h1 className="text-2xl font-semibold">
           {proposal?.parentEmoji} {title}
         </h1>
-        <div className="rounded-lg border border-green-600/30 bg-green-600/10 p-4">
-          <p className="font-medium text-green-700">
+        {/* #109 — the tone (and with it the `dark:` partner this never had) now
+            comes from the shared table; the colour sits on the tinted wrapper so
+            the <p> inherits it rather than restating it. */}
+        <div className={cn("rounded-lg border p-4", STATUS_BANNER_TONE.ok)}>
+          <p className="font-medium">
             🎉 Saved {proposal?.steps.length} steps ({totalMin} min total).
           </p>
         </div>
@@ -338,7 +342,10 @@ export function BreakdownChat({
                   </a>
                 </div>
               ) : gsched.status === "done" ? (
-                <p className="font-medium text-green-700">
+                // #109 — no tint behind this one, so it keeps green-700 (4.65:1
+                // on the light --background) and gains the dark partner it was
+                // missing: green-700 is only 3.97:1 in dark, green-400 is 11.06:1.
+                <p className="font-medium text-green-700 dark:text-green-400">
                   ✅ Sent {gsched.count} task{gsched.count === 1 ? "" : "s"} to
                   your &quot;{gsched.message}&quot; list.
                 </p>
@@ -359,7 +366,11 @@ export function BreakdownChat({
                   </button>
                   {gsched.status === "error" && (
                     <div className="space-y-2">
-                      <p className="text-red-700">{gsched.message}</p>
+                      {/* #109 — untinted, so red-700 stays (6.04:1 light) and
+                          gains the dark partner: red-700 is 3.06:1 in dark. */}
+                      <p className="text-red-700 dark:text-red-400">
+                        {gsched.message}
+                      </p>
                       {gsched.reason === "reconnect_required" && (
                         <a
                           href="/api/google/oauth/start"
@@ -443,13 +454,23 @@ export function BreakdownChat({
       </form>
 
       {fallbackNote && (
-        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700">
+        <div
+          className={cn(
+            "rounded-lg border p-3 text-sm",
+            STATUS_BANNER_TONE.warn,
+          )}
+        >
           {fallbackNote}
         </div>
       )}
 
       {error && (
-        <div className="rounded-lg border border-red-600/30 bg-red-600/10 p-3 text-sm text-red-700">
+        <div
+          className={cn(
+            "rounded-lg border p-3 text-sm",
+            STATUS_BANNER_TONE.error,
+          )}
+        >
           {error}{" "}
           <button
             className="underline"
