@@ -278,7 +278,7 @@ export default async function HelpPage({
           Tasks connection is removed here — nothing inside your Google account
           is deleted. Your tasks, steps, notes and settings are then held for a
           short window so an accident can be undone: ask whoever runs the
-          instance within it. Being straight about a gap — that final removal is
+          instance within it. To be straight about a gap: that final removal is
           done by hand today, not by a scheduled job. The confirmation itself
           names the exact number of days, and the{" "}
           <Link href="/privacy" className="underline">

@@ -81,6 +81,7 @@ describe("HelpPage", () => {
     const section = screen
       .getByRole("heading", { name: /The focus session/i, level: 2 })
       .closest("section");
+    expect(section).not.toBeNull();
     const text = section!.textContent ?? "";
     // The pacer: what it is, and that it is a real cadence you can follow.
     expect(text).toMatch(/breath/i);
@@ -127,6 +128,7 @@ describe("HelpPage", () => {
     const section = screen
       .getByRole("heading", { name: /The focus session/i, level: 2 })
       .closest("section");
+    expect(section).not.toBeNull();
     const text = section!.textContent ?? "";
     expect(text).toMatch(/hyper focus/i);
     expect(text).toMatch(/off by default/i);
@@ -145,6 +147,7 @@ describe("HelpPage", () => {
     const section = screen
       .getByRole("heading", { name: /The focus session/i, level: 2 })
       .closest("section");
+    expect(section).not.toBeNull();
     const text = section!.textContent ?? "";
     // The bundled set is still the floor — a session never starts silent.
     expect(text).toMatch(/ten lo-?fi tracks|ten tracks/i);
