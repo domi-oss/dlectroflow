@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { FocusSound } from "@/lib/constants";
+import { FocusSound, FocusSoundCategory } from "@/lib/constants";
 
 // A fake HTMLAudioElement — records construction + play/pause + mutations.
 const audioPlay = vi.fn().mockResolvedValue(undefined);
@@ -59,6 +59,51 @@ describe("focus-sounds — FOCUS_SOUND_SRC + track catalog", () => {
     // 10 open-lofi categories, one track each.
     expect(new Set(FOCUS_SOUND_TRACKS.map((t) => t.category)).size).toBe(
       FOCUS_SOUND_TRACKS.length,
+    );
+  });
+});
+
+/**
+ * #70 — the category vocabulary moved into constants.ts.
+ *
+ * It had to move: `Settings.focusSoundCategory` is a CHECK-constrained column,
+ * and `enum-constraint-sync` derives the expected value set from a constants.ts
+ * object rather than a re-typed literal list. Leaving the slugs here as inline
+ * strings would have left the constraint mirroring nothing.
+ *
+ * These two assertions are the lockstep. `focus-sounds.ts` imports the constant
+ * (it cannot be the other way round — constants.ts must stay dependency-free),
+ * so a slug can only drift by adding a category with no bundled track or a
+ * bundled track with a category the constraint would reject; both fail here.
+ */
+describe("focus-sounds — the category vocabulary (#70)", () => {
+  it("bundles exactly one track per FocusSoundCategory value, and no others", async () => {
+    const { FOCUS_SOUND_TRACKS } = await import("@/lib/focus-sounds");
+    const declared = Object.values(FocusSoundCategory);
+    expect(FOCUS_SOUND_TRACKS.map((t) => t.category).sort()).toEqual(
+      [...declared].sort(),
+    );
+  });
+
+  it("uses open-lofi's own slugs, not paraphrases of them", async () => {
+    // Spelled out because #70's first version invented `ambient`, `asian` and
+    // `seasonal`, none of which exist. The corrected slugs are the contract the
+    // picker, the constraint and any future manifest all have to agree on, so
+    // they are pinned as literals here rather than derived from the code they
+    // are meant to police.
+    expect(Object.values(FocusSoundCategory).sort()).toEqual(
+      [
+        "activities",
+        "ambient-lofi",
+        "asian-lofi",
+        "chillhop",
+        "funk-soul",
+        "hybrid",
+        "jazzhop",
+        "late-night",
+        "seasonal-weather",
+        "soul-rnb",
+      ].sort(),
     );
   });
 });

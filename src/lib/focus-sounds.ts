@@ -6,7 +6,7 @@
  * player/preview control) so the browser unlocks later programmatic playback.
  */
 
-import { FocusSound } from "@/lib/constants";
+import { FocusSound, FocusSoundCategory } from "@/lib/constants";
 
 /**
  * #43 — the curated, bundled lo-fi library. One CC0 track per open-lofi category
@@ -19,6 +19,14 @@ import { FocusSound } from "@/lib/constants";
 export type FocusTrack = {
   id: string;
   title: string;
+  /**
+   * The category slug. Typed `string`, not `FocusSoundCategory`, and that is the
+   * decision rather than laziness: a BUNDLED track always carries one of the ten
+   * (`focus-sounds.test.ts` asserts the bijection), but a STREAMED one carries
+   * whatever its manifest said, including a category this app has never heard of
+   * — `categoryLabel()` in focus-catalog.ts humanises exactly that case. Only the
+   * ten are persistable (#70); an unknown one still plays and still groups.
+   */
   category: string;
   categoryLabel: string;
   src: string;
@@ -28,70 +36,70 @@ export const FOCUS_SOUND_TRACKS: readonly FocusTrack[] = [
   {
     id: FocusSound.LofiCalm,
     title: "Aurora on Mute",
-    category: "ambient-lofi",
+    category: FocusSoundCategory.AmbientLofi,
     categoryLabel: "Ambient lo-fi",
     src: "/audio/lofi/aurora-on-mute.mp3",
   },
   {
     id: FocusSound.LofiChillhop,
     title: "Porchlight Golden Hour",
-    category: "chillhop",
+    category: FocusSoundCategory.Chillhop,
     categoryLabel: "Chillhop",
     src: "/audio/lofi/porchlight-golden-hour.mp3",
   },
   {
     id: FocusSound.LofiJazzhop,
     title: "Breezy Afternoon Terrace",
-    category: "jazzhop",
+    category: FocusSoundCategory.Jazzhop,
     categoryLabel: "Jazz hop",
     src: "/audio/lofi/breezy-afternoon-terrace.mp3",
   },
   {
     id: FocusSound.LofiSoulRnb,
     title: "Barefoot in the Kitchen",
-    category: "soul-rnb",
+    category: FocusSoundCategory.SoulRnb,
     categoryLabel: "Soul / R&B",
     src: "/audio/lofi/barefoot-in-the-kitchen.mp3",
   },
   {
     id: FocusSound.LofiLateNight,
     title: "3 AM Echoes",
-    category: "late-night",
+    category: FocusSoundCategory.LateNight,
     categoryLabel: "Late night",
     src: "/audio/lofi/3-am-echoes.mp3",
   },
   {
     id: FocusSound.LofiFunkSoul,
     title: "Burnt Sunset Groove",
-    category: "funk-soul",
+    category: FocusSoundCategory.FunkSoul,
     categoryLabel: "Funk / soul",
     src: "/audio/lofi/burnt-sunset-groove.mp3",
   },
   {
     id: FocusSound.LofiAsian,
     title: "Lanterns in Slow Motion",
-    category: "asian-lofi",
+    category: FocusSoundCategory.AsianLofi,
     categoryLabel: "Asian lo-fi",
     src: "/audio/lofi/lanterns-in-slow-motion.mp3",
   },
   {
     id: FocusSound.LofiSeasonal,
     title: "After School Rain",
-    category: "seasonal-weather",
+    category: FocusSoundCategory.SeasonalWeather,
     categoryLabel: "Seasonal / weather",
     src: "/audio/lofi/after-school-rain.mp3",
   },
   {
     id: FocusSound.LofiActivities,
     title: "Chapter By Lamplight",
-    category: "activities",
+    category: FocusSoundCategory.Activities,
     categoryLabel: "Activities",
     src: "/audio/lofi/chapter-by-lamplight.mp3",
   },
   {
     id: FocusSound.LofiHybrid,
     title: "Cafe Da Tarde",
-    category: "hybrid",
+    category: FocusSoundCategory.Hybrid,
     categoryLabel: "Hybrid / world",
     src: "/audio/lofi/cafe-da-tarde.mp3",
   },
