@@ -31,6 +31,34 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Added
 
+- **Subscribe to your own schedule from any calendar app (#154).** Settings →
+  Integrations gains **Calendar subscription**: one URL you paste into Google
+  Calendar, Apple Calendar or Outlook once, after which your scheduled steps
+  appear there and stay in sync. It needs **no Google account and no OAuth at
+  all**, which is what makes it the half of the closed scheduling epic (#29) that
+  serves a self-hoster rather than the hosted instance. Until now the whole ICS
+  surface was the per-task download: one file, one task, no updates.
+
+  **The URL is a credential**, because a calendar client cannot present a session
+  cookie — Google, Apple and Outlook all fetch a subscription anonymously — so
+  possession of the token is the entire authorization. It is 256 bits from a
+  CSPRNG; regenerating replaces it in one write, so the old URL stops working on
+  the very next request rather than at some later expiry; the responses are
+  `no-store` so no shared cache can keep a revoked one alive; and the feed
+  carries step titles and times and nothing else, because the URL will end up in
+  a calendar provider's logs. The Settings card says all of that at the point you
+  copy it, not in a paragraph further down.
+
+  New endpoint `GET /api/ics/feed/[token]`, which is the only route in the app
+  that authorises from something other than a session — `/api/ics/[taskId]` next
+  door stays session-scoped, because a task id is guessable in a way a token is
+  not. Unknown, malformed, regenerated and revoked all answer the same 404.
+
+  `/privacy` now discloses the new recipient (whichever calendar app you
+  subscribe from, which is explicitly **not** a processor — you chose it), the
+  stored token and its retention, and the legal effective date moves with it. No
+  new environment variable and no new dependency.
+
 - **A member can export their own data (#129).** Settings → Account gains
   **Download my data (.zip)**, and `GET /api/export` behind it. The archive holds
   the same data written four ways, because no single format does every job: a

@@ -86,7 +86,10 @@ function fingerprint(node: React.ReactElement): string {
  * putting it there would invite it into a page.
  */
 const PUBLISHED = {
-  privacy: "1a7cd006060f6751679ea2bb32902aa5a731946337f314634b9125ed7f9888a5",
+  // #154 — the calendar subscription feed: a new recipient (the reader's own
+  // calendar app), a new stored item and a new retention rule. Substance, so
+  // LEGAL_EFFECTIVE_DATE moved to 2026-08-04 in the same commit.
+  privacy: "583d408f74a67e9a1f4fbc7a9b74da0bac19ea43b21f7b9eb11908be674b699e",
   terms: "a2f663c5edbd5ebd2d5bba3e64bcb4ff4d97c6ce1ed58af81facd34541efa942",
 } as const;
 

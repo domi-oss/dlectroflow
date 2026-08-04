@@ -57,7 +57,17 @@ export const SOURCE_REPO_URL =
 /**
  * ISO date the current text took effect. Bump when the substance changes.
  *
- * Bumped for #129: access and portability are now exercisable from Settings
+ * Bumped for #154: a member can create a calendar subscription URL, which adds
+ * a NEW RECIPIENT — whichever calendar app they paste it into then fetches their
+ * scheduled step titles and times, on its own schedule, into that company's
+ * storage and quite possibly outside the UK. That is a disclosure under Art.
+ * 13(1)(e) and it would move this date on its own; a new stored item (the
+ * capability token) and a new retention rule for it come with it. The recipient
+ * is deliberately described as NOT a processor: the data subject chooses the app
+ * and there is no contract with it, which is a different relationship from
+ * Anthropic's or Resend's and has to read differently.
+ *
+ * Previously bumped for #129: access and portability are now exercisable from Settings
  * rather than only by emailing the controller, and /privacy says so — the
  * paragraph that used to read "there is no self-service export button yet" would
  * otherwise be a false statement on a published legal page. It also newly
@@ -85,7 +95,7 @@ export const SOURCE_REPO_URL =
  * Previously bumped for #126: freezing or deleting an account also revokes the
  * Google grant, which changed what the app does with somebody's Google account.
  */
-export const LEGAL_EFFECTIVE_DATE = "2026-08-03";
+export const LEGAL_EFFECTIVE_DATE = "2026-08-04";
 
 /** Where the hosted instance and its backups physically sit. */
 export const HOSTING_REGION = "London, United Kingdom (GCP europe-west2)";
