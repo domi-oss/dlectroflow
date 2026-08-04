@@ -191,10 +191,19 @@ if [ "$DRY_RUN" = "false" ] && [ -z "${REGISTRY_PRUNE_TOKEN:-}" ]; then
   warn "PRUNE_DRY_RUN=false but the only credential is CI_JOB_TOKEN, which cannot delete registry tags (verified 2026-07-29: HTTP 403 on the tag-delete endpoint). Expect the delete loop to stop on its first call. Set REGISTRY_PRUNE_TOKEN to a Maintainer token with 'api' scope."
 fi
 
-# ── 1. Which registry repository? There are THREE ────────────────────────────
-# `…/dlectroflow` (SHA + main-* builds), `…/dlectroflow/cache` (Kaniko layer
-# cache) and `…/dlectroflow/main` (holds a stale `latest`). The API lists them
-# with `…/main` FIRST, so `.[0]` picks the wrong one; match the path EXACTLY.
+# ── 1. Which registry repository? Never `.[0]` ───────────────────────────────
+# TWO of them as measured 2026-08-04: `…/dlectroflow` (SHA + main-* builds) and
+# `…/dlectroflow/cache` (Kaniko layer cache). There were THREE when this was
+# written — `…/dlectroflow/main`, a hand-pushed orphan holding a stale `latest`,
+# deleted 2026-07-29 (#113) — and the API listed it FIRST, so `.[0]` picked the
+# wrong repository and pruned a listing that did not contain production's tag.
+#
+# The count is not the point and is not worth re-checking here: a repository
+# appears the moment anything is pushed under a new path, so `.[0]` can start
+# being wrong again without warning. Match the path EXACTLY and assert there is
+# exactly one match. src/lib/registry-prune.test.ts keeps the three-repository
+# shape as its fixture on purpose — it is the harder case, and dropping it when
+# production dropped it would retire the test for the bug that caused it.
 : >"$WORK/repos.tsv"
 page=1
 while :; do

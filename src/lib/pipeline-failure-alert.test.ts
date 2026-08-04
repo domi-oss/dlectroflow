@@ -718,6 +718,71 @@ describe("scripts/alert-pipeline-failure.sh", () => {
 // ── the weekly digest's drift backstop ───────────────────────────────────────
 
 describe("scripts/ops-digest.sh", () => {
+  /**
+   * The digest also runs `check-registry-drain.sh` (#113). Its GraphQL calls
+   * are routed here rather than left unserved, so the digest's happy path is
+   * exercised end to end. Without these the suite still passed — because the
+   * drain check bailed early on a missing `CI_PROJECT_PATH` and reported
+   * "undetermined", which reads as a working test and proves nothing. An
+   * unexercised green is the exact failure #113 is made of, so it is not one to
+   * leave in the suite that came out of #113.
+   */
+  const DRAIN_NOW = "2026-08-04T00:00:00Z";
+  const drainDaysAgo = (days: number) =>
+    new Date(Date.parse(DRAIN_NOW) - days * 86_400_000)
+      .toISOString()
+      .replace(".000Z", "Z");
+  const registryRoutes = (): Route[] => [
+    {
+      method: "POST",
+      match: "/api/graphql",
+      body: {
+        data: {
+          project: {
+            containerExpirationPolicy: {
+              enabled: true,
+              cadence: "EVERY_DAY",
+              keepN: "TEN_TAGS",
+              olderThan: "SEVEN_DAYS",
+              nameRegex: ".*",
+              nameRegexKeep: "(latest|main-.*|prod|v.*)",
+              nextRunAt: drainDaysAgo(0.8),
+            },
+            containerRepositories: {
+              nodes: [
+                {
+                  id: "gid://gitlab/ContainerRepository/777",
+                  path: "acme/dlectroflow",
+                  status: null,
+                  tagsCount: 12,
+                  expirationPolicyCleanupStatus: "UNSCHEDULED",
+                  expirationPolicyStartedAt: drainDaysAgo(1.8),
+                },
+              ],
+            },
+          },
+        },
+      },
+    },
+    {
+      method: "POST",
+      match: "/api/graphql",
+      body: {
+        data: {
+          containerRepository: {
+            tags: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: Array.from({ length: 12 }, (_, i) => ({
+                name: i.toString(16).padStart(40, "a"),
+                createdAt: drainDaysAgo(i * 0.4),
+              })),
+            },
+          },
+        },
+      },
+    },
+  ];
+
   const digestRoutes = (behind: number): Route[] => [
     {
       method: "GET",
@@ -731,12 +796,35 @@ describe("scripts/ops-digest.sh", () => {
       body: { status: "ok", sha: OLD_SHORT },
     },
     { method: "GET", match: `=${PROD_URL}/`, body: {} },
+    ...registryRoutes(),
     { method: "GET", match: "/pipelines", body: [] },
     { method: "GET", match: "/merge_requests", body: [] },
     { method: "GET", match: "/vulnerabilities", body: [] },
     { method: "GET", match: "/issues?state=opened", body: [] },
     { method: "POST", match: "/notes", body: { id: 1 } },
   ];
+
+  it("carries the registry drain check into the posted digest (#113)", () => {
+    const result = drive(DIGEST_SCRIPT, {
+      routes: digestRoutes(0),
+      env: {
+        OPS_DIGEST_ISSUE_IID: "16",
+        ALERT_ISSUE_IID: undefined,
+        CI_PROJECT_PATH: "acme/dlectroflow",
+        REGISTRY_DRAIN_NOW: DRAIN_NOW,
+      },
+    });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    const body = result.bodies.find(
+      (b) => typeof b === "string" && b.includes("ops digest"),
+    ) as string;
+    // The verdict AND the facts behind it, so a reader can disagree with the
+    // verdict without re-running anything.
+    expect(body).toMatch(/registry cleanup policy is draining/);
+    expect(body).toMatch(/name_regex_keep/);
+    expect(body).toMatch(/UNSCHEDULED/);
+  });
 
   it("drops the 7-day window rather than inventing a 1969 one", () => {
     // Duo review on !251, mechanism corrected — see DATE_STUB. With a `date`
