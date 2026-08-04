@@ -278,26 +278,29 @@ describe("#62 the drag preview is our own element, not the grip's box", () => {
   // What this can assert in jsdom is that the ghost really is rendered from
   // our own component during `dragstart` (real-browser pixels still need a
   // device — see the MR).
-  it("renders the ghost row into a preview container while the drag starts", async () => {
+  it("renders the ghost row into a preview container while the drag starts, then takes it away", async () => {
     const { container } = renderInbox([
       makeItem({ id: "p1", text: "Test de UI-elementen in de checkout flow" }),
     ]);
 
-    let previewText: string | null = null;
-    const grip = gripFor(container, "p1");
-    grip.addEventListener("dragstart", () => {
-      // Same tick as the native event: `setCustomNativeDragPreview` removes
-      // the container as soon as the browser has taken its photo.
-      const ghosts = Array.from(
-        document.body.querySelectorAll("[data-drag-ghost]"),
-      );
-      previewText = ghosts.map((g) => g.textContent).join("");
+    // The container's whole life is one tick of `dragstart` plus the frame the
+    // lift completes on. `act` flushes React's portal into it; the frame after
+    // that, `setCustomNativeDragPreview` removes it.
+    await act(async () => {
+      fireEvent.dragStart(gripFor(container, "p1"));
     });
 
-    fireEvent.dragStart(grip);
-    await nextFrame();
+    const ghost = document.body.querySelector("[data-drag-ghost]");
+    expect(ghost, "no preview was mounted").not.toBeNull();
+    expect(ghost!.textContent).toContain(
+      "Test de UI-elementen in de checkout flow",
+    );
+    // …rendered outside the row, which is the point: the browser photographs
+    // this element, so nothing about the 28×44 grip's box can shape it.
+    expect(container.contains(ghost)).toBe(false);
 
-    expect(previewText).toContain("Test de UI-elementen in de checkout flow");
+    await nextFrame();
+    expect(document.body.querySelector("[data-drag-ghost]")).toBeNull();
   });
 });
 
@@ -471,16 +474,5 @@ describe("#163 the keyboard path", () => {
     expect(grip).toHaveAttribute("aria-hidden", "true");
     expect(grip).not.toHaveAttribute("tabindex");
     expect(grip.tagName).not.toBe("BUTTON");
-  });
-
-  // WCAG 2.5.8: the grip is still a pointer target, so it keeps the hit area
-  // the owner's design revision settled on (28px wide × 44px tall).
-  it("keeps the grip an adequate pointer target", () => {
-    const { container } = renderInbox([
-      makeItem({ id: "k7", text: "grip row" }),
-    ]);
-    const grip = gripFor(container, "k7");
-    expect(grip.className).toContain("min-h-11");
-    expect(grip.className).toContain("w-7");
   });
 });

@@ -78,14 +78,22 @@ describe("drag announcements", () => {
   // silence — it is the drag equivalent of a green pipeline over a skipped
   // gate. Both the no-op paths say so explicitly.
   it("says nothing moved when a drop changes nothing", () => {
-    const message = notMovedAnnouncement("buy oat milk", "needsReview");
+    const message = notMovedAnnouncement(
+      "buy oat milk",
+      "needsReview",
+      "plain",
+    );
     expect(message).toContain("buy oat milk");
     expect(message).toContain("Needs review");
     expect(message).toMatch(/not moved|still in/i);
   });
 
   it("says nothing moved when a drag is cancelled", () => {
-    const message = cancelledAnnouncement("buy oat milk", "needsReview");
+    const message = cancelledAnnouncement(
+      "buy oat milk",
+      "needsReview",
+      "plain",
+    );
     expect(message).toContain("buy oat milk");
     expect(message).toMatch(/cancel/i);
     expect(message).toContain("Needs review");

@@ -404,8 +404,14 @@ describe("InboxView — row hierarchy (#50/#51/#52)", () => {
   // Owner design revision: the drag grip was tucked into a narrower gutter
   // (44px square → 28px wide) so the title sits closer to the left edge. The
   // grip keeps a full 44px height and stays ≥ the WCAG-AA 24px minimum width.
+  //
+  // #163 changed what the grip *is* — no longer a `<button>`, because there is
+  // no keyboard drag for it to activate — but not its size, which is a pointer
+  // concern (2.5.8) and unaffected. Queried by `data-drag-grip` for that
+  // reason; why it left the accessibility tree is pinned in
+  // `inbox-view.drag.test.tsx`.
   it("design revision: the drag grip stays an adequate hit target (≥24px wide, 44px tall)", () => {
-    render(
+    const { container } = render(
       <InboxView
         now={Date.now()}
         initialItems={[makeItem({ id: "g1", text: "grip row" })]}
@@ -414,9 +420,10 @@ describe("InboxView — row hierarchy (#50/#51/#52)", () => {
         resumeStep={null}
       />,
     );
-    const grip = screen.getByRole("button", { name: "Drag grip row" });
-    expect(grip.className).toContain("min-h-11"); // 44px tall
-    expect(grip.className).toContain("w-7"); // 28px wide (≥ WCAG-AA 24px min)
+    const grip = container.querySelector<HTMLElement>('[data-drag-grip="g1"]');
+    expect(grip, "no drag grip rendered").not.toBeNull();
+    expect(grip!.className).toContain("min-h-11"); // 44px tall
+    expect(grip!.className).toContain("w-7"); // 28px wide (≥ WCAG-AA 24px min)
   });
 
   // #52 — the age/status pill moves off the title line down to the metadata
@@ -1214,15 +1221,23 @@ describe("dragEndToMove (pure)", () => {
 });
 
 describe("DragGhostRow — mobile drag preview (#62)", () => {
-  // Regression coverage note: the real bug is a *browser layout* bug —
-  // dnd-kit's DragOverlay sizes its wrapper to the measured rect of the
-  // draggable node (the 28×44 grip button, not the row), which jsdom can't
-  // reproduce since getBoundingClientRect always returns zeroes here. These
-  // assertions instead pin down the two things we CAN verify statically:
-  // the ghost renders the full row text (not just a fragment), and its
-  // markup never constrains itself to a fixed narrow width that would force
+  // Regression coverage note: the real bug is a *browser layout* bug, which
+  // jsdom cannot reproduce since getBoundingClientRect always returns zeroes
+  // here. These assertions pin the two things we CAN verify statically: the
+  // ghost renders the full row text (not just a fragment), and its markup
+  // never constrains itself to a fixed narrow width that would force
   // character-by-character wrapping. Final confirmation that the on-screen
   // ghost is no longer clipped needs a real mobile device (see MR).
+  //
+  // #163 removed the *cause* rather than the symptom. The clipping came from
+  // dnd-kit's `DragOverlay` sizing its wrapper to the measured rect of the
+  // draggable node — the 28×44 grip, not the row — which the component worked
+  // around with an explicit `style={{ width: "auto", height: "auto" }}`. There
+  // is no wrapper to size any more: `setCustomNativeDragPreview` mounts this
+  // component into a container of its own and the browser photographs that, so
+  // the grip's rect is not in the calculation at all. The test that pinned the
+  // override went with it; that the preview is a separate, self-sized element
+  // is pinned in `inbox-view.drag.test.tsx` instead.
   it("renders the full item text, not truncated", () => {
     render(
       <DragGhostRow text="Test de UI-elementen in de checkout flow grondig" />,
@@ -1245,52 +1260,6 @@ describe("DragGhostRow — mobile drag preview (#62)", () => {
     expect(title.className).toMatch(/min-w-0/);
     expect(title.className).toMatch(/flex-1/);
     expect(title.className).toMatch(/break-words/);
-  });
-
-  it("InboxView's DragOverlay clears dnd-kit's rect-based width/height so it can't be clipped to the grip's box", async () => {
-    // dnd-kit only mounts DragOverlay's portal content once a drag is
-    // actually active, so drive a real (mouse) drag start through dnd-kit's
-    // own sensors rather than asserting on JSX we can't see from outside.
-    // Note: jsdom's getBoundingClientRect always returns zeroes, so this
-    // can't reproduce the *pixel* clipping itself — only that our explicit
-    // `style` override reaches the DOM instead of dnd-kit's computed
-    // `width: 0px; height: 0px` (which is what jsdom's zero-rect would
-    // otherwise render as, proving the override is wired through).
-    render(
-      <InboxView
-        now={Date.now()}
-        initialItems={[makeItem({ id: "d1", text: "draggable row" })]}
-        settings={settings}
-        welcomeVisible={false}
-        resumeStep={null}
-      />,
-    );
-    const grip = screen.getByRole("button", { name: "Drag draggable row" });
-    fireEvent.mouseDown(grip, { clientX: 0, clientY: 0, button: 0 });
-    fireEvent.mouseMove(document, { clientX: 0, clientY: 20 }); // > 5px activation distance
-
-    // Identify the ghost positively by the overlay it lives in (a fixed-position
-    // wrapper) rather than by the absence of an <li> — robust even if dnd-kit
-    // ever wraps its portal content in a list element (Duo review).
-    const ghost = screen
-      .getAllByText("draggable row")
-      .find((el) => el.closest('[style*="position: fixed"]'));
-    expect(ghost).toBeTruthy();
-    const overlayWrapper = ghost!.closest(
-      '[style*="position: fixed"]',
-    ) as HTMLElement | null;
-    expect(overlayWrapper).toBeTruthy();
-    expect(overlayWrapper!.style.width).toBe("auto");
-    expect(overlayWrapper!.style.height).toBe("auto");
-
-    fireEvent.mouseUp(document);
-    // dnd-kit defers removing its document-level `click`/`selectionchange`
-    // listeners by 50ms (AbstractPointerSensor.detach) to let the browser's
-    // native click-after-drag fire first. Wait it out so those listeners
-    // (added straight on the real `document`) don't leak into later tests
-    // and swallow their clicks. Use 120ms for comfortable headroom over the
-    // 50ms delay on a loaded CI runner (Duo review — 60ms was too tight).
-    await new Promise((resolve) => setTimeout(resolve, 120));
   });
 });
 
