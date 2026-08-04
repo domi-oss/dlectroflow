@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 // #118 Phase C — the panel that writes a member's own LLM key. The rule the
@@ -109,7 +109,19 @@ describe("AccountPanel", () => {
     expect(screen.getByRole("button", { name: /saving/i })).toBeInTheDocument();
     expect(keyStatus()).toBeInTheDocument();
 
+    // Await the transition settling before returning. Without this the
+    // microtask that resolves the action and drives the post-save state change
+    // can fire during or after `afterEach(cleanup)`, which is an unawaited
+    // update in a spec whose whole purpose is removing nondeterminism — the
+    // same class of defect this file is fixing. Raised by GitLab Duo on !264.
+    // The label returning to "Save key" is the observable end of the
+    // transition, so waiting on it needs no arbitrary timeout.
     release({ ok: true });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /^save key$/i }),
+      ).toBeInTheDocument(),
+    );
   });
 
   it("names the signed-in account and the provider that authenticated it", () => {
