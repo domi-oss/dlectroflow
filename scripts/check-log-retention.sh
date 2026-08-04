@@ -192,12 +192,18 @@ case "$api_state" in
 esac
 
 # ── 3. The artefact: read one back ───────────────────────────────────────────
-# Project-wide first, with an empty filter. Any entry at all proves ingestion is
-# live, which separates "nothing is being kept" from "the app in particular is
-# not being kept" — two different problems with two different fixes.
+# Project-wide first: any entry at all proves ingestion is live, which separates
+# "nothing is being kept" from "the app in particular is not being kept" — two
+# different problems with two different fixes.
+#
+# `LOG_FILTER` is positional and optional, so it is OMITTED rather than passed
+# as "". An empty positional is the kind of argument a CLI is free to reject in
+# a later release, and the failure would present as `unclassified` — a check
+# reporting "undetermined" because of its own argument list, indistinguishable
+# from the provider being unreachable.
 ingest="unknown"
 read_reason=""
-gc logging read "" \
+gc logging read \
   --limit=1 \
   --freshness="$LOG_FRESHNESS" \
   --order=desc \
