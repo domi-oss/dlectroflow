@@ -382,6 +382,23 @@ describe("workspace-scoping harness", () => {
   const CREATE_OPS = new Set(["create", "createMany"]);
 
   /**
+   * Characters that may appear inside a JavaScript identifier, as a Set rather
+   * than a character class.
+   *
+   * `/[A-Za-z0-9_$]/.test(c)` reads better and is what this was first written
+   * as — GitLab SAST flags it under "Incorrect regular expression" (the ReDoS
+   * rule), and the finding is FIXED here rather than dismissed. It would have
+   * been a defensible dismissal: a character class with no quantifier cannot
+   * backtrack. But the identical rule was fixed by hardcoding on the #109/#117
+   * branch and again in !254, and a dismissal now would leave the repo treating
+   * one rule two ways. A Set lookup is also the faster answer for a single
+   * character, so nothing is lost.
+   */
+  const IDENT_CHARS = new Set(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_$",
+  );
+
+  /**
    * The clause that decides WHOSE rows a call touches — `where` for anything
    * that selects existing rows, `data` for a create.
    *
@@ -414,7 +431,7 @@ describe("workspace-scoping harness", () => {
         ch === key[0] &&
         args.startsWith(key, i) &&
         // A property name, not the tail of a longer identifier.
-        !/[A-Za-z0-9_$]/.test(args[i - 1] ?? "")
+        !IDENT_CHARS.has(args[i - 1] ?? "")
       ) {
         const open = args.indexOf("{", i + key.length);
         if (open === -1) return "";
