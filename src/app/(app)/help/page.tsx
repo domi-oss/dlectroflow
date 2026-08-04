@@ -163,9 +163,10 @@ export default async function HelpPage({
           and <strong>Done for now</strong> leaves the run altogether.
         </p>
         <p className="text-sm">
-          Finishing a <em>whole</em> task never moves you on by itself — the
-          next thing is offered, not taken. <strong>Hyper focus mode</strong> is
-          what extends the same countdown to single-task to-dos, chaining one
+          Finishing a whole <em>multi-step</em> task never moves you on by
+          itself — that finish deserves a pause, so the next task is offered
+          rather than taken. <strong>Hyper focus mode</strong> is what extends
+          the same countdown to <em>single-task</em> to-dos, chaining one
           straight into the next. It is <strong>off by default</strong>, it
           covers single-task to-dos only (steps inside a task are not affected
           by it), and you turn it on or off on the{" "}
@@ -243,12 +244,18 @@ export default async function HelpPage({
           same since #123 and the delete dialog says it too. */}
       <section className="space-y-2">
         <SectionHeading id="help-your-data" voice={voice} />
+        {/* The Account section is filtered out of Settings for a caller with no
+            account of their own (`me != null` in (app)/settings/page.tsx), so
+            saying "it is on the Settings page" full stop would send a guest
+            hunting for a control that is not rendered for them. */}
         <p className="text-sm">
-          Everything below lives under <strong>Account</strong> on the{" "}
+          Both controls below live under <strong>Account</strong> on the{" "}
           <Link href="/settings?from=help" className="underline">
             Settings
           </Link>{" "}
-          page.
+          page. That section appears once you have{" "}
+          <strong>an account of your own</strong> — a guest sandbox does not, so
+          it is not shown there.
         </p>
         <p className="text-sm">
           <strong>Take a copy with you.</strong>{" "}

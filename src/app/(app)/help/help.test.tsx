@@ -192,6 +192,11 @@ describe("HelpPage", () => {
     // Deletion: the honest shape — a recoverable window, then removal by hand.
     expect(text).toMatch(/signed out/i);
     expect(text).toMatch(/type the word|type `?delete`?|typing the word/i);
+    // `(app)/settings/page.tsx` filters the Account section out for a caller
+    // with no account of their own, so the page must not send a guest hunting
+    // for a control that is never rendered for them.
+    expect(text).toMatch(/an account of your own/i);
+    expect(text).toMatch(/guest/i);
     // The section must route to the page that owns both controls, carrying the
     // origin like every other deep link on this page.
     const hrefs = Array.from(section!.querySelectorAll("a")).map((a) =>
