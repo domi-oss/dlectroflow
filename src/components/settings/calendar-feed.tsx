@@ -71,6 +71,7 @@ export function CalendarFeed({ url }: { url: string | null }) {
   const statusId = useId();
   const warningId = useId();
   const confirmId = useId();
+  const fieldId = useId();
 
   const fieldRef = useRef<HTMLInputElement | null>(null);
   const regenerateRef = useRef<HTMLButtonElement | null>(null);
@@ -168,15 +169,12 @@ export function CalendarFeed({ url }: { url: string | null }) {
       {url ? (
         <>
           <div className="mt-3 space-y-2">
-            <label
-              htmlFor={`${warningId}-field`}
-              className="block text-sm font-medium"
-            >
+            <label htmlFor={fieldId} className="block text-sm font-medium">
               Calendar feed URL
             </label>
             <div className="flex flex-wrap items-center gap-2">
               <input
-                id={`${warningId}-field`}
+                id={fieldId}
                 ref={fieldRef}
                 type="text"
                 readOnly

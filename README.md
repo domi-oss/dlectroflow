@@ -52,7 +52,7 @@ This is **in active development**. Being honest so you don't hit surprises:
 | 🔔 Desktop notifications + demo override | ✅ works |
 | ✂️ AI task breakdown (streaming chat) | ✅ works — Claude by default (needs an Anthropic API key) |
 | 🤖 Bring your own LLM (`LLM_PROVIDER`) | ⚠️ **partly** — `anthropic` is what runs in production; `openai-compatible` ships but is unit-tested only, and **no human has yet run it against a real non-Anthropic endpoint** (see [BYO-LLM](#-bring-your-own-llm-byo-llm)) |
-| 📅 Scheduling (breakdown → Google Tasks) | ✅ works — connect Google from **Settings → Integrations** (or right from a breakdown) and steps land in your Google Tasks list, durations parsed; a Reclaim-synced list is scheduled automatically (see [Connecting Google Tasks](#-connecting-google-tasks)). No Google? Steps save locally and export as `.ics`. |
+| 📅 Scheduling (breakdown → Google Tasks) | ✅ works — connect Google from **Settings → Integrations** (or right from a breakdown) and steps land in your Google Tasks list, durations parsed; a Reclaim-synced list is scheduled automatically (see [Connecting Google Tasks](#-connecting-google-tasks)). No Google? Steps save locally, export as `.ics`, or **subscribe to a private calendar feed** that stays in sync (see [No Google account?](#no-google-account-ics-still-works)). |
 | ⏱️ Focus timer — true pause/resume, one-number setup screen | ✅ works |
 | 🎧 Focus music — 10 bundled CC0 lo-fi tracks, in-session mini-player, shuffle | ✅ works (see [Focus music](#-focus-music)) |
 | 🎉 Rewards & streaks + dashboard | ✅ works |
@@ -183,7 +183,7 @@ Guest users get a sandboxed AI breakdown experience with built-in guardrails:
 
 - **AI quota:** 5 breakdowns / IP / 24 h; 10 unique guest IPs / day globally (Haiku model — cheaper, still useful).
 - **Owner model:** selectable in Settings (defaults to `claude-sonnet-4-6`).
-- **`.ics` export:** no integration or OAuth needed — the calendar file is built on request and downloaded.
+- **`.ics` export:** no integration or OAuth needed — the calendar file is built on request and downloaded. Signed-in accounts can also subscribe to a private, always-in-sync [calendar feed](#no-google-account-ics-still-works).
 - **Dark mode:** persists via `localStorage`; no backend required.
 
 New env vars for Phase 2:
@@ -321,6 +321,20 @@ Scheduling isn't all-or-nothing. With no Google connection at all, a task's step
 still save locally and **Add to calendar (.ics)** hands you a calendar file to
 import wherever you like — no OAuth client, no integration to set up. It's
 available to everyone, guests included.
+
+**Or subscribe once and stop importing.** *Settings → Integrations → Calendar
+subscription* mints a private URL you paste into Google Calendar, Apple Calendar
+or Outlook a single time; your scheduled steps then appear there and stay in
+sync. Still no Google account, still no OAuth, nothing to connect. Signed-in
+accounts only — a guest sandbox expires in about a day, so a subscription for
+one would be a link that quietly dies.
+
+> **The URL is a password.** It has to be: a calendar app cannot sign in, so
+> holding the link *is* the permission. Anyone who has it can read your step
+> titles and times without signing in, and calendar apps store it in plain text.
+> It carries titles and times and nothing else — no notes, no coaching
+> conversations, nothing about your account. **Regenerate** it if it gets out;
+> the old URL stops working on the very next request.
 
 > **Heads-up if you read an older copy of this README:** the direct
 > "Schedule in Reclaim (MCP)" flow was **removed in v0.2.0** (#36). Reclaim is
