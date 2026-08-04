@@ -4,6 +4,7 @@ import { currentWorkspaceId, currentUser } from "@/lib/workspace";
 import { getGoogleStatus } from "@/lib/google";
 import { loadPeopleAdmin } from "@/lib/people";
 import { ownLlmKeyPresent } from "@/app/actions/account";
+import { feedUrl, getOwnFeed } from "@/lib/calendar-feed";
 import { PeoplePanel } from "@/components/settings/people-panel";
 import { AgingSection } from "@/components/settings/aging-section";
 import { VoiceSection } from "@/components/settings/voice-section";
@@ -50,7 +51,7 @@ export default async function SettingsPage({
   // signature already accepts null (a caller with no account is answered without
   // a query), so no non-null assertion is needed at all.
   const meId = me?.id ?? null;
-  const [google, people, keyPresent] = await Promise.all([
+  const [google, people, keyPresent, feed] = await Promise.all([
     // #118 Phase C — every signed-in account has its own connection, so this is
     // resolved for whoever is asking. A caller with no account is passed null
     // and getGoogleStatus() answers without a query.
@@ -63,6 +64,12 @@ export default async function SettingsPage({
     // there is no id to pass, which is why the ciphertext can never be read for
     // somebody else. Answers false without a query for a caller with no account.
     ownLlmKeyPresent(),
+    // #154 — the calendar feed URL, resolved on the SERVER for the session's own
+    // account. The capability token never travels through a client fetch: the
+    // only way it reaches a browser is as this page's props, rendered for the
+    // person it belongs to. A caller with no account is answered without a
+    // query, and gets the read-only shell below.
+    meId ? getOwnFeed(meId) : Promise.resolve(null),
   ]);
   const voice: Voice = settings.voice === "playful" ? "playful" : "plain";
   // Relative times ("2h ago") are rendered from ONE timestamp so the server and
@@ -172,7 +179,13 @@ export default async function SettingsPage({
           // #118 Phase C — YOUR OWN connection, owner or member alike. Was
           // `owner && google`, with a member falling into the guest shell below
           // and no way to reach the connect flow from the UI at all.
-          <IntegrationsPanel google={google} voice={voice} />
+          <IntegrationsPanel
+            google={google}
+            // #154 — null when this account has no feed, which is what makes
+            // the card offer to create one rather than show a dead URL.
+            calendarFeedUrl={feed ? feedUrl(feed.token) : null}
+            voice={voice}
+          />
         ) : (
           // #11 — a caller with no account sees the section EXISTS, read-only,
           // with no status fetched and none shown.

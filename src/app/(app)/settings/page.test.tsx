@@ -43,6 +43,12 @@ const userOverride = vi.fn<() => Promise<object | null>>(async () =>
   (await isOwnerRequest()) ? OWNER_USER : null,
 );
 const ownLlmKeyPresentMock = vi.fn<() => Promise<boolean>>(async () => false);
+// #154 — the page reads the acting account's feed at the server boundary. The
+// module's own rules (mint, rotate, the capability lookup) are covered in
+// calendar-feed.test.ts and calendar-feed.integration.test.ts.
+const ownFeedMock = vi.fn<() => Promise<{ token: string } | null>>(
+  async () => null,
+);
 
 vi.mock("@/lib/db", () => ({
   getSettings: vi.fn().mockImplementation(async () => ({
@@ -63,6 +69,12 @@ vi.mock("@/lib/google", () => ({
 vi.mock("@/lib/people", () => ({
   loadPeopleAdmin: vi.fn().mockResolvedValue(null),
 }));
+// `feedUrl` is the REAL one: "the page hands the panel an absolute URL" is a
+// thing worth asserting, and a stub would make it pass whatever the page built.
+vi.mock("@/lib/calendar-feed", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/calendar-feed")>();
+  return { feedUrl: actual.feedUrl, getOwnFeed: () => ownFeedMock() };
+});
 
 // --- Heavy child components: stubbed down to a marker each ---------------
 // The markers keep the footer assertions cheap AND make the page's own job
@@ -107,16 +119,19 @@ vi.mock("@/components/settings/integrations-panel", () => ({
     defaultExpanded,
     readOnly,
     google,
+    calendarFeedUrl,
   }: {
     defaultExpanded?: boolean;
     readOnly?: boolean;
     google?: unknown;
+    calendarFeedUrl?: string | null;
   }) => (
     <div
       data-stub="settings-integrations"
       data-default-expanded={String(Boolean(defaultExpanded))}
       data-read-only={String(Boolean(readOnly))}
       data-google={google == null ? "null" : "status"}
+      data-calendar-feed={calendarFeedUrl ?? "null"}
     />
   ),
 }));
@@ -347,6 +362,47 @@ describe("SettingsPage — Integrations is per-account (#118)", () => {
     // null, not an id — getGoogleStatus answers without a query, so a guest's
     // settings page load touches the credential table not at all (#118).
     expect(getGoogleStatus).toHaveBeenCalledWith(null);
+  });
+
+  // #154 — the calendar feed URL is resolved on the SERVER and handed down as a
+  // prop. That is the whole reason the capability token never has to travel
+  // through a client fetch: the only browser it ever reaches is the one
+  // rendering the page for the account it belongs to.
+  it("hands the panel an ABSOLUTE feed URL for an account that has one", async () => {
+    isOwnerRequest.mockResolvedValue(false);
+    userOverride.mockResolvedValue(MEMBER_USER);
+    ownFeedMock.mockResolvedValue({ token: "T".repeat(43) });
+    process.env.PUBLIC_ORIGIN = "https://dlectroflow.dev";
+
+    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+
+    expect(integrationsStub()!.getAttribute("data-calendar-feed")).toBe(
+      `https://dlectroflow.dev/api/ics/feed/${"T".repeat(43)}`,
+    );
+  });
+
+  it("hands it null when the account has not turned a feed on", async () => {
+    isOwnerRequest.mockResolvedValue(false);
+    userOverride.mockResolvedValue(MEMBER_USER);
+    ownFeedMock.mockResolvedValue(null);
+
+    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+
+    expect(integrationsStub()!.getAttribute("data-calendar-feed")).toBe("null");
+  });
+
+  it("does not query the feed at all for a caller with no account", async () => {
+    // A guest sandbox expires in about a day, so it can never have a feed —
+    // and a settings page load by somebody with no account should not touch the
+    // credential table, the same rule #118 set for the Google status.
+    isOwnerRequest.mockResolvedValue(false);
+    userOverride.mockResolvedValue(null);
+    ownFeedMock.mockClear();
+
+    render(await SettingsPage({ searchParams: Promise.resolve({}) }));
+
+    expect(ownFeedMock).not.toHaveBeenCalled();
+    expect(integrationsStub()!.getAttribute("data-calendar-feed")).toBe("null");
   });
 
   it("lists Integrations in the section nav for a member", async () => {
