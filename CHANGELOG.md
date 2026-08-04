@@ -129,6 +129,22 @@ operators upgrading a self-hosted instance don't get surprised.
     "Permanent" and by the button's own label, not by colour (WCAG 1.4.1), and
     both controls meet the 44px target size at 390px (WCAG 2.5.5).
 
+- **A production log-retention check that verifies the artefact, not the status
+  field (#157).** Keeping logs on GKE needs two independent settings to agree —
+  the cluster's `loggingConfig`, which decides what to ship, and the project's
+  `logging.googleapis.com` service, which decides whether anything accepts it —
+  and neither can see the other. Enable only the first and logs are silently
+  discarded while both settings still read as correct on their own.
+  `scripts/check-log-retention.sh` sidesteps that by **reading a log line back
+  out**, and follows `check-prod-drift.sh`'s three-state contract: `0` retained,
+  `1` proven not retained, `2` undetermined. A successful query returning zero
+  entries is `1`, not `0`, and a query that could not run is `2`, not either —
+  collapsing those is the failure the check exists to prevent. It is read-only
+  and reports provider errors as a category, never echoing an identifier, since
+  the weekly `ops_digest` publishes its verdict on a public issue. Operator
+  steps, and why the window is 30 days rather than a default nobody chose, are
+  in `docs/deploy-runbook.md` § 16.
+
 ### Changed
 
 - **`.ics` downloads now fold long lines (RFC 5545 §3.1).** The per-task calendar
