@@ -196,6 +196,17 @@ export function useFocusSound(
    * The heard-set is reset in both branches, and deliberately so: it records
    * positions in a pass, so carrying it into a re-dealt order would mark
    * unrelated entries as already played and wrap the playlist early.
+   *
+   * ── On the setState in here ─────────────────────────────────────────────────
+   * `react-hooks/set-state-in-effect` is an error in this repo, and it is right
+   * to be. This is the case the rule exempts in prose: React state being
+   * synchronised with two external systems it does not own — an async catalog
+   * fetch and a live `<audio>` element. It also costs almost nothing in practice.
+   * `mergeFocusTracks` keeps bundled tracks at their indices, so #61's growth
+   * path reaches `moved === indexRef.current` and sets nothing; the only branch
+   * that re-renders is a playlist REPLACEMENT, which is a deliberate user action.
+   * (The rule does not flag it because `setIdx` wraps the setter — an indirection
+   * that predates this change. If it is ever inlined, this comment is the answer.)
    */
   const tracksRef = useRef(tracks);
   useEffect(() => {
