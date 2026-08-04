@@ -7,6 +7,7 @@ import {
   rangeCeiling,
   compareTriples,
   matchesCurrentValue,
+  isVettedPattern,
   coveringRules,
   type OverrideBlock,
   type PackageRule,
@@ -132,8 +133,14 @@ describe("matchesCurrentValue", () => {
     expect(matchesCurrentValue("/^\\^?5\\./", "^2.1.3")).toBe(false);
   });
 
-  it("honours the trailing case-insensitive flag", () => {
-    expect(matchesCurrentValue("/^V1/i", "v1.2.3")).toBe(true);
+  it("refuses a pattern that is not in the vetted set", () => {
+    // Previously this asserted the `i` flag by compiling `/^V1/i` on the fly.
+    // Patterns are no longer compiled from config text (ReDoS sink, and a
+    // pattern nobody has read should not silently be interpreted), so a
+    // well-formed but unlisted pattern now reads as "not covered" — the same
+    // direction the glob form is refused in.
+    expect(matchesCurrentValue("/^V1/i", "v1.2.3")).toBe(false);
+    expect(matchesCurrentValue("/^\\^?9\\./", "^9.0.0")).toBe(false);
   });
 
   it("negates a leading '!'", () => {
@@ -153,6 +160,29 @@ describe("matchesCurrentValue", () => {
 
   it("does not throw on an unparseable regex", () => {
     expect(matchesCurrentValue("/[/", "^5.0.8")).toBe(false);
+  });
+
+  it("vets every matchCurrentValue the real config uses", () => {
+    // The invariant that makes the fixed set safe rather than merely quieter:
+    // a pattern added to renovate.json but not vetted here would make its scope
+    // read as UNCOVERED, and the guard it was written for would stop applying
+    // with nothing to say so. This fails instead.
+    const config = JSON.parse(
+      readFileSync(join(process.cwd(), ".gitlab/renovate.json"), "utf8"),
+    ) as { packageRules?: { matchCurrentValue?: string }[] };
+    const used = (config.packageRules ?? [])
+      .map((r) => r.matchCurrentValue)
+      .filter((v): v is string => typeof v === "string");
+    expect(used.length).toBeGreaterThan(0);
+    for (const pattern of used) {
+      expect(matchesCurrentValue(pattern, "^0.0.0-nothing-matches-this")).toBe(
+        false,
+      );
+      // Not "does it match this value" but "is it evaluated at all": an
+      // unvetted pattern and a vetted non-matching one both return false, so
+      // assert vetting directly.
+      expect(isVettedPattern(pattern)).toBe(true);
+    }
   });
 });
 

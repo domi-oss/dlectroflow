@@ -2,11 +2,13 @@
 
 import {
   useEffect,
+  useId,
   useRef,
   useState,
   useSyncExternalStore,
   useTransition,
 } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Clock } from "lucide-react";
@@ -14,18 +16,21 @@ import { cn, touchTarget } from "@/lib/utils";
 import { COMPLETE_TEXT } from "@/lib/completion-style";
 import { DonePill } from "@/components/completion/done-pill";
 import {
-  DndContext,
-  MouseSensor,
-  TouchSensor,
-  KeyboardSensor,
-  useSensor,
-  useSensors,
-  useDraggable,
-  useDroppable,
-  DragOverlay,
-  type DragEndEvent,
-  type DragStartEvent,
-} from "@dnd-kit/core";
+  draggable,
+  dropTargetForElements,
+  monitorForElements,
+  type ElementDragPayload,
+} from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
+import { setCustomNativeDragPreview } from "@atlaskit/pragmatic-drag-and-drop/element/set-custom-native-drag-preview";
+import { pointerOutsideOfPreview } from "@atlaskit/pragmatic-drag-and-drop/element/pointer-outside-of-preview";
+import {
+  MOVE_INSTRUCTIONS,
+  liftAnnouncement,
+  overAnnouncement,
+  movedAnnouncement,
+  notMovedAnnouncement,
+  cancelledAnnouncement,
+} from "@/components/inbox/drag-announce";
 import {
   isAging,
   effectiveAgingMs,
@@ -90,7 +95,25 @@ import {
 } from "@/lib/notifications";
 import { formatAgo } from "@/lib/format";
 
-/** Map a dnd-kit drop onto a bucket to a move intent (null when dropped nowhere). */
+/**
+ * The key an inbox row's drag carries its item id under, and the one a bucket's
+ * drop zone carries its bucket id under. Both are `data` on
+ * pragmatic-drag-and-drop's `draggable` / `dropTargetForElements`, which is an
+ * open `Record<string, unknown>` — so these constants are the only thing making
+ * "is this drag one of ours?" a decidable question rather than a guess (#163).
+ */
+const DRAG_ITEM_KEY = "inboxItemId";
+const DROP_BUCKET_KEY = "inboxBucketId";
+
+/** True when a native drag was started by one of our rows rather than by an
+ * image, a text selection, or another surface on the page. */
+function isInboxDrag(source: ElementDragPayload): boolean {
+  return typeof source.data[DRAG_ITEM_KEY] === "string";
+}
+
+/** Map a drop onto a bucket to a move intent (null when dropped nowhere).
+ * Pure, and shared by every drop path, so `dragEndToMove(id, null)` is what a
+ * cancelled drag looks like as well as a drop into empty space. */
 export function dragEndToMove(
   activeId: string,
   overId: string | null,
@@ -498,28 +521,33 @@ export function InboxView({
     />
   );
 
-  // Drag (dnd-kit) + the "Move to…" menu share this single dispatcher so the
-  // two paths can never diverge (Task 10). Every drop moves immediately —
-  // a Multi-step drop parks the item there with a "Break into steps now?"
-  // call-to-action (requestBreakdown) instead of a blocking prompt.
-  // Mouse/touch split (#26): a bare PointerSensor loses the gesture race to
-  // page scrolling on touch screens, so drags never started on mobile.
-  // Touch = long-press to lift (the standard mobile list pattern); mouse keeps
-  // a 5px threshold (imperceptible, and stops stray clicks becoming drags).
-  const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, {
-      activationConstraint: { delay: 250, tolerance: 5 },
-    }),
-    useSensor(KeyboardSensor),
-  );
   const itemsById = new Map(initialItems.map((i) => [i.id, i]));
 
+  // #163 — every move outcome, spoken once.
+  //
+  // dnd-kit maintained this live region itself; pragmatic-drag-and-drop hands
+  // the job to us on purpose (see drag-announce.ts). The state lives here, next
+  // to the dispatcher, rather than inside the drag code, because the "Move to…"
+  // menu has to produce the SAME sentence — a keyboard user who never drags is
+  // exactly the user this feedback is for, and until now they got none at all.
+  const [announcement, setAnnouncement] = useState("");
+
+  // Drag + the "Move to…" menu share this single dispatcher so the two paths
+  // can never diverge (Task 10). Every drop moves immediately — a Multi-step
+  // drop parks the item there with a "Break into steps now?" call-to-action
+  // (requestBreakdown) instead of a blocking prompt.
   const moveItemToBucket = (itemId: string, target: BucketId) => {
     const item = itemsById.get(itemId);
     if (!item) return;
-    const plan = dropPlan(bucketOfItem(item, now), target);
-    if (plan.kind === "noop") return;
+    const source = bucketOfItem(item, now);
+    const plan = dropPlan(source, target);
+    // A no-op says so. Announcing the intent instead of the outcome would tell
+    // a screen reader an item had moved when it had not.
+    if (plan.kind === "noop") {
+      setAnnouncement(notMovedAnnouncement(item.text, source, voice));
+      return;
+    }
+    setAnnouncement(movedAnnouncement(item.text, source, plan.target, voice));
 
     run(async () => {
       if (plan.reopenFirst) await reopenItem(itemId, undefined);
@@ -543,23 +571,83 @@ export function InboxView({
     });
   };
 
-  // Row-follows-finger feedback (#26): DragOverlay floats a copy of the row;
-  // rows compare their id against activeDragId to dim themselves (dnd-kit does
-  // NOT hide the source automatically). Cleared on drop/cancel.
+  // Row dimming (#26): rows compare their id against activeDragId to dim
+  // themselves. The platform's own drag preview is a photo of an element we
+  // supply (see DragGrip), and it does not hide the source, so this is still
+  // ours to do. Cleared on drop and on cancel.
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
-  const handleDragStart = (e: DragStartEvent) =>
-    setActiveDragId(String(e.active.id));
-  const handleDragEnd = (e: DragEndEvent) => {
-    setActiveDragId(null);
-    const move = dragEndToMove(
-      String(e.active.id),
-      e.over ? String(e.over.id) : null,
-    );
-    if (move) moveItemToBucket(move.itemId, move.target);
-  };
-  const activeDragItem = activeDragId
-    ? (itemsById.get(activeDragId) ?? null)
-    : null;
+
+  // The monitor below is registered ONCE — re-registering it per render would
+  // tear the subscription down and rebuild it on every keystroke in the capture
+  // box — but it has to act on the current items, voice and clock. This is the
+  // standard "latest ref" hand-off, written into the ref from an effect rather
+  // than during render so it stays correct if React renders a pass it throws
+  // away.
+  const latest = useRef({ itemsById, now, voice, moveItemToBucket });
+  useEffect(() => {
+    latest.current = { itemsById, now, voice, moveItemToBucket };
+  });
+
+  useEffect(() => {
+    /** The bucket a drag is currently over, or null when it is over nothing.
+     * `dropTargets` is innermost-first; buckets never nest, so [0] is it. */
+    const bucketUnder = (
+      dropTargets: readonly { data: Record<string, unknown> }[],
+    ): string | null => {
+      const id = dropTargets[0]?.data[DROP_BUCKET_KEY];
+      return typeof id === "string" ? id : null;
+    };
+
+    return monitorForElements({
+      canMonitor: ({ source }) => isInboxDrag(source),
+      onDragStart: ({ source }) => {
+        const id = String(source.data[DRAG_ITEM_KEY]);
+        const { itemsById, now, voice } = latest.current;
+        const item = itemsById.get(id);
+        if (!item) return;
+        setActiveDragId(id);
+        setAnnouncement(
+          liftAnnouncement(item.text, bucketOfItem(item, now), voice),
+        );
+      },
+      onDropTargetChange: ({ source, location }) => {
+        const id = String(source.data[DRAG_ITEM_KEY]);
+        const { itemsById, voice } = latest.current;
+        const item = itemsById.get(id);
+        const over = bucketUnder(location.current.dropTargets);
+        if (!item || !over || !isBucketId(over)) return;
+        setAnnouncement(overAnnouncement(item.text, over, voice));
+      },
+      // pragmatic-drag-and-drop has no separate "cancel" event: an Escape, a
+      // drop into empty space and a `dragend` all arrive here with an empty
+      // `dropTargets`, which `dragEndToMove` already maps to null.
+      onDrop: ({ source, location }) => {
+        setActiveDragId(null);
+        const id = String(source.data[DRAG_ITEM_KEY]);
+        const { itemsById, now, voice, moveItemToBucket } = latest.current;
+        const item = itemsById.get(id);
+        if (!item) return;
+        const move = dragEndToMove(
+          id,
+          bucketUnder(location.current.dropTargets),
+        );
+        if (!move) {
+          setAnnouncement(
+            cancelledAnnouncement(item.text, bucketOfItem(item, now), voice),
+          );
+          return;
+        }
+        moveItemToBucket(move.itemId, move.target);
+      },
+    });
+  }, []);
+
+  // One instructions node for the whole board, named by every row's move
+  // control. `useId` is the #94 fix: dnd-kit built this id from a per-render
+  // counter that restarted in the browser, and rendered the node into a portal
+  // that never server-rendered, so on a hard load `aria-describedby` pointed at
+  // nothing at all.
+  const moveInstructionsId = useId();
 
   const submit = () => {
     const value = text.trim();
@@ -706,12 +794,12 @@ export function InboxView({
         )}
       </div>
 
-      <DndContext
-        sensors={sensors}
-        onDragStart={handleDragStart}
-        onDragCancel={() => setActiveDragId(null)}
-        onDragEnd={handleDragEnd}
-      >
+      {/* #163 — the drag surface. There is no provider to wrap it in any more:
+          pragmatic-drag-and-drop registers draggables, drop targets and the
+          monitor imperatively against real elements, so the board is plain
+          markup and the wiring is in the effects above and in DragGrip /
+          DroppableBucket below. */}
+      <>
         {/* Needs review */}
         <section>
           <h2 className="text-primary mb-2 flex items-center gap-2 text-sm font-semibold">
@@ -801,12 +889,13 @@ export function InboxView({
                         <MoveToMenu
                           key="move-icon"
                           compact
+                          describedById={moveInstructionsId}
                           currentBucket={bucketOfItem(item, now)}
                           voice={voice}
                           onMove={(target) => moveItemToBucket(item.id, target)}
                         />
                       }
-                      dragGrip={<DragGrip id={item.id} label={item.text} />}
+                      dragGrip={<DragGrip id={item.id} text={item.text} />}
                       editButton={pencil(item)}
                       editMenuItem={editMenuItem(item)}
                       titleEditor={
@@ -918,7 +1007,7 @@ export function InboxView({
                               : undefined
                           }
                         >
-                          <DragGrip id={item.id} label={item.text} />
+                          <DragGrip id={item.id} text={item.text} />
                           {editingId === item.id ? (
                             titleEditor(item)
                           ) : awaitingBreakdown ? (
@@ -1002,6 +1091,7 @@ export function InboxView({
                             <MoveToMenu
                               key="move-icon"
                               compact
+                              describedById={moveInstructionsId}
                               currentBucket={bucketOfItem(item, now)}
                               voice={voice}
                               onMove={(target) =>
@@ -1161,7 +1251,7 @@ export function InboxView({
                       >
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
                         <div className="flex items-start gap-2">
-                          <DragGrip id={item.id} label={item.text} />
+                          <DragGrip id={item.id} text={item.text} />
                           {editingId === item.id ? (
                             titleEditor(item)
                           ) : (
@@ -1203,6 +1293,7 @@ export function InboxView({
                             <MoveToMenu
                               key="move-icon"
                               compact
+                              describedById={moveInstructionsId}
                               currentBucket={bucketOfItem(item, now)}
                               voice={voice}
                               onMove={(target) =>
@@ -1314,7 +1405,7 @@ export function InboxView({
                               "opacity-70",
                           )}
                         >
-                          <DragGrip id={item.id} label={item.text} />
+                          <DragGrip id={item.id} text={item.text} />
                           {editingId === item.id ? (
                             titleEditor(item)
                           ) : (
@@ -1377,6 +1468,7 @@ export function InboxView({
                               <MoveToMenu
                                 key="move-icon"
                                 compact
+                                describedById={moveInstructionsId}
                                 currentBucket={bucketOfItem(item, now)}
                                 voice={voice}
                                 onMove={(target) =>
@@ -1448,6 +1540,7 @@ export function InboxView({
                             <span className="flex-1" />
                             <MoveToMenu
                               compact
+                              describedById={moveInstructionsId}
                               currentBucket={bucketOfItem(item, now)}
                               voice={voice}
                               onMove={(target) =>
@@ -1498,7 +1591,7 @@ export function InboxView({
                       >
                         {/* Title line + action row below — mirrors the Needs-review row layout. */}
                         <div className="flex items-start gap-2">
-                          <DragGrip id={item.id} label={item.text} />
+                          <DragGrip id={item.id} text={item.text} />
                           {editingId === item.id ? (
                             titleEditor(item)
                           ) : (
@@ -1539,6 +1632,7 @@ export function InboxView({
                           <span className="flex-1" />
                           <MoveToMenu
                             compact
+                            describedById={moveInstructionsId}
                             currentBucket={bucketOfItem(item, now)}
                             voice={voice}
                             onMove={(target) =>
@@ -1565,22 +1659,31 @@ export function InboxView({
             </DroppableBucket>
           </div>
         </section>
-        {/* #26: floating copy of the dragged row — the whole card visibly follows
-            the finger/pointer during a drag, with a short settle animation on drop.
-            #62: dnd-kit's DragOverlay sizes its wrapper to the *draggable* node's
-            measured rect (see PositionedOverlay in @dnd-kit/core), and the
-            draggable ref lives on the 28×44 DragGrip button, not the row — so
-            without the `style` override below the overlay box is grip-sized and
-            the title text gets crushed into a vertical sliver on drop. Clearing
-            width/height here lets the ghost shrink-to-fit its own content
-            (capped to a sensible row width) instead of the grip's box. */}
-        <DragOverlay
-          dropAnimation={{ duration: 180, easing: "ease-out" }}
-          style={{ width: "auto", height: "auto" }}
-        >
-          {activeDragItem ? <DragGhostRow text={activeDragItem.text} /> : null}
-        </DragOverlay>
-      </DndContext>
+      </>
+
+      {/* #163 — the live region every move outcome is announced through.
+          Rendered ALWAYS and initially empty on purpose: assistive technology
+          announces a *change* to a region already in the accessibility tree, so
+          one that appears together with its first message is silent. `sr-only`
+          rather than `hidden`, because a live region has to be rendered to be
+          observed. */}
+      <p
+        data-testid="move-announcer"
+        role="status"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {announcement}
+      </p>
+
+      {/* The description every row's move control points at. `hidden` is the
+          long-standing technique for a description-only node: an element
+          referenced directly by `aria-describedby` contributes its text even
+          when it is not rendered, and hiding it keeps the sentence from being
+          read a second time by someone browsing the page. */}
+      <p id={moveInstructionsId} hidden>
+        {MOVE_INSTRUCTIONS}
+      </p>
     </div>
   );
 }
@@ -1712,10 +1815,27 @@ function DroppableBucket({
   id: BucketId;
   children: React.ReactNode;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id });
+  const ref = useRef<HTMLDivElement>(null);
+  const [isOver, setIsOver] = useState(false);
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    return dropTargetForElements({
+      element,
+      getData: () => ({ [DROP_BUCKET_KEY]: id }),
+      // Without this a file, an image or a text selection dragged in from
+      // anywhere would light the bucket up as a valid target.
+      canDrop: ({ source }) => isInboxDrag(source),
+      onDragEnter: () => setIsOver(true),
+      onDragLeave: () => setIsOver(false),
+      onDrop: () => setIsOver(false),
+    });
+  }, [id]);
+
   return (
     <div
-      ref={setNodeRef}
+      ref={ref}
       data-bucket={id}
       className={cn("rounded-lg", isOver && "ring-primary ring-2")}
     >
@@ -1724,35 +1844,103 @@ function DroppableBucket({
   );
 }
 
-/** Drag handle for a single item card — the pointer/keyboard-accessible grip
- * dnd-kit binds `useDraggable` listeners to. */
-function DragGrip({ id, label }: { id: string; label: string }) {
-  const { attributes, listeners, setNodeRef } = useDraggable({ id });
+/**
+ * The pointer drag handle for a single row.
+ *
+ * **It is decoration, not a control (#163.)** It used to be a
+ * `<button aria-label="Drag …">` because dnd-kit's `KeyboardSensor` needed a
+ * focusable activator. pragmatic-drag-and-drop is built on the platform's own
+ * drag and drop and has no keyboard adapter at all — Atlassian's accessibility
+ * guidelines recommend *against* building one ("avoid directional controls")
+ * and point at a menu instead. Keeping a focus stop that advertises a drag it
+ * can no longer perform would be worse for a screen-reader user than not
+ * exposing it, so the grip is `aria-hidden` and out of the tab order, and the
+ * row's "Move to" control carries the whole non-pointer path. That is what
+ * satisfies WCAG 2.1.1 (Keyboard) and, since the same control needs no
+ * dragging movement, 2.5.7 as well.
+ *
+ * No `touch-none`: dnd-kit's `TouchSensor` needed it to win the gesture race
+ * against page scrolling (#26). The platform arbitrates that race itself now —
+ * a long press lifts, a swipe scrolls — and a `touch-action: none` island would
+ * only trap a scroll that happens to start on the grip.
+ */
+function DragGrip({ id, text }: { id: string; text: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [previewContainer, setPreviewContainer] = useState<HTMLElement | null>(
+    null,
+  );
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    return draggable({
+      element,
+      getInitialData: () => ({ [DRAG_ITEM_KEY]: id }),
+      onGenerateDragPreview: ({ nativeSetDragImage }) => {
+        setCustomNativeDragPreview({
+          // Push the ghost off the pointer so the row underneath stays
+          // readable. Kept small: a native preview wider or taller than 280px
+          // is dimmed heavily by Windows.
+          getOffset: pointerOutsideOfPreview({ x: "12px", y: "8px" }),
+          render: ({ container }) => {
+            setPreviewContainer(container);
+            return () => setPreviewContainer(null);
+          },
+          nativeSetDragImage,
+        });
+      },
+    });
+  }, [id]);
+
   return (
-    <button
-      ref={setNodeRef}
-      {...attributes}
-      {...listeners}
-      aria-label={`Drag ${label}`}
-      // Narrow gutter (28px wide × 44px tall) so the title tucks in to the left
-      // instead of floating past a full 44px-square grip. 28px keeps the target
-      // width ≥ the WCAG-AA 24px minimum (2.5.8); full 44px height preserved.
-      className="text-muted-foreground hover:text-foreground inline-flex min-h-11 w-7 shrink-0 cursor-grab touch-none items-center justify-center text-xs"
-    >
-      ⠿
-    </button>
+    <>
+      <span
+        ref={ref}
+        data-drag-grip={id}
+        // Decoration for a pointer, and named nowhere in the accessibility
+        // tree — see the component doc comment.
+        aria-hidden="true"
+        // Narrow gutter (28px wide × 44px tall) so the title tucks in to the
+        // left instead of floating past a full 44px-square grip. 28px keeps the
+        // pointer target ≥ the WCAG-AA 24px minimum (2.5.8); full 44px height
+        // preserved.
+        className="text-muted-foreground hover:text-foreground inline-flex min-h-11 w-7 shrink-0 cursor-grab items-center justify-center text-xs select-none"
+      >
+        ⠿
+      </span>
+      {/* A portal rather than a second React root, so the ghost is rendered by
+          the same tree (and therefore under the same providers) as the row it
+          is a copy of. `setCustomNativeDragPreview` owns this container: it
+          appends it to the body, lets the browser photograph it, and removes it
+          on the frame the lift completes. */}
+      {previewContainer
+        ? createPortal(<DragGhostRow text={text} />, previewContainer)
+        : null}
+    </>
   );
 }
 
-/** Floating ghost rendered inside the `DragOverlay` while a row is being
- * dragged (#26/#62). Deliberately its own component (rather than inline
- * JSX) so it can be unit-tested in isolation from dnd-kit's drag lifecycle —
- * jsdom can't reproduce the real-browser layout bug (#62) this guards
- * against, but it can assert the markup never relies on a fixed narrow
- * width and lets the title wrap normally instead of one-character-per-line. */
+/**
+ * The row copy the browser photographs to use as the drag preview (#26/#62).
+ *
+ * #62 was that dnd-kit's `DragOverlay` sized its wrapper to the measured rect
+ * of the *draggable* node, and the draggable ref lived on the 28×44 grip — so
+ * the ghost came out grip-shaped and the title collapsed into a
+ * one-character-per-line sliver. That coupling does not exist here: the preview
+ * is this element, in a container of its own, and the grip's rect never enters
+ * the calculation. The `style={{ width: "auto", height: "auto" }}` workaround
+ * against `PositionedOverlay` is gone with it.
+ *
+ * Still its own component so it can be unit-tested away from the drag
+ * lifecycle: jsdom cannot reproduce the real-browser layout bug, but it can
+ * assert the markup never pins itself to a fixed narrow width.
+ */
 export function DragGhostRow({ text }: { text: string }) {
   return (
-    <div className="bg-background ring-primary/40 pointer-events-none flex w-[min(90vw,28rem)] scale-[1.02] items-start gap-2 rounded-lg border px-4 py-3 shadow-lg ring-2">
+    <div
+      data-drag-ghost=""
+      className="bg-background ring-primary/40 pointer-events-none flex w-[min(90vw,28rem)] scale-[1.02] items-start gap-2 rounded-lg border px-4 py-3 shadow-lg ring-2"
+    >
       <span
         aria-hidden="true"
         className="text-muted-foreground inline-flex w-7 shrink-0 items-center justify-center text-xs"

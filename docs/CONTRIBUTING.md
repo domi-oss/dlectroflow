@@ -75,15 +75,42 @@ nowhere else.
 **A retitle sweep is also the cheapest moment to notice a stale description**,
 because it is the one time somebody reads all of them in a sitting. When #113's
 title was shortened, the audit found the description underneath it describing
-three registry repositories and 500 tags; there were two and 412, `latest` had
-moved, and the cleanup policy's `next_run_at` had been stuck in the past for two
-days — which changed the issue's conclusion, not just its wording. None of that
-was found by looking for it. It was found by checking whether a shortened title
-had left anything behind.
+three registry repositories and 500 tags; there were two and 412, and `latest`
+had moved. None of that was found by looking for it. It was found by checking
+whether a shortened title had left anything behind.
 
 So: re-read the description while you are in there, and date any figures you
 re-measure. An issue whose numbers silently expired is worse than a long title,
 because a long title is at least honest about being long.
+
+### Re-measuring is not the same as re-diagnosing
+
+The #113 sweep above is also a warning, and it is the more useful half. Having
+re-measured, it drew a **new** conclusion from a new number — `next_run_at` was
+two days in the past, therefore the cleanup policy had stalled — and wrote that
+into the issue, into a note, and into the milestone as the criterion for
+verifying the fix. It was wrong. On gitlab.com that field is an earliest-start,
+not a schedule, and the policy was draining correctly the whole time. The
+correction then nearly went wrong the same way, from the opposite direction:
+bare-SHA tags had grown, therefore the policy must be running without reaping —
+also wrong, because the growth was CI pushing faster than a 7-day window
+retires.
+
+Both errors are one mistake: **reading a count as a mechanism.** A number tells
+you the state of the world, not which process produced it — and when several
+processes move the same counter, as three do here, it cannot tell you that even
+in principle.
+
+Two habits fall out of it, and they are cheap:
+
+- **Ask what else moves this number** before concluding anything from it. If the
+  answer is "more than one thing", the number cannot attribute a cause and you
+  need a different measurement — one that partitions by mechanism.
+- **Write down the measurement, not the conclusion.** Figures rot, so a
+  conclusion drawn from them rots too, silently and with none of the visible
+  staleness of a dated number. `scripts/check-registry-drain.sh` exists because
+  of this: the question is now re-answered on demand instead of being re-argued
+  from whatever figure was last written down.
 
 ### Keep re-measurable numbers out of the title
 

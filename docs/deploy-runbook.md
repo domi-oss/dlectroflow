@@ -199,6 +199,33 @@ ingress `X-Forwarded-Proto` header and Task 3's `requestOrigin`.
   > **sslip.io host format:** use the **dash-separated** IP form (e.g. `mr-<IID>.203-0-113-5.sslip.io` for an ingress IP of `203.0.113.5`), **not** the dotted form. A dotted quad *after* a hyphenated prefix like `mr-1.` makes sslip.io misparse the address (it reads the leading `1` as part of the IP); the dash form resolves correctly. (`203.0.113.5` is a documentation placeholder — substitute your reserved ingress IP.)
 - Merge to `main` → `deploy_production` publishes to `https://dlectroflow.dev`.
 
+## 9b. The full lo-fi catalog (optional, off by default)
+- Ten CC0 tracks ship inside the image, one per open-lofi category. The full
+  open-lofi set is 166 tracks / ~544 MB, too much for a container image, so the
+  rest is read at run time from wherever it is kept.
+- Extract the `openlofi.zip` release somewhere an HTTP server can reach, then set
+  the chart value:
+  ```
+  --set focus.catalogOrigin=https://your-store.example.com/openlofi
+  ```
+  It renders as `FOCUS_CATALOG_ORIGIN` in the app Secret, and is omitted entirely
+  when empty — the default.
+- **The URL never reaches a browser.** `next.config.ts` keeps `default-src 'self'`
+  with `media-src` unset, so a browser refuses audio from any other origin; the
+  pod fetches the bytes and streams them back through `/api/focus-catalog/audio`,
+  forwarding `Range` so seeking works. Any credential the store needs therefore
+  stays server-side. Pointing the player at the store directly would need a CSP
+  relaxation, which `src/lib/security-headers.test.ts` fails the build over.
+- Unset, unreachable or misconfigured, the player uses the bundled ten. A
+  misconfigured store is not silent: grep the app logs for
+  `focus_catalog_unavailable`, which carries the reason and is emitted once per
+  session rather than once per range request.
+- Verify from a pod rather than assuming: `kubectl -n dlectroflow-prod exec
+  deploy/dlectroflow -- printenv FOCUS_CATALOG_ORIGIN`, then load `/focus` and
+  confirm the mini-player lists more than ten tracks.
+- Licence/provenance for the streamed set: `public/audio/LICENSE.md`. The app
+  validates the shape of what it is served, never the licence of the bytes.
+
 ## 10. Cost guardrails
 - Confirm the free Autopilot/zonal cluster credit on the billing account.
 - Set a GCP budget alert (Billing → Budgets & alerts).
@@ -456,4 +483,178 @@ credentials — the order below assumes the worst anyway.
 7. **Afterwards:** take a fresh on-demand backup (§12), verify token columns
    show `v1:` ciphertext, and audit GCS bucket access
    (`gcloud logging read 'resource.type="gcs_bucket"' ...`) for reads you
-   don't recognise.
+   don't recognise. **That audit depends on §16 being in place** — with
+   project-level ingestion off the read answers `SERVICE_DISABLED`, which is
+   silent unless you check the exit status.
+
+## 16. Log retention (prod)
+
+**Two independent settings have to agree before a single log line is kept, and
+neither one can see the other.**
+
+1. The **cluster** decides what to ship: `loggingConfig` enabling
+   `SYSTEM_COMPONENTS` and `WORKLOADS`, with `loggingService` set to
+   `logging.googleapis.com/kubernetes`. §1's `create-auto` gives you this.
+2. The **project** decides whether anything accepts it: the
+   `logging.googleapis.com` service, enabled, with a retention window on the
+   bucket the logs land in.
+
+Do only the first and the cluster ships logs to somewhere that will not take
+them. Nothing errors, nothing warns, and **there is no retention at all** — an
+application log line then exists only in a running pod's buffer, and Autopilot
+recycles pods without warning or correlation to anything you did. The dangerous
+part is that each setting reads as correct on its own, so the contradiction is
+invisible from either end. Do not treat "logging is enabled on the cluster" as
+an answer to "are logs being kept".
+
+### Enable it
+
+```bash
+gcloud services enable logging.googleapis.com --project=YOUR_GCP_PROJECT
+gcloud logging buckets update _Default --location=global --retention-days=30 --project=YOUR_GCP_PROJECT
+```
+
+Enabling starts the clock; it does **not** backfill. Everything before this
+point is gone, and the first minutes after it hold nothing either — so generate
+some traffic and wait before believing any check.
+
+### Then prove it from the artefact
+
+```bash
+LOG_PROJECT=YOUR_GCP_PROJECT bash scripts/check-log-retention.sh
+```
+
+`scripts/check-log-retention.sh` **reads a log line back out**. It deliberately
+refuses to ask whether the API shows as enabled, because a status field can read
+correct while nothing is being kept — this project has been caught more than
+once by a green signal that meant nothing had been looked at. Exit codes follow
+`check-prod-drift.sh` — `0` retained, `1` proven not retained, `2` undetermined.
+**`2` is not a pass.** A successful query returning zero entries is reported as
+`1`, not `0`.
+
+Add `LOG_CLUSTER=dlectroflow LOG_CLUSTER_LOCATION=europe-west2` to have it read
+the cluster's `loggingConfig` too, so a failure report names the *contradiction*
+rather than only the symptom. Without that, a reader who is told "no logs" goes
+to the cluster config, finds it correct, and stops.
+
+> **A quiet instance can fail the namespace line honestly.** The app writes on
+> startup and on errors, not per request, so on a low-traffic day there may be
+> nothing from `dlectroflow-prod` inside the default one-hour window even though
+> ingestion is working — the project-wide line above it will be a ✅ while the
+> namespace line is a 🔴, which is the pair telling you which of the two it is.
+> Give it something to say (`kubectl -n dlectroflow-prod rollout restart
+> deployment/dlectroflow`, or widen the window with `LOG_FRESHNESS=24h`) rather
+> than treating the empty read as noise.
+
+The weekly `ops_digest` job calls the same script and publishes its verdict. It
+reports `⚠️ undetermined` there, and that is honest rather than broken: that job
+runs on `alpine` and authenticates to the cluster through the GitLab Kubernetes
+agent, so it holds no Google Cloud credential and cannot see project-level
+state. Until then the digest's job is to keep the gap visible instead of silent.
+
+To make that line answerable, the job needs a **read-only** identity holding
+`roles/logging.viewer` (the read-back) and
+`roles/serviceusage.serviceUsageViewer` (the API-state line), plus `gcloud` on
+the image. Nothing the script runs is a write, so nothing beyond those two roles
+is warranted — and a credential wide enough to *fix* the problem would let a
+scheduled job change production, which is the opposite of what a check is for.
+
+### Why 30 days, and not a number picked by default
+
+- 30 days is the `_Default` bucket's own default, and a bucket's default
+  retention is the longest window whose storage is not separately billed.
+  Extending past it adds a per-GiB-month charge on top of the ingestion charge
+  that is already unavoidable, so a longer window is a recurring cost decision
+  and a shorter one saves nothing.
+- It has to outlast the loop it exists to close: the gap between a production
+  event happening and someone asking about it. The signal that reports
+  production problems here is a **weekly** digest, so any window shorter than a
+  fortnight can lose an incident between two reports. 30 days covers four.
+- Longer retention buys trend analysis and audit history, which belong to the
+  durable alerting story — error rate, restart loops, `tag:"llm_failure"` —
+  tracked separately in #157. Retention is that work's prerequisite, not a
+  cheaper version of it, so the window is sized for diagnosis rather than for
+  analysis it is not going to be used for.
+- **If ingestion volume ever becomes the problem, the lever is an exclusion
+  filter on `_Default`, not a shorter window.** Dropping health-check and
+  static-asset lines cuts volume without costing you the lines an incident needs.
+
+### What this does not give you
+
+Retention, not alerting. Nothing here watches the logs — `/api/livez`'s
+in-memory `llmFailureCount` still resets on every pod recycle, and the only
+alert policy is a binary uptime check. That is deliberate and the reasoning is
+in #157.
+
+## 17. Container registry — measure it, don't quote it (#113)
+
+Every number about this registry is stale within a pipeline: CI pushes a tag per
+build. #113 was diagnosed four times; the first was right and each later round
+re-argued it from whatever figure was last written down. So this section records
+**commands, not numbers** — and dates the few numbers it cannot avoid.
+
+### The one command
+
+```
+bash scripts/check-registry-drain.sh
+```
+
+Read-only. Prints the policy's configuration, per-repository tag counts and
+cleanup status, the age of the oldest tag the policy owns, and a verdict. Exits
+`0` draining / `1` not draining / `2` undetermined — and `2` is a distinct state
+because "could not read the registry" must never be filed as "the registry is
+fine". It also runs in the weekly `ops_digest` job, so the answer arrives without
+anyone asking.
+
+### Why the obvious signals are all wrong
+
+Worth knowing before reaching for one of them in an incident:
+
+| Signal | Why it misleads |
+|---|---|
+| Total tag count | Moved by GitLab's policy, by `prune_registry` (#114) and by manual passes, while CI pushes against all three. Attributes nothing. |
+| Bare-SHA count falling | It will not fall. Measured 2026-08-04, ~46 pushes/day against a 7-day horizon settles near 400 **when the policy is working correctly** — re-derive both numbers before using them, they move with merge rate. |
+| `next_run_at` advancing | On gitlab.com the cadence is an earliest-start, not a schedule. Measured 2026-08-04: ~20h overdue while the tags proved the last run had drained exactly. |
+| `main-*` growing | The keep pattern retains those **forever** by design. That is #114's job to bound, not the policy's. |
+
+The one signal that does work is the **age of the oldest tag the policy owns** —
+immune to push rate, to #114, and to scheduler lag. That is what the script
+asserts.
+
+### Reading it by hand
+
+If you need the raw facts rather than the verdict:
+
+```
+glab api projects/84020916 \
+  | python3 -c "import json,sys;print(json.dumps(json.load(sys.stdin)['container_expiration_policy'],indent=2))"
+```
+
+GitLab's own view of whether the last run finished — the field that went
+unqueried for a week while the policy was assumed stalled. `UNFINISHED` means
+"partially executed, tags remaining"; `UNSCHEDULED` is the default resting state:
+
+```
+printf '%s' '{"query":"{ project(fullPath: \"gl-demo-ultimate-dtop/domi-oss/dlectroflow\") { containerRepositories { nodes { path tagsCount expirationPolicyCleanupStatus expirationPolicyStartedAt } } } }"}' > /tmp/q.json
+glab api graphql --input /tmp/q.json -H "Content-Type: application/json" -X POST
+```
+
+**Trap when listing tags yourself:** the REST endpoint returns them
+**alphabetically**, so a paginator that stops early never reaches `m` and
+concludes there are no `main-*` tags at all. And GitLab's GraphQL
+`containerRepository.tags` connection caps a page at 20 while deriving
+`hasNextPage` from what you *asked* for — measured 2026-08-04, `first: 100`
+stops after 5 pages with 99 of 421 tags and a confident `hasNextPage: false`.
+Request `first: 20`, page to exhaustion, and cross-check the total you collected
+against `tagsCount` or the REST `X-Total` header:
+
+```
+glab api --method GET "projects/84020916/registry/repositories/11826214/tags?per_page=1" -i \
+  | grep -i '^x-total:'
+```
+
+### Deleting tags
+
+Nothing here deletes. `scripts/prune-registry.sh` is the only thing in this repo
+that does, it ships as a dry run, and it needs a credential the CI job does not
+have — read its header before changing anything about it.

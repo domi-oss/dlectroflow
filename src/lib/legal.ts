@@ -57,6 +57,35 @@ export const SOURCE_REPO_URL =
 /**
  * ISO date the current text took effect. Bump when the substance changes.
  *
+ * ONE date covers both documents, so a substantive change to either moves it for
+ * both. That is deliberate — a reader comparing the two should not have to hold
+ * two version numbers — and it means /privacy's date can move while its text
+ * has not. The fingerprint gate is what keeps that honest in the other
+ * direction: the text cannot move without someone deciding about this date.
+ *
+ *
+ * Two changes share this date, to two different documents — #164 to the Terms
+ * and #154 to the Privacy Policy. Both are recorded, because a reader asking
+ * why the date moved is owed both answers, and because the fingerprint gate
+ * re-recorded BOTH hashes for a merged text state neither branch rendered
+ * alone.
+ *
+ * Bumped for #164, which lands two changes to the Terms at once:
+ *
+ *   1. The Terms now say what the backups do and do not do for one person —
+ *      whole-instance recovery, no per-person restore, and nothing that brings
+ *      back a deletion. Telling a reader that a copy of their work cannot be
+ *      fetched back for them changes what they can rely on, which is substance;
+ *      the page previously said only "there are nightly backups", which invited
+ *      the opposite inference.
+ *   2. The same clause now tells the reader they can download a copy of
+ *      everything from Settings. #129 shipped between the two halves of this
+ *      change, so the advice "keep your own copy" stopped being something the
+ *      reader had to arrange for themselves. Naming a route by which somebody
+ *      can act on their own data is substance in the reassuring direction, and
+ *      it moves the date for the same reason #153's erasure control did.
+ *
+ *
  * Bumped for #154: a member can create a calendar subscription URL, which adds
  * a NEW RECIPIENT — whichever calendar app they paste it into then fetches their
  * scheduled step titles and times, on its own schedule, into that company's
@@ -67,11 +96,11 @@ export const SOURCE_REPO_URL =
  * and there is no contract with it, which is a different relationship from
  * Anthropic's or Resend's and has to read differently.
  *
- * Previously bumped for #129: access and portability are now exercisable from Settings
- * rather than only by emailing the controller, and /privacy says so — the
- * paragraph that used to read "there is no self-service export button yet" would
- * otherwise be a false statement on a published legal page. It also newly
- * discloses two deliberate exclusions (the Google OAuth tokens and any stored
+ *
+ * Previously bumped for #129: access and portability are now exercisable from
+ * Settings rather than only by emailing the controller, and /privacy says so —
+ * the paragraph that used to read "there is no self-service export button yet"
+ * would otherwise be a false statement on a published legal page. It also newly * discloses two deliberate exclusions (the Google OAuth tokens and any stored
  * LLM API key), and that a guest sandbox can exercise the right in full. HOW a
  * data subject exercises an Art. 15/20 right, and what is withheld from it, are
  * both part of the Art. 12/13 disclosure rather than presentation.

@@ -274,27 +274,72 @@ describe("#105 the inbox hydrates a sub-minute row from one clock", () => {
   });
 });
 
-// #94's question, answered where the answer is cheap to keep: it is the reason
-// the assertions above can demand ZERO recoverable errors on a page that has a
-// known, unrelated hydration mismatch. dnd-kit derives its
-// `aria-describedby` id from a per-render counter, so the server's value and the
-// client's differ. If React ever starts treating that as a recoverable error,
-// this test fails and says why the tests above changed behaviour.
-describe("#94 dnd-kit's aria-describedby id is an attribute mismatch, not a bailout", () => {
-  it("mismatches without discarding the tree", async () => {
+// #94 — "aria-describedby names an id that is not in the document on every hard
+// load of /", so the move instructions were announced to nobody.
+//
+// The cause was dnd-kit's own id generation: a per-render counter (the server's
+// incremented per request, the browser's restarted at 0) naming an instructions
+// node rendered into a PORTAL, which never server-renders at all. Both halves
+// are gone with the library (#163) — the description is a plain node in the
+// tree, and its id comes from React's `useId`, which is stable across the two
+// renders by construction.
+//
+// Established in #94 and still true, which is why the suite above can demand
+// zero recoverable errors: an attribute mismatch is reported through
+// `console.error` and does NOT make React rebuild the tree, so this was never
+// the #75/#105 class of fault. Kept as a comment because it is the reason the
+// assertions above are shaped the way they are.
+//
+// The test below is deliberately a SWEEP rather than an assertion about the
+// grip: #94's last open task asks for "a test that would have caught it", and
+// one that only knows about the drag grip would not catch the next dangling
+// reference somewhere else on the page.
+describe("#94 no aria-describedby on the server-rendered inbox dangles", () => {
+  it("every referenced id exists in the same server-rendered markup", async () => {
+    const { html } = await serverThenHydrate([makeItem()]);
+
+    const doc = document.implementation.createHTMLDocument("ssr");
+    // Trusted input: the string our own renderToString just produced, parsed
+    // into an inert document that never runs script or loads a subresource.
+    doc.body.innerHTML = html;
+
+    const referencing = Array.from(
+      doc.body.querySelectorAll("[aria-describedby]"),
+    );
+    const dangling: string[] = [];
+    for (const el of referencing) {
+      for (const id of (el.getAttribute("aria-describedby") ?? "").split(
+        /\s+/,
+      )) {
+        if (!id) continue;
+        if (!doc.getElementById(id)) {
+          dangling.push(`${el.tagName.toLowerCase()} → #${id}`);
+        }
+      }
+    }
+
+    // Proof the sweep is actually looking at something: an empty page would
+    // also report zero dangling references, and a zero nothing looked at is
+    // not a result.
+    expect(
+      referencing.length,
+      "nothing on / uses aria-describedby",
+    ).toBeGreaterThan(0);
+    expect(dangling).toEqual([]);
+  });
+
+  it("survives hydration — the client resolves the same id the server wrote", async () => {
     const { container, serverRow, recoverable } = await serverThenHydrate([
       makeItem(),
     ]);
 
-    const grip = container.querySelector('[aria-roledescription="draggable"]');
-    expect(grip, "no drag grip rendered").not.toBeNull();
+    const describing = container.querySelector("[aria-describedby]");
+    expect(describing, "no aria-describedby survived hydration").not.toBeNull();
+    const id = describing!.getAttribute("aria-describedby")!;
+    expect(container.querySelector(`#${CSS.escape(id)}`)).not.toBeNull();
 
-    // The ids really do disagree across the two renders…
-    expect(grip!.getAttribute("aria-describedby")).toMatch(
-      /^DndDescribedBy-\d+$/,
-    );
-    // …and React neither reported it as recoverable nor rebuilt the tree, which
-    // is why it cannot be the cause of the dropped `dark` class (#98/#105).
+    // …and the server's tree is still the one on the page, so nothing about
+    // this description reintroduces the #105 regeneration.
     expect(recoverable).toEqual([]);
     expect(serverRow!.isConnected).toBe(true);
   });

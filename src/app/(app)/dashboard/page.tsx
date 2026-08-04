@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getDashboardData } from "@/lib/rewards";
 import { getTodaySpark } from "@/lib/spark";
 import { getTodayRollup } from "@/lib/rollup";
@@ -37,6 +38,21 @@ export default async function DashboardPage({
       <h1 className="text-2xl font-semibold">{t("nav.dashboard", voice)}</h1>
 
       <SparkCard initial={spark.quote} />
+
+      {/* #142 — the quiet way onward. This page is where the focus flow lands
+          when the queue is empty, and the spark above is the reward for getting
+          there; without a way out it would be a cul-de-sac. Deliberately the
+          Library and not the Inbox: the Inbox is the fullest screen in the app,
+          and landing on a pile straight after clearing your queue swaps the
+          reward for a demand. Always shown rather than gated on `?from=focus` —
+          "find something else" is a fair offer on any visit, and a link that
+          appears only sometimes is a link nobody learns is there. */}
+      <Link
+        href="/library"
+        className="text-muted-foreground hover:text-foreground inline-flex min-h-[44px] items-center text-sm hover:underline"
+      >
+        {t("focus.done.findSomethingElse", voice)}
+      </Link>
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

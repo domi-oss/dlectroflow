@@ -31,6 +31,56 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Added
 
+- **The focus timer can play the full lo-fi catalog (#61).** Ten CC0 tracks still
+  ship inside the image, one per open-lofi category; the other 156 are read at run
+  time from wherever an operator keeps them. **New optional environment variable:
+  `FOCUS_CATALOG_ORIGIN`** (Helm: `focus.catalogOrigin`), pointing at a directory
+  holding the extracted `openlofi.zip` — the mp3s plus `catalog.json`. Unset, which
+  is the default, nothing changes.
+
+  **The browser never talks to that store.** The CSP is unchanged — `default-src
+  'self'` with `media-src` still unset — so third-party audio remains impossible
+  during a focus session, and the bytes are fetched server-side and streamed back
+  through `/api/focus-catalog/audio` instead, with `Range` forwarded so seeking
+  works. Any credential the store needs stays on the server as a consequence
+  rather than as a promise. Both routes require a session, guest sandboxes
+  included, so an instance cannot be used as an open relay.
+
+  Every failure keeps the music on: unset, unreachable, a broken manifest, an
+  offline browser — the player falls back to the bundled ten and a session never
+  starts silent. A configured store that does not answer logs
+  `focus_catalog_unavailable` once per session, so the degradation is visible
+  rather than silent. Licence and provenance for the streamed set are recorded in
+  `public/audio/LICENSE.md`; setup is in `docs/self-host-vps.md` and
+  `docs/deploy-runbook.md`.
+- **Finishing a step no longer dead-ends (#142).** Completing a step used to swap
+  the timer into a "done" screen on the same URL and stop; a single-task to-do got
+  *"That was the last step of this task. 🏁"* and nothing else. Now the finish
+  moves you on. Inside a multi-step task the next step arrives after a 5-second
+  countdown, landing on its **start screen** — nothing begins a timer for you. At
+  the end of a whole task the next task is offered rather than taken
+  automatically, because that finish deserves a real pause, and stopping is a
+  first-class button rather than a link hiding underneath. When there is nothing
+  left at all you land on **Activity**, which is the one surface that treats an
+  empty queue as an achievement; the daily spark is already there, and a quiet
+  **Find something else →** link keeps the page from being a cul-de-sac.
+
+  A new **hyper focus mode**, **off by default**, chains single-task to-dos the
+  same way — turn it on from the /focus launcher, or accept the offer that
+  appears when the multi-step queue empties. It governs single-task chaining
+  only. The mode is remembered per browser rather than per account: it describes
+  the session you are in, not a preference your account holds.
+
+  **Accessibility.** A timed navigation that is not announced is a WCAG failure,
+  so the countdown announces itself and how to stop it before it can run out
+  (WCAG 2.2.1 Timing Adjustable). **Escape cancels** as well as the visible
+  **Stay here** button, because tabbing to a control inside five seconds is not a
+  real escape for anyone using a screen reader; the countdown also holds while
+  the panel has focus, so reading the options is never a race. The escape does
+  not move or relabel while you reach for it, focus lands somewhere deliberate on
+  every transition (WCAG 2.4.3), and `prefers-reduced-motion` drops the animated
+  progress track — the advance itself is unchanged, because that setting is about
+  motion and not about what the app does.
 - **Subscribe to your own schedule from any calendar app (#154).** Settings →
   Integrations gains **Calendar subscription**: one URL you paste into Google
   Calendar, Apple Calendar or Outlook once, after which your scheduled steps
@@ -157,7 +207,44 @@ operators upgrading a self-hosted instance don't get surprised.
     "Permanent" and by the button's own label, not by colour (WCAG 1.4.1), and
     both controls meet the 44px target size at 390px (WCAG 2.5.5).
 
+- **A production log-retention check that verifies the artefact, not the status
+  field (#157).** Keeping logs on GKE needs two independent settings to agree —
+  the cluster's `loggingConfig`, which decides what to ship, and the project's
+  `logging.googleapis.com` service, which decides whether anything accepts it —
+  and neither can see the other. Enable only the first and logs are silently
+  discarded while both settings still read as correct on their own.
+  `scripts/check-log-retention.sh` sidesteps that by **reading a log line back
+  out**, and follows `check-prod-drift.sh`'s three-state contract: `0` retained,
+  `1` proven not retained, `2` undetermined. A successful query returning zero
+  entries is `1`, not `0`, and a query that could not run is `2`, not either —
+  collapsing those is the failure the check exists to prevent. It is read-only
+  and reports provider errors as a category, never echoing an identifier, since
+  the weekly `ops_digest` publishes its verdict on a public issue. Operator
+  steps, and why the window is 30 days rather than a default nobody chose, are
+  in `docs/deploy-runbook.md` § 16.
+
 ### Changed
+
+- **Inbox drag now runs on the browser's own drag and drop (#163).**
+  `@dnd-kit/core` is replaced by `@atlaskit/pragmatic-drag-and-drop`. Dragging a
+  row between buckets with a mouse or a touchscreen behaves as before, and the
+  drag and the **Move to…** menu still share one dispatcher, so a drop and a
+  menu pick can never mean different things.
+
+  **One behaviour does change, and it is worth reading if you drag with a
+  keyboard.** The old library had a keyboard drag mode — focus the grip, then
+  arrow the item across the board. The new one has no keyboard drag at all, by
+  design: its guidance is to offer an explicit control instead of arrow-key
+  movement. That control already exists on every row — the **Move to** button
+  (📥, and as "Move to…" in the ▾ menu) — so moving an item with the keyboard
+  alone still works and takes fewer keystrokes than arrowing across the page
+  ever did. The grip is now a pointer affordance only and is no longer a tab
+  stop, because a focusable control that advertises a drag it cannot perform is
+  worse than none.
+
+  Moves are now **announced to screen readers**, naming the item and both lists
+  — including moves made from the menu, which were silent before. A drop that
+  changes nothing says so rather than claiming a move.
 
 - **`.ics` downloads now fold long lines (RFC 5545 §3.1).** The per-task calendar
   download has emitted content lines over the 75-octet limit since #39 put a focus
@@ -166,16 +253,43 @@ operators upgrading a self-hosted instance don't get surprised.
   can never split an emoji. Every calendar client unfolds, so imported events are
   unchanged — but a strict parser will now accept the file.
 
-- **Privacy Policy — effective date 3 August 2026.** Two substantive changes,
-  both about how a data subject actually exercises a right rather than about what
-  the policy promises. The Erasure right now names the self-serve control and its
-  one exception (the owner's own account), and the retention section says what
-  deleting your own account does (#153). Access and Portability now name the
-  export control instead of promising an answer by hand, disclose the two things
-  it withholds (the Google OAuth tokens and any stored LLM API key), and state
-  that a guest sandbox can exercise the right in full (#129). How a right is
-  exercised, and what is withheld from it, are both part of the Art. 12/13
-  disclosure rather than copy tweaks.
+- **Terms of Service — the backups are not a personal undo, and where to get
+  your own copy (#164).** *Your data* gains a short clause saying what the
+  nightly backups do and do not do for one person: they exist to bring the whole
+  instance back after a disaster, and that obligation is stated rather than
+  disclaimed — but there is no per-person restore, and nothing brings back a
+  capture, task or step you deleted. The page previously mentioned backups once,
+  in the as-is section, and left a reader to infer the rest; the likely inference
+  was the wrong one. That sentence now carries the gist and links to the full
+  clause, so the two cannot drift apart. Deliberately **not** filed under *Limits
+  on my liability*: it describes how the service works, and the narrow claim is
+  *no individual restore*, never *no responsibility for your data*. Tests assert
+  both directions.
+
+  The clause closes by telling you that you can download a copy of everything
+  from Settings, which #129 made true while this change was open. It is **prose,
+  not a link**: `/api/export` is an authenticated GET that returns a file, so a
+  link to it from a page written to be readable while signed out would answer a
+  reader with a 401 rather than their data. A test asserts the claim is present,
+  that it names Settings, that no `/export/` link appears — and, separately,
+  that the Settings control it describes still exists and still points at
+  `/api/export`, so the Terms cannot outlive their own premise.
+
+- **Privacy Policy — the Erasure right, and Access and Portability.** Two
+  substantive changes, both about how a data subject actually exercises a right
+  rather than about what the policy promises. The Erasure right now names the
+  self-serve control and its one exception (the owner's own account), and the
+  retention section says what deleting your own account does (#153). Access and
+  Portability now name the export control instead of promising an answer by hand,
+  disclose the two things it withholds (the Google OAuth tokens and any stored
+  LLM API key), and state that a guest sandbox can exercise the right in full
+  (#129). How a right is exercised, and what is withheld from it, are both part
+  of the Art. 12/13 disclosure rather than copy tweaks.
+
+- **Both legal pages now carry an effective date of 4 August 2026**, moved by the
+  Terms change above. The date is shared by the two documents on purpose — a
+  reader comparing them should not have to hold two version numbers — so
+  /privacy's date moves with it even though its text has not changed since #129.
 - `docs/legal.md`'s "Google revocation: the gap the pages admit" section was
   stale — it still described freeze and delete as paths that never call Google's
   revoke endpoint, which #126 fixed in v0.5.0. Corrected, and the residue that
@@ -183,6 +297,23 @@ operators upgrading a self-hosted instance don't get surprised.
   separately so it does not get lost with it.
 
 ### Fixed
+
+- **The inbox's drag instructions were being announced to nobody (#94).** On
+  every hard load of `/`, the drag handle's `aria-describedby` named an element
+  that was not in the document: the old library built that id from a per-render
+  counter — the server's incremented per request while the browser's restarted
+  at zero — and rendered the description into a portal that never
+  server-rendered at all. Screen-reader users got silence where the instructions
+  should have been. Both causes are gone with #163: the description is a real
+  node in the page with a stable React id. It was never the fault that dropped
+  dark mode (that was #105); an attribute mismatch does not make React rebuild
+  the tree.
+
+  Two tests keep it gone, because the reason it lasted this long is that nothing
+  was looking: a server-render sweep asserting that no `aria-describedby` on the
+  page dangles, and an axe scan of the inbox **with a row in it** — the existing
+  scan loaded `/` empty, so there were no rows, no row controls, and nothing for
+  the rule to fail on.
 
 - **A signing-in user no longer makes the logs report an incident that never
   happened (#156).** The first authenticated render for a new workspace creates

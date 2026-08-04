@@ -149,6 +149,9 @@ thing in the left column, the pages are wrong until you fix them.
 | **GCP region** (currently `europe-west2`) | `HOSTING_REGION`; the "data at rest is in the UK" claim; whether transfers section still holds | `legal.ts`, Privacy → *Where your data is stored* |
 | **Backup schedule / bucket region** (02:00 UTC, same region) | The backup time and the "same region" claim | `charts/dlectroflow/values.yaml` → `backup.schedule`; Privacy → *Where your data is stored* |
 | **Backup retention** (30-day bucket lifecycle) | `BACKUP_RETENTION_DAYS`; the erasure promise depends on it ("gone from backups within 30 days") | `legal.ts`, Privacy → *How long I keep it*, *Your rights* |
+| **Backup restore granularity** (whole-database dumps, restored whole — there is no per-workspace or per-user restore path anywhere in `charts/dlectroflow/templates/backup.yaml` or the runbook) | The whole "no per-person restore, and nothing brings back a deletion" clause. If a per-person restore ever becomes something the operator is willing to offer, **that clause becomes false in the reassuring direction** — a reader would have been told to keep their own copy on a premise that no longer holds | Terms → *Your data* → *What the backups can and cannot do* (#164) |
+| **Any model gaining a soft-delete column** (today `BrainDumpItem`, `Task` and `Step` are hard `deleteMany`/`delete` — see `src/app/actions/braindump.ts`, `src/app/actions/breakdown.ts`) | "delete a capture, a task or a step and it is gone from the app there and then". A recycle bin would make that sentence wrong, and it is the sentence people act on | `prisma/schema.prisma`; Terms → *Your data* (#164) |
+| **The self-service export existing, and living in Settings** (`GET /api/export`, surfaced by `ExportData` in Settings → Account) | "You can download a copy of everything from Settings" — the *only* sentence on either page that tells a reader they can act on their own data without emailing anybody. Move the control and the sentence is a wild goose chase; remove it and the sentence is false. Both pages name it, so both move together. A test in `src/app/terms/page.test.tsx` renders the real control and asserts its `href`, so this row has a build failure behind it rather than only a reminder | `src/app/api/export/route.ts`, `src/components/settings/export-data.tsx`, `src/components/settings/account-panel.tsx`; Terms → *Your data* (#164); Privacy → *Your rights* → Access, Portability (#129) |
 | **Guest purge schedule** (03:30 UTC) | The stated purge time | `charts/dlectroflow/values.yaml` → `purge.schedule`; Privacy → *How long I keep it* |
 | **Guest TTL** (`GUEST_SANDBOX_TTL_HOURS`, default 24) | "about a day" in three places, and the `df_guest` cookie lifetime | Privacy → *Cookies*, *How long I keep it*; Terms → *Who can use it* |
 | **LLM provider** (`LLM_PROVIDER`, default `anthropic`) | Who the AI processor is, and the international-transfer section. **A switch to a non-UK provider is a new transfer disclosure**; a switch to a self-hosted model may remove one | Privacy → *Sending your text to an AI provider*, *Data that leaves the UK* |
@@ -217,6 +220,16 @@ asserts each honest wording is still present.
 > by `src/app/privacy/page.test.tsx` — the block that used to assert "no
 > self-service export button" now asserts the control IS named, and that the two
 > withheld credentials are still disclosed.
+>
+> **The Terms name it too, since #164.** *Your data* → *What the backups can and
+> cannot do* tells the reader they can download a copy of everything from
+> Settings, in prose and **without a link** — see the source comment at that
+> paragraph for why a public legal page does not link an authenticated download
+> endpoint. `src/app/terms/page.test.tsx` pins all three halves: the claim is
+> present, it names Settings, and no `/export/i` href appears on the page. It
+> also pins the claim's *premise*, by rendering the real Settings control and
+> asserting it still points at `/api/export` — the Terms may only say this for
+> as long as the control it describes exists.
 
 > [!IMPORTANT]
 > **All three rights are self-service now, and each one still has a caveat the
@@ -422,7 +435,7 @@ including hosting the statement somewhere you control.
 | `src/lib/auth/gate.test.ts` | The legal paths losing their public exemption, and lookalike paths gaining one |
 | `src/proxy.test.ts` | The **middleware** redirecting the pages even while the classifier says public — the failure that silently breaks Google verification |
 | `src/app/privacy/page.test.tsx` | Missing required disclosures; contents/heading drift; hardcoded copies of `legal.ts` values; unshipped features creeping into the text; the non-commercial framing being lost, or the Art. 2(2)(c) rebuttal being dropped. **Plus (#118 Phase C):** the per-user Google claims regressing to owner-only, the "owner cannot reach your connection" claim being dropped, the freeze/delete revoke gap being softened, and BYO key drifting into BYO provider |
-| `src/app/terms/page.test.tsx` | Missing "as is"/no-uptime-guarantee wording; the liability carve-outs disappearing or becoming conditional on trader status; "sole trader"/"trading as" returning; governing law changing by accident; **the Google connection being described as the instance's rather than the user's, and the own-key clause implying a provider choice (#125)** |
+| `src/app/terms/page.test.tsx` | Missing "as is"/no-uptime-guarantee wording; the liability carve-outs disappearing or becoming conditional on trader status; "sole trader"/"trading as" returning; governing law changing by accident; **the Google connection being described as the instance's rather than the user's, and the own-key clause implying a provider choice (#125)**. **Plus (#164):** the no-per-person-restore clause going missing, *or* widening into a blanket "no responsibility for your data" — both directions are asserted, because the two failures are opposite and each looks reasonable on its own; also that the clause stays out of the liability section, and that the as-is section still links to it. **And the export sentence, which is asserted three ways:** that the claim is present (this was a `.not.toMatch` until #129 shipped — the polarity flipped, the pattern did not), that it names Settings, and that no `/export/` href appears, because the no-link decision is deliberate rather than a leftover. A fourth test renders the real `ExportData` control and checks its `href`, so the *premise* of the sentence is pinned and not merely its wording |
 | `src/components/legal/legal-footer.test.tsx` | The links that make the pages reachable |
 | `e2e/a11y/axe-legal-pages.spec.ts` | WCAG A/AA and colour-contrast regressions on both pages, in both themes, with no session |
 | `e2e/smoke/legal-pages.spec.ts` | The deployed pages being unreachable, or the footer link being broken, end to end |

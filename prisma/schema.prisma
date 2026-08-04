@@ -194,14 +194,22 @@ model Settings {
 // Phase C's migration destroys that orphan (userId IS NULL) rather than adopting
 // it, and the owner reconnects once.
 //
-// `userId` is still NULLABLE, deliberately: the code this release replaces wrote
-// a NULL userId on every page load, so SET NOT NULL during a rolling update
-// would 500 the inbox. src/lib/__tests__/scoping.harness.test.ts is the guard —
-// it fails CI if any prisma.googleAuth.* call does not name userId.
+// A credential belongs to exactly one account, and `userId` is NOT NULL in the
+// database to say so (#122, 20260804120000_google_auth_user_id_not_null). It was
+// nullable for exactly one release on purpose — the code #118 replaced wrote a
+// NULL userId on every page load, so SET NOT NULL during that rolling update
+// would have 500'd the inbox — and #118's purge above was the repair half.
+//
+// src/lib/__tests__/scoping.harness.test.ts remains the PRIMARY guard: it fails
+// CI if any prisma.googleAuth.* call does not name userId, which beats a runtime
+// constraint violation. The column constraint is the layer beneath it, for the
+// writers a static scan of the repo cannot see (raw SQL, psql, an old dump).
+// Proof that it is applied and that it bites:
+// src/lib/google-auth-user-id-not-null.integration.test.ts.
 model GoogleAuth {
   id             String    @id @default(cuid())
-  userId         String?   @unique
-  user           User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId         String    @unique
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   accessToken    String?
   refreshToken   String?
   expiresAt      DateTime?

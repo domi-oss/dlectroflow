@@ -86,11 +86,23 @@ function fingerprint(node: React.ReactElement): string {
  * putting it there would invite it into a page.
  */
 const PUBLISHED = {
-  // #154 — the calendar subscription feed: a new recipient (the reader's own
-  // calendar app), a new stored item and a new retention rule. Substance, so
-  // LEGAL_EFFECTIVE_DATE moved to 2026-08-04 in the same commit.
+  // Two changes share LEGAL_EFFECTIVE_DATE 2026-08-04 and they touch DIFFERENT
+  // documents, so exactly one hash moves per document rather than both moving:
+  //
+  //   privacy — #154, the calendar subscription feed. A new recipient (whichever
+  //     calendar app the reader pastes the URL into), a new stored item (the
+  //     capability token) and a new retention rule for it.
+  //   terms   — #164, on `main`: what the backups do and do not do for one
+  //     person, plus the sentence saying a copy can be downloaded from Settings.
+  //
+  // Both were re-derived from the MERGED tree, not copied from either branch —
+  // the merge produces a text state neither side rendered alone, so a hash
+  // carried across from one branch is only correct by luck. `terms` came back
+  // byte-identical to `main`'s (this branch does not touch /terms) and `privacy`
+  // came back identical to this branch's (#164 does not touch /privacy), which
+  // is the evidence that the two changes are genuinely disjoint.
   privacy: "583d408f74a67e9a1f4fbc7a9b74da0bac19ea43b21f7b9eb11908be674b699e",
-  terms: "a2f663c5edbd5ebd2d5bba3e64bcb4ff4d97c6ce1ed58af81facd34541efa942",
+  terms: "836ef685761ab3db05397e7a4753da743e25836b9d9b4ab7c61a61920bdbfe9b",
 } as const;
 
 describe("legal: published text is pinned to the effective date (#141)", () => {

@@ -190,6 +190,23 @@ case "$fmt" in
 esac
 `;
 
+/**
+ * Test double for `gcloud`, shadowing any real one (#157).
+ *
+ * `ops-digest.sh` calls `scripts/check-log-retention.sh`, which reaches for
+ * `gcloud`. This harness puts its stub bin in front of the ambient PATH rather
+ * than replacing it, so on a contributor's machine with the SDK installed the
+ * digest tests would otherwise shell out to a live cloud project — read-only,
+ * but non-deterministic, slow, and dependent on whichever project happened to
+ * be active. Failing with an unclassifiable error models the CI reality
+ * (no Google Cloud credential in this pipeline) and pins the digest to the
+ * ⚠️ undetermined arm, which is the state those tests should see.
+ */
+const GCLOUD_STUB = `#!/usr/bin/env bash
+echo "ERROR: no credential in this environment" >&2
+exit 1
+`;
+
 interface Result {
   status: number;
   stdout: string;
@@ -205,6 +222,7 @@ function drive(script: string, harness: Harness): Result {
   const bin = join(work, "bin");
   mkdirSync(bin);
   writeFileSync(join(bin, "curl"), CURL_STUB, { mode: 0o755 });
+  writeFileSync(join(bin, "gcloud"), GCLOUD_STUB, { mode: 0o755 });
   for (const [name, source] of Object.entries(harness.bin ?? {})) {
     writeFileSync(join(bin, name), source, { mode: 0o755 });
   }
@@ -700,6 +718,71 @@ describe("scripts/alert-pipeline-failure.sh", () => {
 // ── the weekly digest's drift backstop ───────────────────────────────────────
 
 describe("scripts/ops-digest.sh", () => {
+  /**
+   * The digest also runs `check-registry-drain.sh` (#113). Its GraphQL calls
+   * are routed here rather than left unserved, so the digest's happy path is
+   * exercised end to end. Without these the suite still passed — because the
+   * drain check bailed early on a missing `CI_PROJECT_PATH` and reported
+   * "undetermined", which reads as a working test and proves nothing. An
+   * unexercised green is the exact failure #113 is made of, so it is not one to
+   * leave in the suite that came out of #113.
+   */
+  const DRAIN_NOW = "2026-08-04T00:00:00Z";
+  const drainDaysAgo = (days: number) =>
+    new Date(Date.parse(DRAIN_NOW) - days * 86_400_000)
+      .toISOString()
+      .replace(".000Z", "Z");
+  const registryRoutes = (): Route[] => [
+    {
+      method: "POST",
+      match: "/api/graphql",
+      body: {
+        data: {
+          project: {
+            containerExpirationPolicy: {
+              enabled: true,
+              cadence: "EVERY_DAY",
+              keepN: "TEN_TAGS",
+              olderThan: "SEVEN_DAYS",
+              nameRegex: ".*",
+              nameRegexKeep: "(latest|main-.*|prod|v.*)",
+              nextRunAt: drainDaysAgo(0.8),
+            },
+            containerRepositories: {
+              nodes: [
+                {
+                  id: "gid://gitlab/ContainerRepository/777",
+                  path: "acme/dlectroflow",
+                  status: null,
+                  tagsCount: 12,
+                  expirationPolicyCleanupStatus: "UNSCHEDULED",
+                  expirationPolicyStartedAt: drainDaysAgo(1.8),
+                },
+              ],
+            },
+          },
+        },
+      },
+    },
+    {
+      method: "POST",
+      match: "/api/graphql",
+      body: {
+        data: {
+          containerRepository: {
+            tags: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: Array.from({ length: 12 }, (_, i) => ({
+                name: i.toString(16).padStart(40, "a"),
+                createdAt: drainDaysAgo(i * 0.4),
+              })),
+            },
+          },
+        },
+      },
+    },
+  ];
+
   const digestRoutes = (behind: number): Route[] => [
     {
       method: "GET",
@@ -713,12 +796,35 @@ describe("scripts/ops-digest.sh", () => {
       body: { status: "ok", sha: OLD_SHORT },
     },
     { method: "GET", match: `=${PROD_URL}/`, body: {} },
+    ...registryRoutes(),
     { method: "GET", match: "/pipelines", body: [] },
     { method: "GET", match: "/merge_requests", body: [] },
     { method: "GET", match: "/vulnerabilities", body: [] },
     { method: "GET", match: "/issues?state=opened", body: [] },
     { method: "POST", match: "/notes", body: { id: 1 } },
   ];
+
+  it("carries the registry drain check into the posted digest (#113)", () => {
+    const result = drive(DIGEST_SCRIPT, {
+      routes: digestRoutes(0),
+      env: {
+        OPS_DIGEST_ISSUE_IID: "16",
+        ALERT_ISSUE_IID: undefined,
+        CI_PROJECT_PATH: "acme/dlectroflow",
+        REGISTRY_DRAIN_NOW: DRAIN_NOW,
+      },
+    });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    const body = result.bodies.find(
+      (b) => typeof b === "string" && b.includes("ops digest"),
+    ) as string;
+    // The verdict AND the facts behind it, so a reader can disagree with the
+    // verdict without re-running anything.
+    expect(body).toMatch(/registry cleanup policy is draining/);
+    expect(body).toMatch(/name_regex_keep/);
+    expect(body).toMatch(/UNSCHEDULED/);
+  });
 
   it("drops the 7-day window rather than inventing a 1969 one", () => {
     // Duo review on !251, mechanism corrected — see DATE_STUB. With a `date`
