@@ -40,6 +40,23 @@
  * rather than `.gitlab/`: GitLab detects the community files in any of the
  * three locations, but `.gitlab/` has a recursive glob in `.code_changes`, so
  * a typo fix there would run the full pipeline.
+ *
+ * `skills` holds GitLab Duo agent skills (`skills/<name>/SKILL.md`). It is
+ * classified here rather than in `.code_changes` because it is prose: Duo reads
+ * it as instructions, nothing imports it, nothing bundles it, and no CI job
+ * executes it — so changing one cannot change what the application does, which
+ * is the test this list applies. The distinction from `docker/` is worth being
+ * precise about, since that IS in `.code_changes` despite also never running in
+ * CI: `docker/` is deployment configuration and decides how the app is built
+ * and served, whereas a skill only shapes how an agent talks about the repo.
+ *
+ * This holds ONLY while the directory stays prose. Upstream AntiVibe ships four
+ * optional helper shell scripts; they were deliberately not carried over, and
+ * the reason is this line. Adding any executable under `skills/` means moving
+ * `skills/**\/*` into `.code_changes` in the same change — otherwise it ships
+ * unscanned and unexecuted-by-CI with no signal, which is the precise hazard
+ * this module's header describes. `skills/README.md` repeats that condition
+ * where someone adding a skill will actually read it.
  */
 export const DOCS_ONLY_PATHS = [
   "AGENTS.md",
@@ -48,6 +65,7 @@ export const DOCS_ONLY_PATHS = [
   "LICENSE",
   "README.md",
   "docs",
+  "skills",
 ] as const;
 
 /**
