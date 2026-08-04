@@ -42,6 +42,7 @@ model User {
   aiUsage      UserAiUsage?
   allowlistRow Allowlist?
   googleAuth   GoogleAuth?
+  calendarFeed CalendarFeed?
 
   @@unique([provider, providerSub])
   @@index([status, purgeAfter])
@@ -207,6 +208,44 @@ model GoogleAuth {
   scope          String?
   needsReconnect Boolean   @default(false)
   updatedAt      DateTime  @updatedAt
+}
+
+// ── Calendar subscription feed (#154) ─────────────────────────────────────
+// ONE ROW PER USER, keyed on `userId` exactly as UserAiUsage is, so an account
+// has one feed or none and "turn it off" is a row that stops existing.
+//
+// `token` is a CAPABILITY: a calendar client cannot present a session cookie, so
+// possession of the URL is the entire authorization. It is 256 bits from a
+// CSPRNG (src/lib/calendar-feed.ts), which is why nothing here is rate-limited
+// against guessing — 2^256 is not a search space.
+//
+// STORED IN PLAINTEXT, deliberately, and this is the decision most worth
+// arguing with. Hashing a bearer token protects against a read-only leak of the
+// database — but this token grants read access to data that is IN THAT SAME
+// DATABASE, so an attacker holding the rows has already got everything the token
+// would fetch. The marginal security is therefore ~zero, while the cost is real:
+// a hash can only be shown once, and a feed URL you cannot re-copy onto a second
+// device is one people paste into a note, which is strictly worse. The
+// comparison is with `llmKeyEnc` and `GoogleAuth.accessToken`, which ARE
+// protected — both are credentials to a THIRD PARTY, where the leak reaches past
+// this database. This one does not.
+//
+// `rotatedAt` is nullable and means "never regenerated". Both timestamps are
+// audit columns rather than UI: a credential with no record of when it was
+// issued or last rotated is one you cannot reason about during an incident.
+//
+// Cascade on the user, so deleting an account destroys the feed with it. A
+// REVOKED account is a different case — the row survives a freeze (#153) and the
+// feed is refused at resolve time by checking `User.status`, on the same
+// reasoning currentUser() gives for reading the role from the database: a
+// revocation has to take effect on the next request, not whenever something
+// expires.
+model CalendarFeed {
+  userId    String    @id
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String    @unique
+  createdAt DateTime  @default(now())
+  rotatedAt DateTime?
 }
 
 // ── Feature 1 — Brain Dump ────────────────────────────────────────────────

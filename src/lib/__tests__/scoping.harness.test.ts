@@ -378,6 +378,69 @@ describe("workspace-scoping harness", () => {
     "deleteMany",
   ] as const;
 
+  /** Ops that select rows by a filter; everything else here writes new ones. */
+  const CREATE_OPS = new Set(["create", "createMany"]);
+
+  /**
+   * The clause that decides WHOSE rows a call touches — `where` for anything
+   * that selects existing rows, `data` for a create.
+   *
+   * #154: reading the whole argument text instead was a false pass waiting to
+   * happen. `findUnique({ where: { id }, select: { userId: true } })` names no
+   * owner and constrains nothing, yet a substring search for `userId` finds one,
+   * because `select` decides which COLUMNS come back rather than which ROWS. A
+   * rule that cannot tell those apart reports coverage it does not have — the
+   * exact failure this whole file exists to avoid. Returns "" when the clause is
+   * absent, which fails closed.
+   */
+  function ownerClause(args: string, op: string): string {
+    const key = CREATE_OPS.has(op) ? "data:" : "where:";
+    const at = args.indexOf(key);
+    if (at === -1) return "";
+    const open = args.indexOf("{", at + key.length);
+    if (open === -1) return "";
+    let depth = 0;
+    for (let i = open; i < args.length; i++) {
+      if (args[i] === "{") depth++;
+      else if (args[i] === "}") {
+        depth--;
+        if (depth === 0) return args.slice(open, i + 1);
+      }
+    }
+    return args.slice(open);
+  }
+
+  /**
+   * The lookups allowed to key on a CAPABILITY instead of an owner, each with
+   * its reason. Adding an entry is a security decision, and the narrowness is
+   * the point: the key is `model.op`, so the allowance covers one operation on
+   * one model and nothing adjacent to it.
+   *
+   * `USER_KEYED_OWNERS` below independently confines every one of these to a
+   * single module, so an exception here cannot be reached from a route handler,
+   * a component or a serialiser.
+   */
+  const BY_CAPABILITY_LOOKUPS: Record<string, string> = {
+    // #154. A calendar client cannot present a session cookie — Google, Apple
+    // and Outlook all fetch a subscription anonymously — so possession of the
+    // 256-bit token IS the authorization, and requiring a userId alongside it
+    // would mean requiring something the caller has no way to supply. The token
+    // column is `@unique`, so this is one row by an unguessable key; the owner's
+    // `status` is then checked separately in the same function.
+    "calendarFeed.findUnique":
+      "the capability URL's token is the credential — a subscribing calendar client has no session to present, and the token column is unique so this reads exactly one row",
+  };
+
+  /** Does this call name its owner where it counts? */
+  function namesOwner(model: string, op: string, args: string): boolean {
+    const clause = ownerClause(args, op);
+    if (clause.includes("userId")) return true;
+    return (
+      BY_CAPABILITY_LOOKUPS[`${model}.${op}`] != null &&
+      clause.includes("token")
+    );
+  }
+
   /**
    * Scan one file's source for user-keyed calls that do not name `userId`.
    *
@@ -395,7 +458,7 @@ describe("workspace-scoping harness", () => {
       );
       for (const m of src.matchAll(re)) {
         const args = callArgs(src, m.index + m[0].length - 1);
-        if (!args.includes("userId")) offenders.push(`${model}.${m[1]}`);
+        if (!namesOwner(model, m[1], args)) offenders.push(`${model}.${m[1]}`);
       }
     }
     return offenders;
@@ -406,7 +469,17 @@ describe("workspace-scoping harness", () => {
     // must fail this test and force a decision (policed, or NOT_USER_SCOPED with
     // a reason) instead of arriving unpoliced. And without the "at all" half,
     // every rule below would vacuously pass if `userId` were renamed.
-    expect(userKeyedModels().sort()).toEqual(["googleAuth", "userAiUsage"]);
+    //
+    // #154's `calendarFeed` is the third, and this test is what made it a
+    // decision: it failed the moment the model was added, which is the whole
+    // reason the feed token lives on its own row rather than as a nullable
+    // column on `User` — `User` carries neither `workspaceId` nor `userId`, so
+    // nothing in this file can see a `prisma.user.*` call at all.
+    expect(userKeyedModels().sort()).toEqual([
+      "calendarFeed",
+      "googleAuth",
+      "userAiUsage",
+    ]);
   });
 
   it("does not police a workspace-keyed model under the weaker user rule", () => {
@@ -456,6 +529,88 @@ describe("workspace-scoping harness", () => {
     expect(scanUserScope(good, ["googleAuth"])).toEqual([]);
   });
 
+  /**
+   * #154 — the false pass this rule shipped with, and the reason the check now
+   * reads the WHERE clause rather than the whole argument text.
+   *
+   * `args.includes("userId")` cannot tell the clause that decides WHICH ROWS are
+   * touched from the clause that decides which COLUMNS come back. A lookup by
+   * primary key that merely *selects* `userId` therefore satisfied the old rule
+   * while naming no owner at all — and that is not hypothetical: it is the exact
+   * shape `resolveFeed` would have had if it were written carelessly.
+   */
+  it("is not satisfied by a userId that appears only in the SELECT", () => {
+    const bad = `
+      await prisma.googleAuth.findUnique({ where: { id }, select: { userId: true } });
+    `;
+    expect(scanUserScope(bad, ["googleAuth"])).toEqual([
+      "googleAuth.findUnique",
+    ]);
+  });
+
+  it("reads `data` rather than `where` for a create, which has no where", () => {
+    const good = `
+      await prisma.userAiUsage.create({ data: { userId, count: 1 } });
+    `;
+    expect(scanUserScope(good, ["userAiUsage"])).toEqual([]);
+  });
+
+  it("flags a create whose data names no owner", () => {
+    const bad = `
+      await prisma.userAiUsage.create({ data: { count: 1 }, select: { userId: true } });
+    `;
+    expect(scanUserScope(bad, ["userAiUsage"])).toEqual(["userAiUsage.create"]);
+  });
+
+  // ── #154 — the ONE lookup keyed on a capability instead of an owner ────────
+
+  it("allows the named capability lookup to key on its token", () => {
+    // `calendarFeed.findUnique` by token IS the authorization: a calendar client
+    // cannot present a session cookie, so possession of the token is all there
+    // is. BY_CAPABILITY_LOOKUPS is where that is argued for.
+    const good = `
+      await prisma.calendarFeed.findUnique({ where: { token }, select: { userId: true } });
+    `;
+    expect(scanUserScope(good, ["calendarFeed"])).toEqual([]);
+  });
+
+  it("does not widen the exception to other operations on the same model", () => {
+    // A set-wide read or a write keyed on a token would be a different and much
+    // worse thing than one row fetched by an unguessable unique key.
+    const bad = `
+      await prisma.calendarFeed.findMany({ where: { token } });
+      await prisma.calendarFeed.updateMany({ where: { token }, data: {} });
+      await prisma.calendarFeed.delete({ where: { token } });
+    `;
+    expect(scanUserScope(bad, ["calendarFeed"])).toEqual([
+      "calendarFeed.findMany",
+      "calendarFeed.updateMany",
+      "calendarFeed.delete",
+    ]);
+  });
+
+  it("does not let the exception excuse a lookup keyed on anything else", () => {
+    // The allowance is for `token`, not for "findUnique on this model".
+    const bad = `
+      await prisma.calendarFeed.findUnique({ where: { id } });
+    `;
+    expect(scanUserScope(bad, ["calendarFeed"])).toEqual([
+      "calendarFeed.findUnique",
+    ]);
+  });
+
+  it("every BY_CAPABILITY_LOOKUPS entry names a real model and states a reason", () => {
+    const all = Prisma.dmmf.datamodel.models.map(
+      (m) => m.name[0].toLowerCase() + m.name.slice(1),
+    );
+    for (const [key, reason] of Object.entries(BY_CAPABILITY_LOOKUPS)) {
+      const [model, op] = key.split(".");
+      expect(all, `${model} is not a model`).toContain(model);
+      expect(USER_KEYED_OPS as readonly string[]).toContain(op);
+      expect(reason.length).toBeGreaterThan(40);
+    }
+  });
+
   it("is not fooled by a nested object closing early", () => {
     // callArgs balances parentheses; a non-greedy regex would stop at the first
     // `)` and miss the userId that follows it.
@@ -491,6 +646,13 @@ describe("workspace-scoping harness", () => {
       "the entire prisma.googleAuth surface — six functions, each keyed on the acting user",
     "src/lib/user-quota.ts":
       "the entire prisma.userAiUsage surface — the per-user AI meter, every statement bound to one userId",
+    // #154 — the calendar subscription feed's capability token. Every exported
+    // function takes the acting user's id and NONE of them accepts a row id, so
+    // there is nothing a caller could point at another account's feed. The one
+    // by-token lookup is argued for in BY_CAPABILITY_LOOKUPS above, and this
+    // entry is what keeps it unreachable from anywhere else.
+    "src/lib/calendar-feed.ts":
+      "the entire prisma.calendarFeed surface — mint, rotate, disable and the single capability lookup, all in one module",
   };
 
   it("the credential modules exist where this test thinks they do", () => {
