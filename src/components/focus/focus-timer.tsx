@@ -846,6 +846,14 @@ export function FocusTimer({
     router.push(`/focus/${stepId}`);
   }, [nextUp, router, run]);
 
+  /** #142 — stable identity for the countdown's `onAdvance`. An inline arrow
+   * would hand AutoAdvance a new callback on every render, invalidating the
+   * memoised `advance` it guards its fire-once behaviour with. It is guarded by
+   * a ref too, so this is tidiness rather than a fix — but it keeps that ref
+   * from being the only thing standing between a re-render and a double
+   * navigation. */
+  const advanceSingle = useCallback(() => void startSingle(), [startSingle]);
+
   /** #142 — the empty-multi-step-queue offer: turn the mode on AND act on it,
    * because the button's own sentence ("work through the single-task to-dos?")
    * promises both and splitting them would cost a second tap for one decision. */
@@ -1183,7 +1191,7 @@ export function FocusTimer({
               targetText={nextUp.text}
               voice={voice}
               reducedMotion={reducedMotion}
-              onAdvance={() => void startSingle()}
+              onAdvance={advanceSingle}
             />
           )}
 
