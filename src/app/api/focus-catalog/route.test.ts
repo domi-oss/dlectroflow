@@ -39,8 +39,8 @@ beforeEach(() => {
 
 describe("GET /api/focus-catalog", () => {
   it("refuses a caller with no session, without asking the store", async () => {
-    // Not about confidentiality — the tracks are public-domain — but about not
-    // being an open relay to somebody else's storage bill.
+    // Not about confidentiality — the tracks are public domain — but about not
+    // leaving the instance as an open relay to the operator's store.
     hasSessionMock.mockResolvedValue(false);
     const res = await GET();
     expect(res.status).toBe(401);
