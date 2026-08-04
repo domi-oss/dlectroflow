@@ -510,12 +510,27 @@ the cluster's `loggingConfig` too, so a failure report names the *contradiction*
 rather than only the symptom. Without that, a reader who is told "no logs" goes
 to the cluster config, finds it correct, and stops.
 
+> **A quiet instance can fail the namespace line honestly.** The app writes on
+> startup and on errors, not per request, so on a low-traffic day there may be
+> nothing from `dlectroflow-prod` inside the default one-hour window even though
+> ingestion is working — the project-wide line above it will be a ✅ while the
+> namespace line is a 🔴, which is the pair telling you which of the two it is.
+> Give it something to say (`kubectl -n dlectroflow-prod rollout restart
+> deployment/dlectroflow`, or widen the window with `LOG_FRESHNESS=24h`) rather
+> than treating the empty read as noise.
+
 The weekly `ops_digest` job calls the same script and publishes its verdict. It
 reports `⚠️ undetermined` there, and that is honest rather than broken: that job
 runs on `alpine` and authenticates to the cluster through the GitLab Kubernetes
 agent, so it holds no Google Cloud credential and cannot see project-level
-state. Giving CI a read-only credential is what would turn that line green or
-red; until then the digest's job is to keep the gap visible instead of silent.
+state. Until then the digest's job is to keep the gap visible instead of silent.
+
+To make that line answerable, the job needs a **read-only** identity holding
+`roles/logging.viewer` (the read-back) and
+`roles/serviceusage.serviceUsageViewer` (the API-state line), plus `gcloud` on
+the image. Nothing the script runs is a write, so nothing beyond those two roles
+is warranted — and a credential wide enough to *fix* the problem would let a
+scheduled job change production, which is the opposite of what a check is for.
 
 ### Why 30 days, and not a number picked by default
 
