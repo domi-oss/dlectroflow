@@ -64,12 +64,25 @@ let behaviour: "ok" | "500" | "404" | "not-json" | "hang" | "huge" = "ok";
 let server: Server;
 let origin = "";
 
+/**
+ * The fake store's Range handling, written without a regex.
+ *
+ * A `/^bytes=(\d*)-(\d*)$/` here was flagged MEDIUM by the SAST ReDoS rule
+ * (`nodejs_scan.javascript-dos-rule-regex_dos`) on !256, because the input is a
+ * request header. It was linear and could not actually backtrack — but this
+ * parses a header, which is a split, and a fixture is not the place to argue
+ * with a scanner over a rule the repo elsewhere chose to fix rather than dismiss.
+ */
 function serveRange(req: IncomingMessage, body: Buffer) {
+  const whole = { status: 200, start: 0, end: body.length - 1 };
   const range = req.headers.range;
-  const match = /^bytes=(\d*)-(\d*)$/.exec(range ?? "");
-  if (!match) return { status: 200, start: 0, end: body.length - 1 };
-  const start = match[1] ? Number(match[1]) : 0;
-  const end = match[2] ? Number(match[2]) : body.length - 1;
+  if (typeof range !== "string" || !range.startsWith("bytes=")) return whole;
+
+  const parts = range.slice("bytes=".length).split("-");
+  if (parts.length !== 2) return whole;
+  const start = parts[0] === "" ? 0 : Number(parts[0]);
+  const end = parts[1] === "" ? body.length - 1 : Number(parts[1]);
+  if (!Number.isInteger(start) || !Number.isInteger(end)) return whole;
   return { status: 206, start, end };
 }
 
