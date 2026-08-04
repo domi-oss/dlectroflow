@@ -683,4 +683,43 @@ describe("workspace-scoping harness", () => {
     }
     expect(offenders).toEqual([]);
   });
+
+  // ── #154 — the one route that authorises from something other than a session ─
+  //
+  // Everything above polices WHICH ROWS a query may reach. The calendar feed
+  // needs one thing more, because it is the only endpoint in the app that a
+  // caller reaches with no cookie at all: authorization must happen in the
+  // pinned module and nowhere else. `resolveFeed` checks the token AND the
+  // owner's status; a handler that grew its own query would be a second place
+  // where "whose data is this" gets decided, and the second place is the one
+  // that gets it wrong.
+
+  const FEED_ROUTE = "src/app/api/ics/feed/[token]/route.ts";
+
+  it("the feed endpoint exists where this test thinks it does", () => {
+    // Without this, renaming the route turns the rule below into a test that
+    // reads no file and passes forever — the same guard the People block uses.
+    expect(
+      () => readFileSync(FEED_ROUTE, "utf8"),
+      `${FEED_ROUTE} is missing`,
+    ).not.toThrow();
+  });
+
+  it("the feed endpoint reaches the database only through the pinned module", () => {
+    // Comments stripped first: the route's doc comment states this property in
+    // order to explain it, and a rule that cannot tell code from prose punishes
+    // the explanation (the idiom the OWNER_WORKSPACE_ID rule above uses).
+    const code = readFileSync(FEED_ROUTE, "utf8")
+      .split("\n")
+      .filter(
+        (line) =>
+          !line.trimStart().startsWith("//") &&
+          !line.trimStart().startsWith("*"),
+      )
+      .join("\n");
+    expect(code).not.toMatch(/\bprisma\./);
+    // The control: the file really does authorise, so an absent `prisma.` is
+    // "it delegates" rather than "it never checks anything".
+    expect(code).toMatch(/resolveFeed\(/);
+  });
 });

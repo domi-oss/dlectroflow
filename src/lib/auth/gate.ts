@@ -10,6 +10,16 @@
  * Asserted by src/lib/auth/gate.test.ts AND src/proxy.test.ts (the classifier
  * and the middleware that has to honour it).
  *
+ * `/api/ics/feed` (#154) is here for a structural reason rather than a legal
+ * one, and it is the narrowest entry in the list on purpose. A calendar client
+ * fetching a subscription — Google, Apple, Outlook — sends no cookie and cannot
+ * sign in, so the 256-bit capability token in the path IS the authorization; see
+ * `src/lib/calendar-feed.ts`. Redirecting it to /login would not look like an
+ * auth failure to anybody, it would look like a feed that quietly stopped
+ * updating. **`/api/ics` itself stays private**: the per-task download at
+ * `/api/ics/[taskId]` is session-scoped and keyed on an id that is guessable in
+ * a way a token is not.
+ *
  * Matching is exact-or-`prefix + "/"` (see isPublicPath), so a prefix without a
  * trailing "/" is still safe against lookalikes like "/privacyhack" — unlike
  * OWNER_ONLY_PREFIXES / AUTHENTICATED_PREFIXES below, which use a plain
@@ -21,6 +31,7 @@ export const PUBLIC_PREFIXES = [
   "/api/auth/",
   "/privacy",
   "/terms",
+  "/api/ics/feed",
 ];
 
 /**
