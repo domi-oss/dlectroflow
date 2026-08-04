@@ -50,3 +50,51 @@ export function stripComments(source: string): string {
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
+
+/**
+ * The same step for shell source (#157). `scripts/*.sh` in this repo carry
+ * header comments longer than the code under them, and the value most likely to
+ * be quoted in one is the value a scanner is looking for — so `check-log-
+ * retention.sh` documenting its old retention window in prose must not read as
+ * its current one.
+ *
+ * A character scan rather than a regex, because shell's `#` is only a comment
+ * when it is unquoted AND begins a word: `${sub#=}` and `severity#x` are not
+ * comments, and a line-anchored regex cannot see quote state that opened on an
+ * earlier line. Quoting is tracked across the whole input for that reason.
+ *
+ * Deliberately does NOT model backslash escapes or here-documents. Both would
+ * make it a parser; the failure they cause is over-stripping, which loses a
+ * binding and makes the caller's answer `null` — a loud miss, not a confident
+ * wrong one.
+ */
+export function stripShellComments(source: string): string {
+  let out = "";
+  let quote: '"' | "'" | null = null;
+  let i = 0;
+  while (i < source.length) {
+    const ch = source[i];
+    if (quote !== null) {
+      out += ch;
+      if (ch === quote) quote = null;
+      i += 1;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      out += ch;
+      i += 1;
+      continue;
+    }
+    // Unquoted `#` starts a comment only at the start of a word — otherwise it
+    // is parameter expansion (`${v#p}`) or part of a bare token.
+    const prev = i === 0 ? "\n" : source[i - 1];
+    if (ch === "#" && (prev === "\n" || prev === " " || prev === "\t")) {
+      while (i < source.length && source[i] !== "\n") i += 1;
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
