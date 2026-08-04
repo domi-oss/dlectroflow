@@ -66,5 +66,34 @@ dedication is accurate and safe to ship.
 | `chapter-by-lamplight.mp3`     | Chapter By Lamplight     | activities         |
 | `cafe-da-tarde.mp3`            | Cafe Da Tarde            | hybrid             |
 
-Streaming sources (YouTube / Spotify / SoundCloud) and the full open-lofi catalog
-are explicitly a **future** release (#61) and are intentionally not present here.
+Streaming sources (YouTube / Spotify / SoundCloud) remain out of scope: the app's
+CSP has no `media-src`, so audio can only come from its own origin. The rest of
+the open-lofi catalog now reaches the app through that same origin — see below.
+
+## The streamed catalog (#61) — same licence, not in this repo
+
+The other 156 open-lofi tracks are **not vendored here**; the full set is ~544 MB
+and a container image is the wrong place for it. An operator who sets
+`FOCUS_CATALOG_ORIGIN` points the app at a directory holding the extracted
+`openlofi.zip` — the mp3s plus `catalog.json` — and the app reads them at run
+time. Unset, everything above is all there is, which is the default.
+
+**The licence is the same, and so is the chain of title.** The streamed set is the
+rest of the same open-lofi `v1.0.0` release documented above: CC0 1.0 Universal,
+no attribution required, commercial use included, resting on the same
+second-hand Suno-ownership claim recorded in the origin caveat. Nothing about the
+provenance changes by being fetched rather than committed — but two things about
+the *deployment* do, and they are the operator's to get right:
+
+1. **What is in the store is what plays.** The app validates shape, never
+   content: it accepts `{title, filename, category}` entries whose filename looks
+   like a plain `.mp3` name, and it has no way to know whether the bytes behind
+   one are CC0. Upload the open-lofi release, not a mixtape. `catalog.json`'s own
+   `"license": "CC0-1.0"` field is a claim by whoever wrote the file, and the app
+   does not read it as permission.
+2. **The provenance record travels with the store, not with this file.** If you
+   serve a different set, the note above stops describing what your instance
+   plays, and this file is no longer the licence record for it.
+
+The bundled ten stay bundled regardless. They are the fallback when the store is
+unreachable, so a focus session is never silent for want of a network.

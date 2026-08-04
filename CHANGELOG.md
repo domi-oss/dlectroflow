@@ -31,6 +31,29 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Added
 
+- **The focus timer can play the full lo-fi catalog (#61).** Ten CC0 tracks still
+  ship inside the image, one per open-lofi category; the other 156 are read at run
+  time from wherever an operator keeps them. **New optional environment variable:
+  `FOCUS_CATALOG_ORIGIN`** (Helm: `focus.catalogOrigin`), pointing at a directory
+  holding the extracted `openlofi.zip` — the mp3s plus `catalog.json`. Unset, which
+  is the default, nothing changes.
+
+  **The browser never talks to that store.** The CSP is unchanged — `default-src
+  'self'` with `media-src` still unset — so third-party audio remains impossible
+  during a focus session, and the bytes are fetched server-side and streamed back
+  through `/api/focus-catalog/audio` instead, with `Range` forwarded so seeking
+  works. Any credential the store needs stays on the server as a consequence
+  rather than as a promise. Both routes require a session, guest sandboxes
+  included, so an instance cannot be used as an open relay.
+
+  Every failure keeps the music on: unset, unreachable, a broken manifest, an
+  offline browser — the player falls back to the bundled ten and a session never
+  starts silent. A configured store that does not answer logs
+  `focus_catalog_unavailable` once per session, so the degradation is visible
+  rather than silent. Licence and provenance for the streamed set are recorded in
+  `public/audio/LICENSE.md`; setup is in `docs/self-host-vps.md` and
+  `docs/deploy-runbook.md`.
+
 - **A member can export their own data (#129).** Settings → Account gains
   **Download my data (.zip)**, and `GET /api/export` behind it. The archive holds
   the same data written four ways, because no single format does every job: a
