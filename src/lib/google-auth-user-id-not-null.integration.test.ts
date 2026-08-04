@@ -146,10 +146,32 @@ describe("GoogleAuth.userId is NOT NULL in the database (#122)", () => {
       (e: unknown) => e,
     );
 
+    // `PrismaClientKnownRequestError` and its `.code` are documented public API;
+    // P2010 is the documented code for "Raw query failed".
     expect(err).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
     const known = err as Prisma.PrismaClientKnownRequestError;
-    expect(known.code).toBe("P2010"); // raw query failed
-    expect((known.meta as { code?: string } | undefined)?.code).toBe("23502");
+    expect(known.code).toBe("P2010");
+
+    // The CONTENTS of `meta` for a raw failure are not, so the SQLSTATE is read
+    // from either carrier: `meta.code` where Prisma puts it today, falling back
+    // to the message, which embeds it as "Raw query failed. Code: `23502`". A
+    // Prisma upgrade that moves it between the two therefore does not turn a
+    // working constraint into a red build over the shape of an error object.
+    //
+    // Note for anyone tempted by the obvious alternative — asserting the message
+    // mentions the table or "not-null" — it does NOT, and this was measured
+    // rather than assumed. The whole message is:
+    //
+    //   Invalid `prisma.$executeRawUnsafe()` invocation:
+    //   Raw query failed. Code: `23502`. Message: `Failing row contains (…).`
+    //
+    // Prisma discards Postgres' primary "null value in column … violates
+    // not-null constraint" line and keeps only the DETAIL, which names neither
+    // the column nor the relation. `23502` is the only identifying token in it.
+    const sqlState =
+      (known.meta as { code?: string } | undefined)?.code ??
+      (/\b23502\b/.test(known.message) ? "23502" : undefined);
+    expect(sqlState).toBe("23502"); // not_null_violation
 
     // And nothing was written — the whole statement rolled back. Counted by
     // primary key rather than by `userId: null`, which the generated types no

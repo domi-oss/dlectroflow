@@ -49,16 +49,56 @@
 -- deliberately not where that investigation happens; it only stops the deploy
 -- being the thing that discovers it.
 --
+-- WHY THIS REPAIRS RATHER THAN ABORTING (RAISE EXCEPTION), which was raised in
+-- review on !255 and is the right question to ask of an irreversible statement:
+--
+--   * Migrations run ON CONTAINER START in this project (see CLAUDE.md, Stack).
+--     A RAISE EXCEPTION here is therefore not "the deploy pauses politely for an
+--     investigation" — it is a pod that cannot boot, i.e. an outage, and the
+--     investigation then happens under outage pressure. That converts a data
+--     anomaly into downtime.
+--   * Nothing is lost that anyone could reach. A NULL-userId row is unreachable
+--     (every read keys on userId), unrevocable (disconnectGoogle deletes by
+--     userId) and uncascadable. Before and after this statement, the owning
+--     member sees exactly "Not connected". There is no user-visible difference.
+--   * It is not a fresh call. #118 already decided, with owner authorisation,
+--     that a NULL-userId credential is DESTROYED rather than adopted, for those
+--     same three reasons — see 20260729140000_google_auth_orphan_purge. This
+--     migration inherits that decision instead of quietly reversing it.
+--
+-- The legitimate half of the objection is the audit trail, so that is what got
+-- stronger: a count alone told an investigator nothing about WHAT vanished. It
+-- now names each row and when it was last written, which is what makes "find the
+-- writer" actionable after the fact. It deliberately logs whether a token was
+-- PRESENT, never any token material — the columns are ciphertext and a
+-- migration log is not the place for it, even encrypted.
+--
 -- Logged, not silent: exactly as in #118's purge, this destroys real credentials
--- so it says how many. Idempotent — matches zero rows on any re-run.
+-- so it says so, loudly. Idempotent — matches zero rows on any re-run.
 DO $$
 DECLARE
-  purged integer;
+  purged  integer;
+  details text;
 BEGIN
-  DELETE FROM "GoogleAuth" WHERE "userId" IS NULL;
-  GET DIAGNOSTICS purged = ROW_COUNT;
+  WITH removed AS (
+    DELETE FROM "GoogleAuth"
+     WHERE "userId" IS NULL
+    RETURNING "id",
+              "updatedAt",
+              ("accessToken"  IS NOT NULL) AS had_access,
+              ("refreshToken" IS NOT NULL) AS had_refresh
+  )
+  SELECT count(*)::int,
+         string_agg(
+           format('%s (updatedAt=%s, hadAccessToken=%s, hadRefreshToken=%s)',
+                  "id", "updatedAt", had_access, had_refresh),
+           '; ' ORDER BY "updatedAt"
+         )
+    INTO purged, details
+    FROM removed;
+
   IF purged > 0 THEN
-    RAISE WARNING '#122: purged % orphaned GoogleAuth row(s) (userId IS NULL) — the pre-flight was supposed to be 0; find the writer', purged;
+    RAISE WARNING '#122: purged % orphaned GoogleAuth row(s) (userId IS NULL) — the pre-flight was supposed to return 0, so a writer produced these and needs finding: %', purged, details;
   ELSE
     RAISE NOTICE '#122: no orphaned GoogleAuth rows to purge, as expected';
   END IF;
