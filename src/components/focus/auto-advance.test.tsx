@@ -93,7 +93,12 @@ describe("AutoAdvance (#142)", () => {
     setup();
     const status = screen.getByRole("status");
     expect(status).toHaveTextContent(/next step/i);
-    expect(status).toHaveTextContent(new RegExp(`${AUTO_ADVANCE_SEC} seconds`));
+    // A plain containment check rather than `new RegExp(...)`: SAST's
+    // "Regular expression with non-literal value" rule does not exempt test
+    // files, and !254 settled that this repo FIXES that rule by removing the
+    // constructed pattern rather than dismissing it. Still asserted against the
+    // real constant, so the copy and the countdown cannot drift.
+    expect(status.textContent).toContain(`${AUTO_ADVANCE_SEC} seconds`);
     expect(status).toHaveTextContent(/escape/i);
     expect(status).toHaveTextContent(/stay here/i);
   });
