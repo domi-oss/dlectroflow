@@ -54,6 +54,9 @@ vi.mock("@/app/actions/focus", () => ({
     plannedMin: 10,
   }),
 }));
+vi.mock("@/app/actions/braindump", () => ({
+  ensureFocusStep: vi.fn().mockResolvedValue("new-step"),
+}));
 vi.mock("@/app/actions/settings", () => ({
   dismissFocusTimerTip: vi.fn().mockResolvedValue(undefined),
   updateFocusShuffle: vi.fn().mockResolvedValue(undefined),
@@ -162,6 +165,7 @@ import {
   dismissFocusTimerTip,
   updateFocusShuffle,
 } from "@/app/actions/settings";
+import { ensureFocusStep } from "@/app/actions/braindump";
 
 const STEPS: TrackerStep[] = [
   { id: "s1", text: "Outline", done: true, estMinutes: 5, subtaskEmoji: null },
@@ -2359,5 +2363,244 @@ describe("FocusTimer — auto-advance after a completed step (#142)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ── #142 — the end of a task, and the end of everything ──────────────────────
+describe("FocusTimer — where a finished TASK goes (#142)", () => {
+  /**
+   * This jsdom build exposes no `localStorage` (Node's own is gated behind
+   * --localstorage-file and shadows jsdom's), so hyper focus mode reads as OFF
+   * unless a store is installed. Persistence semantics live in
+   * hyper-focus.test.ts; this only needs somewhere for the mode to be true.
+   */
+  function installStorage(seed?: Record<string, string>) {
+    const map = new Map(Object.entries(seed ?? {}));
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      writable: true,
+      value: {
+        get length() {
+          return map.size;
+        },
+        key: (i: number) => Array.from(map.keys())[i] ?? null,
+        getItem: (k: string) => map.get(k) ?? null,
+        setItem: (k: string, v: string) => void map.set(k, String(v)),
+        removeItem: (k: string) => void map.delete(k),
+        clear: () => map.clear(),
+      } as Storage,
+    });
+    return map;
+  }
+
+  /** A finished LAST step: no next step in this task. */
+  const lastStep = (over: Partial<Parameters<typeof FocusTimer>[0]> = {}) =>
+    base({
+      nextStep: null,
+      step: {
+        id: "s3",
+        text: "Polish",
+        estMinutes: 1,
+        subtaskEmoji: null,
+        order: 3,
+        total: 3,
+        done: false,
+      },
+      ...over,
+    });
+
+  const singleTaskDone = (
+    over: Partial<Parameters<typeof FocusTimer>[0]> = {},
+  ) =>
+    lastStep({
+      isSingleTask: true,
+      taskTitle: "Call the bank",
+      step: {
+        id: "s1",
+        text: "Call the bank",
+        estMinutes: 1,
+        subtaskEmoji: null,
+        order: 1,
+        total: 1,
+        done: false,
+      },
+      steps: [
+        {
+          id: "s1",
+          text: "Call the bank",
+          done: false,
+          estMinutes: 1,
+          subtaskEmoji: null,
+        },
+      ],
+      ...over,
+    });
+
+  async function finish(user: ReturnType<typeof userEvent.setup>) {
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /complete step/i }));
+  }
+
+  it("hyper focus ON chains into the next single-task to-do, through the same countdown", async () => {
+    installStorage({ "df-hyper-focus": "1" });
+    vi.useFakeTimers();
+    try {
+      render(
+        <FocusTimer
+          {...singleTaskDone({
+            nextUp: { kind: "single", itemId: "i9", text: "Book the dentist" },
+          })}
+        />,
+      );
+      await act(async () => {
+        screen.getByRole("button", { name: /start focusing/i }).click();
+      });
+      await act(async () => {
+        screen.getByRole("button", { name: /complete step/i }).click();
+      });
+      expect(screen.getByText("Book the dentist")).toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(AUTO_ADVANCE_SEC * 1000);
+      });
+      // A to-do has no step until one is created for it, so the chain goes
+      // through ensureFocusStep rather than guessing a URL.
+      expect(ensureFocusStep).toHaveBeenCalledWith("i9");
+      // Flush the action's promise chain. `waitFor` polls on REAL timers and
+      // would simply hang here (5s test timeout) with fake ones installed.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(push).toHaveBeenCalledWith("/focus/new-step");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("hyper focus OFF returns to /focus after the celebration — nothing navigates on its own", async () => {
+    installStorage();
+    vi.useFakeTimers();
+    try {
+      render(
+        <FocusTimer
+          {...singleTaskDone({
+            nextUp: { kind: "single", itemId: "i9", text: "Book the dentist" },
+          })}
+        />,
+      );
+      await act(async () => {
+        screen.getByRole("button", { name: /start focusing/i }).click();
+      });
+      await act(async () => {
+        screen.getByRole("button", { name: /complete step/i }).click();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(push).not.toHaveBeenCalled();
+      expect(
+        screen.queryByRole("button", { name: /stay here/i }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("link", { name: /back to focus/i }),
+      ).toHaveAttribute("href", "/focus");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("finishing a whole multi-step task offers the next task AND a real stop", async () => {
+    installStorage();
+    vi.useFakeTimers();
+    try {
+      render(
+        <FocusTimer
+          {...lastStep({
+            nextUp: {
+              kind: "step",
+              stepId: "s9",
+              text: "Draft the agenda",
+              emoji: null,
+              taskTitle: "Plan the offsite",
+            },
+          })}
+        />,
+      );
+      await act(async () => {
+        screen.getByRole("button", { name: /start focusing/i }).click();
+      });
+      await act(async () => {
+        screen.getByRole("button", { name: /complete step/i }).click();
+      });
+      expect(screen.getByText(/task complete/i)).toBeInTheDocument();
+      // Offered, never taken automatically: a whole task deserves a real pause.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(push).not.toHaveBeenCalled();
+      expect(
+        screen.getByRole("link", { name: /focus the next step/i }),
+      ).toHaveAttribute("href", "/focus/s9");
+      expect(screen.getByText("Plan the offsite")).toBeInTheDocument();
+      // …and stopping is a first-class answer, not a link hiding underneath.
+      expect(
+        screen.getByRole("link", { name: /done for now/i }),
+      ).toHaveAttribute("href", "/focus");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("an empty multi-step queue offers hyper focus mode, and one press starts the chain", async () => {
+    const store = installStorage();
+    const user = userEvent.setup();
+    render(
+      <FocusTimer
+        {...lastStep({
+          nextUp: { kind: "single", itemId: "i9", text: "Book the dentist" },
+        })}
+      />,
+    );
+    await finish(user);
+    expect(screen.getByText(/no multi-step tasks left/i)).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: /turn on hyper focus mode/i }),
+    );
+    expect(store.get("df-hyper-focus")).toBe("1");
+    expect(ensureFocusStep).toHaveBeenCalledWith("i9");
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/focus/new-step"));
+  });
+
+  it("nothing left at all lands on the activity dashboard, not on an empty list", async () => {
+    installStorage();
+    const user = userEvent.setup();
+    render(<FocusTimer {...lastStep({ nextUp: null })} />);
+    await finish(user);
+    expect(await screen.findByText(/that's everything/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /see how today went/i }),
+    ).toHaveAttribute("href", "/dashboard");
+  });
+
+  it("a failed chain says so and offers a retry — it does not silently do nothing", async () => {
+    // Mode off, so the empty-queue screen is the one offering to turn it on —
+    // and pressing that offer is what runs the chain.
+    installStorage();
+    vi.mocked(ensureFocusStep).mockRejectedValueOnce(new Error("boom"));
+    const user = userEvent.setup();
+    render(
+      <FocusTimer
+        {...lastStep({
+          nextUp: { kind: "single", itemId: "i9", text: "Book the dentist" },
+        })}
+      />,
+    );
+    await finish(user);
+    await user.click(
+      screen.getByRole("button", { name: /turn on hyper focus mode/i }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(/next to-do/i);
+    vi.mocked(ensureFocusStep).mockResolvedValue("new-step");
+    await user.click(screen.getByRole("button", { name: /try again/i }));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/focus/new-step"));
   });
 });

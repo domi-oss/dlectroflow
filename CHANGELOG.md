@@ -53,6 +53,34 @@ operators upgrading a self-hosted instance don't get surprised.
   rather than silent. Licence and provenance for the streamed set are recorded in
   `public/audio/LICENSE.md`; setup is in `docs/self-host-vps.md` and
   `docs/deploy-runbook.md`.
+- **Finishing a step no longer dead-ends (#142).** Completing a step used to swap
+  the timer into a "done" screen on the same URL and stop; a single-task to-do got
+  *"That was the last step of this task. 🏁"* and nothing else. Now the finish
+  moves you on. Inside a multi-step task the next step arrives after a 5-second
+  countdown, landing on its **start screen** — nothing begins a timer for you. At
+  the end of a whole task the next task is offered rather than taken
+  automatically, because that finish deserves a real pause, and stopping is a
+  first-class button rather than a link hiding underneath. When there is nothing
+  left at all you land on **Activity**, which is the one surface that treats an
+  empty queue as an achievement; the daily spark is already there, and a quiet
+  **Find something else →** link keeps the page from being a cul-de-sac.
+
+  A new **hyper focus mode**, **off by default**, chains single-task to-dos the
+  same way — turn it on from the /focus launcher, or accept the offer that
+  appears when the multi-step queue empties. It governs single-task chaining
+  only. The mode is remembered per browser rather than per account: it describes
+  the session you are in, not a preference your account holds.
+
+  **Accessibility.** A timed navigation that is not announced is a WCAG failure,
+  so the countdown announces itself and how to stop it before it can run out
+  (WCAG 2.2.1 Timing Adjustable). **Escape cancels** as well as the visible
+  **Stay here** button, because tabbing to a control inside five seconds is not a
+  real escape for anyone using a screen reader; the countdown also holds while
+  the panel has focus, so reading the options is never a race. The escape does
+  not move or relabel while you reach for it, focus lands somewhere deliberate on
+  every transition (WCAG 2.4.3), and `prefers-reduced-motion` drops the animated
+  progress track — the advance itself is unchanged, because that setting is about
+  motion and not about what the app does.
 
 - **A member can export their own data (#129).** Settings → Account gains
   **Download my data (.zip)**, and `GET /api/export` behind it. The archive holds

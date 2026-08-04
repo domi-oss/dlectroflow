@@ -10,6 +10,7 @@ import {
   RefreshCw,
   RotateCcw,
   TriangleAlert,
+  Zap,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -26,6 +27,7 @@ import {
   dismissFocusTimerTip,
   updateFocusShuffle,
 } from "@/app/actions/settings";
+import { ensureFocusStep } from "@/app/actions/braindump";
 import { AutoAdvance } from "@/components/focus/auto-advance";
 import { Celebration } from "@/components/focus/celebration";
 import { TimerVisual } from "@/components/focus/timer-visual";
@@ -57,7 +59,9 @@ import {
 import { useFocusSound } from "@/lib/use-focus-sound";
 import { FocusSoundPlayer } from "@/components/focus/focus-sound-player";
 import { FocusSound } from "@/lib/constants";
+import { chooseEnding } from "@/lib/focus-next";
 import { usePrefersReducedMotion } from "@/lib/use-prefers-reduced-motion";
+import { useHyperFocus } from "@/lib/use-hyper-focus";
 import { t, type StringKey } from "@/lib/strings";
 import { cn } from "@/lib/utils";
 import { useVoice } from "@/components/voice-provider";
@@ -116,7 +120,12 @@ type FailedHandler =
   | "togglePause"
   | "complete"
   | "reestimate"
-  | "requeue";
+  | "requeue"
+  // #142 — opening the next single-task to-do. It is a server action too
+  // (`ensureFocusStep` creates the to-do's one step on demand), so a chain that
+  // failed used to be indistinguishable from a button that does nothing —
+  // which is the dead end this issue is about, wearing a different hat.
+  | "chain";
 
 type ActionFailure = {
   handler: FailedHandler;
@@ -165,6 +174,30 @@ export type NextStepPeek = {
 };
 
 /**
+ * #142 — what the REST of the queue has, in effective order (soonest due, then
+ * soonest scheduled — see `nextInFocusOrder`), once this task is out of the way.
+ * Computed by the page, so the completion screen never has to ask.
+ *
+ * `null` is a real state and not a missing prop: "there is nothing else" is what
+ * sends the user to the dashboard rather than back to an empty list.
+ */
+export type NextUp =
+  /** The next incomplete step of another multi-step task. */
+  | {
+      kind: "step";
+      stepId: string;
+      text: string;
+      emoji: string | null;
+      taskTitle: string;
+    }
+  /**
+   * The next single-task to-do. Carries the BrainDumpItem id, not a step id: a
+   * to-do has no step until `ensureFocusStep` creates one, which is exactly how
+   * the launcher's ▶ Start works.
+   */
+  | { kind: "single"; itemId: string; text: string };
+
+/**
  * #137 — which message a failure gets. The stale-deployment case overrides the
  * handler entirely: what the user needs to know is not "the requeue failed" but
  * "your tab is older than the server", because that is what decides whether
@@ -179,6 +212,8 @@ function failureMessageKey(failure: ActionFailure): StringKey {
       return "focus.error.requeue";
     case "complete":
       return "focus.error.complete";
+    case "chain":
+      return "focus.error.chain";
     // start / resumeExisting / togglePause — all "the session couldn't be
     // reached", and the affordance (press it again) is the same for each.
     default:
@@ -205,6 +240,7 @@ export function FocusTimer({
   streak,
   focusMinToday,
   nextStep,
+  nextUp = null,
   isSingleTask,
   addTimeIncrementMin,
   settings,
@@ -222,6 +258,10 @@ export function FocusTimer({
   streak: number;
   focusMinToday: number;
   nextStep: NextStepPeek | null;
+  /** #142 — the rest of the queue, in effective order. Optional so a caller
+   * that predates the completion flow (or a test that doesn't care) simply
+   * gets the "nothing else" ending. */
+  nextUp?: NextUp | null;
   isSingleTask: boolean;
   addTimeIncrementMin: number;
   settings: TimerSettings;
@@ -231,6 +271,9 @@ export function FocusTimer({
   const router = useRouter();
   const voice = useVoice();
   const reducedMotion = usePrefersReducedMotion();
+  // #142 — read here rather than in the done screen so the hook order is stable
+  // across every phase; it is only ever consulted once the step is finished.
+  const [hyperFocus, setHyperFocus] = useHyperFocus();
   const timerStyle = resolveTimerStyle(settings.timerStyle, voice);
 
   const [phase, setPhase] = useState<Phase>("setup");
@@ -753,6 +796,7 @@ export function FocusTimer({
       complete: () => void finishComplete(),
       reestimate: () => void startReestimate(),
       requeue: () => void confirmRequeue(),
+      chain: () => void startSingle(),
     };
     if (failure) retry[failure.handler]();
   };
@@ -775,6 +819,40 @@ export function FocusTimer({
   const goToNextStep = useCallback(() => {
     if (nextStep) router.push(`/focus/${nextStep.id}`);
   }, [nextStep, router]);
+
+  /**
+   * #142 — open the next single-task to-do.
+   *
+   * A to-do has no Step until one is created for it, so this goes through
+   * `ensureFocusStep` exactly as the launcher's ▶ Start does, rather than
+   * guessing a URL. Routed through `run()` like every other server call in this
+   * component: an `ensureFocusStep` that rejects, hangs or answers `null` would
+   * otherwise leave a button that visibly does nothing — which is the dead end
+   * this issue is about, reintroduced inside its own fix.
+   */
+  const startSingle = useCallback(async () => {
+    if (nextUp?.kind !== "single") return;
+    const outcome = await run("chain", () => ensureFocusStep(nextUp.itemId));
+    if (!outcome.ok) return;
+    const stepId = outcome.value;
+    // `null` means the action ran and could not produce a step (the item was
+    // archived or completed from another tab). It is a failure the user must
+    // see, not a silent no-op — and it is known-not-stale for the same reason
+    // finishComplete's `ok: false` is: the action RETURNED.
+    if (!stepId) {
+      setFailure({ handler: "chain", stale: false });
+      return;
+    }
+    router.push(`/focus/${stepId}`);
+  }, [nextUp, router, run]);
+
+  /** #142 — the empty-multi-step-queue offer: turn the mode on AND act on it,
+   * because the button's own sentence ("work through the single-task to-dos?")
+   * promises both and splitting them would cost a second tap for one decision. */
+  const acceptHyperFocus = useCallback(() => {
+    setHyperFocus(true);
+    void startSingle();
+  }, [setHyperFocus, startSingle]);
 
   const dismissTip = () => {
     setTipVisible(false);
@@ -1026,6 +1104,17 @@ export function FocusTimer({
     </div>
   );
 
+  // #142 — which of the seven endings the finished screen shows. Derived here
+  // rather than in the JSX below: the decision is the interesting part and it is
+  // unit-tested on its own (focus-next.test.ts), while the render is just the
+  // seven shapes it can take.
+  const ending = chooseEnding({
+    hasNextStep: nextStep != null,
+    nextUpKind: nextUp?.kind ?? null,
+    isSingleTask,
+    hyperFocus,
+  });
+
   // ── End screens ────────────────────────────────────────────────────────────
   if (phase === "done") {
     return (
@@ -1068,13 +1157,16 @@ export function FocusTimer({
           ) : null}
         </div>
         <div className="flex flex-col items-center gap-3">
-          {nextStep ? (
-            // #142 — this used to be a bare link, which is where the momentum
-            // went: the highest-energy moment in the app asked for one more
-            // decision. It now moves on by itself after five seconds, onto the
-            // next step's SETUP screen (a plain route push — nothing starts a
-            // timer there), with an escape that is announced before it is
-            // needed. See AutoAdvance for the WCAG reasoning.
+          {/* #142 — what used to be `nextStep ? <link> : "that was the last
+              step 🏁"`, i.e. a dead end for every single-task to-do and for the
+              end of every task. `chooseEnding` picks one of seven, and it lives
+              in focus-next.ts because seven branches over four inputs written
+              inline as `&&`s is precisely how the dead end got there. */}
+          {ending.kind === "advance-step" && nextStep && (
+            // Moves on by itself after five seconds, onto the next step's SETUP
+            // screen (a plain route push — nothing starts a timer there), with
+            // an escape announced before it is needed. Ungated by hyper focus
+            // mode: inside a task the sequence is already agreed.
             <AutoAdvance
               label={t("focus.advance.nextStep", voice)}
               targetText={nextStep.text}
@@ -1083,15 +1175,138 @@ export function FocusTimer({
               reducedMotion={reducedMotion}
               onAdvance={goToNextStep}
             />
-          ) : (
-            <p className="text-sm">That was the last step of this task. 🏁</p>
           )}
-          <Link
-            href="/focus"
-            className="text-muted-foreground text-sm hover:underline"
-          >
-            {t("action.back", voice)}
-          </Link>
+
+          {ending.kind === "advance-single" && nextUp?.kind === "single" && (
+            <AutoAdvance
+              label={t("focus.advance.nextTodo", voice)}
+              targetText={nextUp.text}
+              voice={voice}
+              reducedMotion={reducedMotion}
+              onAdvance={() => void startSingle()}
+            />
+          )}
+
+          {/* The end of a WHOLE task. Never a countdown, whatever the mode
+              says: this finish is a bigger deal than finishing a step and
+              deserves a real pause. It just must not be a dead end. */}
+          {ending.kind !== "advance-step" &&
+            ending.kind !== "advance-single" && (
+              <>
+                <p className="text-lg font-medium">
+                  {t(
+                    isSingleTask
+                      ? "focus.done.singleComplete"
+                      : "focus.done.taskComplete",
+                    voice,
+                  )}
+                </p>
+
+                {ending.kind === "offer-task" && nextUp?.kind === "step" && (
+                  <>
+                    <Link
+                      href={`/focus/${nextUp.stepId}`}
+                      className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium"
+                    >
+                      <Play aria-hidden="true" className="h-4 w-4 shrink-0" />
+                      {t("focus.nextStep", voice)}
+                    </Link>
+                    {/* Which task, and which step of it — an unnamed "next" is
+                      just another thing to open before you know what it is. */}
+                    <p className="text-muted-foreground text-sm">
+                      {nextUp.taskTitle}
+                    </p>
+                    <p className="text-sm">
+                      {nextUp.emoji ? `${nextUp.emoji} ` : ""}
+                      {nextUp.text}
+                    </p>
+                  </>
+                )}
+
+                {ending.kind === "offer-single" &&
+                  nextUp?.kind === "single" && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void startSingle()}
+                        disabled={pending}
+                        className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium disabled:opacity-50"
+                      >
+                        <Play aria-hidden="true" className="h-4 w-4 shrink-0" />
+                        {t("focus.advance.nextTodo", voice)}
+                      </button>
+                      <p className="text-sm">{nextUp.text}</p>
+                    </>
+                  )}
+
+                {ending.kind === "offer-hyper" && nextUp?.kind === "single" && (
+                  <>
+                    <p className="text-muted-foreground text-sm">
+                      {t("focus.done.queueEmpty", voice)}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={acceptHyperFocus}
+                      disabled={pending}
+                      className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium disabled:opacity-50"
+                    >
+                      <Zap aria-hidden="true" className="h-4 w-4 shrink-0" />
+                      {t("focus.hyper.turnOn", voice)}
+                    </button>
+                    <p className="text-sm">{nextUp.text}</p>
+                  </>
+                )}
+
+                {ending.kind === "nothing-left" && (
+                  <>
+                    <p className="text-muted-foreground text-sm">
+                      {t("focus.done.allClear", voice)}
+                    </p>
+                    {/* The dashboard, not the inbox or the library: it is the only
+                      one of the three that treats an empty queue as an
+                      ACHIEVEMENT rather than a state needing correction. The
+                      inbox is the fullest screen in the app, and landing on a
+                      pile straight after clearing your queue swaps the reward
+                      for a demand. The daily spark is already rendered there,
+                      and the "find something else" link beside it keeps the
+                      page from being a cul-de-sac. */}
+                    <Link
+                      href="/dashboard"
+                      className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center rounded-md px-4 font-medium"
+                    >
+                      {t("focus.done.seeYourDay", voice)}
+                    </Link>
+                  </>
+                )}
+
+                {/* Stopping, as a first-class answer rather than a link hiding
+                  under the next thing — except when there is nothing to go back
+                  to, where /focus would be its own dead end. */}
+                {ending.kind !== "nothing-left" && (
+                  <Link
+                    href="/focus"
+                    className={
+                      ending.kind === "back-to-focus"
+                        ? "bg-primary text-primary-foreground inline-flex min-h-[44px] items-center rounded-md px-4 font-medium"
+                        : "text-muted-foreground inline-flex min-h-[44px] items-center text-sm hover:underline"
+                    }
+                  >
+                    {t(
+                      ending.kind === "back-to-focus"
+                        ? "focus.done.backToFocus"
+                        : "focus.done.doneForNow",
+                      voice,
+                    )}
+                  </Link>
+                )}
+              </>
+            )}
+
+          {/* #137/#142 — the same notice as everywhere else. The done screen
+              returns early, so without this a failed chain would report
+              nothing at all: a button that visibly does nothing, which is the
+              dead end this whole issue is about. */}
+          {failureNotice}
         </div>
       </div>
     );

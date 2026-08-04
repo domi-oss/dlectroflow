@@ -321,6 +321,13 @@ export const STRINGS = {
     plain: "That's everything. Nothing left in the queue.",
     playful: "Kitchen's clear. Nothing left on the pass.",
   },
+  // #142 — the dashboard's way onward, so the empty-queue destination is not a
+  // cul-de-sac. The Library rather than the Inbox: the Inbox is the fullest
+  // screen in the app and lands a demand where a reward just was.
+  "focus.done.findSomethingElse": {
+    plain: "Find something else →",
+    playful: "Find something else →",
+  },
   "focus.done.seeYourDay": {
     plain: "See how today went →",
     playful: "See how today went →",
@@ -348,6 +355,13 @@ export const STRINGS = {
   "focus.error.requeue": {
     plain: "Couldn't save that — your step hasn't changed.",
     playful: "Couldn't save that — your step hasn't changed.",
+  },
+  // #142 — opening the next single-task to-do failed. Names the thing that
+  // did not happen rather than the function that failed, and pressing again is
+  // the whole remedy, so the shared Retry button is enough.
+  "focus.error.chain": {
+    plain: "Couldn't open the next to-do.",
+    playful: "Couldn't open the next to-do.",
   },
   "focus.error.complete": {
     plain: "Couldn't finish the step just now — nothing is lost.",

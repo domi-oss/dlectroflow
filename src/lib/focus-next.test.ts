@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  chooseEnding,
   compareFocusOrder,
   nextInFocusOrder,
   type FocusOrdered,
@@ -133,5 +134,70 @@ describe("nextInFocusOrder (#142)", () => {
     ];
     nextInFocusOrder(rows);
     expect(rows.map((r) => r.id)).toEqual(["later", "next"]);
+  });
+});
+
+describe("chooseEnding (#142) — what the finished-step screen offers", () => {
+  const at = (over: Partial<Parameters<typeof chooseEnding>[0]> = {}) =>
+    chooseEnding({
+      hasNextStep: false,
+      nextUpKind: null,
+      isSingleTask: false,
+      hyperFocus: false,
+      ...over,
+    }).kind;
+
+  it("another step in this task always auto-advances, whatever the mode says", () => {
+    // Inside a task the sequence is the thing you already agreed to, so this is
+    // NOT gated behind hyper focus mode.
+    expect(at({ hasNextStep: true })).toBe("advance-step");
+    expect(at({ hasNextStep: true, hyperFocus: true })).toBe("advance-step");
+    expect(
+      at({ hasNextStep: true, nextUpKind: "single", isSingleTask: true }),
+    ).toBe("advance-step");
+  });
+
+  it("a finished single-task to-do chains only when hyper focus mode is on", () => {
+    expect(
+      at({ nextUpKind: "single", isSingleTask: true, hyperFocus: true }),
+    ).toBe("advance-single");
+    expect(
+      at({ nextUpKind: "single", isSingleTask: true, hyperFocus: false }),
+    ).toBe("back-to-focus");
+  });
+
+  it("finishing a WHOLE multi-step task never auto-advances — it offers", () => {
+    // "Finishing a whole task is a bigger deal than finishing a step and
+    // deserves a real pause, but it should not dead-end."
+    expect(at({ nextUpKind: "step" })).toBe("offer-task");
+    expect(at({ nextUpKind: "step", hyperFocus: true })).toBe("offer-task");
+    expect(at({ nextUpKind: "single", hyperFocus: true })).toBe("offer-single");
+  });
+
+  it("an empty multi-step queue offers to turn hyper focus mode on", () => {
+    expect(at({ nextUpKind: "single", hyperFocus: false })).toBe("offer-hyper");
+  });
+
+  it("never offers to turn on a mode that is already on", () => {
+    expect(at({ nextUpKind: "single", hyperFocus: true })).not.toBe(
+      "offer-hyper",
+    );
+  });
+
+  it("nothing left at all → the dashboard, in every mode", () => {
+    for (const hyperFocus of [true, false])
+      for (const isSingleTask of [true, false])
+        expect(at({ hyperFocus, isSingleTask })).toBe("nothing-left");
+  });
+
+  it("a next step outranks everything else on offer", () => {
+    expect(
+      at({
+        hasNextStep: true,
+        nextUpKind: "step",
+        isSingleTask: false,
+        hyperFocus: true,
+      }),
+    ).toBe("advance-step");
   });
 });

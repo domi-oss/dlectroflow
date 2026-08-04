@@ -78,3 +78,62 @@ export function nextInFocusOrder<T extends FocusOrdered>(
   if (candidates.length === 0) return null;
   return [...candidates].sort(compareFocusOrder)[0] ?? null;
 }
+
+/**
+ * #142 — what the finished-step screen offers, as one exhaustive decision.
+ *
+ * Kept out of the component and out of JSX because it is seven branches over
+ * four inputs, and a chain of `&&`s in a render is where "you finished, and
+ * that's all we have to say" comes back. The component renders an ending; it
+ * does not work out which one.
+ */
+export type FocusEnding =
+  /** More steps in this task — the countdown, ungated. */
+  | { kind: "advance-step" }
+  /** A single-task to-do finished with hyper focus mode on — chain, countdown. */
+  | { kind: "advance-single" }
+  /** A whole task finished, another multi-step task is waiting — offer it. */
+  | { kind: "offer-task" }
+  /** A whole task finished, hyper focus already on — offer the next to-do. */
+  | { kind: "offer-single" }
+  /** The multi-step queue is empty and to-dos remain — offer the mode. */
+  | { kind: "offer-hyper" }
+  /** A single-task to-do finished with the mode off — back to /focus. */
+  | { kind: "back-to-focus" }
+  /** Nothing at all — the dashboard, where the day's evidence is. */
+  | { kind: "nothing-left" };
+
+export function chooseEnding(input: {
+  /** Another incomplete step exists in the task just worked on. */
+  hasNextStep: boolean;
+  /** What the rest of the queue has, in effective order — see nextInFocusOrder. */
+  nextUpKind: "step" | "single" | null;
+  /** The thing just finished was a single-task to-do, not one step of a task. */
+  isSingleTask: boolean;
+  hyperFocus: boolean;
+}): FocusEnding {
+  const { hasNextStep, nextUpKind, isSingleTask, hyperFocus } = input;
+
+  // Inside a task, the sequence is what you already agreed to when you broke it
+  // down. Deliberately NOT gated behind hyper focus mode, which governs
+  // single-task chaining only.
+  if (hasNextStep) return { kind: "advance-step" };
+
+  if (nextUpKind === null) return { kind: "nothing-left" };
+
+  if (isSingleTask) {
+    // The mode's entire job, and its entire scope.
+    if (nextUpKind === "single" && hyperFocus)
+      return { kind: "advance-single" };
+    // A single-task to-do finished while a multi-step task is waiting: offer it
+    // rather than dropping the user on the launcher to find it themselves.
+    if (nextUpKind === "step") return { kind: "offer-task" };
+    return { kind: "back-to-focus" };
+  }
+
+  // A WHOLE multi-step task just finished. Nothing here auto-advances, whatever
+  // the mode says: that finish is a bigger deal than finishing a step and
+  // deserves a real pause — it simply must not be a dead end.
+  if (nextUpKind === "step") return { kind: "offer-task" };
+  return hyperFocus ? { kind: "offer-single" } : { kind: "offer-hyper" };
+}
