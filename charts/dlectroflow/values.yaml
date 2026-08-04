@@ -186,6 +186,23 @@ user:
   # first breakdown.
   aiWindowHours: ""
 
+# The focus timer's music. Ten CC0 tracks ship inside the image (one per
+# open-lofi category); the full 166-track set is too large for a container image
+# and is read from an object store at run time instead.
+focus:
+  # FOCUS_CATALOG_ORIGIN — no default. The directory holding the extracted
+  # openlofi.zip: the mp3s plus the catalog.json manifest beside them. Any plain
+  # HTTP file server does.
+  #
+  # The app proxies the audio rather than linking to it, so this URL never
+  # reaches a browser and any credential the store needs stays server-side —
+  # next.config.ts keeps `default-src 'self'` with no `media-src`, which is what
+  # makes third-party audio impossible during a focus session.
+  #
+  # Unset, the player uses the bundled ten. The timer is never silent for want
+  # of this value.
+  catalogOrigin: ""
+
 # Daily logical Postgres backup → GCS (prod only; see templates/backup.yaml).
 # Disabled by default so review apps and `helm template` stay clean; CI turns it
 # on for prod with the bucket + GSA below. Retention is the bucket lifecycle.

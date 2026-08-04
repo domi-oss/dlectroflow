@@ -199,6 +199,33 @@ ingress `X-Forwarded-Proto` header and Task 3's `requestOrigin`.
   > **sslip.io host format:** use the **dash-separated** IP form (e.g. `mr-<IID>.203-0-113-5.sslip.io` for an ingress IP of `203.0.113.5`), **not** the dotted form. A dotted quad *after* a hyphenated prefix like `mr-1.` makes sslip.io misparse the address (it reads the leading `1` as part of the IP); the dash form resolves correctly. (`203.0.113.5` is a documentation placeholder — substitute your reserved ingress IP.)
 - Merge to `main` → `deploy_production` publishes to `https://dlectroflow.dev`.
 
+## 9b. The full lo-fi catalog (optional, off by default)
+- Ten CC0 tracks ship inside the image, one per open-lofi category. The full
+  open-lofi set is 166 tracks / ~544 MB, too much for a container image, so the
+  rest is read at run time from wherever it is kept.
+- Extract the `openlofi.zip` release somewhere an HTTP server can reach, then set
+  the chart value:
+  ```
+  --set focus.catalogOrigin=https://your-store.example.com/openlofi
+  ```
+  It renders as `FOCUS_CATALOG_ORIGIN` in the app Secret, and is omitted entirely
+  when empty — the default.
+- **The URL never reaches a browser.** `next.config.ts` keeps `default-src 'self'`
+  with `media-src` unset, so a browser refuses audio from any other origin; the
+  pod fetches the bytes and streams them back through `/api/focus-catalog/audio`,
+  forwarding `Range` so seeking works. Any credential the store needs therefore
+  stays server-side. Pointing the player at the store directly would need a CSP
+  relaxation, which `src/lib/security-headers.test.ts` fails the build over.
+- Unset, unreachable or misconfigured, the player uses the bundled ten. A
+  misconfigured store is not silent: grep the app logs for
+  `focus_catalog_unavailable`, which carries the reason and is emitted once per
+  session rather than once per range request.
+- Verify from a pod rather than assuming: `kubectl -n dlectroflow-prod exec
+  deploy/dlectroflow -- printenv FOCUS_CATALOG_ORIGIN`, then load `/focus` and
+  confirm the mini-player lists more than ten tracks.
+- Licence/provenance for the streamed set: `public/audio/LICENSE.md`. The app
+  validates the shape of what it is served, never the licence of the bytes.
+
 ## 10. Cost guardrails
 - Confirm the free Autopilot/zonal cluster credit on the billing account.
 - Set a GCP budget alert (Billing → Budgets & alerts).

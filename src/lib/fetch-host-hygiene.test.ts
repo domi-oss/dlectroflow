@@ -65,9 +65,28 @@ import {
 //
 // Keyed by `<file>:<target expression>` rather than by line number, so the map
 // does not rot every time a function moves — which is the failure mode that
-// made the SAST rule unusable. Empty today: nothing in the scanned scope
-// fetches a non-constant host.
-const REVIEWED_DYNAMIC_HOSTS: Record<string, string> = {};
+// made the SAST rule unusable.
+const REVIEWED_DYNAMIC_HOSTS: Record<string, string> = {
+  "src/lib/focus-catalog-source.ts:url":
+    "ENV-DERIVED, and enforced rather than promised. #61 streams the full " +
+    "lo-fi catalog from an object store the operator names in " +
+    "FOCUS_CATALOG_ORIGIN — the same class of knob as LLM_BASE_URL, set by " +
+    "whoever runs the instance and never by a request. The host cannot be " +
+    "constant at build time for that reason. What makes the divergence " +
+    "reviewable is that this is the module's ONLY fetch, and the function " +
+    "holding it (`fetchFromStore`) refuses any url that does not " +
+    "`startsWith` the normalised base before the call is made, so no caller — " +
+    "present or future — can point it at another host. `resolveCatalogBase` " +
+    "additionally rejects a non-http(s) scheme, userinfo, a query and a " +
+    'fragment; `redirect: "error"` stops the store relocating the request ' +
+    "after the fact. The one REQUEST-derived value is a track filename, which " +
+    "`isSafeCatalogFilename` allow-lists by shape (no slash, backslash, " +
+    "percent, colon or whitespace) and `encodeURIComponent` reduces to a " +
+    "single path segment appended to an already-closed authority — a path " +
+    "question, which is #79's concern and not this guard's. Both refusals are " +
+    "tested over a real socket in focus-catalog-source.test.ts, including the " +
+    "negative: the store receives no request at all.",
+};
 
 // ── Directories that ship or run against real data ─────────────────────────
 const SCANNED_ROOTS = ["src", "prisma", "scripts"] as const;
