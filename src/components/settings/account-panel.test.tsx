@@ -65,7 +65,7 @@ function keyStatus(): HTMLElement {
   // this helper ran inside that window the first matcher missed, the `??` fell
   // through to the delete-confirmation button that no test here has opened, and
   // `getByRole` threw. It presented as a 1-in-5 flake in an unrelated-looking
-  // test; it cost three pipelines on 2026-08-04. The prefix has to span both
+  // test; it cost four pipelines on 2026-08-04. The prefix has to span both
   // labels because the region is the same one in either state — that is the
   // whole point of resolving it through `aria-describedby`.
   const describer =
@@ -89,9 +89,11 @@ describe("AccountPanel", () => {
     // and threw `getElementError` from a test whose subject is the LLM key.
     //
     // Holding the action's promise unresolved makes the in-flight window real
-    // rather than a race, so this fails 5 times in 5 before the fix instead of
-    // 1 time in 5 after it. It cost three merge-request pipelines on
-    // 2026-08-04 (!255, !258, !262) before it was worth pinning.
+    // rather than a race. Measured: this spec failed 3 runs out of 3 before the
+    // fix, and the file passed 15 out of 15 after it. It cost four
+    // merge-request pipelines on 2026-08-04 (!255, !258, !262, !263) before it
+    // was worth pinning — the first was retried and passed, which is how a
+    // flake earns another day.
     let release!: (v: { ok: true }) => void;
     saveMock.mockReturnValue(
       new Promise<{ ok: true }>((resolve) => {
@@ -104,9 +106,7 @@ describe("AccountPanel", () => {
 
     // Mid-transition: the button reads "Saving…", and the helper must still
     // find the region rather than falling through to an unrelated control.
-    expect(
-      screen.getByRole("button", { name: /saving/i }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /saving/i })).toBeInTheDocument();
     expect(keyStatus()).toBeInTheDocument();
 
     release({ ok: true });
