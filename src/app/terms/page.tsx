@@ -592,15 +592,42 @@ export default function TermsPage() {
           delete a capture, a task or a step and it is gone from the app there
           and then.
         </p>
-        {/* #129 — when a member can export their own data, the addition goes at
-            the end of the paragraph below and is one sentence: "You can
-            download a copy of everything from Settings." It is not written yet
-            because it is not true yet: there is no `src/app/api/account/`
-            route, and a dead link in a published legal document is worse than
-            no link at all. */}
+        {/* #129 — SHIPPED, and the sentence below is it. `GET /api/export`
+            (`src/app/api/export/route.ts`) and the Settings → Account control
+            (`src/components/settings/export-data.tsx`) are both real, so the
+            advice above is now something a reader can act on with a control
+            this app provides, instead of a chore they have to invent for
+            themselves.
+
+            WAS, until #129 landed: "when a member can export their own data,
+            the addition goes at the end of the paragraph below and is one
+            sentence: 'You can download a copy of everything from Settings.' It
+            is not written yet because it is not true yet: there is no
+            `src/app/api/account/` route, and a dead link in a published legal
+            document is worse than no link at all." That reasoning is kept
+            rather than deleted, because it is still the rule — it is only the
+            fact underneath it that changed, and the rule is what stopped this
+            page from promising a feature for the months it did not exist. (The
+            export did not land under `/api/account/` in the end; it is
+            `/api/export`, deliberately outside `AUTHENTICATED_PREFIXES` so a
+            guest sandbox can export before it expires.)
+
+            NO LINK, deliberately, and that is the same rule applied to the new
+            fact rather than an oversight left over from the old one. /terms is
+            public and `/api/export` is not gated, so a signed-out reader
+            following a link would be minted a fresh guest workspace by
+            `src/proxy.ts` and handed an archive of nothing — which reads as
+            "nothing is held about me", is wrong, and is silent. A legal page
+            also should not fire a download at somebody who came here to read.
+            Settings is named in prose instead; the reader who can use this
+            sentence is signed in and can find it. Pinned by
+            `src/app/terms/page.test.tsx`, which asserts the claim is present,
+            that it names Settings, that no `/export/` href appears, and that
+            the control it describes still exists. */}
         <p>
           So the one piece of advice on this page I would most like you to take:{" "}
-          <strong>keep your own copy of anything that matters.</strong>
+          <strong>keep your own copy of anything that matters.</strong> You can
+          download a copy of everything from Settings.
         </p>
       </LegalSection>
 

@@ -87,7 +87,7 @@ function fingerprint(node: React.ReactElement): string {
  */
 const PUBLISHED = {
   privacy: "1a7cd006060f6751679ea2bb32902aa5a731946337f314634b9125ed7f9888a5",
-  terms: "9d94ada9c90f02defbdcde0cb107cd04b4ba65b7043adc8d1ab1cbb21a57fd17",
+  terms: "836ef685761ab3db05397e7a4753da743e25836b9d9b4ab7c61a61920bdbfe9b",
 } as const;
 
 describe("legal: published text is pinned to the effective date (#141)", () => {

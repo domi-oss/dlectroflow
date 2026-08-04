@@ -106,7 +106,7 @@ export const SOURCE_REPO_URL =
  * Previously bumped for #126: freezing or deleting an account also revokes the
  * Google grant, which changed what the app does with somebody's Google account.
  */
-export const LEGAL_EFFECTIVE_DATE = "2026-08-03";
+export const LEGAL_EFFECTIVE_DATE = "2026-08-04";
 
 /** Where the hosted instance and its backups physically sit. */
 export const HOSTING_REGION = "London, United Kingdom (GCP europe-west2)";

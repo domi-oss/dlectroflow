@@ -8,6 +8,7 @@ import {
   SOURCE_REPO_URL,
   formatEffectiveDate,
 } from "@/lib/legal";
+import { ExportData } from "@/components/settings/export-data";
 import TermsPage, { metadata } from "./page";
 
 afterEach(cleanup);
@@ -19,8 +20,13 @@ function pageText(): string {
 
 /**
  * Any assertion in the Terms that a member can get their own data out. Kept as
- * one pattern so the guard and its positive control cannot drift apart, which is
- * how the original narrow version came to miss the wording #129 plans to use.
+ * one pattern so the guard and its controls cannot drift apart, which is how the
+ * original narrow version came to miss the wording #129 went on to use.
+ *
+ * It is now a REQUIREMENT rather than a prohibition — #129 shipped, so the Terms
+ * must make this claim instead of must not. The pattern did not need to change
+ * when the polarity did, which is the point of having recorded the intended
+ * wording before there was anything to describe.
  *
  * The object list is deliberate, and the comment is deliberately precise about
  * it — an earlier version of this comment claimed the pattern "does not require
@@ -406,36 +412,92 @@ describe("Terms of Service page: no per-user restore (#164)", () => {
     );
   });
 
-  it("does not promise or link to an export that is not built yet (#129)", () => {
-    // #129 is what makes "keep your own copy" actionable and it is unshipped:
-    // there is still no `src/app/api/account/` route. The clause leaves a slot
-    // for one line, and until that line is true a dead link in a published
-    // legal document is worse than no link.
+  it("tells the reader they can get their own copy, now that they can (#129)", () => {
+    // THIS ASSERTION USED TO BE `.not.toMatch`. Until #129 shipped there was no
+    // route to point at, and the clause deliberately left the slot empty — a
+    // dead link in a published legal document is worse than no link at all.
+    // `GET /api/export` and the Settings control are real as of #129, so the
+    // omission stopped being caution and became a page that understates what
+    // the reader can do. The guard is now the other way round, and the same
+    // pattern does both jobs.
+    const text = pageText();
+    expect(text).toMatch(EXPORT_CLAIM);
+  });
+
+  it("names Settings in prose and links no download endpoint (#129)", () => {
+    // The claim has to say WHERE, or it is a reassurance the reader cannot act
+    // on, and "keep your own copy" is the one instruction this clause exists to
+    // make followable.
     const { container } = render(<TermsPage />);
     const text = container.textContent!.replace(/\s+/g, " ");
-    expect(text).not.toMatch(EXPORT_CLAIM);
+    expect(text).toMatch(/download a copy of everything from Settings/i);
+
+    // And it stays PROSE. The absent link is not a leftover from when there was
+    // nothing to link — it is the decision, and it is asserted so that a future
+    // "helpful" tidy-up has to argue with a test rather than with a comment:
+    //
+    //   • `/api/export` is a GET that returns a file, not a page. A legal
+    //     document is a thing people read; a link in it that starts a download
+    //     is not what a reader is agreeing to click.
+    //   • /terms is PUBLIC (`PUBLIC_PREFIXES` in src/lib/auth/gate.ts) and
+    //     `/api/export` is NOT in `AUTHENTICATED_PREFIXES` — so a signed-out
+    //     reader following the link does not get a login prompt, or even a 401.
+    //     `src/proxy.ts` mints them a fresh guest workspace and the route
+    //     cheerfully exports it: an archive of nothing, which reads as "the
+    //     operator holds nothing about me" or "the export is broken". That is a
+    //     worse outcome than the dead link this guard was originally written to
+    //     prevent, and it is silent.
+    //   • The endpoint has a cooldown (`src/lib/export/cooldown.ts`), so a
+    //     stray click from a page nobody is signed in on can spend it.
+    //
+    // Settings is behind the auth gate, so the prose names it rather than
+    // linking that either: the reader who can act on this sentence is already
+    // signed in and knows where Settings is.
     const hrefs = Array.from(
       container.querySelectorAll<HTMLAnchorElement>("a[href]"),
     ).map((a) => a.getAttribute("href")!);
     expect(hrefs.filter((h) => /export/i.test(h))).toEqual([]);
   });
 
-  it("the export guard actually matches the sentence #129 plans to add", () => {
-    // A guard nobody has seen fire is a comment. The wording #129 will add is
-    // recorded verbatim in a comment in page.tsx; the original pattern required
-    // "your" or "a copy of your" and so would NOT have matched "a copy of
-    // everything" — it would have stayed green while the claim went live.
-    // Raised by GitLab Duo on !252 and verified against the recorded sentence.
+  it("only makes that claim because the control it describes is real (#129)", () => {
+    // The premise, pinned. The whole reason the sentence was withheld for so
+    // long was that a published legal document must not describe a feature that
+    // does not exist — and "it exists today" is not a property a comment can
+    // keep true. So the claim is tied to the actual control: Settings → Account
+    // renders `ExportData`, and that is what `/api/export` hangs off.
+    //
+    // If the export is ever removed or moved, this fails next to the clause
+    // that depends on it, rather than the Terms quietly becoming false.
+    render(<ExportData />);
+    const control = screen.getByRole("link", { name: /download my data/i });
+    expect(control).toHaveAttribute("href", "/api/export");
+  });
+
+  it("the export guard is specific enough for its own assertion to mean something", () => {
+    // A `.toMatch` guard fails in the opposite direction to the `.not.toMatch`
+    // it replaced: instead of missing a claim that went live, it can be
+    // satisfied by any nearby sentence, and then it asserts nothing. So the
+    // discrimination is tested rather than assumed — the negative control below
+    // is now the load-bearing half.
+    //
+    // WAS (while #129 was unshipped): this test proved the guard COULD fire, by
+    // matching it against the wording recorded in a comment in page.tsx. That
+    // mattered because the original pattern required "your" or "a copy of your"
+    // and so would NOT have matched "a copy of everything" — it would have
+    // stayed green while the claim went live. Raised by GitLab Duo on !252. The
+    // pattern is still the widened one for exactly that reason, so the examples
+    // stay: they are what stops a future narrowing from going unnoticed.
     expect("You can download a copy of everything from Settings.").toMatch(
       EXPORT_CLAIM,
     );
-    // And the narrower phrasings it already covered.
     expect("You can export your data at any time.").toMatch(EXPORT_CLAIM);
     expect("You may download a copy of your data.").toMatch(EXPORT_CLAIM);
     // Raised by review on !252: these two evaded the earlier pattern.
     expect("You can export all your data.").toMatch(EXPORT_CLAIM);
     expect("You can download everything from Settings.").toMatch(EXPORT_CLAIM);
-    // Not a claim about export, so it must not trip the guard.
+    // Not a claim about export, so it must not satisfy the guard — otherwise
+    // the assertion above would be met by the AGPL section and the Terms could
+    // drop the export sentence entirely without anything going red.
     expect("You can download the source code.").not.toMatch(EXPORT_CLAIM);
   });
 
