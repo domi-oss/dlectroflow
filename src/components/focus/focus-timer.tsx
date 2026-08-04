@@ -1195,6 +1195,20 @@ export function FocusTimer({
             />
           )}
 
+          {/* The way out of the countdown itself. "Stay here" stops the clock
+              but leaves you on a finished step, so without this the escape
+              would trade one dead end for another — the exact shape of the bug
+              #142 is about. Quiet, because moving on is the primary answer. */}
+          {(ending.kind === "advance-step" ||
+            ending.kind === "advance-single") && (
+            <Link
+              href="/focus"
+              className="text-muted-foreground inline-flex min-h-[44px] items-center text-sm hover:underline"
+            >
+              {t("focus.done.doneForNow", voice)}
+            </Link>
+          )}
+
           {/* The end of a WHOLE task. Never a countdown, whatever the mode
               says: this finish is a bigger deal than finishing a step and
               deserves a real pause. It just must not be a dead end. */}

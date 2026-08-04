@@ -2348,6 +2348,19 @@ describe("FocusTimer — auto-advance after a completed step (#142)", () => {
     expect(container.querySelector("[data-auto-advance-progress]")).toBeNull();
   });
 
+  it("the countdown itself is escapable to /focus — 'Stay here' must not trade one dead end for another", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimer {...base()} />);
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /complete step/i }));
+    await user.click(await screen.findByRole("button", { name: /stay here/i }));
+    // Cancelled, so the only things on screen are "Go now" and the way out.
+    expect(screen.getByRole("link", { name: /done for now/i })).toHaveAttribute(
+      "href",
+      "/focus",
+    );
+  });
+
   it("no next step → no countdown, and nothing navigates on its own", async () => {
     vi.useFakeTimers();
     try {
