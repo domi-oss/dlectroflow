@@ -392,22 +392,44 @@ describe("workspace-scoping harness", () => {
    * rule that cannot tell those apart reports coverage it does not have — the
    * exact failure this whole file exists to avoid. Returns "" when the clause is
    * absent, which fails closed.
+   *
+   * The key is matched only at the TOP LEVEL of the argument object, never
+   * nested. `indexOf("where:")` would find the first one anywhere, and a
+   * relation filter inside a `select` — `select: { steps: { where: … } }` — sits
+   * earlier in the source than the call's own `where` often enough that the rule
+   * would silently start reading the wrong clause. Nothing in the tree does that
+   * today; a guard that only holds for today's call sites is not a guard.
    */
   function ownerClause(args: string, op: string): string {
     const key = CREATE_OPS.has(op) ? "data:" : "where:";
-    const at = args.indexOf(key);
-    if (at === -1) return "";
-    const open = args.indexOf("{", at + key.length);
-    if (open === -1) return "";
+    // `args` opens with the call's `(`, so the argument object's own properties
+    // sit at brace depth 1.
     let depth = 0;
-    for (let i = open; i < args.length; i++) {
-      if (args[i] === "{") depth++;
-      else if (args[i] === "}") {
-        depth--;
-        if (depth === 0) return args.slice(open, i + 1);
+    for (let i = 0; i < args.length; i++) {
+      const ch = args[i];
+      if (ch === "{") depth++;
+      else if (ch === "}") depth--;
+      else if (
+        depth === 1 &&
+        ch === key[0] &&
+        args.startsWith(key, i) &&
+        // A property name, not the tail of a longer identifier.
+        !/[A-Za-z0-9_$]/.test(args[i - 1] ?? "")
+      ) {
+        const open = args.indexOf("{", i + key.length);
+        if (open === -1) return "";
+        let inner = 0;
+        for (let j = open; j < args.length; j++) {
+          if (args[j] === "{") inner++;
+          else if (args[j] === "}") {
+            inner--;
+            if (inner === 0) return args.slice(open, j + 1);
+          }
+        }
+        return args.slice(open);
       }
     }
-    return args.slice(open);
+    return "";
   }
 
   /**
@@ -546,6 +568,33 @@ describe("workspace-scoping harness", () => {
     expect(scanUserScope(bad, ["googleAuth"])).toEqual([
       "googleAuth.findUnique",
     ]);
+  });
+
+  it("reads the call's OWN where, not a relation filter nested inside a select", () => {
+    // `indexOf("where:")` would find the inner one first and read `{ done: false }`
+    // as the owner clause — which, being an object that happens to be there,
+    // could just as easily have contained the word `userId` and passed. Nothing
+    // in the tree writes this shape today; a guard that only holds for today's
+    // call sites is not a guard.
+    const bad = `
+      await prisma.googleAuth.findFirst({
+        select: { user: { where: { userId } } },
+        where: { id },
+      });
+    `;
+    expect(scanUserScope(bad, ["googleAuth"])).toEqual([
+      "googleAuth.findFirst",
+    ]);
+  });
+
+  it("still finds the call's own where when a nested one precedes it", () => {
+    const good = `
+      await prisma.googleAuth.findFirst({
+        select: { user: { where: { id } } },
+        where: { userId },
+      });
+    `;
+    expect(scanUserScope(good, ["googleAuth"])).toEqual([]);
   });
 
   it("reads `data` rather than `where` for a create, which has no where", () => {
