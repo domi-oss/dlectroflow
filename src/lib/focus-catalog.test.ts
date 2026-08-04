@@ -417,6 +417,47 @@ describe("mergeFocusTracks", () => {
     );
   });
 
+  it("still dedupes a catalog track whose id lost its prefix", () => {
+    // Duo review (!256). The fallback read the filename as the last
+    // `/`-separated segment of `src`, which for a catalog track is
+    // `audio?track=foo.mp3` — so it matched nothing and the bundled copy would
+    // have been listed twice. Not reachable through parseCatalog, which always
+    // writes the prefix, but mergeFocusTracks is exported and takes any
+    // FocusTrack.
+    const merged = mergeFocusTracks(FOCUS_SOUND_TRACKS, [
+      {
+        id: "aurora-on-mute.mp3",
+        title: "Aurora on Mute",
+        category: "ambient-lofi",
+        categoryLabel: "Ambient lo-fi",
+        src: catalogAudioSrc("aurora-on-mute.mp3"),
+      },
+    ]);
+    expect(merged).toHaveLength(FOCUS_SOUND_TRACKS.length);
+    expect(merged).toBe(FOCUS_SOUND_TRACKS);
+  });
+
+  it("reads the filename from either src shape when the id cannot supply it", () => {
+    const merged = mergeFocusTracks(FOCUS_SOUND_TRACKS, [
+      {
+        id: "brand-new.mp3",
+        title: "Brand New",
+        category: "activities",
+        categoryLabel: "Activities",
+        src: catalogAudioSrc("brand-new.mp3"),
+      },
+      {
+        id: "brand-new-again.mp3",
+        title: "Duplicate by src",
+        category: "activities",
+        categoryLabel: "Activities",
+        src: catalogAudioSrc("brand-new.mp3"),
+      },
+    ]);
+    expect(merged).toHaveLength(FOCUS_SOUND_TRACKS.length + 1);
+    expect(merged.at(-1)?.title).toBe("Brand New");
+  });
+
   it("returns the bundled array itself when there is nothing to add", () => {
     // Referential stability matters: useFocusSound re-deals its play order when
     // the track list changes, and an empty catalog must not look like a change.

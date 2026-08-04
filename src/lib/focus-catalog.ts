@@ -313,9 +313,23 @@ export function parseCatalogTracks(raw: unknown): FocusTrack[] {
   return tracks;
 }
 
-/** The filename a bundled track's `public/` path ends in. */
-function bundledFilename(track: FocusTrack): string {
-  return track.src.split("/").pop() ?? "";
+/**
+ * The audio file a track names, whichever of the two `src` shapes it uses.
+ *
+ * A bundled track's `src` is a `public/` path (`/audio/lofi/x.mp3`); a streamed
+ * one's carries the name in a query parameter
+ * (`/api/focus-catalog/audio?track=x.mp3`). Reading only the last `/` segment —
+ * which is what this did until Duo's review on !256 — turns the second into
+ * `audio?track=x.mp3`, so it matches no bundled filename and the same track gets
+ * listed twice.
+ */
+function trackFilename(track: FocusTrack): string {
+  const [path, query] = track.src.split("?");
+  if (query) {
+    const named = new URLSearchParams(query).get(CATALOG_TRACK_PARAM);
+    if (named) return named;
+  }
+  return path.split("/").pop() ?? "";
 }
 
 /**
@@ -338,11 +352,13 @@ export function mergeFocusTracks(
   bundled: readonly FocusTrack[],
   catalog: readonly FocusTrack[],
 ): readonly FocusTrack[] {
-  const have = new Set(bundled.map(bundledFilename));
+  const have = new Set(bundled.map(trackFilename));
   const additions = catalog.filter((track) => {
+    // The id is authoritative when it carries the catalog prefix; otherwise the
+    // src is, and `trackFilename` understands both shapes it can take.
     const filename = track.id.startsWith(CATALOG_TRACK_ID_PREFIX)
       ? track.id.slice(CATALOG_TRACK_ID_PREFIX.length)
-      : bundledFilename(track);
+      : trackFilename(track);
     if (have.has(filename)) return false;
     have.add(filename);
     return true;
