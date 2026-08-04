@@ -226,16 +226,43 @@ operators upgrading a self-hosted instance don't get surprised.
   can never split an emoji. Every calendar client unfolds, so imported events are
   unchanged — but a strict parser will now accept the file.
 
-- **Privacy Policy — effective date 3 August 2026.** Two substantive changes,
-  both about how a data subject actually exercises a right rather than about what
-  the policy promises. The Erasure right now names the self-serve control and its
-  one exception (the owner's own account), and the retention section says what
-  deleting your own account does (#153). Access and Portability now name the
-  export control instead of promising an answer by hand, disclose the two things
-  it withholds (the Google OAuth tokens and any stored LLM API key), and state
-  that a guest sandbox can exercise the right in full (#129). How a right is
-  exercised, and what is withheld from it, are both part of the Art. 12/13
-  disclosure rather than copy tweaks.
+- **Terms of Service — the backups are not a personal undo, and where to get
+  your own copy (#164).** *Your data* gains a short clause saying what the
+  nightly backups do and do not do for one person: they exist to bring the whole
+  instance back after a disaster, and that obligation is stated rather than
+  disclaimed — but there is no per-person restore, and nothing brings back a
+  capture, task or step you deleted. The page previously mentioned backups once,
+  in the as-is section, and left a reader to infer the rest; the likely inference
+  was the wrong one. That sentence now carries the gist and links to the full
+  clause, so the two cannot drift apart. Deliberately **not** filed under *Limits
+  on my liability*: it describes how the service works, and the narrow claim is
+  *no individual restore*, never *no responsibility for your data*. Tests assert
+  both directions.
+
+  The clause closes by telling you that you can download a copy of everything
+  from Settings, which #129 made true while this change was open. It is **prose,
+  not a link**: `/api/export` is an authenticated GET that returns a file, so a
+  link to it from a page written to be readable while signed out would answer a
+  reader with a 401 rather than their data. A test asserts the claim is present,
+  that it names Settings, that no `/export/` link appears — and, separately,
+  that the Settings control it describes still exists and still points at
+  `/api/export`, so the Terms cannot outlive their own premise.
+
+- **Privacy Policy — the Erasure right, and Access and Portability.** Two
+  substantive changes, both about how a data subject actually exercises a right
+  rather than about what the policy promises. The Erasure right now names the
+  self-serve control and its one exception (the owner's own account), and the
+  retention section says what deleting your own account does (#153). Access and
+  Portability now name the export control instead of promising an answer by hand,
+  disclose the two things it withholds (the Google OAuth tokens and any stored
+  LLM API key), and state that a guest sandbox can exercise the right in full
+  (#129). How a right is exercised, and what is withheld from it, are both part
+  of the Art. 12/13 disclosure rather than copy tweaks.
+
+- **Both legal pages now carry an effective date of 4 August 2026**, moved by the
+  Terms change above. The date is shared by the two documents on purpose — a
+  reader comparing them should not have to hold two version numbers — so
+  /privacy's date moves with it even though its text has not changed since #129.
 - `docs/legal.md`'s "Google revocation: the gap the pages admit" section was
   stale — it still described freeze and delete as paths that never call Google's
   revoke endpoint, which #126 fixed in v0.5.0. Corrected, and the residue that

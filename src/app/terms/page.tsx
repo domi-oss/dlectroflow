@@ -191,12 +191,21 @@ export default function TermsPage() {
             particular needs, or that any AI suggestion it produces is correct.
           </li>
         </ul>
+        {/* #164 — this sentence used to end "not as a promise to you", which
+            half-stated the point and left the reader to guess at the other
+            half. The full clause now lives in ONE place, under Your data, and
+            this is the pointer to it: two statements of the same fact in one
+            document is how a document ends up contradicting itself. */}
         <p>
           <strong>
             So please keep your own copy of anything that matters.
           </strong>{" "}
-          There are nightly backups, but they exist for disaster recovery, not
-          as a promise to you.
+          There are nightly backups, but they are for disaster recovery and not
+          a personal undo — see{" "}
+          <Link href={`#${s("data").id}`} className="underline">
+            Your data
+          </Link>{" "}
+          for what they can and cannot do.
         </p>
       </LegalSection>
 
@@ -549,6 +558,76 @@ export default function TermsPage() {
           For anything about your data, write to{" "}
           <Mail address={LEGAL_CONTACT_EMAIL} /> rather than the general address
           — that inbox is the statutory route and it is monitored as one.
+        </p>
+
+        {/* #164 — the honest scope of the backups, and deliberately NOT in the
+            liability section. This describes how the service works; filing it as
+            an exclusion would frame an operational fact as a limitation, and the
+            docblock at the top of this file records why this page keeps its
+            exclusions narrow. The first paragraph is load-bearing for that: the
+            claim being made is "no individual restore", never "no
+            responsibility for your data".
+
+            It asserts the obligation ("I treat it as one") rather than saying
+            nothing in these Terms disclaims it, which was the first draft. The
+            broader phrasing invited an argument it would lose: the liability
+            section DOES exclude liability for loss of data and the cost of
+            reconstructing it, and while excluding a liability is not the same as
+            dropping a duty, a legal page should not leave two of its own clauses
+            looking like they disagree. A claim about conduct cannot conflict
+            with a limit on liability. */}
+        <LegalSubheading>What the backups can and cannot do</LegalSubheading>
+        <p>
+          There are nightly backups, and they do one job: if this instance were
+          lost — a failed disk, a bad deployment, a mistake of mine — they are
+          how it comes back, with everybody&rsquo;s work in it. That is a real
+          obligation and I treat it as one.
+        </p>
+        <p>
+          <strong>What they are not is a personal undo.</strong> There is no
+          per-person restore. A backup is a snapshot of the whole database and
+          it is restored whole, so lifting one person&rsquo;s tasks out of one
+          and putting them back into a running instance is not something I can
+          offer you. Nor is there anything that brings back what you deleted:
+          delete a capture, a task or a step and it is gone from the app there
+          and then.
+        </p>
+        {/* #129 — SHIPPED, and the sentence below is it. `GET /api/export`
+            (`src/app/api/export/route.ts`) and the Settings → Account control
+            (`src/components/settings/export-data.tsx`) are both real, so the
+            advice above is now something a reader can act on with a control
+            this app provides, instead of a chore they have to invent for
+            themselves.
+
+            WAS, until #129 landed: "when a member can export their own data,
+            the addition goes at the end of the paragraph below and is one
+            sentence: 'You can download a copy of everything from Settings.' It
+            is not written yet because it is not true yet: there is no
+            `src/app/api/account/` route, and a dead link in a published legal
+            document is worse than no link at all." That reasoning is kept
+            rather than deleted, because it is still the rule — it is only the
+            fact underneath it that changed, and the rule is what stopped this
+            page from promising a feature for the months it did not exist. (The
+            export did not land under `/api/account/` in the end; it is
+            `/api/export`, deliberately outside `AUTHENTICATED_PREFIXES` so a
+            guest sandbox can export before it expires.)
+
+            NO LINK, deliberately, and that is the same rule applied to the new
+            fact rather than an oversight left over from the old one. /terms is
+            public and `/api/export` is not gated, so a signed-out reader
+            following a link would be minted a fresh guest workspace by
+            `src/proxy.ts` and handed an archive of nothing — which reads as
+            "nothing is held about me", is wrong, and is silent. A legal page
+            also should not fire a download at somebody who came here to read.
+            Settings is named in prose instead; the reader who can use this
+            sentence is signed in and can find it. Pinned by
+            `src/app/terms/page.test.tsx`, which asserts the claim is present,
+            that it names Settings, that no `/export/` href appears, and that
+            the control it describes still exists. */}
+        <p>
+          So the one piece of advice on this page I would most like you to take:{" "}
+          <strong>keep your own copy of anything that matters.</strong> You can
+          download a copy of everything from Settings.
         </p>
       </LegalSection>
 
