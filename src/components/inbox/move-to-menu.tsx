@@ -2,29 +2,13 @@
 
 import { useRef } from "react";
 import { Menu } from "@base-ui/react/menu";
-import type { BucketId } from "./bucket";
-import { t, type Voice, type StringKey } from "@/lib/strings";
+import { BUCKET_ORDER, BUCKET_LABEL, type BucketId } from "./bucket";
+import { t, type Voice } from "@/lib/strings";
 import { cn, touchTarget } from "@/lib/utils";
 import {
   ANCHORED_POSITIONER,
   popupSurface,
 } from "@/components/ui/anchored-popup";
-
-// Menu order + the section string each bucket shows as its label.
-const BUCKET_ORDER: BucketId[] = [
-  "needsReview",
-  "multiStep",
-  "singleTask",
-  "savedLater",
-  "completed",
-];
-const BUCKET_LABEL: Record<BucketId, StringKey> = {
-  needsReview: "section.needsReview",
-  multiStep: "section.multiStep",
-  singleTask: "section.singleTask",
-  savedLater: "section.savedLater",
-  completed: "section.completed",
-};
 
 /**
  * Keyboard/screen-reader accessible "Move to…" menu — the non-pointer fallback
@@ -50,6 +34,7 @@ export function MoveToMenu({
   voice,
   onMove,
   compact = false,
+  describedById,
 }: {
   currentBucket: BucketId;
   voice: Voice;
@@ -57,6 +42,12 @@ export function MoveToMenu({
   /** v6: row end-cluster variant — a 📥 icon trigger (aria-label "Move to")
    * instead of the full "Move to…" text button used in the ▾ dropdown. */
   compact?: boolean;
+  /** #163 — id of the board's shared move-instructions node. Since
+   * pragmatic-drag-and-drop has no keyboard adapter this trigger is not a
+   * fallback for dragging, it is the whole non-pointer path, so it is worth
+   * saying what it does. Optional: a caller with no such node just omits it,
+   * and no `aria-describedby` is written at all — a dangling one is #94. */
+  describedById?: string;
 }) {
   const host = useRef<HTMLSpanElement>(null);
   const targets = BUCKET_ORDER.filter((b) => b !== currentBucket);
@@ -69,6 +60,7 @@ export function MoveToMenu({
       <Menu.Root modal={false}>
         <Menu.Trigger
           aria-label={compact ? "Move to" : undefined}
+          aria-describedby={describedById}
           title={compact ? "Move to" : undefined}
           className={cn(
             compact
