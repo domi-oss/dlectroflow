@@ -2,11 +2,16 @@
  * `scripts/check-registry-drain.sh` — is the container-registry cleanup policy
  * actually draining? (#113)
  *
- * #113 was filed and then re-diagnosed three times on the strength of numbers
- * that did not mean what they were read to mean, so this suite exists to make
- * the question answerable by a command instead of by an argument. Three
- * specific misreadings are pinned here as tests, because each produced a
- * confident wrong answer that a code review would not have caught:
+ * #113 was diagnosed four times. The first was right: on 2026-07-29 the
+ * registry held 1,886 tags including owned bare SHAs 11 to 16 days old, a
+ * genuine failure to drain, fixed exactly as that diagnosis proposed — by a
+ * manual bulk delete, because the policy could not catch up on its own. Every
+ * reading after that was wrong, in a different direction each time, and each
+ * was argued from a number rather than measured.
+ *
+ * So this suite pins BOTH ends — the check must go red on the July shape and
+ * green on the current one — plus the three misreadings, because each produced
+ * a confident wrong answer that a code review would not have caught:
  *
  *   1. **The tag count is the wrong metric, in either direction.** Three
  *      mechanisms move it — GitLab's policy, `scripts/prune-registry.sh` (#114,
@@ -342,6 +347,33 @@ describe("scripts/check-registry-drain.sh", () => {
     expect(result.stdout).toContain("UNFINISHED");
     expect(result.stdout).toContain("🔴");
     expect(result.status).toBe(1);
+  });
+
+  /**
+   * The retrospective case, and the one that justifies the criterion rather
+   * than merely asserting it.
+   *
+   * On 2026-07-29 this registry held 1,886 tags including bare SHAs pushed on
+   * 13, 16 and 18 July — 11 to 16 days old, owned by the policy, and long past
+   * `older_than: 7d`. That WAS a real failure to drain, and the issue's
+   * original diagnosis of it (the cleanup worker exceeding its time budget on a
+   * deep registry) is the one reading of #113 that has never been contradicted.
+   * It was fixed the way the issue proposed: a manual bulk delete, after which
+   * the policy has completed every run.
+   *
+   * So this check has to go red on the July shape and green on today's, and
+   * both are pinned — otherwise "the policy is fine" is an assertion about a
+   * threshold nobody tested. 16 days against `older_than` 7d + 4d grace = 11d.
+   */
+  it("would have gone red on the July 2026 state that started this issue", () => {
+    const july = [
+      ...freshShaTags(19, 5),
+      { name: "1".repeat(40), createdAt: daysAgo(16) },
+    ];
+    const result = drive(scenario([{ path: PRIMARY, pages: [july] }]));
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("🔴");
+    expect(result.stdout).toMatch(/16(\.\d)?d/);
   });
 
   /**

@@ -6,12 +6,19 @@
 # Callers install bash and invoke `bash scripts/check-registry-drain.sh`.
 #
 # ── Why this exists ──────────────────────────────────────────────────────────
-# #113 was diagnosed three times from three sets of numbers, and each reading
-# was confidently wrong in a different way. The registry is not hard to measure;
-# it is hard to measure the RIGHT thing, because several independent mechanisms
-# move the same counter and the obvious signals mean something other than they
-# look like they mean. This script exists so the question is settled by a
-# command instead of by an argument, and so the answer carries its own date.
+# #113 was diagnosed four times from four sets of numbers. The FIRST diagnosis
+# was right — on 2026-07-29 the registry held 1,886 tags including owned bare
+# SHAs 11 to 16 days old, which is a genuine failure to drain, and the fix it
+# proposed (bulk-delete manually first, because the policy cannot catch up on
+# its own) is what actually fixed it. Every reading after that was wrong, in a
+# different direction each time, and each was argued from a number.
+#
+# The registry is not hard to measure; it is hard to measure the RIGHT thing,
+# because several independent mechanisms move the same counter and the obvious
+# signals mean something other than they look like they mean. This script exists
+# so the question is settled by a command instead of by an argument, and so the
+# answer carries its own date. src/lib/registry-drain.test.ts pins both ends: it
+# must go red on the July 2026 shape and green on the current one.
 #
 # The three traps, all of which produce a plausible answer rather than an error:
 #
