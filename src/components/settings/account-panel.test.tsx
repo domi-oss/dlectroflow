@@ -59,8 +59,17 @@ const props = {
  * checks the message reached the region the control points at.
  */
 function keyStatus(): HTMLElement {
+  // `/^sav/i`, not `/^save/i` — #167. The button renders
+  // `{pending ? "Saving…" : "Save key"}`, and `^save` does not match "Saving…"
+  // (s-a-v-i). `userEvent.click` does not await the useTransition, so whenever
+  // this helper ran inside that window the first matcher missed, the `??` fell
+  // through to the delete-confirmation button that no test here has opened, and
+  // `getByRole` threw. It presented as a 1-in-5 flake in an unrelated-looking
+  // test; it cost three pipelines on 2026-08-04. The prefix has to span both
+  // labels because the region is the same one in either state — that is the
+  // whole point of resolving it through `aria-describedby`.
   const describer =
-    screen.queryByRole("button", { name: /^save/i }) ??
+    screen.queryByRole("button", { name: /^sav/i }) ??
     screen.getByRole("button", { name: /yes, remove/i });
   const id = describer.getAttribute("aria-describedby");
   const region = id ? document.getElementById(id) : null;
@@ -70,6 +79,39 @@ function keyStatus(): HTMLElement {
 }
 
 describe("AccountPanel", () => {
+  it("resolves the live region while a save is still in flight (#167)", async () => {
+    // This is the 1-in-5 flake from #167, made deterministic. `keyStatus()`
+    // finds the panel's own live region via the Save button's
+    // `aria-describedby`, but that button's label flips to "Saving…" for the
+    // length of the useTransition — and `userEvent.click` does not await the
+    // transition. When the helper ran inside that window it matched nothing,
+    // fell through to the delete-confirmation button that was never opened,
+    // and threw `getElementError` from a test whose subject is the LLM key.
+    //
+    // Holding the action's promise unresolved makes the in-flight window real
+    // rather than a race, so this fails 5 times in 5 before the fix instead of
+    // 1 time in 5 after it. It cost three merge-request pipelines on
+    // 2026-08-04 (!255, !258, !262) before it was worth pinning.
+    let release!: (v: { ok: true }) => void;
+    saveMock.mockReturnValue(
+      new Promise<{ ok: true }>((resolve) => {
+        release = resolve;
+      }),
+    );
+    render(<AccountPanel {...props} />);
+    await userEvent.type(screen.getByLabelText(/api key/i), "sk-ant-secret");
+    await userEvent.click(screen.getByRole("button", { name: /^save/i }));
+
+    // Mid-transition: the button reads "Saving…", and the helper must still
+    // find the region rather than falling through to an unrelated control.
+    expect(
+      screen.getByRole("button", { name: /saving/i }),
+    ).toBeInTheDocument();
+    expect(keyStatus()).toBeInTheDocument();
+
+    release({ ok: true });
+  });
+
   it("names the signed-in account and the provider that authenticated it", () => {
     // #74 — the provider has to be stated wherever identity is shown, and
     // CurrentUser.provider carries the one this account was PROVISIONED under.
