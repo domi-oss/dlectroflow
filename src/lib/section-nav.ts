@@ -68,10 +68,11 @@ export const HELP_SECTIONS = [
   { id: "help-task-breakdown", heading: { text: "Task breakdown" } },
   { id: "help-focus-session", heading: { text: "The focus session" } },
   { id: "help-voice-settings", heading: { text: "Voice & settings" } },
-  // #129 / #153 — export and self-deletion. Next to "Voice & settings" because
-  // both controls live on the Settings page it links to, and BEFORE guests: a
-  // guest sandbox can export too, so the data section has to be readable
-  // without first working out whether the guest caveats apply to you.
+  // #129 / #153 — export and self-deletion. After "Voice & settings" because
+  // both controls live under Account on the same Settings page that section
+  // already sends people to, and before "Guests & AI limits" because it is about
+  // an account you own: the section states that it needs one, so putting it
+  // after the guest caveats would answer the question in the wrong order.
   { id: "help-your-data", heading: { text: "Your data" } },
   { id: "help-guests-ai-limits", heading: { text: "Guests & AI limits" } },
 ] as const satisfies readonly SectionDef[];
