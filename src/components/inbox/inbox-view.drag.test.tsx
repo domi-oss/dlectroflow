@@ -178,10 +178,24 @@ async function nextFrame() {
   });
 }
 
+/**
+ * A whole drag, in the event sequence a real browser produces.
+ *
+ * `dragover` is not decoration here (Duo review). pragmatic-drag-and-drop binds
+ * it on `window` and repurposes it as its `drag` event, and its listener calls
+ * the SAME `onUpdateEvent` that `dragenter` does — "we need to regularly
+ * calculate the drop targets in order to allow dynamic `canDrop()` checks" and
+ * re-read `getData()` (`dist/esm/ledger/lifecycle-manager.js`). A sequence that
+ * jumps `dragenter` → `drop` therefore exercises only the entry-time
+ * evaluation, and would miss a regression in the continuous one.
+ */
 async function dragOnto(grip: HTMLElement, target: HTMLElement) {
   fireEvent.dragStart(grip);
   await nextFrame();
   fireEvent.dragEnter(target);
+  await nextFrame();
+  // Throttled to at most once per frame by the library, so this needs its own.
+  fireEvent.dragOver(target);
   await nextFrame();
   await act(async () => {
     fireEvent.drop(target);
@@ -446,10 +460,28 @@ describe("#163 the keyboard path", () => {
     const target = await within(row).findByRole("menuitem", {
       name: /^Completed$/,
     });
-    for (let i = 0; i < 10 && !target.matches("[data-highlighted]"); i++) {
+    // Bounded so a menu that never highlights fails instead of hanging. The
+    // cap is 2× the four entries a needs-review row offers, which is enough
+    // for the roving cursor to wrap; exhausting it means the arrow keys are
+    // not moving the cursor at all, and the message has to say that rather
+    // than "expected element to have attribute" (Duo review).
+    const MAX_ARROWS = 8;
+    let presses = 0;
+    while (!target.matches("[data-highlighted]") && presses < MAX_ARROWS) {
       await user.keyboard("{ArrowDown}");
+      presses += 1;
     }
-    expect(target).toHaveAttribute("data-highlighted");
+    expect(
+      target.matches("[data-highlighted]"),
+      `ArrowDown never reached "Completed": ${presses} of a maximum ${MAX_ARROWS} presses. ` +
+        `Highlighted instead: ${
+          within(row)
+            .queryAllByRole("menuitem")
+            .filter((el) => el.matches("[data-highlighted]"))
+            .map((el) => el.textContent)
+            .join(", ") || "nothing"
+        }.`,
+    ).toBe(true);
     await user.keyboard("{Enter}");
 
     expect(completeItem).toHaveBeenCalledWith("k5");
