@@ -131,6 +131,27 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Changed
 
+- **Inbox drag now runs on the browser's own drag and drop (#163).**
+  `@dnd-kit/core` is replaced by `@atlaskit/pragmatic-drag-and-drop`. Dragging a
+  row between buckets with a mouse or a touchscreen behaves as before, and the
+  drag and the **Move to…** menu still share one dispatcher, so a drop and a
+  menu pick can never mean different things.
+
+  **One behaviour does change, and it is worth reading if you drag with a
+  keyboard.** The old library had a keyboard drag mode — focus the grip, then
+  arrow the item across the board. The new one has no keyboard drag at all, by
+  design: its guidance is to offer an explicit control instead of arrow-key
+  movement. That control already exists on every row — the **Move to** button
+  (📥, and as "Move to…" in the ▾ menu) — so moving an item with the keyboard
+  alone still works and takes fewer keystrokes than arrowing across the page
+  ever did. The grip is now a pointer affordance only and is no longer a tab
+  stop, because a focusable control that advertises a drag it cannot perform is
+  worse than none.
+
+  Moves are now **announced to screen readers**, naming the item and both lists
+  — including moves made from the menu, which were silent before. A drop that
+  changes nothing says so rather than claiming a move.
+
 - **`.ics` downloads now fold long lines (RFC 5545 §3.1).** The per-task calendar
   download has emitted content lines over the 75-octet limit since #39 put a focus
   deep-link in every event's `DESCRIPTION`; #129's export made it unavoidable, so
@@ -155,6 +176,23 @@ operators upgrading a self-hosted instance don't get surprised.
   separately so it does not get lost with it.
 
 ### Fixed
+
+- **The inbox's drag instructions were being announced to nobody (#94).** On
+  every hard load of `/`, the drag handle's `aria-describedby` named an element
+  that was not in the document: the old library built that id from a per-render
+  counter — the server's incremented per request while the browser's restarted
+  at zero — and rendered the description into a portal that never
+  server-rendered at all. Screen-reader users got silence where the instructions
+  should have been. Both causes are gone with #163: the description is a real
+  node in the page with a stable React id. It was never the fault that dropped
+  dark mode (that was #105); an attribute mismatch does not make React rebuild
+  the tree.
+
+  Two tests keep it gone, because the reason it lasted this long is that nothing
+  was looking: a server-render sweep asserting that no `aria-describedby` on the
+  page dangles, and an axe scan of the inbox **with a row in it** — the existing
+  scan loaded `/` empty, so there were no rows, no row controls, and nothing for
+  the rule to fail on.
 
 - **A signing-in user no longer makes the logs report an incident that never
   happened (#156).** The first authenticated render for a new workspace creates

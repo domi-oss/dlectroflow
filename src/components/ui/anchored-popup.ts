@@ -35,8 +35,14 @@ export const ANCHORED_POSITIONER = {
      *  instead of jumping to the other alignment. */
     align: "shift",
   },
-  /** Immune to any ancestor `transform` (dnd-kit sets one on a dragging row)
-   *  and to any clipping ancestor a future layout might introduce. */
+  /** Immune to any ancestor `transform` and to any clipping ancestor a future
+   *  layout might introduce. The original motivating case — dnd-kit putting a
+   *  `transform` on a dragging row — went away with #163, which moved the inbox
+   *  onto the platform's own drag and drop (it photographs a separate preview
+   *  element and never transforms the row). The property stays: `motion` is a
+   *  dependency, `scale-*` and `translate-*` are used elsewhere in the tree, and
+   *  a popup that silently mispositions under a transformed ancestor is exactly
+   *  the class of fault #92 was. */
   positionMethod: "fixed",
 } as const;
 
