@@ -69,7 +69,23 @@ describe("GoogleAuth after the orphan purge (#118)", () => {
     // The row the migration destroys. It is production this matters for — a dev
     // database may never have held one — but the assertion is what stops a
     // future writer re-introducing an unowned credential and nobody noticing.
-    const orphans = await prisma.googleAuth.count({ where: { userId: null } });
+    //
+    // Raw since #122: `count({ where: { userId: null } })` was the natural way
+    // to write this, and it stopped COMPILING the moment
+    // 20260804120000_google_auth_user_id_not_null made the column NOT NULL —
+    // Prisma narrows the filter to `string | StringFilter` with no null variant.
+    // Kept as raw SQL rather than deleted, because "the purge left nothing
+    // behind" is a claim about DATA that predates the constraint and is worth
+    // keeping provable on its own. `::int` because a bare count(*) is bigint,
+    // which Prisma hands back as a BigInt that `toBe(0)` would reject.
+    //
+    // That the constraint now makes this structurally impossible is a separate
+    // assertion, in google-auth-user-id-not-null.integration.test.ts.
+    const [{ orphans }] = await prisma.$queryRaw<{ orphans: number }[]>`
+      SELECT count(*)::int AS "orphans"
+        FROM "GoogleAuth"
+       WHERE "userId" IS NULL
+    `;
     expect(orphans).toBe(0);
   });
 

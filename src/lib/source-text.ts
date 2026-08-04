@@ -50,3 +50,71 @@ export function stripComments(source: string): string {
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
+
+/**
+ * The same step for shell source (#157). `scripts/*.sh` in this repo carry
+ * header comments longer than the code under them, and the value most likely to
+ * be quoted in one is the value a scanner is looking for — so `check-log-
+ * retention.sh` documenting its old retention window in prose must not read as
+ * its current one.
+ *
+ * A character scan rather than a regex, because shell's `#` is only a comment
+ * when it is unquoted AND begins a word: `${sub#=}` and `severity#x` are not
+ * comments, and a line-anchored regex cannot see quote state that opened on an
+ * earlier line. Quoting is tracked across the whole input for that reason.
+ *
+ * Deliberately does NOT model backslash escapes or here-documents. Both would
+ * make it a parser; the failure they cause is over-stripping, which loses a
+ * binding and makes the caller's answer `null` — a loud miss, not a confident
+ * wrong one.
+ */
+
+/**
+ * Characters after which an unquoted `#` begins a word, and therefore a
+ * comment. Whitespace is the obvious half; the operators are the half that is
+ * easy to miss, and missing them fails in the direction that matters — a
+ * commented-out binding read as live code.
+ *
+ * Each one measured against bash rather than reasoned about, because the naive
+ * reading of "start of a word" is wrong for several of them:
+ *
+ *     printf X |#c        the `#c` is a comment; the pipe still runs
+ *     (#c \n printf Y)    the `#c` is a comment; the subshell still runs
+ *     printf Z >#f        the `#f` is a comment, so `>` has no target and bash
+ *                         reports a syntax error rather than writing to `#f`
+ *
+ * `$`, `{`, `}`, `=`, `-` and word characters are all in the tested set and all
+ * correctly excluded: `${sub#=}` and `severity#x` must survive.
+ */
+const WORD_START_BEFORE_HASH = "\n \t;&|()<>";
+
+export function stripShellComments(source: string): string {
+  let out = "";
+  let quote: '"' | "'" | null = null;
+  let i = 0;
+  while (i < source.length) {
+    const ch = source[i];
+    if (quote !== null) {
+      out += ch;
+      if (ch === quote) quote = null;
+      i += 1;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      out += ch;
+      i += 1;
+      continue;
+    }
+    // Unquoted `#` starts a comment only at the start of a word — otherwise it
+    // is parameter expansion (`${v#p}`) or part of a bare token.
+    const prev = i === 0 ? "\n" : source[i - 1];
+    if (ch === "#" && WORD_START_BEFORE_HASH.includes(prev)) {
+      while (i < source.length && source[i] !== "\n") i += 1;
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}

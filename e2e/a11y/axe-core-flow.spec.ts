@@ -32,6 +32,39 @@ test.describe("accessibility: core-flow routes (axe)", () => {
     });
   }
 
+  // #94's last open task, answered: "axe's aria-valid-attr-value should flag a
+  // dangling aria-describedby, so work out why the existing scans do not reach
+  // a drag grip carrying it."
+  //
+  // They do not reach it because **the inbox above is scanned empty.** `/` in
+  // STATIC_ROUTES is loaded and scanned with no item captured, so there are no
+  // rows, no row controls, and no `aria-describedby` anywhere on the page — a
+  // clean scan of nothing at all. The rule was never suppressed and its impact
+  // is critical; it simply had nothing to look at.
+  //
+  // Since #163 the row's move control carries the description (there is no
+  // keyboard drag any more, so that control is the whole non-pointer path), and
+  // its id comes from `useId` rather than a per-render counter. This scan is the
+  // mechanical half of the proof — the SSR sweep in
+  // `inbox-view.hydration.test.tsx` is the other half, and catches it one layer
+  // earlier and without a browser.
+  test("no new serious/critical violations: inbox WITH a row (/)", async ({
+    page,
+  }) => {
+    const label = `A11y row ${Date.now()}`;
+    await page.goto("/");
+    await waitForShell(page);
+    await captureItem(page, label);
+
+    const row = needsReviewRow(page, label);
+    await expect(row).toBeVisible();
+    // The control the description hangs off. Asserting it is here first means a
+    // future refactor that drops it fails loudly instead of quietly restoring
+    // the "scan of nothing" this test exists to end.
+    await expect(row.getByRole("button", { name: "Move to" })).toBeVisible();
+    await scanA11y(page, "/ (with a row)");
+  });
+
   // #100 — the header's identity popover, under the FULL ruleset rather than the
   // contrast-only gate. This is the surface where the mechanical rules earn their
   // keep: a `Popover.Popup` is a `dialog`, so it must carry an accessible name

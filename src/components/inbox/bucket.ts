@@ -3,6 +3,7 @@
 //   Needs review → To do (Single-task + Multi-step) → Saved for later.
 
 import { BrainDumpStatus, TaskStatus } from "@/lib/constants";
+import type { StringKey } from "@/lib/strings";
 
 export type Item = {
   id: string;
@@ -71,6 +72,35 @@ export type BucketId = (typeof BUCKET_IDS)[number];
 export function isBucketId(id: string): id is BucketId {
   return (BUCKET_IDS as readonly string[]).includes(id);
 }
+
+/**
+ * The order buckets are offered in for a *move* — the "Move to…" menu's entry
+ * order. Deliberately not `BUCKET_IDS`, which is the storage/typing order:
+ * this one is the board's reading order, Needs review → To do → Saved →
+ * Completed.
+ */
+export const BUCKET_ORDER: BucketId[] = [
+  "needsReview",
+  "multiStep",
+  "singleTask",
+  "savedLater",
+  "completed",
+];
+
+/**
+ * The string key each bucket shows as its section heading. Lives here, next to
+ * `BucketId`, rather than in the menu that first needed it — since #163 the
+ * screen-reader announcements name the same buckets, and a second copy of this
+ * map is how the menu and the live region would come to disagree about what a
+ * bucket is called.
+ */
+export const BUCKET_LABEL: Record<BucketId, StringKey> = {
+  needsReview: "section.needsReview",
+  multiStep: "section.multiStep",
+  singleTask: "section.singleTask",
+  savedLater: "section.savedLater",
+  completed: "section.completed",
+};
 
 const toMs = (d: Date | string): number =>
   (typeof d === "string" ? new Date(d) : d).getTime();

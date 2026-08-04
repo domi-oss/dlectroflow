@@ -190,6 +190,23 @@ case "$fmt" in
 esac
 `;
 
+/**
+ * Test double for `gcloud`, shadowing any real one (#157).
+ *
+ * `ops-digest.sh` calls `scripts/check-log-retention.sh`, which reaches for
+ * `gcloud`. This harness puts its stub bin in front of the ambient PATH rather
+ * than replacing it, so on a contributor's machine with the SDK installed the
+ * digest tests would otherwise shell out to a live cloud project — read-only,
+ * but non-deterministic, slow, and dependent on whichever project happened to
+ * be active. Failing with an unclassifiable error models the CI reality
+ * (no Google Cloud credential in this pipeline) and pins the digest to the
+ * ⚠️ undetermined arm, which is the state those tests should see.
+ */
+const GCLOUD_STUB = `#!/usr/bin/env bash
+echo "ERROR: no credential in this environment" >&2
+exit 1
+`;
+
 interface Result {
   status: number;
   stdout: string;
@@ -205,6 +222,7 @@ function drive(script: string, harness: Harness): Result {
   const bin = join(work, "bin");
   mkdirSync(bin);
   writeFileSync(join(bin, "curl"), CURL_STUB, { mode: 0o755 });
+  writeFileSync(join(bin, "gcloud"), GCLOUD_STUB, { mode: 0o755 });
   for (const [name, source] of Object.entries(harness.bin ?? {})) {
     writeFileSync(join(bin, name), source, { mode: 0o755 });
   }

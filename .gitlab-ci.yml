@@ -982,6 +982,15 @@ ops_digest:
   before_script:
     - apk add --no-cache curl jq coreutils bash
   script:
+    # The digest also runs scripts/check-log-retention.sh (#157). It reports
+    # ⚠️ undetermined HERE and always will until someone wires a credential:
+    # this image has no gcloud, and the only cluster access in this pipeline is
+    # the GitLab Kubernetes agent context, which cannot see project-level Google
+    # Cloud state. That is deliberate and it is not a broken job — an unknown
+    # published as an unknown is the whole point, because the fault #157
+    # describes is a guard that stopped guarding while still reading as
+    # coverage. To make the line answerable, give this job a read-only Logging
+    # credential; to check it by hand today, docs/deploy-runbook.md § 16.
     - bash scripts/ops-digest.sh
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'

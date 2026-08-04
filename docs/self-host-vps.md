@@ -202,6 +202,46 @@ in-app and desktop round-ups work without them, so this is purely additive.
 Resend's free tier is plenty for one instance, and the from-address has to be on
 a domain you have verified with them.
 
+### The full lo-fi catalog (optional)
+
+The focus timer always has music: ten CC0 tracks are inside the image, one per
+open-lofi category. The full open-lofi set is 166 tracks and about 544 MB, which
+is far too much to put in a container image, so the rest is read at run time from
+wherever you choose to keep it.
+
+Download the `openlofi.zip` release from
+[open-lofi](https://github.com/btahir/open-lofi), extract it somewhere an HTTP
+server can reach — object storage with public reads, an nginx container, a MinIO
+service on this same Compose network — and point the app at the directory holding
+the mp3s and `catalog.json`:
+
+```bash
+FOCUS_CATALOG_ORIGIN=http://minio:9000/openlofi
+```
+
+**Your browser never opens that URL, which is why plain `http://` on a private
+network is fine here.** The app proxies the audio: `next.config.ts` sets
+`default-src 'self'` and deliberately leaves `media-src` unset, so a browser will
+refuse audio from anywhere but the app itself — a focus session is a long,
+unattended, personal page view and makes no third-party request. The bytes are
+fetched server-side and streamed back through `/api/focus-catalog/audio`, with
+`Range` requests forwarded so seeking still works. If your store needs a
+credential, it stays on the server for the same reason.
+
+Leave it unset and you get the bundled ten. Set it wrong, or let the store go
+down, and you also get the bundled ten — the timer is never silent because of
+this variable. A misconfigured store logs `focus_catalog_unavailable` with the
+reason, once per session rather than once per request:
+
+```bash
+docker compose --env-file .env.prod -f docker/docker-compose.prod.yml logs app | grep focus_catalog
+```
+
+Licence and provenance for the streamed set are in `public/audio/LICENSE.md`. The
+short version: it is the same CC0 1.0 release as the bundled ten, and the app
+validates the *shape* of what it is served, never the licence of the bytes — so
+what you upload is what your instance plays.
+
 ## 4. Start it
 
 ```bash

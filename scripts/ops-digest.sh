@@ -15,9 +15,11 @@
 #   OPS_DIGEST_ISSUE_IID                           — iid of the standing "Weekly ops digest" issue
 #   PROD_URL (optional)                            — defaults to the prod origin
 #
-# NOT covered here (deliberate): Anthropic/GKE spend and error-log summaries need
-# billing creds + the Layer 3 observability store (#29). They stay manual weekly
-# glances until #29 lands — see the "Spend & error logs" section below.
+# NOT covered here (deliberate): Anthropic/GKE spend needs billing creds, so it
+# stays a manual weekly glance — see the "Spend" section below. Error logs are no
+# longer in that bucket: section 2c now reports whether they are being retained at
+# all (#157), which is the question that has to be answered before summarising
+# them is even possible.
 set -euo pipefail
 
 PROD_URL="${PROD_URL:-https://dlectroflow.dev}"
@@ -108,6 +110,30 @@ case "$drift_status" in
   *) drift_headline="⚠️ **undetermined** — this is an unknown, not an all-clear" ;;
 esac
 
+# ── 2c. Are production's logs actually being kept? (#157) ─────────────────────
+# Two settings have to agree before a log line is kept — the cluster's, which
+# decides what to ship, and the project's, which decides whether anything accepts
+# it — and neither can see the other. With only the first in place every
+# application log line lives in a pod's buffer and dies with the pod, while both
+# configs still read correct in isolation. Same shape as 2b: ask the outcome, not
+# the cause, because that is what catches the causes nobody has thought of.
+#
+# THIS JOB CANNOT ANSWER IT TODAY, and publishing that is the point. The digest
+# runs on alpine and reaches the cluster through the GitLab Kubernetes agent, so
+# it holds no Google Cloud credential and the check reports "undetermined". An
+# unknown nobody can see is indistinguishable from a pass, which is precisely the
+# failure being fixed — so it goes in the digest as ⚠️ rather than being omitted
+# until someone wires a credential. Exit 2 must never render as ✅.
+set +e
+logret_block="$(bash "${HERE}/check-log-retention.sh")"
+logret_status=$?
+set -e
+case "$logret_status" in
+  0) logret_headline="✅ production logs are retained, proven by reading one back" ;;
+  1) logret_headline="🔴 **production logs are not being retained** — see below" ;;
+  *) logret_headline="⚠️ **undetermined** — this is an unknown, not an all-clear" ;;
+esac
+
 # ── 3. Dependency upgrades — open Renovate MRs awaiting triage ────────────────
 # The API has no source-branch filter, so we fetch open MRs and filter for
 # `renovate/` client-side. If the fetched page is full (100 open MRs), Renovate
@@ -153,6 +179,10 @@ cat > "$WORK/body.md" <<EOF
 - ${drift_headline}
 ${drift_block}
 
+**Logs** — could an incident be diagnosed after the fact? (#157)
+- ${logret_headline}
+${logret_block}
+
 **CI**
 - Failed \`main\` pipelines (${WINDOW_LABEL}): **${failed_pipes}**
 
@@ -164,9 +194,12 @@ ${drift_block}
 **Dependencies**
 - Open Renovate MRs awaiting triage: **${renovate_mrs}**
 
-**Spend & error logs — _manual this week_ ⚠️** (needs billing creds + observability store, #29):
+**Spend — _manual this week_ ⚠️** (needs billing creds):
 - Anthropic + GKE/GCP spend: review in the respective consoles.
-- Error-log scan: n/a until structured logging lands (#29).
+- Error-log scan: covered by the **Logs** section above, not by this line. The
+  old wording deferred it to #29, which was closed as an epic about scheduling
+  for open-source and never had anything to do with logs; #157 is where the gap
+  actually lives.
 
 _Automated by the \`ops_digest\` CI job (pipeline ${CI_PIPELINE_ID}). Cadence: docs/quality-audit-prompts.md ## Cadence + #16._
 EOF

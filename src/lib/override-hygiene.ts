@@ -117,6 +117,48 @@ export type PackageRule = {
 const CONFIG_REGEX = /^!?\/(.*)\/(i?)$/;
 
 /**
+ * Every `matchCurrentValue` this predicate will evaluate, as **literal** regex
+ * literals rather than `new RegExp(configString)`.
+ *
+ * WHY A FIXED SET INSTEAD OF COMPILING WHAT THE CONFIG SAYS
+ *   Building a `RegExp` from config text is a ReDoS sink as far as SAST is
+ *   concerned, and the finding is fair even though it is not exploitable here
+ *   (the source is a versioned file in this repo and this module runs only in
+ *   tests). It was left untriaged on `main` once already, which is the argument
+ *   for removing it rather than annotating it.
+ *
+ *   The fixed set also buys a property the dynamic version did not have. This
+ *   predicate is what a test uses to prove a security guard covers a given
+ *   override, so silently interpreting a pattern nobody has read is the wrong
+ *   default. An unlisted pattern now reads as "not covered" — the same
+ *   deliberate direction the glob form is refused in, for the same reason.
+ *
+ *   Adding a `matchCurrentValue` to `.gitlab/renovate.json` therefore requires
+ *   adding it here too, and `override-hygiene.test.ts` fails until it is. That
+ *   is the point: a human vets each pattern once.
+ *
+ * KEY FORMAT is `source\u0000flags`, matching CONFIG_REGEX's two capture groups.
+ * NUL is used because it cannot occur in either.
+ */
+const VETTED_PATTERNS: ReadonlyMap<string, RegExp> = new Map([
+  // .gitlab/renovate.json — brace-expansion, top-level override, capped >=5.0.8
+  ["^\\^?5\\.\u0000", /^\^?5\./],
+  // .gitlab/renovate.json — brace-expansion, nested minimatch@^3 scope, capped <3
+  ["^\\^?2\\.\u0000", /^\^?2\./],
+]);
+
+/**
+ * Whether `pattern` is one this module will actually evaluate. Exported so a
+ * test can assert the config uses nothing unvetted — without it, an unvetted
+ * pattern is indistinguishable from a vetted one that simply did not match.
+ */
+export function isVettedPattern(pattern: string): boolean {
+  const parsed = CONFIG_REGEX.exec(pattern);
+  if (!parsed) return false;
+  return VETTED_PATTERNS.has(`${parsed[1]}\u0000${parsed[2]}`);
+}
+
+/**
  * Whether Renovate's `matchCurrentValue` pattern would match `value`, for the
  * explicit `/regex/` form only (`!` prefix negates, trailing `i` folds case —
  * both as in Renovate's own `getRegexPredicate`).
@@ -131,12 +173,9 @@ const CONFIG_REGEX = /^!?\/(.*)\/(i?)$/;
 export function matchesCurrentValue(pattern: string, value: string): boolean {
   const parsed = CONFIG_REGEX.exec(pattern);
   if (!parsed) return false;
-  let matched: boolean;
-  try {
-    matched = new RegExp(parsed[1], parsed[2] || undefined).test(value);
-  } catch {
-    return false;
-  }
+  const compiled = VETTED_PATTERNS.get(`${parsed[1]}\u0000${parsed[2]}`);
+  if (!compiled) return false;
+  const matched = compiled.test(value);
   return pattern.startsWith("!") ? !matched : matched;
 }
 

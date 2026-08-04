@@ -31,6 +31,29 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Added
 
+- **The focus timer can play the full lo-fi catalog (#61).** Ten CC0 tracks still
+  ship inside the image, one per open-lofi category; the other 156 are read at run
+  time from wherever an operator keeps them. **New optional environment variable:
+  `FOCUS_CATALOG_ORIGIN`** (Helm: `focus.catalogOrigin`), pointing at a directory
+  holding the extracted `openlofi.zip` — the mp3s plus `catalog.json`. Unset, which
+  is the default, nothing changes.
+
+  **The browser never talks to that store.** The CSP is unchanged — `default-src
+  'self'` with `media-src` still unset — so third-party audio remains impossible
+  during a focus session, and the bytes are fetched server-side and streamed back
+  through `/api/focus-catalog/audio` instead, with `Range` forwarded so seeking
+  works. Any credential the store needs stays on the server as a consequence
+  rather than as a promise. Both routes require a session, guest sandboxes
+  included, so an instance cannot be used as an open relay.
+
+  Every failure keeps the music on: unset, unreachable, a broken manifest, an
+  offline browser — the player falls back to the bundled ten and a session never
+  starts silent. A configured store that does not answer logs
+  `focus_catalog_unavailable` once per session, so the degradation is visible
+  rather than silent. Licence and provenance for the streamed set are recorded in
+  `public/audio/LICENSE.md`; setup is in `docs/self-host-vps.md` and
+  `docs/deploy-runbook.md`.
+
 - **A member can export their own data (#129).** Settings → Account gains
   **Download my data (.zip)**, and `GET /api/export` behind it. The archive holds
   the same data written four ways, because no single format does every job: a
@@ -129,7 +152,44 @@ operators upgrading a self-hosted instance don't get surprised.
     "Permanent" and by the button's own label, not by colour (WCAG 1.4.1), and
     both controls meet the 44px target size at 390px (WCAG 2.5.5).
 
+- **A production log-retention check that verifies the artefact, not the status
+  field (#157).** Keeping logs on GKE needs two independent settings to agree —
+  the cluster's `loggingConfig`, which decides what to ship, and the project's
+  `logging.googleapis.com` service, which decides whether anything accepts it —
+  and neither can see the other. Enable only the first and logs are silently
+  discarded while both settings still read as correct on their own.
+  `scripts/check-log-retention.sh` sidesteps that by **reading a log line back
+  out**, and follows `check-prod-drift.sh`'s three-state contract: `0` retained,
+  `1` proven not retained, `2` undetermined. A successful query returning zero
+  entries is `1`, not `0`, and a query that could not run is `2`, not either —
+  collapsing those is the failure the check exists to prevent. It is read-only
+  and reports provider errors as a category, never echoing an identifier, since
+  the weekly `ops_digest` publishes its verdict on a public issue. Operator
+  steps, and why the window is 30 days rather than a default nobody chose, are
+  in `docs/deploy-runbook.md` § 16.
+
 ### Changed
+
+- **Inbox drag now runs on the browser's own drag and drop (#163).**
+  `@dnd-kit/core` is replaced by `@atlaskit/pragmatic-drag-and-drop`. Dragging a
+  row between buckets with a mouse or a touchscreen behaves as before, and the
+  drag and the **Move to…** menu still share one dispatcher, so a drop and a
+  menu pick can never mean different things.
+
+  **One behaviour does change, and it is worth reading if you drag with a
+  keyboard.** The old library had a keyboard drag mode — focus the grip, then
+  arrow the item across the board. The new one has no keyboard drag at all, by
+  design: its guidance is to offer an explicit control instead of arrow-key
+  movement. That control already exists on every row — the **Move to** button
+  (📥, and as "Move to…" in the ▾ menu) — so moving an item with the keyboard
+  alone still works and takes fewer keystrokes than arrowing across the page
+  ever did. The grip is now a pointer affordance only and is no longer a tab
+  stop, because a focusable control that advertises a drag it cannot perform is
+  worse than none.
+
+  Moves are now **announced to screen readers**, naming the item and both lists
+  — including moves made from the menu, which were silent before. A drop that
+  changes nothing says so rather than claiming a move.
 
 - **`.ics` downloads now fold long lines (RFC 5545 §3.1).** The per-task calendar
   download has emitted content lines over the 75-octet limit since #39 put a focus
@@ -182,6 +242,23 @@ operators upgrading a self-hosted instance don't get surprised.
   separately so it does not get lost with it.
 
 ### Fixed
+
+- **The inbox's drag instructions were being announced to nobody (#94).** On
+  every hard load of `/`, the drag handle's `aria-describedby` named an element
+  that was not in the document: the old library built that id from a per-render
+  counter — the server's incremented per request while the browser's restarted
+  at zero — and rendered the description into a portal that never
+  server-rendered at all. Screen-reader users got silence where the instructions
+  should have been. Both causes are gone with #163: the description is a real
+  node in the page with a stable React id. It was never the fault that dropped
+  dark mode (that was #105); an attribute mismatch does not make React rebuild
+  the tree.
+
+  Two tests keep it gone, because the reason it lasted this long is that nothing
+  was looking: a server-render sweep asserting that no `aria-describedby` on the
+  page dangles, and an axe scan of the inbox **with a row in it** — the existing
+  scan loaded `/` empty, so there were no rows, no row controls, and nothing for
+  the rule to fail on.
 
 - **A signing-in user no longer makes the logs report an incident that never
   happened (#156).** The first authenticated render for a new workspace creates

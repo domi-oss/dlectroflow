@@ -25,6 +25,7 @@ import {
   resolveWorkspace,
   touchWorkspace,
   currentUser,
+  hasSession,
   isOwnerRequest,
   MissingWorkspaceError,
 } from "./workspace";
@@ -323,5 +324,48 @@ describe("isOwnerRequest", () => {
 
   it("treats an anonymous request as not-owner", async () => {
     expect(await isOwnerRequest()).toBe(false);
+  });
+});
+
+describe("hasSession", () => {
+  // #61 — the cheap gate. `currentWorkspaceId()` upserts `lastSeenAt` on the way
+  // through, which is right for a page view and wrong for a range request: one
+  // track can produce a dozen, and every seek adds more. This asks the same
+  // question with no database round trip at all.
+  it("is true for a signed-in account", async () => {
+    const token = await signUserSession(
+      { kind: "user", userId: "u-1", wsId: "ws-1" },
+      SECRET,
+    );
+    cookiesMock.mockResolvedValue(jarWith(token));
+    expect(await hasSession()).toBe(true);
+    expect(workspaceUpsertMock).not.toHaveBeenCalled();
+  });
+
+  it("is true for a guest sandbox, which is a real session", async () => {
+    const token = await signGuestSession("g-1", SECRET, 3600);
+    cookiesMock.mockResolvedValue({
+      get: (name: string) =>
+        name === "df_guest" ? { value: token } : undefined,
+    });
+    expect(await hasSession()).toBe(true);
+  });
+
+  it("is false with no cookie at all", async () => {
+    cookiesMock.mockResolvedValue(jarWith(undefined));
+    expect(await hasSession()).toBe(false);
+  });
+
+  it("is false for a tampered token rather than throwing", async () => {
+    cookiesMock.mockResolvedValue(jarWith("not.a.jwt"));
+    expect(await hasSession()).toBe(false);
+  });
+
+  it("lets a non-session failure through instead of reporting anonymous", async () => {
+    // A misconfigured AUTH_SESSION_SECRET must not read as "not signed in" —
+    // that sends somebody with a perfectly good cookie to re-authenticate over
+    // what is actually an outage. Same reasoning as /api/export's 401 branch.
+    cookiesMock.mockRejectedValue(new Error("cookie store exploded"));
+    await expect(hasSession()).rejects.toThrow("cookie store exploded");
   });
 });
