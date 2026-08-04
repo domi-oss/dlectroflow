@@ -150,6 +150,8 @@ interface RepoSpec {
   path: string;
   tagsCount?: number;
   cleanupStatus?: string;
+  /** `ContainerRepository.status` — DELETE_SCHEDULED / DELETE_FAILED / …. */
+  repoStatus?: string | null;
   startedAt?: string | null;
   /** Pages exactly as the connection would return them. */
   pages?: Tag[][];
@@ -190,7 +192,7 @@ function scenario(repos: RepoSpec[], policy: PolicySpec = {}): Route[] {
               nodes: repos.map((repo, i) => ({
                 id: `gid://gitlab/ContainerRepository/${100 + i}`,
                 path: repo.path,
-                status: null,
+                status: repo.repoStatus ?? null,
                 tagsCount:
                   repo.tagsCount ??
                   (repo.pages ?? []).reduce((n, page) => n + page.length, 0),
@@ -338,6 +340,26 @@ describe("scripts/check-registry-drain.sh", () => {
       ]),
     );
     expect(result.stdout).toContain("UNFINISHED");
+    expect(result.stdout).toContain("🔴");
+    expect(result.status).toBe(1);
+  });
+
+  /**
+   * A repository stuck mid-removal is invisible in every count — its tags are
+   * still listed and still billed — and no cleanup policy will ever touch it,
+   * because GitLab believes it is on its way out.
+   */
+  it("fails when a repository is stuck in DELETE_FAILED", () => {
+    const result = drive(
+      scenario([
+        {
+          path: PRIMARY,
+          repoStatus: "DELETE_FAILED",
+          pages: [freshShaTags(20, 6)],
+        },
+      ]),
+    );
+    expect(result.stdout).toContain("DELETE_FAILED");
     expect(result.stdout).toContain("🔴");
     expect(result.status).toBe(1);
   });

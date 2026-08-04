@@ -336,6 +336,7 @@ def owned($tags; $del; $keep):
           collected: ($r.tags | length),
           claimed: ($r.tagsCount // 0),
           complete: (($r.tags | length) >= ($r.tagsCount // 0)),
+          status: $r.status,
           cleanupStatus: $r.cleanupStatus,
           startedAt: ($r.startedAt | parse_ts),
           kept: (($r.tags | length) - ($own | length)),
@@ -359,6 +360,10 @@ def owned($tags; $del; $keep):
       if ($deleteRe == "") then "`name_regex` is empty, so the policy can never select anything to reap" else empty end,
       ( $repos[] | select(.cleanupStatus == "UNFINISHED")
         | "GitLab reports \(.path) as **UNFINISHED** — its own wording is \"Tags cleanup has been partially executed. There are still remaining tags to delete\"" ),
+      # A repository stuck mid-removal cannot be reaped by anything, and it is
+      # invisible in every count: the tags are still billed and still listed.
+      ( $repos[] | select(.status == "DELETE_FAILED")
+        | "\(.path) is stuck in `DELETE_FAILED` — its removal did not complete, so nothing will reap it" ),
       ( if ($olderDays == null) then empty else
           $repos[] | select(.oldest != null)
           | select(days($now - .oldest.ts) > $limit)
@@ -375,7 +380,7 @@ def owned($tags; $del; $keep):
       # separate loops, the sub-bullets all landed after the last parent, which
       # attributes the numbers to the wrong repository.
       ( $repos[]
-        | ( "- \(code(.path)): \(.collected) tags walked (`tagsCount` \(.claimed)), cleanup status \(code(.cleanupStatus // "unknown"))\(if .startedAt == null then "" else ", last run \(days($now - .startedAt))d ago" end)",
+        | ( "- \(code(.path)): \(.collected) tags walked (`tagsCount` \(.claimed)), cleanup status \(code(.cleanupStatus // "unknown"))\(if .startedAt == null then "" else ", last run \(days($now - .startedAt))d ago" end)\(if .status == null then "" else ", repository status \(code(.status))" end)",
             ( "  - \(.kept) kept by `name_regex_keep`, \(.owned | length) owned by the policy" +
               ( if ($keepN != null) and ((.owned | length) <= $keepN) then
                   " — all of them inside `keep_n` (\($keepN)), which spares the newest \($keepN) of the delete set whatever their age"
