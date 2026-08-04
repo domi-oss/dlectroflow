@@ -13,11 +13,16 @@ import {
   FocusTimer,
   REESTIMATE_TIMEOUT_MS,
 } from "@/components/focus/focus-timer";
+import { AUTO_ADVANCE_SEC } from "@/components/focus/auto-advance";
 import type { TrackerStep } from "@/components/focus/focus-step-tracker";
 
 const refresh = vi.fn();
+// #142 — `push` is module-level rather than created inside `useRouter()`: the
+// auto-advance asserts on where it navigates, and a fresh spy per hook call
+// records nothing the test can read.
+const push = vi.fn();
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), refresh }),
+  useRouter: () => ({ push, refresh }),
 }));
 vi.mock("next/link", () => ({
   default: ({
@@ -48,6 +53,9 @@ vi.mock("@/app/actions/focus", () => ({
     totalSec: 600,
     plannedMin: 10,
   }),
+}));
+vi.mock("@/app/actions/braindump", () => ({
+  ensureFocusStep: vi.fn().mockResolvedValue("new-step"),
 }));
 vi.mock("@/app/actions/settings", () => ({
   dismissFocusTimerTip: vi.fn().mockResolvedValue(undefined),
@@ -157,6 +165,7 @@ import {
   dismissFocusTimerTip,
   updateFocusShuffle,
 } from "@/app/actions/settings";
+import { ensureFocusStep } from "@/app/actions/braindump";
 
 const STEPS: TrackerStep[] = [
   { id: "s1", text: "Outline", done: true, estMinutes: 5, subtaskEmoji: null },
@@ -2249,5 +2258,362 @@ describe("FocusTimer — server-action failures (#137, #139)", () => {
       expect(cta).toBeEnabled();
       expect(screen.getByRole("alert")).toBeInTheDocument();
     });
+  });
+});
+
+// ── #142 — finishing a step no longer dead-ends ────────────────────────
+//
+// The fake-timer tests here follow the same shape as the alarm block above:
+// native `.click()` inside `act`, never userEvent, because userEvent's own
+// scheduler interacts awkwardly with fake timers around an async server action.
+describe("FocusTimer — auto-advance after a completed step (#142)", () => {
+  /** Start → Complete step, on fake timers, leaving the done screen mounted. */
+  async function finishOnFakeTimers() {
+    await act(async () => {
+      screen.getByRole("button", { name: /start focusing/i }).click();
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: /complete step/i }).click();
+    });
+  }
+
+  it("offers the next step as a countdown, naming where it is going", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimer {...base()} />);
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /complete step/i }));
+    expect(await screen.findByText("Polish")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/next step/i);
+    expect(
+      screen.getByRole("button", { name: /stay here/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("lands on the next step's START screen — it does not begin the next timer", async () => {
+    vi.useFakeTimers();
+    try {
+      render(<FocusTimer {...base()} />);
+      await finishOnFakeTimers();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(AUTO_ADVANCE_SEC * 1000);
+      });
+      expect(push).toHaveBeenCalledWith("/focus/s3");
+      // beginFocus was called ONCE — by the step just finished, never by the
+      // arrival. Landing mid-countdown on work you have not agreed to is worse
+      // than an extra tap.
+      expect(beginFocus).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("'Stay here' stops the navigation but keeps the next step reachable", async () => {
+    vi.useFakeTimers();
+    try {
+      render(<FocusTimer {...base()} />);
+      await finishOnFakeTimers();
+      await act(async () => {
+        screen.getByRole("button", { name: /stay here/i }).click();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(push).not.toHaveBeenCalled();
+      await act(async () => {
+        screen.getByRole("button", { name: /go now/i }).click();
+      });
+      expect(push).toHaveBeenCalledWith("/focus/s3");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("focus lands on the celebration, deliberately, rather than on <body>", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimer {...base()} />);
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /complete step/i }));
+    await waitFor(() =>
+      expect(screen.getByTestId("focus-done-summary")).toHaveFocus(),
+    );
+  });
+
+  it("respects reduced motion on the countdown", async () => {
+    mockReducedMotion = true;
+    const user = userEvent.setup();
+    const { container } = render(<FocusTimer {...base()} />);
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /complete step/i }));
+    expect(await screen.findByText("Polish")).toBeInTheDocument();
+    expect(container.querySelector("[data-auto-advance-progress]")).toBeNull();
+  });
+
+  it("the countdown itself is escapable to /focus — 'Stay here' must not trade one dead end for another", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimer {...base()} />);
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /complete step/i }));
+    await user.click(await screen.findByRole("button", { name: /stay here/i }));
+    // Cancelled, so the only things on screen are "Go now" and the way out.
+    expect(screen.getByRole("link", { name: /done for now/i })).toHaveAttribute(
+      "href",
+      "/focus",
+    );
+  });
+
+  it("no next step → no countdown, and nothing navigates on its own", async () => {
+    vi.useFakeTimers();
+    try {
+      render(<FocusTimer {...base({ nextStep: null })} />);
+      await finishOnFakeTimers();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(push).not.toHaveBeenCalled();
+      expect(
+        screen.queryByRole("button", { name: /stay here/i }),
+      ).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ── #142 — the end of a task, and the end of everything ──────────────────────
+describe("FocusTimer — where a finished TASK goes (#142)", () => {
+  /**
+   * This jsdom build exposes no `localStorage` (Node's own is gated behind
+   * --localstorage-file and shadows jsdom's), so hyper focus mode reads as OFF
+   * unless a store is installed. Persistence semantics live in
+   * hyper-focus.test.ts; this only needs somewhere for the mode to be true.
+   */
+  function installStorage(seed?: Record<string, string>) {
+    const map = new Map(Object.entries(seed ?? {}));
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      writable: true,
+      value: {
+        get length() {
+          return map.size;
+        },
+        key: (i: number) => Array.from(map.keys())[i] ?? null,
+        getItem: (k: string) => map.get(k) ?? null,
+        setItem: (k: string, v: string) => void map.set(k, String(v)),
+        removeItem: (k: string) => void map.delete(k),
+        clear: () => map.clear(),
+      } as Storage,
+    });
+    return map;
+  }
+
+  /** A finished LAST step: no next step in this task. */
+  const lastStep = (over: Partial<Parameters<typeof FocusTimer>[0]> = {}) =>
+    base({
+      nextStep: null,
+      step: {
+        id: "s3",
+        text: "Polish",
+        estMinutes: 1,
+        subtaskEmoji: null,
+        order: 3,
+        total: 3,
+        done: false,
+      },
+      ...over,
+    });
+
+  const singleTaskDone = (
+    over: Partial<Parameters<typeof FocusTimer>[0]> = {},
+  ) =>
+    lastStep({
+      isSingleTask: true,
+      taskTitle: "Call the bank",
+      step: {
+        id: "s1",
+        text: "Call the bank",
+        estMinutes: 1,
+        subtaskEmoji: null,
+        order: 1,
+        total: 1,
+        done: false,
+      },
+      steps: [
+        {
+          id: "s1",
+          text: "Call the bank",
+          done: false,
+          estMinutes: 1,
+          subtaskEmoji: null,
+        },
+      ],
+      ...over,
+    });
+
+  async function finish(user: ReturnType<typeof userEvent.setup>) {
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /complete step/i }));
+  }
+
+  it("hyper focus ON chains into the next single-task to-do, through the same countdown", async () => {
+    installStorage({ "df-hyper-focus": "1" });
+    vi.useFakeTimers();
+    try {
+      render(
+        <FocusTimer
+          {...singleTaskDone({
+            nextUp: { kind: "single", itemId: "i9", text: "Book the dentist" },
+          })}
+        />,
+      );
+      await act(async () => {
+        screen.getByRole("button", { name: /start focusing/i }).click();
+      });
+      await act(async () => {
+        screen.getByRole("button", { name: /complete step/i }).click();
+      });
+      expect(screen.getByText("Book the dentist")).toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(AUTO_ADVANCE_SEC * 1000);
+      });
+      // A to-do has no step until one is created for it, so the chain goes
+      // through ensureFocusStep rather than guessing a URL.
+      expect(ensureFocusStep).toHaveBeenCalledWith("i9");
+      // Flush the action's promise chain. `waitFor` polls on REAL timers and
+      // would simply hang here (5s test timeout) with fake ones installed.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(push).toHaveBeenCalledWith("/focus/new-step");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("hyper focus OFF returns to /focus after the celebration — nothing navigates on its own", async () => {
+    installStorage();
+    vi.useFakeTimers();
+    try {
+      render(
+        <FocusTimer
+          {...singleTaskDone({
+            nextUp: { kind: "single", itemId: "i9", text: "Book the dentist" },
+          })}
+        />,
+      );
+      await act(async () => {
+        screen.getByRole("button", { name: /start focusing/i }).click();
+      });
+      await act(async () => {
+        screen.getByRole("button", { name: /complete step/i }).click();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(push).not.toHaveBeenCalled();
+      expect(
+        screen.queryByRole("button", { name: /stay here/i }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("link", { name: /back to focus/i }),
+      ).toHaveAttribute("href", "/focus");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("finishing a whole multi-step task offers the next task AND a real stop", async () => {
+    installStorage();
+    vi.useFakeTimers();
+    try {
+      render(
+        <FocusTimer
+          {...lastStep({
+            nextUp: {
+              kind: "step",
+              stepId: "s9",
+              text: "Draft the agenda",
+              emoji: null,
+              taskTitle: "Plan the offsite",
+            },
+          })}
+        />,
+      );
+      await act(async () => {
+        screen.getByRole("button", { name: /start focusing/i }).click();
+      });
+      await act(async () => {
+        screen.getByRole("button", { name: /complete step/i }).click();
+      });
+      expect(screen.getByText(/task complete/i)).toBeInTheDocument();
+      // Offered, never taken automatically: a whole task deserves a real pause.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(push).not.toHaveBeenCalled();
+      expect(
+        screen.getByRole("link", { name: /focus the next step/i }),
+      ).toHaveAttribute("href", "/focus/s9");
+      expect(screen.getByText("Plan the offsite")).toBeInTheDocument();
+      // …and stopping is a first-class answer, not a link hiding underneath.
+      expect(
+        screen.getByRole("link", { name: /done for now/i }),
+      ).toHaveAttribute("href", "/focus");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("an empty multi-step queue offers hyper focus mode, and one press starts the chain", async () => {
+    const store = installStorage();
+    const user = userEvent.setup();
+    render(
+      <FocusTimer
+        {...lastStep({
+          nextUp: { kind: "single", itemId: "i9", text: "Book the dentist" },
+        })}
+      />,
+    );
+    await finish(user);
+    expect(screen.getByText(/no multi-step tasks left/i)).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: /turn on hyper focus mode/i }),
+    );
+    expect(store.get("df-hyper-focus")).toBe("1");
+    expect(ensureFocusStep).toHaveBeenCalledWith("i9");
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/focus/new-step"));
+  });
+
+  it("nothing left at all lands on the activity dashboard, not on an empty list", async () => {
+    installStorage();
+    const user = userEvent.setup();
+    render(<FocusTimer {...lastStep({ nextUp: null })} />);
+    await finish(user);
+    expect(await screen.findByText(/that's everything/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /see how today went/i }),
+    ).toHaveAttribute("href", "/dashboard");
+  });
+
+  it("a failed chain says so and offers a retry — it does not silently do nothing", async () => {
+    // Mode off, so the empty-queue screen is the one offering to turn it on —
+    // and pressing that offer is what runs the chain.
+    installStorage();
+    vi.mocked(ensureFocusStep).mockRejectedValueOnce(new Error("boom"));
+    const user = userEvent.setup();
+    render(
+      <FocusTimer
+        {...lastStep({
+          nextUp: { kind: "single", itemId: "i9", text: "Book the dentist" },
+        })}
+      />,
+    );
+    await finish(user);
+    await user.click(
+      screen.getByRole("button", { name: /turn on hyper focus mode/i }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(/next to-do/i);
+    vi.mocked(ensureFocusStep).mockResolvedValue("new-step");
+    await user.click(screen.getByRole("button", { name: /try again/i }));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/focus/new-step"));
   });
 });

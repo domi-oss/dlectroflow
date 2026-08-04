@@ -241,6 +241,98 @@ export const STRINGS = {
   // (mirrors focus.hero.left's "~Xm left" pattern on the launcher hero).
   "focus.startFresh": { plain: "↻ Start fresh", playful: "↻ Start fresh" },
 
+  // ── #142 — the auto-advance countdown after a step is completed ────────────
+  //
+  // Deliberately IDENTICAL across voices, for the same reason as the #137 error
+  // strings above but the opposite emotion: this copy is a *timed navigation*
+  // notice, and it is the only thing standing between the user and a screen
+  // change they did not ask for. A playful synonym for "Stay here" would make
+  // the escape harder to find at exactly the wrong moment, and the announcement
+  // names the button by its literal label — if the two ever drift, the spoken
+  // instruction points at a control that isn't there.
+  "focus.advance.in": { plain: "in", playful: "in" },
+  "focus.advance.seconds": { plain: "seconds", playful: "seconds" },
+  "focus.advance.goNow": { plain: "Go now", playful: "Go now" },
+  "focus.advance.stayHere": { plain: "Stay here", playful: "Stay here" },
+  // WCAG 2.2.1 — the non-visual half of "turn the time limit off". Spoken
+  // before the countdown can run out, and Escape needs no tabbing to reach, so
+  // a screen-reader user is not racing the clock to find a button.
+  "focus.advance.escapeHint": {
+    plain: 'Press Escape, or choose "Stay here", to stay on this screen.',
+    playful: 'Press Escape, or choose "Stay here", to stay on this screen.',
+  },
+  "focus.advance.cancelled": {
+    plain: "Staying here. Move on whenever you're ready.",
+    playful: "Staying here. Move on whenever you're ready.",
+  },
+  "focus.advance.nextStep": { plain: "Next step", playful: "Next step" },
+  "focus.advance.nextTodo": { plain: "Next to-do", playful: "Next to-do" },
+
+  // #142 — "hyper focus mode": chain single-task to-dos after one completes.
+  // The NAME is fixed copy in both voices because the issue names it, the
+  // completion screen offers it by that name, and the launcher toggle turns it
+  // off by that name — three surfaces that must say the same words. The
+  // supporting line is where the voice lives.
+  "focus.hyper.name": {
+    plain: "Hyper focus mode",
+    playful: "Hyper focus mode",
+  },
+  "focus.hyper.on": { plain: "on", playful: "on" },
+  "focus.hyper.off": { plain: "off", playful: "off" },
+  "focus.hyper.help": {
+    plain:
+      "When a single-task to-do is done, roll straight into the next one instead of coming back here.",
+    playful:
+      "Clear a snack and the next one lands in front of you, instead of coming back here.",
+  },
+  "focus.hyper.turnOn": {
+    plain: "Turn on hyper focus mode",
+    playful: "Turn on hyper focus mode",
+  },
+  "focus.hyper.turnOff": {
+    plain: "Turn off hyper focus mode",
+    playful: "Turn off hyper focus mode",
+  },
+
+  // #142 — the end of a whole task, and the end of everything.
+  "focus.done.taskComplete": {
+    plain: "Task complete. 🏁",
+    playful: "Whole plate cleared. 🏁",
+  },
+  "focus.done.singleComplete": {
+    plain: "That one's done. 🏁",
+    playful: "Devoured. 🏁",
+  },
+  // The finish deserves a real pause, so stopping is a first-class answer here
+  // rather than a link hiding under the next thing.
+  "focus.done.doneForNow": {
+    plain: "Done for now",
+    playful: "Done for now",
+  },
+  "focus.done.backToFocus": {
+    plain: "Back to focus",
+    playful: "Back to focus",
+  },
+  "focus.done.queueEmpty": {
+    plain: "No multi-step tasks left. Work through the single-task to-dos?",
+    playful: "No big plates left. Work through the snacks?",
+  },
+  "focus.done.allClear": {
+    plain: "That's everything. Nothing left in the queue.",
+    playful: "Kitchen's clear. Nothing left on the pass.",
+  },
+  // #142 — the dashboard's way onward, so the empty-queue destination is not a
+  // cul-de-sac. The Library rather than the Inbox: the Inbox is the fullest
+  // screen in the app and lands a demand where a reward just was.
+  "focus.done.findSomethingElse": {
+    plain: "Find something else →",
+    playful: "Find something else →",
+  },
+  "focus.done.seeYourDay": {
+    plain: "See how today went →",
+    playful: "See how today went →",
+  },
+
   // ── #137 — what the timer says when a server action fails ──────────────────
   // It used to say nothing: a rejected action left the screen on "Claude is
   // re-estimating…" indefinitely. These are the words that replace the spinner.
@@ -263,6 +355,13 @@ export const STRINGS = {
   "focus.error.requeue": {
     plain: "Couldn't save that — your step hasn't changed.",
     playful: "Couldn't save that — your step hasn't changed.",
+  },
+  // #142 — opening the next single-task to-do failed. Names the thing that
+  // did not happen rather than the function that failed, and pressing again is
+  // the whole remedy, so the shared Retry button is enough.
+  "focus.error.chain": {
+    plain: "Couldn't open the next to-do.",
+    playful: "Couldn't open the next to-do.",
   },
   "focus.error.complete": {
     plain: "Couldn't finish the step just now — nothing is lost.",
