@@ -6,29 +6,42 @@ import { renderHook, act } from "@testing-library/react";
 // vi.hoisted so it exists when the (hoisted) vi.mock factory runs. `element`
 // also captures the onEnded handler the hook installs, so tests can fire a
 // track-end the way the real <audio> element would (#68).
-const { createPlaylistPlayer, player, element } = vi.hoisted(() => {
-  const player = {
-    play: vi.fn(),
-    pause: vi.fn(),
-    stop: vi.fn(),
-    setVolume: vi.fn(),
-    load: vi.fn(),
-    getTime: vi.fn(() => ({ currentTime: 0, duration: 0 })),
-  };
-  const element: { onEnded?: () => void } = {};
-  const createPlaylistPlayer = vi.fn(
-    (_src: string, opts?: { volume?: number; onEnded?: () => void }) => {
-      element.onEnded = opts?.onEnded;
-      return player;
-    },
-  );
-  return { createPlaylistPlayer, player, element };
-});
+const { createPlaylistPlayer, player, element, useFocusCatalogMock } =
+  vi.hoisted(() => {
+    const player = {
+      play: vi.fn(),
+      pause: vi.fn(),
+      stop: vi.fn(),
+      setVolume: vi.fn(),
+      load: vi.fn(),
+      getTime: vi.fn(() => ({ currentTime: 0, duration: 0 })),
+    };
+    const element: { onEnded?: () => void } = {};
+    const createPlaylistPlayer = vi.fn(
+      (_src: string, opts?: { volume?: number; onEnded?: () => void }) => {
+        element.onEnded = opts?.onEnded;
+        return player;
+      },
+    );
+    return {
+      createPlaylistPlayer,
+      player,
+      element,
+      useFocusCatalogMock: vi.fn(),
+    };
+  });
 
 vi.mock("@/lib/focus-sounds", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/focus-sounds")>();
   return { ...actual, createPlaylistPlayer };
 });
+
+// #61 — the playlist is `useFocusCatalog()`'s output now, so it is the seam the
+// hook's tests drive. Default: the bundled ten, i.e. every pre-#61 assertion in
+// this file measures exactly what it always did.
+vi.mock("@/lib/use-focus-catalog", () => ({
+  useFocusCatalog: useFocusCatalogMock,
+}));
 
 import { useFocusSound, DEFAULT_FOCUS_VOLUME } from "@/lib/use-focus-sound";
 import { FOCUS_SOUND_TRACKS } from "@/lib/focus-sounds";
@@ -36,6 +49,7 @@ import { FOCUS_SOUND_TRACKS } from "@/lib/focus-sounds";
 beforeEach(() => {
   vi.clearAllMocks();
   element.onEnded = undefined;
+  useFocusCatalogMock.mockReturnValue(FOCUS_SOUND_TRACKS);
 });
 
 /** Fire the shared element's `ended` handler — what the browser does when a
@@ -334,5 +348,81 @@ describe("useFocusSound — shuffle toggle (#68)", () => {
     expect(result.current.track?.id).toBe(
       FOCUS_SOUND_TRACKS[(from + 1) % N].id,
     );
+  });
+});
+
+/**
+ * #61 — the streamed catalog arrives after the session has already started, so
+ * the playlist grows underneath a hook that is mid-track. The contract is the
+ * one `toggleShuffle` already keeps: what is playing is never touched, only what
+ * comes next.
+ */
+describe("useFocusSound — the catalog arriving mid-session (#61)", () => {
+  const STREAMED = [
+    {
+      id: "catalog:paper-cranes.mp3",
+      title: "Paper Cranes",
+      category: "chillhop",
+      categoryLabel: "Chillhop",
+      src: "/api/focus-catalog/audio?track=paper-cranes.mp3",
+    },
+    {
+      id: "catalog:bell-field.mp3",
+      title: "Bell Field",
+      category: "hybrid",
+      categoryLabel: "Hybrid / world",
+      src: "/api/focus-catalog/audio?track=bell-field.mp3",
+    },
+  ];
+  const GROWN = [...FOCUS_SOUND_TRACKS, ...STREAMED];
+
+  it("does not interrupt the track that is playing", () => {
+    const { result, rerender } = renderHook(() => useFocusSound("lofi_calm"));
+    act(() => result.current.play());
+    const before = result.current.track;
+    player.load.mockClear();
+
+    useFocusCatalogMock.mockReturnValue(GROWN);
+    rerender();
+
+    expect(result.current.track).toBe(before);
+    expect(result.current.playing).toBe(true);
+    // No load() means no src swap and no position reset — the whole promise.
+    expect(player.load).not.toHaveBeenCalled();
+  });
+
+  it("plays the streamed tracks once the pass reaches them", () => {
+    const { result, rerender } = renderHook(() => useFocusSound("lofi_calm"));
+    act(() => result.current.play());
+    useFocusCatalogMock.mockReturnValue(GROWN);
+    rerender();
+
+    const heard = new Set<string>();
+    for (let i = 0; i < GROWN.length; i++) {
+      act(() => result.current.next());
+      heard.add(result.current.track!.id);
+    }
+    expect(heard.has("catalog:paper-cranes.mp3")).toBe(true);
+    expect(heard.has("catalog:bell-field.mp3")).toBe(true);
+    // Still one pass: every track exactly once, nothing repeated.
+    expect(heard.size).toBe(GROWN.length);
+  });
+
+  it("reports the grown length through hasTracks and the pass", () => {
+    const { result, rerender } = renderHook(() => useFocusSound("off"));
+    expect(result.current.hasTracks).toBe(true);
+    useFocusCatalogMock.mockReturnValue(GROWN);
+    rerender();
+    expect(result.current.hasTracks).toBe(true);
+    expect(result.current.track?.id).toBe(FOCUS_SOUND_TRACKS[0].id);
+  });
+
+  it("keeps working when the catalog never arrives", () => {
+    // The bundled-only path, which is what most instances run.
+    const { result, rerender } = renderHook(() => useFocusSound("lofi_calm"));
+    act(() => result.current.play());
+    rerender();
+    expect(result.current.track?.id).toBe("lofi_calm");
+    expect(result.current.playing).toBe(true);
   });
 });

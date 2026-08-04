@@ -262,6 +262,57 @@ export function parseCatalog(raw: unknown): FocusTrack[] {
   return tracks;
 }
 
+/**
+ * Validate tracks coming back from `/api/focus-catalog` — the wire shape, which
+ * is `FocusTrack` rather than the manifest's `{title, filename, category}`.
+ *
+ * The response is same-origin and the server already ran `parseCatalog` over the
+ * manifest, so why check it again? Because the DATA inside it came from a store
+ * this app does not author, and the client is the last place a bad `src` could
+ * become a cross-origin request. After that only `default-src 'self'` stands
+ * between a hostile manifest and a third-party media host, and a defence that
+ * deep should not be the first one.
+ *
+ * So `src` is not validated — it is **ignored and recomputed** from the id, which
+ * leaves nothing to get wrong. The id carries the filename, the filename is
+ * allow-listed by shape, and the element is pointed at this app's own route for
+ * it. Everything else follows `parseCatalog`'s rules exactly.
+ */
+export function parseCatalogTracks(raw: unknown): FocusTrack[] {
+  const tracks: FocusTrack[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of readEntries(raw)) {
+    if (tracks.length >= MAX_CATALOG_TRACKS) break;
+    if (!isRecord(entry)) continue;
+
+    const { id, title, category, categoryLabel: label } = entry;
+    if (typeof id !== "string" || !id.startsWith(CATALOG_TRACK_ID_PREFIX)) {
+      continue;
+    }
+    const filename = id.slice(CATALOG_TRACK_ID_PREFIX.length);
+    if (!isSafeCatalogFilename(filename) || seen.has(filename)) continue;
+    if (typeof title !== "string") continue;
+    const cleanTitle = title.trim().slice(0, MAX_TITLE_LENGTH);
+    if (!cleanTitle) continue;
+
+    const slug = typeof category === "string" ? category : "";
+    seen.add(filename);
+    tracks.push({
+      id,
+      title: cleanTitle,
+      category: slug,
+      categoryLabel:
+        typeof label === "string" && label.trim()
+          ? label.trim().slice(0, MAX_TITLE_LENGTH)
+          : categoryLabel(slug),
+      src: catalogAudioSrc(filename),
+    });
+  }
+
+  return tracks;
+}
+
 /** The filename a bundled track's `public/` path ends in. */
 function bundledFilename(track: FocusTrack): string {
   return track.src.split("/").pop() ?? "";

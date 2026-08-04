@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  FOCUS_SOUND_TRACKS,
   buildPlayOrder,
   createPlaylistPlayer,
   focusTrackIndex,
@@ -11,6 +10,7 @@ import {
   type FocusTrack,
   type PlaylistPlayer,
 } from "@/lib/focus-sounds";
+import { useFocusCatalog } from "@/lib/use-focus-catalog";
 
 /**
  * #43 — the in-timer lo-fi playlist controller. Owns a single background
@@ -85,7 +85,13 @@ export function useFocusSound(
   initialSound: string,
   opts: FocusSoundOptions = {},
 ): FocusSoundControls {
-  const tracks = FOCUS_SOUND_TRACKS;
+  // #61 — the bundled ten, then whatever the streamed catalog adds once it
+  // loads. Identical to FOCUS_SOUND_TRACKS (same array) until then, and on every
+  // instance with no catalog configured, so a session always has music.
+  const tracks = useFocusCatalog();
+  // Seeded from the BUNDLED list on purpose: Settings.focusSound can only hold a
+  // bundled track's id, because that column is enum-constrained (#70 is what
+  // would give a streamed track a persistable identity).
   const startIndex = Math.max(0, focusTrackIndex(initialSound));
   const initialShuffle = Boolean(opts.shuffle);
 
@@ -132,6 +138,25 @@ export function useFocusSound(
     }
     return passRef.current;
   }, [tracks, startIndex]);
+
+  // #61 — the streamed catalog resolves after the first render, so the playlist
+  // can grow while a track is already playing. The pass was dealt for the old
+  // length and would never reach the new entries, so it is re-dealt AROUND the
+  // current track: same contract as toggleShuffle, and for the same reason —
+  // no load(), no position reset, only what comes next changes. A pass that has
+  // not been dealt yet is left alone; it will be dealt at the new length.
+  const trackCountRef = useRef(tracks.length);
+  useEffect(() => {
+    if (tracks.length === trackCountRef.current) return;
+    trackCountRef.current = tracks.length;
+    if (!passRef.current) return;
+    const order = buildPlayOrder(tracks.length, {
+      shuffle: shuffleRef.current,
+      startAt: indexRef.current,
+    });
+    const cursor = playOrderCursor(order, indexRef.current);
+    passRef.current = { order, cursor, heard: new Set([cursor]) };
+  }, [tracks.length]);
 
   // Latest step(), for the element's `ended` handler — that handler is installed
   // once, at creation, so it must not close over a stale callback.

@@ -12,6 +12,7 @@ import {
   isSafeCatalogFilename,
   mergeFocusTracks,
   parseCatalog,
+  parseCatalogTracks,
   resolveCatalogBase,
 } from "./focus-catalog";
 import { FOCUS_SOUND_TRACKS } from "./focus-sounds";
@@ -304,6 +305,83 @@ describe("parseCatalog", () => {
     });
     expect(tracks).toHaveLength(1);
     expect(tracks[0].title.length).toBeLessThanOrEqual(120);
+  });
+});
+
+describe("parseCatalogTracks", () => {
+  /** The wire shape: what /api/focus-catalog puts on the response. */
+  const wire = (over: Record<string, unknown> = {}) => ({
+    id: `${CATALOG_TRACK_ID_PREFIX}fine.mp3`,
+    title: "Fine",
+    category: "activities",
+    categoryLabel: "Activities",
+    src: catalogAudioSrc("fine.mp3"),
+    ...over,
+  });
+
+  it("accepts the shape the route sends", () => {
+    expect(parseCatalogTracks({ tracks: [wire()] })).toEqual([
+      {
+        id: `${CATALOG_TRACK_ID_PREFIX}fine.mp3`,
+        title: "Fine",
+        category: "activities",
+        categoryLabel: "Activities",
+        src: catalogAudioSrc("fine.mp3"),
+      },
+    ]);
+    expect(parseCatalogTracks([wire()])).toHaveLength(1);
+  });
+
+  it("ignores the src it was sent and recomputes it from the id", () => {
+    // The point of the second pass: nothing in the response can decide where an
+    // <audio> element points.
+    const [track] = parseCatalogTracks([
+      wire({ src: "https://evil.test/x.mp3" }),
+    ]);
+    expect(track.src).toBe(catalogAudioSrc("fine.mp3"));
+  });
+
+  it("drops an id that is not a catalog id, or whose filename could escape", () => {
+    for (const id of [
+      "fine.mp3",
+      "lofi_calm",
+      `${CATALOG_TRACK_ID_PREFIX}../../etc/passwd`,
+      `${CATALOG_TRACK_ID_PREFIX}a/b.mp3`,
+      `${CATALOG_TRACK_ID_PREFIX}x.wav`,
+      `${CATALOG_TRACK_ID_PREFIX}`,
+      42,
+    ]) {
+      expect(parseCatalogTracks([wire({ id })]), String(id)).toEqual([]);
+    }
+  });
+
+  it("applies the same title, duplicate and cap rules as the manifest parser", () => {
+    expect(parseCatalogTracks([wire({ title: "   " })])).toEqual([]);
+    expect(parseCatalogTracks([wire({ title: 7 })])).toEqual([]);
+    expect(parseCatalogTracks([wire(), wire()])).toHaveLength(1);
+    expect(
+      parseCatalogTracks(
+        Array.from({ length: MAX_CATALOG_TRACKS + 10 }, (_, i) =>
+          wire({ id: `${CATALOG_TRACK_ID_PREFIX}t-${i}.mp3` }),
+        ),
+      ),
+    ).toHaveLength(MAX_CATALOG_TRACKS);
+  });
+
+  it("re-derives a label the response left blank", () => {
+    const [track] = parseCatalogTracks([
+      wire({ category: "soul-rnb", categoryLabel: "  " }),
+    ]);
+    expect(track.categoryLabel).toBe("Soul / R&B");
+  });
+
+  it("returns nothing for anything that is not a track list", () => {
+    for (const raw of [null, undefined, 0, "x", {}, { tracks: "no" }, [1, 2]]) {
+      expect(
+        parseCatalogTracks(raw),
+        JSON.stringify(raw) ?? "undefined",
+      ).toEqual([]);
+    }
   });
 });
 
