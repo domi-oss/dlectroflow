@@ -7,10 +7,14 @@
 #
 # ── Why this exists ──────────────────────────────────────────────────────────
 # #113 was diagnosed four times from four sets of numbers. The FIRST diagnosis
-# was right — on 2026-07-29 the registry held 1,886 tags including owned bare
-# SHAs 11 to 16 days old, which is a genuine failure to drain, and the fix it
-# proposed (bulk-delete manually first, because the policy cannot catch up on
-# its own) is what actually fixed it. Every reading after that was wrong, in a
+# was right about the symptom: on 2026-07-29 the registry held 1,886 tags
+# including owned bare SHAs 11 to 16 days old, which is a genuine failure to
+# drain. It prescribed a manual bulk delete first, on the reasoning that the
+# policy could not catch up on its own; that delete happened the same day and
+# every run since has completed. Whether the delete is what *caused* the
+# recovery is not established — nobody captured `expirationPolicyCleanupStatus`
+# before or after, so the time-budget mechanism it hypothesised remains a good
+# fit rather than a measured fact. Every reading after that one was wrong, in a
 # different direction each time, and each was argued from a number.
 #
 # The registry is not hard to measure; it is hard to measure the RIGHT thing,
