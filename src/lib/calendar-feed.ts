@@ -31,6 +31,31 @@ import { UserStatus } from "@/lib/constants";
  *    coaching transcripts, no account fields. The URL will end up in a calendar
  *    provider's logs and, quite possibly, in plain text on a phone.
  *
+ * ## Why a stored random token, and not a signed one
+ *
+ * The obvious suggestion, and the one this codebase's own habits point at: the
+ * guest and owner sessions are signed JWTs (`src/lib/auth/session.ts`), verified
+ * with no database round trip, and `src/proxy.ts` forwards the SIGNED token
+ * rather than a raw id precisely so nothing trusts an unverified value. Why is
+ * this credential not the same shape?
+ *
+ * **Because a signed token cannot be revoked, and revocation is the feature.**
+ * A JWT is valid because the signature says so; the only ways to stop honouring
+ * one are to wait for its expiry or to keep a server-side list of the ones you
+ * have withdrawn — and that list is this table, arrived at the long way round
+ * with a second thing to keep in step. The issue's requirement is that
+ * regenerating invalidates the old URL *immediately, not on a schedule*, and a
+ * row that stops existing does that in one write with nothing left to converge.
+ * An expiry is also the wrong behaviour here for an ordinary reason: a
+ * subscription is meant to keep working for years, and a URL that silently dies
+ * in a calendar nobody is looking at is a worse failure than one you revoke on
+ * purpose.
+ *
+ * The property the signed-token pattern exists to protect is not lost, either.
+ * Its point is that a caller must never be trusted for an id they supplied —
+ * and nothing here trusts the token: it is looked up, and the row it finds is
+ * what names the owner. There is no id in the URL to forge.
+ *
  * ## This module owns the whole `prisma.calendarFeed` surface
  *
  * `src/lib/__tests__/scoping.harness.test.ts` pins that, the way it pins
