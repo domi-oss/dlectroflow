@@ -2243,8 +2243,22 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     // `pending` comes from ONE `useTransition` shared by the whole list
     // (inbox-view.tsx:230) and every Schedule control carries
     // `disabled={pending}` (row-actions.tsx), so an action started on one row
-    // disables the control on all of them. That is correct: pushing to Google
-    // Tasks is workspace-wide, and a second concurrent press would race it.
+    // disables the control on all of them.
+    //
+    // This spec pins that as OBSERVED BEHAVIOUR, not as correct behaviour —
+    // #169. An earlier version of this comment justified the shared lock as
+    // "pushing to Google Tasks is workspace-wide"; that is wrong, and the
+    // codebase disproves it. The same flag is flipped by 20 call sites through
+    // the generic `run()` — completeItem, renameItem, snoozeBrainDumpItem,
+    // deleteBrainDumpItem, freshenItem, keepAsTask, reopenItem, dismissPrompt —
+    // so RENAMING an item disables every Schedule button in the list, which no
+    // workspace-wide argument covers. `row-actions.tsx:44` documents the prop as
+    // "a schedule call for THIS row", and two of its own unit tests say the same,
+    // so the prop is honest about the intent and the parent does not honour it.
+    //
+    // Waiting for the control to be enabled is the right thing for a test to do
+    // either way, which is why this MR still lands ahead of #169: it removes a
+    // dropped press, and it does not depend on who wins the design argument.
     //
     // The consequence for tests is the part that cost a pipeline: `await
     // user.click` does not await the transition, and `userEvent` discards a
@@ -2339,8 +2353,9 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     //
     // Every Schedule control in the list is `disabled={pending}` from ONE
     // shared `useTransition` (inbox-view.tsx:230), so row A's in-flight action
-    // disables row B's button too — deliberately, it is a workspace-wide
-    // operation. Row A's error text and the clearing of `pending` land in
+    // disables row B's button too. **Not deliberately** — see #169; the same
+    // flag is set by rename, complete, snooze and delete, none of which is a
+    // workspace-wide operation. Row A's error text and the clearing of `pending` land in
     // SEPARATE render passes, error first, and `await user.click` does not
     // await the transition. Measured: at the instant the error text is inserted
     // into the DOM, this button is still disabled. `findByText` above normally
