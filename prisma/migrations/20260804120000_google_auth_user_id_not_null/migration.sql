@@ -67,4 +67,26 @@ END $$;
 -- The one line the issue is actually about. The UNIQUE index and the ON DELETE
 -- CASCADE foreign key both already exist (20260727230000_accounts_identity); all
 -- that is missing is that the column was allowed to hold no owner at all.
+--
+-- LOCKING, because this is the other failure mode and it is not the one above.
+-- SET NOT NULL takes an ACCESS EXCLUSIVE lock on "GoogleAuth" and full-scans it
+-- to re-validate every row, so for the length of that scan it blocks READS as
+-- well as writes — including from the old pods still serving during the rolling
+-- update. That is a different hazard from an orphan aborting the statement, and
+-- the DELETE above does nothing about it.
+--
+-- It is negligible here, and structurally so rather than by observation:
+-- "GoogleAuth_userId_key" is UNIQUE on the column, and the FK cascades from
+-- "User", so the table holds AT MOST one row per account and cannot exceed the
+-- size of "User". A scan of that is sub-millisecond, and the lock is released
+-- when the statement commits.
+--
+-- Which is why the zero-downtime dance is deliberately NOT used here: the
+-- ADD CONSTRAINT ... CHECK ("userId" IS NOT NULL) NOT VALID → VALIDATE CONSTRAINT
+-- → SET NOT NULL sequence (Postgres 12+ then skips the scan, because a validated
+-- CHECK already proves it) trades one brief exclusive lock for three statements
+-- and a permanent redundant constraint. That is the right trade on a table with
+-- millions of rows. On one bounded by the account count it is cost without a
+-- benefit. Revisit this comment, not just the statement, if that bound ever
+-- changes.
 ALTER TABLE "GoogleAuth" ALTER COLUMN "userId" SET NOT NULL;
