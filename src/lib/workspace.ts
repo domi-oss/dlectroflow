@@ -107,6 +107,43 @@ export async function currentWorkspaceId(): Promise<string> {
 }
 
 /**
+ * Is there a valid session of ANY kind behind this request — account or guest?
+ *
+ * The cheap sibling of {@link currentWorkspaceId}: it verifies the same signed
+ * tokens and stops there, with no `touchWorkspace` and so no database round trip.
+ *
+ * That distinction is the reason it exists (#61). `currentWorkspaceId()` is right
+ * for a page view, where one `lastSeenAt` write per navigation is the point. It
+ * is wrong for a media byte-range request: a single track produces a handful and
+ * every seek adds more, so gating the audio proxy on it would turn scrubbing a
+ * lo-fi track into a write amplifier.
+ *
+ * Use it ONLY where the answer needed is "is this a real caller" and no user data
+ * is read. Anything that touches workspace-scoped rows must resolve the workspace
+ * properly — an unscoped query behind this gate is still an IDOR.
+ *
+ * A missing or tampered token is `false`. Anything else rethrows, deliberately:
+ * reporting an outage as "not signed in" sends somebody with a perfectly good
+ * cookie off to re-authenticate, which is the trap `/api/export`'s 401 branch
+ * documents.
+ */
+export async function hasSession(): Promise<boolean> {
+  const jar = await cookies();
+  const hdrs = await headers();
+  try {
+    await resolveWorkspace({
+      owner: jar.get(OWNER_COOKIE)?.value,
+      guest: jar.get(GUEST_COOKIE)?.value,
+      header: hdrs.get(GUEST_WS_HEADER) ?? undefined,
+    });
+    return true;
+  } catch (err) {
+    if (err instanceof MissingWorkspaceError) return false;
+    throw err;
+  }
+}
+
+/**
  * The signed-in account behind this request, or null for guests/anonymous.
  *
  * The role is read from the database rather than carried in the token on
