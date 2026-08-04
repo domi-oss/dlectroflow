@@ -118,24 +118,33 @@ export function AutoAdvance({
     onCancel?.();
   }, [cancelled, onCancel]);
 
+  // Reaching zero is a state, not an event. Derived (rather than `left <= 0`
+  // inline in the deps below) because it flips exactly once, so the ticker is
+  // created once and torn down once — putting `left` itself in those deps would
+  // rebuild the interval every second and make the countdown drift long.
+  const elapsed = left <= 0;
+
   // The clock. Torn down and rebuilt when `held` flips, which is what suspends
   // it — the remaining count lives in state, so nothing is lost across the gap.
+  // `elapsed` is in the guard so a countdown whose advance did NOT navigate (a
+  // failed chain, say) stops ticking instead of firing a no-op every second for
+  // as long as the finished screen is open.
   useEffect(() => {
-    if (cancelled || held) return;
+    if (cancelled || held || elapsed) return;
     const id = setInterval(() => {
       setLeft((n) => (n <= 0 ? 0 : n - 1));
     }, 1000);
     return () => clearInterval(id);
-  }, [cancelled, held]);
+  }, [cancelled, held, elapsed]);
 
   // Separate from the ticker deliberately: calling a navigation side-effect from
   // inside a `setState` updater is impure, and under the React compiler a render
   // can be repeated or discarded, so "it only runs once" would not be a
-  // guarantee. Reaching zero is a state, and this reacts to it.
+  // guarantee. This reacts to the state instead.
   useEffect(() => {
-    if (left > 0 || cancelled) return;
+    if (!elapsed || cancelled) return;
     advance();
-  }, [left, cancelled, advance]);
+  }, [elapsed, cancelled, advance]);
 
   // WCAG 2.2.1 — the keyboard escape. Bound to the document rather than the
   // panel because focus is wherever the completed step left it, which is not
@@ -184,10 +193,11 @@ export function AutoAdvance({
       <p className="text-muted-foreground flex items-center gap-1.5 text-sm font-semibold">
         <ArrowRight aria-hidden="true" className="h-4 w-4 shrink-0" />
         <span>{label}</span>
-        {!cancelled && (
+        {!cancelled && !elapsed && (
           // aria-hidden: a per-second number inside a live region would talk
           // over itself five times. The spoken version is the sentence above,
-          // said once.
+          // said once. Gone once it reaches zero: "in 0…" left on screen after
+          // an advance that could not navigate reads as a stuck clock.
           <span
             aria-hidden="true"
             data-testid="auto-advance-count"

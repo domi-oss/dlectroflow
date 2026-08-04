@@ -184,3 +184,28 @@ describe("AutoAdvance (#142)", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("AutoAdvance — the clock stops at zero (#142)", () => {
+  it("stops ticking once it has fired, even if nothing navigated", async () => {
+    // A countdown whose advance cannot navigate (a failed chain) must not go on
+    // firing a no-op every second for as long as the finished screen is open.
+    vi.useFakeTimers();
+    const onAdvance = vi.fn();
+    render(
+      <AutoAdvance
+        label="Next to-do"
+        targetText="Book the dentist"
+        voice="plain"
+        reducedMotion={false}
+        onAdvance={onAdvance}
+      />,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(AUTO_ADVANCE_SEC * 1000);
+    });
+    expect(onAdvance).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+    // …and the readout does not sit on "in 0…" like a stuck clock.
+    expect(screen.queryByTestId("auto-advance-count")).toBeNull();
+  });
+});
