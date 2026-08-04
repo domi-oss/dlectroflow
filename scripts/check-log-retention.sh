@@ -117,14 +117,26 @@ gc() {
   GC_ERR="$(cat "$WORK/err" 2> /dev/null || true)"
 }
 
-# A provider error reduced to one of five words. The full text is discarded:
-# it carries identifiers, and a category is all a reader needs to know which of
-# "it is broken" and "I could not look" they are being told.
+# A provider error reduced to one word. The full text is DISCARDED, never
+# printed, and that is a hard requirement rather than tidiness: measured against
+# the real CLI, a single `gcloud services list` failure put the invoking user's
+# **email address** and a support `Help Token` on stderr, alongside the project
+# id twice. This output is spliced into a note on a public issue. A category is
+# also all a reader needs, because the only question they have is which of "it
+# is broken" and "I could not look" they are being told.
 #
-# SERVICE_DISABLED is matched FIRST and that ordering is load-bearing — the real
-# message is `PERMISSION_DENIED: … has not been used in this project … reason:
-# SERVICE_DISABLED`, so a permission-first arm would misfile the one cause this
-# script was written to catch as a credential problem.
+# Arm order is load-bearing, twice over:
+#
+#   - SERVICE_DISABLED first. The real message is `PERMISSION_DENIED: … has not
+#     been used in this project … reason: SERVICE_DISABLED`, so a
+#     permission-first arm would misfile the one cause this script exists to
+#     catch as a credential problem.
+#   - project-not-found before permission. GCP deliberately conflates "no such
+#     project" with "no access to it" so that an error cannot be used to probe
+#     for project existence — the real text is literally `not found or permission
+#     denied`. Reporting that as a bare permission problem sends the reader to
+#     IAM when the likelier fix is a typo in LOG_PROJECT, so the two are reported
+#     as the one thing the provider is actually willing to say.
 classify() {
   case "$1" in
     *SERVICE_DISABLED* | *"has not been used in project"* | *"API has not been used"*)
@@ -132,6 +144,9 @@ classify() {
       ;;
     *"Reauthentication"* | *"gcloud auth login"* | *"credentials"* | *"not logged in"*)
       printf 'no_credential'
+      ;;
+    *"not found or deleted"* | *"not found or permission denied"* | *"may not exist"*)
+      printf 'project_not_found_or_inaccessible'
       ;;
     *PERMISSION_DENIED* | *"does not have permission"* | *"Permission denied"*)
       printf 'permission_denied'

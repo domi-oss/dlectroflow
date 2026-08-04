@@ -602,6 +602,34 @@ describe("scripts/check-log-retention.sh", () => {
     expect(result.stdout).not.toContain("ERROR: (gcloud");
   });
 
+  it("never echoes the invoking user's identity or a support token either", () => {
+    // Not hypothetical, and worse than the project id. Measured against the
+    // real CLI: one `gcloud services list` failure put the invoking account's
+    // EMAIL ADDRESS and a support `Help Token` on stderr. Both would have gone
+    // straight into a note on a public issue had the script forwarded stderr
+    // instead of classifying it.
+    const realErr =
+      "ERROR: (gcloud.services.list) [person@example.test] does not have " +
+      `permission to access projects instance [${PROJECT}] (or it may not ` +
+      `exist): Project '${PROJECT}' not found or permission denied. Help ` +
+      "Token: AdZh9GdH1_4C0BdH9SmXeiymikHaiVecBfbvSs3ohmofCE2qLuVDxyb74K0C7q";
+    const result = drive({
+      routes: [
+        { match: "services list", code: 1, body: realErr },
+        { match: "logging read", code: 1, body: realErr },
+        { match: "logging buckets describe", code: 1, body: realErr },
+      ],
+    });
+    expect(result.stdout).not.toContain("person@example.test");
+    expect(result.stdout).not.toContain("Help Token");
+    expect(result.stdout).not.toContain(PROJECT);
+    expect(result.stdout).not.toMatch(/@[a-z0-9.-]+\.[a-z]{2,}/i);
+    // …and the category it does print is the useful one: GCP conflates "no
+    // such project" with "no access", so pointing at IAM would be a guess.
+    expect(result.stdout).toContain("project_not_found_or_inaccessible");
+    expect(result.status).toBe(2);
+  });
+
   it("only ever reads — no gcloud verb it runs can change anything", () => {
     // This is pointed at production. A check that can mutate is not a check.
     const result = drive({ routes: healthyRoutes() });
