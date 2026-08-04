@@ -212,7 +212,7 @@ TAGS_QUERY_TEMPLATE='query($after: String) {
   }
 }'
 
-repo_count="$(jq -r '.data.project.containerRepositories.nodes | length' "$WORK/policy.json")"
+repo_count="$(jq -r '(.data.project.containerRepositories.nodes // []) | length' "$WORK/policy.json")"
 : >"$WORK/walks.jsonl"
 
 i=0
@@ -340,6 +340,12 @@ def owned($tags; $del; $keep):
           cleanupStatus: $r.cleanupStatus,
           startedAt: ($r.startedAt | parse_ts),
           kept: (($r.tags | length) - ($own | length)),
+          # Tags whose timestamp could not be read are counted, not silently
+          # dropped. Dropping them is the failure this whole issue is made of:
+          # an unreadable date would shrink the owned set toward empty and turn
+          # a stale registry into a confident ✅. `parse_ts` returns null for
+          # anything that is not UTC, so one API change is all it would take.
+          unparsed: ($own | map(select((.createdAt | parse_ts) == null)) | length),
           owned: ($own
                   | map(. + {ts: (.createdAt | parse_ts)})
                   | map(select(.ts != null))
@@ -354,7 +360,12 @@ def owned($tags; $del; $keep):
 | ( [ if ($keepN == null) then "the `keep_n` value \(($p.keepN|tostring)) is not one this check recognises" else empty end,
       if ($olderDays == null) then "the `older_than` value \(($p.olderThan|tostring)) is not one this check recognises" else empty end,
       ( $repos[] | select(.complete | not)
-        | "the tag walk for \(.path) collected \(.collected) of \(.claimed) tags, so the tags it did not see are exactly the ones that would have failed it" ) ] ) as $unknowns
+        | "the tag walk for \(.path) collected \(.collected) of \(.claimed) tags, so the tags it did not see are exactly the ones that would have failed it" ),
+      ( $repos[] | select(.unparsed > 0)
+        | "\(.unparsed) tag(s) in \(.path) carry a creation date this check cannot read, and an unreadable date shrinks the owned set toward empty, which would read as a clean registry" ),
+      ( if ($repos | length) == 0 then
+          "the project reports no container repositories at all, so there is nothing to assess — that is a different statement from a clean registry"
+        else empty end ) ] ) as $unknowns
 
 | ( [ if ($p.enabled | not) then "the cleanup policy is **disabled**, so nothing is ever reaped" else empty end,
       if ($deleteRe == "") then "`name_regex` is empty, so the policy can never select anything to reap" else empty end,

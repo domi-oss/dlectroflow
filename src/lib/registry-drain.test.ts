@@ -517,6 +517,28 @@ describe("scripts/check-registry-drain.sh", () => {
     expect(result.stdout).not.toContain("✅");
   });
 
+  /**
+   * The same shape as the short walk, one level down. An unreadable timestamp
+   * removes a tag from the owned set, and an owned set shrunk toward empty
+   * reads as a clean registry. `parse_ts` returns null for anything that is not
+   * UTC, so a single API change would be enough to trigger it silently.
+   */
+  it("reports undetermined when a tag's creation date cannot be read", () => {
+    const tags = freshShaTags(20, 6);
+    tags[7] = { name: "e".repeat(40), createdAt: "2026-07-01 12:00:00 +0100" };
+    const result = drive(scenario([{ path: PRIMARY, pages: [tags] }]));
+    expect(result.status).toBe(2);
+    expect(result.stdout).not.toContain("✅");
+    expect(result.stdout).toMatch(/cannot read|unreadable/i);
+  });
+
+  it("does not call an empty project a clean registry", () => {
+    const result = drive(scenario([]));
+    expect(result.status).toBe(2);
+    expect(result.stdout).not.toContain("✅");
+    expect(result.stdout).toMatch(/no container repositories/i);
+  });
+
   it("never issues a request that is not a read", () => {
     const result = drive(
       scenario([{ path: PRIMARY, pages: [freshShaTags(20, 6)] }]),
