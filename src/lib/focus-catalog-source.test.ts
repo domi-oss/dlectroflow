@@ -59,7 +59,8 @@ const MANIFEST = {
  *  asked for — the SSRF assertion needs the negative. */
 let requestedPaths: string[] = [];
 /** Set by a test to make the store misbehave for the next request. */
-let behaviour: "ok" | "500" | "404" | "not-json" | "hang" | "huge" = "ok";
+let behaviour: "ok" | "500" | "404" | "not-json" | "hang" | "huge" | "trickle" =
+  "ok";
 
 let server: Server;
 let origin = "";
@@ -98,6 +99,13 @@ beforeAll(async () => {
       }
       if (behaviour === "not-json") {
         res.writeHead(200, { "Content-Type": "application/json" }).end("{[");
+        return;
+      }
+      if (behaviour === "trickle") {
+        // Headers promptly, then a body that never finishes. The header-only
+        // deadline has already been cleared by the time this matters.
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.write('{"tracks":[');
         return;
       }
       if (behaviour === "huge") {
@@ -154,6 +162,10 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // The "hang" and "trickle" cases leave a socket open on purpose, and
+  // `server.close()` waits for every connection to end — so without this the
+  // teardown hook is what times out, not the test.
+  server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
@@ -275,6 +287,17 @@ describe("fetchCatalogTracks", () => {
     vi.stubEnv(CATALOG_ORIGIN_ENV, origin);
     behaviour = "huge";
     const result = await fetchCatalogTracks();
+    expect(result.status).toBe("unavailable");
+  });
+
+  it("gives up on a store that answers and then trickles the body forever", async () => {
+    // Duo review (!256). The header deadline is cleared the moment `fetch`
+    // resolves — deliberately, so a long audio stream is not truncated — which
+    // left the manifest READ itself bounded only by a byte cap. A store that
+    // sends headers and then stalls would hold the request open indefinitely.
+    vi.stubEnv(CATALOG_ORIGIN_ENV, origin);
+    behaviour = "trickle";
+    const result = await fetchCatalogTracks({ timeoutMs: 200 });
     expect(result.status).toBe("unavailable");
   });
 

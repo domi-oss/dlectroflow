@@ -72,7 +72,23 @@ const MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
  */
 const SINGLE_BYTE_RANGE = /^bytes=(?:\d+-\d*|-\d+)$/;
 
-/** The normalised catalog base, or null when no store is configured. */
+/**
+ * The normalised catalog base, or null when no store is configured.
+ *
+ * The variable is read as a LITERAL rather than through `CATALOG_ORIGIN_ENV`,
+ * and it has to be. `env-drift` (`extractUsedEnvKeys`) finds env reads with a
+ * regex over source text — `process.env.KEY`, `process.env["KEY"]` and
+ * destructured forms — so `process.env[CATALOG_ORIGIN_ENV]` is invisible to it.
+ * Verified rather than assumed: making that change turns `npm run check:env`
+ * red with "Documented in .env.example but never read in src/:
+ * FOCUS_CATALOG_ORIGIN", which is CI red on a job that exists to keep the two
+ * config surfaces honest.
+ *
+ * The drift this looks like it invites is already covered: every test stubs via
+ * `CATALOG_ORIGIN_ENV`, so renaming the constant without renaming the literal
+ * makes `catalogBase()` read an unstubbed variable and the suite goes red.
+ * (Duo review, !256.)
+ */
 export function catalogBase(): string | null {
   return resolveCatalogBase(process.env.FOCUS_CATALOG_ORIGIN);
 }
@@ -202,10 +218,19 @@ export async function fetchCatalogTracks(
   const base = catalogBase();
   if (!base) return { status: "unconfigured" };
 
+  const timeoutMs = opts.timeoutMs ?? MANIFEST_TIMEOUT_MS;
   try {
     const res = await fetchFromStore(base, catalogIndexUrl(base), {
       headers: { Accept: "application/json" },
-      timeoutMs: opts.timeoutMs ?? MANIFEST_TIMEOUT_MS,
+      timeoutMs,
+      // The manifest gets a WHOLE-REQUEST deadline as well as the header one,
+      // and it is the only caller that does. `fetchFromStore` clears its own
+      // timer the moment headers arrive — right for audio, where a long stream
+      // must not be truncated, and wrong here: a store that answers promptly
+      // and then trickles the body would hold this request open, bounded only
+      // by the byte cap below. This signal survives into the body read.
+      // (Duo review, !256.)
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) {
       await res.body?.cancel();
