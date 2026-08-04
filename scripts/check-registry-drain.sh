@@ -102,11 +102,6 @@ set -euo pipefail
 GRACE_DAYS="${REGISTRY_DRAIN_GRACE_DAYS:-4}"
 MAX_PAGES="${REGISTRY_DRAIN_MAX_PAGES:-400}"
 
-# The connection serves 20 per page whatever you ask for, and derives
-# `hasNextPage` from the request. Asking for exactly what it serves is the only
-# value for which that computation is correct. See trap 3 above.
-PAGE_SIZE=20
-
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -203,6 +198,11 @@ jq -e '.data.project.containerExpirationPolicy' "$WORK/policy.json" >/dev/null 2
 # ── 2. Walk every repository's tags ──────────────────────────────────────────
 # Every repository, not just the primary one: the Kaniko `…/cache` repository is
 # subject to the same policy and has its own way of going wrong.
+# `first: 20` is deliberately a literal and deliberately NOT configurable. The
+# connection serves 20 per page whatever you ask for, and derives `hasNextPage`
+# from what you REQUESTED — so 20 is the only value for which that computation
+# is correct, and any larger number ends the walk early with a subset and a
+# confident `hasNextPage: false`. See trap 3 in the header.
 TAGS_QUERY_TEMPLATE='query($after: String) {
   containerRepository(id: "REPO_GID") {
     tags(first: 20, after: $after) {
@@ -287,8 +287,7 @@ jq -r -n \
   --slurpfile policy "$WORK/policy.json" \
   --slurpfile walks "$WORK/walks.jsonl" \
   --arg nowIso "$NOW_ISO" \
-  --argjson grace "$GRACE_DAYS" \
-  --argjson pageSize "$PAGE_SIZE" '
+  --argjson grace "$GRACE_DAYS" '
 def parse_ts:
   if . == null or . == "" then null
   else
