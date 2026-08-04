@@ -61,8 +61,17 @@ test("a member's calendar feed serves an ICS to a caller with no session", async
     /anyone who has it/i,
   );
 
-  // A brand-new context: no cookies, no storage, nothing this session has.
-  const anonymous = await playwright.request.newContext();
+  // A brand-new context with an EXPLICITLY EMPTY cookie jar.
+  //
+  // `playwright.request.newContext()` alone is NOT anonymous here: it inherits
+  // `storageState` from the project's `use`, which for the `member` project is
+  // the signed-in member's session — so the first version of this spec sent
+  // `df_owner` with every request and would have proved the opposite of the
+  // claim. The assertion below is what caught it. An explicit empty state is the
+  // only form that cannot silently inherit.
+  const anonymous = await playwright.request.newContext({
+    storageState: { cookies: [], origins: [] },
+  });
   try {
     const res = await anonymous.get(url);
     expect(res.status()).toBe(200);
@@ -107,6 +116,10 @@ test("the per-task ICS download is still session-scoped", async ({
   // sandbox is what "the middleware treated this as private" actually looks like.
   const anonymous = await playwright.request.newContext({
     baseURL: MEMBER_BASE_URL,
+    // Explicitly empty, for the reason spelled out in the spec above: the
+    // project's `use.storageState` would otherwise arrive with a live session
+    // and the middleware would never reach its guest branch.
+    storageState: { cookies: [], origins: [] },
   });
   try {
     await anonymous.get("/api/ics/some-task-id");

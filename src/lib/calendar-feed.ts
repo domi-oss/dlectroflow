@@ -240,6 +240,22 @@ export const FEED_PAST_WINDOW_DAYS = 30;
  * more, and the way to guarantee that is to never read anything else. A future
  * column on `Task` or `Step` cannot leak into somebody's calendar by default.
  *
+ * ## Two things it deliberately does not do
+ *
+ * **A finished step stays in the feed.** `Step.done` is not filtered on, and is
+ * not even selected: the slot happened, and removing it would make the calendar
+ * lie about the day it is describing. A person's calendar is a record of their
+ * week as much as a plan for it, and a Tuesday that empties itself as it is
+ * worked through is the wrong artefact.
+ *
+ * **`DTSTAMP` is the moment of the fetch, so two polls of unchanged data are not
+ * byte-identical.** That is the opposite of the export's rule, which pins the
+ * stamp so an archive is diffable — and it is fine here for a reason specific to
+ * a subscription: clients reconcile a feed on `UID`, not on `DTSTAMP` or on the
+ * body's bytes, and the response is `no-store`, so there is no conditional
+ * request whose validator this could defeat. Stated rather than left as a
+ * difference somebody has to spot.
+ *
  * `now` and `stamp` are injectable so the body is deterministic under test.
  */
 export async function buildFeedIcs(input: {
