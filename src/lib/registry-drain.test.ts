@@ -381,6 +381,26 @@ describe("scripts/check-registry-drain.sh", () => {
    * still listed and still billed — and no cleanup policy will ever touch it,
    * because GitLab believes it is on its way out.
    */
+  /**
+   * GitLab keeps `latest` whatever the patterns say, so this check must too.
+   * Not hypothetical: #113 is about editing `name_regex_keep`, so the pattern
+   * losing its `latest` alternative is a live possibility — and `latest` would
+   * then look ancient, because a tag reports when it was CREATED, not when it
+   * last moved. Measured 2026-08-04, `latest` and `v0.5.0` share a digest while
+   * reporting dates 13 days apart.
+   */
+  it("never counts `latest` against the policy, whatever the keep pattern says", () => {
+    const tags = [
+      ...freshShaTags(19, 5),
+      { name: "latest", createdAt: daysAgo(400) },
+    ];
+    const result = drive(
+      scenario([{ path: PRIMARY, pages: [tags] }], { nameRegexKeep: "(v.*)" }),
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("✅");
+  });
+
   it("fails when a repository is stuck in DELETE_FAILED", () => {
     const result = drive(
       scenario([

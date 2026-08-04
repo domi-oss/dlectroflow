@@ -334,8 +334,18 @@ def code(s): "`" + s + "`";
 # which backtracks. They agree on patterns like these, but they are not the same
 # engine, so a pattern using a construct RE2 rejects outright would be one
 # GitLab never accepted in the first place.
+#
+# `latest` is excluded unconditionally, because GitLab keeps it whatever the
+# patterns say. That is not hypothetical here: this issue is ABOUT editing
+# `name_regex_keep`, so the pattern losing its `latest` alternative is a live
+# possibility — and `latest` would then look ancient, because a tag reports when
+# the TAG was created rather than when it last moved. Measured 2026-08-04,
+# `latest` and `v0.5.0` share digest sha256:b35954f6… while reporting 2026-07-19
+# and 2026-08-01. Without this the check would go red on a healthy registry the
+# first time somebody tightened the pattern.
 def owned($tags; $del; $keep):
   [ $tags[]
+    | select(.name != "latest")
     | select(($del != "") and (.name | test("\\A(?:" + $del + ")\\z")))
     | select(($keep == "") or ((.name | test("\\A(?:" + $keep + ")\\z")) | not)) ];
 
