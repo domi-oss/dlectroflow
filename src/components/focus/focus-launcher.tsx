@@ -2,6 +2,7 @@ import Link from "next/link";
 import { t, type Voice } from "@/lib/strings";
 import type { LauncherData } from "@/lib/focus-launcher";
 import { SingleTaskLane, MultiStepLane } from "@/components/focus/focus-lanes";
+import { HyperFocusToggle } from "@/components/focus/hyper-focus-toggle";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -61,6 +62,14 @@ export function FocusLauncher({
           ~{meta.minutesToClear}m {t("focus.meta.toClear", voice)}
         </span>
       </Link>
+
+      {/* #142 — the "hyper focus mode" switch. Here rather than in Settings
+          because it is a mode this session is in, not a taste, and because it
+          is the one place turning it back OFF is reachable without first
+          finishing something: the completion screen offers to turn it on, and
+          an on-switch whose off-switch lives somewhere else is a trap. Hidden
+          when there is nothing to chain — a mode with an empty queue is noise. */}
+      {singleTasks.length > 0 && <HyperFocusToggle voice={voice} />}
 
       {/* 4. Resume hero (amber) — only when a paused multi-step step exists. */}
       {resumeHero && (

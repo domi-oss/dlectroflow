@@ -268,6 +268,64 @@ export const STRINGS = {
   "focus.advance.nextStep": { plain: "Next step", playful: "Next step" },
   "focus.advance.nextTodo": { plain: "Next to-do", playful: "Next to-do" },
 
+  // #142 — "hyper focus mode": chain single-task to-dos after one completes.
+  // The NAME is fixed copy in both voices because the issue names it, the
+  // completion screen offers it by that name, and the launcher toggle turns it
+  // off by that name — three surfaces that must say the same words. The
+  // supporting line is where the voice lives.
+  "focus.hyper.name": {
+    plain: "Hyper focus mode",
+    playful: "Hyper focus mode",
+  },
+  "focus.hyper.on": { plain: "on", playful: "on" },
+  "focus.hyper.off": { plain: "off", playful: "off" },
+  "focus.hyper.help": {
+    plain:
+      "When a single-task to-do is done, roll straight into the next one instead of coming back here.",
+    playful:
+      "Clear a snack and the next one lands in front of you, instead of coming back here.",
+  },
+  "focus.hyper.turnOn": {
+    plain: "Turn on hyper focus mode",
+    playful: "Turn on hyper focus mode",
+  },
+  "focus.hyper.turnOff": {
+    plain: "Turn off hyper focus mode",
+    playful: "Turn off hyper focus mode",
+  },
+
+  // #142 — the end of a whole task, and the end of everything.
+  "focus.done.taskComplete": {
+    plain: "Task complete. 🏁",
+    playful: "Whole plate cleared. 🏁",
+  },
+  "focus.done.singleComplete": {
+    plain: "That one's done. 🏁",
+    playful: "Devoured. 🏁",
+  },
+  // The finish deserves a real pause, so stopping is a first-class answer here
+  // rather than a link hiding under the next thing.
+  "focus.done.doneForNow": {
+    plain: "Done for now",
+    playful: "Done for now",
+  },
+  "focus.done.backToFocus": {
+    plain: "Back to focus",
+    playful: "Back to focus",
+  },
+  "focus.done.queueEmpty": {
+    plain: "No multi-step tasks left. Work through the single-task to-dos?",
+    playful: "No big plates left. Work through the snacks?",
+  },
+  "focus.done.allClear": {
+    plain: "That's everything. Nothing left in the queue.",
+    playful: "Kitchen's clear. Nothing left on the pass.",
+  },
+  "focus.done.seeYourDay": {
+    plain: "See how today went →",
+    playful: "See how today went →",
+  },
+
   // ── #137 — what the timer says when a server action fails ──────────────────
   // It used to say nothing: a rejected action left the screen on "Claude is
   // re-estimating…" indefinitely. These are the words that replace the spinner.
