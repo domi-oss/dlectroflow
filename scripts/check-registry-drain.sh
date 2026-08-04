@@ -312,6 +312,21 @@ def code(s): "`" + s + "`";
 # Anchored at both ends, which is how GitLab applies these patterns
 # (`Gitlab::UntrustedRegexp` wraps them in \A…\z). An unanchored match would
 # quietly treat every tag merely CONTAINING "v" as a release and keep it.
+#
+# NOTE: no apostrophes anywhere in this jq program. It is a single-quoted bash
+# string, so one apostrophe in a comment ends the string and the whole program
+# fails to compile. That is a compile error rather than a wrong answer, and the
+# suite catches it immediately, but it costs a round trip.
+#
+# These two patterns are interpolated into a regex, which is worth being
+# explicit about: they are this project OWN cleanup-policy configuration, set by
+# a Maintainer in project settings and read back from the API — not user input,
+# and nothing a tag can influence. The worst a pathological pattern could do is
+# slow down this weekly read-only check. GitLab evaluates the same two patterns
+# against the same tags using RE2, which is linear-time; jq uses Oniguruma,
+# which backtracks. They agree on patterns like these, but they are not the same
+# engine, so a pattern using a construct RE2 rejects outright would be one
+# GitLab never accepted in the first place.
 def owned($tags; $del; $keep):
   [ $tags[]
     | select(($del != "") and (.name | test("\\A(?:" + $del + ")\\z")))
