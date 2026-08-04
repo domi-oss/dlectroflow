@@ -442,12 +442,21 @@ price is acceptable.
   Costs essentially nothing.
 - **The GitLab container registry** — where CI pushes the image the cluster
   pulls. **$0 on this project's GitLab plan**, but not free of consequences: CI
-  pushes a tag per commit, so it reached **1,886 tags and 116.5 GiB** of registry
-  storage. A weekly `prune_registry` job (see
-  [.gitlab-ci.yml](../.gitlab-ci.yml)) bounds it, because GitLab's own cleanup
-  policy cannot express "keep the newest N tags matching a pattern" and its
-  `name_regex_keep` was therefore keeping every production build forever. If you
-  run your own CI, see
+  pushes a tag per commit, and on 2026-07-29 that had reached **1,886 tags and
+  116.5 GiB** of registry storage. Two mechanisms bound it now, and they own
+  different tags:
+  - GitLab's own cleanup policy reaps everything **not** matching
+    `name_regex_keep`, which at a 7-day horizon settles at roughly a week's
+    worth of pushes rather than at zero — 409 bare-SHA tags on 2026-08-04, and a
+    correct policy is obliged to hold about that many.
+  - A weekly `prune_registry` job (see [.gitlab-ci.yml](../.gitlab-ci.yml))
+    bounds the `main-*` tags, because the keep pattern protects those **forever**
+    and GitLab's policy cannot express "keep the newest N matching a pattern".
+
+  The current figures churn with every pipeline, so measure rather than trust a
+  number written here: `bash scripts/check-registry-drain.sh` prints tag counts,
+  the policy's configuration and whether it is actually draining. If you run
+  your own CI, see
   [What every option also costs](#what-every-option-also-costs).
 - **The GKE cluster management fee** — $0.10/hour, about $73/month, **entirely
   cancelled** by Google's free-tier credit of $74.40/month per billing account.

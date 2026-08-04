@@ -134,6 +134,29 @@ case "$logret_status" in
   *) logret_headline="⚠️ **undetermined** — this is an unknown, not an all-clear" ;;
 esac
 
+# ── 2d. Is the container registry actually draining? (#113, the check #16 asked
+# for) ────────────────────────────────────────────────────────────────────────
+# A registry-growth check belongs on the ops cadence because nothing else
+# surfaces it: the cleanup policy fails silently, and the one number a human
+# would glance at — the tag count — is ALSO moved by the weekly prune job
+# (#114), so a broken policy and a working one look identical from outside. #113
+# was re-diagnosed three times on that ambiguity. check-registry-drain.sh
+# resolves it by partitioning the tags on the policy's own keep regex and
+# reporting only on the set the policy owns, which is exactly the set #114 is
+# forbidden to touch.
+#
+# Read-only, and deliberately NOT part of prune_registry: that job deletes and
+# wants a Maintainer credential, this one reads and runs on the digest's token.
+set +e
+registry_block="$(bash "${HERE}/check-registry-drain.sh")"
+registry_status=$?
+set -e
+case "$registry_status" in
+  0) registry_headline="✅ the registry cleanup policy is draining" ;;
+  1) registry_headline="🔴 **the registry cleanup policy is not draining** — see below" ;;
+  *) registry_headline="⚠️ **undetermined** — this is an unknown, not an all-clear" ;;
+esac
+
 # ── 3. Dependency upgrades — open Renovate MRs awaiting triage ────────────────
 # The API has no source-branch filter, so we fetch open MRs and filter for
 # `renovate/` client-side. If the fetched page is full (100 open MRs), Renovate
@@ -182,6 +205,9 @@ ${drift_block}
 **Logs** — could an incident be diagnosed after the fact? (#157)
 - ${logret_headline}
 ${logret_block}
+**Registry** — is the cleanup policy draining? (#113)
+- ${registry_headline}
+${registry_block}
 
 **CI**
 - Failed \`main\` pipelines (${WINDOW_LABEL}): **${failed_pipes}**

@@ -585,3 +585,76 @@ Retention, not alerting. Nothing here watches the logs — `/api/livez`'s
 in-memory `llmFailureCount` still resets on every pod recycle, and the only
 alert policy is a binary uptime check. That is deliberate and the reasoning is
 in #157.
+
+## 17. Container registry — measure it, don't quote it (#113)
+
+Every number about this registry is stale within a pipeline: CI pushes a tag per
+build. #113 was diagnosed four times; the first was right and each later round
+re-argued it from whatever figure was last written down. So this section records
+**commands, not numbers** — and dates the few numbers it cannot avoid.
+
+### The one command
+
+```
+bash scripts/check-registry-drain.sh
+```
+
+Read-only. Prints the policy's configuration, per-repository tag counts and
+cleanup status, the age of the oldest tag the policy owns, and a verdict. Exits
+`0` draining / `1` not draining / `2` undetermined — and `2` is a distinct state
+because "could not read the registry" must never be filed as "the registry is
+fine". It also runs in the weekly `ops_digest` job, so the answer arrives without
+anyone asking.
+
+### Why the obvious signals are all wrong
+
+Worth knowing before reaching for one of them in an incident:
+
+| Signal | Why it misleads |
+|---|---|
+| Total tag count | Moved by GitLab's policy, by `prune_registry` (#114) and by manual passes, while CI pushes against all three. Attributes nothing. |
+| Bare-SHA count falling | It will not fall. Measured 2026-08-04, ~46 pushes/day against a 7-day horizon settles near 400 **when the policy is working correctly** — re-derive both numbers before using them, they move with merge rate. |
+| `next_run_at` advancing | On gitlab.com the cadence is an earliest-start, not a schedule. Measured 2026-08-04: ~20h overdue while the tags proved the last run had drained exactly. |
+| `main-*` growing | The keep pattern retains those **forever** by design. That is #114's job to bound, not the policy's. |
+
+The one signal that does work is the **age of the oldest tag the policy owns** —
+immune to push rate, to #114, and to scheduler lag. That is what the script
+asserts.
+
+### Reading it by hand
+
+If you need the raw facts rather than the verdict:
+
+```
+glab api projects/84020916 \
+  | python3 -c "import json,sys;print(json.dumps(json.load(sys.stdin)['container_expiration_policy'],indent=2))"
+```
+
+GitLab's own view of whether the last run finished — the field that went
+unqueried for a week while the policy was assumed stalled. `UNFINISHED` means
+"partially executed, tags remaining"; `UNSCHEDULED` is the default resting state:
+
+```
+printf '%s' '{"query":"{ project(fullPath: \"gl-demo-ultimate-dtop/domi-oss/dlectroflow\") { containerRepositories { nodes { path tagsCount expirationPolicyCleanupStatus expirationPolicyStartedAt } } } }"}' > /tmp/q.json
+glab api graphql --input /tmp/q.json -H "Content-Type: application/json" -X POST
+```
+
+**Trap when listing tags yourself:** the REST endpoint returns them
+**alphabetically**, so a paginator that stops early never reaches `m` and
+concludes there are no `main-*` tags at all. And GitLab's GraphQL
+`containerRepository.tags` connection caps a page at 20 while deriving
+`hasNextPage` from what you *asked* for — measured 2026-08-04, `first: 100`
+stops after 5 pages with 99 of 421 tags and a confident `hasNextPage: false`.
+Request `first: 20`, page to exhaustion, and cross-check the total you collected
+against `tagsCount` or the REST `X-Total` header:
+
+```
+glab api --method GET "projects/84020916/registry/repositories/11826214/tags?per_page=1" -i \
+  | grep -i '^x-total:'
+```
+
+### Deleting tags
+
+Nothing here deletes. `scripts/prune-registry.sh` is the only thing in this repo
+that does, it ships as a dry run, and it needs a credential the CI job does not
+have — read its header before changing anything about it.
