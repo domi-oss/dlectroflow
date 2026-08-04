@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 // #118 Phase C — the panel that writes a member's own LLM key. The rule the
@@ -59,9 +59,29 @@ const props = {
  * checks the message reached the region the control points at.
  */
 function keyStatus(): HTMLElement {
-  const describer =
-    screen.queryByRole("button", { name: /^save/i }) ??
-    screen.getByRole("button", { name: /yes, remove/i });
+  // `/^sav/i`, not `/^save/i` — #167. The button renders
+  // `{pending ? "Saving…" : "Save key"}`, and `^save` does not match "Saving…"
+  // (s-a-v-i). `userEvent.click` does not await the useTransition, so whenever
+  // this helper ran inside that window the matcher missed. The prefix has to
+  // span both labels because the region is the same one in either state — which
+  // is the whole point of resolving it through `aria-describedby`.
+  //
+  // There used to be a `?? getByRole("button", { name: /yes, remove/i })` here.
+  // It was NOT a fallback. The Save button renders unconditionally — it sits
+  // outside the `keyPresent &&` block — so that branch was unreachable except
+  // in the one mid-transition window where the old matcher failed, i.e. exactly
+  // the bug. Its only effect was to convert a one-word matcher fault into
+  // "cannot find /yes, remove/i", an error naming a delete dialog no spec here
+  // opens. That is why #167 survived four CI failures undiagnosed. An explicit
+  // failure that names the real cause is worth more than a branch that cannot
+  // fire.
+  const describer = screen.queryByRole("button", { name: /^sav/i });
+  if (!describer)
+    throw new Error(
+      "no Save button matched /^sav/i — the label is `Saving…` mid-transition " +
+        "and `Save key` otherwise, so a matcher that misses one of them is the " +
+        "bug (#167), not a missing element",
+    );
   const id = describer.getAttribute("aria-describedby");
   const region = id ? document.getElementById(id) : null;
   if (!region)
@@ -70,6 +90,51 @@ function keyStatus(): HTMLElement {
 }
 
 describe("AccountPanel", () => {
+  it("resolves the live region while a save is still in flight (#167)", async () => {
+    // This is the 1-in-5 flake from #167, made deterministic. `keyStatus()`
+    // finds the panel's own live region via the Save button's
+    // `aria-describedby`, but that button's label flips to "Saving…" for the
+    // length of the useTransition — and `userEvent.click` does not await the
+    // transition. When the helper ran inside that window it matched nothing,
+    // fell through to the delete-confirmation button that was never opened,
+    // and threw `getElementError` from a test whose subject is the LLM key.
+    //
+    // Holding the action's promise unresolved makes the in-flight window real
+    // rather than a race. Measured: this spec failed 3 runs out of 3 before the
+    // fix, and the file passed 15 out of 15 after it. It cost four
+    // merge-request pipelines on 2026-08-04 (!255, !258, !262, !263) before it
+    // was worth pinning — the first was retried and passed, which is how a
+    // flake earns another day.
+    let release!: (v: { ok: true }) => void;
+    saveMock.mockReturnValue(
+      new Promise<{ ok: true }>((resolve) => {
+        release = resolve;
+      }),
+    );
+    render(<AccountPanel {...props} />);
+    await userEvent.type(screen.getByLabelText(/api key/i), "sk-ant-secret");
+    await userEvent.click(screen.getByRole("button", { name: /^save/i }));
+
+    // Mid-transition: the button reads "Saving…", and the helper must still
+    // find the region rather than falling through to an unrelated control.
+    expect(screen.getByRole("button", { name: /saving/i })).toBeInTheDocument();
+    expect(keyStatus()).toBeInTheDocument();
+
+    // Await the transition settling before returning. Without this the
+    // microtask that resolves the action and drives the post-save state change
+    // can fire during or after `afterEach(cleanup)`, which is an unawaited
+    // update in a spec whose whole purpose is removing nondeterminism — the
+    // same class of defect this file is fixing. Raised by GitLab Duo on !264.
+    // The label returning to "Save key" is the observable end of the
+    // transition, so waiting on it needs no arbitrary timeout.
+    release({ ok: true });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /^save key$/i }),
+      ).toBeInTheDocument(),
+    );
+  });
+
   it("names the signed-in account and the provider that authenticated it", () => {
     // #74 — the provider has to be stated wherever identity is shown, and
     // CurrentUser.provider carries the one this account was PROVISIONED under.
@@ -110,16 +175,26 @@ describe("AccountPanel", () => {
     expect(saveMock).toHaveBeenCalledWith("sk-ant-secret");
     // Leaving a secret in a mounted input is a shoulder-surfing and screenshot
     // problem for no benefit — it is stored, not editable.
-    expect(screen.getByLabelText(/api key/i)).toHaveValue("");
+    //
+    // `waitFor`, because clearing happens inside the `startTransition` callback
+    // and `userEvent.click` does not await it. Measured on !264: delaying the
+    // action's resolution by 50ms turns a bare assertion here red. The repo
+    // convention for this shape is already `waitFor` — see
+    // delete-account.test.tsx:154 and voice-section.test.tsx:47.
+    await waitFor(() =>
+      expect(screen.getByLabelText(/api key/i)).toHaveValue(""),
+    );
   });
 
   it("announces success without ever echoing the key", async () => {
     render(<AccountPanel {...props} />);
     await userEvent.type(screen.getByLabelText(/api key/i), "sk-ant-secret");
     await userEvent.click(screen.getByRole("button", { name: /^save/i }));
-    const status = keyStatus();
-    expect(status).toHaveTextContent(/saved/i);
-    expect(status).not.toHaveTextContent("sk-ant-secret");
+    // `waitFor` for the same reason as above: the outcome message is set inside
+    // the transition. The matcher fix stops `keyStatus()` throwing, but it does
+    // not make the region's CONTENT ready — a distinction #167 hid.
+    await waitFor(() => expect(keyStatus()).toHaveTextContent(/saved/i));
+    expect(keyStatus()).not.toHaveTextContent("sk-ant-secret");
   });
 
   it("reports a rejected key in the same place, and keeps what was typed", async () => {
@@ -127,7 +202,9 @@ describe("AccountPanel", () => {
     render(<AccountPanel {...props} />);
     await userEvent.type(screen.getByLabelText(/api key/i), "sk-nope");
     await userEvent.click(screen.getByRole("button", { name: /^save/i }));
-    expect(keyStatus()).toHaveTextContent(/not accepted|invalid/i);
+    await waitFor(() =>
+      expect(keyStatus()).toHaveTextContent(/not accepted|invalid/i),
+    );
     // Not cleared on failure — clearing a rejected value forces a re-paste.
     expect(screen.getByLabelText(/api key/i)).toHaveValue("sk-nope");
   });
@@ -139,7 +216,7 @@ describe("AccountPanel", () => {
     render(<AccountPanel {...props} />);
     await userEvent.type(screen.getByLabelText(/api key/i), "sk-ant-secret");
     await userEvent.click(screen.getByRole("button", { name: /^save/i }));
-    expect(keyStatus()).toHaveTextContent(/sign(ed)? in/i);
+    await waitFor(() => expect(keyStatus()).toHaveTextContent(/sign(ed)? in/i));
   });
 
   it("refuses to submit an empty field without calling the server", async () => {
