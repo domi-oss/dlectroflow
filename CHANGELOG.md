@@ -287,6 +287,33 @@ operators upgrading a self-hosted instance don't get surprised.
   revoke endpoint, which #126 fixed in v0.5.0. Corrected, and the residue that
   *is* still true (the revoke is a request Google can refuse) is stated
   separately so it does not get lost with it.
+- **`README.md` and the in-app `/help` page caught up with #61, #142, #129 and
+  #153.** Two of the claims they carried had become false rather than merely
+  incomplete. The README said *"Streaming a bigger catalogue is a later release
+  (#61); this is the bundled set"*, and `/help` told users *"ten lo-fi tracks are
+  bundled with the app, so nothing is streamed from anywhere else"* — a privacy
+  claim, so the correction deliberately keeps **both** halves: an operator can
+  serve more tracks from a store they run, and the browser still never contacts
+  it, because the CSP is unchanged and the bytes are proxied server-side through
+  `/api/focus-catalog/audio`. Dropping the second half would have read as a
+  privacy regression where none happened. `FOCUS_CATALOG_ORIGIN` is now in the
+  README as well as `.env.example` and the two deploy guides.
+
+  The larger gap was #142: completing a step **navigates on its own after five
+  seconds**, and `/help` described none of it. An automatic navigation the docs
+  do not mention is experienced as the app moving by itself, so the page now
+  names the countdown, that it lands on the next step's start screen without
+  starting its timer, both escapes (**Escape** as well as the **Stay here**
+  button), and that **hyper focus mode is off by default** and chains single-task
+  to-dos only.
+
+  `/help` also gained a **Your data** section: export (#129) and self-deletion
+  (#153) both shipped and neither was mentioned anywhere a user looks, despite
+  being UK GDPR rights rather than features to browse for. It is worded against
+  what the app actually does, the not-yet-automatic final purge included, and it
+  says the Account section needs an account of your own — a guest sandbox is not
+  shown those controls. Four specs pin the new copy, one of them asserting the
+  retired streaming claim cannot come back.
 
 ### Fixed
 

@@ -40,6 +40,7 @@ describe("HelpPage", () => {
       /Task breakdown/i,
       /The focus session/i,
       /Voice & settings/i,
+      /Your data/i,
       /Guests & AI limits/i,
     ]) {
       expect(
@@ -80,6 +81,7 @@ describe("HelpPage", () => {
     const section = screen
       .getByRole("heading", { name: /The focus session/i, level: 2 })
       .closest("section");
+    expect(section).not.toBeNull();
     const text = section!.textContent ?? "";
     // The pacer: what it is, and that it is a real cadence you can follow.
     expect(text).toMatch(/breath/i);
@@ -93,6 +95,72 @@ describe("HelpPage", () => {
     expect(text).toMatch(/Pause music and timer together/i);
   });
 
+  // #142 — the app now NAVIGATES ON ITS OWN five seconds after a step is
+  // completed. A timed navigation nobody documented is experienced as the app
+  // moving by itself, so this page owes the reader all four facts: that it
+  // happens, how long they have, where it lands, and how to stop it. Escape is
+  // asserted by name because it is the escape a screen-reader user can actually
+  // reach inside five seconds (WCAG 2.2.1) and is invisible until described.
+  it("documents the auto-advance countdown, where it lands, and both escapes (#142)", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    const section = screen
+      .getByRole("heading", { name: /The focus session/i, level: 2 })
+      .closest("section");
+    expect(section).not.toBeNull();
+    const text = section!.textContent ?? "";
+    // It happens at all, and the number matches AUTO_ADVANCE_SEC.
+    expect(text).toMatch(/five seconds|5 seconds/i);
+    // Where it lands: the next step's SETUP screen, with nothing timing yet.
+    expect(text).toMatch(/start screen/i);
+    expect(text).toMatch(/does not start|nothing starts|without starting/i);
+    // Both escapes, by the labels on screen and by the key.
+    expect(text).toMatch(/Escape/);
+    expect(text).toMatch(/Stay here/i);
+    expect(text).toMatch(/Go now/i);
+  });
+
+  // #142 — hyper focus mode is the one part of the auto-advance that is a
+  // CHOICE, and a reader who has just been moved on by itself needs to know
+  // which parts they opted into. Both halves are pinned: off by default, and
+  // single-task to-dos only.
+  it("documents hyper focus mode as off by default and single-task only (#142)", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    const section = screen
+      .getByRole("heading", { name: /The focus session/i, level: 2 })
+      .closest("section");
+    expect(section).not.toBeNull();
+    const text = section!.textContent ?? "";
+    expect(text).toMatch(/hyper focus/i);
+    expect(text).toMatch(/off by default/i);
+    // It governs single-task chaining ONLY — see src/lib/hyper-focus.ts.
+    expect(text).toMatch(/single-task/i);
+  });
+
+  // #61 — this used to read "nothing is streamed from anywhere else", which
+  // stopped being true when a catalog store became configurable. It is a
+  // user-facing PRIVACY claim, so both halves have to survive the correction:
+  // an operator can serve more tracks, and the browser still never contacts
+  // that store (the CSP keeps `default-src 'self'` with `media-src` unset —
+  // src/lib/security-headers.test.ts fails on any relaxation).
+  it("states the focus-music privacy posture accurately once a catalog is configured (#61)", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    const section = screen
+      .getByRole("heading", { name: /The focus session/i, level: 2 })
+      .closest("section");
+    expect(section).not.toBeNull();
+    const text = section!.textContent ?? "";
+    // The bundled set is still the floor — a session never starts silent.
+    expect(text).toMatch(/ten lo-?fi tracks|ten tracks/i);
+    // Half one: more tracks can come from a store whoever runs the instance runs.
+    expect(text).toMatch(
+      /more tracks|the rest of the catalogue|full catalogue/i,
+    );
+    // Half two, and the half that must never be dropped.
+    expect(text).toMatch(/browser never (contacts|talks to)/i);
+    // The retired claim must be gone, not merely qualified.
+    expect(text).not.toMatch(/nothing is streamed from anywhere else/i);
+  });
+
   it("routes from the focus section to the Settings page that owns the track picker", async () => {
     render(await HelpPage({ searchParams: Promise.resolve({}) }));
     const section = screen
@@ -101,6 +169,39 @@ describe("HelpPage", () => {
     expect(section).not.toBeNull();
     // The picker lives in Settings, so this section must link there rather than
     // naming a control the reader then has to hunt for.
+    const hrefs = Array.from(section!.querySelectorAll("a")).map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(hrefs).toContain("/settings?from=help");
+  });
+
+  // #129 / #153 — both shipped, and both are rights a person exercises rather
+  // than features they browse for (UK GDPR Art. 15/20 and Art. 17). /help is
+  // where somebody looks for "how do I get my stuff out", so the page has to
+  // name the two controls and where they live.
+  it("tells a member they can export and delete their own data (#129, #153)", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    const section = screen
+      .getByRole("heading", { name: /Your data/i, level: 2 })
+      .closest("section");
+    expect(section).not.toBeNull();
+    const text = section!.textContent ?? "";
+    // The controls, by the labels they actually carry in Settings → Account.
+    expect(text).toMatch(/Download my data/i);
+    expect(text).toMatch(/Delete my account/i);
+    // Export: it is one archive, and it deliberately excludes the secrets.
+    expect(text).toMatch(/\.zip/i);
+    expect(text).toMatch(/API key|Google connection/i);
+    // Deletion: the honest shape — a recoverable window, then removal by hand.
+    expect(text).toMatch(/signed out/i);
+    expect(text).toMatch(/type the word|type `?delete`?|typing the word/i);
+    // `(app)/settings/page.tsx` filters the Account section out for a caller
+    // with no account of their own, so the page must not send a guest hunting
+    // for a control that is never rendered for them.
+    expect(text).toMatch(/an account of your own/i);
+    expect(text).toMatch(/guest/i);
+    // The section must route to the page that owns both controls, carrying the
+    // origin like every other deep link on this page.
     const hrefs = Array.from(section!.querySelectorAll("a")).map((a) =>
       a.getAttribute("href"),
     );

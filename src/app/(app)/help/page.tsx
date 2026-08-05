@@ -143,9 +143,58 @@ export default async function HelpPage({
           buttons, and there is nothing to switch on. If your system asks for
           reduced motion, the ring simply holds still.
         </p>
+        {/* #142 — the app navigates ON ITS OWN five seconds after a step is
+            completed, which is the one thing on this page a reader cannot
+            discover any other way: they meet it as the app moving without them.
+            Both escapes are named, Escape included — it is the only one a
+            screen-reader user can reach inside five seconds (WCAG 2.2.1), and
+            an escape nobody has been told about is not one. */}
+        <p className="text-sm">
+          <strong>Finishing a step moves you on by itself.</strong> Inside a
+          task with several steps, completing one counts down{" "}
+          <strong>five seconds</strong> and then opens the next step — on its{" "}
+          <strong>start screen</strong>, so you still choose a length and press
+          Start. It <strong>does not start the timer</strong> for you. Press{" "}
+          <strong>Go now</strong> to skip the wait, or{" "}
+          <strong>Stay here</strong> to stop the countdown and stay on the
+          finished step; <kbd>Escape</kbd> stops it too, from wherever your
+          keyboard happens to be, so you never have to find a button inside five
+          seconds. The countdown also pauses while the panel has keyboard focus,
+          and <strong>Done for now</strong> leaves the run altogether.
+        </p>
+        <p className="text-sm">
+          Finishing a whole <em>multi-step</em> task never moves you on by
+          itself — that finish deserves a pause, so the next task is offered
+          rather than taken. <strong>Hyper focus mode</strong> is what extends
+          the same countdown to <em>single-task</em> to-dos, chaining one
+          straight into the next. It is <strong>off by default</strong>, it
+          covers single-task to-dos only (steps inside a task are not affected
+          by it), and you turn it on or off on the{" "}
+          <Link href="/focus" className="underline">
+            Focus
+          </Link>{" "}
+          page — or by accepting the offer that appears when you run out of
+          steps. It is remembered per browser rather than per account, so your
+          phone and your laptop can be in different modes.
+        </p>
+        {/* #61 — this used to say "nothing is streamed from anywhere else",
+            which stopped being true the moment a catalog store became
+            configurable. It is a privacy claim, so the correction keeps BOTH
+            halves: an operator can serve more tracks, and the browser still
+            never contacts that store. `default-src 'self'` with `media-src`
+            unset is what makes the second half true, and
+            src/lib/security-headers.test.ts fails the build on any relaxation. */}
         <p className="text-sm">
           <strong>Focus music</strong>: ten lo-fi tracks are bundled with the
-          app, so nothing is streamed from anywhere else. Choose one under{" "}
+          app, so a session always has something to play — even offline, and
+          even on a brand-new install. Whoever runs your instance can add{" "}
+          <strong>more tracks</strong> from a store they run themselves, which
+          is switched off unless they set it up. Either way{" "}
+          <strong>your browser never contacts that store</strong>: the app
+          fetches the audio itself and serves it from its own address, so
+          listening never puts you in touch with anywhere else. If that store is
+          missing or having a bad day you get the bundled ten and the music
+          still plays. Choose a track under{" "}
           <strong>Focus timer → Focus sounds</strong> on the{" "}
           <Link href="/settings?from=help" className="underline">
             Settings
@@ -183,6 +232,64 @@ export default async function HelpPage({
             Settings
           </Link>{" "}
           page.
+        </p>
+      </section>
+
+      {/* #129 / #153 — the two controls a person needs when they want OUT.
+          Neither is a feature you go looking for in a tour, and both are rights
+          rather than conveniences (UK GDPR Art. 15/20 access and portability,
+          Art. 17 erasure), so they get their own named section rather than a
+          line inside "Voice & settings". Worded against what the app actually
+          does, including the part that is not automatic — /privacy has said the
+          same since #123 and the delete dialog says it too. */}
+      <section className="space-y-2">
+        <SectionHeading id="help-your-data" voice={voice} />
+        {/* The Account section is filtered out of Settings for a caller with no
+            account of their own (`me != null` in (app)/settings/page.tsx), so
+            saying "it is on the Settings page" full stop would send a guest
+            hunting for a control that is not rendered for them. */}
+        <p className="text-sm">
+          Both controls below live under <strong>Account</strong> on the{" "}
+          <Link href="/settings?from=help" className="underline">
+            Settings
+          </Link>{" "}
+          page. That section appears once you have{" "}
+          <strong>an account of your own</strong> — a guest sandbox does not, so
+          it is not shown there.
+        </p>
+        <p className="text-sm">
+          <strong>Take a copy with you.</strong>{" "}
+          <strong>Download my data (.zip)</strong> builds one archive of
+          everything in this account: your tasks and their steps, your
+          brain-dump inbox, the coaching conversations, your settings, and your
+          scheduled work as a calendar file. The same data is written several
+          ways so you are not stuck with one tool — a Markdown file you can read
+          anywhere, CSVs for a spreadsheet, and a complete JSON copy. A README
+          inside explains each file. Two things are deliberately left out: your{" "}
+          <strong>Google connection</strong> and any <strong>API key</strong>{" "}
+          you have stored are never exported.
+        </p>
+        <p className="text-sm">
+          <strong>Delete your account.</strong>{" "}
+          <strong>Delete my account</strong> opens a confirmation you have to{" "}
+          <strong>type the word</strong> <kbd>delete</kbd> into, because this is
+          not something to do by reflex. When it goes through you are{" "}
+          <strong>signed out</strong> and cannot sign back in, and your Google
+          Tasks connection is removed here — nothing inside your Google account
+          is deleted. Your tasks, steps, notes and settings are then held for a
+          short window so an accident can be undone: ask whoever runs the
+          instance within it. To be straight about a gap: that final removal is
+          done by hand today, not by a scheduled job. The confirmation itself
+          names the exact number of days, and the{" "}
+          <Link href="/privacy" className="underline">
+            Privacy Policy
+          </Link>{" "}
+          covers backups, which are deleted on their own schedule.
+        </p>
+        <p className="text-sm">
+          If you are the instance owner, the delete control is not there: yours
+          is the only account that can manage the instance, so shutting it down
+          is a deployment job rather than a settings one.
         </p>
       </section>
 
