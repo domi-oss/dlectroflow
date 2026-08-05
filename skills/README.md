@@ -34,6 +34,13 @@ image-build and scanning jobs.
 
 That classification is only honest while everything here is prose. **Adding an executable —
 a shell script, a hook, anything CI or a developer would run — means moving `skills/**/*`
-into `.code_changes` in `.gitlab-ci.yml` in the same change**, or it ships unscanned with no
-signal at all. That is precisely the failure mode `ci-docs-only.ts` exists to catch, and it
-is why upstream AntiVibe's four optional helper scripts were deliberately not carried over.
+into `.code_changes` in `.gitlab-ci.yml` in the same change**, or it ships unscanned. That is
+precisely the failure mode `ci-docs-only.ts` exists to catch, and it is why upstream
+AntiVibe's four optional helper scripts were deliberately not carried over.
+
+You will not get to forget this. `ci-docs-only.test.ts` walks every committed file under
+`skills/` recursively and fails on anything that is not documentation — an executable bit, a
+symlink, a submodule, or a file type not on the allow-list in `DOCS_ONLY_FILE_SUFFIXES`. The
+failure names the file and tells you the two ways out: reclassify the directory as code, or,
+if the file really is inert prose in a shape this repo has not used before, add its type to
+that list and record why it cannot execute.

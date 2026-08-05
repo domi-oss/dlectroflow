@@ -13,8 +13,11 @@ import {
   parseStubDeclaredReports,
   parseStubReportTypes,
   parseStubWrittenReports,
+  parseTreeEntries,
+  docsOnlyViolations,
   globCoversTopLevel,
   classifyTopLevelPath,
+  type CommittedEntry,
 } from "./ci-docs-only";
 
 const REPO_ROOT = join(__dirname, "..", "..");
@@ -40,6 +43,34 @@ function committedTopLevelPaths(): string[] {
     { cwd: REPO_ROOT, encoding: "utf8", env: isolatedGitEnv() },
   );
   return out.split("\n").filter(Boolean);
+}
+
+/**
+ * Every committed file with its git mode, recursively.
+ *
+ * `-r` is the entire point, and its absence was the hole this reader closes:
+ * `committedTopLevelPaths` above stops at the top level, so it sees the bare
+ * name `skills` and has no opinion whatever about what is inside it. A
+ * `skills/foo/helper.sh` would therefore be classified purely by the word
+ * `skills` and take the fast path unbuilt, untested and unscanned.
+ *
+ * `-z` rather than the default line format: git QUOTES a path containing a
+ * newline, a quote or a non-ASCII byte, and a quoted path parses to the wrong
+ * name. That direction fails OPEN — a mangled `helper.sh` stops looking like a
+ * shell script — so the format that cannot mangle it is the only safe one.
+ *
+ * Same `-C REPO_ROOT` + `cwd` + `isolatedGitEnv()` hardening as the reader
+ * above, for the same #146 reason: an ambient `GIT_DIR` would point this at
+ * another repository, and a guard enumerating somebody else's tree passes by
+ * vacuity rather than failing.
+ */
+function committedEntries(): CommittedEntry[] {
+  const out = execFileSync(
+    "git",
+    ["-C", REPO_ROOT, "ls-tree", "-r", "-z", "HEAD"],
+    { cwd: REPO_ROOT, encoding: "utf8", env: isolatedGitEnv() },
+  );
+  return parseTreeEntries(out);
 }
 
 /**
@@ -96,6 +127,192 @@ describe("committedTopLevelPaths is git-isolated", () => {
     expect(paths, "read the decoy repository").not.toContain("DECOY.md");
     expect(paths).toContain("package.json");
     expect(paths).toContain("src");
+  });
+
+  // The recursive reader carries the same hazard and the same hardening. It is
+  // the worse of the two to get wrong: the top-level reader pointed at another
+  // repository fails loudly on the `package.json`/`src` sanity check, whereas
+  // the recursive guard would simply find no violations in a tree that has no
+  // docs-only prefixes at all, and report a clean pass.
+  it("enumerates this repository recursively, not the one the environment names", () => {
+    const decoy = makeDecoyRepo();
+    for (const [name, value] of Object.entries(
+      ambientGitEnvPointingAt(decoy),
+    )) {
+      vi.stubEnv(name, value);
+    }
+
+    const paths = committedEntries().map((e) => e.path);
+    expect(paths, "read the decoy repository").not.toContain("DECOY.md");
+    expect(paths).toContain("src/lib/ci-docs-only.ts");
+  });
+});
+
+describe("parseTreeEntries", () => {
+  const record = (mode: string, path: string): string =>
+    `${mode} blob 179ae8d918cdbbc69dbdb3ee7724152b1f496950\t${path}\0`;
+
+  it("reads the mode and path of each NUL-terminated record", () => {
+    expect(
+      parseTreeEntries(
+        record("100644", "docs/legal.md") + record("100755", "scripts/x.sh"),
+      ),
+    ).toEqual([
+      { mode: "100644", path: "docs/legal.md" },
+      { mode: "100755", path: "scripts/x.sh" },
+    ]);
+  });
+
+  it("keeps a path containing a newline intact", () => {
+    // Exactly why `-z` is used. In the default line format git would render
+    // this as a quoted, escaped string; parsed naively it stops looking like
+    // the `.sh` it is, and the guard below then waves it through.
+    expect(parseTreeEntries(record("100755", "skills/we\nird.sh"))).toEqual([
+      { mode: "100755", path: "skills/we\nird.sh" },
+    ]);
+  });
+
+  it("throws on an unreadable record rather than dropping it", () => {
+    // Dropping it is the fail-open direction: the entry vanishes from the set
+    // the guard inspects, and the guard then reports a clean tree.
+    expect(() => parseTreeEntries("garbage-not-a-tree-entry\0")).toThrow(
+      /cannot read/,
+    );
+  });
+
+  it("throws on empty output rather than reporting an empty tree", () => {
+    // `git ls-tree` printing nothing means the call went wrong, not that the
+    // repository has no files — and an empty set passes every check below.
+    expect(() => parseTreeEntries("")).toThrow(/no files/);
+  });
+});
+
+/**
+ * The recursive, fail-closed half of the guard.
+ *
+ * `DOCS_ONLY_PATHS` grants a whole directory the fast path on the strength of
+ * its name. `classifyTopLevelPath` above only ever asks whether that name is
+ * on a list, so nothing in this module could previously see *inside* `docs/`
+ * or `skills/` at all — the classification was a promise about the contents
+ * that nothing checked.
+ *
+ * Contrast `docker/**` + `/ *` in `.code_changes`: a recursive glob re-triggers
+ * the full gate at any depth, so `docker/` needs no such promise. A docs-only
+ * prefix has no equivalent, which is why the promise has to be enforced here
+ * instead.
+ *
+ * Fail-closed means the allow-list is of *observed* shapes, not plausible
+ * ones. Nothing is pre-authorised on the grounds that it would probably be
+ * fine; adding a `.svg` to `docs/` is meant to fail once, in front of the
+ * person adding it, who then either lists the type here or learns why not.
+ */
+describe("docsOnlyViolations", () => {
+  const entry = (mode: string, path: string): CommittedEntry => ({
+    mode,
+    path,
+  });
+
+  it("rejects an executable committed under a docs-only prefix", () => {
+    // The scenario this whole guard exists for. Upstream AntiVibe ships four
+    // optional helper shell scripts; carrying one over would land exactly this
+    // entry, and before this check it would have merged with no build, no
+    // test and no security scan, and nothing anywhere would have said so.
+    expect(
+      docsOnlyViolations([entry("100755", "skills/antivibe/helper.sh")]),
+    ).toEqual([
+      {
+        path: "skills/antivibe/helper.sh",
+        reason: "has the executable bit set",
+      },
+      {
+        path: "skills/antivibe/helper.sh",
+        reason: "is not a recognised documentation file type",
+      },
+    ]);
+  });
+
+  it("rejects a non-documentation file type even without the executable bit", () => {
+    // `sh file.sh` and `node file.js` both ignore the mode entirely, so the
+    // executable bit is a signal and not the control.
+    expect(
+      docsOnlyViolations([entry("100644", "skills/antivibe/helper.sh")]),
+    ).toEqual([
+      {
+        path: "skills/antivibe/helper.sh",
+        reason: "is not a recognised documentation file type",
+      },
+    ]);
+  });
+
+  it("rejects a symlink, which is not prose whatever it is named", () => {
+    // A `docs/shortcut.md` symlinked at `../src/lib/secrets.ts` reads as
+    // documentation to every name-based check in this file.
+    expect(docsOnlyViolations([entry("120000", "docs/shortcut.md")])).toEqual([
+      { path: "docs/shortcut.md", reason: "is a symbolic link" },
+    ]);
+  });
+
+  it("rejects a submodule, which is an entire unscanned repository", () => {
+    expect(docsOnlyViolations([entry("160000", "skills/vendor")])).toEqual([
+      { path: "skills/vendor", reason: "is a git submodule" },
+      {
+        path: "skills/vendor",
+        reason: "is not a recognised documentation file type",
+      },
+    ]);
+  });
+
+  it("names an unrecognised mode instead of assuming it is harmless", () => {
+    expect(docsOnlyViolations([entry("100664", "docs/legal.md")])).toEqual([
+      {
+        path: "docs/legal.md",
+        reason: "has the unrecognised git mode 100664",
+      },
+    ]);
+  });
+
+  it("accepts the documentation shapes the tree actually holds", () => {
+    expect(
+      docsOnlyViolations([
+        entry("100644", "README.md"),
+        entry("100644", "LICENSE"),
+        entry("100644", "docs/design/specs/assets/row-final.png"),
+        entry("100644", "docs/wireframe/dlectroflow-wireframe.html"),
+        entry("100644", "skills/antivibe/LICENSE"),
+        entry("100644", "skills/antivibe/templates/deep-dive.md"),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("ignores everything outside the docs-only prefixes", () => {
+    // `scripts/` is full of committed 100755 shell scripts and is covered by
+    // `.code_changes`, so it gets the full gate and is none of this guard's
+    // business. A guard that flagged them would be relaxed within the week.
+    expect(
+      docsOnlyViolations([
+        entry("100755", "scripts/prune-registry.sh"),
+        entry("100644", "src/lib/ci-docs-only.ts"),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("does not let a sibling name pick up a docs prefix", () => {
+    // `docs` must not claim `docs-internal/`, and must not therefore silently
+    // start policing a directory that `.code_changes` is responsible for.
+    expect(
+      docsOnlyViolations([entry("100755", "docs-internal/build.sh")]),
+    ).toEqual([]);
+  });
+
+  it("rejects a bare extension with no stem", () => {
+    // `skills/.md` is a dotfile, not a document. Fail-closed: an odd shape
+    // nobody thought about gets rejected, not waved through on a suffix match.
+    expect(docsOnlyViolations([entry("100644", "skills/.md")])).toEqual([
+      {
+        path: "skills/.md",
+        reason: "is not a recognised documentation file type",
+      },
+    ]);
   });
 });
 
@@ -249,6 +466,51 @@ describe("docs-only CI fast path covers every committed top-level path", () => {
     for (const doc of ["README.md", "CHANGELOG.md", "docs"]) {
       expect(classifyTopLevelPath(doc, codeGlobs)).toBe("docs");
     }
+  });
+});
+
+/**
+ * The classification above is a promise that `docs/` and `skills/` contain
+ * nothing but prose. This is the enforcement of it, against the real tree.
+ */
+describe("every committed file under a docs-only prefix is really documentation", () => {
+  const entries = committedEntries();
+  const covered = entries.filter((e) =>
+    DOCS_ONLY_PATHS.some((p) => e.path === p || e.path.startsWith(`${p}/`)),
+  );
+
+  /**
+   * The "clean" result below is only worth anything if the enumeration
+   * actually looked at something, and specifically if it looked BELOW the top
+   * level — a reader that stopped at the top level (the bug this closes) would
+   * find nothing wrong and report exactly the same zero.
+   */
+  it("actually descends into the docs-only directories", () => {
+    expect(covered.length).toBeGreaterThan(50);
+    expect(covered.map((e) => e.path)).toContain(
+      "skills/antivibe/templates/deep-dive.md",
+    );
+    expect(covered.map((e) => e.path)).toContain(
+      "docs/design/specs/assets/2026-07-16-row-final-stacked.png",
+    );
+  });
+
+  /** The same guard, shown returning a non-empty answer when there is one. */
+  it("would flag an executable added under one of them", () => {
+    expect(
+      docsOnlyViolations([
+        ...entries,
+        { mode: "100755", path: "skills/antivibe/helper.sh" },
+      ]),
+    ).not.toEqual([]);
+  });
+
+  it("finds no executable, symlink, submodule or non-prose file", () => {
+    const violations = docsOnlyViolations(entries);
+    expect(
+      violations.map((v) => `${v.path} ${v.reason}`),
+      `These committed files sit under a path in DOCS_ONLY_PATHS, so a merge request touching only them SKIPS the compile, test, image-build and scanning jobs — but they are not documentation. Either move the prefix into .code_changes in .gitlab-ci.yml (it can now affect the app or be executed), or, if the file genuinely is inert documentation of a shape this repo did not have before, add its type to DOCS_ONLY_FILE_SUFFIXES / DOCS_ONLY_FILE_NAMES and say in the comment there why it cannot execute.`,
+    ).toEqual([]);
   });
 });
 
