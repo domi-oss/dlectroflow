@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { decryptToken } from "@/lib/crypto/token-cipher";
 
 // #118 Phase C — the caller's OWN account settings. Every assertion below is
@@ -168,6 +168,118 @@ describe("saveOwnLlmKey", () => {
     await expect(saveOwnLlmKey("sk-ant-secret")).rejects.toThrow(
       "connection reset",
     );
+  });
+});
+
+/**
+ * #177 step 1 — the fourth guard, alongside empty / over-length / control
+ * characters. The shape table itself is exercised in
+ * `src/lib/llm/key-shape.test.ts`; what these specs pin is the WIRING: that the
+ * guard runs before the write, that it reports a code of its own rather than
+ * the generic `invalid_key`, and — the one that matters — that it stays
+ * asymmetric once it is behind a server action.
+ */
+describe("saveOwnLlmKey — a key that belongs to another provider", () => {
+  // The action resolves the configured provider from `LLM_PROVIDER`, so these
+  // specs own that variable and hand it back. `beforeEach` deletes it rather
+  // than assuming the ambient environment is clean: an `.env` that happens to
+  // set it would otherwise silently flip which direction is being tested.
+  beforeEach(() => {
+    delete process.env.LLM_PROVIDER;
+  });
+  afterEach(() => {
+    delete process.env.LLM_PROVIDER;
+  });
+
+  it("refuses an OpenAI key on an anthropic instance, before the write", async () => {
+    // The 2026-08-05 incident: this saved, decrypted, and came back
+    // `401 invalid x-api-key` with nothing on screen to say so.
+    expect(await saveOwnLlmKey("sk-proj-AAAABBBBCCCCDDDD")).toEqual({
+      ok: false,
+      error: "wrong_provider_key",
+      looksLike: "OpenAI",
+      expectedProvider: "Anthropic",
+      expectedPrefix: "sk-ant-",
+    });
+    expect(userUpdateMock).not.toHaveBeenCalled();
+  });
+
+  it("reports a code of its own, distinct from `invalid_key`", async () => {
+    // A generic code leaves the panel with nothing specific to say, which is
+    // the state #177 is fixing — the user could already see that "it didn't
+    // work" and still had no idea why.
+    const result = await saveOwnLlmKey("gsk_AAAABBBBCCCCDDDD");
+    expect(result).toMatchObject({ ok: false, error: "wrong_provider_key" });
+    expect(result).not.toMatchObject({ error: "invalid_key" });
+  });
+
+  it("follows LLM_PROVIDER, so the check runs in both directions", async () => {
+    process.env.LLM_PROVIDER = "openai-compatible";
+    expect(await saveOwnLlmKey("sk-ant-api03-AAAA")).toMatchObject({
+      ok: false,
+      error: "wrong_provider_key",
+      looksLike: "Anthropic",
+      expectedPrefix: null,
+    });
+    expect(userUpdateMock).not.toHaveBeenCalled();
+
+    // …and the same key that was refused above is stored here, because OpenAI
+    // is a native openai-compatible endpoint rather than a foreign one.
+    expect(await saveOwnLlmKey("sk-proj-AAAABBBBCCCCDDDD")).toEqual({
+      ok: true,
+    });
+    expect(userUpdateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("STORES an unrecognised key shape rather than guessing", async () => {
+    // The false-reject case, pinned at the action boundary as well as in the
+    // module. A conformance check here would make a key in a format the
+    // provider introduced later unsaveable — a failure with no workaround at
+    // all, which is worse than the silent 401 being fixed.
+    expect(await saveOwnLlmKey("sk-ant2-a-format-that-does-not-exist")).toEqual(
+      { ok: true },
+    );
+    expect(decryptToken(userUpdateMock.mock.calls[0][0].data.llmKeyEnc)).toBe(
+      "sk-ant2-a-format-that-does-not-exist",
+    );
+  });
+
+  it("never returns any part of the rejected key", async () => {
+    // The result is rendered in the account panel, so anything derived from the
+    // key would put a secret in an RSC payload — the exact thing this file's
+    // presence-only discipline exists to prevent.
+    const result = await saveOwnLlmKey("sk-proj-THE-SECRET-BODY-9f2c");
+    expect(JSON.stringify(result)).not.toContain("THE-SECRET-BODY");
+    expect(JSON.stringify(result)).not.toContain("9f2c");
+  });
+
+  it("still rejects an empty or control-character key as `invalid_key`", async () => {
+    // Guard order: the shape check is the fourth, not the first. A blank field
+    // is not a "wrong provider" problem and must not be described as one.
+    expect(await saveOwnLlmKey("   ")).toEqual({
+      ok: false,
+      error: "invalid_key",
+    });
+    expect(await saveOwnLlmKey("sk-proj-A\nX-Evil: 1")).toEqual({
+      ok: false,
+      error: "invalid_key",
+    });
+    expect(await saveOwnLlmKey(`sk-proj-${"A".repeat(601)}`)).toEqual({
+      ok: false,
+      error: "invalid_key",
+    });
+    expect(userUpdateMock).not.toHaveBeenCalled();
+  });
+
+  it("reports a lost session, not a key shape, for a signed-out caller", async () => {
+    // Deliberately ordered after the session check: an expired session must not
+    // be reported as a key problem, and a signed-out caller gets no signal
+    // about key shapes at all.
+    currentUserMock.mockResolvedValue(null);
+    expect(await saveOwnLlmKey("sk-proj-AAAABBBBCCCCDDDD")).toEqual({
+      ok: false,
+      error: "not_signed_in",
+    });
   });
 });
 

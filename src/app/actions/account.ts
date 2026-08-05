@@ -8,6 +8,8 @@ import { encryptToken } from "@/lib/crypto/token-cipher";
 import { freezeAccount } from "@/lib/account-lifecycle";
 import { OWNER_COOKIE } from "@/lib/auth/session";
 import { UserRole } from "@/lib/constants";
+import { configuredProvider } from "@/lib/llm/configured-provider";
+import { detectForeignProviderKey } from "@/lib/llm/key-shape";
 
 /**
  * #35 Phase C (#118) — the caller's OWN account settings.
@@ -42,6 +44,39 @@ export type AccountActionResult =
   | { ok: false; error: "not_signed_in" | "invalid_key" | "not_found" };
 
 /**
+ * #177 step 1 — `saveOwnLlmKey`'s outcomes, which are `AccountActionResult`
+ * plus one the other actions cannot produce.
+ *
+ * `wrong_provider_key` is a code of its OWN rather than another `invalid_key`,
+ * and it carries the three labels the panel needs to say something specific.
+ * The generic code is what made the original bug survive contact with the UI:
+ * "that key was not accepted" is exactly as actionable as the canned fallback
+ * breakdown the member was already staring at.
+ *
+ * EVERY FIELD IS A FIXED LABEL from `key-shape.ts`'s table. Nothing derived
+ * from the key travels back — the key decides which label, never what is in it.
+ * That is the same rule as rule 2 above: this value crosses into a client
+ * component, so a prefix echoed "to be helpful" would be a secret in an RSC
+ * payload.
+ *
+ * A separate union for the same reason `DeleteAccountResult` is one: a panel
+ * that has to handle impossible cases stops describing what can actually
+ * happen.
+ */
+export type SaveKeyResult =
+  | AccountActionResult
+  | {
+      ok: false;
+      error: "wrong_provider_key";
+      /** Provider whose format the pasted key unmistakably matches. */
+      looksLike: string;
+      /** Provider this instance is configured for. */
+      expectedProvider: string;
+      /** That provider's issued prefix, or null when it has no fixed one. */
+      expectedPrefix: string | null;
+    };
+
+/**
  * #153 — the self-serve deletion's outcomes. A separate union from
  * `AccountActionResult` on purpose: `invalid_key` and `not_found` are not
  * reachable here, and a panel that has to handle impossible cases stops
@@ -72,9 +107,7 @@ const CONTROL_CHARS = /[\u0000-\u001F\u007F]/;
 const NOT_SIGNED_IN = { ok: false, error: "not_signed_in" } as const;
 const INVALID_KEY = { ok: false, error: "invalid_key" } as const;
 
-export async function saveOwnLlmKey(
-  apiKey: string,
-): Promise<AccountActionResult> {
+export async function saveOwnLlmKey(apiKey: string): Promise<SaveKeyResult> {
   const me = await currentUser();
   if (!me) return NOT_SIGNED_IN;
 
@@ -85,6 +118,20 @@ export async function saveOwnLlmKey(
   if (!key || key.length > MAX_KEY_LENGTH || CONTROL_CHARS.test(key)) {
     return INVALID_KEY;
   }
+
+  // #177 — the fourth guard, and the only one that is about the key's CONTENT
+  // rather than its safety. Asymmetric by design: it refuses a key that
+  // unmistakably belongs to another provider, and stays out of the way of one
+  // it merely does not recognise. See key-shape.ts for why the reverse — a
+  // conformance check — would be worse than the bug it fixes.
+  //
+  // The provider comes from the instance's `LLM_PROVIDER`, not the caller's
+  // `User.llmProvider`: nothing in the app writes that column yet (#125 is the
+  // feature), so null is the only value it holds and reading it would be
+  // describing a choice nobody can make. When #125 lands, the expected provider
+  // becomes `me.llmProvider ?? configuredProvider()` and this is the call site.
+  const foreign = detectForeignProviderKey(key, configuredProvider());
+  if (foreign) return { ok: false, error: "wrong_provider_key", ...foreign };
 
   try {
     await prisma.user.update({

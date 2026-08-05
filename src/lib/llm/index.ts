@@ -1,6 +1,7 @@
 import type { LLMCredentials, LLMProvider } from "./types";
 import { createAnthropicProvider } from "./anthropic";
 import { createOpenAICompatibleProvider } from "./openai-compatible";
+import { configuredProvider } from "./configured-provider";
 import { LlmProvider } from "@/lib/constants";
 
 let cached: LLMProvider | undefined;
@@ -21,18 +22,16 @@ const PROVIDER_IDS = [
 
 type ProviderId = (typeof PROVIDER_IDS)[number];
 
-/** The deploy's own provider, with the "unknown value" warning it always had. */
-function instanceProvider(warnOnUnknown: boolean): ProviderId {
-  const provider = process.env.LLM_PROVIDER ?? "anthropic";
-  if (provider === "openai-compatible") return "openai-compatible";
-  if (provider !== "anthropic" && warnOnUnknown) {
-    // Unknown value → fall back to the safe default, but make it visible.
-    console.error(
-      `[llm] unknown LLM_PROVIDER="${provider}", defaulting to anthropic`,
-    );
-  }
-  return "anthropic";
-}
+/**
+ * The deploy's own provider, with the "unknown value" warning it always had.
+ *
+ * #177 moved the body to `./configured-provider`, which imports nothing but the
+ * constants: the key-shape guard in `saveOwnLlmKey` needs this answer and would
+ * otherwise drag both vendor SDKs into a server action that calls neither. The
+ * read still happens in exactly one place.
+ */
+const instanceProvider = (warnOnUnknown: boolean): ProviderId =>
+  configuredProvider(warnOnUnknown);
 
 function build(provider: ProviderId, creds?: LLMCredentials): LLMProvider {
   return provider === "openai-compatible"
