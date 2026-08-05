@@ -180,8 +180,25 @@ function makeMultiStep() {
   });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
+  // #168 — re-arm the two Google actions from scratch, because
+  // `vi.clearAllMocks()` clears recorded calls but NOT the
+  // `mockResolvedValueOnce` queue. Any spec that queues a once-value and then
+  // fails to trigger the call leaves it behind, and the NEXT spec to touch that
+  // mock consumes it instead of its own. That is what turned one dropped press
+  // into two red specs on ccbc8dc: the second failure reported a Reconnect link
+  // for a response it had mocked as `no_reclaim_list`, which sends anyone
+  // reading it to the wrong test. `mockReset()` is the part that drops the
+  // queue; the defaults then have to be restored, since it clears those too.
+  const { pushStepsToGoogleTasks, scheduleSingleTask } =
+    await import("@/app/actions/google-schedule");
+  const push = pushStepsToGoogleTasks as ReturnType<typeof vi.fn>;
+  const single = scheduleSingleTask as ReturnType<typeof vi.fn>;
+  push.mockReset();
+  push.mockResolvedValue({ ok: true, scheduled: 1, listTitle: "Reclaim" });
+  single.mockReset();
+  single.mockResolvedValue({ ok: true });
   scheduleViaIcsMock.mockResolvedValue({
     ok: true,
     ics: "BEGIN:VCALENDAR",
@@ -2218,6 +2235,83 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     ).toBeInTheDocument();
   });
 
+  it("holds every row's Schedule control while one row's schedule is in flight (#168)", async () => {
+    // The trap behind #168, pinned so the next spec to press two Schedule
+    // controls in sequence finds it documented rather than rediscovering it as
+    // a load-dependent flake.
+    //
+    // `pending` comes from ONE `useTransition` shared by the whole list
+    // (inbox-view.tsx:230) and every Schedule control carries
+    // `disabled={pending}` (row-actions.tsx), so an action started on one row
+    // disables the control on all of them.
+    //
+    // This spec pins that as OBSERVED BEHAVIOUR, not as correct behaviour —
+    // #169. An earlier version of this comment justified the shared lock as
+    // "pushing to Google Tasks is workspace-wide"; that is wrong, and the
+    // codebase disproves it. The same flag is flipped by 20 call sites through
+    // the generic `run()` — completeItem, renameItem, snoozeBrainDumpItem,
+    // deleteBrainDumpItem, freshenItem, keepAsTask, reopenItem, dismissPrompt —
+    // so RENAMING an item disables every Schedule button in the list, which no
+    // workspace-wide argument covers. `row-actions.tsx:44` documents the prop as
+    // "a schedule call for THIS row", and two of its own unit tests say the same,
+    // so the prop is honest about the intent and the parent does not honour it.
+    //
+    // Waiting for the control to be enabled is the right thing for a test to do
+    // either way, which is why this MR still lands ahead of #169: it removes a
+    // dropped press, and it does not depend on who wins the design argument.
+    //
+    // The consequence for tests is the part that cost a pipeline: `await
+    // user.click` does not await the transition, and `userEvent` discards a
+    // press on a disabled control WITHOUT raising anything. So a spec that
+    // presses a second Schedule control without waiting gets no error at the
+    // press — it gets a timeout, one second later, on a find for something that
+    // was never going to render. Holding the action's promise unresolved makes
+    // the window real rather than a race (the technique !237 and !264 used).
+    const { scheduleSingleTask, pushStepsToGoogleTasks } =
+      await import("@/app/actions/google-schedule");
+    let release!: (value: { ok: true }) => void;
+    (scheduleSingleTask as ReturnType<typeof vi.fn>).mockReturnValueOnce(
+      new Promise<{ ok: true }>((resolve) => {
+        release = resolve;
+      }),
+    );
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[
+          makeItem({ id: "st1", text: "single todo", status: "triaged" }),
+          makeMultiStep(),
+        ]}
+        settings={settings}
+        google={connected}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const rowA = screen.getByText("single todo").closest("li")!;
+    const rowB = screen.getByText("plan trip").closest("li")!;
+    const scheduleB = within(rowB).getByRole("button", { name: /schedule/i });
+    expect(scheduleB).toBeEnabled();
+
+    await user.click(within(rowA).getByRole("button", { name: /schedule/i }));
+    await user.click(within(rowA).getByRole("button", { name: /^30 min$/i }));
+    expect(scheduleB).toBeDisabled();
+
+    // The press that goes nowhere, and says nothing about having gone nowhere.
+    await user.click(scheduleB);
+    expect(pushStepsToGoogleTasks).not.toHaveBeenCalled();
+
+    // Settle the transition before returning. An unresolved action outliving
+    // the spec fires its state update during or after `afterEach(cleanup)`,
+    // which is the same class of nondeterminism this file is removing — raised
+    // by GitLab Duo on !264 and it applies verbatim here. The control becoming
+    // live again is the observable end of the transition, so waiting on it
+    // needs no arbitrary timeout.
+    release({ ok: true });
+    await waitFor(() => expect(scheduleB).toBeEnabled());
+  });
+
   it("a reconnect_required response clears a stale schedule error left on another row (Duo review)", async () => {
     const { scheduleSingleTask, pushStepsToGoogleTasks } =
       await import("@/app/actions/google-schedule");
@@ -2252,12 +2346,41 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     ).toBeInTheDocument();
     // Row B (multi-step) then hits the workspace-wide reconnect_required condition.
     const rowB = screen.getByText("plan trip").closest("li")!;
-    await user.click(within(rowB).getByRole("button", { name: /schedule/i }));
-    await within(rowB).findByRole("link", { name: /reconnect google/i });
-    // Row A's now-stale error must not sit beside a Reconnect prompt.
-    expect(
-      within(rowA).queryByText(/Reclaim-synced Google Tasks list/i),
-    ).not.toBeInTheDocument();
+    const scheduleB = within(rowB).getByRole("button", { name: /schedule/i });
+    // #168 — wait for row B's control to be live before pressing it, or this
+    // press is silently discarded and the spec fails 1000ms later on a find
+    // that could never have succeeded.
+    //
+    // Every Schedule control in the list is `disabled={pending}` from ONE
+    // shared `useTransition` (inbox-view.tsx:230), so row A's in-flight action
+    // disables row B's button too. **Not deliberately** — see #169; the same
+    // flag is set by rename, complete, snooze and delete, none of which is a
+    // workspace-wide operation. Row A's error text and the clearing of `pending` land in
+    // SEPARATE render passes, error first, and `await user.click` does not
+    // await the transition. Measured: at the instant the error text is inserted
+    // into the DOM, this button is still disabled. `findByText` above normally
+    // resolves after the second pass — but under full-suite load it can resolve
+    // inside the gap, and `userEvent` drops a press on a disabled control
+    // without raising anything. That is how this spec turned `main` red on
+    // ccbc8dc while passing 8/8 in isolation.
+    await waitFor(() => expect(scheduleB).toBeEnabled());
+    await user.click(scheduleB);
+    // One `waitFor` for both halves, deliberately: row A's now-stale error must
+    // not sit beside a Reconnect prompt, and a bare `queryByText(...).not.
+    // toBeInTheDocument()` cannot tell "already cleared" from "not rendered
+    // yet". Wrapping only the negative half would not help either — it passes
+    // on the first tick whether or not the clear has happened. Asserting the
+    // Reconnect link's presence and the error's absence in the SAME callback is
+    // what makes the absence mean something: it is retried until both hold at
+    // one instant (#168).
+    await waitFor(() => {
+      expect(
+        within(rowB).getByRole("link", { name: /reconnect google/i }),
+      ).toBeInTheDocument();
+      expect(
+        within(rowA).queryByText(/Reclaim-synced Google Tasks list/i),
+      ).not.toBeInTheDocument();
+    });
   });
 
   it("a scheduleSingleTask failure shows an inline error message under the row", async () => {
@@ -2312,12 +2435,19 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     await user.click(within(row).getByRole("button", { name: /schedule/i }));
     // The detailed "available lists" message wins over the generic dictionary
     // copy for the same reason ("Couldn't find your Reclaim-synced...").
-    expect(
-      await within(row).findByText(/Available: Personal, Work/),
-    ).toBeInTheDocument();
-    expect(
-      within(row).queryByText(/Couldn't find your Reclaim-synced/),
-    ).not.toBeInTheDocument();
+    //
+    // Both halves in one `waitFor`, for the reason spelled out on the
+    // reconnect_required spec above: the two strings are alternatives for the
+    // same slot, so "the generic copy is absent" only carries information at an
+    // instant where the specific one is present (#168).
+    await waitFor(() => {
+      expect(
+        within(row).getByText(/Available: Personal, Work/),
+      ).toBeInTheDocument();
+      expect(
+        within(row).queryByText(/Couldn't find your Reclaim-synced/),
+      ).not.toBeInTheDocument();
+    });
   });
 });
 
