@@ -70,6 +70,23 @@ vi.mock("@/app/actions/ics-schedule", () => ({
   scheduleViaIcs: scheduleViaIcsMock,
 }));
 vi.mock("@/lib/download-ics", () => ({ downloadIcs: downloadIcsMock }));
+// #44 — the rows mount the note disclosure, so its actions must exist.
+vi.mock("@/app/actions/task-notes", () => ({
+  updateTaskNotes: vi
+    .fn()
+    .mockImplementation(async (_id: string, notes: string | null) => ({
+      ok: true,
+      notes,
+    })),
+}));
+vi.mock("@/app/actions/step-notes", () => ({
+  updateStepNotes: vi
+    .fn()
+    .mockImplementation(async (_id: string, notes: string | null) => ({
+      ok: true,
+      notes,
+    })),
+}));
 
 vi.mock("@/lib/notifications", () => ({
   notificationPermission: () => "default",
@@ -2844,5 +2861,46 @@ describe("InboxView — resume banner (Task 3, #8)", () => {
     expect(
       screen.queryByRole("link", { name: /resume/i }),
     ).not.toBeInTheDocument();
+  });
+});
+
+// ── #44 — the note affordance at the TASK grain in the Inbox ────────────────
+//
+// The Inbox got step notes with #44's first pass (through the expanded
+// <TaskSteps>) and no task note. Same class of gap the owner found in the
+// Library: a surface that renders a task and offers no way to annotate it.
+// A component test cannot see this — only a test that renders the SURFACE can.
+describe("InboxView — the task note (#44)", () => {
+  const render1 = (item: Item) =>
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[item]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+
+  it("offers a note on a task-backed to-do row, named after the task", () => {
+    render1(
+      makeItem({
+        id: "s1",
+        text: "Renew the passport",
+        status: "triaged",
+        triagedAt: new Date(),
+        taskId: "t1",
+      }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Add note for Renew the passport" }),
+    ).toBeTruthy();
+  });
+
+  it("offers no note on an untriaged item with no Task behind it", () => {
+    // A brain-dump item in Needs review has no `Task` row yet, so there is no
+    // `notes` column to write to. Absent rather than present-and-failing.
+    render1(makeItem({ id: "n1", text: "raw thought", taskId: null }));
+    expect(screen.queryByRole("button", { name: /add note/i })).toBeNull();
   });
 });

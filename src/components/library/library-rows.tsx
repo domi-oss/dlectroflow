@@ -19,6 +19,7 @@ import { formatWake } from "@/lib/format";
 import { useSelectMode } from "./use-select-mode";
 import { SelectActionBar } from "./select-action-bar";
 import { RowNumber, AgeLabel, singleTaskEstimate } from "./library-row-meta";
+import { TaskNoteRow } from "@/components/breakdown/task-note";
 
 /**
  * Inline estimate editor for a single-task ("plated") row — mirrors the
@@ -312,6 +313,21 @@ export function LibraryRows({
                     </button>,
                     deleteControl(item.id, "delete-m", { fullWidth: true }),
                   ]}
+                />
+              )}
+
+              {/* #44 — the note, below the action line so the row's primary
+                  controls keep their position. Collapsed when empty, which is
+                  what keeps a long list readable; renders nothing at all when
+                  the row has no `Task` behind it. This row grain is the gap the
+                  owner found: multi-step tasks reached a note through their
+                  expanded steps and single-step ones had no route to one. */}
+              {!selecting && (
+                <TaskNoteRow
+                  taskId={item.taskId}
+                  taskTitle={item.text}
+                  notes={item.notes}
+                  voice={voice}
                 />
               )}
             </li>

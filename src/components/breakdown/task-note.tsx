@@ -47,6 +47,65 @@ export function TaskNote({
 }
 
 /**
+ * The task note as a LIST ROW mounts it (#44).
+ *
+ * One wrapper for the Inbox and both Library components, rather than the same
+ * three-line conditional written out three times — the gap this exists to close
+ * was exactly a surface where somebody wrote it twice and missed the third.
+ *
+ * `taskId` is nullable across every one of those surfaces, and the null is not
+ * an edge case: a brain-dump item that has never been triaged has NO `Task`
+ * row, so there is no `notes` column to write to. Rendering nothing is correct
+ * — the alternative is an affordance whose save can only fail.
+ *
+ * ## Where the note is offered, and where it deliberately is not (#44)
+ *
+ * Kept here because a deliberate absence and a forgotten one look identical in
+ * a diff, which is how the Library gap shipped.
+ *
+ * | Surface | Grain | Note | Why |
+ * |---|---|---|---|
+ * | `/tasks/[id]` header card | task | editable | the task's home |
+ * | `/tasks/[id]` step rows | step | editable | `TaskSteps` |
+ * | `/tasks/[id]` done step rows | step | read-only | annotating finished work has no purpose; hiding what was written would be worse |
+ * | `/` Inbox rows | task | editable | via this component |
+ * | `/` Inbox expanded step rows | step | editable | `TaskSteps` |
+ * | `/library` Single-task + Saved-for-later | task | editable | via this component |
+ * | `/library` Multi-step row | task | editable | via this component |
+ * | `/library` Multi-step expanded steps | step | editable | `TaskSteps` |
+ * | `/library` Done | task | read-only | a closure view with no other controls; same call as a done step row |
+ * | `/focus/[stepId]` session | task + step | read-only | see `FocusNotes` in the timer — the point of the surface is not editing |
+ * | `/focus` launcher lanes | task + step | none | a navigation list; every entry is a link INTO the session, which shows the note |
+ * | `/tasks/[id]?edit=1` breakdown chat | task + proposed steps | none | the steps are an unsaved model proposal with no ids, so a step note has nowhere to live; the working view one click away owns the task note |
+ * | Dashboard | none | none | aggregates and badges, no task or step rows |
+ * | Any row with `taskId === null` | — | none | no `Task` row exists, so there is no column to write |
+ */
+export function TaskNoteRow({
+  taskId,
+  taskTitle,
+  notes,
+  voice,
+  autoSaveDelayMs,
+}: {
+  taskId: string | null;
+  taskTitle: string;
+  notes?: string | null;
+  voice: Voice;
+  autoSaveDelayMs?: number;
+}) {
+  if (!taskId) return null;
+  return (
+    <TaskNote
+      taskId={taskId}
+      taskTitle={taskTitle}
+      notes={notes ?? null}
+      voice={voice}
+      autoSaveDelayMs={autoSaveDelayMs}
+    />
+  );
+}
+
+/**
  * The same disclosure bound to one step.
  *
  * `subject` names the step by POSITION as well as text — "step 2 of 5: Plan" —

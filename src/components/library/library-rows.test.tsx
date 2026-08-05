@@ -295,3 +295,83 @@ describe("LibraryRows (plated) — meta, editable estimate, select mode", () => 
     );
   });
 });
+
+// ── #44 — the note affordance on a SINGLE-STEP task row ─────────────────────
+//
+// The gap the owner found on the review app: multi-step tasks reached the note
+// through their expanded step list, and single-step ones — which are real
+// `Task` rows with a real `notes` column — had no route to it at all outside
+// /tasks/[id]. The component tests for `NoteField` all passed throughout,
+// because a component test cannot see a surface that never mounts the
+// component. These assert PRESENCE on the surface.
+describe("LibraryRows — the note affordance (#44)", () => {
+  it("offers a note on a task-backed plated row, named after the task", () => {
+    render(
+      <LibraryRows
+        items={[
+          makeItem({ id: "p1", text: "Renew the passport", taskId: "t1" }),
+        ]}
+        tab="plated"
+        voice="plain"
+        now={Date.now()}
+        settings={settings}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Add note for Renew the passport" }),
+    ).toBeTruthy();
+  });
+
+  it("shows an existing note as text without expanding anything", () => {
+    render(
+      <LibraryRows
+        items={[
+          makeItem({
+            id: "p1",
+            text: "Renew the passport",
+            taskId: "t1",
+            notes: "photo booth on the high street",
+          }),
+        ]}
+        tab="plated"
+        voice="plain"
+        now={Date.now()}
+        settings={settings}
+      />,
+    );
+    expect(screen.getByTestId("note-text").textContent).toBe(
+      "photo booth on the high street",
+    );
+  });
+
+  it("offers no note on a row with no Task behind it", () => {
+    // A saved-for-later brain-dump item that has never been triaged has no
+    // `Task` row, so there is no `notes` column to write to. The affordance is
+    // absent rather than present-and-failing.
+    render(
+      <LibraryRows
+        items={[makeItem({ id: "s1", text: "someday maybe", taskId: null })]}
+        tab="pantry"
+        voice="plain"
+        now={Date.now()}
+        settings={settings}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /add note/i })).toBeNull();
+  });
+
+  it("offers a note on a task-backed pantry row", () => {
+    render(
+      <LibraryRows
+        items={[makeItem({ id: "s2", text: "later thing", taskId: "t2" })]}
+        tab="pantry"
+        voice="plain"
+        now={Date.now()}
+        settings={settings}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Add note for later thing" }),
+    ).toBeTruthy();
+  });
+});

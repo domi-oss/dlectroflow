@@ -104,7 +104,7 @@ describe("LibraryMultistep", () => {
         settings={settings}
       />,
     );
-    const title = screen.getByRole("button", { name: /task old/i });
+    const title = screen.getByRole("button", { name: "task old" });
     expect(title.className).toMatch(/text-base/);
     expect(title.className).toMatch(/font-semibold/);
   });
@@ -118,7 +118,7 @@ describe("LibraryMultistep", () => {
         settings={settings}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /task old/i }));
+    fireEvent.click(screen.getByRole("button", { name: "task old" }));
     expect(screen.getByTestId("task-steps")).toHaveTextContent("Told");
   });
   it("shows next-step + estimate meta on a collapsed row", () => {
@@ -135,7 +135,7 @@ describe("LibraryMultistep", () => {
     // but a broad query could also match text inside the expanded "new" row's
     // stubbed TaskSteps subtree, so scope with within(row).
     const oldRow = screen
-      .getByRole("button", { name: /task old/i })
+      .getByRole("button", { name: "task old" })
       .closest("li")!;
     expect(within(oldRow).getByText("first", { selector: "*" })).toBeTruthy();
     // Both of "old"'s steps are not-done (10 + 5 min), so the collapsed row's
@@ -186,7 +186,7 @@ describe("LibraryMultistep", () => {
     );
     // Collapse the auto-opened row so the collapsed-row meta (pills) render.
     fireEvent.click(screen.getByRole("button", { name: /^collapse all$/i }));
-    const row = screen.getByRole("button", { name: /task p/i }).closest("li")!;
+    const row = screen.getByRole("button", { name: "task p" }).closest("li")!;
     // Total = 4 (paused step's remaining) + 5 (not-started step) = 9, not the
     // raw 10 + 5 = 15 the old estimate-sum would have shown.
     expect(within(row).getByText(/≈9\s*min left/)).toBeTruthy();
@@ -205,7 +205,7 @@ describe("LibraryMultistep", () => {
     // rows that's step "a" ("🍳"). Scope to one row so this can't accidentally
     // match the sibling row's identical emoji.
     const newRow = screen
-      .getByRole("button", { name: /task new/i })
+      .getByRole("button", { name: "task new" })
       .closest("li")!;
     expect(within(newRow).getByText("🍳")).toBeTruthy();
   });
@@ -232,9 +232,9 @@ describe("LibraryMultistep", () => {
     fireEvent.click(screen.getByRole("button", { name: /^select$/i }));
     // "old" starts collapsed (only "new" opens by default) — tap its title.
     const oldRow = screen
-      .getByRole("button", { name: /task old/i })
+      .getByRole("button", { name: "task old" })
       .closest("li")!;
-    fireEvent.click(within(oldRow).getByRole("button", { name: /task old/i }));
+    fireEvent.click(within(oldRow).getByRole("button", { name: "task old" }));
     expect(
       within(oldRow).getByRole("checkbox", { name: /task old/i }),
     ).toBeChecked();
@@ -249,8 +249,8 @@ describe("LibraryMultistep", () => {
         settings={settings}
       />,
     );
-    const newTitle = screen.getByRole("button", { name: /task new/i });
-    const oldTitle = screen.getByRole("button", { name: /task old/i });
+    const newTitle = screen.getByRole("button", { name: "task new" });
+    const oldTitle = screen.getByRole("button", { name: "task old" });
     // "new" opens by default — expanded, with aria-controls pointing at its panel.
     expect(newTitle).toHaveAttribute("aria-expanded", "true");
     expect(newTitle).toHaveAttribute("aria-controls", "lib-steps-new");
@@ -264,10 +264,10 @@ describe("LibraryMultistep", () => {
     // it's not announced as expandable while a tap just toggles selection.
     fireEvent.click(screen.getByRole("button", { name: /^select$/i }));
     expect(
-      screen.getByRole("button", { name: /task new/i }),
+      screen.getByRole("button", { name: "task new" }),
     ).not.toHaveAttribute("aria-expanded");
     expect(
-      screen.getByRole("button", { name: /task old/i }),
+      screen.getByRole("button", { name: "task old" }),
     ).not.toHaveAttribute("aria-expanded");
   });
   it("select mode: Select → tick a row → Delete calls bulkBrainDumpAction", async () => {
@@ -336,7 +336,7 @@ describe("LibraryMultistep", () => {
     fireEvent.click(screen.getByRole("button", { name: /^collapse all$/i }));
     expect(screen.queryByTestId("task-steps")).toBeNull();
     // Also collapses the row's aria-expanded state.
-    expect(screen.getByRole("button", { name: /task new/i })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "task new" })).toHaveAttribute(
       "aria-expanded",
       "false",
     );
@@ -404,5 +404,39 @@ describe("LibraryMultistep", () => {
       openTask.compareDocumentPosition(toggle) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+});
+
+// ── #44 — the note affordance at the TASK grain on a multi-step row ─────────
+//
+// Its steps already reach their own notes through the expanded step list. The
+// task's own note is a different thing — context for the whole task — and had
+// no route here either.
+describe("LibraryMultistep — the task note (#44)", () => {
+  it("offers a note named after the task, not after one of its steps", () => {
+    render(
+      <LibraryMultistep
+        items={[mk("new", new Date("2026-07-18"))]}
+        voice="plain"
+        now={Date.now()}
+        settings={settings}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Add note for task new" }),
+    ).toBeTruthy();
+  });
+
+  it("shows an existing task note as text", () => {
+    const item = { ...mk("new", new Date("2026-07-18")), notes: "ring ahead" };
+    render(
+      <LibraryMultistep
+        items={[item]}
+        voice="plain"
+        now={Date.now()}
+        settings={settings}
+      />,
+    );
+    expect(screen.getByTestId("note-text").textContent).toBe("ring ahead");
   });
 });

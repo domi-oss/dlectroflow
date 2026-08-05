@@ -2625,3 +2625,38 @@ describe("FocusTimer — where a finished TASK goes (#142)", () => {
     await waitFor(() => expect(push).toHaveBeenCalledWith("/focus/new-step"));
   });
 });
+
+// ── #44 — the jotted context, present while you do the work ─────────────────
+//
+// The issue asks for the note in the focus session specifically: "the context
+// you jotted is right there while you're doing the work". READ-ONLY here, and
+// that is the decision — the session exists to remove decisions, and a text
+// field with an autosave is an invitation to edit rather than to work. Every
+// other surface can edit it.
+describe("FocusTimer — the notes for this work (#44)", () => {
+  it("shows the task's note", () => {
+    render(<FocusTimer {...base({ taskNote: "bring the Figma link" })} />);
+    expect(screen.getByText("bring the Figma link")).toBeInTheDocument();
+  });
+
+  it("shows the step's own note as well as the task's", () => {
+    render(
+      <FocusTimer
+        {...base({ taskNote: "bring the Figma link", stepNote: "call Sam" })}
+      />,
+    );
+    expect(screen.getByText("bring the Figma link")).toBeInTheDocument();
+    expect(screen.getByText("call Sam")).toBeInTheDocument();
+  });
+
+  it("renders no note region at all when neither exists", () => {
+    render(<FocusTimer {...base()} />);
+    expect(screen.queryByTestId("note-text")).toBeNull();
+  });
+
+  it("offers no way to EDIT here — no textbox and no Add note", () => {
+    render(<FocusTimer {...base({ taskNote: "read only" })} />);
+    expect(screen.queryByRole("button", { name: /add note/i })).toBeNull();
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+});

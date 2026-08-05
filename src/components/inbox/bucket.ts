@@ -28,6 +28,15 @@ export type Item = {
   scheduledAt: Date | null;
   /** Single-task time estimate in minutes; null → display default of 5. */
   estMinutes: number | null;
+  /** #44 — the freeform note on the `Task` behind this item; null when the task
+   *  has none, and meaningless when `taskId` is null because there is then no
+   *  row to hold one.
+   *
+   *  OPTIONAL for the same reason the per-step `notes` below is: not every read
+   *  site fetches it. The Inbox and Library pages do, because both render task
+   *  rows the owner manages from; the focus launcher builds the same `Item`
+   *  shape to pick what to work on next and renders no note. */
+  notes?: string | null;
   steps: {
     id: string;
     order: number;

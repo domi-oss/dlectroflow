@@ -64,6 +64,7 @@ import { downloadIcs } from "@/lib/download-ics";
 import type { GoogleConnStatus, ScheduleIntent } from "@/lib/scheduling/types";
 import { StatusPill } from "@/components/inbox/status-pill";
 import { TaskSteps } from "@/components/breakdown/task-steps";
+import { TaskNoteRow } from "@/components/breakdown/task-note";
 import {
   bucketItems,
   bucketOfItem,
@@ -1187,6 +1188,21 @@ export function InboxView({
                             {scheduleErrors[item.id]}
                           </p>
                         )}
+
+                        {/* #44 — the TASK's note. Below the action line, and
+                            rendered only for a row that HAS a task: an
+                            untriaged brain-dump item has no `Task` row, so
+                            there is no `notes` column to write to. Distinct
+                            from the per-step notes inside <TaskSteps> below,
+                            which are context for one step rather than for the
+                            whole to-do. */}
+                        <TaskNoteRow
+                          taskId={item.taskId}
+                          taskTitle={item.text}
+                          notes={item.notes}
+                          voice={voice}
+                        />
+
                         {expanded && item.taskId && (
                           <div className="mt-2">
                             <TaskSteps
@@ -1356,6 +1372,18 @@ export function InboxView({
                             {scheduleErrors[item.id]}
                           </p>
                         )}
+
+                        {/* #44 — a single-step to-do is a real `Task` row with
+                            a real `notes` column, and this is the Inbox twin of
+                            the Library gap: it has no steps to reach a note
+                            through, so without this there is no route to one
+                            outside /tasks/[id]. */}
+                        <TaskNoteRow
+                          taskId={item.taskId}
+                          taskTitle={item.text}
+                          notes={item.notes}
+                          voice={voice}
+                        />
                       </li>
                     );
                   })}
@@ -1962,6 +1990,15 @@ function EmptyBucket({ voice }: { voice: Voice }) {
   );
 }
 
+/**
+ * A Needs-review row: an untriaged brain-dump item.
+ *
+ * #44 — NO note affordance here, deliberately. An item in this bucket has not
+ * been triaged, which is precisely the state in which it has no `Task` row —
+ * and therefore no `notes` column to write to. The affordance would render as
+ * nothing on every row this bucket can hold. The moment triage creates a task,
+ * the row moves to To-do or Multi-step, both of which offer it.
+ */
 function ItemRow({
   item,
   settings,

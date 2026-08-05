@@ -93,6 +93,9 @@ export default async function InboxPage({
     stepsTotal: task?.steps.length ?? 0,
     stepsDone: task?.steps.filter((s) => s.done).length ?? 0,
     taskStatus: task?.status ?? null,
+    // #44 — the task's own note, for the row-level disclosure. `task` is the
+    // workspace-scoped relation already loaded here, so this costs no query.
+    notes: task?.notes ?? null,
     completedAt: item.completedAt,
     scheduledAt: task?.scheduledAt ?? null,
     estMinutes: item.estMinutes,
