@@ -25,7 +25,10 @@ describe("section registries (#72)", () => {
     // 10 since #118 Phase C added the signed-in-only Account section (9 after
     // #35 Phase B's owner-only People section).
     expect(SETTINGS_SECTIONS.length).toBe(10);
-    expect(HELP_SECTIONS.length).toBe(6);
+    // 7 since #129/#153 added Help's "Your data" section — export and
+    // self-deletion are rights a reader arrives looking for, so they are a named
+    // section rather than a line inside another one.
+    expect(HELP_SECTIONS.length).toBe(7);
   });
 
   it("resolves a settings label through the app voice — one source for nav + <h2>", () => {

@@ -12,6 +12,14 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/app/actions/settings", () => ({
   updateFocusTimerSettings: vi.fn().mockResolvedValue(undefined),
 }));
+// #70 — the picker offers a category only once the merged list actually holds
+// more than one track in it, so `useFocusCatalog` is the seam these specs drive.
+// Default: the bundled ten, i.e. an instance with no reachable catalog, which is
+// what every pre-#70 assertion in this file measures.
+const useFocusCatalogMock = vi.fn();
+vi.mock("@/lib/use-focus-catalog", () => ({
+  useFocusCatalog: () => useFocusCatalogMock(),
+}));
 import { updateFocusTimerSettings } from "@/app/actions/settings";
 
 // Fake <audio> so preview clicks don't hit jsdom's unimplemented media API.
@@ -34,6 +42,7 @@ afterEach(cleanup);
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubGlobal("Audio", FakeAudio as unknown as typeof Audio);
+  useFocusCatalogMock.mockReturnValue(FOCUS_SOUND_TRACKS);
 });
 
 // #101 — every settings section is a disclosure now. Focus timer is the ONE the
@@ -47,6 +56,7 @@ const base = {
   keepAwake: true,
   alarmEnabled: true,
   sound: "off",
+  category: null as string | null,
   pauseTogether: false,
   voice: "plain" as const,
 };
@@ -112,6 +122,7 @@ describe("FocusTimerSection", () => {
         keepAwake: true,
         alarmEnabled: true,
         sound: "off",
+        category: null,
         pauseTogether: false,
       }),
     );
@@ -215,6 +226,181 @@ describe("FocusTimerSection", () => {
     expect(
       screen.getByRole("button", { name: /^preview — aurora on mute/i }),
     ).toHaveAttribute("aria-pressed", "false");
+  });
+});
+
+/**
+ * #70 — the category picker.
+ *
+ * The decision these specs encode, because it is the one thing about this feature
+ * that is not obvious from the code: **an instance with no reachable catalog is
+ * offered no categories at all** — not ten disabled ones, and not ten that each
+ * play a single track.
+ *
+ * That is what #70 was blocked on. #43 bundles ten tracks, one per category, so a
+ * category picker on a default install would be a second way of saying "this
+ * track", dressed up as a playlist. Ten `aria-disabled` radios would be worse
+ * again: a screen-reader user would traverse ten options that do nothing, for a
+ * capability the settings page cannot grant. So the group is absent until the data
+ * makes it real, which also means the markup on a default install is exactly what
+ * it was before this feature existed.
+ */
+describe("FocusTimerSection — category playlists (#70)", () => {
+  const streamed = (name: string, category: string, label: string) => ({
+    id: `catalog:${name}.mp3`,
+    title: name,
+    category,
+    categoryLabel: label,
+    src: `/api/focus-catalog/audio?track=${name}.mp3`,
+  });
+  const GROWN = [
+    ...FOCUS_SOUND_TRACKS,
+    streamed("paper-cranes", "chillhop", "Chillhop"),
+    streamed("second-wind", "chillhop", "Chillhop"),
+    streamed("terrace-dust", "jazzhop", "Jazz hop"),
+  ];
+
+  const categoryRadios = () =>
+    screen
+      .getAllByRole("radio")
+      .filter(
+        (r) =>
+          r.getAttribute("name") === "focusSound" &&
+          (
+            r.getAttribute("aria-label") ??
+            r.closest("label")?.textContent ??
+            ""
+          )
+            .toLowerCase()
+            .includes("whole category"),
+      );
+
+  it("offers no category at all when every category holds one track", () => {
+    // The default install, and the whole no-catalog decision in one assertion.
+    render(<FocusTimerSection {...base} />);
+    expect(categoryRadios()).toHaveLength(0);
+    // Not hidden-but-present, and not disabled either: absent.
+    expect(screen.queryByText(/whole category/i)).toBeNull();
+    const soundRadios = screen
+      .getAllByRole("radio")
+      .filter((r) => r.getAttribute("name") === "focusSound");
+    expect(soundRadios).toHaveLength(FOCUS_SOUND_TRACKS.length + 1);
+  });
+
+  it("offers a category once the catalog gives it more than one track", () => {
+    useFocusCatalogMock.mockReturnValue(GROWN);
+    render(<FocusTimerSection {...base} />);
+    expect(categoryRadios()).toHaveLength(2);
+    expect(
+      screen.getByRole("radio", { name: /chillhop — whole category/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("radio", { name: /jazz hop — whole category/i }),
+    ).toBeInTheDocument();
+    // Only the two that reached the floor — the other eight still hold one track.
+    expect(
+      screen.queryByRole("radio", { name: /late night — whole category/i }),
+    ).toBeNull();
+  });
+
+  it("names how many tracks a category holds, in the accessible name", () => {
+    // A radio called "Chillhop" next to a track called "Porchlight Golden Hour ·
+    // Chillhop" is ambiguous read aloud, so the count and the word "category" are
+    // part of the label rather than decoration around it.
+    useFocusCatalogMock.mockReturnValue(GROWN);
+    render(<FocusTimerSection {...base} />);
+    expect(
+      screen.getByRole("radio", {
+        name: /chillhop — whole category · 3 tracks/i,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not offer a category the database could not store", () => {
+    // A self-hoster's own manifest category: the tracks play, but
+    // Settings_focusSoundCategory_check would reject the slug, so a radio for it
+    // would silently fail to stick.
+    useFocusCatalogMock.mockReturnValue([
+      ...FOCUS_SOUND_TRACKS,
+      streamed("wind-one", "wind-chimes", "Wind chimes"),
+      streamed("wind-two", "wind-chimes", "Wind chimes"),
+    ]);
+    render(<FocusTimerSection {...base} />);
+    expect(categoryRadios()).toHaveLength(0);
+  });
+
+  it("picking a category saves the slug and the track the session opens on", async () => {
+    useFocusCatalogMock.mockReturnValue(GROWN);
+    const user = userEvent.setup();
+    render(<FocusTimerSection {...base} />);
+    await user.click(
+      screen.getByRole("radio", { name: /chillhop — whole category/i }),
+    );
+    await waitFor(() =>
+      expect(updateFocusTimerSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sound: "lofi_chillhop",
+          category: "chillhop",
+        }),
+      ),
+    );
+  });
+
+  it("seeds the checked state from the stored category, not from the track", () => {
+    useFocusCatalogMock.mockReturnValue(GROWN);
+    render(
+      <FocusTimerSection {...base} sound="lofi_chillhop" category="chillhop" />,
+    );
+    expect(
+      screen.getByRole("radio", { name: /chillhop — whole category/i }),
+    ).toBeChecked();
+    // The individual chillhop track must NOT also read as selected — they are one
+    // radio group, and two checked radios in it would be a lie about the state.
+    expect(
+      screen.getByRole("radio", { name: /porchlight golden hour/i }),
+    ).not.toBeChecked();
+  });
+
+  it("picking an individual track clears the category", async () => {
+    useFocusCatalogMock.mockReturnValue(GROWN);
+    const user = userEvent.setup();
+    render(
+      <FocusTimerSection {...base} sound="lofi_chillhop" category="chillhop" />,
+    );
+    await user.click(screen.getByRole("radio", { name: /3 am echoes/i }));
+    await waitFor(() =>
+      expect(updateFocusTimerSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ sound: "lofi_late_night", category: null }),
+      ),
+    );
+  });
+
+  it("picking Off clears the category", async () => {
+    useFocusCatalogMock.mockReturnValue(GROWN);
+    const user = userEvent.setup();
+    render(
+      <FocusTimerSection {...base} sound="lofi_chillhop" category="chillhop" />,
+    );
+    await user.click(screen.getByRole("radio", { name: /^off$/i }));
+    await waitFor(() =>
+      expect(updateFocusTimerSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ sound: "off", category: null }),
+      ),
+    );
+  });
+
+  it("still shows a stored category that has shrunk below the offer floor", async () => {
+    // The store stopped answering. The selection is still live (the player
+    // honours it), so hiding the only control that could change it would leave a
+    // preference nobody can see or clear.
+    render(
+      <FocusTimerSection {...base} sound="lofi_chillhop" category="chillhop" />,
+    );
+    const radio = screen.getByRole("radio", {
+      name: /chillhop — whole category/i,
+    });
+    expect(radio).toBeChecked();
+    expect(categoryRadios()).toHaveLength(1);
   });
 });
 

@@ -53,11 +53,13 @@ This is **in active development**. Being honest so you don't hit surprises:
 | ✂️ AI task breakdown (streaming chat) | ✅ works — Claude by default (needs an Anthropic API key) |
 | 🤖 Bring your own LLM (`LLM_PROVIDER`) | ⚠️ **partly** — `anthropic` is what runs in production; `openai-compatible` ships but is unit-tested only, and **no human has yet run it against a real non-Anthropic endpoint** (see [BYO-LLM](#-bring-your-own-llm-byo-llm)) |
 | 📅 Scheduling (breakdown → Google Tasks) | ✅ works — connect Google from **Settings → Integrations** (or right from a breakdown) and steps land in your Google Tasks list, durations parsed; a Reclaim-synced list is scheduled automatically (see [Connecting Google Tasks](#-connecting-google-tasks)). No Google? Steps save locally, export as `.ics`, or **subscribe to a private calendar feed** that stays in sync (see [No Google account?](#no-google-account-ics-still-works)). |
-| ⏱️ Focus timer — true pause/resume, one-number setup screen | ✅ works |
-| 🎧 Focus music — 10 bundled CC0 lo-fi tracks, in-session mini-player, shuffle | ✅ works (see [Focus music](#-focus-music)) |
+| ⏱️ Focus timer — true pause/resume, one-number setup screen, auto-advance | ✅ works — finishing a step no longer dead-ends: a 5-second countdown opens the **next step's start screen**, and nothing starts its timer for you. **Escape** cancels, as does a **Stay here** button. **Hyper focus mode** extends the same chaining to single-task to-dos and is **off by default**. |
+| 🎧 Focus music — 10 bundled CC0 lo-fi tracks, in-session mini-player, shuffle | ✅ works — plus an optional operator-run store for the full 166-track catalogue via `FOCUS_CATALOG_ORIGIN` (off by default). The browser never contacts that store either way (see [Focus music](#-focus-music)). |
 | 🎉 Rewards & streaks + dashboard | ✅ works |
 | 🌇 End-of-day round-up (in-app + desktop) | ✅ works |
 | ✉️ Round-up **email** (opt-in) | ✅ works when `RESEND_API_KEY` is set; cleanly disabled otherwise |
+| 📦 Export your own data | ✅ works — **Settings → Account → Download my data (.zip)**: one archive holding a readable `tasks.md`, three CSVs, a `scheduled.ics` and a lossless `export.json`, with a README inside explaining each. Your Google connection and any stored LLM key are **never** exported. |
+| 🗑️ Delete your own account | ✅ works — **Settings → Account → Delete my account**, behind a modal that needs the word `delete` typed. It signs you out and freezes the account rather than destroying it, so an accident can be undone by whoever runs the instance within the retention window; the final deletion is **a hand operation today, not a scheduled job**. The instance owner is refused (an owner-less instance has no way back). |
 | 🐳 Postgres + GitLab CI/CD | ✅ **live** — deployed to GKE Autopilot at **[dlectroflow.dev](https://dlectroflow.dev)** (valid TLS) via GitLab CI/CD; every MR gets a review app. Local Postgres via Docker Compose. |
 
 If all you want right now is **capture → Claude breakdown**, that's fully working
@@ -345,8 +347,9 @@ one would be a link that quietly dies.
 
 ## 🎧 Focus music
 
-Optional lo-fi to focus to, bundled with the app — no streaming account, no media
-service, works offline.
+Optional lo-fi to focus to. Ten tracks ship inside the app — no streaming account,
+works offline — and an operator can serve the rest of the catalogue without the
+browser ever talking to anything but the app itself.
 
 - **10 tracks**, one per genre category, in `public/audio/lofi/`. Every file is
   **CC0 1.0 (public domain)**; per-file provenance is in
@@ -360,7 +363,40 @@ service, works offline.
 - **The playlist advances itself** when a track ends, and plays every track once
   before starting a new pass (shuffled or in order) — no accidental repeats.
 
-Streaming a bigger catalogue is a later release (#61); this is the bundled set.
+### The full catalogue (optional, off by default)
+
+The bundled ten are one track per open-lofi category. The whole set is **166
+tracks / ~544 MB**, which is too much to put in a container image, so the rest is
+read at run time from wherever the operator keeps it:
+
+```bash
+# Point the app at a directory holding the extracted openlofi.zip
+# (the mp3s plus catalog.json). Unset — the default — nothing changes.
+FOCUS_CATALOG_ORIGIN=https://your-store.example.com/openlofi
+```
+
+On Kubernetes it is the chart value `focus.catalogOrigin`, which renders into the
+app Secret and is omitted entirely when empty. Setup walkthroughs:
+[docs/deploy-runbook.md](docs/deploy-runbook.md) § 9b (GKE) and
+[docs/self-host-vps.md](docs/self-host-vps.md) (Compose).
+
+> [!IMPORTANT]
+> **The browser never contacts that store.** The Content-Security-Policy is
+> unchanged — `default-src 'self'` with `media-src` unset — so a browser refuses
+> audio from any other origin. The **server** fetches the bytes and streams them
+> back through `/api/focus-catalog/audio`, forwarding `Range` so seeking still
+> works. Any credential the store needs therefore stays server-side as a
+> consequence rather than as a promise, and pointing the player at the store
+> directly would need a CSP relaxation that
+> `src/lib/security-headers.test.ts` fails the build over.
+
+**Nothing about it is load-bearing.** Unset, unreachable, or serving a broken
+manifest, the player falls back to the bundled ten and a session never starts
+silent. A configured store that does not answer logs `focus_catalog_unavailable`
+once per session (with the reason), so the degradation is visible rather than
+silent. Licence and provenance for the streamed set are in
+[`public/audio/LICENSE.md`](public/audio/LICENSE.md) — the app validates the
+*shape* of what it is served, never the licence of the bytes.
 
 ---
 
@@ -538,7 +574,7 @@ practice, or $0 if you point it at a model you run yourself.
 - **Provider-agnostic LLM seam** (`src/lib/llm/`) — **Claude API** by default (`@anthropic-ai/sdk`, streaming with adaptive thinking; model is configurable — defaults to `claude-sonnet-4-6` for owners and `claude-haiku-4-5` for guests, see [Phase 2](#phase-2-guest-access--ai-cost-controls))
 - …or **any OpenAI-compatible endpoint** via the `openai` SDK — a local runner or another vendor (see [BYO-LLM](#-bring-your-own-llm-byo-llm))
 - **Google Tasks API** via OAuth 2.0 (the scheduling integration; Reclaim syncs that list from its own side) + a zero-OAuth `.ics` download as the universal fallback
-- Bundled **CC0** focus audio under `public/audio/` — no external media service
+- Bundled **CC0** focus audio under `public/audio/`, plus an optional operator-run store for the full catalogue that is **proxied server-side** — the browser still only ever talks to the app's own origin (`default-src 'self'`, `media-src` unset)
 - Deploy: **Docker** → GKE Autopilot via GitLab CI/CD
 
 Full feature spec and the build order live in [`docs/dlectroflow-plan.md`](docs/dlectroflow-plan.md).

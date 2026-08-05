@@ -7,6 +7,7 @@ import {
   OWNER_BREAKDOWN_ALLOWLIST,
   FocusTimerStyle,
   FocusSound,
+  FocusSoundCategory,
   CompleteTickColor,
   Typeface,
 } from "@/lib/constants";
@@ -179,6 +180,21 @@ export async function updateFirstRunPreview(enabled: boolean) {
  * a caller that predates it, or one that only means to change the style, must
  * never silently switch a workspace's focus session over to "the music can stop
  * my timer". Omitted ⇒ false, same as the column default.
+ *
+ * #70 — `category` (Settings.focusSoundCategory) narrows the playlist to one
+ * open-lofi category, allowlist-validated against FocusSoundCategory so a bad
+ * slug cannot reach Settings_focusSoundCategory_check. Omitted ⇒ null, i.e. the
+ * whole list, which is safe for exactly the reason pauseTogether's default is:
+ * this call already replaces `sound` outright, and the category is part of that
+ * same selection rather than an independent taste. Two normalisations:
+ *
+ *  * an out-of-set slug becomes null, so a retired category widens the playlist
+ *    rather than emptying it;
+ *  * `sound: "off"` clears the category. It and "off" are options in one radio
+ *    group, so choosing one replaces the other, and `(off, chillhop)` would be a
+ *    stored state the picker has no way to show. This is deliberately UNLIKE
+ *    focusShuffle / focusPauseTogether, which are orthogonal tastes left inert
+ *    while sound is off — those describe HOW music plays, this describes WHICH.
  */
 export async function updateFocusTimerSettings(input: {
   timerStyle: string | null;
@@ -186,6 +202,7 @@ export async function updateFocusTimerSettings(input: {
   keepAwake: boolean;
   alarmEnabled: boolean;
   sound: string;
+  category?: string | null;
   pauseTogether?: boolean;
 }) {
   const workspaceId = await currentWorkspaceId();
@@ -198,12 +215,20 @@ export async function updateFocusTimerSettings(input: {
   const focusSound = sounds.includes(input.sound)
     ? input.sound
     : FocusSound.Off;
+  const categories = Object.values(FocusSoundCategory) as string[];
+  const focusSoundCategory =
+    focusSound !== FocusSound.Off &&
+    typeof input.category === "string" &&
+    categories.includes(input.category)
+      ? input.category
+      : null;
   const data = {
     focusTimerStyle,
     focusMinimalMode: Boolean(input.minimalMode),
     focusKeepAwake: Boolean(input.keepAwake),
     focusAlarmEnabled: Boolean(input.alarmEnabled),
     focusSound,
+    focusSoundCategory,
     focusPauseTogether: Boolean(input.pauseTogether),
   };
   await prisma.settings.upsert({

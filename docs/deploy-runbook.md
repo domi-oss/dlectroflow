@@ -223,6 +223,14 @@ ingress `X-Forwarded-Proto` header and Task 3's `requestOrigin`.
 - Verify from a pod rather than assuming: `kubectl -n dlectroflow-prod exec
   deploy/dlectroflow -- printenv FOCUS_CATALOG_ORIGIN`, then load `/focus` and
   confirm the mini-player lists more than ten tracks.
+- **Setting this also turns on the per-category playlists (#70)**, with nothing
+  else to configure. Settings offers a category once the catalog gives it more
+  than one track; with the bundled ten — one per category — there is nothing to
+  offer, so that part of the picker is absent rather than shown greyed out. So
+  "no category options on `/settings`" is the correct reading of an unset or
+  unreachable store, and the second half of the check above: if `/focus` lists
+  more than ten tracks and `/settings` still offers no category, that is a bug
+  rather than configuration.
 - Licence/provenance for the streamed set: `public/audio/LICENSE.md`. The app
   validates the shape of what it is served, never the licence of the bytes.
 

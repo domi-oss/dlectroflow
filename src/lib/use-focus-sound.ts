@@ -4,8 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildPlayOrder,
   createPlaylistPlayer,
-  focusTrackIndex,
   playOrderCursor,
+  resolveFocusPlaylist,
+  trackIndexIn,
   clampVolume,
   type FocusTrack,
   type PlaylistPlayer,
@@ -36,6 +37,14 @@ import { useFocusCatalog } from "@/lib/use-focus-catalog";
  * up front (never a random pick per advance, which can play the same track twice
  * in a row) and is a persisted taste setting: seeded from Settings.focusShuffle
  * and reported back through onShuffleChange.
+ *
+ * #70 — the playlist can also be NARROWED to one category (Settings
+ * .focusSoundCategory). Phase 1's pass model needed no changes for that: it walks
+ * whatever list it is given. What did need deciding is the difference between a
+ * list that GREW and a list that was REPLACED — see the effect below. Growing is
+ * #61's case and must never interrupt; replacing is a category switch and must,
+ * because continuing to play a track that is no longer in the playlist means the
+ * picker says one thing and the speakers say another.
  */
 export type FocusSoundControls = {
   track: FocusTrack | null;
@@ -61,6 +70,13 @@ export type FocusSoundControls = {
 };
 
 export type FocusSoundOptions = {
+  /**
+   * #70 — Settings.focusSoundCategory. One of the ten open-lofi slugs, or
+   * null/undefined for "the whole list", which is the normal case. A slug that
+   * matches nothing widens back to the whole list rather than going silent
+   * (`resolveFocusPlaylist`).
+   */
+  category?: string | null;
   /** Seed from Settings.focusShuffle (#68) — a taste setting, not per-session. */
   shuffle?: boolean;
   /** Called with the new value when the user toggles shuffle, so the caller can
@@ -88,11 +104,23 @@ export function useFocusSound(
   // #61 — the bundled ten, then whatever the streamed catalog adds once it
   // loads. Identical to FOCUS_SOUND_TRACKS (same array) until then, and on every
   // instance with no catalog configured, so a session always has music.
-  const tracks = useFocusCatalog();
-  // Seeded from the BUNDLED list on purpose: Settings.focusSound can only hold a
-  // bundled track's id, because that column is enum-constrained (#70 is what
-  // would give a streamed track a persistable identity).
-  const startIndex = Math.max(0, focusTrackIndex(initialSound));
+  const available = useFocusCatalog();
+  // #70 — then narrowed to one category, if one is selected. useMemo is
+  // load-bearing rather than an optimisation: the effect below treats a new array
+  // identity as "the playlist changed", so a fresh filter on every render would
+  // re-deal the pass on every render.
+  const tracks = useMemo(
+    () => resolveFocusPlaylist(available, opts.category),
+    [available, opts.category],
+  );
+  // Where the session opens. Resolved against the list the player will actually
+  // walk, NOT against FOCUS_SOUND_TRACKS: a bundled track keeps its index in the
+  // merged list, but not in a category-narrowed one (the chillhop track is index
+  // 1 of ten and index 0 of a chillhop playlist). `Settings.focusSound` can still
+  // only hold a bundled track's id — that column is enum-constrained, and a
+  // streamed track has no persistable identity — so a category whose stored
+  // start track sits outside it simply opens at its own head.
+  const startIndex = Math.max(0, trackIndexIn(tracks, initialSound));
   const initialShuffle = Boolean(opts.shuffle);
 
   const [index, setIndex] = useState(startIndex);
@@ -124,39 +152,91 @@ export function useFocusSound(
     setPlaying(p);
   };
 
+  /** Deal a fresh pass over `list`, with `startAt` at the cursor. */
+  const dealPass = (list: readonly FocusTrack[], startAt: number): Pass => {
+    const order = buildPlayOrder(list.length, {
+      shuffle: shuffleRef.current,
+      startAt,
+    });
+    const cursor = playOrderCursor(order, startAt);
+    return { order, cursor, heard: new Set([cursor]) };
+  };
+
   // The pass is dealt lazily (a shuffle spends randomness we shouldn't spend on
   // every render) and starts on the track settings chose, so a session opens with
   // the sound the user picked even when shuffle is on.
   const pass = useCallback((): Pass => {
-    if (!passRef.current) {
-      const order = buildPlayOrder(tracks.length, {
-        shuffle: shuffleRef.current,
-        startAt: startIndex,
-      });
-      const cursor = playOrderCursor(order, startIndex);
-      passRef.current = { order, cursor, heard: new Set([cursor]) };
-    }
+    passRef.current ??= dealPass(tracks, startIndex);
     return passRef.current;
   }, [tracks, startIndex]);
 
-  // #61 — the streamed catalog resolves after the first render, so the playlist
-  // can grow while a track is already playing. The pass was dealt for the old
-  // length and would never reach the new entries, so it is re-dealt AROUND the
-  // current track: same contract as toggleShuffle, and for the same reason —
-  // no load(), no position reset, only what comes next changes. A pass that has
-  // not been dealt yet is left alone; it will be dealt at the new length.
-  const trackCountRef = useRef(tracks.length);
+  /**
+   * The playlist changed underneath a live hook. Two cases, and telling them
+   * apart is the whole job — the test for that is "is the track that was current
+   * still in the new list?", not the list's length.
+   *
+   * **It GREW** (#61: the streamed catalog resolved; #70: the selected category
+   * gained tracks). The current track is still there, so nothing may interrupt:
+   * the pass is re-dealt AROUND it — same contract as toggleShuffle, and for the
+   * same reason. No load(), no position reset, only what comes next changes. Its
+   * index can still have moved, so `index` is reconciled first; without that,
+   * `tracks[index]` reports a neighbour of what is actually playing.
+   *
+   * **It was REPLACED** (#70: a category switch). The current track is not in the
+   * new playlist, and continuing to play it would mean the picker says chillhop
+   * while the speakers play jazz hop — the desync a user would report as the
+   * feature being broken. So the pass restarts at the new list's head and the
+   * element follows it. That is a deliberate interruption, and the only one here:
+   * play/pause state is preserved, because `load()` resumes iff it was playing.
+   *
+   * A LENGTH check cannot make this distinction, which is not hypothetical: two
+   * categories with the same number of tracks are common, and the old guard
+   * returned early on that swap and left the element on the old source.
+   *
+   * The heard-set is reset in both branches, and deliberately so: it records
+   * positions in a pass, so carrying it into a re-dealt order would mark
+   * unrelated entries as already played and wrap the playlist early.
+   *
+   * ── On the setState in here ─────────────────────────────────────────────────
+   * `react-hooks/set-state-in-effect` is an error in this repo, and it is right
+   * to be. This is the case the rule exempts in prose: React state being
+   * synchronised with two external systems it does not own — an async catalog
+   * fetch and a live `<audio>` element. It also costs almost nothing in practice.
+   * `mergeFocusTracks` keeps bundled tracks at their indices, so #61's growth
+   * path reaches `moved === indexRef.current` and sets nothing; the only branch
+   * that re-renders is a playlist REPLACEMENT, which is a deliberate user action.
+   * (The rule does not flag it because `setIdx` wraps the setter — an indirection
+   * that predates this change. If it is ever inlined, this comment is the answer.)
+   */
+  const tracksRef = useRef(tracks);
   useEffect(() => {
-    if (tracks.length === trackCountRef.current) return;
-    trackCountRef.current = tracks.length;
-    if (!passRef.current) return;
-    const order = buildPlayOrder(tracks.length, {
-      shuffle: shuffleRef.current,
-      startAt: indexRef.current,
-    });
-    const cursor = playOrderCursor(order, indexRef.current);
-    passRef.current = { order, cursor, heard: new Set([cursor]) };
-  }, [tracks.length]);
+    if (tracks === tracksRef.current) return;
+    const previous = tracksRef.current;
+    tracksRef.current = tracks;
+    if (tracks.length === 0) return;
+
+    const currentId = previous[indexRef.current]?.id;
+    const moved = currentId ? trackIndexIn(tracks, currentId) : -1;
+
+    if (moved >= 0) {
+      if (moved !== indexRef.current) setIdx(moved);
+      // A pass that has not been dealt yet is left alone; it will be dealt over
+      // the new list, at the new start index, on first use.
+      if (passRef.current) passRef.current = dealPass(tracks, moved);
+      return;
+    }
+
+    const start = Math.max(0, trackIndexIn(tracks, initialSound));
+    passRef.current = dealPass(tracks, start);
+    setIdx(start);
+    // Only if an element exists. Creating one here would be outside a user
+    // gesture (the browser would refuse to play it later), and with nothing
+    // playing there is nothing to keep in sync.
+    playerRef.current?.load(tracks[start].src);
+    // `initialSound` is in the dependency list only to satisfy the linter — the
+    // identity guard on the first line means a caller changing it, on its own,
+    // does nothing. It is the ANCHOR for a reset, not a trigger for one.
+  }, [tracks, initialSound]);
 
   // Latest step(), for the element's `ended` handler — that handler is installed
   // once, at creation, so it must not close over a stale callback.
@@ -267,12 +347,7 @@ export function useFocusSound(
     // toggle never touches playback — no load(), no position reset; only what
     // comes next changes. Tracks already heard in the abandoned pass can come
     // round again: the user just asked for a different order.
-    const order = buildPlayOrder(tracks.length, {
-      shuffle: nextShuffle,
-      startAt: indexRef.current,
-    });
-    const cursor = playOrderCursor(order, indexRef.current);
-    passRef.current = { order, cursor, heard: new Set([cursor]) };
+    passRef.current = dealPass(tracks, indexRef.current);
     onShuffleChangeRef.current?.(nextShuffle);
   }, [tracks]);
 

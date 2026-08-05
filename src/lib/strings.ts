@@ -555,6 +555,31 @@ export const STRINGS = {
     playful:
       "Pick the track your focus playlist starts on, or preview each one first. 🎧",
   },
+  // #70 — category playlists. These four only ever render when the catalog has
+  // actually given some category more than one track, so the hint can talk about
+  // categories in the present tense without lying on a default install (where the
+  // whole group is absent, not disabled).
+  //
+  // "whole category" and the count are part of each radio's LABEL rather than
+  // decoration around it: read aloud, a radio called "Chillhop" sitting next to
+  // one called "Porchlight Golden Hour · Chillhop" says nothing about which is the
+  // playlist.
+  "focusSettings.soundCategoryHint": {
+    plain:
+      "Or play a whole category: every track in it, in one pass, with no repeats until it's done.",
+    playful:
+      "Or play a whole category: every track in it, in one pass, with no repeats until it's done. 🎶",
+  },
+  "focusSettings.soundWholeCategory": {
+    plain: "whole category",
+    playful: "whole category",
+  },
+  // Composed as "· 14 tracks". Singular is reachable only for a stored selection
+  // whose category has shrunk below the offer floor (the store stopped
+  // answering) — that radio stays on screen so the preference can still be
+  // cleared, so its label still has to read correctly.
+  "focusSettings.soundTrackCount": { plain: "tracks", playful: "tracks" },
+  "focusSettings.soundTrackCountOne": { plain: "track", playful: "track" },
   "focusSettings.preview": { plain: "Preview", playful: "Preview" },
   "focusSettings.stopPreview": {
     plain: "Stop preview",

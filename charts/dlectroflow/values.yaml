@@ -201,6 +201,11 @@ focus:
   #
   # Unset, the player uses the bundled ten. The timer is never silent for want
   # of this value.
+  #
+  # Setting it also turns on the per-category playlists in Settings (#70), with
+  # nothing else to configure: a category is offered once the catalog gives it
+  # more than one track. With only the bundled ten — one per category — there is
+  # nothing to offer, so that part of the picker is absent rather than greyed out.
   catalogOrigin: ""
 
 # Daily logical Postgres backup → GCS (prod only; see templates/backup.yaml).
