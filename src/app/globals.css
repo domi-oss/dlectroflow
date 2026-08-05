@@ -218,6 +218,87 @@
     @apply font-sans;
   }
 
+  /* #182 — inline code and keys, which until now had no treatment at all.
+   *
+   * The report was "words too close together" on /help. There are no missing
+   * spaces on that page: its three <kbd> elements simply carry no class, and
+   * nothing here styled `code` or `kbd`, so Tailwind's preflight left them at
+   * `font-size: 1em` in the mono face and nothing else. A monospace run at the
+   * same size as the proportional text around it, with no padding and no edge,
+   * reads as jammed into its neighbours — which is exactly what was reported.
+   * Seven bare <code> elements elsewhere had the same problem, and ten more in
+   * privacy/page.tsx wore an ad-hoc `text-xs` that sized them without ever
+   * separating them.
+   *
+   * A base rule rather than a <Kbd> component, for one reason: the defect is
+   * "somebody wrote the element and gave it nothing", and a component can only
+   * fix the sites that remember to opt in. This fixes all twenty across seven
+   * files while editing one of them, and the twenty-first cannot be written
+   * wrong.
+   *
+   * `em`, not `rem`. A chip has to stay proportional to whatever it sits in,
+   * and these sit in text-sm legal prose, text-sm help copy and default body
+   * text. Against the text-sm body, 0.875em resolves to the same 12px the
+   * `text-xs` sites already had, so nothing resizes — which is what let those
+   * nine drop the utility.
+   *
+   * ── Colour, measured rather than assumed ─────────────────────────────────
+   * The chip paints its OWN opaque surface, so the page behind it cannot move
+   * the text ratio (the property `a11y-class-hygiene` calls pinning your own
+   * background). Measured on this palette:
+   *
+   *   text on chip     11.77:1 light   10.29:1 dark     (AA needs 4.5)
+   *   chip vs --card    1.42:1 light    1.34:1 dark
+   *   chip vs --background 1.34:1 light 1.44:1 dark
+   *
+   * Mixed from --foreground so it tracks the theme rather than needing a
+   * `dark:` partner. --muted on its own is 1.07:1 against --background — i.e.
+   * invisible, which is why it is tinted rather than used neat.
+   *
+   * `color-mix(in oklab, …)` needs no feature check: Tailwind 4 compiles every
+   * opacity modifier to it, and `outline-ring/50` two rules above means this
+   * stylesheet already ships one on every page.
+   *
+   * `box-decoration-break: clone` so a chip that wraps across a line keeps its
+   * padding and radius on both fragments; without it the second half loses its
+   * left edge and reads as a different token.
+   *
+   * The radius is deliberately NOT --radius-sm. At this chip's height that
+   * token (0.51rem) rounds to a full pill, and a pill already means "badge" in
+   * this UI — the Library hub's count pill and the save-status chip are both
+   * 9999px. A code token should not look like a badge.
+   *
+   * `pre` is excluded on purpose: a code BLOCK wants none of this, and there is
+   * no <pre> in the tree for the rule to get wrong. */
+  code,
+  kbd,
+  samp {
+    font-size: 0.875em;
+    padding-inline: 0.35em;
+    padding-block: 0.1em;
+    border-radius: calc(var(--radius) * 0.35);
+    background-color: color-mix(in oklab, var(--foreground) 10%, var(--muted));
+    color: var(--foreground);
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+  }
+
+  /* A key is a keycap: the same chip with one heavier edge underneath. That
+   * edge is the whole convention, and it is what separates <kbd> from <code> at
+   * a glance on /help, where both appear within a few lines of each other. It
+   * reads 1.63:1 (light) and 1.72:1 (dark) against the chip it sits on, so the
+   * cue survives both themes.
+   *
+   * An inset shadow rather than a border-bottom: a border would add 2px to an
+   * INLINE box, nudging the line it sits on. A shadow paints inside the box the
+   * chip already occupies, so a paragraph's leading is untouched. */
+  kbd {
+    box-shadow: inset 0 -2px 0
+      color-mix(in oklab, var(--foreground) 30%, var(--muted));
+    padding-bottom: 0.15em;
+    font-weight: 500;
+  }
+
   /* a11y: honour the OS "reduce motion" setting for CSS-driven animation and
    * transitions (the countdown-ring sweep, hover/colour transitions, the
    * "thinking" pulse, etc). JS-driven Motion animation (the focus confetti) is
