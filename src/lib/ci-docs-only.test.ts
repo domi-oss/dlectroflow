@@ -410,6 +410,56 @@ describe("globCoversTopLevel", () => {
     // docker/, where `docker/**/*` covers them.
     expect(globCoversTopLevel("*.yml", ".gitlab-ci.yml")).toBe(true);
   });
+
+  // The cases below pin behaviour that the previous `new RegExp` implementation
+  // got right incidentally, via `[^/]*` and its metacharacter escaping. They
+  // were added BEFORE that implementation was replaced with a string matcher,
+  // and passed against both — which is the only thing that makes the swap a
+  // refactor rather than a rewrite. Semgrep flagged the dynamic `RegExp` four
+  // separate times as this function drifted down the file (dismissed as a false
+  // positive at lines 121, 130 and 161); the matcher ends that cycle instead of
+  // paying it again. This file already made the same choice once, for the same
+  // reason — see `parseStubReportTypes`' "substring match, not new RegExp".
+  it("matches a wildcard in the middle, and requires the parts in order", () => {
+    expect(globCoversTopLevel("a*c", "abc")).toBe(true);
+    expect(globCoversTopLevel("a*c", "ac")).toBe(true);
+    expect(globCoversTopLevel("a*c", "cba")).toBe(false);
+  });
+
+  it("handles several wildcards in one glob", () => {
+    expect(globCoversTopLevel("a*b*c", "axxbyyc")).toBe(true);
+    expect(globCoversTopLevel("a*b*c", "abc")).toBe(true);
+    expect(globCoversTopLevel("a*b*c", "acb")).toBe(false);
+  });
+
+  it("treats regex metacharacters in a glob as literal text", () => {
+    // The escaping in the old implementation existed for exactly this. A
+    // matcher that dropped it would read `.` as "any character" and `+` as a
+    // quantifier, and start matching names nobody listed.
+    expect(globCoversTopLevel("a+b.md", "a+b.md")).toBe(true);
+    expect(globCoversTopLevel("a+b.md", "aab.md")).toBe(false);
+    expect(globCoversTopLevel("a.md", "axmd")).toBe(false);
+    expect(globCoversTopLevel("f(x).md", "f(x).md")).toBe(true);
+  });
+
+  it("never lets a wildcard cross a directory separator", () => {
+    // `[^/]*`, not `.*`. A glob with no `/` in it describes a top-level name,
+    // so it must not reach into a subdirectory — otherwise `*.ts` would claim
+    // every TypeScript file in the repo and the classification would call the
+    // whole tree code, hiding real gaps rather than reporting them.
+    expect(globCoversTopLevel("*", "README.md")).toBe(true);
+    expect(globCoversTopLevel("*", "src/index.ts")).toBe(false);
+    expect(globCoversTopLevel("a*c", "a/c")).toBe(false);
+  });
+
+  it("does not use a dynamic RegExp, which semgrep flags on every line move", () => {
+    // A characterisation of the implementation, not of the behaviour, and
+    // deliberately so: the point of the refactor was to stop re-triaging the
+    // same false positive, and only a check on the source itself can keep that
+    // from being undone by the next person reaching for `new RegExp`.
+    const source = readFileSync(join(__dirname, "ci-docs-only.ts"), "utf8");
+    expect(source).not.toContain("new RegExp");
+  });
 });
 
 describe("docs-only CI fast path covers every committed top-level path", () => {

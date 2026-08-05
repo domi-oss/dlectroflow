@@ -229,19 +229,52 @@ export function parseCodeChangeGlobs(gitlabCiYml: string): string[] {
  *   • a filename pattern where `*` matches any run of non-`/` characters
  *     (`*.ts`, or a literal name like `.nvmrc`)
  *
- * A trailing wildcard (`Name*`) falls out of the same substitution and is still
- * honoured, though `.code_changes` no longer uses one — the last was
- * `Dockerfile*`, retired when the Docker family moved under `docker/`.
+ * A trailing wildcard (`Name*`) is honoured too, though `.code_changes` no
+ * longer uses one — the last was `Dockerfile*`, retired when the Docker family
+ * moved under `docker/`.
+ *
+ * Matched by walking the literal fragments rather than by compiling a regex.
+ * The regex version needed every fragment escaped against injection and was
+ * flagged by semgrep as "regular expression with non-literal value" on each of
+ * the four occasions this function drifted to a new line number — three
+ * dismissals as a false positive so far, all of the same code. A matcher that
+ * never builds a pattern cannot be flagged and cannot be mis-escaped, and this
+ * module had already made the same trade once (`parseStubReportTypes` compares
+ * a substring for exactly this reason). Behaviour is unchanged; the
+ * characterisation cases in the colocated test were written against the regex
+ * implementation and pass against both.
  */
 export function globCoversTopLevel(glob: string, name: string): boolean {
   const slash = glob.indexOf("/");
   if (slash !== -1) return glob.slice(0, slash) === name;
 
-  const pattern = glob
-    .split("*")
-    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-    .join("[^/]*");
-  return new RegExp(`^${pattern}$`).test(name);
+  const fragments = glob.split("*");
+  if (fragments.length === 1) return glob === name; // no wildcard: a literal name
+
+  // A glob with no `/` describes a top-level name, and a wildcard stands for
+  // `[^/]*`, so nothing in this branch can legally match a path with a
+  // separator in it. Rejecting those up front is what keeps `*.ts` from
+  // claiming `src/index.ts` — and with them gone, the remaining wildcards are
+  // unconstrained and the walk below stays a plain left-to-right scan.
+  if (name.includes("/")) return false;
+
+  const first = fragments[0];
+  const last = fragments[fragments.length - 1];
+  if (!name.startsWith(first) || !name.endsWith(last)) return false;
+
+  // Interior fragments must appear in order and must not overlap each other,
+  // hence searching from `cursor` and advancing past each hit.
+  let cursor = first.length;
+  for (const fragment of fragments.slice(1, -1)) {
+    const found = name.indexOf(fragment, cursor);
+    if (found === -1) return false;
+    cursor = found + fragment.length;
+  }
+
+  // The trailing fragment is matched by `endsWith` above, but that can overlap
+  // what the walk already consumed — `a*b*c` against `abc` must not let the
+  // final `c` double as a character an interior fragment already claimed.
+  return cursor + last.length <= name.length;
 }
 
 /**
