@@ -190,6 +190,52 @@ describe("proxy: the legal pages are reachable with no cookies at all (#123)", (
   }
 });
 
+// #154 — the calendar subscription feed must be reachable by a calendar client.
+//
+// Same shape as the legal-pages test above and for the same reason: this drives
+// the real middleware rather than isPublicPath(), because the failure being
+// guarded is "the classifier says public and the middleware redirects anyway".
+// A calendar app has no cookie, cannot follow a sign-in, and reports a redirect
+// as a feed that simply stopped updating — silently, in everybody's calendar.
+describe("proxy: the calendar feed is reachable with no cookies at all (#154)", () => {
+  const FEED = `/api/ics/feed/${"T".repeat(43)}`;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.AUTH_SESSION_SECRET = SECRET;
+    vi.mocked(requestOrigin).mockReturnValue("https://dlectroflow.dev");
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("serves the feed to a request carrying no session and no guest cookie", async () => {
+    const req = new NextRequest(`https://dlectroflow.dev${FEED}`);
+    expect(req.cookies.getAll()).toEqual([]);
+
+    const res = await proxy(req);
+
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.status).toBe(200);
+  });
+
+  it("mints no guest sandbox for a feed poll", async () => {
+    // A calendar client polls every few minutes forever. Minting a guest
+    // workspace each time would create rows for a subscriber who is not using
+    // the app at all, and the route resolves its workspace from the token.
+    const res = await proxy(new NextRequest(`https://dlectroflow.dev${FEED}`));
+    expect(res.cookies.get(GUEST_COOKIE)).toBeUndefined();
+    expect(res.headers.get(GUEST_WS_HEADER)).toBeNull();
+  });
+
+  it("still gates the per-task ICS download, which is session-scoped", async () => {
+    // The public prefix is `/api/ics/feed`, not `/api/ics`. A task id is
+    // guessable in a way a 256-bit token is not.
+    const res = await proxy(
+      new NextRequest("https://dlectroflow.dev/api/ics/some-task-id"),
+    );
+    expect(res.cookies.get(GUEST_COOKIE)).toBeDefined();
+  });
+});
+
 describe("proxy: a signed-in user is never also minted a guest", () => {
   beforeEach(() => {
     vi.clearAllMocks();

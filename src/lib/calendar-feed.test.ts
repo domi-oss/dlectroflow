@@ -1,0 +1,121 @@
+import { describe, it, expect, afterEach } from "vitest";
+import {
+  FEED_TOKEN_CHARS,
+  feedPath,
+  feedUrl,
+  isFeedTokenShape,
+  mintFeedToken,
+} from "./calendar-feed";
+
+/**
+ * #154 — the capability token, tested as the credential it is.
+ *
+ * A subscription URL cannot carry a session cookie, so the token IS the auth.
+ * That makes three properties load-bearing rather than cosmetic: it comes from a
+ * CSPRNG, it is long enough that guessing is not a strategy, and its shape is
+ * checked before anything is done with it. The database surface — including that
+ * a regenerate invalidates the old token immediately — is proved against real
+ * Postgres in `calendar-feed.integration.test.ts`.
+ */
+
+describe("mintFeedToken (#154)", () => {
+  it("is 256 bits of randomness, encoded as 43 base64url characters", () => {
+    // 32 bytes → ceil(32 * 8 / 6) = 43 base64 characters, unpadded. Asserted on
+    // the DECODED length as well: the character count alone would still pass if
+    // the entropy were narrowed to hex or to a smaller byte count.
+    const token = mintFeedToken();
+    expect(token).toHaveLength(FEED_TOKEN_CHARS);
+    expect(Buffer.from(token, "base64url")).toHaveLength(32);
+  });
+
+  it("is URL-safe — no +, / or = to be re-encoded by anything in the path", () => {
+    for (let i = 0; i < 50; i++) {
+      expect(mintFeedToken()).toMatch(/^[A-Za-z0-9_-]+$/);
+    }
+  });
+
+  it("never repeats", () => {
+    // Not a randomness test — a collision here means the generator is a constant
+    // or a counter, which is the failure that would actually ship.
+    const seen = new Set(Array.from({ length: 500 }, mintFeedToken));
+    expect(seen.size).toBe(500);
+  });
+
+  it("passes its own shape check", () => {
+    expect(isFeedTokenShape(mintFeedToken())).toBe(true);
+  });
+});
+
+describe("isFeedTokenShape (#154)", () => {
+  const valid = "a".repeat(FEED_TOKEN_CHARS);
+
+  it("accepts a well-formed token", () => {
+    expect(isFeedTokenShape(valid)).toBe(true);
+  });
+
+  it("rejects anything of the wrong length", () => {
+    expect(isFeedTokenShape("")).toBe(false);
+    expect(isFeedTokenShape("a".repeat(FEED_TOKEN_CHARS - 1))).toBe(false);
+    expect(isFeedTokenShape("a".repeat(FEED_TOKEN_CHARS + 1))).toBe(false);
+  });
+
+  it("rejects characters that are not in the base64url alphabet", () => {
+    // The point is not tidiness: this runs BEFORE the database, so a path
+    // segment that is not a token never becomes a query at all.
+    // Control characters are written as ESCAPES, never as literals — the rule
+    // `src/app/actions/account.ts` states for its own CONTROL_CHARS pattern. A
+    // literal one is invisible in a diff, which is the last property you want
+    // in a validation test, and it turns the file binary as far as git is
+    // concerned so the diff shows "Bin" instead of the change.
+    const bad = ["/", ".", "%", "+", "=", " ", "\n", "\r", "'", "\u0000"];
+    for (const ch of bad) {
+      expect(
+        isFeedTokenShape(valid.slice(1) + ch),
+        `accepted ${JSON.stringify(ch)}`,
+      ).toBe(false);
+    }
+  });
+
+  it("rejects a traversal-shaped segment", () => {
+    expect(isFeedTokenShape("../../etc/passwd")).toBe(false);
+  });
+
+  it("is not fooled by a newline, which anchors without the m flag would allow", () => {
+    // /^[A-Za-z0-9_-]{43}$/ without care matches "…\n" because $ also matches
+    // before a trailing newline in JS. A token that round-trips with a newline
+    // attached would be a header-injection shape downstream.
+    expect(isFeedTokenShape(valid + "\n")).toBe(false);
+  });
+});
+
+describe("feedPath / feedUrl (#154)", () => {
+  const ORIGINAL = process.env.PUBLIC_ORIGIN;
+  afterEach(() => {
+    if (ORIGINAL === undefined) delete process.env.PUBLIC_ORIGIN;
+    else process.env.PUBLIC_ORIGIN = ORIGINAL;
+  });
+
+  it("puts the token in the path, under the prefix the auth gate opens", () => {
+    // The gate's PUBLIC_PREFIXES entry and this path are the same fact twice
+    // over; `gate.test.ts` asserts the other half.
+    expect(feedPath("abc")).toBe("/api/ics/feed/abc");
+  });
+
+  it("builds an absolute URL on the configured public origin", () => {
+    process.env.PUBLIC_ORIGIN = "https://dlectroflow.dev";
+    expect(feedUrl("abc")).toBe("https://dlectroflow.dev/api/ics/feed/abc");
+  });
+
+  it("does not double a slash when the origin carries a trailing one", () => {
+    process.env.PUBLIC_ORIGIN = "https://dlectroflow.dev/";
+    expect(feedUrl("abc")).toBe("https://dlectroflow.dev/api/ics/feed/abc");
+  });
+
+  it("puts the token in the PATH, never in a query string", () => {
+    // A query string is the wrong place for a credential: it is the part most
+    // likely to be logged verbatim by an intermediary, and the part a referrer
+    // policy does not protect.
+    process.env.PUBLIC_ORIGIN = "https://dlectroflow.dev";
+    expect(feedUrl("abc")).not.toContain("?");
+  });
+});

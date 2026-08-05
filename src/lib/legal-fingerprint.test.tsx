@@ -86,7 +86,31 @@ function fingerprint(node: React.ReactElement): string {
  * putting it there would invite it into a page.
  */
 const PUBLISHED = {
-  privacy: "1a7cd006060f6751679ea2bb32902aa5a731946337f314634b9125ed7f9888a5",
+  // Two changes share LEGAL_EFFECTIVE_DATE and they touch DIFFERENT documents,
+  // so exactly one hash moves per document rather than both moving:
+  //
+  //   privacy — #154, the calendar subscription feed. A new recipient (whichever
+  //     calendar app the reader pastes the URL into), a new stored item (the
+  //     capability token) and a new retention rule for it.
+  //   terms   — #164, on `main`: what the backups do and do not do for one
+  //     person, plus the sentence saying a copy can be downloaded from Settings.
+  //
+  // Both were re-derived from the MERGED tree, not copied from either branch —
+  // the merge produces a text state neither side rendered alone, so a hash
+  // carried across from one branch is only correct by luck. `terms` came back
+  // byte-identical to `main`'s (this branch does not touch /terms), which is the
+  // evidence that the two changes are genuinely disjoint.
+  //
+  // `privacy` moved a second time within #154, at 2026-08-05, and that one is
+  // the reason to read this comment rather than skip it. The page had said
+  // there was "no log of when it was fetched" — false on both deploy targets,
+  // because the token is in the request path and both front ends log the
+  // request line. Retracting a claimed absence of processing, and naming the
+  // 30-day window in its place, is exactly the substance this gate exists to
+  // stop shipping under yesterday's date. It is also the second time a #154
+  // privacy claim has needed correcting before merge, which is the argument for
+  // the drift row `docs/legal.md` now carries for it.
+  privacy: "bef88667e65a9c2989ac60abd1034a58119e9e82f66850e7aa7675a879248d8e",
   terms: "836ef685761ab3db05397e7a4753da743e25836b9d9b4ab7c61a61920bdbfe9b",
 } as const;
 

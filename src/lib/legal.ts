@@ -63,6 +63,13 @@ export const SOURCE_REPO_URL =
  * has not. The fingerprint gate is what keeps that honest in the other
  * direction: the text cannot move without someone deciding about this date.
  *
+ *
+ * Two changes share this date, to two different documents — #164 to the Terms
+ * and #154 to the Privacy Policy. Both are recorded, because a reader asking
+ * why the date moved is owed both answers, and because the fingerprint gate
+ * re-recorded BOTH hashes for a merged text state neither branch rendered
+ * alone.
+ *
  * Bumped for #164, which lands two changes to the Terms at once:
  *
  *   1. The Terms now say what the backups do and do not do for one person —
@@ -78,11 +85,35 @@ export const SOURCE_REPO_URL =
  *      can act on their own data is substance in the reassuring direction, and
  *      it moves the date for the same reason #153's erasure control did.
  *
+ *
+ * Bumped for #154: a member can create a calendar subscription URL, which adds
+ * a NEW RECIPIENT — whichever calendar app they paste it into then fetches their
+ * scheduled step titles and times, on its own schedule, into that company's
+ * storage and quite possibly outside the UK. That is a disclosure under Art.
+ * 13(1)(e) and it would move this date on its own; a new stored item (the
+ * capability token) and a new retention rule for it come with it. The recipient
+ * is deliberately described as NOT a processor: the data subject chooses the app
+ * and there is no contract with it, which is a different relationship from
+ * Anthropic's or Resend's and has to read differently.
+ *
+ * Moved a day within #154, on review, and the reason is worth keeping. The first
+ * draft told readers there was "no log of when it was fetched". That was false
+ * on both deploy targets: the token travels in the request PATH, `docker/
+ * Caddyfile` enables an access log, and `charts/dlectroflow/templates/
+ * ingress.yaml` sets no `log-format` override, so ingress-nginx's default —
+ * which contains `$request` — applies. Replacing a claimed ABSENCE of processing
+ * with the disclosure that it happens, and for how long, is substance twice
+ * over: a processing operation the reader was told did not exist, and a
+ * retention period (30 days) that had never been stated on the page at all.
+ * Nothing published under 2026-08-04 — this branch has not merged — so the date
+ * tracks the latest substantive edit rather than accumulating a correction
+ * notice for a version no reader ever saw.
+ *
+ *
  * Previously bumped for #129: access and portability are now exercisable from
  * Settings rather than only by emailing the controller, and /privacy says so —
  * the paragraph that used to read "there is no self-service export button yet"
- * would otherwise be a false statement on a published legal page. It also newly
- * discloses two deliberate exclusions (the Google OAuth tokens and any stored
+ * would otherwise be a false statement on a published legal page. It also newly * discloses two deliberate exclusions (the Google OAuth tokens and any stored
  * LLM API key), and that a guest sandbox can exercise the right in full. HOW a
  * data subject exercises an Art. 15/20 right, and what is withheld from it, are
  * both part of the Art. 12/13 disclosure rather than presentation.
@@ -106,7 +137,7 @@ export const SOURCE_REPO_URL =
  * Previously bumped for #126: freezing or deleting an account also revokes the
  * Google grant, which changed what the app does with somebody's Google account.
  */
-export const LEGAL_EFFECTIVE_DATE = "2026-08-04";
+export const LEGAL_EFFECTIVE_DATE = "2026-08-05";
 
 /** Where the hosted instance and its backups physically sit. */
 export const HOSTING_REGION = "London, United Kingdom (GCP europe-west2)";

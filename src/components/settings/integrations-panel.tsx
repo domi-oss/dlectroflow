@@ -5,6 +5,7 @@ import { disconnectGoogleTasks } from "@/app/actions/google-schedule";
 import { t, type Voice } from "@/lib/strings";
 import { CollapsibleSection } from "@/components/nav/collapsible-section";
 import { GoogleAccountHint } from "@/components/integrations/google-account-hint";
+import { CalendarFeed } from "@/components/settings/calendar-feed";
 import { cn, touchTarget } from "@/lib/utils";
 
 type GoogleStatus = {
@@ -21,6 +22,14 @@ const GOOGLE_NAME = "Google Tasks";
 // the acting user, so this card is only ever about the reader's own connection.
 const GOOGLE_DESCRIPTION =
   "Schedule your steps and tasks into your own Google Tasks — a Reclaim-synced list is scheduled automatically.";
+// #154 — the second integration in this section, and deliberately a peer of the
+// Google one rather than a sub-feature of it: the calendar feed needs no OAuth,
+// no Google account and nothing to connect, which is exactly what makes it the
+// half of the closed epic #29 that serves a self-hoster. The signed-out shell
+// reuses this copy so the two presentations cannot drift.
+const FEED_NAME = "Calendar subscription";
+const FEED_DESCRIPTION =
+  "One URL you paste into Google Calendar, Apple Calendar or Outlook once. Your scheduled steps then appear there and stay in sync.";
 
 /** Descriptor list = the extension point: future integrations add an entry here. */
 function googleDescriptor(g: GoogleStatus) {
@@ -45,6 +54,7 @@ function googleDescriptor(g: GoogleStatus) {
 
 export function IntegrationsPanel({
   google,
+  calendarFeedUrl = null,
   readOnly = false,
   voice = "plain",
   defaultExpanded,
@@ -52,6 +62,11 @@ export function IntegrationsPanel({
   /** The ACTING account's own status (#118). `null` in the signed-out read-only
    *  shell, where no status is fetched at all. */
   google: GoogleStatus | null;
+  /** #154 — the acting account's calendar feed URL, or null when they have not
+   *  turned one on. Resolved on the server: the token never round-trips through
+   *  a client fetch, so the only way it reaches a browser is as this page's own
+   *  props, for the person it belongs to. */
+  calendarFeedUrl?: string | null;
   /** #11 — signed-out read-only presentation: show the shell, never real
    *  status. #118 changed WHO gets it (a caller with no account, not any
    *  non-owner), not what it withholds. */
@@ -127,6 +142,25 @@ export function IntegrationsPanel({
           <p className="text-muted-foreground mt-3 text-sm">
             {t("settings.integrationsSignInHint", voice)}
           </p>
+        </div>
+
+        {/* #154 — the same treatment for the feed: a visitor sees the
+            integration EXISTS, with no URL and no control. A guest sandbox
+            expires in about a day, so a subscription URL for one would be a
+            link that quietly dies — which is why this shell is all a caller
+            with no account ever gets, rather than a disabled Create button. */}
+        <div className="mt-4 rounded-lg border p-4">
+          <div className="flex items-center gap-3">
+            <div className="flex-1">
+              <p className="font-medium">{FEED_NAME}</p>
+              <p className="text-muted-foreground text-sm">
+                {FEED_DESCRIPTION}
+              </p>
+            </div>
+            <span className="bg-muted text-muted-foreground rounded-full px-2.5 py-0.5 text-xs font-medium">
+              {t("settings.integrationsSignedOut", voice)}
+            </span>
+          </div>
         </div>
       </CollapsibleSection>
     );
@@ -282,6 +316,11 @@ export function IntegrationsPanel({
           </p>
         )}
       </div>
+
+      {/* #154 — a peer card, not a nested one: this integration is reachable
+          with no Google account at all, and burying it under the Google card
+          would say the opposite. */}
+      <CalendarFeed url={calendarFeedUrl} />
     </CollapsibleSection>
   );
 }

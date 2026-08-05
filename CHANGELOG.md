@@ -100,6 +100,42 @@ operators upgrading a self-hosted instance don't get surprised.
   every transition (WCAG 2.4.3), and `prefers-reduced-motion` drops the animated
   progress track — the advance itself is unchanged, because that setting is about
   motion and not about what the app does.
+- **Subscribe to your own schedule from any calendar app (#154).** Settings →
+  Integrations gains **Calendar subscription**: one URL you paste into Google
+  Calendar, Apple Calendar or Outlook once, after which your scheduled steps
+  appear there and stay in sync. It needs **no Google account and no OAuth at
+  all**, which is what makes it the half of the closed scheduling epic (#29) that
+  serves a self-hoster rather than the hosted instance. Until now the whole ICS
+  surface was the per-task download: one file, one task, no updates.
+
+  **The URL is a credential**, because a calendar client cannot present a session
+  cookie — Google, Apple and Outlook all fetch a subscription anonymously — so
+  possession of the token is the entire authorization. It is 256 bits from a
+  CSPRNG; regenerating replaces it in one write, so the old URL stops working on
+  the very next request rather than at some later expiry; the responses are
+  `no-store` so no shared cache can keep a revoked one alive; and the feed
+  carries step titles and times and nothing else, because the URL will end up in
+  a calendar provider's logs. The Settings card says all of that at the point you
+  copy it, not in a paragraph further down.
+
+  **It ends up in this instance's logs too, and the notice says so.** The token
+  travels in the request path, so an access log entry for a feed fetch contains
+  it — that is true of Caddy on the self-host path and of ingress-nginx on the
+  Kubernetes one, neither of which is configured to drop it. Production keeps
+  those entries for 30 days. The consequence for an operator is a rotation step:
+  a leaked backup dump or a mishandled log export is a disclosure of every live
+  feed token, and `docs/deploy-runbook.md` §15 now says to clear the table.
+
+  New endpoint `GET /api/ics/feed/[token]`, which is the only route in the app
+  that authorises from something other than a session — `/api/ics/[taskId]` next
+  door stays session-scoped, because a task id is guessable in a way a token is
+  not. Unknown, malformed, regenerated and revoked all answer the same 404.
+
+  `/privacy` now discloses the new recipient (whichever calendar app you
+  subscribe from, which is explicitly **not** a processor — you chose it), the
+  stored token and its retention, the fact that the web server's access log
+  records the URL and for how long, and the legal effective date moves with it.
+  No new environment variable and no new dependency.
 
 - **A member can export their own data (#129).** Settings → Account gains
   **Download my data (.zip)**, and `GET /api/export` behind it. The archive holds
@@ -383,6 +419,28 @@ operators upgrading a self-hosted instance don't get surprised.
     text findings across 9 files, 2 focus findings, 4 unmeasured banner tones.
 ### Security
 
+- **`.ics` text values now escape every line terminator, not just `\n` (#154).**
+  `esc()` in `src/lib/ics.ts` handled `\`, `;`, `,` and LF but not **CR**. RFC
+  5545 §3.3.11 permits no control character but HTAB, and a literal CR inside a
+  value ends the content line early under a lenient parser, so one property
+  becomes two. CRLF now collapses to a single `\n` rather than two, and the
+  remaining C0 controls are dropped — there is no escape sequence for them to
+  survive as. `UID`, previously interpolated raw, is escaped too; every UID today
+  is machine-derived so no output changes, but the next one derived from user
+  text inherits the gate instead of having to notice its absence.
+
+  **This reaches shipped code**, which is why it is here and not folded silently
+  into the feature above: `ics.ts` is shared by the per-task `.ics` download, the
+  #129 export's `scheduled.ics`, and the new subscription feed. The route in is
+  `parentEmoji` and `subtaskEmoji`, the two fields not passed through the
+  whitespace-collapsing helper and persisted straight from a model proposal.
+  Impact is low — the attacker and the victim are the same account, and the only
+  reachable effect is a malformed entry in your own calendar — but the fix is one
+  expression and the surface is every calendar file the app has ever emitted.
+
+  The test that should have caught it could not: it stripped `\r\n` and then
+  looked only for `\n`, on a fixture containing no line terminator at all, so it
+  passed with the defect present. It now asserts on text that would leak one.
 - **The dependency bot can no longer walk a security override back into a CVE
   range (#161).** `brace-expansion` is held at the patched `^5.0.8` by a
   top-level npm `override` because CVE-2026-14257 / GHSA-mh99-v99m-4gvg has no

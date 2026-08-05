@@ -25,12 +25,39 @@ function floating(d: Date): string {
 function utc(d: Date): string {
   return d.toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z";
 }
+/**
+ * RFC 5545 §3.3.11 TEXT escaping.
+ *
+ * The order is load-bearing: backslash first, or the backslashes this function
+ * introduces get escaped a second time.
+ *
+ * **Every line terminator, not just LF (#154 review).** CR was missed until a
+ * review found it, and it is the one that matters most: §3.3.11 admits no
+ * control character but HTAB, and a literal CR inside a value ends the content
+ * line early under a lenient parser, turning one property into two. `oneLine`
+ * in `src/lib/calendar-feed.ts` collapses whitespace on titles and step text,
+ * but `parentEmoji` and `subtaskEmoji` bypass it and are persisted straight
+ * from a model proposal, so the terminator has a real route in. The gate
+ * belongs here rather than at those two call sites, because this is the shared
+ * serialiser behind the feed, `/api/ics/[taskId]` and the #129 export — fixing
+ * the callers would leave the primitive still wrong for the next one.
+ *
+ * CRLF collapses to a single `\n`, not two: it is one line ending, and emitting
+ * two would open a blank line in somebody's calendar entry. The remaining C0
+ * controls are dropped outright — no legitimate title contains one, and there
+ * is no escape sequence for them to survive as.
+ */
 function esc(s: string): string {
-  return s
-    .replace(/\\/g, "\\\\")
-    .replace(/;/g, "\\;")
-    .replace(/,/g, "\\,")
-    .replace(/\n/g, "\\n");
+  return (
+    s
+      .replace(/\\/g, "\\\\")
+      .replace(/;/g, "\\;")
+      .replace(/,/g, "\\,")
+      .replace(/\r\n|\r|\n/g, "\\n")
+      // Spelled as code points because §3.3.11 is: HTAB (\x09) is the single
+      // control character it permits, and CR/LF are handled by the line above.
+      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
+  );
 }
 function nextTopOfHour(from = new Date()): Date {
   const d = new Date(from);
@@ -144,7 +171,12 @@ export function buildIcsCalendar(input: {
     const description = event.description?.trim();
     lines.push(
       "BEGIN:VEVENT",
-      `UID:${event.uid}`,
+      // Escaped like any other value, though every UID today is machine-derived
+      // (`step-`/`task-` plus a cuid, or a timestamp) and has nothing to escape.
+      // A gate rather than a comment saying it is safe: the next person to
+      // derive a UID from user text inherits the protection instead of having
+      // to notice its absence (#154 review).
+      `UID:${esc(event.uid)}`,
       `DTSTAMP:${dtstamp}`,
       `DTSTART:${time(event.start)}`,
       `DTEND:${time(event.end)}`,
@@ -157,6 +189,140 @@ export function buildIcsCalendar(input: {
   lines.push("END:VCALENDAR");
   // Trailing CRLF: §3.1 terminates every content line, the last one included.
   return lines.map(foldLine).join("\r\n") + "\r\n";
+}
+
+/**
+ * A task as the scheduled-work mapping below needs to see it — structural, so
+ * both a Prisma row (`Task & { steps: Step[] }`) and a hand-built fixture
+ * satisfy it with no adapter.
+ */
+export type ScheduledTask = {
+  id: string;
+  title: string;
+  parentEmoji: string | null;
+  scheduleDueAt: Date | null;
+  steps: readonly {
+    id: string;
+    text: string;
+    estMinutes: number;
+    subtaskEmoji: string | null;
+    scheduledAt: Date | null;
+  }[];
+};
+
+/** How long a due-date marker lasts. Matches the ICS download's default slot
+ *  (`DEFAULT_ICS_DURATION_MIN` in `src/app/actions/ics-schedule.ts`), so the
+ *  surfaces do not disagree about what "a task-shaped amount of time" is. */
+const DUE_EVENT_MINUTES = 25;
+
+/** Collapse whitespace: a calendar entry's title is a one-line thing, and an
+ *  escaped `\n` in a SUMMARY renders as a literal backslash-n in some clients.
+ *  The untouched text is in `export.json`. */
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function taskLabel(task: ScheduledTask): string {
+  return `${task.parentEmoji ? `${task.parentEmoji} ` : ""}${oneLine(task.title)}`;
+}
+
+/**
+ * Scheduled work → VEVENTs. The mapping shared by the data export (#129) and
+ * the per-user subscription feed (#154).
+ *
+ * It lives here rather than in `src/lib/export/calendar.ts`, where #129 wrote
+ * it, because the feed is a second consumer and a second copy of these rules is
+ * how the two surfaces would come to disagree about what a person's calendar
+ * contains. `export/calendar.ts` is now a caller and keeps its own end-to-end
+ * tests.
+ *
+ * ## VEVENT, not VTODO
+ *
+ * `VTODO` is the semantically correct iCalendar component for a task: it has
+ * `DUE`, `PERCENT-COMPLETE` and `STATUS:COMPLETED`, which is exactly this data.
+ * **Google Calendar ignores `VTODO` entirely** — an import succeeds and shows
+ * nothing. So the correct choice is the useless one.
+ *
+ * ## Which rows become events, and which deliberately do not
+ *
+ * This turns on what `Task.scheduledAt` actually means:
+ *
+ *  1. **Every `Step` with a `scheduledAt`** becomes an event at that instant,
+ *     `estMinutes` long. This is the real calendar content — the slot the person
+ *     put aside to do one thing.
+ *  2. **Every `Task` with a `scheduleDueAt`** becomes a short marker event at the
+ *     deadline. A due date is a point in somebody's calendar, so it belongs in
+ *     one; without `VTODO` there is no other way to say "due".
+ *  3. **`Task.scheduledAt` produces NOTHING.** It records *when the task was
+ *     scheduled*, by whichever method got there first (see the schema comment),
+ *     not *when to do it*. An event at that instant would be an appointment at
+ *     the moment somebody pressed a button — worse than useless, because it looks
+ *     like data.
+ *
+ * ## No `TRANSP:OPAQUE`
+ *
+ * The per-task download marks its events busy, because that is a live request to
+ * defend a slot (#104). Neither caller here is: an archive of past and future
+ * work must not silently block out somebody's calendar, and neither must a feed
+ * somebody subscribed to in order to *see* their plan.
+ *
+ * ## `since` — the one thing the two callers disagree about
+ *
+ * The export passes nothing and gets everything, because an archive that
+ * silently dropped rows would be the failure that feature exists to fix. The
+ * feed passes a window, because a subscription answers "what is coming up" and
+ * would otherwise grow without bound in somebody's calendar provider. The
+ * comparison is against an event's END, so a slot still running when the window
+ * opens is kept rather than leaving a hole in today.
+ */
+export function scheduledStepEvents(
+  tasks: readonly ScheduledTask[],
+  opts?: { since?: Date },
+): IcsEvent[] {
+  const since = opts?.since?.getTime();
+  const events: IcsEvent[] = [];
+
+  for (const task of tasks) {
+    for (const step of task.steps) {
+      if (!step.scheduledAt) continue;
+      // Clamped to at least a minute. The database CHECK already enforces >= 1
+      // (#78), so this defends against a future writer rather than today's data —
+      // and an event whose DTEND precedes its DTSTART is rejected by some clients
+      // and silently dropped by others.
+      const minutes = Math.max(1, Math.round(step.estMinutes || 1));
+      const emoji = step.subtaskEmoji ? `${step.subtaskEmoji} ` : "";
+      events.push({
+        // Derived from the row's own id (already a cuid), so re-reading the same
+        // feed updates the same events instead of duplicating them.
+        uid: `step-${step.id}@dlectroflow`,
+        start: step.scheduledAt,
+        end: new Date(step.scheduledAt.getTime() + minutes * 60_000),
+        summary: `${taskLabel(task)}: ${emoji}${oneLine(step.text)}`,
+      });
+    }
+
+    if (task.scheduleDueAt) {
+      events.push({
+        uid: `task-${task.id}@dlectroflow`,
+        start: task.scheduleDueAt,
+        end: new Date(
+          task.scheduleDueAt.getTime() + DUE_EVENT_MINUTES * 60_000,
+        ),
+        // "(due)" in the SUMMARY is doing the work `VTODO`'s `DUE` property would
+        // have done. Without it, a deadline is indistinguishable from a work slot.
+        summary: `${taskLabel(task)} (due)`,
+      });
+    }
+  }
+
+  // Chronological, so the file reads in the order the days happened. `getTime`
+  // rather than subtracting Dates: the arithmetic is identical and the intent is
+  // legible.
+  events.sort((a, b) => a.start.getTime() - b.start.getTime());
+
+  return since == null
+    ? events
+    : events.filter((e) => e.end.getTime() >= since);
 }
 
 /** Build a downloadable .ics: one back-to-back VEVENT per step (floating local time). */

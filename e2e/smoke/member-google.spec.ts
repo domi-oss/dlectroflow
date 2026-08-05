@@ -172,14 +172,25 @@ test("the disconnect confirmation is reachable and reads correctly at 390px", as
     .locator("xpath=ancestor::section");
   await integrations.getByRole("button", { name: /^disconnect$/i }).click();
 
-  // Announced, not merely displayed.
-  await expect(integrations.getByRole("status")).toContainText(
-    /remove access/i,
-  );
   const confirm = integrations.getByRole("button", {
     name: /yes, disconnect/i,
   });
   await expect(confirm).toBeVisible();
+
+  // Announced, not merely displayed — located THROUGH the button's own
+  // `aria-describedby` rather than by a bare `getByRole("status")`. #154 added a
+  // second live region to this section (the calendar feed card's), and this
+  // direction is the stronger assertion anyway: it proves the button points at
+  // an announced question, rather than that exactly one announced thing exists
+  // on the page.
+  const describedBy = await confirm.getAttribute("aria-describedby");
+  expect(
+    describedBy,
+    "the confirm button must describe its question",
+  ).toBeTruthy();
+  const question = page.locator(`#${describedBy}`);
+  await expect(question).toHaveAttribute("role", "status");
+  await expect(question).toContainText(/remove access/i);
   const box = await confirm.boundingBox();
   expect(box!.height).toBeGreaterThanOrEqual(44);
 

@@ -7,6 +7,14 @@ const { disconnectMock } = vi.hoisted(() => ({ disconnectMock: vi.fn() }));
 vi.mock("@/app/actions/google-schedule", () => ({
   disconnectGoogleTasks: disconnectMock,
 }));
+// #154 — the calendar feed card lives in this section now. Its own behaviour is
+// covered in `calendar-feed.test.tsx`; here it only has to render.
+vi.mock("@/app/actions/calendar-feed", () => ({
+  createCalendarFeed: vi.fn(),
+  regenerateCalendarFeed: vi.fn(),
+  disableCalendarFeed: vi.fn(),
+}));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
 import { IntegrationsPanel } from "./integrations-panel";
 import { GOOGLE_ACCOUNT_HINT } from "@/components/integrations/google-account-hint";
@@ -132,11 +140,22 @@ describe("IntegrationsPanel — per-user copy and a11y (#118)", () => {
     // A confirmation that appears silently is a confirmation a screen-reader
     // user never learns about — and the destructive button has to SAY what it
     // is confirming, not just be next to the words.
-    const status = screen.getByRole("status");
-    expect(status).toHaveTextContent(/remove access/i);
+    //
+    // Located THROUGH the button's own `aria-describedby` rather than by a bare
+    // `getByRole("status")`: #154 added a second live region to this section
+    // (the calendar feed card's), and this direction is the stronger assertion
+    // anyway — it proves the button points at an announced question rather than
+    // that exactly one announced thing exists on the page.
     const confirm = screen.getByRole("button", { name: /yes, disconnect/i });
-    expect(confirm).toHaveAttribute("aria-describedby", status.id);
-    expect(status.id).toBeTruthy();
+    const describedBy = confirm.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    const status = document.getElementById(describedBy!);
+    expect(
+      status,
+      "the confirm button describes a node that is not there",
+    ).not.toBeNull();
+    expect(status).toHaveAttribute("role", "status");
+    expect(status).toHaveTextContent(/remove access/i);
   });
 
   it("keeps the Disconnect confirmation reachable and cancellable from the keyboard", async () => {
@@ -293,6 +312,73 @@ describe("IntegrationsPanel — signed-out read-only shell (#11, #118)", () => {
     expect(screen.queryByText(/^connected$/i)).toBeNull();
     expect(screen.queryByText(/not connected/i)).toBeNull();
     expect(screen.queryByText(/reconnect needed/i)).toBeNull();
+  });
+});
+
+// #154 — the calendar subscription feed sits in this section, which is what the
+// issue asked for ("surfaced in Settings next to the existing integrations").
+// It is a genuine second integration and not a sub-feature of Google: it needs
+// no OAuth and no Google account at all, which is the whole point of it.
+describe("IntegrationsPanel — the calendar feed card (#154)", () => {
+  it("renders the feed card alongside the Google one for a signed-in account", () => {
+    render(
+      <IntegrationsPanel
+        google={base}
+        calendarFeedUrl={null}
+        defaultExpanded
+      />,
+    );
+    expect(screen.getByText("Google Tasks")).toBeInTheDocument();
+    expect(screen.getByTestId("calendar-feed-card")).toBeInTheDocument();
+  });
+
+  it("passes the account's URL through, so the card can show it", () => {
+    const url = `https://dlectroflow.dev/api/ics/feed/${"A".repeat(43)}`;
+    render(
+      <IntegrationsPanel google={base} calendarFeedUrl={url} defaultExpanded />,
+    );
+    expect(
+      (screen.getByLabelText(/calendar feed url/i) as HTMLInputElement).value,
+    ).toBe(url);
+  });
+
+  it("shows the signed-out shell a feed exists, with no URL and no controls", () => {
+    render(
+      <IntegrationsPanel
+        google={null}
+        readOnly
+        voice="plain"
+        defaultExpanded
+      />,
+    );
+    expect(screen.getByText(/calendar subscription/i)).toBeInTheDocument();
+    // Nothing to copy and nothing to press: a guest sandbox expires in about a
+    // day, so a subscription URL for one would be a link that quietly dies.
+    expect(screen.queryByLabelText(/calendar feed url/i)).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /create a calendar feed/i }),
+    ).toBeNull();
+  });
+
+  it("never washes the read-only feed card in an opacity dim (AA)", () => {
+    // Same regression lock #90 put on the Google shell, applied to its sibling
+    // so the two cards cannot drift apart.
+    render(
+      <IntegrationsPanel
+        google={null}
+        readOnly
+        voice="plain"
+        defaultExpanded
+      />,
+    );
+    const card = screen
+      .getByText(/calendar subscription/i)
+      .closest("div.rounded-lg");
+    expect(
+      card,
+      "could not find the feed card container — has the markup changed?",
+    ).not.toBeNull();
+    expect(card!.className).not.toContain("opacity-");
   });
 });
 

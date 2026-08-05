@@ -43,6 +43,27 @@ describe("gate paths", () => {
     expect(isPublicPath("/privacyhack")).toBe(false);
     expect(isPublicPath("/terms-and-conditions-evil")).toBe(false);
   });
+  // #154 — the per-user calendar subscription feed.
+  //
+  // This one MUST be public for a structural reason rather than a legal one: a
+  // calendar client fetching a subscription has no cookie to send and no way to
+  // sign in, so the capability token in the path is the entire authorization.
+  // Anything not matched here is redirected to /login by src/proxy.ts, which a
+  // calendar app reads as a broken feed — silently, in everybody's calendar.
+  it("the calendar subscription feed is public (#154)", () => {
+    expect(isPublicPath("/api/ics/feed/" + "T".repeat(43))).toBe(true);
+    expect(isPublicPath("/api/ics/feed")).toBe(true);
+  });
+
+  it("does not open the rest of the ICS surface with it (#154)", () => {
+    // The per-task download is session-scoped and must stay that way: it takes a
+    // task id, which is guessable in a way a 256-bit token is not.
+    expect(isPublicPath("/api/ics/some-task-id")).toBe(false);
+    expect(isPublicPath("/api/ics")).toBe(false);
+    // Exact-or-`prefix + "/"` matching, so a hostile sibling cannot inherit it.
+    expect(isPublicPath("/api/ics/feedhack")).toBe(false);
+  });
+
   it("integration oauth is NOT owner-only any more (#118 Phase C)", () => {
     // Google is per-user now: a member connecting their OWN account is the
     // intended behaviour, not a hijack. See AUTHENTICATED_PREFIXES below.

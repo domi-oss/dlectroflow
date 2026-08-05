@@ -385,6 +385,27 @@ describe("Privacy Policy page: promises nothing unshipped", () => {
     expect(pageText()).toMatch(/is\s+not\s+deleted automatically today/i);
   });
 
+  it("admits the feed token reaches the access log, and does not claim otherwise (#154)", () => {
+    // The page shipped "no record of which calendar app you pasted it into, and
+    // no log of when it was fetched". The first half is true. The second was
+    // false on BOTH deploy targets: the token is in the request PATH, and
+    // `docker/Caddyfile` enables an access log while
+    // `charts/dlectroflow/templates/ingress.yaml` sets no `log-format`
+    // override, so ingress-nginx's default — which contains `$request` —
+    // applies. A privacy notice claiming an absence that the infrastructure
+    // contradicts is the worst shape this page can take, so both directions are
+    // pinned: the retraction must be present AND the old claim must be gone.
+    const text = pageText();
+    expect(text).not.toMatch(/no log of when it was fetched/i);
+    expect(text).toMatch(/the app itself writes nothing when your calendar/i);
+    expect(text).toMatch(/the token is part of the web address/i);
+    expect(text).toMatch(/there is a record of when the feed was fetched/i);
+    // And the bounded window, which is what makes the disclosure actionable
+    // rather than just alarming. Stated wherever the logs are described.
+    expect(text).toMatch(/deleted after 30 days/i);
+    expect(text).toMatch(/the web address of each request/i);
+  });
+
   it("does not claim a member can choose their own AI provider (#125)", () => {
     // The replacement guard, and the one most at risk of a well-meaning
     // "improvement": BYO KEY shipped, BYO PROVIDER did not. `LLMCredentials` has
