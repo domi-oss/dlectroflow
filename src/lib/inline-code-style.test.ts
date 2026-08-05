@@ -41,6 +41,24 @@ function scannedFiles(): string[] {
     .map((entry) => path.join(SCANNED_ROOT, entry));
 }
 
+/**
+ * Files that contain one of these elements at all — the denominator that makes
+ * the "no size overrides" zero mean something.
+ *
+ * Hardcoded rather than interpolated from {@link INLINE_CODE_TAGS}, which is
+ * the more obvious way to write it. Building a `RegExp` from a template literal
+ * trips semgrep's `javascript-regex-non-literal` (ReDoS), and this repo's
+ * settled answer to that rule is to hardcode rather than dismiss —
+ * `a11y-class-hygiene.ts` made exactly this change for exactly this reason, and
+ * records why: a dismissal has to be re-argued every time a repo-wide reformat
+ * re-fingerprints the finding. This one was reported on pipeline iid 1843 and
+ * fixed rather than triaged.
+ *
+ * The cost is that this can drift from the exported list, so the test below
+ * asserts it does not.
+ */
+const INLINE_CODE_ELEMENT = /<(?:code|kbd|samp)[ >]/;
+
 describe("findInlineCodeSizeOverrides", () => {
   // ── Prove the detector fires ────────────────────────────────────────────
   it("flags the ad-hoc text-xs this issue removed", () => {
@@ -221,10 +239,21 @@ describe("the real tree", () => {
     // A clean result from a scanner that read nothing is not a clean result.
     // The denominator: the files that actually contain one of these elements.
     const withInlineCode = scannedFiles().filter((file) =>
-      new RegExp(`<(${INLINE_CODE_TAGS.join("|")})[ >]`).test(
-        readFileSync(file, "utf8"),
-      ),
+      INLINE_CODE_ELEMENT.test(readFileSync(file, "utf8")),
     );
     expect(withInlineCode.length).toBeGreaterThanOrEqual(7);
+  });
+
+  it("keeps that hardcoded pattern in step with the exported tags", () => {
+    // The one thing hardcoding costs is that the two can drift apart, so the
+    // drift is what gets asserted. Cheaper than the alternative — see the note
+    // on INLINE_CODE_ELEMENT.
+    for (const tag of INLINE_CODE_TAGS) {
+      expect(INLINE_CODE_ELEMENT.test(`<${tag}>`)).toBe(true);
+      expect(INLINE_CODE_ELEMENT.test(`<${tag} className="x">`)).toBe(true);
+    }
+    expect(INLINE_CODE_ELEMENT.test("<span>")).toBe(false);
+    // Not a prefix match: <codex> is not <code>.
+    expect(INLINE_CODE_ELEMENT.test("<codex>")).toBe(false);
   });
 });
