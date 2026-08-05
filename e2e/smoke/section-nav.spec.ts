@@ -883,6 +883,42 @@ test.describe("section nav — desktop", () => {
     expect(onTop).toBe(true);
   });
 
+  test("the header's account popover opens OVER the bar too", async ({
+    page,
+  }) => {
+    // The app-menu case above passes because that menu is `absolute z-10` — a
+    // POSITIONED element, so its z-index applies. The account popover is a Base
+    // UI popover, and it was a different story: its `Popup` carries `z-50` but
+    // computes to `position: static`, where z-index has no effect at all, and
+    // its `Positioner` is `fixed` with a transform — a stacking context at
+    // `z-index: auto`. Auto loses to the bar's `z-[2]`, so the whole popover
+    // painted underneath it.
+    //
+    // Nothing caught it because the bar only overlapped the popover's lower
+    // rows, and only on pages where it sits high enough. #172 moved the bar up
+    // 40px on /help by removing a redundant back link, which slid it onto the
+    // Sign out button and turned a latent fault into a broken control.
+    await page.goto("/help");
+    await waitForShell(page);
+    await waitForNavHydrated(page);
+    await page.getByRole("button", { name: /^Account:/ }).click();
+
+    const popup = page.getByRole("dialog", { name: "Account" });
+    await expect(popup).toBeVisible();
+    const signOut = popup.getByRole("button", { name: "Sign out" });
+    const box = (await signOut.boundingBox())!;
+    // Hit-test the control's own centre: "visible" is not the same as
+    // "clickable", and the failure mode here is precisely a visible control
+    // with something else on top of it.
+    const reachable = await page.evaluate(({ x, y, width, height }) => {
+      const el = document.elementFromPoint(x + width / 2, y + height / 2);
+      return Boolean(el?.closest('[role="dialog"][aria-label="Account"]'));
+    }, box);
+    expect(reachable, "the sticky bar is covering the Sign out control").toBe(
+      true,
+    );
+  });
+
   test("opts into smooth scrolling (reduced motion is handled separately)", async ({
     page,
   }) => {

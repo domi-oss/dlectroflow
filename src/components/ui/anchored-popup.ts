@@ -44,6 +44,28 @@ export const ANCHORED_POSITIONER = {
    *  a popup that silently mispositions under a transformed ancestor is exactly
    *  the class of fault #92 was. */
   positionMethod: "fixed",
+  /**
+   * #172 — the stacking, and it has to live HERE rather than on the popup.
+   *
+   * `Popover.Popup` / `Menu.Popup` compute to `position: static`, and z-index
+   * does nothing on a static element. `popupSurface`'s `z-50` was therefore
+   * inert: it read like the stacking was handled and it was not. What actually
+   * stacks is this positioner — `position: fixed` plus the transform Base UI
+   * writes for placement, so it is a stacking context — and it was left at
+   * `z-index: auto`. Auto loses to any positive z-index, so every popup built
+   * from this constant painted UNDERNEATH the `sticky top-0 z-[2]` section-nav
+   * bar wherever the two overlapped.
+   *
+   * It stayed invisible because the bar only ever covered a popover's lower
+   * rows. Removing a redundant back link from /help moved the bar up ~40px,
+   * which put it over the account popover's "Sign out" — a control that was
+   * fully visible and could not be clicked.
+   *
+   * 50 rather than a smaller number so this sits above the app menu's `z-10`
+   * too: an anchored popup is the most recently opened surface on the page, so
+   * it belongs on top of the page chrome, not interleaved with it.
+   */
+  className: "z-50",
 } as const;
 
 /**
@@ -57,7 +79,12 @@ export const ANCHORED_POSITIONER = {
  */
 export function popupSurface(className?: string): string {
   return cn(
-    "bg-background z-50 flex max-w-[calc(100vw-1rem)] flex-col rounded-md border shadow-md",
+    // No z-index here on purpose. A Base UI `Popup` computes to
+    // `position: static`, so a z-index on it is silently ignored — this string
+    // used to carry `z-50` and it never once took effect.
+    // Stacking belongs to ANCHORED_POSITIONER above, which is the element that
+    // is actually positioned; see #172 for how the dead class hid a real bug.
+    "bg-background flex max-w-[calc(100vw-1rem)] flex-col rounded-md border shadow-md",
     className,
   );
 }
