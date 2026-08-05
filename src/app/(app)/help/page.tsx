@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { getSettings } from "@/lib/db";
 import { currentWorkspaceId } from "@/lib/workspace";
-import { BackLink } from "@/components/nav/back-link";
 import { SectionNav } from "@/components/nav/section-nav";
 import { SectionHeading } from "@/components/nav/section-heading";
 import { HELP_SECTIONS } from "@/lib/section-nav";
@@ -29,8 +28,6 @@ export default async function HelpPage({
 
   return (
     <div className="space-y-8">
-      <BackLink from={from} voice={voice} />
-
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold">Help &amp; getting started</h1>
         <p className="text-muted-foreground text-sm">
@@ -40,8 +37,10 @@ export default async function HelpPage({
       </header>
 
       {/* #72 — the page map. Sticky so it stays reachable on a long scroll.
-          #131 — and the way OUT rides with it: the same `from` the control
-          above was given, so both copies resolve to the same origin. */}
+          #131 — and the way OUT rides with it. It is the page's only back
+          control: because the bar is `sticky top-0` it is on screen at the top
+          too, so the separate copy that used to sit above this heading was a
+          duplicate of the same destination rather than extra reach. */}
       <SectionNav
         sections={HELP_SECTIONS}
         voice={voice}

@@ -21,7 +21,6 @@ import { FocusTimerSection } from "@/components/settings/focus-timer-section";
 import { IntegrationsPanel } from "@/components/settings/integrations-panel";
 import { AccountPanel } from "@/components/settings/account-panel";
 import { PURGE_GRACE_DAYS } from "@/lib/account-lifecycle";
-import { BackLink } from "@/components/nav/back-link";
 import { SectionNav } from "@/components/nav/section-nav";
 import { SETTINGS_SECTIONS } from "@/lib/section-nav";
 import { t, type Voice } from "@/lib/strings";
@@ -83,12 +82,12 @@ export default async function SettingsPage({
 
   return (
     <div className="space-y-4">
-      <BackLink from={from} voice={voice} />
-
       <h1 className="text-xl font-semibold">{t("nav.settings", voice)}</h1>
-      {/* #131 — the same `from` goes to both back controls: the one above, which
-          scrolls away with the header, and the compact copy the sticky bar
-          carries for everywhere below the fold. */}
+      {/* #131 — the page's `from` goes to the back control in the sticky bar,
+          which is the only one. There used to be a second copy above this
+          heading, on the reasoning that the bar was for "below the fold" — but
+          the bar is `sticky top-0`, so its copy is already on screen here. The
+          two rendered together, 40px apart, pointing at the same place. */}
       <SectionNav
         sections={sections}
         voice={voice}
