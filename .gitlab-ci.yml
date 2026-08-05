@@ -886,6 +886,21 @@ deploy_production:
     # Both hostnames must also be in cert-manager's hostAliases or the HTTP-01
     # self-check never completes on GKE and the cert silently never issues —
     # docs/deploy-runbook.md §4.
+    #
+    # ── The streamed lo-fi catalog (#61) ─────────────────────────────────────
+    # Ten CC0 tracks ship inside the image, one per category. The full set is
+    # 166 tracks / ~544 MB, which is more than a runtime image should carry, so
+    # the rest is read at run time from a location the operator configures.
+    # The value is a plain operator knob like the others here, not a credential:
+    # the pod fetches the bytes and streams them back through
+    # /api/focus-catalog/audio, because next.config.ts keeps `default-src 'self'`
+    # with `media-src` unset and a browser therefore refuses third-party audio.
+    #
+    # Unset, the player falls back to the bundled ten and nothing else changes —
+    # which is a good default and a bad failure mode, because a MISSING flag and
+    # a deliberately empty one are indistinguishable from inside the cluster.
+    # `src/lib/deploy-values.ts` exists to make that difference loud; deleting
+    # the flag below fails that test rather than quietly halving the feature.
     - helm upgrade --install dlectroflow charts/dlectroflow
         --namespace dlectroflow-prod --create-namespace
         --set env=production --set postgres.persistent=true
@@ -903,6 +918,7 @@ deploy_production:
         --set-string secrets.gitlabOauthClientSecret="$GITLAB_OAUTH_CLIENT_SECRET"
         --set-string secrets.guestIpHashSalt="$GUEST_IP_HASH_SALT"
         --set-string secrets.tokenEncKey="$TOKEN_ENC_KEY"
+        --set-string focus.catalogOrigin="$FOCUS_CATALOG_ORIGIN"
         --set-string registry.username="$GITLAB_DEPLOY_TOKEN_USER"
         --set-string registry.password="$GITLAB_DEPLOY_TOKEN"
         --set backup.enabled=true
