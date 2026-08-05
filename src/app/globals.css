@@ -180,6 +180,53 @@
   --tick-color: oklch(0.792 0.209 151.711); /* ~green-400, AA on dark */
 }
 
+/* #182 — the inline-code chip's two surfaces, as explicit per-theme tokens.
+ *
+ * Each is --foreground blended toward --muted (the chip 10% of the way, the
+ * keycap edge 30%), which is the relationship that makes them work in both
+ * themes: --foreground and --muted are always at opposite ends of the range, so
+ * the same blend darkens in light and lightens in dark.
+ *
+ * ── Why these are precomputed and not a color-mix() ────────────────────────
+ * They WERE `color-mix(in oklab, var(--foreground) 10%, var(--muted))`, which is
+ * the obvious way to say it and reads better. It shipped a hazard. Lightning CSS
+ * cannot evaluate a mix of two custom properties at build time, so it emits a
+ * fallback for engines that would drop the declaration — and the fallback it
+ * chooses is the first colour, neat:
+ *
+ *     code,kbd,samp{…;background-color:var(--foreground);…}   ← generated
+ *     code,kbd,samp{background-color:color-mix(in oklab,…)}
+ *
+ * A chip whose background is --foreground, with `color: var(--foreground)` on
+ * top, is 1:1 — text that is not merely low-contrast but literally invisible.
+ * It only bites an engine without color-mix, which is below this app's floor and
+ * so should never happen; a fallback that fails *this* way is still not one to
+ * leave in the stylesheet, and it was found by reading the CSS the review app
+ * actually served rather than the source. Precomputing removes the fallback
+ * because there is nothing left to fall back from.
+ *
+ * Measured on this palette, with a calculator calibrated against three ratios
+ * this file already publishes (--primary on --card 5.41 vs its documented 5.42,
+ * white on the dark --destructive 3.52, dark --background on --destructive
+ * 5.57 vs 5.58):
+ *
+ *              text on chip   chip vs --card   chip vs --background   edge vs chip
+ *   light        11.77:1          1.42:1             1.34:1              1.63:1
+ *   dark         10.29:1          1.34:1             1.44:1              1.72:1
+ *
+ * The text ratios are past AAA, not just AA. The chip-vs-surface figures are
+ * deliberately low — a code token is a quiet tint, not a badge — but not as low
+ * as --muted neat, which is 1.07:1 against --background and therefore invisible.
+ * That is why the tint exists at all rather than reusing --muted. */
+:root {
+  --code-surface: oklch(0.8851 0.0131 331.979);
+  --code-edge: oklch(0.7413 0.0176 322.794);
+}
+.dark {
+  --code-surface: oklch(0.3032 0.0376 300.522);
+  --code-edge: oklch(0.4376 0.0349 302.725);
+}
+
 /* #40 — user-selected UI typeface (a11y). typefaceRootAttrs sets data-font on
  * the app shell; these rules re-key --font-sans / --font-heading off it so the
  * whole subtree re-renders in the chosen face. figtree is the @theme default,
@@ -240,24 +287,13 @@
    * and these sit in text-sm legal prose, text-sm help copy and default body
    * text. Against the text-sm body, 0.875em resolves to the same 12px the
    * `text-xs` sites already had, so nothing resizes — which is what let those
-   * nine drop the utility.
+   * ten drop the utility.
    *
-   * ── Colour, measured rather than assumed ─────────────────────────────────
    * The chip paints its OWN opaque surface, so the page behind it cannot move
    * the text ratio (the property `a11y-class-hygiene` calls pinning your own
-   * background). Measured on this palette:
-   *
-   *   text on chip     11.77:1 light   10.29:1 dark     (AA needs 4.5)
-   *   chip vs --card    1.42:1 light    1.34:1 dark
-   *   chip vs --background 1.34:1 light 1.44:1 dark
-   *
-   * Mixed from --foreground so it tracks the theme rather than needing a
-   * `dark:` partner. --muted on its own is 1.07:1 against --background — i.e.
-   * invisible, which is why it is tinted rather than used neat.
-   *
-   * `color-mix(in oklab, …)` needs no feature check: Tailwind 4 compiles every
-   * opacity modifier to it, and `outline-ring/50` two rules above means this
-   * stylesheet already ships one on every page.
+   * background). --code-surface and --code-edge are defined per theme above,
+   * with the measured ratios and the reason they are precomputed rather than a
+   * color-mix().
    *
    * `box-decoration-break: clone` so a chip that wraps across a line keeps its
    * padding and radius on both fragments; without it the second half loses its
@@ -277,7 +313,7 @@
     padding-inline: 0.35em;
     padding-block: 0.1em;
     border-radius: calc(var(--radius) * 0.35);
-    background-color: color-mix(in oklab, var(--foreground) 10%, var(--muted));
+    background-color: var(--code-surface);
     color: var(--foreground);
     -webkit-box-decoration-break: clone;
     box-decoration-break: clone;
@@ -293,8 +329,7 @@
    * INLINE box, nudging the line it sits on. A shadow paints inside the box the
    * chip already occupies, so a paragraph's leading is untouched. */
   kbd {
-    box-shadow: inset 0 -2px 0
-      color-mix(in oklab, var(--foreground) 30%, var(--muted));
+    box-shadow: inset 0 -2px 0 var(--code-edge);
     padding-bottom: 0.15em;
     font-weight: 500;
   }

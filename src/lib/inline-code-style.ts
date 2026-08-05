@@ -143,14 +143,21 @@ export function findInlineCodeSizeOverrides(
 }
 
 /**
- * The declarations of the first CSS rule whose selector list is exactly
- * `selectors`, or null if there is no such rule.
+ * Everything declared by rules whose selector list is exactly `selectors`, or
+ * null if there is no such rule.
  *
- * Deliberately tiny, and deliberately not a CSS parser: the one question being
- * asked is "does this exact rule still exist, and does it still set these
- * properties". Comments are stripped first, because `globals.css`'s rule is
- * preceded by forty lines of prose that names both the selectors and the
- * properties — the same comment-versus-code trap the JSX side has.
+ * Declarations from **every** matching block are merged, later winning, because
+ * that is what the cascade does and it is the question worth asking: not "what
+ * is in this one block" but "what does this selector end up setting". A CSS file
+ * splits a selector across blocks routinely — `globals.css` has three separate
+ * `:root` rules, the palette, the completion tokens and the code-chip tokens —
+ * and a first-match-only reader silently reports the palette's declarations as
+ * the whole answer. It did exactly that here before this was fixed.
+ *
+ * Deliberately tiny, and deliberately not a CSS parser. Comments are stripped
+ * first, because `globals.css`'s rule is preceded by forty lines of prose naming
+ * both the selectors and the properties — the same comment-versus-code trap the
+ * JSX side has.
  */
 export function findCssRule(
   css: string,
@@ -158,8 +165,11 @@ export function findCssRule(
 ): Record<string, string> | null {
   const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
   const wanted = selectors.join(",");
-  // Split on `}` boundaries rather than matching braces: none of the rules
-  // being asked about nest, and a nested block would simply not match.
+  const declarations: Record<string, string> = {};
+  let matched = false;
+
+  // Split on `}` boundaries rather than matching braces: none of the rules being
+  // asked about nest, and a nested block would simply not match.
   for (const chunk of withoutComments.split("}")) {
     const brace = chunk.indexOf("{");
     if (brace === -1) continue;
@@ -170,8 +180,8 @@ export function findCssRule(
       .filter(Boolean)
       .join(",");
     if (selector !== wanted) continue;
+    matched = true;
 
-    const declarations: Record<string, string> = {};
     for (const statement of chunk.slice(brace + 1).split(";")) {
       const colon = statement.indexOf(":");
       if (colon === -1) continue;
@@ -182,7 +192,6 @@ export function findCssRule(
         .trim()
         .replace(/\s+/g, " ");
     }
-    return declarations;
   }
-  return null;
+  return matched ? declarations : null;
 }

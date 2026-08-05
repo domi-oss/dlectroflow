@@ -118,6 +118,18 @@ describe("findCssRule", () => {
   it("returns null when the selector list differs", () => {
     expect(findCssRule(`code, kbd { color: red }`, ["code"])).toBeNull();
   });
+
+  it("merges every block with that selector, later winning", () => {
+    // `globals.css` has three separate `:root` rules. Reading only the first
+    // reports the palette's declarations as the whole answer, which is what
+    // made the `--code-surface` assertion below read `undefined`.
+    const css = `:root { --a: 1; --b: 2 } p { color: red } :root { --b: 3; --c: 4 }`;
+    expect(findCssRule(css, [":root"])).toEqual({
+      "--a": "1",
+      "--b": "3",
+      "--c": "4",
+    });
+  });
 });
 
 describe("the real tree", () => {
@@ -135,11 +147,54 @@ describe("the real tree", () => {
     // own surface is never guaranteed to pair with its text.
     expect(rule!["font-size"]).toBe("0.875em");
     expect(rule!["padding-inline"]).toBeDefined();
-    expect(rule!["background-color"]).toContain("color-mix");
+    expect(rule!["background-color"]).toBe("var(--code-surface)");
     expect(rule!["color"]).toBe("var(--foreground)");
 
     // Relative, not absolute. The whole reason the per-site `text-xs` was wrong.
     expect(rule!["font-size"]).toMatch(/em$/);
+  });
+
+  /**
+   * The chip's colours stay precomputed, and this is the assertion that keeps
+   * them that way.
+   *
+   * They were originally `color-mix(in oklab, var(--foreground) 10%,
+   * var(--muted))`, which reads far better and is the obvious way to express
+   * "blend these two". It shipped a hazard. Lightning CSS cannot evaluate a mix
+   * of two custom properties at build time, so it emits a fallback for engines
+   * that would drop the declaration — and it picks the first colour, neat. The
+   * CSS the review app actually served contained:
+   *
+   *     code,kbd,samp{…;background-color:var(--foreground);…}
+   *     code,kbd,samp{background-color:color-mix(in oklab,…)}
+   *
+   * With `color: var(--foreground)` also set, the fallback is 1:1 — text that is
+   * not low-contrast but invisible. It is below this app's browser floor and so
+   * should never be reached; a fallback that fails *that* way is still not one
+   * to keep, and nothing in the source hinted at it. It was found by reading the
+   * built stylesheet, which is the only place it exists.
+   *
+   * So: no `color-mix` in the chip's own declarations. Anywhere else in the
+   * file is fine — Tailwind compiles every opacity modifier to one.
+   */
+  it("keeps the chip's colours out of a build-time fallback", () => {
+    const css = readFileSync(GLOBALS, "utf8");
+    for (const selectors of [
+      INLINE_CODE_TAGS as unknown as string[],
+      ["kbd"],
+    ]) {
+      const rule = findCssRule(css, selectors);
+      expect(rule).not.toBeNull();
+      expect(Object.values(rule!).join(" ")).not.toContain("color-mix");
+    }
+
+    // And the tokens the rule points at are defined for BOTH themes. A missing
+    // `.dark` value is the failure this replaced: the light chip is a dark tint
+    // on a light surface, so inheriting it into dark mode is unreadable.
+    for (const token of ["--code-surface", "--code-edge"]) {
+      expect(findCssRule(css, [":root"])![token]).toMatch(/^oklch\(/);
+      expect(findCssRule(css, [".dark"])![token]).toMatch(/^oklch\(/);
+    }
   });
 
   it("gives kbd its keycap edge without changing the line box", () => {
