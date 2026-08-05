@@ -460,9 +460,28 @@ Options, in order of preference:
 
 If a database copy may have left your control (stolen backup dump, exposed
 `POSTGRES_PASSWORD`, compromised pod, suspicious GCS access), work this list
-**top to bottom**. Token columns are AES-256-GCM ciphertext (`v1:`, key
-`TOKEN_ENC_KEY` lives outside the DB), so a DB copy alone exposes no usable
-credentials — the order below assumes the worst anyway.
+**top to bottom**. Third-party token columns are AES-256-GCM ciphertext (`v1:`,
+key `TOKEN_ENC_KEY` lives outside the DB), so a DB copy alone exposes no usable
+credential to Google or an LLM provider — the order below assumes the worst
+anyway.
+
+**`CalendarFeed.token` is the exception, and the one to reach for first.** It is
+stored in plaintext by deliberate decision (the argument is in
+`prisma/schema.prisma`), so a copy of the database is a copy of every live feed
+URL, usable immediately and from anywhere. Step 5.
+
+Two triggers that are *not* a database leak also land on step 5:
+
+- **A backup dump, anywhere it has come to rest.** A dump leaves the database's
+  failure domain — that is the entire point of taking one — and nothing about
+  restoring it, copying it or losing it rotates anything. A feed token inside a
+  six-month-old dump is not a historical record; it is a bearer credential that
+  still works. Treat any dump you cannot account for as a token disclosure even
+  where the rest of the DB is stale enough not to matter.
+- **Access logs, or anything derived from them.** The token is in the request
+  path, so every access-log entry for a feed fetch contains it (§16, and the
+  privacy notice says so). Shipping logs somewhere new, widening who can read
+  them, or losing an export of them is a token disclosure by itself.
 
 1. **Cut off the entry point.** Rotate `POSTGRES_PASSWORD` in Secrets Manager,
    redeploy (the secret-checksum annotation rolls the pods), and restart the
@@ -482,14 +501,24 @@ credentials — the order below assumes the worst anyway.
 4. **Reclaim tokens** (only if a `ReclaimAuth` row exists — the write path is
    unused): revoke dlectroflow in Reclaim's connected-apps settings, then
    `DELETE FROM "ReclaimAuth";` — a fresh client re-registers on next connect.
-5. **Owner/guest sessions.** DB leak alone does NOT expose `AUTH_SESSION_SECRET`
+5. **Calendar feed tokens** (#154) — **every one of them, not a sample.** These
+   are plaintext, so unlike steps 3 and 4 there is nothing to decide: if the
+   rows were in something that left your control, the tokens are disclosed.
+   `DELETE FROM "CalendarFeed";` — the same clean-slate idiom as above, and the
+   only one that needs no `pgcrypto`. Each affected person then turns their feed
+   back on from **Settings → Integrations**, which mints a fresh token. Tell
+   them: their calendar app will show the subscription failing until they paste
+   the new URL, and a silent failure they were not warned about reads as the app
+   breaking rather than as an incident response.
+6. **Owner/guest sessions.** DB leak alone does NOT expose `AUTH_SESSION_SECRET`
    or `GUEST_IP_HASH_SALT` (env-only) — rotate them only on pod/CI compromise.
    Rotating logs everyone out (sessions are stateless JWTs).
-6. **What's NOT in the DB:** `ANTHROPIC_API_KEY`, `RESEND_API_KEY`,
+7. **What's NOT in the DB:** `ANTHROPIC_API_KEY`, `RESEND_API_KEY`,
    `GITLAB_OAUTH_CLIENT_SECRET`, GCS credentials (keyless Workload Identity).
    Rotate at their providers only on pod/CI compromise.
-7. **Afterwards:** take a fresh on-demand backup (§12), verify token columns
-   show `v1:` ciphertext, and audit GCS bucket access
+8. **Afterwards:** take a fresh on-demand backup (§12), verify token columns
+   show `v1:` ciphertext, confirm `SELECT count(*) FROM "CalendarFeed";` reads
+   what you expect after step 5, and audit GCS bucket access
    (`gcloud logging read 'resource.type="gcs_bucket"' ...`) for reads you
    don't recognise. **That audit depends on §16 being in place** — with
    project-level ingestion off the read answers `SERVICE_DISABLED`, which is
@@ -586,6 +615,26 @@ scheduled job change production, which is the opposite of what a check is for.
 - **If ingestion volume ever becomes the problem, the lever is an exclusion
   filter on `_Default`, not a shorter window.** Dropping health-check and
   static-asset lines cuts volume without costing you the lines an incident needs.
+
+### One entry type is a credential (#154)
+
+Access-log lines carry the request path, and a calendar feed is fetched at
+`/api/ics/feed/<token>`. **So the log is, in part, a store of live bearer
+tokens** — for 30 days, and for anyone who can read it.
+
+Consequences worth stating rather than rediscovering:
+
+- Read access to the logs is read access to every feed. Grant it on that basis.
+- Exporting, forwarding or sinking these logs anywhere new moves the tokens with
+  them, and does not stop being true because the destination is trusted.
+- If any of that goes wrong, it is a token disclosure and §15 step 5 is the
+  response.
+- The privacy notice (`src/app/privacy/page.tsx`) tells readers this happens and
+  names the 30 days. Changing the window or the log format means changing that
+  page — the drift table in `docs/legal.md` records the obligation.
+- An exclusion filter on feed paths would remove the tokens, but it also removes
+  the only evidence that a feed was ever fetched. Not done, so the trade-off is
+  a decision rather than an oversight.
 
 ### What this does not give you
 

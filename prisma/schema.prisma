@@ -247,6 +247,29 @@ model GoogleAuth {
 // protected — both are credentials to a THIRD PARTY, where the leak reaches past
 // this database. This one does not.
 //
+// WHERE THAT ARGUMENT STOPS (#154 review). It holds for a live database, where
+// holding the rows and holding the token get you the same data at the same
+// moment. It does NOT carry to a backup, and the difference is not a detail:
+//
+//  - A dump leaves the database's failure domain — that is what a backup is for
+//    — so the copy and the thing it copies do not fail, leak or get restored
+//    together. "The attacker already has the data" assumes one blast radius.
+//  - A dump is a snapshot; the token in it is not. Nothing about restoring,
+//    copying or losing a dump rotates anything, so a token read out of a
+//    six-month-old one is a live, forward-looking read capability against
+//    TODAY'S data — including everything written after the snapshot. The rest of
+//    the dump ages into a historical record. This column does not age at all.
+//
+// That is a real cost of the plaintext decision, not a reason to reverse it: the
+// re-copyable URL is still worth more than a hash whose only benefit accrues in
+// the case handled below. It is paid for operationally instead — every dump you
+// cannot account for is a token disclosure, and `docs/deploy-runbook.md` §15
+// step 5 rotates the whole table. `rotatedAt` is what makes that auditable.
+//
+// The same asymmetry is why the token is worth rotating after a log exposure:
+// it travels in the request path, so it outlives the request in the access log
+// (runbook §16) exactly as it outlives the snapshot in a dump.
+//
 // `rotatedAt` is nullable and means "never regenerated". Both timestamps are
 // audit columns rather than UI: a credential with no record of when it was
 // issued or last rotated is one you cannot reason about during an incident.
