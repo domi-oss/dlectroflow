@@ -328,8 +328,17 @@ export default function PrivacyPage() {
           <li>
             <strong>A calendar subscription URL</strong>, if you create one: a
             single random token, so the URL is unguessable. Nothing else — no
-            record of which calendar app you pasted it into, and no log of when
-            it was fetched. Signed-in accounts only. Details in{" "}
+            record of which calendar app you pasted it into, and the app itself
+            writes nothing when your calendar fetches the feed.{" "}
+            <strong>One caveat that matters here.</strong> The token is part of
+            the web address, not a hidden header, and the web server in front of
+            the app records the address of every request it handles — the
+            ordinary access log described at the end of this section. So there
+            <em> is</em> a record of when the feed was fetched, and it has the
+            token in it. Those logs are deleted after 30 days, and you can
+            replace the token from Settings at any time, which makes every
+            logged copy of the old one useless. Signed-in accounts only. Details
+            in{" "}
             <Link href={`#${s("recipients").id}`} className="underline">
               Who else is involved
             </Link>
@@ -361,9 +370,17 @@ export default function PrivacyPage() {
           never stores your IP address, only the salted hash described above.
           But the web server sitting in front of it writes ordinary access logs,
           and those include IP addresses, as web server logs everywhere do. They
-          are platform logs: kept only as long as they are useful for
-          investigating errors and abuse, never joined to your account or your
-          content, and never used for analytics.
+          are platform logs: kept for 30 days, never joined to your account or
+          your content, and never used for analytics.
+        </p>
+        <p>
+          Those logs record <strong>the web address of each request</strong> as
+          well, which is the same everywhere and normally says nothing much. It
+          is worth spelling out for one feature: a calendar subscription URL
+          carries its token in the address, so the token appears in the log for
+          as long as the log is kept. That is why the setting lets you replace
+          it, and why the 30-day window is stated here rather than left as
+          &ldquo;however long logs last&rdquo;.
         </p>
       </LegalSection>
 
@@ -926,9 +943,10 @@ export default function PrivacyPage() {
             the feed off or your account is deleted. Regenerating replaces the
             token, and the old URL stops working on the next request rather than
             at some later expiry. Turning the feed off removes the row
-            altogether. Note what I cannot delete: anything your calendar app
-            has already copied into its own storage is that app&rsquo;s to
-            remove, not mine.
+            altogether. The copies of the address in the web server&rsquo;s
+            access logs age out with those logs, after 30 days. Note what I
+            cannot delete: anything your calendar app has already copied into
+            its own storage is that app&rsquo;s to remove, not mine.
           </li>
           <li>
             <strong>The round-up email address</strong> is kept until you clear

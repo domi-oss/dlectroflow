@@ -96,6 +96,19 @@ export const SOURCE_REPO_URL =
  * and there is no contract with it, which is a different relationship from
  * Anthropic's or Resend's and has to read differently.
  *
+ * Moved a day within #154, on review, and the reason is worth keeping. The first
+ * draft told readers there was "no log of when it was fetched". That was false
+ * on both deploy targets: the token travels in the request PATH, `docker/
+ * Caddyfile` enables an access log, and `charts/dlectroflow/templates/
+ * ingress.yaml` sets no `log-format` override, so ingress-nginx's default —
+ * which contains `$request` — applies. Replacing a claimed ABSENCE of processing
+ * with the disclosure that it happens, and for how long, is substance twice
+ * over: a processing operation the reader was told did not exist, and a
+ * retention period (30 days) that had never been stated on the page at all.
+ * Nothing published under 2026-08-04 — this branch has not merged — so the date
+ * tracks the latest substantive edit rather than accumulating a correction
+ * notice for a version no reader ever saw.
+ *
  *
  * Previously bumped for #129: access and portability are now exercisable from
  * Settings rather than only by emailing the controller, and /privacy says so —
@@ -124,7 +137,7 @@ export const SOURCE_REPO_URL =
  * Previously bumped for #126: freezing or deleting an account also revokes the
  * Google grant, which changed what the app does with somebody's Google account.
  */
-export const LEGAL_EFFECTIVE_DATE = "2026-08-04";
+export const LEGAL_EFFECTIVE_DATE = "2026-08-05";
 
 /** Where the hosted instance and its backups physically sit. */
 export const HOSTING_REGION = "London, United Kingdom (GCP europe-west2)";

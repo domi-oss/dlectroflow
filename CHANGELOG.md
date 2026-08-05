@@ -118,6 +118,14 @@ operators upgrading a self-hosted instance don't get surprised.
   a calendar provider's logs. The Settings card says all of that at the point you
   copy it, not in a paragraph further down.
 
+  **It ends up in this instance's logs too, and the notice says so.** The token
+  travels in the request path, so an access log entry for a feed fetch contains
+  it — that is true of Caddy on the self-host path and of ingress-nginx on the
+  Kubernetes one, neither of which is configured to drop it. Production keeps
+  those entries for 30 days. The consequence for an operator is a rotation step:
+  a leaked backup dump or a mishandled log export is a disclosure of every live
+  feed token, and `docs/deploy-runbook.md` §15 now says to clear the table.
+
   New endpoint `GET /api/ics/feed/[token]`, which is the only route in the app
   that authorises from something other than a session — `/api/ics/[taskId]` next
   door stays session-scoped, because a task id is guessable in a way a token is
@@ -125,8 +133,9 @@ operators upgrading a self-hosted instance don't get surprised.
 
   `/privacy` now discloses the new recipient (whichever calendar app you
   subscribe from, which is explicitly **not** a processor — you chose it), the
-  stored token and its retention, and the legal effective date moves with it. No
-  new environment variable and no new dependency.
+  stored token and its retention, the fact that the web server's access log
+  records the URL and for how long, and the legal effective date moves with it.
+  No new environment variable and no new dependency.
 
 - **A member can export their own data (#129).** Settings → Account gains
   **Download my data (.zip)**, and `GET /api/export` behind it. The archive holds

@@ -117,8 +117,21 @@ export function feedPath(token: string): string {
  * deriving it from a spoofable `Host` would let one request mint a URL pointing
  * at somebody else's hostname.
  *
- * The token goes in the PATH, never a query string: a query string is the part
- * most likely to be logged verbatim by an intermediary.
+ * The token goes in the PATH rather than a query string, but **do not read that
+ * as "so it is not logged" — it is (#154 review).** Both deploy targets record
+ * the whole request line, path included: `docker/Caddyfile` enables an access
+ * log, and `charts/dlectroflow/templates/ingress.yaml` sets no `log-format`
+ * override, so ingress-nginx's default applies and that contains `$request`.
+ * Production keeps those entries for 30 days (`docs/deploy-runbook.md` §16).
+ *
+ * What the path buys is narrower and still worth having: a query string is the
+ * part that leaks OUTWARD — into `Referer` headers, analytics, browser history
+ * and third-party intermediaries — whereas a path in a URL nobody navigates to
+ * from a page stays with the operator's own logs. The token is therefore a
+ * credential with a KNOWN exposure, not a hidden one, which is why
+ * `src/app/privacy/page.tsx` says so plainly, why the rotation control exists,
+ * and why `docs/deploy-runbook.md` §15 lists these tokens among the things a
+ * leak means rotating.
  */
 export function feedUrl(token: string): string {
   return `${publicOrigin()}${feedPath(token)}`;
