@@ -108,7 +108,9 @@ describe(`notes columns are bounded at ${TASK_NOTE_MAX_LENGTH} characters by the
     async ({ constraint, insert }) => {
       await expect(
         insert(`over-${constraint}`, "x".repeat(TASK_NOTE_MAX_LENGTH + 1)),
-      ).rejects.toThrow(new RegExp(constraint));
+        // `toThrow(string)` is a SUBSTRING match in vitest, so the constraint
+        // name is checked without constructing a regex from a variable.
+      ).rejects.toThrow(constraint);
     },
   );
 

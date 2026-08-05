@@ -362,6 +362,47 @@ function literalsFromDef(def: string): Set<string> {
   return out;
 }
 
+/**
+ * A constraint definition, flattened for substring matching.
+ *
+ * Postgres re-renders `CHECK (char_length("notes") <= 2000)` as
+ * `CHECK (((notes IS NULL) OR (char_length(notes) <= 2000)))` — it adds parens,
+ * and it quotes an identifier only when the identifier needs it, which differs
+ * between `"estMinutes"` and `notes`. Stripping the identifier quotes and
+ * collapsing whitespace makes the comparison one stable string.
+ *
+ * Substring matching rather than a regex assembled from the registry row, and
+ * that is deliberate. Such a regex is harder to read than the string it is
+ * looking for, and building one from variables is a pattern SAST flags as a
+ * class — correctly, even where the inputs are local constants as they are
+ * here. Written out, the comparison is just the SQL. Only double quotes are
+ * removed; single-quoted VALUE literals are what `literalsFromDef` reads.
+ */
+function flatDef(def: string): string {
+  return def.replace(/"/g, "").replace(/\s+/g, " ");
+}
+
+/**
+ * Every function NAME called in a constraint definition, lowercased.
+ *
+ * Needed because substring matching cannot answer "does this measure with
+ * `length`?" — `length(` is a substring of `char_length(`, so a plain
+ * `includes` reports the wrong function in every definition that uses the right
+ * one. The regex this replaced carried a word boundary that was doing that work
+ * invisibly; losing it turned two passing assertions red, which is how it was
+ * caught.
+ *
+ * The regex here is a fixed LITERAL — nothing is interpolated into it — so it
+ * carries none of the non-literal-construction risk that motivated the rewrite.
+ */
+function calledFunctions(def: string): Set<string> {
+  return new Set(
+    [...flatDef(def).matchAll(/([a-z_][a-z0-9_]*)\s*\(/gi)].map((m) =>
+      m[1].toLowerCase(),
+    ),
+  );
+}
+
 type CheckRow = { conname: string; def: string };
 let checks: Map<string, string>;
 
@@ -518,18 +559,16 @@ describe("numeric-range CHECK constraints are applied (#78)", () => {
 
       // Postgres normalises `CHECK ("estMinutes" >= 1)` to
       // `CHECK (("estMinutes" >= 1))`; match the comparison, not the parens.
-      // A literal pattern that CAPTURES the column and the bound, rather than one
-      // built around them — same assertion, and it keeps this file free of the
-      // dynamically-constructed patterns SAST flags (#180 removed the other one).
-      const bound = /"(\w+)"\s*>=\s*(\d+)\b/.exec(def as string);
+      // #180 reached the same place from the other direction, with a literal
+      // capturing pattern. This file now has TWO bound assertions (`>= min`
+      // here, `<= max` below), so they share one idiom rather than each
+      // carrying its own — `flatDef` normalises the quoting and whitespace and
+      // the comparison is then just the SQL, with no pattern built from a
+      // variable for SAST to flag.
       expect(
-        bound?.[1],
-        `${constraint} does not compare "${column}" — its definition is: ${def}`,
-      ).toBe(column);
-      expect(
-        Number(bound?.[2]),
+        flatDef(def as string).includes(`${column} >= ${min}`),
         `${constraint} does not pin "${column}" >= ${min} — its definition is: ${def}`,
-      ).toBe(min);
+      ).toBe(true);
 
       if (nullable) {
         // #80 — on a nullable column the bound alone is not the invariant: a
@@ -562,7 +601,7 @@ describe("text-length CHECK constraints are applied (#44)", () => {
   });
 
   it.each(LENGTH_REGISTRY)(
-    "$constraint pins $fn($table.$column) <= $max",
+    "$constraint pins $column <= $max, measured with $fn",
     ({ constraint, column, max, fn, nullable }) => {
       const def = checks.get(constraint);
       expect(
@@ -570,13 +609,10 @@ describe("text-length CHECK constraints are applied (#44)", () => {
         `constraint ${constraint} is not applied to the DB — add the migration`,
       ).toBeDefined();
 
-      // Postgres normalises `CHECK (char_length("notes") <= 2000)` to
-      // `CHECK ((char_length(notes) <= 2000))` and may drop the column quotes,
-      // so match the call and the comparison rather than the exact text.
+      // Matched against the flattened definition, so the parens and quoting
+      // Postgres chooses for itself cannot break the assertion.
       expect(
-        new RegExp(`${fn}\\("?${column}"?\\)\\s*<=\\s*${max}\\b`).test(
-          def as string,
-        ),
+        flatDef(def as string).includes(`${fn}(${column}) <= ${max}`),
         `${constraint} does not pin ${fn}("${column}") <= ${max} — its definition is: ${def}`,
       ).toBe(true);
 
@@ -586,9 +622,14 @@ describe("text-length CHECK constraints are applied (#44)", () => {
       const otherFns = ["octet_length", "length", "bit_length"].filter(
         (f) => f !== fn,
       );
+      const called = calledFunctions(def as string);
+      expect(
+        called.has(fn),
+        `${constraint} does not call ${fn} at all — its definition is: ${def}`,
+      ).toBe(true);
       for (const other of otherFns) {
         expect(
-          new RegExp(`\\b${other}\\(`).test(def as string),
+          called.has(other),
           `${constraint} measures with ${other}, which disagrees with ${fn} on multi-byte text — its definition is: ${def}`,
         ).toBe(false);
       }
