@@ -16,6 +16,14 @@
  * So this module re-derives the classification from the committed tree and the
  * test asserts every top-level entry is deliberately on one side or the other.
  *
+ * Being on the documentation side is a claim about a directory's CONTENTS, and
+ * a name is not evidence for it, so that half is enforced separately and
+ * recursively by `docsOnlyViolations`: an executable, a symlink, a submodule or
+ * an unrecognised file type anywhere beneath a docs-only prefix fails the
+ * check. `docker/**\/*` needs no equivalent — its recursive glob in
+ * `.code_changes` re-triggers the gate at any depth — but a docs-only prefix
+ * has no backstop, so this is it.
+ *
  * The test enumerates that tree with `git ls-tree`, which is why the `test_app`
  * job installs `git` — `node:22-alpine` ships without it, and the first run of
  * this guard failed in CI with `spawnSync git ENOENT` while passing locally.
@@ -40,6 +48,27 @@
  * rather than `.gitlab/`: GitLab detects the community files in any of the
  * three locations, but `.gitlab/` has a recursive glob in `.code_changes`, so
  * a typo fix there would run the full pipeline.
+ *
+ * `skills` holds GitLab Duo agent skills (`skills/<name>/SKILL.md`). It is
+ * classified here rather than in `.code_changes` because it is prose: Duo reads
+ * it as instructions, nothing imports it, nothing bundles it, and no CI job
+ * executes it — so changing one cannot change what the application does, which
+ * is the test this list applies. The distinction from `docker/` is worth being
+ * precise about, since that IS in `.code_changes` despite also never running in
+ * CI: `docker/` is deployment configuration and decides how the app is built
+ * and served, whereas a skill only shapes how an agent talks about the repo.
+ *
+ * This holds ONLY while the directory stays prose. Upstream AntiVibe ships four
+ * optional helper shell scripts; they were deliberately not carried over, and
+ * the reason is this line. Adding any executable under `skills/` means moving
+ * `skills/**\/*` into `.code_changes` in the same change, or it ships unscanned
+ * and unexecuted-by-CI — the precise hazard this module's header describes.
+ *
+ * That condition used to rest on this comment being read, which is what a gate
+ * exists to replace: `docsOnlyViolations` below now fails the suite on the
+ * offending file, by name, so the reclassification cannot be forgotten rather
+ * than merely being written down. `skills/README.md` still states the rule
+ * where someone adding a skill will meet it first.
  */
 export const DOCS_ONLY_PATHS = [
   "AGENTS.md",
@@ -48,7 +77,61 @@ export const DOCS_ONLY_PATHS = [
   "LICENSE",
   "README.md",
   "docs",
+  "skills",
 ] as const;
+
+/**
+ * File suffixes and exact filenames that may appear under a `DOCS_ONLY_PATHS`
+ * prefix. Anything else fails the guard.
+ *
+ * This is the enforcement of the promise `DOCS_ONLY_PATHS` makes. That list
+ * grants a whole directory the fast path on the strength of its name, and the
+ * name is not evidence: `docker/**\/*` needs no equivalent because its
+ * recursive glob in `.code_changes` re-triggers the gate at any depth, but a
+ * docs-only prefix has no such backstop, so the contents are checked here
+ * instead.
+ *
+ * Deliberately an allow-list of what the tree ACTUALLY holds, not of what
+ * seems harmless — 70 `.md`, 3 `.png`, 1 `.html` and 3 `LICENSE` as of this
+ * commit. Fail-closed only works if the list is not padded with speculative
+ * entries: adding a `.svg` should fail once, in front of the person adding it,
+ * rather than having been silently pre-authorised by someone who was not
+ * looking at it.
+ *
+ * `.html` earns its place narrowly. `docs/wireframe/dlectroflow-wireframe.html`
+ * is a static design artefact: nothing imports it, no route serves it, and it
+ * is not in the image, so it can only run in a browser a developer aimed at
+ * their own checkout. A `.html` that the app served would be a code path and
+ * would belong in `.code_changes`, not here.
+ */
+export const DOCS_ONLY_FILE_SUFFIXES: readonly string[] = [
+  ".md",
+  ".png",
+  ".html",
+];
+
+/** @see DOCS_ONLY_FILE_SUFFIXES — MIT copies from ported skills, and the root AGPL text. */
+export const DOCS_ONLY_FILE_NAMES: readonly string[] = ["LICENSE"];
+
+/** The only git file mode documentation has any business having. */
+const GIT_MODE_REGULAR_FILE = "100644";
+
+/**
+ * What is wrong with each git mode that is not a plain file, phrased for the
+ * failure message.
+ *
+ * A symlink and a submodule are here because neither is caught by looking at
+ * the filename, which is the only thing the rest of this module does: a
+ * `docs/guide.md` symlinked at `../src/lib/crypto/token.ts` reads as
+ * documentation to every name-based check, and a submodule is an entire
+ * repository that the fast path would ship without building or scanning a line
+ * of it.
+ */
+const NON_FILE_GIT_MODES: Readonly<Record<string, string>> = {
+  "100755": "has the executable bit set",
+  "120000": "is a symbolic link",
+  "160000": "is a git submodule",
+};
 
 /**
  * Every scanner job `.code_scanner_rules` gates, mapped to the security report
@@ -146,19 +229,52 @@ export function parseCodeChangeGlobs(gitlabCiYml: string): string[] {
  *   • a filename pattern where `*` matches any run of non-`/` characters
  *     (`*.ts`, or a literal name like `.nvmrc`)
  *
- * A trailing wildcard (`Name*`) falls out of the same substitution and is still
- * honoured, though `.code_changes` no longer uses one — the last was
- * `Dockerfile*`, retired when the Docker family moved under `docker/`.
+ * A trailing wildcard (`Name*`) is honoured too, though `.code_changes` no
+ * longer uses one — the last was `Dockerfile*`, retired when the Docker family
+ * moved under `docker/`.
+ *
+ * Matched by walking the literal fragments rather than by compiling a regex.
+ * The regex version needed every fragment escaped against injection and was
+ * flagged by semgrep as "regular expression with non-literal value" on each of
+ * the four occasions this function drifted to a new line number — three
+ * dismissals as a false positive so far, all of the same code. A matcher that
+ * never builds a pattern cannot be flagged and cannot be mis-escaped, and this
+ * module had already made the same trade once (`parseStubReportTypes` compares
+ * a substring for exactly this reason). Behaviour is unchanged; the
+ * characterisation cases in the colocated test were written against the regex
+ * implementation and pass against both.
  */
 export function globCoversTopLevel(glob: string, name: string): boolean {
   const slash = glob.indexOf("/");
   if (slash !== -1) return glob.slice(0, slash) === name;
 
-  const pattern = glob
-    .split("*")
-    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-    .join("[^/]*");
-  return new RegExp(`^${pattern}$`).test(name);
+  const fragments = glob.split("*");
+  if (fragments.length === 1) return glob === name; // no wildcard: a literal name
+
+  // A glob with no `/` describes a top-level name, and a wildcard stands for
+  // `[^/]*`, so nothing in this branch can legally match a path with a
+  // separator in it. Rejecting those up front is what keeps `*.ts` from
+  // claiming `src/index.ts` — and with them gone, the remaining wildcards are
+  // unconstrained and the walk below stays a plain left-to-right scan.
+  if (name.includes("/")) return false;
+
+  const first = fragments[0];
+  const last = fragments[fragments.length - 1];
+  if (!name.startsWith(first) || !name.endsWith(last)) return false;
+
+  // Interior fragments must appear in order and must not overlap each other,
+  // hence searching from `cursor` and advancing past each hit.
+  let cursor = first.length;
+  for (const fragment of fragments.slice(1, -1)) {
+    const found = name.indexOf(fragment, cursor);
+    if (found === -1) return false;
+    cursor = found + fragment.length;
+  }
+
+  // The trailing fragment is matched by `endsWith` above, but that can overlap
+  // what the walk already consumed — `a*b*c` against `abc` must not let the
+  // final `c` double as a character an interior fragment already claimed.
+  return cursor + last.length <= name.length;
 }
 
 /**
@@ -355,4 +471,118 @@ export function classifyTopLevelPath(
   if (codeGlobs.some((g) => globCoversTopLevel(g, name))) return "code";
   if (docsPaths.includes(name)) return "docs";
   return "unclassified";
+}
+
+/** One committed file: its git mode and its repository-relative path. */
+export type CommittedEntry = { mode: string; path: string };
+
+/** A committed file that a `DOCS_ONLY_PATHS` prefix should not be vouching for. */
+export type DocsOnlyViolation = { path: string; reason: string };
+
+/**
+ * `<mode> SP <type> SP <object>` then a TAB then the path — the format
+ * `git ls-tree` has emitted since forever, so no `--format` (git 2.36+)
+ * dependency is taken on the `node:22-alpine` image's git.
+ *
+ * `[\s\S]+` and not `.+` for the path: with `-z` the records are NUL-separated
+ * and the path is raw, so a path legitimately containing a newline arrives
+ * intact and must not fall out of the match. Dropping it would be fail-open —
+ * a file the guard never saw is a file the guard never objected to.
+ */
+const TREE_ENTRY = /^(\d{6}) (\w+) ([0-9a-f]+)\t([\s\S]+)$/;
+
+/**
+ * Parse `git ls-tree -r -z HEAD` into mode/path pairs.
+ *
+ * Pure, and separate from the call that produces the input, for the reason
+ * every file-parsing guard in this repo is: parsing that can only be exercised
+ * against the real tree cannot be shown to FAIL, and a guard nobody has
+ * watched fail is a guard nobody has tested.
+ *
+ * Throws on an unreadable record and on no records at all, rather than
+ * returning what it managed to read. Both silent versions fail in the
+ * dangerous direction: the entry the parser could not read is precisely the
+ * oddly-shaped one worth inspecting, and an empty set satisfies every
+ * assertion made against it.
+ */
+export function parseTreeEntries(lsTreeZOutput: string): CommittedEntry[] {
+  const entries: CommittedEntry[] = [];
+
+  for (const record of lsTreeZOutput.split("\0")) {
+    if (record === "") continue; // trailing NUL after the last record
+
+    const parsed = TREE_ENTRY.exec(record);
+    if (!parsed) {
+      throw new Error(
+        `\`git ls-tree\` produced a record this guard cannot read: ${JSON.stringify(record)}\n` +
+          `Expected \`<mode> <type> <object>\\t<path>\`, NUL-separated (\`git ls-tree -r -z HEAD\`).`,
+      );
+    }
+    entries.push({ mode: parsed[1], path: parsed[4] });
+  }
+
+  if (entries.length === 0) {
+    throw new Error(
+      "`git ls-tree` listed no files. That means the call went wrong, not that the repository is empty — and an empty file list passes every docs-only check by vacuity.",
+    );
+  }
+  return entries;
+}
+
+/**
+ * Every committed file under a docs-only prefix that is not documentation.
+ *
+ * The fail-closed half of this module. `classifyTopLevelPath` asks only whether
+ * a top-level NAME is on a list; it cannot see inside `docs/` or `skills/`, so
+ * on its own the docs-only classification is an unchecked promise about their
+ * contents. This checks it, recursively, for every depth.
+ *
+ * Both the mode and the filename are tested, and a file can fail on both.
+ * Neither substitutes for the other: `sh helper.sh` and `node helper.js` run a
+ * mode-644 file perfectly well, so the executable bit is a signal rather than
+ * the control, while a mode-755 `NOTES.md` is a shell script wearing a hat.
+ *
+ * Entries outside the docs-only prefixes are not this function's business —
+ * `scripts/` is full of committed executables and is covered by
+ * `.code_changes`, so it already gets the full gate.
+ */
+export function docsOnlyViolations(
+  entries: readonly CommittedEntry[],
+  docsPaths: readonly string[] = DOCS_ONLY_PATHS,
+): DocsOnlyViolation[] {
+  const violations: DocsOnlyViolation[] = [];
+
+  for (const { mode, path } of entries) {
+    // `${p}/` and not `startsWith(p)`: `docs` must not claim `docs-internal/`,
+    // which `.code_changes` — not this list — is responsible for.
+    const isDocsOnly = docsPaths.some(
+      (p) => path === p || path.startsWith(`${p}/`),
+    );
+    if (!isDocsOnly) continue;
+
+    if (mode !== GIT_MODE_REGULAR_FILE) {
+      violations.push({
+        path,
+        reason:
+          NON_FILE_GIT_MODES[mode] ?? `has the unrecognised git mode ${mode}`,
+      });
+    }
+
+    const name = path.slice(path.lastIndexOf("/") + 1);
+    // `length >` and not `>=`: `.md` alone is a dotfile with no stem, not a
+    // document, and an unaccounted-for shape fails rather than passing on a
+    // suffix match nobody intended.
+    const isDocumentation =
+      DOCS_ONLY_FILE_NAMES.includes(name) ||
+      DOCS_ONLY_FILE_SUFFIXES.some(
+        (suffix) => name.length > suffix.length && name.endsWith(suffix),
+      );
+    if (!isDocumentation) {
+      violations.push({
+        path,
+        reason: "is not a recognised documentation file type",
+      });
+    }
+  }
+  return violations;
 }
