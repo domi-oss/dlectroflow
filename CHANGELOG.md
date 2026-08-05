@@ -419,6 +419,28 @@ operators upgrading a self-hosted instance don't get surprised.
     text findings across 9 files, 2 focus findings, 4 unmeasured banner tones.
 ### Security
 
+- **`.ics` text values now escape every line terminator, not just `\n` (#154).**
+  `esc()` in `src/lib/ics.ts` handled `\`, `;`, `,` and LF but not **CR**. RFC
+  5545 §3.3.11 permits no control character but HTAB, and a literal CR inside a
+  value ends the content line early under a lenient parser, so one property
+  becomes two. CRLF now collapses to a single `\n` rather than two, and the
+  remaining C0 controls are dropped — there is no escape sequence for them to
+  survive as. `UID`, previously interpolated raw, is escaped too; every UID today
+  is machine-derived so no output changes, but the next one derived from user
+  text inherits the gate instead of having to notice its absence.
+
+  **This reaches shipped code**, which is why it is here and not folded silently
+  into the feature above: `ics.ts` is shared by the per-task `.ics` download, the
+  #129 export's `scheduled.ics`, and the new subscription feed. The route in is
+  `parentEmoji` and `subtaskEmoji`, the two fields not passed through the
+  whitespace-collapsing helper and persisted straight from a model proposal.
+  Impact is low — the attacker and the victim are the same account, and the only
+  reachable effect is a malformed entry in your own calendar — but the fix is one
+  expression and the surface is every calendar file the app has ever emitted.
+
+  The test that should have caught it could not: it stripped `\r\n` and then
+  looked only for `\n`, on a fixture containing no line terminator at all, so it
+  passed with the defect present. It now asserts on text that would leak one.
 - **The dependency bot can no longer walk a security override back into a CVE
   range (#161).** `brace-expansion` is held at the patched `^5.0.8` by a
   top-level npm `override` because CVE-2026-14257 / GHSA-mh99-v99m-4gvg has no
