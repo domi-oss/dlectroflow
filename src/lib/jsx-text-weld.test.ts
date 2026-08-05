@@ -148,6 +148,24 @@ describe("findTextWelds", () => {
     expect(findTextWelds(source)).toEqual([]);
   });
 
+  it("flags sentence punctuation running into an inline element", () => {
+    // The shape a symmetric "both sides must be word characters" rule missed.
+    // Found by injecting a real Prettier reflow into help/page.tsx and watching
+    // the rendered-text test in help.test.tsx fail while this module said clean.
+    // English never writes `step;Escape`.
+    const source = `export const A = () => (
+  <p>
+    stay on the finished step;
+    <kbd>Escape</kbd>
+    stops it too
+  </p>
+);`;
+    expect(findTextWelds(source).map((f) => f.rendered)).toEqual([
+      "step;Escape",
+      "Escapestops",
+    ]);
+  });
+
   // ── Precision: the shapes that must NOT fire ────────────────────────────
 
   it("does not flag punctuation before an inline element", () => {
@@ -254,32 +272,51 @@ describe("the real tree", () => {
   });
 
   /**
-   * The sensitivity number, measured rather than asserted.
+   * The sensitivity number, measured in CI rather than asserted in a comment.
    *
-   * The assertion below this one is expected to pass with zero findings, and a
-   * passing zero is worth exactly as much as the evidence that the same scanner
-   * can return non-zero. So: take every real source that has a space before an
-   * inline tag, delete that one space and push the tag onto its own line — the
-   * precise edit Prettier's reflow makes — and require the detector to notice.
+   * The assertion below this one is expected to pass with **zero** findings, and
+   * a passing zero is worth exactly as much as the evidence that the same
+   * scanner can return non-zero. So: take every real source that has a space
+   * between prose and an inline tag, delete that one space and push the tag onto
+   * its own line — the precise edit Prettier's reflow makes — and require the
+   * detector to notice.
    *
-   * 50 of 55 injected welds are caught at the time of writing. All five misses
-   * are the module's two documented limitations, and all five were inspected:
+   * **180 of 190 injected welds are caught** at the time of writing (61/68
+   * before an opening tag, 119/122 after a closing one). Every miss was
+   * inspected, and none is a parser bug:
    *
-   *  * three are `<strong>{EXPR}</strong>` / `<code>{EXPR}</code>`, where the
-   *    element's leading character is dynamic (privacy 897, terms 130,
-   *    account-panel 197) — limitation 2, literal text only;
-   *  * one is `<kbd>/</kbd>`, whose content is punctuation, so `or` and `/`
-   *    touching is not a word-on-word weld;
-   *  * one is inside a JSX **comment** in `celebration.tsx`, which the AST
-   *    correctly refuses to read as markup. A regex would have flagged it, and
-   *    this repo has twice shipped a tool that read a comment as code.
+   *  * **five** are `<strong>{EXPR}</strong>` / `<code>{EXPR}</code>`, where the
+   *    element's edge character is dynamic — limitation 2, literal text only
+   *    (privacy 897, terms 130, account-panel 197, breakdown-model-section 130,
+   *    inbox-view 2315);
+   *  * **two** are `<kbd>/</kbd>`, whose entire content is punctuation, so `or`
+   *    and `/` touching is not a word-on-word weld;
+   *  * **one** is inside a JSX **comment** in `celebration.tsx`, and one is a
+   *    TypeScript **ternary colon** in `breakdown-chat.tsx` — neither is markup,
+   *    so neither mutant is a weld at all. A regex reports both, and this repo
+   *    has twice shipped a tool that read a comment as code. Two of the ten
+   *    "misses" are therefore the AST being right.
    *
-   * The floor is 0.85 rather than the measured 0.909 so that ordinary copy
-   * edits, which change the mix of literal and dynamic elements, do not fail
-   * the suite. A drop past it means the parser regressed.
+   * The floor is 0.85 rather than the measured 0.947 so that ordinary copy
+   * edits, which change the mix of literal and dynamic elements, cannot fail the
+   * suite on their own. A drop past it means the parser regressed.
    */
-  const INJECTABLE =
-    /([\p{L}\p{N}]) (<(?:strong|em|kbd|code|span|a|b|i|small|abbr)\b)/gu;
+  const INJECTIONS = [
+    // Prose, then an inline tag stranded on the next line.
+    {
+      pattern:
+        /([\p{L}\p{N}.,;:!?)\]]) (<(?:strong|em|kbd|code|span|a|b|i|small|abbr)\b)/gu,
+      keep: 1,
+      drop: 2,
+    },
+    // A closing tag, then prose stranded on the next line.
+    {
+      pattern:
+        /(<\/(?:strong|em|kbd|code|span|a|b|i|small|abbr)>) ([\p{L}\p{N}])/gu,
+      keep: 1,
+      drop: 2,
+    },
+  ];
 
   it("catches the welds it claims to catch, on real sources", () => {
     let injected = 0;
@@ -287,15 +324,18 @@ describe("the real tree", () => {
     for (const file of scannedFiles()) {
       const source = readFileSync(file, "utf8");
       const before = findTextWelds(source, file).length;
-      for (const match of source.matchAll(INJECTABLE)) {
-        const cut = match.index + match[0].length - match[2].length;
-        const mutant = `${source.slice(0, match.index)}${match[1]}\n${source.slice(cut)}`;
-        injected++;
-        if (findTextWelds(mutant, file).length > before) caught++;
+      for (const { pattern, keep, drop } of INJECTIONS) {
+        for (const match of source.matchAll(pattern)) {
+          // Re-join without the single space, with a newline in its place.
+          const cut = match.index + match[0].length - match[drop].length;
+          const mutant = `${source.slice(0, match.index)}${match[keep]}\n${source.slice(cut)}`;
+          injected++;
+          if (findTextWelds(mutant, file).length > before) caught++;
+        }
       }
     }
-    // Both halves matter: a high ratio over two mutants would mean nothing.
-    expect(injected).toBeGreaterThan(30);
+    // Both halves matter: a perfect ratio over two mutants would mean nothing.
+    expect(injected).toBeGreaterThan(100);
     expect(caught / injected).toBeGreaterThanOrEqual(0.85);
   });
 

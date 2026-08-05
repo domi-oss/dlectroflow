@@ -99,17 +99,41 @@ const INLINE_TAGS = new Set([
 ]);
 
 /**
- * Characters that can weld. A boundary is only a finding when **both** sides
- * are one of these, which is what keeps correct English out of the results:
- * `(<code>x</code>)`, `<em>y</em>.` and `<kbd>N</kbd>,` all touch their
- * neighbour on purpose and all have punctuation on one side.
+ * The two ends of a boundary are judged by **different** character sets,
+ * because English punctuation is not symmetric.
+ *
+ * The left end asks "does a space belong after this character?" — true of any
+ * word character, and equally true of sentence punctuation. Nothing in English
+ * writes `step;Escape` or `first,second`. The right end asks "does a space
+ * belong before this character?" — true of word characters only, because
+ * closing punctuation is *supposed* to touch what it follows.
+ *
+ * The asymmetry is what lets all three of these through untouched while still
+ * catching the reflow:
+ *
+ *     a value (<code>x</code>)   `(` opens, so nothing belongs after it
+ *     <em>terms</em>.            `.` closes, so nothing belongs before it
+ *     finished step;<kbd>Esc</kbd>   ← a finding, and a symmetric rule missed it
+ *
+ * That third one is not hypothetical: it is what an injected Prettier reflow
+ * produced on `help/page.tsx`, and the first version of this module read it as
+ * clean because `;` was punctuation on one side. Opening punctuation (`(`, `[`,
+ * `“`, `/`, `—`) is deliberately absent from the left set for the same reason
+ * it belongs in neither: a space after it would be the bug.
+ *
+ * Closing brackets are in the left set on the same argument as `;`. It is the
+ * other half of the pair already there — `(` opens and takes nothing after it,
+ * `)` closes and takes a space — and it is what turns
+ * `<strong>Download my data (.zip)</strong>builds` into a finding. Both were
+ * added after measuring: neither produces a single new result on the real tree,
+ * so the recall is free.
  *
  * Unicode-aware because the UI copy is not ASCII — `£`, `—` and `’` all appear
  * next to inline elements in the legal pages, and a `[A-Za-z0-9]` test would
- * read `’` as a word boundary and flag `it’s<strong>` as clean while flagging
- * accented prose that is fine.
+ * read `’` as a word boundary.
  */
-const WELDABLE = /[\p{L}\p{N}]/u;
+const NEEDS_SPACE_AFTER = /[\p{L}\p{N}.,;:!?)\]]/u;
+const NEEDS_SPACE_BEFORE = /[\p{L}\p{N}]/u;
 
 /** One weld. `rendered` is the two words as the browser paints them. */
 export interface WeldFinding {
@@ -171,6 +195,15 @@ type Contribution =
   | { kind: "unknown" }
   /** Renders nothing at all: whitespace-only text, a comment, `{/* … *\/}`. */
   | { kind: "empty" };
+
+/**
+ * A contribution that actually reaches a boundary.
+ *
+ * Everything that renders nothing is dropped before any boundary is judged, so
+ * the `empty` arm is unreachable from there. Naming that as a type is what lets
+ * the reads of `.trailing` and `.leading` stay unguarded.
+ */
+type Edge = Exclude<Contribution, { kind: "empty" }>;
 
 function tagNameOf(
   node: ts.JsxElement | ts.JsxSelfClosingElement,
@@ -299,9 +332,17 @@ export function findTextWelds(
     // Children that render nothing are dropped first, so that the two things
     // either side of a whitespace-only line really are neighbours. Keeping the
     // node alongside its contribution is what lets the finding point at a line.
+    //
+    // The predicate is a type guard rather than a plain comparison: `.filter()`
+    // does not narrow a union on its own, and without it every later read of
+    // `.trailing` has to be told the `empty` arm is gone. Saying it once here is
+    // both shorter and the only place the claim is actually true.
     const significant = children
       .map((child) => ({ child, contribution: contributionOf(child) }))
-      .filter((entry) => entry.contribution.kind !== "empty");
+      .filter(
+        (entry): entry is { child: ts.JsxChild; contribution: Edge } =>
+          entry.contribution.kind !== "empty",
+      );
 
     for (let i = 0; i + 1 < significant.length; i++) {
       const left = significant[i];
@@ -313,7 +354,8 @@ export function findTextWelds(
       // (adjacent JSXText children do not occur) and element-to-element is out
       // of scope, per the note above.
       if ((a.kind === "inline") === (b.kind === "inline")) continue;
-      if (!WELDABLE.test(a.trailing) || !WELDABLE.test(b.leading)) continue;
+      if (!NEEDS_SPACE_AFTER.test(a.trailing)) continue;
+      if (!NEEDS_SPACE_BEFORE.test(b.leading)) continue;
 
       const rendered = `${lastWord(a.trailing, left.child)}${firstWord(
         b.leading,
@@ -345,7 +387,9 @@ export function findTextWelds(
  */
 function lastWord(trailing: string, node: ts.JsxChild): string {
   const text = flattenLiteralText(node);
-  const match = /[\p{L}\p{N}][\p{L}\p{N}\p{Pd}'’]*$/u.exec(text);
+  // The trailing sentence punctuation is part of what a reader searches for:
+  // the defect reads `step;Escape`, and `stepEscape` is not in the file.
+  const match = /[\p{L}\p{N}][\p{L}\p{N}\p{Pd}'’]*[.,;:!?)\]]*$/u.exec(text);
   return match ? match[0] : trailing;
 }
 
