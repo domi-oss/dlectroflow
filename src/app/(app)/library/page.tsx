@@ -124,6 +124,10 @@ export default async function LibraryPage({
           done: s.done,
           estMinutes: s.estMinutes,
           subtaskEmoji: s.subtaskEmoji,
+          // #44 — this row expands into the same <TaskSteps> the task page
+          // renders, so the note travels with the step rather than the two
+          // surfaces disagreeing about whether a step has one.
+          notes: s.notes,
           resumable: session?.pausedAt != null,
           openRemainingSec: openSessionRemainingSec(session, now),
         };

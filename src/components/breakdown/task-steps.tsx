@@ -16,6 +16,8 @@ import { t, type Voice } from "@/lib/strings";
 import { cn } from "@/lib/utils";
 import { COMPLETE_TEXT } from "@/lib/completion-style";
 import { DonePill } from "@/components/completion/done-pill";
+import { StepNote } from "@/components/breakdown/task-note";
+import { NoteText } from "@/components/breakdown/note-field";
 
 export type TaskStepRow = {
   id: string;
@@ -25,6 +27,9 @@ export type TaskStepRow = {
   subtaskEmoji: string | null;
   estMinutes: number;
   done: boolean;
+  /** #44 — this step's own freeform note. Null when it has none, which is the
+   *  common case and the reason the field is a disclosure rather than a box. */
+  notes: string | null;
   /** True when the step has an unfinished FocusSession (started, never ended) —
    * surfaces "Resume Focus" instead of "Start Focus". NOTE: this is the
    * "unfinished session" heuristic, not a true pause/resume (see #25). */
@@ -124,23 +129,28 @@ export function TaskSteps({
           // Done steps keep the completed state (strikethrough + ✓) with no
           // focus/complete actions.
           return (
-            <li
-              key={s.id}
-              className="flex items-center gap-3 rounded-lg border px-3 py-2 text-sm"
-            >
-              <span className="text-muted-foreground w-8 text-xs tabular-nums">
-                {s.order}/{s.total}
-              </span>
-              <span
-                className={cn("text-muted-foreground flex-1", COMPLETE_TEXT)}
-              >
-                {s.subtaskEmoji ? `${s.subtaskEmoji} ` : ""}
-                {s.text}
-              </span>
-              <span className="text-muted-foreground text-xs">
-                {s.estMinutes}m
-              </span>
-              <DonePill voice={voice} />
+            <li key={s.id} className="rounded-lg border px-3 py-2 text-sm">
+              <div className="flex items-center gap-3">
+                <span className="text-muted-foreground w-8 text-xs tabular-nums">
+                  {s.order}/{s.total}
+                </span>
+                <span
+                  className={cn("text-muted-foreground flex-1", COMPLETE_TEXT)}
+                >
+                  {s.subtaskEmoji ? `${s.subtaskEmoji} ` : ""}
+                  {s.text}
+                </span>
+                <span className="text-muted-foreground text-xs">
+                  {s.estMinutes}m
+                </span>
+                <DonePill voice={voice} />
+              </div>
+              {/* #44 — a DONE step gets its note READ-ONLY and no control.
+                  Annotating finished work has no purpose, so the "Add note"
+                  affordance would be clutter on a row that deliberately carries
+                  no actions; silently hiding text the user already wrote would
+                  be worse than either. */}
+              {s.notes && <NoteText>{s.notes}</NoteText>}
             </li>
           );
         }
@@ -267,6 +277,20 @@ export function TaskSteps({
                   {t("step.sendToReview", voice)}
                 </button>,
               ]}
+            />
+
+            {/* #44 — this step's own note. Below the action line, so the row's
+                primary controls keep their position and a note never pushes
+                Focus/Complete around. Collapsed when empty, which is what keeps
+                an already-dense list readable; `dense` on the field itself only
+                tightens the type scale, never the 44px hit target. */}
+            <StepNote
+              stepId={s.id}
+              order={s.order}
+              total={s.total}
+              text={s.text}
+              notes={s.notes}
+              voice={voice}
             />
           </li>
         );

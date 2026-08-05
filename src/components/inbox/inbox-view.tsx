@@ -1200,6 +1200,7 @@ export function InboxView({
                                 subtaskEmoji: s.subtaskEmoji,
                                 estMinutes: s.estMinutes,
                                 done: s.done,
+                                notes: s.notes ?? null,
                                 resumable: s.resumable,
                               }))}
                             />

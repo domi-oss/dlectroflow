@@ -24,6 +24,16 @@ vi.mock("@/app/actions/focus", () => ({
   renameStep: vi.fn().mockResolvedValue(undefined),
   updateStepEstimate: vi.fn().mockResolvedValue(undefined),
 }));
+// #44 — every row now mounts a note disclosure, so the action it binds has to
+// exist even in the specs that are about something else entirely.
+vi.mock("@/app/actions/step-notes", () => ({
+  updateStepNotes: vi
+    .fn()
+    .mockImplementation(async (_id: string, notes: string | null) => ({
+      ok: true,
+      notes,
+    })),
+}));
 
 import { ejectStepToInbox } from "@/app/actions/breakdown";
 import {
@@ -42,6 +52,7 @@ function steps(overrides: Partial<ReturnType<typeof baseStep>>[] = []) {
       subtaskEmoji: "🌱",
       estMinutes: 10,
       done: false,
+      notes: null as string | null,
       resumable: false,
     },
     {
@@ -52,6 +63,7 @@ function steps(overrides: Partial<ReturnType<typeof baseStep>>[] = []) {
       subtaskEmoji: "🚀",
       estMinutes: 15,
       done: false,
+      notes: null as string | null,
       resumable: false,
     },
   ];
@@ -66,6 +78,7 @@ function baseStep() {
     subtaskEmoji: "🌱",
     estMinutes: 10,
     done: false,
+    notes: null as string | null,
     resumable: false,
   };
 }

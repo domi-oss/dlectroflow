@@ -837,6 +837,28 @@ export const STRINGS = {
   // identical across voices (same call as task.scheduled/notScheduled above).
   "task.eyebrow": { plain: "Task", playful: "Task" },
 
+  // ── #44 — the note disclosure, on a task and on a step row ────────────────
+  // Two labels for one control, because the call to action differs: "Add note"
+  // when there is nothing yet, "Edit note" when there is. Both are the VISIBLE
+  // label only — the component appends the task or step it belongs to for
+  // assistive tech, so a list of steps does not present a dozen buttons with
+  // identical names. Keeping the visible text short is what makes it fit on a
+  // dense step row; keeping it a PREFIX of the accessible name is what keeps
+  // WCAG 2.5.3 (Label in Name) satisfied for voice control.
+  // 🗒️ is flavour, so playful only.
+  "note.add": { plain: "Add note", playful: "🗒️ Add note" },
+  "note.edit": { plain: "Edit note", playful: "🗒️ Edit note" },
+  // The field's own label. Same word in both voices: it labels an input, and an
+  // emoji inside a form label is read out by a screen reader every time the
+  // field takes focus.
+  "note.label": { plain: "Note", playful: "Note" },
+  "note.hint": {
+    plain:
+      "Rides along into your calendar event or Google Task when you schedule this. Saves automatically.",
+    playful:
+      "Tags along into your calendar event or Google Task when you plate this up. Saves itself.",
+  },
+
   // ── MR ③ — Appearance (theme + app-wide completion style) ──────────────────
   // ✓ is a functional glyph (allowed in plain).
   "appearance.heading": { plain: "Appearance", playful: "🎨 Appearance" },

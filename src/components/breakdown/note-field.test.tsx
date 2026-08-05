@@ -1,0 +1,303 @@
+// @vitest-environment jsdom
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { render, screen, cleanup, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { NoteField } from "@/components/breakdown/note-field";
+import { TASK_NOTE_MAX_LENGTH } from "@/lib/task-notes";
+
+/**
+ * #44 — the shared note disclosure, mounted once per task and once per step.
+ *
+ * The a11y assertions here are the substance, not a garnish. `a11y-class-hygiene`
+ * can see a contrast or focus-indicator regression in this file's class strings
+ * and axe can see a missing label, but NEITHER can see the failure this control
+ * is most likely to have: "Add note" repeated down a list of steps, giving a
+ * screen-reader user twelve buttons with identical names and no way to tell
+ * which step each belongs to. That one is only catchable by asserting the
+ * accessible NAME, which is what most of the specs below do.
+ */
+
+afterEach(cleanup);
+beforeEach(() => vi.clearAllMocks());
+
+const onSave = vi.fn();
+
+const renderField = (props?: Partial<Parameters<typeof NoteField>[0]>) =>
+  render(
+    <NoteField
+      subject="Ship the thing"
+      initialNote={null}
+      onSave={onSave}
+      voice="plain"
+      autoSaveDelayMs={20}
+      {...props}
+    />,
+  );
+
+beforeEach(() => {
+  onSave.mockImplementation(async (next: string | null) => ({
+    ok: true as const,
+    notes: next,
+  }));
+});
+
+describe("NoteField — collapsed by default", () => {
+  it("shows only an Add note affordance when there is no note", () => {
+    renderField();
+    expect(screen.getByRole("button", { name: /add note/i })).toBeTruthy();
+    // The editor is not merely invisible — it is out of the a11y tree and the
+    // tab order, which is what `hidden` the ATTRIBUTE buys over a CSS class.
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("names the trigger after the thing it belongs to, not just 'Add note'", () => {
+    // The failure this prevents: a list of steps rendering twelve buttons all
+    // called "Add note". The visible label stays short, and the subject is
+    // appended for assistive tech only.
+    renderField();
+    expect(
+      screen.getByRole("button", { name: "Add note for Ship the thing" }),
+    ).toBeTruthy();
+  });
+
+  it("keeps the visible label INSIDE the accessible name (WCAG 2.5.3)", () => {
+    // Label in Name: a voice-control user says what they can SEE. The name is
+    // set explicitly (an sr-only span produced "Add notefor Ship the thing" —
+    // see the component's comment), so the containment has to be asserted
+    // rather than falling out of the markup.
+    renderField();
+    const trigger = screen.getByRole("button", { name: /add note/i });
+    const visible = (trigger.textContent ?? "").trim();
+    const accessibleName = trigger.getAttribute("aria-label") ?? "";
+    expect(visible).toBe("Add note");
+    expect(accessibleName.startsWith(visible)).toBe(true);
+  });
+
+  it("does the same in the playful voice, where the label carries an emoji", () => {
+    // The emoji is part of the visible label, so it has to be part of the
+    // accessible name too or 2.5.3 breaks in one voice and not the other.
+    renderField({ voice: "playful" });
+    const trigger = screen.getByRole("button", { name: /add note/i });
+    const visible = (trigger.textContent ?? "").trim();
+    expect(visible).toBe("🗒️ Add note");
+    expect(trigger.getAttribute("aria-label")).toBe(
+      "🗒️ Add note for Ship the thing",
+    );
+  });
+
+  it("reports itself collapsed, and points at the region it controls", () => {
+    renderField();
+    const trigger = screen.getByRole("button", { name: /add note/i });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    const controls = trigger.getAttribute("aria-controls");
+    expect(controls).toBeTruthy();
+    // `aria-controls` has to RESOLVE even while collapsed, which is why the
+    // body stays mounted behind `hidden` rather than being unmounted.
+    expect(document.getElementById(controls as string)).not.toBeNull();
+  });
+});
+
+describe("NoteField — an existing note is readable without expanding", () => {
+  it("renders the saved note as text while collapsed", () => {
+    // The whole point of the note is that it is THERE when you come back to the
+    // task. Hiding it behind a tap would defeat the feature.
+    renderField({ initialNote: "Bring the Figma link" });
+    expect(screen.getByTestId("note-text").textContent).toBe(
+      "Bring the Figma link",
+    );
+    // The collapsed editor is out of the a11y tree and the tab order, so the
+    // note is present exactly once as far as a screen reader is concerned even
+    // though the textarea below it is still mounted holding the same string.
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("offers Edit rather than Add once a note exists, still subject-named", () => {
+    renderField({ initialNote: "Bring the Figma link" });
+    expect(
+      screen.getByRole("button", { name: "Edit note for Ship the thing" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /add note/i })).toBeNull();
+  });
+
+  it("preserves the line breaks a multi-line note was written with", () => {
+    renderField({ initialNote: "one\ntwo" });
+    const shown = screen.getByTestId("note-text");
+    expect(shown.textContent).toBe("one\ntwo");
+    // Rendered with `whitespace-pre-wrap`, so the break survives without the
+    // note becoming HTML — it is plain text and stays plain text.
+    expect(shown.className).toContain("whitespace-pre-wrap");
+  });
+});
+
+describe("NoteField — expanding", () => {
+  it("reveals a textarea and moves focus into it", async () => {
+    const user = userEvent.setup();
+    renderField();
+    await user.click(screen.getByRole("button", { name: /add note/i }));
+
+    const box = screen.getByRole("textbox");
+    expect(box).toBeTruthy();
+    // Focus MANAGEMENT, not just reveal: a keyboard user who activated the
+    // trigger would otherwise have to tab blindly forward to reach the field
+    // they just asked for.
+    await waitFor(() => expect(document.activeElement).toBe(box));
+  });
+
+  it("flips aria-expanded on the same trigger, rather than swapping buttons", async () => {
+    const user = userEvent.setup();
+    renderField();
+    const trigger = screen.getByRole("button", { name: /add note/i });
+    await user.click(trigger);
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: /note for Ship the thing/i })
+          .getAttribute("aria-expanded"),
+      ).toBe("true"),
+    );
+  });
+
+  it("gives the textarea a real label, not a placeholder standing in for one", async () => {
+    const user = userEvent.setup();
+    renderField();
+    await user.click(screen.getByRole("button", { name: /add note/i }));
+    // getByLabelText resolves through <label for>, so this fails if the field
+    // is only "labelled" by placeholder text — which disappears the moment you
+    // type and is not a label at all.
+    expect(screen.getByLabelText("Note for Ship the thing")).toBeTruthy();
+  });
+
+  it("describes what the note is for, wired with aria-describedby", async () => {
+    const user = userEvent.setup();
+    renderField();
+    await user.click(screen.getByRole("button", { name: /add note/i }));
+    const box = screen.getByRole("textbox");
+    const describedBy = box.getAttribute("aria-describedby") as string;
+    expect(describedBy).toBeTruthy();
+    const hint = document.getElementById(describedBy.split(" ")[0]);
+    expect(hint?.textContent).toMatch(/calendar|Google Task/i);
+  });
+
+  it("bounds the field at the same length the column and the action do", async () => {
+    const user = userEvent.setup();
+    renderField();
+    await user.click(screen.getByRole("button", { name: /add note/i }));
+    expect(screen.getByRole("textbox").getAttribute("maxLength")).toBe(
+      String(TASK_NOTE_MAX_LENGTH),
+    );
+  });
+
+  it("collapses on Escape and returns focus to the trigger", async () => {
+    const user = userEvent.setup();
+    renderField();
+    const trigger = screen.getByRole("button", { name: /add note/i });
+    await user.click(trigger);
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+    // Focus must not be lost to the document body — that is where a keyboard
+    // user's position disappears and they have to start tabbing from the top.
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: /add note for Ship the thing/i }),
+    );
+  });
+});
+
+describe("NoteField — autosave", () => {
+  it("saves once after the debounce, not once per keystroke", async () => {
+    const user = userEvent.setup();
+    renderField();
+    await user.click(screen.getByRole("button", { name: /add note/i }));
+    await user.type(screen.getByRole("textbox"), "call Sam");
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave).toHaveBeenCalledWith("call Sam");
+  });
+
+  it("has no Save button — the field is the whole interaction", async () => {
+    const user = userEvent.setup();
+    renderField();
+    await user.click(screen.getByRole("button", { name: /add note/i }));
+    expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull();
+  });
+
+  it("shows the shared saved affordance, matching the settings sections", async () => {
+    const user = userEvent.setup();
+    renderField();
+    await user.click(screen.getByRole("button", { name: /add note/i }));
+    await user.type(screen.getByRole("textbox"), "hi");
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-save-status="saved"]'),
+      ).not.toBeNull(),
+    );
+  });
+
+  it("surfaces a failed save without disabling the field", async () => {
+    onSave.mockResolvedValue({ ok: false as const, reason: "error" as const });
+    const user = userEvent.setup();
+    renderField();
+    await user.click(screen.getByRole("button", { name: /add note/i }));
+    await user.type(screen.getByRole("textbox"), "hi");
+
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-save-status="error"]'),
+      ).not.toBeNull(),
+    );
+    // Still editable: the user's text is the only copy that exists, so taking
+    // the field away from them is how it gets lost.
+    expect(screen.getByRole("textbox").hasAttribute("disabled")).toBe(false);
+  });
+
+  it("does not save on expand alone, when nothing was typed", async () => {
+    const user = userEvent.setup();
+    renderField({ initialNote: "unchanged" });
+    await user.click(screen.getByRole("button", { name: /edit note/i }));
+    await new Promise((r) => setTimeout(r, 60));
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("sends null when the note is cleared, so the column goes back to NULL", async () => {
+    const user = userEvent.setup();
+    renderField({ initialNote: "delete me" });
+    await user.click(screen.getByRole("button", { name: /edit note/i }));
+    await user.clear(screen.getByRole("textbox"));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(null));
+  });
+
+  it("adopts what the server actually stored, not what was typed", async () => {
+    // The action trims, strips controls and clamps. A field that keeps showing
+    // the pre-normalisation text is telling the user something untrue about
+    // what is saved.
+    onSave.mockResolvedValue({ ok: true as const, notes: "trimmed" });
+    const user = userEvent.setup();
+    renderField();
+    await user.click(screen.getByRole("button", { name: /add note/i }));
+    await user.type(screen.getByRole("textbox"), "  trimmed  ");
+
+    await waitFor(() =>
+      expect(screen.getByRole("textbox")).toHaveProperty("value", "trimmed"),
+    );
+  });
+
+  it("announces the remaining budget politely as the bound approaches", async () => {
+    const user = userEvent.setup();
+    renderField({ initialNote: "y".repeat(TASK_NOTE_MAX_LENGTH - 5) });
+    await user.click(screen.getByRole("button", { name: /edit note/i }));
+
+    const counter = screen.getByRole("status", { name: /characters/i });
+    expect(counter.textContent).toContain("5");
+    // Polite, not assertive: a count ticking down on every keystroke must not
+    // interrupt what the screen reader is already saying.
+    expect(counter.getAttribute("aria-live")).toBe("polite");
+  });
+
+  it("stays quiet about the budget while there is plenty left", async () => {
+    const user = userEvent.setup();
+    renderField();
+    await user.click(screen.getByRole("button", { name: /add note/i }));
+    expect(screen.queryByRole("status", { name: /characters/i })).toBeNull();
+  });
+});
