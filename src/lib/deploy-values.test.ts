@@ -88,6 +88,27 @@ describe("parseHelmValues", () => {
     ]);
   });
 
+  it("still strips a commented-out flag that follows an apostrophe", () => {
+    // Worth pinning because the two rules interact and the wrong outcome is the
+    // dangerous one. `stripShellComments` tracks `'` as a quote character, and
+    // prose comments are full of apostrophes — if one opened a quote that
+    // swallowed the following `#`, a switched-off flag would read back as live.
+    // It does not, because the `#` that starts the apostrophe's own comment is
+    // reached first and consumes the rest of that line, apostrophe included.
+    // The real deploy_production block has 8 apostrophes across 64 comment
+    // lines and strips to zero.
+    const yml = [
+      "j:",
+      "  script:",
+      "    # the reader's business",
+      "    # --set-string ghost=yes",
+      "    - helm upgrade --set-string real=yes",
+    ].join("\n");
+    expect(parseHelmValues(yml, "j")).toEqual([
+      { key: "real", value: "yes", stringly: true },
+    ]);
+  });
+
   it("does not read a # inside a quoted value as a comment", () => {
     const yml = [
       "j:",
