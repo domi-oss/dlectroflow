@@ -59,7 +59,7 @@ describe("encodePlain", () => {
   // #44 — the plain encoder is what a self-hoster with a bare Google Tasks
   // list gets, so the note has to reach it too and not only the Reclaim path.
   it("carries the user's note above the deep-link (#44)", () => {
-    const { notes } = encodePlain({ ...args, userNote: "call before 5" });
+    const { notes } = encodePlain({ ...args, taskNote: "call before 5" });
     expect(notes).toContain("call before 5");
     expect(notes.indexOf("call before 5")).toBeLessThan(
       notes.indexOf("/focus/step_6"),
@@ -67,7 +67,7 @@ describe("encodePlain", () => {
   });
 
   it("is unchanged when there is no note (#44)", () => {
-    expect(encodePlain({ ...args, userNote: null }).notes).toBe(
+    expect(encodePlain({ ...args, taskNote: null }).notes).toBe(
       encodePlain(args).notes,
     );
   });

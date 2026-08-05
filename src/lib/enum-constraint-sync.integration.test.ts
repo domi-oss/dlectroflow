@@ -315,13 +315,25 @@ const LENGTH_REGISTRY: ReadonlyArray<{
   nullable: boolean;
 }> = [
   {
-    // 20260805120000_task_notes (#44) — the user's freeform note. Bounded
-    // because it is threaded into the Google Task `notes` field, which the
-    // Tasks API rejects over 8192 characters; the note is one part of that
+    // 20260805120000_task_and_step_notes (#44) — the user's freeform note.
+    // Bounded because it is threaded into the Google Task `notes` field, which
+    // the Tasks API rejects over 8192 characters; the note is one part of that
     // envelope, so it cannot be allowed to fill it alone. Behavioural half in
-    // src/lib/task-notes-check.integration.test.ts.
+    // src/lib/notes-length-check.integration.test.ts.
     constraint: "Task_notes_check",
     table: "Task",
+    column: "notes",
+    max: TASK_NOTE_MAX_LENGTH,
+    fn: "char_length",
+    nullable: true,
+  },
+  {
+    // The per-step twin, same migration and same bound. Listed separately
+    // rather than derived from the entry above so that the two CAN diverge
+    // visibly if a future migration changes one — a registry that generated
+    // both from one row would report agreement it had not checked.
+    constraint: "Step_notes_check",
+    table: "Step",
     column: "notes",
     max: TASK_NOTE_MAX_LENGTH,
     fn: "char_length",

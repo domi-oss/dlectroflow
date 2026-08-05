@@ -114,6 +114,10 @@ function makeTaskWithSteps(): ExportTask {
         googleTaskListId: null,
         scheduledAt: new Date(Date.UTC(2026, 6, 2, 9, 0, 0)),
         done: true,
+        // #44 — a step-level note, so the export tiers are exercised at BOTH
+        // grains. `tasks.md` quotes it under its step, `export.json` reproduces
+        // it verbatim, and the CSVs drop it like every other free-text column.
+        notes: "the login page, not the marketing one",
         // The column holds a JSON *string*, which is the whole reason
         // export.json has to expand it.
         estimateHistory: "[10,15]",
@@ -131,6 +135,7 @@ function makeTaskWithSteps(): ExportTask {
         googleTaskListId: null,
         scheduledAt: null,
         done: false,
+        notes: null,
         estimateHistory: null,
         createdAt: new Date(Date.UTC(2026, 6, 1, 9, 2, 0)),
       },

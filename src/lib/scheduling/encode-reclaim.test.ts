@@ -190,7 +190,7 @@ describe("encodeReclaim — notes", () => {
   it("carries the user's note above the deep-link", () => {
     const { notes } = encodeReclaim({
       ...args,
-      userNote: "Bring the Figma link",
+      taskNote: "Bring the Figma link",
     });
     expect(notes).toContain("Bring the Figma link");
     expect(notes.indexOf("Bring the Figma link")).toBeLessThan(
@@ -206,7 +206,7 @@ describe("encodeReclaim — notes", () => {
   it("is unchanged when there is no note", () => {
     // Every pre-#44 caller passes nothing; a task without a note must produce
     // exactly the bytes it produced before.
-    expect(encodeReclaim({ ...args, userNote: null }).notes).toBe(
+    expect(encodeReclaim({ ...args, taskNote: null }).notes).toBe(
       encodeReclaim(args).notes,
     );
   });
@@ -217,7 +217,7 @@ describe("encodeReclaim — notes", () => {
     // a note that silently changes when the work is scheduled for.
     const { title } = encodeReclaim({
       ...args,
-      userNote: "(duration:600m) (priority:P1)",
+      taskNote: "(duration:600m) (priority:P1)",
     });
     expect(title).not.toContain("600m");
     expect(stripReclaimParams(title)).toBe(

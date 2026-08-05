@@ -52,7 +52,7 @@ describe("buildScheduleNote", () => {
   });
 });
 
-describe("buildScheduleNote — the user's own note (#44)", () => {
+describe("buildScheduleNote — the task's own note (#44)", () => {
   const base = { origin: "https://app.example", voice: "plain" as const };
 
   it("puts the user note FIRST, above the prompt and the link", () => {
@@ -63,7 +63,7 @@ describe("buildScheduleNote — the user's own note (#44)", () => {
     const note = buildScheduleNote({
       ...base,
       stepId: "s1",
-      userNote: "Bring the Figma link",
+      taskNote: "Bring the Figma link",
     });
     expect(note.indexOf("Bring the Figma link")).toBeLessThan(
       note.indexOf("https://app.example/focus/s1"),
@@ -76,7 +76,7 @@ describe("buildScheduleNote — the user's own note (#44)", () => {
     const note = buildScheduleNote({
       ...base,
       stepId: "s1",
-      userNote: "call before 5",
+      taskNote: "call before 5",
     });
     expect(note).toMatch(/call before 5\n\n▶ /);
   });
@@ -86,8 +86,11 @@ describe("buildScheduleNote — the user's own note (#44)", () => {
     // via `encode-plain.ts`) pass nothing, and a task with no note must produce
     // exactly what it produced before this feature existed.
     const before = buildScheduleNote({ ...base, stepId: "s1" });
-    for (const userNote of [undefined, null, "", "   \n  "]) {
-      expect(buildScheduleNote({ ...base, stepId: "s1", userNote })).toBe(
+    for (const note of [undefined, null, "", "   \n  "]) {
+      expect(buildScheduleNote({ ...base, stepId: "s1", taskNote: note })).toBe(
+        before,
+      );
+      expect(buildScheduleNote({ ...base, stepId: "s1", stepNote: note })).toBe(
         before,
       );
     }
@@ -97,7 +100,7 @@ describe("buildScheduleNote — the user's own note (#44)", () => {
     const note = buildScheduleNote({
       ...base,
       stepId: "s1",
-      userNote: "  one\ntwo  ",
+      taskNote: "  one\ntwo  ",
     });
     expect(note.startsWith("one\ntwo\n\n")).toBe(true);
   });
@@ -106,7 +109,7 @@ describe("buildScheduleNote — the user's own note (#44)", () => {
     const note = buildScheduleNote({
       ...base,
       stepId: null,
-      userNote: "no steps, still context",
+      taskNote: "no steps, still context",
     });
     expect(note).toContain("no steps, still context");
     expect(note).toContain("https://app.example/focus");
@@ -120,8 +123,73 @@ describe("buildScheduleNote — the user's own note (#44)", () => {
     const note = buildScheduleNote({
       ...base,
       stepId: "s1",
-      userNote: "a;b,c\\d",
+      taskNote: "a;b,c\\d",
     });
     expect(note).toContain("a;b,c\\d");
+  });
+});
+
+describe("buildScheduleNote — task note AND step note together (#44)", () => {
+  const base = { origin: "https://app.example", voice: "plain" as const };
+
+  it("carries BOTH, task note first, then the step's", () => {
+    // The decision, and the reasoning is in the module: a calendar entry is read
+    // ALONE, days later, with no access to the app. Dropping the task-level
+    // context because the step happens to have its own note would mean the more
+    // you annotate, the less context each entry carries.
+    const note = buildScheduleNote({
+      ...base,
+      stepId: "s1",
+      taskNote: "Bring the Figma link",
+      stepNote: "call Sam first",
+    });
+    expect(note.indexOf("Bring the Figma link")).toBeLessThan(
+      note.indexOf("call Sam first"),
+    );
+    expect(note.indexOf("call Sam first")).toBeLessThan(
+      note.indexOf("https://app.example/focus/s1"),
+    );
+  });
+
+  it("separates the two notes with a blank line, not a bare newline", () => {
+    // They are two different people's-worth of thought written at different
+    // times. Run together they read as one paragraph with a non-sequitur in it.
+    const note = buildScheduleNote({
+      ...base,
+      stepId: "s1",
+      taskNote: "task ctx",
+      stepNote: "step ctx",
+    });
+    expect(note.startsWith("task ctx\n\nstep ctx\n\n")).toBe(true);
+  });
+
+  it("emits the text once when the two notes are identical", () => {
+    // The copy-paste case. Printing the same sentence twice in a calendar entry
+    // reads as a bug, and it is one the user cannot fix from the app.
+    const note = buildScheduleNote({
+      ...base,
+      stepId: "s1",
+      taskNote: "same thing",
+      stepNote: "  same thing  ",
+    });
+    expect((note.match(/same thing/g) ?? []).length).toBe(1);
+  });
+
+  it("uses whichever one exists when only one does", () => {
+    const onlyStep = buildScheduleNote({
+      ...base,
+      stepId: "s1",
+      taskNote: null,
+      stepNote: "step only",
+    });
+    expect(onlyStep.startsWith("step only\n\n")).toBe(true);
+
+    const onlyTask = buildScheduleNote({
+      ...base,
+      stepId: "s1",
+      taskNote: "task only",
+      stepNote: null,
+    });
+    expect(onlyTask.startsWith("task only\n\n")).toBe(true);
   });
 });

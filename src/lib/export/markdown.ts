@@ -59,7 +59,13 @@ function stepLine(step: ExportTask["steps"][number]): string {
   ]
     .filter(Boolean)
     .join(", ");
-  return `- ${box} ${emoji}${indentContinuation(step.text)} (${meta})`;
+  const line = `- ${box} ${emoji}${indentContinuation(step.text)} (${meta})`;
+  // #44 — the step's own note, as a NESTED list item rather than the `### Note`
+  // heading the task-level one gets. It annotates a single bullet, and a
+  // heading here would detach it from the step it belongs to and break the
+  // list. `indentContinuation` keeps a multi-line note inside the same item.
+  if (!step.notes) return line;
+  return `${line}\n  - Note: ${indentContinuation(step.notes)}`;
 }
 
 function taskSection(task: ExportTask): string {

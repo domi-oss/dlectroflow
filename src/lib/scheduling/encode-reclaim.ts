@@ -86,15 +86,18 @@ export type EncodeArgs = {
   origin: string;
   voice: Voice;
   /**
-   * The task's freeform note (#44), threaded into the Google Task `notes` so
-   * the scheduled item carries its own context.
+   * The freeform notes (#44), threaded into the Google Task `notes` so the
+   * scheduled item carries its own context: the TASK's, and this unit's own if
+   * the unit is a step that has one. `buildScheduleNote` composes both and
+   * explains why it is both rather than the more specific one.
    *
    * NOTES, never the title. Reclaim parses `(...)` groups out of a title and
    * acts on them, so a note containing parentheses reaching the title would be
    * read as scheduling parameters — a note that silently changes when the work
    * gets scheduled for. The notes field is not parsed.
    */
-  userNote?: string | null;
+  taskNote?: string | null;
+  stepNote?: string | null;
 };
 
 export function encodeReclaim(a: EncodeArgs): { title: string; notes: string } {
@@ -134,7 +137,7 @@ export function encodeReclaim(a: EncodeArgs): { title: string; notes: string } {
     // The context line stays FIRST (#44) — it says which step this is, and
     // orientation has to precede anything freeform; `buildScheduleNote` then
     // puts the user's note above the prompt and the link.
-    notes: `${context}\n${buildScheduleNote({ origin: a.origin, voice: a.voice, stepId: unit.id, userNote: a.userNote })}`,
+    notes: `${context}\n${buildScheduleNote({ origin: a.origin, voice: a.voice, stepId: unit.id, taskNote: a.taskNote, stepNote: a.stepNote })}`,
   };
 }
 

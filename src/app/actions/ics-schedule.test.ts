@@ -284,6 +284,103 @@ describe("scheduleViaIcs", () => {
     }
   });
 
+  // ── #44: the step's OWN note, on its own event only ──────────────────────
+  it("gives each event its own step's note, and never another step's", async () => {
+    workspaceMock.mockResolvedValue("owner");
+    process.env.PUBLIC_ORIGIN = "https://app.example";
+    taskFindFirstMock.mockResolvedValue(
+      stepTask({
+        notes: null,
+        steps: [
+          { id: "step-A", text: "Plan", estMinutes: 15, notes: "note for A" },
+          { id: "step-B", text: "Build", estMinutes: 20, notes: "note for B" },
+        ],
+      }),
+    );
+    const res = await scheduleViaIcs("task-1");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+
+    // Split per VEVENT so "the string is somewhere in the file" cannot pass for
+    // "the string is on the right event" — the exact confusion #104 was filed
+    // for, one grain down.
+    const unfolded = res.ics.replace(/\r\n[ \t]/g, "");
+    const events = unfolded.split("BEGIN:VEVENT").slice(1);
+    expect(events).toHaveLength(2);
+    const eventFor = (stepId: string) =>
+      events.find((e) => e.includes(`/focus/${stepId}`)) as string;
+
+    expect(eventFor("step-A")).toContain("note for A");
+    expect(eventFor("step-A")).not.toContain("note for B");
+    expect(eventFor("step-B")).toContain("note for B");
+    expect(eventFor("step-B")).not.toContain("note for A");
+    delete process.env.PUBLIC_ORIGIN;
+  });
+
+  it("carries the task note AND the step note, task first", async () => {
+    workspaceMock.mockResolvedValue("owner");
+    process.env.PUBLIC_ORIGIN = "https://app.example";
+    taskFindFirstMock.mockResolvedValue(
+      stepTask({
+        notes: "Bring the Figma link",
+        steps: [
+          { id: "step-A", text: "Plan", estMinutes: 15, notes: "call Sam" },
+        ],
+      }),
+    );
+    const res = await scheduleViaIcs("task-1");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+
+    const unfolded = res.ics.replace(/\r\n[ \t]/g, "");
+    // The decision recorded in `buildScheduleNote`: annotating a step must not
+    // strip the task's context from that step's entry.
+    expect(unfolded).toContain("Bring the Figma link");
+    expect(unfolded).toContain("call Sam");
+    expect(unfolded.indexOf("Bring the Figma link")).toBeLessThan(
+      unfolded.indexOf("call Sam"),
+    );
+    delete process.env.PUBLIC_ORIGIN;
+  });
+
+  it("cannot forge a calendar property from a STEP note either", async () => {
+    // The same gate at the second grain. It is asserted rather than assumed to
+    // follow from the task-level case, because the two values reach `esc()`
+    // through different arguments — one from `task.notes` on every event, one
+    // from `s.notes` per step — and a wiring change could route one of them
+    // around the serialiser without touching the other.
+    workspaceMock.mockResolvedValue("owner");
+    taskFindFirstMock.mockResolvedValue(
+      stepTask({
+        notes: null,
+        steps: [
+          {
+            id: "step-A",
+            text: "Plan",
+            estMinutes: 15,
+            notes:
+              "ok\r\nATTENDEE;CN=Mallory:mailto:m@evil.test\rEND:VEVENT\nBEGIN:VEVENT\nSUMMARY:forged",
+          },
+        ],
+      }),
+    );
+    const res = await scheduleViaIcs("task-1");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+
+    const lines = res.ics.replace(/\r\n[ \t]/g, "").split("\r\n");
+    expect(lines.filter((l) => l === "BEGIN:VEVENT")).toHaveLength(1);
+    expect(lines.filter((l) => l === "END:VEVENT")).toHaveLength(1);
+    for (const forbidden of ["ATTENDEE", "SUMMARY:forged"]) {
+      expect(
+        lines.some((l) => l.startsWith(forbidden)),
+        `a step note forged a ${forbidden} line`,
+      ).toBe(false);
+    }
+    // Escaped, not stripped: the user typed it and gets to read it back.
+    expect(lines.join("\r\n")).toContain("ATTENDEE\\;CN=Mallory");
+  });
+
   it("keeps every physical line inside 75 octets with a long note (RFC 5545 §3.1)", async () => {
     workspaceMock.mockResolvedValue("owner");
     taskFindFirstMock.mockResolvedValue(

@@ -89,6 +89,24 @@ describe("tasks.md — the human tier", () => {
     expect(garage).not.toContain("### Note");
   });
 
+  it("carries a STEP's own note, nested under that step (#44)", () => {
+    // Both grains are the user's content, so both are in the human tier.
+    // Indented under the step's list item rather than given its own heading:
+    // it belongs to one bullet, and a heading would detach it from the step it
+    // annotates.
+    const steps = md.slice(md.indexOf("### Steps"));
+    expect(steps).toContain("the login page, not the marketing one");
+    expect(steps).toMatch(
+      /Draft the outline, then stop[^\n]*\n\s+- Note: the login page, not the marketing one/,
+    );
+  });
+
+  it("leaves a step with no note unannotated", () => {
+    const steps = md.slice(md.indexOf("### Steps"));
+    const secondStep = steps.slice(steps.indexOf("Write it"));
+    expect(secondStep).not.toContain("- Note:");
+  });
+
   it("includes the coaching conversation, attributed and in order", () => {
     // Agreed on the issue: the turns are the most personal content in the
     // database and squarely data "provided by the data subject" (Art. 20).
