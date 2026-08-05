@@ -25,12 +25,39 @@ function floating(d: Date): string {
 function utc(d: Date): string {
   return d.toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z";
 }
+/**
+ * RFC 5545 §3.3.11 TEXT escaping.
+ *
+ * The order is load-bearing: backslash first, or the backslashes this function
+ * introduces get escaped a second time.
+ *
+ * **Every line terminator, not just LF (#154 review).** CR was missed until a
+ * review found it, and it is the one that matters most: §3.3.11 admits no
+ * control character but HTAB, and a literal CR inside a value ends the content
+ * line early under a lenient parser, turning one property into two. `oneLine`
+ * in `src/lib/calendar-feed.ts` collapses whitespace on titles and step text,
+ * but `parentEmoji` and `subtaskEmoji` bypass it and are persisted straight
+ * from a model proposal, so the terminator has a real route in. The gate
+ * belongs here rather than at those two call sites, because this is the shared
+ * serialiser behind the feed, `/api/ics/[taskId]` and the #129 export — fixing
+ * the callers would leave the primitive still wrong for the next one.
+ *
+ * CRLF collapses to a single `\n`, not two: it is one line ending, and emitting
+ * two would open a blank line in somebody's calendar entry. The remaining C0
+ * controls are dropped outright — no legitimate title contains one, and there
+ * is no escape sequence for them to survive as.
+ */
 function esc(s: string): string {
-  return s
-    .replace(/\\/g, "\\\\")
-    .replace(/;/g, "\\;")
-    .replace(/,/g, "\\,")
-    .replace(/\n/g, "\\n");
+  return (
+    s
+      .replace(/\\/g, "\\\\")
+      .replace(/;/g, "\\;")
+      .replace(/,/g, "\\,")
+      .replace(/\r\n|\r|\n/g, "\\n")
+      // Spelled as code points because §3.3.11 is: HTAB (\x09) is the single
+      // control character it permits, and CR/LF are handled by the line above.
+      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
+  );
 }
 function nextTopOfHour(from = new Date()): Date {
   const d = new Date(from);
@@ -144,7 +171,12 @@ export function buildIcsCalendar(input: {
     const description = event.description?.trim();
     lines.push(
       "BEGIN:VEVENT",
-      `UID:${event.uid}`,
+      // Escaped like any other value, though every UID today is machine-derived
+      // (`step-`/`task-` plus a cuid, or a timestamp) and has nothing to escape.
+      // A gate rather than a comment saying it is safe: the next person to
+      // derive a UID from user text inherits the protection instead of having
+      // to notice its absence (#154 review).
+      `UID:${esc(event.uid)}`,
       `DTSTAMP:${dtstamp}`,
       `DTSTART:${time(event.start)}`,
       `DTEND:${time(event.end)}`,

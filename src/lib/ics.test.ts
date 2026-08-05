@@ -210,9 +210,18 @@ describe("buildIcsCalendar (#129)", () => {
     expect(ics.endsWith("END:VCALENDAR\r\n")).toBe(true);
   });
 
-  it("uses CRLF throughout, with no bare LF anywhere (RFC 5545 §3.1)", () => {
-    const ics = buildIcsCalendar({ events: [one], stamp });
-    expect(ics.replace(/\r\n/g, "")).not.toContain("\n");
+  it("uses CRLF throughout, with no bare CR or LF anywhere (RFC 5545 §3.1)", () => {
+    // The payload carries every line terminator on purpose. Asserted against
+    // `one` this test passed with `esc` unable to see a CR at all (#154 review):
+    // the fixture had no terminator to leak, so the check proved nothing. A
+    // guard that cannot fail on the defect it names is not a guard.
+    const ics = buildIcsCalendar({
+      events: [{ ...one, summary: "a\rb\r\nc\nd", description: "e\rf" }],
+      stamp,
+    });
+    const withoutCrlf = ics.replace(/\r\n/g, "");
+    expect(withoutCrlf).not.toContain("\n");
+    expect(withoutCrlf).not.toContain("\r");
   });
 
   it("writes UTC instants with a trailing Z by default", () => {
@@ -240,9 +249,21 @@ describe("buildIcsCalendar (#129)", () => {
     expect(ics).not.toContain("DTSTART:20260708T090000Z");
   });
 
-  it("passes the UID through verbatim, so a re-import is idempotent", () => {
+  it("passes a machine-derived UID through unaltered, so a re-import is idempotent", () => {
     const ics = buildIcsCalendar({ events: [one], stamp });
     expect(ics).toContain("UID:step-abc@dlectroflow");
+  });
+
+  it("escapes the UID too, so a future UID derived from user text cannot break out (#154)", () => {
+    // Latent, not live: every UID today is `step-`/`task-` plus a cuid. The
+    // gate is here so the next person deriving one from a title inherits it
+    // rather than having to notice its absence.
+    const ics = buildIcsCalendar({
+      events: [{ ...one, uid: "step-a;b,c\rd@dlectroflow" }],
+      stamp,
+    });
+    expect(unfoldIcs(ics)).toContain("UID:step-a\\;b\\,c\\nd@dlectroflow");
+    expect(ics.replace(/\r\n/g, "")).not.toContain("\r");
   });
 
   it("emits one VEVENT per event, in the order given", () => {
@@ -263,6 +284,25 @@ describe("buildIcsCalendar (#129)", () => {
     // `SUMMARY:a\\b\;c\,d\ne`.
     expect(unfoldIcs(ics)).toContain("SUMMARY:a\\\\b\\;c\\,d\\ne");
     expect(ics).toContain("DESCRIPTION:x\\;y");
+  });
+
+  it("escapes a bare CR, and folds CRLF into a single \\n rather than two (§3.3.11)", () => {
+    const ics = buildIcsCalendar({
+      events: [{ ...one, summary: "a\rb", description: "c\r\nd" }],
+      stamp,
+    });
+    expect(unfoldIcs(ics)).toContain("SUMMARY:a\\nb");
+    // One break, not `\n\n`: a CRLF is a single line ending, and emitting two
+    // would put a blank line into somebody's calendar entry.
+    expect(unfoldIcs(ics)).toContain("DESCRIPTION:c\\nd");
+  });
+
+  it("strips the remaining C0 control characters, but keeps HTAB (§3.3.11)", () => {
+    const ics = buildIcsCalendar({
+      events: [{ ...one, summary: "a\x00b\x0cc\x1fd\te" }],
+      stamp,
+    });
+    expect(unfoldIcs(ics)).toContain("SUMMARY:abcd\te");
   });
 
   it("omits DESCRIPTION for an absent, empty or whitespace-only note", () => {
@@ -466,6 +506,25 @@ describe("scheduledStepEvents (#154)", () => {
       }),
     ]);
     expect(event.summary).toBe("🛂 Renew the passport: 🔍 Find the old one");
+  });
+
+  it("survives a control character in an emoji — the one field `oneLine` never sees (#154)", () => {
+    // `parentEmoji` and `subtaskEmoji` are interpolated raw, unlike the title
+    // and step text which `oneLine` collapses. They are persisted straight from
+    // a model proposal (src/app/actions/breakdown.ts), so they are the only
+    // route by which an unescaped terminator reaches a content line.
+    const events = scheduledStepEvents([
+      task({
+        parentEmoji: "🛂\r",
+        steps: [step({ subtaskEmoji: "\r🔍" })],
+      }),
+    ]);
+    const ics = buildIcsCalendar({
+      events,
+      stamp: new Date(Date.UTC(2026, 7, 3, 9, 30, 0)),
+    });
+    expect(ics.replace(/\r\n/g, "")).not.toContain("\r");
+    expect((ics.match(/BEGIN:VEVENT/g) ?? []).length).toBe(1);
   });
 
   it("clamps a zero-or-negative estimate so DTEND never precedes DTSTART", () => {
