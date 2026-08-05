@@ -191,8 +191,12 @@ user:
 # and is read from an object store at run time instead.
 focus:
   # FOCUS_CATALOG_ORIGIN — no default. The directory holding the extracted
-  # openlofi.zip: the mp3s plus the catalog.json manifest beside them. Any plain
-  # HTTP file server does.
+  # openlofi.zip: the mp3s plus the catalog.json manifest beside them, flat, one
+  # path segment each. The manifest is NOT inside the zip — that archive is 166
+  # .mp3 files and nothing else — so fetch catalog.json separately from
+  # raw.githubusercontent.com/btahir/open-lofi/main/catalog.json. Any plain HTTP
+  # file server does, provided it allows unauthenticated reads (the app has no
+  # credential to offer it) and honours Range.
   #
   # The app proxies the audio rather than linking to it, so this URL never
   # reaches a browser and any credential the store needs stays server-side —
