@@ -649,6 +649,10 @@ export function InboxView({
   // that never server-rendered, so on a hard load `aria-describedby` pointed at
   // nothing at all.
   const moveInstructionsId = useId();
+  // #183 — associates the capture field with the hint sentence beneath it, so
+  // that sentence is announced as the field's DESCRIPTION rather than being
+  // orphaned text a screen-reader user only reaches after leaving the input.
+  const captureHintId = useId();
 
   const submit = () => {
     const value = text.trim();
@@ -779,10 +783,27 @@ export function InboxView({
             }
           }}
           placeholder="Brain dump anything… (Enter to save)"
+          // #183 — the app's most-used control had NO accessible name: a
+          // placeholder and nothing else. A placeholder is not a name. Support
+          // varies, and it VANISHES on the first keystroke, so anyone who tabs
+          // away mid-capture and back had a field full of text and no way to
+          // re-read what it was for. WCAG 4.1.2 Name, Role, Value; the gap also
+          // undermines 3.3.2 Labels or Instructions.
+          //
+          // `aria-label` rather than a visually-hidden <label>: nothing may
+          // change visually (the placeholder-led look is deliberate), and this
+          // is the smaller change. Short, and deliberately NOT the placeholder
+          // sentence — a name is what you call the control, and a voice-control
+          // user saying "brain dump" has to be able to hit it.
+          aria-label="Brain dump"
+          // The hint below is a DESCRIPTION, not a name. Associated so it is
+          // announced with the field instead of being orphaned text that a
+          // screen-reader user only meets after leaving the input.
+          aria-describedby={captureHintId}
           className="border-input bg-background focus-visible:ring-ring w-full rounded-lg border px-4 py-3 text-base shadow-sm outline-none focus-visible:ring-2"
           autoFocus
         />
-        <p className="text-muted-foreground px-1 text-xs">
+        <p id={captureHintId} className="text-muted-foreground px-1 text-xs">
           No fields required. Press Enter to capture instantly.
         </p>
         {justCaptured && (
@@ -1053,155 +1074,168 @@ export function InboxView({
                               ` · ≈${activeRemainingMin} ${t("lib.minOnStep", voice)}`}
                           </p>
                         )}
-                        <RowActions
-                          className="pl-9"
-                          scheduled={item.scheduledAt != null}
-                          inline={
-                            awaitingBreakdown
-                              ? [
-                                  <button
-                                    key="break-now"
-                                    type="button"
-                                    onClick={() => breakdown(item.id)}
-                                    className="bg-destructive text-destructive-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90"
-                                  >
-                                    {t("prompt.breakNow", voice)}
-                                  </button>,
-                                ]
-                              : [
-                                  // Primary CTA — matches the single-task row (▶ Focus + Complete):
-                                  // jumps straight into the next unfinished step's timer.
-                                  <button
-                                    key="focus"
-                                    type="button"
-                                    onClick={() => focusNextStep(item)}
-                                    className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
-                                  >
-                                    ▶ Start Focus
-                                  </button>,
-                                  <CompleteButton
-                                    key="complete"
-                                    voice={voice}
-                                    onClick={() =>
-                                      run(() => completeItem(item.id))
-                                    }
-                                  />,
-                                ]
-                          }
-                          move={
-                            <MoveToMenu
-                              key="move-icon"
-                              compact
-                              describedById={moveInstructionsId}
-                              currentBucket={bucketOfItem(item, now)}
-                              voice={voice}
-                              onMove={(target) =>
-                                moveItemToBucket(item.id, target)
-                              }
-                            />
-                          }
-                          schedule={schedule}
-                          del={deleteControl(item.id, "delete", { icon: true })}
-                          menu={[
-                            <MoveToMenu
-                              key="move"
-                              currentBucket={bucketOfItem(item, now)}
-                              voice={voice}
-                              onMove={(target) =>
-                                moveItemToBucket(item.id, target)
-                              }
-                            />,
-                            // Rows with steps: view the broken-down list (inline
-                            // expand) + jump to the task page to focus a step —
-                            // above "Mark as completed". Hidden while awaiting.
-                            !awaitingBreakdown ? (
-                              <button
-                                key="view-list-m"
-                                type="button"
-                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                onClick={() =>
-                                  setExpandedId(expanded ? null : item.id)
-                                }
-                              >
-                                View multi-step task list
-                              </button>
-                            ) : null,
-                            !awaitingBreakdown ? (
-                              <button
-                                key="focus-list-m"
-                                type="button"
-                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                // Guard rather than assert: a multi-step row's Task always
-                                // exists by construction, but a data inconsistency must not
-                                // navigate to `/tasks/null` (Duo review).
-                                onClick={() =>
-                                  item.taskId &&
-                                  router.push(`/tasks/${item.taskId}`)
-                                }
-                              >
-                                Start visual focus timer
-                              </button>
-                            ) : null,
-                            awaitingBreakdown ? (
-                              <button
-                                key="break-now-m"
-                                type="button"
-                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                onClick={() => breakdown(item.id)}
-                              >
-                                {t("prompt.breakNow", voice)}
-                              </button>
-                            ) : (
-                              <button
-                                key="complete-m"
-                                type="button"
-                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                onClick={() => run(() => completeItem(item.id))}
-                              >
-                                {t("action.completeFull", voice)}
-                              </button>
-                            ),
-                            schedule ? (
-                              <ScheduleControl
-                                key="schedule-m"
-                                {...schedule}
-                                variant="menu"
-                                label={scheduleMenuLabel(schedule.state, voice)}
-                              />
-                            ) : null,
-                            effectiveGoogle ? (
-                              <ScheduleControl
-                                key="ics-m"
-                                variant="menu"
-                                {...icsProps(item)}
-                                label={t("action.addToCalendar", voice)}
-                              />
-                            ) : null,
-                            editMenuItem(item),
-                            deleteControl(item.id, "delete-m", {
-                              fullWidth: true,
-                            }),
-                          ]}
-                        />
-                        {scheduleErrors[item.id] && (
-                          <p className="text-destructive mt-1 text-xs">
-                            {scheduleErrors[item.id]}
-                          </p>
-                        )}
-
-                        {/* #44 — the TASK's note. Below the action line, and
-                            rendered only for a row that HAS a task: an
-                            untriaged brain-dump item has no `Task` row, so
-                            there is no `notes` column to write to. Distinct
-                            from the per-step notes inside <TaskSteps> below,
-                            which are context for one step rather than for the
-                            whole to-do. */}
+                        {/* #44 — the note's collapsed trigger sits INSIDE the
+                            action group beside Complete (owner request); the
+                            editor body opens below the action line but stays in
+                            this row's <li>. Both halves are null for a row with
+                            no `Task` — an untriaged brain-dump item has no
+                            `notes` column — which is why the action group is
+                            rendered from inside `TaskNoteRow`. */}
                         <TaskNoteRow
                           taskId={item.taskId}
                           taskTitle={item.text}
                           notes={item.notes}
                           voice={voice}
-                        />
+                        >
+                          {({ trigger, body }) => (
+                            <>
+                              <RowActions
+                                className="pl-9"
+                                scheduled={item.scheduledAt != null}
+                                inline={
+                                  awaitingBreakdown
+                                    ? [
+                                        <button
+                                          key="break-now"
+                                          type="button"
+                                          onClick={() => breakdown(item.id)}
+                                          className="bg-destructive text-destructive-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90"
+                                        >
+                                          {t("prompt.breakNow", voice)}
+                                        </button>,
+                                      ]
+                                    : [
+                                        // Primary CTA — matches the single-task row (▶ Focus + Complete):
+                                        // jumps straight into the next unfinished step's timer.
+                                        <button
+                                          key="focus"
+                                          type="button"
+                                          onClick={() => focusNextStep(item)}
+                                          className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
+                                        >
+                                          ▶ Start Focus
+                                        </button>,
+                                        <CompleteButton
+                                          key="complete"
+                                          voice={voice}
+                                          onClick={() =>
+                                            run(() => completeItem(item.id))
+                                          }
+                                        />,
+                                        trigger,
+                                      ]
+                                }
+                                move={
+                                  <MoveToMenu
+                                    key="move-icon"
+                                    compact
+                                    describedById={moveInstructionsId}
+                                    currentBucket={bucketOfItem(item, now)}
+                                    voice={voice}
+                                    onMove={(target) =>
+                                      moveItemToBucket(item.id, target)
+                                    }
+                                  />
+                                }
+                                schedule={schedule}
+                                del={deleteControl(item.id, "delete", {
+                                  icon: true,
+                                })}
+                                menu={[
+                                  <MoveToMenu
+                                    key="move"
+                                    currentBucket={bucketOfItem(item, now)}
+                                    voice={voice}
+                                    onMove={(target) =>
+                                      moveItemToBucket(item.id, target)
+                                    }
+                                  />,
+                                  // Rows with steps: view the broken-down list (inline
+                                  // expand) + jump to the task page to focus a step —
+                                  // above "Mark as completed". Hidden while awaiting.
+                                  !awaitingBreakdown ? (
+                                    <button
+                                      key="view-list-m"
+                                      type="button"
+                                      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                      onClick={() =>
+                                        setExpandedId(expanded ? null : item.id)
+                                      }
+                                    >
+                                      View multi-step task list
+                                    </button>
+                                  ) : null,
+                                  !awaitingBreakdown ? (
+                                    <button
+                                      key="focus-list-m"
+                                      type="button"
+                                      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                      // Guard rather than assert: a multi-step row's Task always
+                                      // exists by construction, but a data inconsistency must not
+                                      // navigate to `/tasks/null` (Duo review).
+                                      onClick={() =>
+                                        item.taskId &&
+                                        router.push(`/tasks/${item.taskId}`)
+                                      }
+                                    >
+                                      Start visual focus timer
+                                    </button>
+                                  ) : null,
+                                  awaitingBreakdown ? (
+                                    <button
+                                      key="break-now-m"
+                                      type="button"
+                                      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                      onClick={() => breakdown(item.id)}
+                                    >
+                                      {t("prompt.breakNow", voice)}
+                                    </button>
+                                  ) : (
+                                    <button
+                                      key="complete-m"
+                                      type="button"
+                                      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                      onClick={() =>
+                                        run(() => completeItem(item.id))
+                                      }
+                                    >
+                                      {t("action.completeFull", voice)}
+                                    </button>
+                                  ),
+                                  schedule ? (
+                                    <ScheduleControl
+                                      key="schedule-m"
+                                      {...schedule}
+                                      variant="menu"
+                                      label={scheduleMenuLabel(
+                                        schedule.state,
+                                        voice,
+                                      )}
+                                    />
+                                  ) : null,
+                                  effectiveGoogle ? (
+                                    <ScheduleControl
+                                      key="ics-m"
+                                      variant="menu"
+                                      {...icsProps(item)}
+                                      label={t("action.addToCalendar", voice)}
+                                    />
+                                  ) : null,
+                                  editMenuItem(item),
+                                  deleteControl(item.id, "delete-m", {
+                                    fullWidth: true,
+                                  }),
+                                ]}
+                              />
+                              {scheduleErrors[item.id] && (
+                                <p className="text-destructive mt-1 text-xs">
+                                  {scheduleErrors[item.id]}
+                                </p>
+                              )}
+                              {body}
+                            </>
+                          )}
+                        </TaskNoteRow>
 
                         {expanded && item.taskId && (
                           <div className="mt-2">
@@ -1288,102 +1322,118 @@ export function InboxView({
                             </span>
                           )}
                         </div>
-                        <RowActions
-                          className="pl-9"
-                          scheduled={item.scheduledAt != null}
-                          inline={[
-                            <button
-                              key="focus"
-                              type="button"
-                              onClick={() => focusOnItem(item.id)}
-                              className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
-                            >
-                              ▶ Start Focus
-                            </button>,
-                            <CompleteButton
-                              key="complete"
-                              voice={voice}
-                              onClick={() => run(() => completeItem(item.id))}
-                            />,
-                          ]}
-                          move={
-                            <MoveToMenu
-                              key="move-icon"
-                              compact
-                              describedById={moveInstructionsId}
-                              currentBucket={bucketOfItem(item, now)}
-                              voice={voice}
-                              onMove={(target) =>
-                                moveItemToBucket(item.id, target)
-                              }
-                            />
-                          }
-                          schedule={schedule}
-                          del={deleteControl(item.id, "delete", { icon: true })}
-                          menu={[
-                            <MoveToMenu
-                              key="move"
-                              currentBucket={bucketOfItem(item, now)}
-                              voice={voice}
-                              onMove={(target) =>
-                                moveItemToBucket(item.id, target)
-                              }
-                            />,
-                            <button
-                              key="focus-m"
-                              type="button"
-                              className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                              onClick={() => focusOnItem(item.id)}
-                            >
-                              Start visual focus timer
-                            </button>,
-                            <button
-                              key="complete-m"
-                              type="button"
-                              className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                              onClick={() => run(() => completeItem(item.id))}
-                            >
-                              {t("action.completeFull", voice)}
-                            </button>,
-                            schedule ? (
-                              <ScheduleControl
-                                key="schedule-m"
-                                {...schedule}
-                                variant="menu"
-                                label={scheduleMenuLabel(schedule.state, voice)}
-                              />
-                            ) : null,
-                            effectiveGoogle ? (
-                              <ScheduleControl
-                                key="ics-m"
-                                variant="menu"
-                                {...icsProps(item)}
-                                label={t("action.addToCalendar", voice)}
-                              />
-                            ) : null,
-                            editMenuItem(item),
-                            deleteControl(item.id, "delete-m", {
-                              fullWidth: true,
-                            }),
-                          ]}
-                        />
-                        {scheduleErrors[item.id] && (
-                          <p className="text-destructive mt-1 text-xs">
-                            {scheduleErrors[item.id]}
-                          </p>
-                        )}
-
-                        {/* #44 — a single-step to-do is a real `Task` row with
-                            a real `notes` column, and this is the Inbox twin of
+                        {/* #44 — a single-step to-do is a real `Task` row with a
+                            real `notes` column, and this is the Inbox twin of
                             the Library gap: it has no steps to reach a note
-                            through, so without this there is no route to one
-                            outside /tasks/[id]. */}
+                            through. Trigger in the action group beside
+                            Complete, body below it, both null when the row has
+                            no task. */}
                         <TaskNoteRow
                           taskId={item.taskId}
                           taskTitle={item.text}
                           notes={item.notes}
                           voice={voice}
-                        />
+                        >
+                          {({ trigger, body }) => (
+                            <>
+                              <RowActions
+                                className="pl-9"
+                                scheduled={item.scheduledAt != null}
+                                inline={[
+                                  <button
+                                    key="focus"
+                                    type="button"
+                                    onClick={() => focusOnItem(item.id)}
+                                    className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
+                                  >
+                                    ▶ Start Focus
+                                  </button>,
+                                  <CompleteButton
+                                    key="complete"
+                                    voice={voice}
+                                    onClick={() =>
+                                      run(() => completeItem(item.id))
+                                    }
+                                  />,
+                                  trigger,
+                                ]}
+                                move={
+                                  <MoveToMenu
+                                    key="move-icon"
+                                    compact
+                                    describedById={moveInstructionsId}
+                                    currentBucket={bucketOfItem(item, now)}
+                                    voice={voice}
+                                    onMove={(target) =>
+                                      moveItemToBucket(item.id, target)
+                                    }
+                                  />
+                                }
+                                schedule={schedule}
+                                del={deleteControl(item.id, "delete", {
+                                  icon: true,
+                                })}
+                                menu={[
+                                  <MoveToMenu
+                                    key="move"
+                                    currentBucket={bucketOfItem(item, now)}
+                                    voice={voice}
+                                    onMove={(target) =>
+                                      moveItemToBucket(item.id, target)
+                                    }
+                                  />,
+                                  <button
+                                    key="focus-m"
+                                    type="button"
+                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                    onClick={() => focusOnItem(item.id)}
+                                  >
+                                    Start visual focus timer
+                                  </button>,
+                                  <button
+                                    key="complete-m"
+                                    type="button"
+                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                    onClick={() =>
+                                      run(() => completeItem(item.id))
+                                    }
+                                  >
+                                    {t("action.completeFull", voice)}
+                                  </button>,
+                                  schedule ? (
+                                    <ScheduleControl
+                                      key="schedule-m"
+                                      {...schedule}
+                                      variant="menu"
+                                      label={scheduleMenuLabel(
+                                        schedule.state,
+                                        voice,
+                                      )}
+                                    />
+                                  ) : null,
+                                  effectiveGoogle ? (
+                                    <ScheduleControl
+                                      key="ics-m"
+                                      variant="menu"
+                                      {...icsProps(item)}
+                                      label={t("action.addToCalendar", voice)}
+                                    />
+                                  ) : null,
+                                  editMenuItem(item),
+                                  deleteControl(item.id, "delete-m", {
+                                    fullWidth: true,
+                                  }),
+                                ]}
+                              />
+                              {scheduleErrors[item.id] && (
+                                <p className="text-destructive mt-1 text-xs">
+                                  {scheduleErrors[item.id]}
+                                </p>
+                              )}
+                              {body}
+                            </>
+                          )}
+                        </TaskNoteRow>
                       </li>
                     );
                   })}

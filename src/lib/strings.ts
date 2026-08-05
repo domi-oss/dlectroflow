@@ -838,20 +838,41 @@ export const STRINGS = {
   "task.eyebrow": { plain: "Task", playful: "Task" },
 
   // ── #44 — the note disclosure, on a task and on a step row ────────────────
-  // Two labels for one control, because the call to action differs: "Add note"
-  // when there is nothing yet, "Edit note" when there is. Both are the VISIBLE
-  // label only — the component appends the task or step it belongs to for
-  // assistive tech, so a list of steps does not present a dozen buttons with
-  // identical names. Keeping the visible text short is what makes it fit on a
-  // dense step row; keeping it a PREFIX of the accessible name is what keeps
-  // WCAG 2.5.3 (Label in Name) satisfied for voice control.
-  // 🗒️ is flavour, so playful only.
-  "note.add": { plain: "Add note", playful: "🗒️ Add note" },
-  "note.edit": { plain: "Edit note", playful: "🗒️ Edit note" },
-  // The field's own label. Same word in both voices: it labels an input, and an
-  // emoji inside a form label is read out by a screen reader every time the
-  // field takes focus.
+  // ONE noun, never "Add"/"Edit". Both of those describe a one-off action and
+  // this is a persistent autosaving field, not an action. The switch also told
+  // a lie in a case that is about to be common — #179 carries a note in from a
+  // brain dump via `{curly brace}` syntax, so a note can exist before anyone
+  // has "added" anything. A fixed word additionally means the control does not
+  // change width the instant somebody types their first character, so the row
+  // does not shift under them.
+  //
+  // This is the VISIBLE label only — the component appends the task or step it
+  // belongs to for assistive tech, so a list of steps does not present a dozen
+  // buttons with identical names. Keeping it a PREFIX of the accessible name is
+  // what keeps WCAG 2.5.3 (Label in Name) satisfied for voice control.
+  // 🗒️ is flavour, so playful only: plain voice is emoji-free app-wide.
+  "note.trigger": { plain: "Note", playful: "🗒️ Note" },
+  // The field's accessible name (`aria-label` on the textarea). Same word in
+  // both voices and deliberately emoji-free: it is read out every time the
+  // field takes focus. There is no longer a VISIBLE label element — the trigger
+  // directly above the field already reads "Note", and two identical words
+  // stacked for one field is noise. See note-field.tsx for what that removal
+  // had to preserve.
   "note.label": { plain: "Note", playful: "Note" },
+  // Inside the box, matching the brain-dump capture input's pattern (owner).
+  // An EXAMPLE of the kind of thing a note is for, not a restatement of the
+  // word "Note" — the owner's own illustration when specifying #44 was "water
+  // can under sink needs a wash" against a task called "water the office
+  // plants": a detail that changes how you do the thing.
+  //
+  // Short on purpose: a step row's textarea is two rows tall and a long
+  // placeholder truncates. It is NOT the accessible name — a placeholder is
+  // unreliable across assistive tech and vanishes on the first keystroke, so
+  // the textarea keeps an explicit `aria-label`.
+  "note.placeholder": {
+    plain: "Anything worth knowing when you start…",
+    playful: "Anything worth knowing when you sit down…",
+  },
   "note.hint": {
     plain:
       "Rides along into your calendar event or Google Task when you schedule this. Saves automatically.",

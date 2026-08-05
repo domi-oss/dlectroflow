@@ -262,7 +262,7 @@ describe("LibraryPage — the note reaches every task-bearing tab (#44)", () => 
     );
     expect(
       screen.getByRole("button", {
-        name: "Edit note for Reply to Sam's email",
+        name: "Note for Reply to Sam's email",
       }),
     ).toBeTruthy();
   });
@@ -270,7 +270,7 @@ describe("LibraryPage — the note reaches every task-bearing tab (#44)", () => 
   it("Multi-step rows offer the TASK's note, named after the task", async () => {
     await renderTab("sorted");
     expect(
-      screen.getByRole("button", { name: "Add note for Plan the offsite" }),
+      screen.getByRole("button", { name: "Note for Plan the offsite" }),
     ).toBeTruthy();
   });
 
@@ -287,7 +287,7 @@ describe("LibraryPage — the note reaches every task-bearing tab (#44)", () => 
     ]);
     await renderTab("pantry");
     expect(
-      screen.getByRole("button", { name: "Add note for Book dentist" }),
+      screen.getByRole("button", { name: "Note for Book dentist" }),
     ).toBeTruthy();
   });
 

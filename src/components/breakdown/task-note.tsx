@@ -3,6 +3,7 @@
 import { updateTaskNotes } from "@/app/actions/task-notes";
 import { updateStepNotes } from "@/app/actions/step-notes";
 import { NoteField } from "@/components/breakdown/note-field";
+import type { ReactNode } from "react";
 import type { Voice } from "@/lib/strings";
 
 /**
@@ -27,6 +28,7 @@ export function TaskNote({
   notes,
   voice,
   autoSaveDelayMs,
+  children,
 }: {
   taskId: string;
   /** Goes into the control's accessible name. */
@@ -34,6 +36,10 @@ export function TaskNote({
   notes: string | null;
   voice: Voice;
   autoSaveDelayMs?: number;
+  /** Placement, passed straight to `NoteField`. Omit for the stacked layout the
+   *  task detail page uses; supply it to put the trigger in a row's action
+   *  group and the body below the action line. */
+  children?: (parts: { trigger: ReactNode; body: ReactNode }) => ReactNode;
 }) {
   return (
     <NoteField
@@ -42,7 +48,9 @@ export function TaskNote({
       voice={voice}
       autoSaveDelayMs={autoSaveDelayMs}
       onSave={(next) => updateTaskNotes(taskId, next)}
-    />
+    >
+      {children}
+    </NoteField>
   );
 }
 
@@ -63,22 +71,31 @@ export function TaskNote({
  * Kept here because a deliberate absence and a forgotten one look identical in
  * a diff, which is how the Library gap shipped.
  *
- * | Surface | Grain | Note | Why |
- * |---|---|---|---|
- * | `/tasks/[id]` header card | task | editable | the task's home |
- * | `/tasks/[id]` step rows | step | editable | `TaskSteps` |
- * | `/tasks/[id]` done step rows | step | read-only | annotating finished work has no purpose; hiding what was written would be worse |
- * | `/` Inbox rows | task | editable | via this component |
- * | `/` Inbox expanded step rows | step | editable | `TaskSteps` |
- * | `/library` Single-task + Saved-for-later | task | editable | via this component |
- * | `/library` Multi-step row | task | editable | via this component |
- * | `/library` Multi-step expanded steps | step | editable | `TaskSteps` |
- * | `/library` Done | task | read-only | a closure view with no other controls; same call as a done step row |
- * | `/focus/[stepId]` session | task + step | read-only | see `FocusNotes` in the timer — the point of the surface is not editing |
- * | `/focus` launcher lanes | task + step | none | a navigation list; every entry is a link INTO the session, which shows the note |
- * | `/tasks/[id]?edit=1` breakdown chat | task + proposed steps | none | the steps are an unsaved model proposal with no ids, so a step note has nowhere to live; the working view one click away owns the task note |
- * | Dashboard | none | none | aggregates and badges, no task or step rows |
- * | Any row with `taskId === null` | — | none | no `Task` row exists, so there is no column to write |
+ * PLACEMENT of the collapsed trigger (owner request, from the review app):
+ * every LIST ROW puts it inside the row's action group, beside Complete, with
+ * the expanded body opening below the action line but still inside the row's
+ * own `<li>` so it reads as belonging to that row. The task detail page keeps
+ * the stacked layout — it has no `RowActions` group to join, and the note is a
+ * field of the task there rather than one more row control.
+ *
+ * | Surface | Grain | Note | Placement | Why |
+ * |---|---|---|---|---|
+ * | `/tasks/[id]` header card | task | editable | stacked | no `RowActions` group to join; here the note is a field of the task, not one more row control |
+ * | `/tasks/[id]` step rows | step | editable | in the action group | `TaskSteps` |
+ * | `/tasks/[id]` done step rows | step | read-only | — | annotating finished work has no purpose; hiding what was written would be worse |
+ * | `/` Inbox — To-do rows | task | editable | in the action group | |
+ * | `/` Inbox — Multi-step rows | task | editable | in the action group | |
+ * | `/` Inbox — expanded step rows | step | editable | in the action group | `TaskSteps` |
+ * | `/` Inbox — Needs review rows | item | none | — | untriaged ⇒ no `Task` row, so no `notes` column |
+ * | `/library` Single-task + Saved-for-later | task | editable | in the action group | |
+ * | `/library` Multi-step row | task | editable | **stacked** | this row has no `RowActions` at all — it is a disclosure title that expands into the step list |
+ * | `/library` Multi-step expanded steps | step | editable | in the action group | `TaskSteps` |
+ * | `/library` Done | task | read-only | — | closure view with no other controls; same call as a done step row |
+ * | `/focus/[stepId]` session | task + step | read-only | — | the point of the surface is not editing |
+ * | `/focus` launcher lanes | task + step | none | — | a navigation list; every entry links INTO the session, which shows the note |
+ * | `/tasks/[id]?edit=1` breakdown chat | task + proposed steps | none | — | the steps are an unsaved model proposal with no ids, so a step note has nowhere to live |
+ * | Dashboard | none | none | — | aggregates and badges, no task or step rows |
+ * | Any row with `taskId === null` | — | none | — | no `Task` row exists, so there is no column to write |
  */
 export function TaskNoteRow({
   taskId,
@@ -86,14 +103,27 @@ export function TaskNoteRow({
   notes,
   voice,
   autoSaveDelayMs,
+  children,
 }: {
   taskId: string | null;
   taskTitle: string;
   notes?: string | null;
   voice: Voice;
   autoSaveDelayMs?: number;
+  /**
+   * Receives the two halves to place: `trigger` goes in the row's action group
+   * beside Complete (owner request), `body` below the action line. Called with
+   * BOTH null when the row has no task — the caller still has to render its
+   * action group, so returning null here would take the whole row with it.
+   *
+   * OPTIONAL, because not every task row has an action group to join.
+   * `LibraryMultistep`'s row is a disclosure title with no `RowActions` at all,
+   * so there is nothing to move the trigger into and it stays stacked. Omitting
+   * this is that decision, and the default below is the stacked layout.
+   */
+  children?: (parts: { trigger: ReactNode; body: ReactNode }) => ReactNode;
 }) {
-  if (!taskId) return null;
+  if (!taskId) return <>{children?.({ trigger: null, body: null })}</>;
   return (
     <TaskNote
       taskId={taskId}
@@ -101,7 +131,9 @@ export function TaskNoteRow({
       notes={notes ?? null}
       voice={voice}
       autoSaveDelayMs={autoSaveDelayMs}
-    />
+    >
+      {children}
+    </TaskNote>
   );
 }
 
@@ -121,6 +153,7 @@ export function StepNote({
   notes,
   voice,
   autoSaveDelayMs,
+  children,
 }: {
   stepId: string;
   order: number;
@@ -129,6 +162,7 @@ export function StepNote({
   notes: string | null;
   voice: Voice;
   autoSaveDelayMs?: number;
+  children?: (parts: { trigger: ReactNode; body: ReactNode }) => ReactNode;
 }) {
   return (
     <NoteField
@@ -138,6 +172,8 @@ export function StepNote({
       autoSaveDelayMs={autoSaveDelayMs}
       dense
       onSave={(next) => updateStepNotes(stepId, next)}
-    />
+    >
+      {children}
+    </NoteField>
   );
 }

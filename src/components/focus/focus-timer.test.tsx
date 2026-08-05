@@ -2654,9 +2654,9 @@ describe("FocusTimer — the notes for this work (#44)", () => {
     expect(screen.queryByTestId("note-text")).toBeNull();
   });
 
-  it("offers no way to EDIT here — no textbox and no Add note", () => {
+  it("offers no way to EDIT here — no trigger and no textbox", () => {
     render(<FocusTimer {...base({ taskNote: "read only" })} />);
-    expect(screen.queryByRole("button", { name: /add note/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^note for/i })).toBeNull();
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 });

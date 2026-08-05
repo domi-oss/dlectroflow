@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   useSaveStatus,
   SaveIndicator,
@@ -74,7 +74,7 @@ export function NoteText({ children }: { children: string }) {
  *
  *  1. **The accessible name says WHICH task or step.** `a11y-class-hygiene`
  *     sees contrast and focus indicators; axe sees a missing label. Neither can
- *     see twelve buttons all called "Add note" down a list of steps, which is
+ *     see twelve buttons all called "Note" down a list of steps, which is
  *     the difference between a usable list and an unusable one. The visible
  *     label stays short and the subject is appended to an explicit
  *     `aria-label` — read the comment on the trigger for why an `sr-only` span
@@ -92,6 +92,7 @@ export function NoteField({
   voice,
   autoSaveDelayMs = 600,
   dense = false,
+  children,
 }: {
   /** What this note belongs to, in words: a task title, or `step 2: Plan`.
    *  Goes into the trigger's and the field's accessible names. */
@@ -107,9 +108,20 @@ export function NoteField({
   /** Step rows are tighter than the task header card. Type scale only — the hit
    *  target stays 44px either way (WCAG 2.5.8). */
   dense?: boolean;
+  /**
+   * PLACEMENT (owner request, #44). Omit and the two halves render stacked,
+   * which is what the task detail page wants. Supply it and you place them
+   * yourself — list rows put the `trigger` inside the row's action group,
+   * beside Complete, and the `body` below the action line.
+   *
+   * A render prop rather than a hook because the list surfaces build their rows
+   * inside `items.map(...)`, which is a callback and not a component: a
+   * `useNoteField()` there would be a hook in a loop. A render prop is a
+   * component, so the state lives exactly where it already did.
+   */
+  children?: (parts: { trigger: ReactNode; body: ReactNode }) => ReactNode;
 }) {
   const bodyId = useId();
-  const fieldId = useId();
   const hintId = useId();
   const counterId = useId();
 
@@ -223,67 +235,86 @@ export function NoteField({
   const remaining = TASK_NOTE_MAX_LENGTH - [...note].length;
   const showCounter = remaining <= COUNTER_VISIBLE_BELOW;
 
-  const triggerLabel = t(hasNote ? "note.edit" : "note.add", voice);
+  const triggerLabel = t("note.trigger", voice);
   const fieldLabel = t("note.label", voice);
 
-  return (
-    <div className={cn("space-y-1", dense ? "text-xs" : "text-sm")}>
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          ref={triggerRef}
-          type="button"
-          aria-expanded={expanded}
-          aria-controls={bodyId}
-          // ── Why `aria-label` and not a visually-hidden span ────────────────
-          // The obvious markup is `Add note<span class="sr-only"> for X</span>`,
-          // deriving the name from content. It was tried and it is WRONG here:
-          // the accname algorithm trims each child's contribution before
-          // concatenating, and the separator between a text node and an inline
-          // element is not specified. Measured with `dom-accessibility-api`, the
-          // same engine testing-library and several audit tools use, the name
-          // came out as **"Add notefor Ship the thing"** — one word, read aloud
-          // as one word. An explicit label is deterministic across every
-          // consumer instead of depending on an implementation's whitespace
-          // handling.
-          //
-          // WCAG 2.5.3 Label in Name still holds, and is asserted rather than
-          // assumed: the visible text is a PREFIX of this name, so a voice
-          // control user saying "add note" activates it.
-          aria-label={`${triggerLabel} for ${subject}`}
-          onClick={() => (expanded ? close() : open())}
-          // min-h-11 is 44px — WCAG 2.5.8 Target Size, and the reason the dense
-          // variant changes only the type scale. `focus-visible:ring-2` rather
-          // than a colour swap, because WCAG 2.4.11 Focus Appearance is not
-          // satisfied by a change of hue alone.
-          className="focus-visible:ring-ring focus-visible:ring-offset-background hover:bg-accent inline-flex min-h-11 items-center rounded-md px-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
-        >
-          {triggerLabel}
-        </button>
-        <SaveIndicator status={status} voice={voice} />
-      </div>
+  const trigger = (
+    // The button and its save indicator travel TOGETHER. The indicator reports
+    // on the note, and left behind in the row it would read as the row's own
+    // status — "Saved ✓" sitting next to Complete says something else entirely.
+    <span className="inline-flex items-center gap-1">
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={bodyId}
+        // ── Why `aria-label` and not a visually-hidden span ────────────────
+        // The obvious markup is `Add note<span class="sr-only"> for X</span>`,
+        // deriving the name from content. It was tried and it is WRONG here:
+        // the accname algorithm trims each child's contribution before
+        // concatenating, and the separator between a text node and an inline
+        // element is not specified. Measured with `dom-accessibility-api`, the
+        // same engine testing-library and several audit tools use, the name
+        // came out as **"Add notefor Ship the thing"** — one word, read aloud
+        // as one word. An explicit label is deterministic across every
+        // consumer instead of depending on an implementation's whitespace
+        // handling.
+        //
+        // WCAG 2.5.3 Label in Name still holds, and is asserted rather than
+        // assumed: the visible text is a PREFIX of this name, so a voice
+        // control user saying "add note" activates it.
+        aria-label={`${triggerLabel} for ${subject}`}
+        onClick={() => (expanded ? close() : open())}
+        // min-h-11 is 44px — WCAG 2.5.8 Target Size, and it survives the move
+        // into the action group, where every sibling control carries the same
+        // floor. `focus-visible:ring-2` rather than a colour swap, because WCAG
+        // 2.4.11 Focus Appearance is not satisfied by a change of hue alone.
+        className="focus-visible:ring-ring focus-visible:ring-offset-background hover:bg-accent inline-flex min-h-11 items-center rounded-md px-2 text-left font-medium outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+      >
+        {triggerLabel}
+      </button>
+      <SaveIndicator status={status} voice={voice} />
+    </span>
+  );
 
+  const body = (
+    <div className={cn("space-y-1", dense ? "text-xs" : "text-sm")}>
       {/* Readable without expanding — the note exists so that it is THERE when
           you come back. Hidden while the editor is open, where the textarea is
           showing the same text. */}
       {hasNote && !expanded && <NoteText>{note}</NoteText>}
 
       {/* `hidden` the ATTRIBUTE, and still mounted, so `aria-controls` resolves
-          while collapsed (the CollapsibleSection dialect). */}
+          while collapsed (the CollapsibleSection dialect). Unchanged by the
+          move: the trigger can sit in a different container and still point at
+          this, because `aria-controls` is an id reference and not a DOM
+          relationship. */}
       <div id={bodyId} hidden={!expanded} className="space-y-1">
-        {/* A REAL label element, not a placeholder standing in for one: it is
-            visible, it survives typing, and clicking it focuses the field. The
-            `aria-label` below it overrides the NAME (same disambiguation as the
-            trigger — one field per step row, all otherwise called "Note"),
-            while this stays the visible label WCAG 2.5.3 measures against. */}
-        <label htmlFor={fieldId} className="block">
-          {fieldLabel}
-        </label>
+        {/* NO visible <label>. The trigger immediately above already reads
+            "Note", and stacking a second identical word for one field is noise
+            (owner). What that removal had to preserve, and does:
+              • the accessible NAME — `aria-label` below is unchanged and still
+                carries the subject, so a screen reader still hears which task
+                or step this field belongs to. Verified with
+                `dom-accessibility-api`, not by eye;
+              • click-to-focus — given up knowingly, and only because the
+                trigger ALREADY moves focus into this textarea on expand
+                (`open()` below), so the affordance it provided is not lost;
+              • the explanation — the hint line stays. It is information, not a
+                label, and it is the only place the behaviour is described.
+            Deliberately NOT `aria-labelledby` pointing at the trigger: a
+            `button` as a field's label is not handled predictably by assistive
+            tech, and it would drag the button's own name onto the field. */}
         <textarea
           ref={fieldRef}
-          id={fieldId}
           value={note}
           rows={dense ? 2 : 3}
           maxLength={TASK_NOTE_MAX_LENGTH}
+          placeholder={t("note.placeholder", voice)}
+          // The accessible NAME, and load-bearing now that the visible label is
+          // gone: the placeholder is not a name (unreliable across assistive
+          // tech, and gone on the first keystroke), and `subject` is what stops
+          // fifteen identical "Note" fields down a step list.
           aria-label={`${fieldLabel} for ${subject}`}
           aria-describedby={showCounter ? `${hintId} ${counterId}` : hintId}
           onChange={(e) => {
@@ -300,7 +331,13 @@ export function NoteField({
               close();
             }
           }}
-          className="border-input focus-visible:ring-ring focus-visible:ring-offset-background w-full rounded-md border px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+          // `placeholder:text-muted-foreground` is NOT decoration. Tailwind's
+          // default placeholder is `currentColor` at 50%, which MEASURES 3.22:1
+          // on the light --background and 4.29:1 on the dark one — both below
+          // the 4.5:1 AA floor. --muted-foreground is 5.27:1 and 9.13:1. No
+          // `dark:` partner is needed because the token already flips with the
+          // theme, which is the whole reason to use it over a numbered shade.
+          className="border-input focus-visible:ring-ring focus-visible:ring-offset-background placeholder:text-muted-foreground w-full rounded-md border px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
         />
         <p id={hintId} className="text-muted-foreground text-xs">
           {t("note.hint", voice)}
@@ -322,6 +359,15 @@ export function NoteField({
           </p>
         )}
       </div>
+    </div>
+  );
+
+  // Placed by the caller (list rows), or stacked (the task detail page).
+  if (children) return <>{children({ trigger, body })}</>;
+  return (
+    <div className={cn("space-y-1", dense ? "text-xs" : "text-sm")}>
+      {trigger}
+      {body}
     </div>
   );
 }

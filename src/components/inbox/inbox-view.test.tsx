@@ -2893,7 +2893,7 @@ describe("InboxView — the task note (#44)", () => {
       }),
     );
     expect(
-      screen.getByRole("button", { name: "Add note for Renew the passport" }),
+      screen.getByRole("button", { name: "Note for Renew the passport" }),
     ).toBeTruthy();
   });
 
@@ -2901,6 +2901,70 @@ describe("InboxView — the task note (#44)", () => {
     // A brain-dump item in Needs review has no `Task` row yet, so there is no
     // `notes` column to write to. Absent rather than present-and-failing.
     render1(makeItem({ id: "n1", text: "raw thought", taskId: null }));
-    expect(screen.queryByRole("button", { name: /add note/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^note for/i })).toBeNull();
+  });
+});
+
+// ── #183 — the capture input had no accessible name ─────────────────────────
+//
+// The app's most-used control was an <input> with a placeholder and nothing
+// else: no <label>, no aria-label, no aria-labelledby. A placeholder is not a
+// name — support varies, and it VANISHES on the first keystroke, so anyone who
+// tabs away mid-capture and back has a field full of text and no way to re-read
+// what it was for. WCAG 4.1.2, and it undermines 3.3.2.
+//
+// Every assertion below goes through `getByRole(..., { name })`, which computes
+// the name with `dom-accessibility-api` — the same engine screen readers'
+// behaviour is modelled on. An attribute-level check would have passed on all
+// three of the mangled-name bugs this codebase produced in one day, including
+// one in #44's own note control ("Add notefor Ship the thing").
+describe("InboxView — the capture input's accessible name (#183)", () => {
+  const renderCapture = () =>
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+
+  it("has a computed accessible name, not merely a placeholder", () => {
+    renderCapture();
+    expect(
+      screen.getByRole("textbox", { name: "Brain dump" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the name once the placeholder is gone", async () => {
+    // The regression that matters. The placeholder disappears the moment you
+    // type; the name must not.
+    const user = userEvent.setup();
+    renderCapture();
+    await user.type(screen.getByRole("textbox", { name: "Brain dump" }), "x");
+    expect(screen.getByRole("textbox", { name: "Brain dump" })).toHaveValue(
+      "x",
+    );
+  });
+
+  it("keeps the placeholder as supplementary text, never as the name", () => {
+    renderCapture();
+    const input = screen.getByRole("textbox", { name: "Brain dump" });
+    expect(input.getAttribute("placeholder")).toBe(
+      "Brain dump anything… (Enter to save)",
+    );
+    // Not welded into the name — the failure mode this project has hit twice.
+    expect(input.getAttribute("aria-label")).toBe("Brain dump");
+  });
+
+  it("announces the hint as the field's DESCRIPTION, not orphaned text", () => {
+    renderCapture();
+    const input = screen.getByRole("textbox", { name: "Brain dump" });
+    const describedBy = input.getAttribute("aria-describedby") as string;
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy)?.textContent).toContain(
+      "Press Enter to capture instantly",
+    );
   });
 });

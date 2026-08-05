@@ -14,7 +14,7 @@ import { TASK_NOTE_MAX_LENGTH } from "@/lib/task-notes";
  * The a11y assertions here are the substance, not a garnish. `a11y-class-hygiene`
  * can see a contrast or focus-indicator regression in this file's class strings
  * and axe can see a missing label, but NEITHER can see the failure this control
- * is most likely to have: "Add note" repeated down a list of steps, giving a
+ * is most likely to have: "Note" repeated down a list of steps, giving a
  * screen-reader user twelve buttons with identical names and no way to tell
  * which step each belongs to. That one is only catchable by asserting the
  * accessible NAME, which is what most of the specs below do.
@@ -45,21 +45,21 @@ beforeEach(() => {
 });
 
 describe("NoteField — collapsed by default", () => {
-  it("shows only an Add note affordance when there is no note", () => {
+  it("shows only the trigger when there is no note", () => {
     renderField();
-    expect(screen.getByRole("button", { name: /add note/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^note for/i })).toBeTruthy();
     // The editor is not merely invisible — it is out of the a11y tree and the
     // tab order, which is what `hidden` the ATTRIBUTE buys over a CSS class.
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
-  it("names the trigger after the thing it belongs to, not just 'Add note'", () => {
+  it("names the trigger after the thing it belongs to, not just 'Note'", () => {
     // The failure this prevents: a list of steps rendering twelve buttons all
-    // called "Add note". The visible label stays short, and the subject is
+    // called "Note". The visible label stays short, and the subject is
     // appended for assistive tech only.
     renderField();
     expect(
-      screen.getByRole("button", { name: "Add note for Ship the thing" }),
+      screen.getByRole("button", { name: "Note for Ship the thing" }),
     ).toBeTruthy();
   });
 
@@ -69,28 +69,54 @@ describe("NoteField — collapsed by default", () => {
     // see the component's comment), so the containment has to be asserted
     // rather than falling out of the markup.
     renderField();
-    const trigger = screen.getByRole("button", { name: /add note/i });
+    const trigger = screen.getByRole("button", { name: /^note for/i });
     const visible = (trigger.textContent ?? "").trim();
     const accessibleName = trigger.getAttribute("aria-label") ?? "";
-    expect(visible).toBe("Add note");
+    expect(visible).toBe("Note");
     expect(accessibleName.startsWith(visible)).toBe(true);
+    // And the name really does resolve to that — `getByRole({ name })` computes
+    // it with `dom-accessibility-api`, so this is the screen reader's answer
+    // rather than an attribute being present.
+    expect(
+      screen.getByRole("button", { name: "Note for Ship the thing" }),
+    ).toBe(trigger);
   });
 
   it("does the same in the playful voice, where the label carries an emoji", () => {
     // The emoji is part of the visible label, so it has to be part of the
     // accessible name too or 2.5.3 breaks in one voice and not the other.
     renderField({ voice: "playful" });
-    const trigger = screen.getByRole("button", { name: /add note/i });
+    // Not anchored: the playful name legitimately begins with the emoji.
+    const trigger = screen.getByRole("button", { name: /note for/i });
     const visible = (trigger.textContent ?? "").trim();
-    expect(visible).toBe("🗒️ Add note");
+    expect(visible).toBe("🗒️ Note");
     expect(trigger.getAttribute("aria-label")).toBe(
-      "🗒️ Add note for Ship the thing",
+      "🗒️ Note for Ship the thing",
     );
+  });
+
+  it("uses ONE noun whether or not a note exists — never Add vs Edit", () => {
+    // "Add" and "Edit" both describe a one-off action; this is a persistent
+    // autosaving field. The switch also lied in a case #179 makes common — a
+    // note carried in from a brain dump exists before anyone "added" anything —
+    // and a fixed word stops the control changing width, and the row shifting,
+    // on the first keystroke.
+    renderField({ initialNote: null });
+    const empty = (
+      screen.getByRole("button", { name: /^note for/i }).textContent ?? ""
+    ).trim();
+    cleanup();
+    renderField({ initialNote: "already written" });
+    const filled = (
+      screen.getByRole("button", { name: /^note for/i }).textContent ?? ""
+    ).trim();
+    expect(empty).toBe("Note");
+    expect(filled).toBe("Note");
   });
 
   it("reports itself collapsed, and points at the region it controls", () => {
     renderField();
-    const trigger = screen.getByRole("button", { name: /add note/i });
+    const trigger = screen.getByRole("button", { name: /^note for/i });
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     const controls = trigger.getAttribute("aria-controls");
     expect(controls).toBeTruthy();
@@ -114,12 +140,11 @@ describe("NoteField — an existing note is readable without expanding", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
-  it("offers Edit rather than Add once a note exists, still subject-named", () => {
+  it("keeps the same subject-named trigger once a note exists", () => {
     renderField({ initialNote: "Bring the Figma link" });
     expect(
-      screen.getByRole("button", { name: "Edit note for Ship the thing" }),
+      screen.getByRole("button", { name: "Note for Ship the thing" }),
     ).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /add note/i })).toBeNull();
   });
 
   it("preserves the line breaks a multi-line note was written with", () => {
@@ -136,7 +161,7 @@ describe("NoteField — expanding", () => {
   it("reveals a textarea and moves focus into it", async () => {
     const user = userEvent.setup();
     renderField();
-    await user.click(screen.getByRole("button", { name: /add note/i }));
+    await user.click(screen.getByRole("button", { name: /^note for/i }));
 
     const box = screen.getByRole("textbox");
     expect(box).toBeTruthy();
@@ -149,7 +174,7 @@ describe("NoteField — expanding", () => {
   it("flips aria-expanded on the same trigger, rather than swapping buttons", async () => {
     const user = userEvent.setup();
     renderField();
-    const trigger = screen.getByRole("button", { name: /add note/i });
+    const trigger = screen.getByRole("button", { name: /^note for/i });
     await user.click(trigger);
     await waitFor(() =>
       expect(
@@ -160,20 +185,72 @@ describe("NoteField — expanding", () => {
     );
   });
 
-  it("gives the textarea a real label, not a placeholder standing in for one", async () => {
+  it("names the textarea programmatically — the placeholder is NOT the name", async () => {
+    // The visible <label> is gone (owner: two stacked "Note" words for one
+    // field is noise), so this name is load-bearing rather than belt-and-
+    // braces. Asserted through `getByRole({ name })`, which computes it with
+    // `dom-accessibility-api` — an attribute-level check would have passed on
+    // all three mangled-name bugs this codebase produced in a day, including
+    // this component's own "Add notefor Ship the thing".
     const user = userEvent.setup();
     renderField();
-    await user.click(screen.getByRole("button", { name: /add note/i }));
-    // getByLabelText resolves through <label for>, so this fails if the field
-    // is only "labelled" by placeholder text — which disappears the moment you
-    // type and is not a label at all.
-    expect(screen.getByLabelText("Note for Ship the thing")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /^note for/i }));
+    expect(
+      screen.getByRole("textbox", { name: "Note for Ship the thing" }),
+    ).toBeTruthy();
+    // No stacked heading above the field any more.
+    expect(document.querySelector("label")).toBeNull();
+  });
+
+  it("shows an example placeholder, and keeps the hint line as well", async () => {
+    const user = userEvent.setup();
+    renderField();
+    await user.click(screen.getByRole("button", { name: /^note for/i }));
+    const box = screen.getByRole("textbox", {
+      name: "Note for Ship the thing",
+    });
+    // An EXAMPLE of what a note is for, not a restatement of the word "Note".
+    expect(box.getAttribute("placeholder")).toBe(
+      "Anything worth knowing when you start…",
+    );
+    // The hint explains where the note travels to; the placeholder cannot.
+    const describedBy = box.getAttribute("aria-describedby") as string;
+    expect(
+      document.getElementById(describedBy.split(" ")[0])?.textContent,
+    ).toMatch(/calendar|Google Task/i);
+  });
+
+  it("paints the placeholder at an AA colour, not the sub-AA default", async () => {
+    // MEASURED, not assumed. Tailwind's default placeholder is currentColor at
+    // 50%, which is 3.22:1 on the light --background and 4.29:1 on the dark one
+    // — both under the 4.5:1 AA floor. --muted-foreground is 5.27:1 / 9.13:1
+    // and flips with the theme, so it needs no `dark:` partner.
+    const user = userEvent.setup();
+    renderField();
+    await user.click(screen.getByRole("button", { name: /^note for/i }));
+    expect(
+      screen.getByRole("textbox", { name: "Note for Ship the thing" })
+        .className,
+    ).toContain("placeholder:text-muted-foreground");
+  });
+
+  it("does not show the placeholder when a note arrived with content (#179)", async () => {
+    // A placeholder only renders on an empty field, so a note carried in from a
+    // brain dump simply never shows it. Pinned because it is the case most
+    // likely to be overlooked, and because it is the reason the placeholder can
+    // safely be an example rather than an instruction.
+    const user = userEvent.setup();
+    renderField({ initialNote: "came in from the brain dump" });
+    await user.click(screen.getByRole("button", { name: /^note for/i }));
+    expect(
+      screen.getByRole("textbox", { name: "Note for Ship the thing" }),
+    ).toHaveProperty("value", "came in from the brain dump");
   });
 
   it("describes what the note is for, wired with aria-describedby", async () => {
     const user = userEvent.setup();
     renderField();
-    await user.click(screen.getByRole("button", { name: /add note/i }));
+    await user.click(screen.getByRole("button", { name: /^note for/i }));
     const box = screen.getByRole("textbox");
     const describedBy = box.getAttribute("aria-describedby") as string;
     expect(describedBy).toBeTruthy();
@@ -184,7 +261,7 @@ describe("NoteField — expanding", () => {
   it("bounds the field at the same length the column and the action do", async () => {
     const user = userEvent.setup();
     renderField();
-    await user.click(screen.getByRole("button", { name: /add note/i }));
+    await user.click(screen.getByRole("button", { name: /^note for/i }));
     expect(screen.getByRole("textbox").getAttribute("maxLength")).toBe(
       String(TASK_NOTE_MAX_LENGTH),
     );
@@ -193,7 +270,7 @@ describe("NoteField — expanding", () => {
   it("collapses on Escape and returns focus to the trigger", async () => {
     const user = userEvent.setup();
     renderField();
-    const trigger = screen.getByRole("button", { name: /add note/i });
+    const trigger = screen.getByRole("button", { name: /^note for/i });
     await user.click(trigger);
     await user.keyboard("{Escape}");
 
@@ -201,7 +278,7 @@ describe("NoteField — expanding", () => {
     // Focus must not be lost to the document body — that is where a keyboard
     // user's position disappears and they have to start tabbing from the top.
     expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: /add note for Ship the thing/i }),
+      screen.getByRole("button", { name: /note for Ship the thing/i }),
     );
   });
 });
@@ -210,7 +287,7 @@ describe("NoteField — autosave", () => {
   it("saves once after the debounce, not once per keystroke", async () => {
     const user = userEvent.setup();
     renderField();
-    await user.click(screen.getByRole("button", { name: /add note/i }));
+    await user.click(screen.getByRole("button", { name: /^note for/i }));
     await user.type(screen.getByRole("textbox"), "call Sam");
 
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
@@ -220,14 +297,14 @@ describe("NoteField — autosave", () => {
   it("has no Save button — the field is the whole interaction", async () => {
     const user = userEvent.setup();
     renderField();
-    await user.click(screen.getByRole("button", { name: /add note/i }));
+    await user.click(screen.getByRole("button", { name: /^note for/i }));
     expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull();
   });
 
   it("shows the shared saved affordance, matching the settings sections", async () => {
     const user = userEvent.setup();
     renderField();
-    await user.click(screen.getByRole("button", { name: /add note/i }));
+    await user.click(screen.getByRole("button", { name: /^note for/i }));
     await user.type(screen.getByRole("textbox"), "hi");
     await waitFor(() =>
       expect(
@@ -240,7 +317,7 @@ describe("NoteField — autosave", () => {
     onSave.mockResolvedValue({ ok: false as const, reason: "error" as const });
     const user = userEvent.setup();
     renderField();
-    await user.click(screen.getByRole("button", { name: /add note/i }));
+    await user.click(screen.getByRole("button", { name: /^note for/i }));
     await user.type(screen.getByRole("textbox"), "hi");
 
     await waitFor(() =>
@@ -256,7 +333,7 @@ describe("NoteField — autosave", () => {
   it("does not save on expand alone, when nothing was typed", async () => {
     const user = userEvent.setup();
     renderField({ initialNote: "unchanged" });
-    await user.click(screen.getByRole("button", { name: /edit note/i }));
+    await user.click(screen.getByRole("button", { name: /^note for/i }));
     await new Promise((r) => setTimeout(r, 60));
     expect(onSave).not.toHaveBeenCalled();
   });
@@ -264,7 +341,7 @@ describe("NoteField — autosave", () => {
   it("sends null when the note is cleared, so the column goes back to NULL", async () => {
     const user = userEvent.setup();
     renderField({ initialNote: "delete me" });
-    await user.click(screen.getByRole("button", { name: /edit note/i }));
+    await user.click(screen.getByRole("button", { name: /^note for/i }));
     await user.clear(screen.getByRole("textbox"));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledWith(null));
@@ -277,7 +354,7 @@ describe("NoteField — autosave", () => {
     onSave.mockResolvedValue({ ok: true as const, notes: "trimmed" });
     const user = userEvent.setup();
     renderField();
-    await user.click(screen.getByRole("button", { name: /add note/i }));
+    await user.click(screen.getByRole("button", { name: /^note for/i }));
     await user.type(screen.getByRole("textbox"), "  trimmed  ");
 
     await waitFor(() =>
@@ -303,7 +380,7 @@ describe("NoteField — autosave", () => {
 
     const user = userEvent.setup();
     renderField();
-    await user.click(screen.getByRole("button", { name: /add note/i }));
+    await user.click(screen.getByRole("button", { name: /^note for/i }));
     await user.type(screen.getByRole("textbox"), "first");
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
 
@@ -327,7 +404,7 @@ describe("NoteField — autosave", () => {
   it("announces the remaining budget politely as the bound approaches", async () => {
     const user = userEvent.setup();
     renderField({ initialNote: "y".repeat(TASK_NOTE_MAX_LENGTH - 5) });
-    await user.click(screen.getByRole("button", { name: /edit note/i }));
+    await user.click(screen.getByRole("button", { name: /^note for/i }));
 
     const counter = screen.getByTestId("note-counter");
     expect(counter.textContent).toContain("5");
@@ -344,7 +421,7 @@ describe("NoteField — autosave", () => {
   it("stays quiet about the budget while there is plenty left", async () => {
     const user = userEvent.setup();
     renderField();
-    await user.click(screen.getByRole("button", { name: /add note/i }));
+    await user.click(screen.getByRole("button", { name: /^note for/i }));
     expect(screen.queryByTestId("note-counter")).toBeNull();
   });
 
@@ -356,7 +433,7 @@ describe("NoteField — autosave", () => {
     // Blurring is the moment that reliably precedes all three.
     const user = userEvent.setup();
     renderField({ autoSaveDelayMs: 10_000 });
-    await user.click(screen.getByRole("button", { name: /add note/i }));
+    await user.click(screen.getByRole("button", { name: /^note for/i }));
     await user.type(screen.getByRole("textbox"), "nearly lost");
     expect(onSave).not.toHaveBeenCalled();
 
@@ -370,7 +447,7 @@ describe("NoteField — autosave", () => {
     // Otherwise merely opening the field and tabbing away writes the column.
     const user = userEvent.setup();
     renderField({ initialNote: "unchanged" });
-    await user.click(screen.getByRole("button", { name: /edit note/i }));
+    await user.click(screen.getByRole("button", { name: /^note for/i }));
     await user.tab();
     await new Promise((r) => setTimeout(r, 40));
     expect(onSave).not.toHaveBeenCalled();

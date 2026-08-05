@@ -276,59 +276,69 @@ export function LibraryRows({
                   />
                 )}
               </div>
-              {!selecting && (
-                <RowActions
-                  inline={[
-                    <button
-                      key="focus"
-                      type="button"
-                      onClick={() => focusOnItem(item.id)}
-                      className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
-                    >
-                      {t("action.startFocus", voice)}
-                    </button>,
-                    <CompleteButton
-                      key="complete"
-                      voice={voice}
-                      onClick={() => run(() => completeItem(item.id))}
-                    />,
-                  ]}
-                  del={deleteControl(item.id, "delete", { icon: true })}
-                  menu={[
-                    <button
-                      key="focus-m"
-                      type="button"
-                      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                      onClick={() => focusOnItem(item.id)}
-                    >
-                      {t("step.startFocusTimer", voice)}
-                    </button>,
-                    <button
-                      key="complete-m"
-                      type="button"
-                      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                      onClick={() => run(() => completeItem(item.id))}
-                    >
-                      {t("action.completeFull", voice)}
-                    </button>,
-                    deleteControl(item.id, "delete-m", { fullWidth: true }),
-                  ]}
-                />
-              )}
-
-              {/* #44 — the note, below the action line so the row's primary
-                  controls keep their position. Collapsed when empty, which is
-                  what keeps a long list readable; renders nothing at all when
-                  the row has no `Task` behind it. This row grain is the gap the
-                  owner found: multi-step tasks reached a note through their
-                  expanded steps and single-step ones had no route to one. */}
+              {/* #44 — the note's collapsed trigger goes INSIDE the action
+                  group, beside Complete (owner request from the review app);
+                  the editor body opens below the action line but stays in this
+                  same <li>, so it reads as belonging to this row and not to the
+                  next one. `TaskNoteRow` hands back both halves and yields
+                  nulls for a row with no `Task`, which is why the action group
+                  is rendered from inside it rather than beside it. */}
               {!selecting && (
                 <TaskNoteRow
                   taskId={item.taskId}
                   taskTitle={item.text}
                   notes={item.notes}
                   voice={voice}
-                />
+                >
+                  {({ trigger, body }) => (
+                    <>
+                      <RowActions
+                        inline={[
+                          <button
+                            key="focus"
+                            type="button"
+                            onClick={() => focusOnItem(item.id)}
+                            className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
+                          >
+                            {t("action.startFocus", voice)}
+                          </button>,
+                          <CompleteButton
+                            key="complete"
+                            voice={voice}
+                            onClick={() => run(() => completeItem(item.id))}
+                          />,
+                          // #44 — third inline control, after Complete. Null for a
+                          // row with no task, and `inline` is rendered as a list, so
+                          // a null simply contributes nothing.
+                          trigger,
+                        ]}
+                        del={deleteControl(item.id, "delete", { icon: true })}
+                        menu={[
+                          <button
+                            key="focus-m"
+                            type="button"
+                            className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                            onClick={() => focusOnItem(item.id)}
+                          >
+                            {t("step.startFocusTimer", voice)}
+                          </button>,
+                          <button
+                            key="complete-m"
+                            type="button"
+                            className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                            onClick={() => run(() => completeItem(item.id))}
+                          >
+                            {t("action.completeFull", voice)}
+                          </button>,
+                          deleteControl(item.id, "delete-m", {
+                            fullWidth: true,
+                          }),
+                        ]}
+                      />
+                      {body}
+                    </>
+                  )}
+                </TaskNoteRow>
               )}
             </li>
           );

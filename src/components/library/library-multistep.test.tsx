@@ -423,7 +423,7 @@ describe("LibraryMultistep — the task note (#44)", () => {
       />,
     );
     expect(
-      screen.getByRole("button", { name: "Add note for task new" }),
+      screen.getByRole("button", { name: "Note for task new" }),
     ).toBeTruthy();
   });
 

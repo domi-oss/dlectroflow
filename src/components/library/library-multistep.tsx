@@ -207,7 +207,11 @@ export function LibraryMultistep({
               {/* #44 — the TASK's own note. Distinct from the per-step notes
                   in the expanded list below: this is context for the whole
                   task, so it stays available whether or not the steps are
-                  showing. */}
+                  showing.
+                  STACKED here, unlike the other list rows, and deliberately:
+                  this row has no `RowActions` group — it is a disclosure title
+                  that expands into the step list — so there is no action group
+                  for the trigger to join. */}
               {!sel.selecting && (
                 <TaskNoteRow
                   taskId={item.taskId}

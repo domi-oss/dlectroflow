@@ -244,6 +244,11 @@ export function ScheduleControl({
           step={1}
           value={custom}
           onChange={(e) => setCustom(e.target.value)}
+          // #183 sweep — `placeholder="min"` was standing in for a name, the
+          // same defect as the brain-dump capture input. The enclosing popup is
+          // already named "… — duration", so this only has to identify itself
+          // within that; the placeholder stays as the compact visible hint.
+          aria-label="Custom duration in minutes"
           className="w-16 rounded-md border px-2 py-1"
           placeholder="min"
         />
@@ -423,6 +428,11 @@ export function RowActions({
 
   return (
     <div
+      // A stable hook for asserting WHICH controls belong to the action group.
+      // #44 put the note trigger in here beside Complete (owner request), and
+      // "is it in the action row or on its own line below" is otherwise only
+      // checkable by walking anonymous divs, which rots on any wrapper change.
+      data-row-actions=""
       className={cn(
         "mt-2 flex flex-wrap items-center gap-2 text-xs",
         className,

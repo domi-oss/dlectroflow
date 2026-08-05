@@ -146,7 +146,7 @@ export function TaskSteps({
                 <DonePill voice={voice} />
               </div>
               {/* #44 — a DONE step gets its note READ-ONLY and no control.
-                  Annotating finished work has no purpose, so the "Add note"
+                  Annotating finished work has no purpose, so the "Note"
                   affordance would be clutter on a row that deliberately carries
                   no actions; silently hiding text the user already wrote would
                   be worse than either. */}
@@ -214,76 +214,11 @@ export function TaskSteps({
               )}
             </div>
             {/* Action line — shared v6 RowActions: Complete + Start/Resume Focus
-                inline, everything (state-dependent) in the 🔽 dropdown. */}
-            <RowActions
-              inline={[
-                <Link
-                  key="focus"
-                  href={`/focus/${s.id}`}
-                  className="bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90"
-                >
-                  {focusLabel}
-                </Link>,
-                <CompleteButton
-                  key="complete"
-                  voice={voice}
-                  onClick={() => complete(s.id)}
-                />,
-              ]}
-              menu={[
-                <Link
-                  key="focus-m"
-                  href={`/focus/${s.id}`}
-                  className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                >
-                  {focusMenuLabel}
-                </Link>,
-                <button
-                  key="complete-m"
-                  type="button"
-                  onClick={() => complete(s.id)}
-                  className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                >
-                  {t("step.complete", voice)}
-                </button>,
-                <button
-                  key="edit-est-m"
-                  type="button"
-                  onClick={() => {
-                    setEditTitleId(null);
-                    setEditEstId(s.id);
-                  }}
-                  className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                >
-                  {t("step.editEstimate", voice)}
-                </button>,
-                <button
-                  key="edit-title-m"
-                  type="button"
-                  onClick={() => {
-                    setEditEstId(null);
-                    setEditTitleId(s.id);
-                  }}
-                  className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                >
-                  {t("step.editTitle", voice)}
-                </button>,
-                <button
-                  key="review-m"
-                  type="button"
-                  onClick={() => sendToReview(s.id)}
-                  className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                >
-                  {t("step.sendToReview", voice)}
-                </button>,
-              ]}
-            />
-
-            {/* #44 — this step's own note. Below the action line, so the row's
-                primary controls keep their position and a note never pushes
-                Focus/Complete around. Collapsed when empty, which is what keeps
-                an already-dense list readable; `dense` on the field itself only
-                tightens the type scale, never the 44px hit target. */}
+                inline, everything (state-dependent) in the 🔽 dropdown.
+                #44 — the step's note trigger is a third inline control here,
+                beside Complete, matching the task rows in the Inbox and the
+                Library; its editor opens below the action line but inside this
+                same <li>. */}
             <StepNote
               stepId={s.id}
               order={s.order}
@@ -291,7 +226,77 @@ export function TaskSteps({
               text={s.text}
               notes={s.notes}
               voice={voice}
-            />
+            >
+              {({ trigger, body }) => (
+                <>
+                  <RowActions
+                    inline={[
+                      <Link
+                        key="focus"
+                        href={`/focus/${s.id}`}
+                        className="bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90"
+                      >
+                        {focusLabel}
+                      </Link>,
+                      <CompleteButton
+                        key="complete"
+                        voice={voice}
+                        onClick={() => complete(s.id)}
+                      />,
+                      trigger,
+                    ]}
+                    menu={[
+                      <Link
+                        key="focus-m"
+                        href={`/focus/${s.id}`}
+                        className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                      >
+                        {focusMenuLabel}
+                      </Link>,
+                      <button
+                        key="complete-m"
+                        type="button"
+                        onClick={() => complete(s.id)}
+                        className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                      >
+                        {t("step.complete", voice)}
+                      </button>,
+                      <button
+                        key="edit-est-m"
+                        type="button"
+                        onClick={() => {
+                          setEditTitleId(null);
+                          setEditEstId(s.id);
+                        }}
+                        className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                      >
+                        {t("step.editEstimate", voice)}
+                      </button>,
+                      <button
+                        key="edit-title-m"
+                        type="button"
+                        onClick={() => {
+                          setEditEstId(null);
+                          setEditTitleId(s.id);
+                        }}
+                        className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                      >
+                        {t("step.editTitle", voice)}
+                      </button>,
+                      <button
+                        key="review-m"
+                        type="button"
+                        onClick={() => sendToReview(s.id)}
+                        className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                      >
+                        {t("step.sendToReview", voice)}
+                      </button>,
+                    ]}
+                  />
+                  {body}
+                </>
+              )}
+            </StepNote>
           </li>
         );
       })}
