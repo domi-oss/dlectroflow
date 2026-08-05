@@ -370,8 +370,9 @@ tracks / ~544 MB**, which is too much to put in a container image, so the rest i
 read at run time from wherever the operator keeps it:
 
 ```bash
-# Point the app at a directory holding the extracted openlofi.zip
-# (the mp3s plus catalog.json). Unset — the default — nothing changes.
+# Point the app at a directory holding the extracted openlofi.zip plus
+# catalog.json, flat. The manifest is NOT inside the zip — download it
+# separately. Unset — the default — nothing changes.
 FOCUS_CATALOG_ORIGIN=https://your-store.example.com/openlofi
 ```
 

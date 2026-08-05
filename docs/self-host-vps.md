@@ -210,10 +210,18 @@ is far too much to put in a container image, so the rest is read at run time fro
 wherever you choose to keep it.
 
 Download the `openlofi.zip` release from
-[open-lofi](https://github.com/btahir/open-lofi), extract it somewhere an HTTP
+[open-lofi](https://github.com/btahir/open-lofi) and extract it somewhere an HTTP
 server can reach — object storage with public reads, an nginx container, a MinIO
-service on this same Compose network — and point the app at the directory holding
-the mp3s and `catalog.json`:
+service on this same Compose network.
+
+**The manifest is not in the zip.** The archive is 166 `.mp3` files and nothing
+else; `catalog.json` is published separately, at
+<https://raw.githubusercontent.com/btahir/open-lofi/main/catalog.json>. Download
+it too and put it beside the mp3s — without it the app finds no catalog and stays
+on the bundled ten, which looks identical to never having set the variable.
+
+The layout is flat: `catalog.json` and every `.mp3` directly under the directory
+you point at, one path segment each. Then:
 
 ```bash
 FOCUS_CATALOG_ORIGIN=http://minio:9000/openlofi
@@ -225,8 +233,17 @@ network is fine here.** The app proxies the audio: `next.config.ts` sets
 refuse audio from anywhere but the app itself — a focus session is a long,
 unattended, personal page view and makes no third-party request. The bytes are
 fetched server-side and streamed back through `/api/focus-catalog/audio`, with
-`Range` requests forwarded so seeking still works. If your store needs a
-credential, it stays on the server for the same reason.
+`Range` requests forwarded so seeking still works — a store that ignores `Range`
+leaves tracks playable but unseekable.
+
+**The store has to allow unauthenticated reads.** There is no credential to give
+it: the app takes a bare URL, rejects one carrying userinfo or a query string (so
+a pre-signed base cannot work), and refuses to follow redirects, since a 3xx
+would move the request to a host you never configured. On a private network that
+costs nothing — nothing outside the Compose network can reach the store anyway,
+which is the same reason plain `http://` is fine there. Exposing the store
+publicly instead means its contents are public; the tracks are CC0, so that is a
+choice rather than a leak, but make it deliberately.
 
 Leave it unset and you get the bundled ten. Set it wrong, or let the store go
 down, and you also get the bundled ten — the timer is never silent because of
