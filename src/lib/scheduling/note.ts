@@ -21,14 +21,37 @@ export function focusUrl(origin: string, stepId?: string | null): string {
 }
 
 /**
- * The note text: a voice-aware prompt line followed by the absolute focus URL.
+ * The note text: the user's own note (#44) when there is one, then a blank
+ * line, then a voice-aware prompt line followed by the absolute focus URL.
  * The newline renders in both calendar clients (ICS escapes it) and Google Task
  * notes (real newline).
+ *
+ * **The user note goes FIRST**, and that is a product decision rather than a
+ * formatting one: a calendar slot and a Google Tasks row both show only the
+ * first line or two, and the note is the part carrying the context ("bring the
+ * Figma link"). The deep-link is what you tap once you have read it.
+ *
+ * **Nothing is escaped here**, deliberately. The same string is serialised two
+ * incompatible ways — into an ICS `DESCRIPTION` under RFC 5545 §3.3.11 (`esc()`
+ * in src/lib/ics.ts) and into a Google Task `notes` field as JSON — so escaping
+ * at this layer would be wrong for one caller and double-applied for the other.
+ * The rule this module keeps is that it stays a plain string and every caller
+ * hands it to a serialiser that knows its own format.
+ *
+ * `userNote` is optional and an absent/blank one produces byte-identical output
+ * to the pre-#44 shape, which is what lets both existing callers pass it
+ * through unconditionally.
  */
 export function buildScheduleNote(input: {
   origin: string;
   voice: Voice;
   stepId?: string | null;
+  /** The task's `notes` column. Already normalised on write
+   *  (`normalizeTaskNote`), trimmed again here because a caller may pass a
+   *  hand-built value and a stray blank line is visible in a calendar entry. */
+  userNote?: string | null;
 }): string {
-  return `${t("schedule.focusNote", input.voice)}\n${focusUrl(input.origin, input.stepId)}`;
+  const link = `${t("schedule.focusNote", input.voice)}\n${focusUrl(input.origin, input.stepId)}`;
+  const note = input.userNote?.trim();
+  return note ? `${note}\n\n${link}` : link;
 }

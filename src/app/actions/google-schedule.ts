@@ -120,6 +120,9 @@ export async function pushStepsToGoogleTasks(
         parentEmoji: task.parentEmoji ?? "🗂️",
         origin,
         voice,
+        // #44 — the owner's note, on every unit. Read from the scoped `task`
+        // above, so it cannot come from the caller.
+        userNote: task.notes,
       });
       const step = task.steps.find((s) => s.id === unit.id)!;
       const { id } = await upsertGoogleTask(
@@ -315,6 +318,11 @@ export async function scheduleSingleTask(
       parentEmoji: null,
       origin: publicOrigin(),
       voice,
+      // #44 — `item.task` is the workspace-scoped row already included above,
+      // so this costs no extra query. It is null when the Task was lazily
+      // created a few lines up, which is correct: a task that did not exist a
+      // moment ago has no note.
+      userNote: item.task?.notes ?? null,
     });
     const existing = await prisma.task.findFirst({
       where: { id: taskId, workspaceId },

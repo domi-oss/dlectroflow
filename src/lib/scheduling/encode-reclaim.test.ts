@@ -184,4 +184,44 @@ describe("encodeReclaim — notes", () => {
     const { notes } = encodeReclaim(args);
     expect(notes).toContain("https://dlectroflow.dev/focus/step_6");
   });
+
+  // #44 — the user's own note rides along into the Google Task, between the
+  // context line and the deep-link.
+  it("carries the user's note above the deep-link", () => {
+    const { notes } = encodeReclaim({
+      ...args,
+      userNote: "Bring the Figma link",
+    });
+    expect(notes).toContain("Bring the Figma link");
+    expect(notes.indexOf("Bring the Figma link")).toBeLessThan(
+      notes.indexOf("https://dlectroflow.dev/focus/step_6"),
+    );
+    // ...and below the context line, which says WHICH step this is — that is
+    // orientation, and it has to come before anything freeform.
+    expect(notes.indexOf("step 6 of 7")).toBeLessThan(
+      notes.indexOf("Bring the Figma link"),
+    );
+  });
+
+  it("is unchanged when there is no note", () => {
+    // Every pre-#44 caller passes nothing; a task without a note must produce
+    // exactly the bytes it produced before.
+    expect(encodeReclaim({ ...args, userNote: null }).notes).toBe(
+      encodeReclaim(args).notes,
+    );
+  });
+
+  it("keeps the note out of the TITLE, where Reclaim parses parameters", () => {
+    // Reclaim consumes `(...)` groups out of the title. A note containing
+    // parentheses reaching the title would be read as scheduling parameters —
+    // a note that silently changes when the work is scheduled for.
+    const { title } = encodeReclaim({
+      ...args,
+      userNote: "(duration:600m) (priority:P1)",
+    });
+    expect(title).not.toContain("600m");
+    expect(stripReclaimParams(title)).toBe(
+      "[6/7] \u270f\ufe0f Note any steps or rules in the quoting process you want to remember ~15m",
+    );
+  });
 });

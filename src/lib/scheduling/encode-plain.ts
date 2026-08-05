@@ -32,7 +32,15 @@ export function encodePlain(a: EncodeArgs): EncodedTask {
       : `${parentEmoji}${a.taskTitle}`,
     `Block ${w.durationMin}m · est. ${Math.round(unit.estMinutes)}m`,
     w.notBefore ? `Not before ${formatReclaimDate(w.notBefore)}` : null,
-    buildScheduleNote({ origin: a.origin, voice: a.voice, stepId: unit.id }),
+    // #44 — the user's note is composed in by `buildScheduleNote`, above the
+    // prompt and the link, so the plain path a self-hoster gets carries the
+    // same context the Reclaim path does.
+    buildScheduleNote({
+      origin: a.origin,
+      voice: a.voice,
+      stepId: unit.id,
+      userNote: a.userNote,
+    }),
   ].filter(Boolean);
 
   return { title, notes: lines.join("\n"), due: w.due.toISOString() };

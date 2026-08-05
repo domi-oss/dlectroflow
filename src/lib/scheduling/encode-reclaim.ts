@@ -85,6 +85,16 @@ export type EncodeArgs = {
   parentEmoji?: string | null;
   origin: string;
   voice: Voice;
+  /**
+   * The task's freeform note (#44), threaded into the Google Task `notes` so
+   * the scheduled item carries its own context.
+   *
+   * NOTES, never the title. Reclaim parses `(...)` groups out of a title and
+   * acts on them, so a note containing parentheses reaching the title would be
+   * read as scheduling parameters — a note that silently changes when the work
+   * gets scheduled for. The notes field is not parsed.
+   */
+  userNote?: string | null;
 };
 
 export function encodeReclaim(a: EncodeArgs): { title: string; notes: string } {
@@ -121,7 +131,10 @@ export function encodeReclaim(a: EncodeArgs): { title: string; notes: string } {
     title: `${visible} ${params.join(" ")}`,
     // Per-unit deep link: the defect this replaces reused the FIRST step's id
     // for every event, so step 6's calendar entry opened the timer on step 1.
-    notes: `${context}\n${buildScheduleNote({ origin: a.origin, voice: a.voice, stepId: unit.id })}`,
+    // The context line stays FIRST (#44) — it says which step this is, and
+    // orientation has to precede anything freeform; `buildScheduleNote` then
+    // puts the user's note above the prompt and the link.
+    notes: `${context}\n${buildScheduleNote({ origin: a.origin, voice: a.voice, stepId: unit.id, userNote: a.userNote })}`,
   };
 }
 

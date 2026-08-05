@@ -51,3 +51,77 @@ describe("buildScheduleNote", () => {
     expect(note).not.toMatch(/\/focus\/(?:\s|$)/);
   });
 });
+
+describe("buildScheduleNote — the user's own note (#44)", () => {
+  const base = { origin: "https://app.example", voice: "plain" as const };
+
+  it("puts the user note FIRST, above the prompt and the link", () => {
+    // Order is a product decision, not a formatting one. A calendar slot and a
+    // Google Tasks list both show only the first line or two, and the note is
+    // the part that carries the context ("bring the Figma link"); the deep-link
+    // is the action you take once you have read it.
+    const note = buildScheduleNote({
+      ...base,
+      stepId: "s1",
+      userNote: "Bring the Figma link",
+    });
+    expect(note.indexOf("Bring the Figma link")).toBeLessThan(
+      note.indexOf("https://app.example/focus/s1"),
+    );
+    expect(note.startsWith("Bring the Figma link")).toBe(true);
+  });
+
+  it("separates the note from the prompt with a blank line", () => {
+    // Without it the last line of a multi-line note reads as part of the prompt.
+    const note = buildScheduleNote({
+      ...base,
+      stepId: "s1",
+      userNote: "call before 5",
+    });
+    expect(note).toMatch(/call before 5\n\n▶ /);
+  });
+
+  it("is byte-identical to the no-note output for every absent-note shape", () => {
+    // The two callers that predate #44 (`ics-schedule.ts`, `encode-reclaim.ts`
+    // via `encode-plain.ts`) pass nothing, and a task with no note must produce
+    // exactly what it produced before this feature existed.
+    const before = buildScheduleNote({ ...base, stepId: "s1" });
+    for (const userNote of [undefined, null, "", "   \n  "]) {
+      expect(buildScheduleNote({ ...base, stepId: "s1", userNote })).toBe(
+        before,
+      );
+    }
+  });
+
+  it("trims the note but keeps its interior line breaks", () => {
+    const note = buildScheduleNote({
+      ...base,
+      stepId: "s1",
+      userNote: "  one\ntwo  ",
+    });
+    expect(note.startsWith("one\ntwo\n\n")).toBe(true);
+  });
+
+  it("carries the note on the launcher (stepless) note too", () => {
+    const note = buildScheduleNote({
+      ...base,
+      stepId: null,
+      userNote: "no steps, still context",
+    });
+    expect(note).toContain("no steps, still context");
+    expect(note).toContain("https://app.example/focus");
+  });
+
+  it("does NOT escape — escaping belongs to the serialiser that knows the format", () => {
+    // Load-bearing. The same string goes into an ICS DESCRIPTION (RFC 5545
+    // §3.3.11 escaping, via `esc()`) and into a Google Task `notes` field (JSON,
+    // where a backslash-escaped semicolon would be visible junk). Escaping here
+    // would be wrong for one of them, and double-escaping for the other.
+    const note = buildScheduleNote({
+      ...base,
+      stepId: "s1",
+      userNote: "a;b,c\\d",
+    });
+    expect(note).toContain("a;b,c\\d");
+  });
+});
