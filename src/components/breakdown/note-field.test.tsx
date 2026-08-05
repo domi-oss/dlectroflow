@@ -329,17 +329,50 @@ describe("NoteField — autosave", () => {
     renderField({ initialNote: "y".repeat(TASK_NOTE_MAX_LENGTH - 5) });
     await user.click(screen.getByRole("button", { name: /edit note/i }));
 
-    const counter = screen.getByRole("status", { name: /characters/i });
+    const counter = screen.getByTestId("note-counter");
     expect(counter.textContent).toContain("5");
+    expect(counter.getAttribute("role")).toBe("status");
     // Polite, not assertive: a count ticking down on every keystroke must not
     // interrupt what the screen reader is already saying.
     expect(counter.getAttribute("aria-live")).toBe("polite");
+    // No `aria-label`. On a live region the NAME and the announced CONTENT are
+    // different things, and a name that paraphrases the content ("characters
+    // remaining" over "5 characters left") is how one gets said twice.
+    expect(counter.hasAttribute("aria-label")).toBe(false);
   });
 
   it("stays quiet about the budget while there is plenty left", async () => {
     const user = userEvent.setup();
     renderField();
     await user.click(screen.getByRole("button", { name: /add note/i }));
-    expect(screen.queryByRole("status", { name: /characters/i })).toBeNull();
+    expect(screen.queryByTestId("note-counter")).toBeNull();
+  });
+
+  it("flushes a pending edit immediately on blur", async () => {
+    // The debounce is a window in which the only copy of what the user typed
+    // lives in component state. Clicking away, tabbing on, or navigating within
+    // that window would lose it: the unmount cleanup CLEARS the timer rather
+    // than firing it, because an async write from a cleanup cannot be awaited.
+    // Blurring is the moment that reliably precedes all three.
+    const user = userEvent.setup();
+    renderField({ autoSaveDelayMs: 10_000 });
+    await user.click(screen.getByRole("button", { name: /add note/i }));
+    await user.type(screen.getByRole("textbox"), "nearly lost");
+    expect(onSave).not.toHaveBeenCalled();
+
+    await user.tab();
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith("nearly lost"));
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not save on blur when nothing is pending", async () => {
+    // Otherwise merely opening the field and tabbing away writes the column.
+    const user = userEvent.setup();
+    renderField({ initialNote: "unchanged" });
+    await user.click(screen.getByRole("button", { name: /edit note/i }));
+    await user.tab();
+    await new Promise((r) => setTimeout(r, 40));
+    expect(onSave).not.toHaveBeenCalled();
   });
 });

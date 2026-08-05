@@ -183,6 +183,25 @@ export function NoteField({
     }, autoSaveDelayMs);
   };
 
+  /**
+   * Write a pending edit NOW rather than waiting out the debounce.
+   *
+   * The debounce window is the one interval in which the only copy of what the
+   * user typed lives in component state. Clicking away, tabbing on, or
+   * navigating within it would lose the edit — the unmount cleanup CLEARS the
+   * timer rather than firing it, because an async write cannot be awaited from
+   * a cleanup. Blur is the moment that reliably precedes all three.
+   *
+   * Guarded on there BEING something pending, so merely opening the field and
+   * tabbing past it does not write the column.
+   */
+  const flushPending = () => {
+    if (!debounce.current) return;
+    clearTimeout(debounce.current);
+    debounce.current = null;
+    void flush();
+  };
+
   const open = () => {
     setExpanded(true);
     // Focus MANAGEMENT, not merely reveal: a keyboard user who just asked for
@@ -271,6 +290,7 @@ export function NoteField({
             setNote(e.target.value);
             scheduleSave();
           }}
+          onBlur={flushPending}
           onKeyDown={(e) => {
             // Escape closes the disclosure and returns focus. Enter must NOT —
             // this is a multi-line field and a newline is a legitimate thing to
@@ -288,9 +308,14 @@ export function NoteField({
         {showCounter && (
           <p
             id={counterId}
+            data-testid="note-counter"
+            // `role="status"` already implies a polite live region; `aria-live`
+            // is stated as well because some assistive tech honours only one of
+            // the two. NO `aria-label` — on a live region the NAME and the
+            // announced CONTENT are different things, and a name paraphrasing
+            // the content is how it gets said twice.
             role="status"
             aria-live="polite"
-            aria-label="characters remaining"
             className="text-muted-foreground text-xs"
           >
             {remaining} characters left
