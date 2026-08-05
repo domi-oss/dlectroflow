@@ -113,6 +113,7 @@ function AllSections({ voice = "plain" as Voice }) {
         keepAwake={false}
         alarmEnabled={false}
         sound="chime"
+        category={null}
         pauseTogether={false}
         voice={voice}
       />

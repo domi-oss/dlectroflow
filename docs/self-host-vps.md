@@ -237,6 +237,14 @@ reason, once per session rather than once per request:
 docker compose --env-file .env.prod -f docker/docker-compose.prod.yml logs app | grep focus_catalog
 ```
 
+Setting this also turns on **per-category playlists**, with nothing else to
+configure. Settings starts offering "Chillhop — whole category" and the rest once
+the catalog gives a category more than one track. With only the bundled ten —
+one per category — a category playlist would be a second way of saying "this
+track", so that part of the picker is absent rather than shown greyed out. If
+`/focus` lists more than ten tracks and `/settings` still offers no category,
+that is a bug worth reporting, not something to configure.
+
 Licence and provenance for the streamed set are in `public/audio/LICENSE.md`. The
 short version: it is the same CC0 1.0 release as the bundled ten, and the app
 validates the *shape* of what it is served, never the licence of the bytes — so

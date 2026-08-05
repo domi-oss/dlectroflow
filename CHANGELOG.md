@@ -53,6 +53,25 @@ operators upgrading a self-hosted instance don't get surprised.
   rather than silent. Licence and provenance for the streamed set are recorded in
   `public/audio/LICENSE.md`; setup is in `docs/self-host-vps.md` and
   `docs/deploy-runbook.md`.
+- **A whole category of focus sounds can be the playlist (#70).** Settings now
+  offers "Chillhop — whole category" alongside the individual tracks, using
+  open-lofi's own category names. Picking one narrows the playlist to that
+  category and plays it under the existing rules: it advances itself, and nothing
+  repeats until every track in the category has had a turn.
+
+  **The option only appears when a category actually holds more than one track.**
+  With no catalog configured the app has one track per category, so a category
+  picker there would be a second way of saying "this track" — the group is
+  therefore absent rather than shown greyed out, and it appears on its own once
+  `FOCUS_CATALOG_ORIGIN` points at a store with more. Nothing needs enabling. If a
+  configured store later stops answering, a category you already chose keeps
+  playing what is still available rather than quietly switching genre, and the
+  setting stays visible so you can change it.
+
+  Categories outside open-lofi's ten can be played but not pinned as a playlist:
+  the preference is stored as a validated value, so a manifest's own category
+  names are not selectable. Existing preferences are untouched — a fresh install
+  and an upgraded one both start with the whole list.
 - **Finishing a step no longer dead-ends (#142).** Completing a step used to swap
   the timer into a "done" screen on the same URL and stop; a single-task to-do got
   *"That was the last step of this task. 🏁"* and nothing else. Now the finish

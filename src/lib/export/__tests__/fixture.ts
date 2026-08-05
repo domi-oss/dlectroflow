@@ -62,6 +62,9 @@ export function makeSettings(overrides: Partial<Settings> = {}): Settings {
     focusKeepAwake: true,
     focusAlarmEnabled: true,
     focusSound: "off",
+    // #70 — null is "play the whole list", the state every row was in before the
+    // column existed, so it is the right value for a baseline fixture.
+    focusSoundCategory: null,
     focusShuffle: false,
     focusPauseTogether: false,
     focusTimerTipDismissedAt: null,

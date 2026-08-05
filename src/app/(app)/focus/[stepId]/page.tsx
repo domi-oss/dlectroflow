@@ -248,6 +248,7 @@ export default async function FocusPage({
         keepAwake: settings.focusKeepAwake,
         alarmEnabled: settings.focusAlarmEnabled,
         sound: settings.focusSound,
+        category: settings.focusSoundCategory,
         shuffle: settings.focusShuffle,
         pauseTogether: settings.focusPauseTogether,
       }}

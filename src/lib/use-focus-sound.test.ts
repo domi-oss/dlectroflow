@@ -426,3 +426,167 @@ describe("useFocusSound — the catalog arriving mid-session (#61)", () => {
     expect(result.current.playing).toBe(true);
   });
 });
+
+/**
+ * #70 — one category of the catalog = one playlist.
+ *
+ * Phase 1's progression model (pass, cursor, heard-set) already generalises to
+ * any track list, so what is tested here is the boundary: which list the hook is
+ * handed, and what happens when that list is REPLACED rather than extended.
+ *
+ * The distinction is the whole point. #61 grows the list underneath a playing
+ * session and must never interrupt it; a category switch replaces it, and
+ * continuing to play a track that is no longer in the playlist would be exactly
+ * the "the picker says chillhop, the speakers say jazz hop" desync a user would
+ * report as the feature not working.
+ */
+describe("useFocusSound — category playlists (#70)", () => {
+  const streamed = (name: string, category: string, label: string) => ({
+    id: `catalog:${name}.mp3`,
+    title: name,
+    category,
+    categoryLabel: label,
+    src: `/api/focus-catalog/audio?track=${name}.mp3`,
+  });
+
+  // Two categories with the SAME number of tracks, which is what makes the
+  // desync below reachable: a length-keyed guard cannot see this swap.
+  const GROWN = [
+    ...FOCUS_SOUND_TRACKS,
+    streamed("paper-cranes", "chillhop", "Chillhop"),
+    streamed("terrace-dust", "jazzhop", "Jazz hop"),
+  ];
+  const chillhopTrack = FOCUS_SOUND_TRACKS.find(
+    (t) => t.category === "chillhop",
+  )!;
+  const jazzhopTrack = FOCUS_SOUND_TRACKS.find(
+    (t) => t.category === "jazzhop",
+  )!;
+
+  beforeEach(() => useFocusCatalogMock.mockReturnValue(GROWN));
+
+  it("narrows the playlist to the selected category", () => {
+    const { result } = renderHook(() =>
+      useFocusSound(chillhopTrack.id, { category: "chillhop" }),
+    );
+    expect(result.current.track?.id).toBe(chillhopTrack.id);
+    expect(result.current.hasTracks).toBe(true);
+
+    // A two-track pass: the streamed chillhop track, then back to the bundled
+    // one. Nothing from another category can appear.
+    act(() => result.current.next());
+    expect(result.current.track?.id).toBe("catalog:paper-cranes.mp3");
+    act(() => result.current.next());
+    expect(result.current.track?.id).toBe(chillhopTrack.id);
+  });
+
+  it("starts on the category's first track when the stored sound is outside it", () => {
+    const { result } = renderHook(() =>
+      useFocusSound(jazzhopTrack.id, { category: "chillhop" }),
+    );
+    expect(result.current.track?.id).toBe(chillhopTrack.id);
+  });
+
+  it("honours a category that has shrunk to one track", () => {
+    // The store stopped answering under a stored selection. One chillhop track
+    // is what the user asked for; all ten categories is not.
+    useFocusCatalogMock.mockReturnValue(FOCUS_SOUND_TRACKS);
+    const { result } = renderHook(() =>
+      useFocusSound(chillhopTrack.id, { category: "chillhop" }),
+    );
+    expect(result.current.track?.id).toBe(chillhopTrack.id);
+    act(() => result.current.next());
+    expect(result.current.track?.id).toBe(chillhopTrack.id);
+  });
+
+  it("falls back to the whole list for a category nothing matches", () => {
+    const { result } = renderHook(() =>
+      useFocusSound(chillhopTrack.id, { category: "retired-slug" }),
+    );
+    expect(result.current.track?.id).toBe(chillhopTrack.id);
+    // The full list is back, so a track from another category is reachable.
+    const ids = new Set<string>();
+    for (let i = 0; i < GROWN.length; i++) {
+      act(() => result.current.next());
+      ids.add(result.current.track!.id);
+    }
+    expect(ids.size).toBe(GROWN.length);
+  });
+
+  it("switching category mid-session moves the ELEMENT, not just the label", () => {
+    // The desync this exists to stop: both categories hold two tracks, so a
+    // guard that only watches the playlist's LENGTH sees nothing, leaves the
+    // element on the old source, and reports a track that is not playing.
+    const { result, rerender } = renderHook(
+      ({ category }: { category: string }) =>
+        useFocusSound(chillhopTrack.id, { category }),
+      { initialProps: { category: "chillhop" } },
+    );
+    act(() => result.current.play());
+    player.load.mockClear();
+
+    rerender({ category: "jazzhop" });
+
+    expect(result.current.track?.id).toBe(jazzhopTrack.id);
+    expect(player.load).toHaveBeenCalledWith(jazzhopTrack.src);
+    // A switch is a deliberate "play something else", so it does interrupt —
+    // but it must not stop the session.
+    expect(result.current.playing).toBe(true);
+  });
+
+  it("switching category mid-session restarts the pass inside the new playlist", () => {
+    const { result, rerender } = renderHook(
+      ({ category }: { category: string }) =>
+        useFocusSound(chillhopTrack.id, { category }),
+      { initialProps: { category: "chillhop" } },
+    );
+    act(() => result.current.play());
+    act(() => result.current.next()); // exhaust the chillhop pass
+    rerender({ category: "jazzhop" });
+
+    // A fresh two-track pass over jazz hop: neither entry may be a chillhop one,
+    // and the pass must not wrap early because the OLD heard-set said it was
+    // already exhausted.
+    const heard = [result.current.track!.id];
+    act(() => result.current.next());
+    heard.push(result.current.track!.id);
+    expect(new Set(heard).size).toBe(2);
+    expect(heard).toEqual([jazzhopTrack.id, "catalog:terrace-dust.mp3"]);
+  });
+
+  it("switching back to no category keeps playing what is already playing", () => {
+    // Widening the playlist is the #61 case, not a replacement: the current
+    // track is still in the list, so nothing may interrupt.
+    const { result, rerender } = renderHook(
+      ({ category }: { category: string | null }) =>
+        useFocusSound(chillhopTrack.id, { category }),
+      { initialProps: { category: "chillhop" } as { category: string | null } },
+    );
+    act(() => result.current.play());
+    player.load.mockClear();
+
+    rerender({ category: null });
+
+    expect(result.current.track?.id).toBe(chillhopTrack.id);
+    expect(player.load).not.toHaveBeenCalled();
+    expect(result.current.playing).toBe(true);
+  });
+
+  it("the catalog arriving under a selected category does not interrupt", () => {
+    useFocusCatalogMock.mockReturnValue(FOCUS_SOUND_TRACKS);
+    const { result, rerender } = renderHook(() =>
+      useFocusSound(chillhopTrack.id, { category: "chillhop" }),
+    );
+    act(() => result.current.play());
+    player.load.mockClear();
+
+    useFocusCatalogMock.mockReturnValue(GROWN);
+    rerender();
+
+    expect(result.current.track?.id).toBe(chillhopTrack.id);
+    expect(player.load).not.toHaveBeenCalled();
+    // ...and the pass now reaches the track that just arrived.
+    act(() => result.current.next());
+    expect(result.current.track?.id).toBe("catalog:paper-cranes.mp3");
+  });
+});

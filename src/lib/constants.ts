@@ -216,6 +216,37 @@ export const FocusSound = {
 } as const;
 export type FocusSound = (typeof FocusSound)[keyof typeof FocusSound];
 
+// #70 — the ten open-lofi categories, as a persistable value set.
+//
+// `Settings.focusSoundCategory` (nullable; null = "play the whole list") stores
+// one of these and is guarded by Settings_focusSoundCategory_check, so this
+// object is the single source of truth the constraint and
+// enum-constraint-sync both mirror. `FOCUS_SOUND_TRACKS` in
+// src/lib/focus-sounds.ts reads its `category` values from here, which is what
+// keeps the slug a picker offers, the slug a bundled track carries and the slug
+// the DB will accept from ever being three different strings.
+//
+// These are open-lofi's OWN slugs, deliberately not paraphrases: #70's first
+// version invented `ambient`, `asian` and `seasonal`, and the corrected list is
+// what a future streamed manifest has to match for a category to group at all.
+//
+// A NEW category is not just a constant: it needs a paired
+// Settings_focusSoundCategory_check migration, or enum-constraint-sync goes red.
+export const FocusSoundCategory = {
+  AmbientLofi: "ambient-lofi",
+  Chillhop: "chillhop",
+  Jazzhop: "jazzhop",
+  SoulRnb: "soul-rnb",
+  LateNight: "late-night",
+  FunkSoul: "funk-soul",
+  AsianLofi: "asian-lofi",
+  SeasonalWeather: "seasonal-weather",
+  Activities: "activities",
+  Hybrid: "hybrid",
+} as const;
+export type FocusSoundCategory =
+  (typeof FocusSoundCategory)[keyof typeof FocusSoundCategory];
+
 // ── MR ③ — app-wide completion style (Appearance settings) ─────────────────
 // completeTickColor is a String column guarded by a Postgres CHECK constraint
 // (Settings_completeTickColor_check). This object is the single source of truth

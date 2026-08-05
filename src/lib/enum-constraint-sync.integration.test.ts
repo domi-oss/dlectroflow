@@ -12,6 +12,7 @@ import {
   WorkspaceKind,
   FocusTimerStyle,
   FocusSound,
+  FocusSoundCategory,
   CompleteTickColor,
   Typeface,
   UserRole,
@@ -136,6 +137,17 @@ const REGISTRY: ReadonlyArray<{
     column: "focusSound",
     values: FocusSound,
     nullable: false,
+  },
+  // #70 — the category playlist selection. Nullable, and the NULL is the common
+  // case rather than an edge one: it means "play the whole list", which is what
+  // every row said before this column existed and what every row on an instance
+  // with no reachable catalog will keep saying.
+  {
+    constraint: "Settings_focusSoundCategory_check",
+    table: "Settings",
+    column: "focusSoundCategory",
+    values: FocusSoundCategory,
+    nullable: true,
   },
   {
     constraint: "Settings_completeTickColor_check",

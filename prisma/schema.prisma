@@ -155,6 +155,15 @@ model Settings {
   focusKeepAwake           Boolean   @default(true)
   focusAlarmEnabled        Boolean   @default(true)
   focusSound               String    @default("off") // off | lofi_* (see FocusSound; #43 lo-fi library)
+  // #70 — one category of the catalog = one playlist. NULL is the normal case,
+  // not an edge one: it means "play the whole list", which is what every row
+  // meant before this column and what every instance with no reachable catalog
+  // goes on meaning. A separate column rather than a `category:*` value in
+  // focusSound above, because that column's CHECK constraint mirrors FocusSound
+  // exactly and the two facts are orthogonal — a category still has to say which
+  // track the session opens on. Mirrors FocusSoundCategory in
+  // src/lib/constants.ts + Settings_focusSoundCategory_check.
+  focusSoundCategory       String?   // null = the whole list | one FocusSoundCategory slug
   // #68 — playlist shuffle for the focus mini-player. A taste setting, so it
   // persists across sessions. Plain Boolean: no pseudo-enum, hence no CHECK
   // constraint to mirror in src/lib/constants.ts.
