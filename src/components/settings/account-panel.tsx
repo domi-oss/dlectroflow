@@ -25,7 +25,75 @@ import { cn, touchTarget } from "@/lib/utils";
  * settings field into an SSRF primitive (see src/lib/llm/types.ts); a user's key
  * is for the instance's configured provider, and `activeModelName` says which.
  */
-type Outcome = "saved" | "removed" | "rejected" | "signed_out" | null;
+/**
+ * What the live region is currently reporting.
+ *
+ * A discriminated union rather than the flat string it was until #177: the
+ * wrong-provider outcome has to carry the labels it names, and holding those in
+ * a second piece of state alongside a string tag is how a message ends up
+ * describing the previous attempt.
+ *
+ * `wrongProvider`'s three fields are FIXED LABELS resolved server-side from
+ * `src/lib/llm/key-shape.ts` — never anything derived from the key. The panel
+ * is told a boolean about a stored key for the same reason.
+ */
+type Outcome =
+  | { kind: "saved" }
+  | { kind: "removed" }
+  | { kind: "rejected" }
+  | { kind: "signed_out" }
+  | {
+      kind: "wrongProvider";
+      looksLike: string;
+      expectedProvider: string;
+      expectedPrefix: string | null;
+    }
+  | null;
+
+/**
+ * #177 — the one message in this panel that is NOT a `strings.ts` lookup, and
+ * the reason is interpolation: `t()` returns a fixed string per voice, and this
+ * sentence has to name three server-resolved values. It follows the panel's
+ * existing precedent for that — "via {provider}" and the `<code>` around
+ * `activeModelName` are composed inline for the same reason, and the `<code>`
+ * here is deliberately the same treatment so a prefix reads as something to
+ * copy rather than as prose.
+ *
+ * Identical in both voices, like `action.complete` and
+ * `focus.timer.completeStep`: a rejected credential is the moment someone is
+ * least served by flavour, and the sentence has to survive being read aloud by
+ * a screen reader as the only explanation of why nothing saved.
+ *
+ * Both branches say what was EXPECTED, never what was received. `expectedPrefix`
+ * is null for `openai-compatible` — the endpoint is whatever the owner
+ * configured — so that branch claims no prefix instead of inventing one that
+ * would send the reader hunting for a key that does not exist.
+ */
+function wrongProviderMessage({
+  looksLike,
+  expectedProvider,
+  expectedPrefix,
+}: {
+  looksLike: string;
+  expectedProvider: string;
+  expectedPrefix: string | null;
+}) {
+  return (
+    <>
+      That looks like an API key for {looksLike}.{" "}
+      {expectedPrefix ? (
+        <>
+          {expectedProvider} keys start <code>{expectedPrefix}</code>.
+        </>
+      ) : (
+        <>
+          This instance needs a key issued by its configured {expectedProvider}{" "}
+          endpoint.
+        </>
+      )}
+    </>
+  );
+}
 
 export function AccountPanel({
   handle,
@@ -90,11 +158,25 @@ export function AccountPanel({
         // shoulder-surfing and screenshot problem for no benefit. KEPT on
         // failure, because clearing a rejected value forces a re-paste.
         setKey("");
-        setOutcome("saved");
+        setOutcome({ kind: "saved" });
         router.refresh();
         return;
       }
-      setOutcome(res.error === "not_signed_in" ? "signed_out" : "rejected");
+      if (res.error === "wrong_provider_key") {
+        // #177 — the labels are carried through verbatim. The panel adds the
+        // sentence around them and nothing else; it has no provider table of
+        // its own to drift out of step with the server's.
+        setOutcome({
+          kind: "wrongProvider",
+          looksLike: res.looksLike,
+          expectedProvider: res.expectedProvider,
+          expectedPrefix: res.expectedPrefix,
+        });
+        return;
+      }
+      setOutcome({
+        kind: res.error === "not_signed_in" ? "signed_out" : "rejected",
+      });
     });
   };
 
@@ -103,11 +185,13 @@ export function AccountPanel({
       const res = await removeOwnLlmKey();
       setConfirming(false);
       if (res.ok) {
-        setOutcome("removed");
+        setOutcome({ kind: "removed" });
         router.refresh();
         return;
       }
-      setOutcome(res.error === "not_signed_in" ? "signed_out" : "rejected");
+      setOutcome({
+        kind: res.error === "not_signed_in" ? "signed_out" : "rejected",
+      });
     });
 
   // ONE live region for every outcome, and it is also what the confirmation
@@ -115,15 +199,17 @@ export function AccountPanel({
   // one a screen-reader user never learns about.
   const message = confirming
     ? t("settings.accountKeyRemoveConfirm", voice)
-    : outcome === "saved"
+    : outcome?.kind === "saved"
       ? t("settings.accountKeySaved", voice)
-      : outcome === "removed"
+      : outcome?.kind === "removed"
         ? t("settings.accountKeyRemoved", voice)
-        : outcome === "rejected"
+        : outcome?.kind === "rejected"
           ? t("settings.accountKeyRejected", voice)
-          : outcome === "signed_out"
+          : outcome?.kind === "signed_out"
             ? t("settings.accountKeySignedOut", voice)
-            : null;
+            : outcome?.kind === "wrongProvider"
+              ? wrongProviderMessage(outcome)
+              : null;
 
   return (
     <CollapsibleSection
@@ -250,7 +336,10 @@ export function AccountPanel({
           </div>
         )}
 
-        {/* Never echoes the key — every branch of `message` is fixed copy. */}
+        {/* Never echoes the key. Every branch of `message` is fixed copy, and
+            the one branch that interpolates (#177's wrong-provider sentence)
+            interpolates LABELS the server chose from a table — the key decides
+            which label, never what is in it. */}
         <p
           role="status"
           id={statusId}

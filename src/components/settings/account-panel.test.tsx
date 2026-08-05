@@ -209,6 +209,100 @@ describe("AccountPanel", () => {
     expect(screen.getByLabelText(/api key/i)).toHaveValue("sk-nope");
   });
 
+  // ── #177 — a key that belongs to another provider ─────────────────────────
+  // The generic "that key was not accepted" is what let the original bug reach
+  // the user: it says no more than the canned fallback breakdown they were
+  // already looking at. These specs are about the panel saying the ONE thing
+  // that makes the problem self-serve — which provider the key is for, and
+  // which one this instance wanted.
+
+  async function submitAndRead(key: string): Promise<HTMLElement> {
+    render(<AccountPanel {...props} />);
+    await userEvent.type(screen.getByLabelText(/api key/i), key);
+    await userEvent.click(screen.getByRole("button", { name: /^save/i }));
+    await waitFor(() => expect(keyStatus()).toHaveTextContent(/looks like/i));
+    return keyStatus();
+  }
+
+  it("names the provider the key is for AND the prefix it wanted", async () => {
+    saveMock.mockResolvedValue({
+      ok: false,
+      error: "wrong_provider_key",
+      looksLike: "OpenAI",
+      expectedProvider: "Anthropic",
+      expectedPrefix: "sk-ant-",
+    });
+    const status = await submitAndRead("sk-proj-PASTED-BY-MISTAKE");
+    expect(status).toHaveTextContent(/OpenAI/);
+    expect(status).toHaveTextContent(/Anthropic keys start/i);
+    expect(status).toHaveTextContent(/sk-ant-/);
+  });
+
+  it("does not echo the rejected key, not even its prefix", async () => {
+    // The panel is handed labels, never anything derived from what was typed —
+    // the same rule that keeps the ciphertext server-side. A message quoting
+    // the pasted value back would put a live credential in the DOM, in an RSC
+    // payload, and in any screenshot of this screen.
+    saveMock.mockResolvedValue({
+      ok: false,
+      error: "wrong_provider_key",
+      looksLike: "OpenAI",
+      expectedProvider: "Anthropic",
+      expectedPrefix: "sk-ant-",
+    });
+    const status = await submitAndRead("sk-proj-PASTED-BY-MISTAKE");
+    expect(status).not.toHaveTextContent("PASTED-BY-MISTAKE");
+    expect(status).not.toHaveTextContent("sk-proj-");
+  });
+
+  it("keeps what was typed, as every other rejection does", async () => {
+    saveMock.mockResolvedValue({
+      ok: false,
+      error: "wrong_provider_key",
+      looksLike: "OpenAI",
+      expectedProvider: "Anthropic",
+      expectedPrefix: "sk-ant-",
+    });
+    await submitAndRead("sk-proj-PASTED-BY-MISTAKE");
+    expect(screen.getByLabelText(/api key/i)).toHaveValue(
+      "sk-proj-PASTED-BY-MISTAKE",
+    );
+  });
+
+  it("claims no prefix when the configured provider has none", async () => {
+    // `openai-compatible` points at whatever endpoint the owner configured, so
+    // there is no prefix that would be true. Printing one anyway would send the
+    // user looking for a key that does not exist.
+    saveMock.mockResolvedValue({
+      ok: false,
+      error: "wrong_provider_key",
+      looksLike: "Anthropic",
+      expectedProvider: "OpenAI-compatible",
+      expectedPrefix: null,
+    });
+    const status = await submitAndRead("sk-ant-api03-PASTED-BY-MISTAKE");
+    expect(status).toHaveTextContent(/Anthropic/);
+    expect(status).toHaveTextContent(/OpenAI-compatible/);
+    expect(status).not.toHaveTextContent(/keys start/i);
+    expect(status).not.toHaveTextContent(/null|undefined/);
+  });
+
+  it("announces it through the same region the Save button points at", async () => {
+    // #129 put a second `role="status"` in this section, so a new message that
+    // landed anywhere else would be silent for a screen-reader user — which is
+    // precisely the failure mode #177 is about.
+    saveMock.mockResolvedValue({
+      ok: false,
+      error: "wrong_provider_key",
+      looksLike: "OpenAI",
+      expectedProvider: "Anthropic",
+      expectedPrefix: "sk-ant-",
+    });
+    const status = await submitAndRead("sk-proj-PASTED-BY-MISTAKE");
+    expect(status).toHaveAttribute("aria-live", "polite");
+    expect(status).toHaveAttribute("role", "status");
+  });
+
   it("reports a lost session distinctly from a bad key", async () => {
     // "Invalid key" for an expired session sends the user hunting for a problem
     // in their key that isn't there.
