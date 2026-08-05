@@ -274,35 +274,44 @@ describe("SettingsPage section composition (#101)", () => {
   });
 });
 
-// ── #131 — there is a way home from the bottom of the page ──────────────────
+// ── #131 — there is ONE way home, and it is always on screen ────────────────
 //
-// The page-level "← Back" scrolls away with the header; the "Jump to…" bar does
-// not. The bar now carries a second copy of the SAME control, and what this page
-// owes it is the origin — otherwise the exit on a scrolled page sends the reader
-// somewhere the one at the top would not have.
+// #131 originally shipped two copies of the same control: a page-level "← Back"
+// above the heading, plus one folded into the "Jump to…" bar. The reason was
+// that the page-level one scrolls away with the header, leaving no exit at the
+// bottom of a long page.
+//
+// The bar solved that by being `sticky top-0` — which also means its copy is on
+// screen at the TOP, next to the page-level one. So the pair only ever rendered
+// together, 40px apart, offering the identical destination twice; the second
+// copy did not add reach, it added a duplicate. The page-level one is gone and
+// the sticky one is the single exit, at every scroll position including zero.
+//
+// What the page still owes it is the origin, which was always the substance of
+// #131 — an exit that forgets where you came from sends the reader somewhere
+// the other copy would not have.
 describe("SettingsPage back control (#131)", () => {
-  /** Both copies the page renders, in document order. */
+  /** Every back control the page renders, in document order. */
   function backControls() {
     return Array.from(document.querySelectorAll("[data-back-link]"));
   }
 
-  it("renders the page-level control AND the one in the sticky bar", async () => {
+  it("renders exactly one back control, and it is the sticky one", async () => {
     render(await SettingsPage({ searchParams: Promise.resolve({}) }));
     expect(
       backControls().map((el) => el.getAttribute("data-back-link")),
-    ).toEqual(["page", "bar"]);
-    // The sticky one lives inside the bar, which is the whole point: it is the
-    // only part of the page's chrome that is still on screen at the bottom.
+    ).toEqual(["bar"]);
+    // It lives inside the bar, which is the whole point: the bar is the only
+    // part of the page's chrome still on screen once you have scrolled.
     const nav = screen.getByRole("navigation", { name: "Settings sections" });
     expect(nav.querySelector('[data-back-link="bar"]')).not.toBeNull();
   });
 
-  it("hands BOTH copies the same origin", async () => {
+  it("hands the surviving copy the origin", async () => {
     render(
       await SettingsPage({ searchParams: Promise.resolve({ from: "help" }) }),
     );
     expect(backControls().map((el) => el.getAttribute("data-from"))).toEqual([
-      "help",
       "help",
     ]);
   });
@@ -312,7 +321,6 @@ describe("SettingsPage back control (#131)", () => {
     // (back-link.test.tsx). The page must not grow a second opinion about it.
     render(await SettingsPage({ searchParams: Promise.resolve({}) }));
     expect(backControls().map((el) => el.getAttribute("data-from"))).toEqual([
-      "",
       "",
     ]);
   });

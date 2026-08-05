@@ -883,6 +883,42 @@ test.describe("section nav — desktop", () => {
     expect(onTop).toBe(true);
   });
 
+  test("the header's account popover opens OVER the bar too", async ({
+    page,
+  }) => {
+    // The app-menu case above passes because that menu is `absolute z-10` — a
+    // POSITIONED element, so its z-index applies. The account popover is a Base
+    // UI popover, and it was a different story: its `Popup` carries `z-50` but
+    // computes to `position: static`, where z-index has no effect at all, and
+    // its `Positioner` is `fixed` with a transform — a stacking context at
+    // `z-index: auto`. Auto loses to the bar's `z-[2]`, so the whole popover
+    // painted underneath it.
+    //
+    // Nothing caught it because the bar only overlapped the popover's lower
+    // rows, and only on pages where it sits high enough. #172 moved the bar up
+    // 40px on /help by removing a redundant back link, which slid it onto the
+    // Sign out button and turned a latent fault into a broken control.
+    await page.goto("/help");
+    await waitForShell(page);
+    await waitForNavHydrated(page);
+    await page.getByRole("button", { name: /^Account:/ }).click();
+
+    const popup = page.getByRole("dialog", { name: "Account" });
+    await expect(popup).toBeVisible();
+    const signOut = popup.getByRole("button", { name: "Sign out" });
+    const box = (await signOut.boundingBox())!;
+    // Hit-test the control's own centre: "visible" is not the same as
+    // "clickable", and the failure mode here is precisely a visible control
+    // with something else on top of it.
+    const reachable = await page.evaluate(({ x, y, width, height }) => {
+      const el = document.elementFromPoint(x + width / 2, y + height / 2);
+      return Boolean(el?.closest('[role="dialog"][aria-label="Account"]'));
+    }, box);
+    expect(reachable, "the sticky bar is covering the Sign out control").toBe(
+      true,
+    );
+  });
+
   test("opts into smooth scrolling (reduced motion is handled separately)", async ({
     page,
   }) => {
@@ -993,13 +1029,20 @@ test.describe("section nav — mobile budget", () => {
 
 // ── #131: there is a way home from the bottom of the page ───────────────────
 //
-// The bar's DESTINATIONS were sticky and its exit was not: `<BackLink>` sits
-// above the h1 on both pages and scrolls away with it, so a reader a screen down
-// a long list of disclosures had no way back but scrolling all the way up. jsdom
-// cannot see any of that — the whole bug is scroll geometry — so the proof lives
-// here: scroll the page to its limit, watch the page-level control leave the
-// viewport, and check the one in the bar is still there and still goes to the
-// right place.
+// The bar's DESTINATIONS were sticky and its exit was not: a page-level
+// `<BackLink>` sat above the h1 on both pages and scrolled away with it, so a
+// reader a screen down a long list of disclosures had no way back but scrolling
+// all the way up. #131 fixed that by folding a copy into the bar.
+//
+// The page-level copy has since been removed: the bar is `sticky top-0`, so its
+// exit is on screen at scroll position zero as well, and the two only ever
+// rendered together — 40px apart, offering the identical destination. What is
+// left is one exit that is reachable everywhere.
+//
+// jsdom cannot see any of this — the whole property is scroll geometry — so the
+// proof lives here: scroll the page to its limit and check the exit is still on
+// screen and still goes to the right place. The precondition that the page
+// really scrolls is asserted, so this cannot pass on a page too short to move.
 
 /** Scroll to the document's limit and wait for it to come to rest. */
 async function scrollToBottom(page: Page): Promise<void> {
@@ -1040,22 +1083,29 @@ test.describe("section nav — the way out sticks (#131)", () => {
       // rather than the nine-line collapsed one #101 made it at rest.
       if (route === "/settings") await expandAllSections(page);
 
-      // The precondition, asserted rather than assumed: the page-level control
-      // starts on screen, and scrolling really does take it away. Without this
-      // the test would pass just as well on a page too short to scroll.
-      const pageLevel = page.locator('[data-back-link="page"]');
-      await expect(pageLevel).toBeInViewport();
+      const back = stickyBack(page.locator(navSelector));
+      // The exit is reachable before scrolling too — that is what made the
+      // separate page-level copy redundant rather than a second affordance.
+      await expect(back).toBeInViewport();
+      // And it is the ONLY one: a page-level copy creeping back in is the
+      // regression this guards.
+      await expect(page.locator("[data-back-link]")).toHaveCount(1);
+
+      // The precondition, asserted rather than assumed: the header really does
+      // leave the viewport. Without this the test would pass just as well on a
+      // page too short to scroll, proving nothing about stickiness.
+      const heading = page.getByRole("heading", { level: 1 });
+      await expect(heading).toBeInViewport();
 
       await scrollToBottom(page);
       expect(
         await page.evaluate(() => Math.round(window.scrollY)),
         "the page did not scroll — this test proves nothing",
       ).toBeGreaterThan(0);
-      await expect(pageLevel).not.toBeInViewport();
+      await expect(heading).not.toBeInViewport();
 
-      // …and the copy in the bar is right there, with the same name and the
-      // same destination.
-      const back = stickyBack(page.locator(navSelector));
+      // …and the exit is still right there, with the same name and the same
+      // destination.
       await expect(back).toBeInViewport();
       await expect(back).toHaveAccessibleName("← Back");
 
@@ -1205,7 +1255,10 @@ test.describe("section nav — the way out on a phone (#131)", () => {
     await scrollToBottom(page);
 
     const back = stickyBack(page.locator(HELP_NAV));
-    await expect(page.locator('[data-back-link="page"]')).not.toBeInViewport();
+    // The h1 stands in for the page chrome that scrolls away; the exit does not
+    // go with it. (This used to assert on a second, page-level back control,
+    // which has been removed — the sticky bar was always on screen beside it.)
+    await expect(page.getByRole("heading", { level: 1 })).not.toBeInViewport();
     await expect(back).toBeInViewport();
     expect((await back.boundingBox())!.height).toBeGreaterThanOrEqual(44);
 
