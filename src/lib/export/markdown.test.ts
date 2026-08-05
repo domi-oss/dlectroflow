@@ -70,6 +70,25 @@ describe("tasks.md — the human tier", () => {
     expect(garage).not.toContain("- Priority:");
   });
 
+  it("carries the user's own note, quoted, in its own section (#44)", () => {
+    // The note is content the data subject typed, so Art. 20 puts it in the
+    // human tier and not only in `export.json`. It is quoted rather than
+    // inlined as a `- Note:` fact for the same reason the coaching turns are:
+    // it is multi-line prose, and a fact list that grows a paragraph stops
+    // being scannable. `csv-files.ts` states the matching decision for the
+    // spreadsheet tier — free-text prose lives in `tasks.md` and `export.json`.
+    expect(md).toContain("### Note");
+    expect(md).toContain("> Bring the Figma link");
+    // Blockquoted line-by-line, so a blank line inside the note cannot end the
+    // quote and leave the rest rendering as body text.
+    expect(md).toContain("> call before 5");
+  });
+
+  it("gives a task with no note no Note heading", () => {
+    const garage = md.slice(md.indexOf("## Tidy the garage"));
+    expect(garage).not.toContain("### Note");
+  });
+
   it("includes the coaching conversation, attributed and in order", () => {
     // Agreed on the issue: the turns are the most personal content in the
     // database and squarely data "provided by the data subject" (Art. 20).

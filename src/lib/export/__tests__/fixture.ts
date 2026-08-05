@@ -95,6 +95,11 @@ function makeTaskWithSteps(): ExportTask {
     scheduleDueAt: new Date(Date.UTC(2026, 6, 5, 17, 0, 0)),
     schedulePriority: "high",
     scheduleHours: "work",
+    // #44 — deliberately MULTI-LINE and multi-paragraph: the note is free text
+    // typed by the data subject, and the tiers disagree about how to carry it
+    // (quoted in `tasks.md`, verbatim in `export.json`, absent from the CSVs).
+    // A single-line fixture would let all three look correct.
+    notes: "Bring the Figma link\n\ncall before 5",
     workspaceId: WORKSPACE_ID,
     steps: [
       {
@@ -168,6 +173,9 @@ function makeSteplessTask(): ExportTask {
     scheduleDueAt: new Date(Date.UTC(2026, 6, 10, 12, 0, 0)),
     schedulePriority: null,
     scheduleHours: null,
+    // No note — the common case, and what keeps the "omits what it has no
+    // value for" assertions honest (#44).
+    notes: null,
     workspaceId: WORKSPACE_ID,
     steps: [],
     turns: [],
@@ -191,6 +199,7 @@ function makeUnscheduledTask(): ExportTask {
     scheduleDueAt: null,
     schedulePriority: null,
     scheduleHours: null,
+    notes: null,
     workspaceId: WORKSPACE_ID,
     steps: [],
     turns: [],

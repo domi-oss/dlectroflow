@@ -82,6 +82,16 @@ function taskSection(task: ExportTask): string {
   facts.push(`- id: \`${task.id}\``);
   lines.push(...facts, "");
 
+  // #44 — the user's own note, above the steps because it is context for doing
+  // them. Its own quoted section rather than another `- Note:` fact line: the
+  // note is multi-line prose, and a fact list that grows a paragraph stops being
+  // scannable — the same call `taskSection` already makes for the coaching
+  // turns. `blockquote` prefixes every line, so a blank line inside the note
+  // cannot terminate the quote and leave the remainder rendering as body text.
+  if (task.notes) {
+    lines.push("### Note", "", blockquote(task.notes), "");
+  }
+
   if (task.steps.length > 0) {
     lines.push("### Steps", "");
     lines.push(...task.steps.map(stepLine));

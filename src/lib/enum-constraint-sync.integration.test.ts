@@ -24,6 +24,10 @@ import {
 // server actions and the Schedule menu import it), so these two value sets are
 // authoritative from there rather than from constants.ts.
 import { SchedulePriority, ScheduleHours } from "@/lib/scheduling/types";
+// #44 — the note bound is a product decision, not a SQL literal to re-type
+// here. Importing it is what makes task-notes.ts authoritative: raising the
+// constant without a matching migration fails the assertion below.
+import { TASK_NOTE_MAX_LENGTH } from "@/lib/task-notes";
 
 // #38 — keep the DB CHECK constraints (see the
 // 20260719171754_add_status_check_constraints migration) in lockstep with the
@@ -290,6 +294,41 @@ const RANGE_REGISTRY: ReadonlyArray<{
   },
 ];
 
+// #44 — text-LENGTH CHECK constraints. A third shape, kept in its own registry
+// rather than bolted onto RANGE_REGISTRY: that one asserts a `>= min` on a
+// numeric column, and an upper bound measured by a FUNCTION (`char_length`)
+// does not fit its assertions at all. The reason it stays in this file is the
+// same one the range registry gives — one place still answers "which CHECK
+// constraints does this schema manage?".
+//
+// `max` is the inclusive upper bound the SQL must declare, and `fn` is the
+// measuring function it must use. Pinning the function is not pedantry:
+// `octet_length` and `char_length` differ by 4x on astral characters, so
+// silently swapping one for the other would reject an all-emoji note a quarter
+// the length of a Latin one the constraint accepts.
+const LENGTH_REGISTRY: ReadonlyArray<{
+  constraint: string;
+  table: string;
+  column: string;
+  max: number;
+  fn: string;
+  nullable: boolean;
+}> = [
+  {
+    // 20260805120000_task_notes (#44) — the user's freeform note. Bounded
+    // because it is threaded into the Google Task `notes` field, which the
+    // Tasks API rejects over 8192 characters; the note is one part of that
+    // envelope, so it cannot be allowed to fill it alone. Behavioural half in
+    // src/lib/task-notes-check.integration.test.ts.
+    constraint: "Task_notes_check",
+    table: "Task",
+    column: "notes",
+    max: TASK_NOTE_MAX_LENGTH,
+    fn: "char_length",
+    nullable: true,
+  },
+];
+
 // The schema the client is connected to (Prisma's `?schema=` param, default
 // "public"). We scope the pg_constraint query to it explicitly rather than
 // relying on current_schema() / search_path ordering.
@@ -491,6 +530,67 @@ describe("numeric-range CHECK constraints are applied (#78)", () => {
       } else {
         // A NOT NULL column needs no NULL allowance; one appearing here would
         // mean the column went nullable without this registry noticing.
+        expect(
+          /IS NULL/i.test(def as string),
+          `${constraint} guards a non-nullable column but unexpectedly contains an "IS NULL" allowance`,
+        ).toBe(false);
+      }
+    },
+  );
+});
+
+describe("text-length CHECK constraints are applied (#44)", () => {
+  it("has exactly the managed length CHECK constraints (no missing, no strays)", () => {
+    const managedNames = new Set(LENGTH_REGISTRY.map((r) => r.constraint));
+    const applied = [...checks.keys()]
+      .filter((n) => managedNames.has(n))
+      .sort();
+    const expected = LENGTH_REGISTRY.map((r) => r.constraint).sort();
+    expect(applied).toEqual(expected);
+  });
+
+  it.each(LENGTH_REGISTRY)(
+    "$constraint pins $fn($table.$column) <= $max",
+    ({ constraint, column, max, fn, nullable }) => {
+      const def = checks.get(constraint);
+      expect(
+        def,
+        `constraint ${constraint} is not applied to the DB — add the migration`,
+      ).toBeDefined();
+
+      // Postgres normalises `CHECK (char_length("notes") <= 2000)` to
+      // `CHECK ((char_length(notes) <= 2000))` and may drop the column quotes,
+      // so match the call and the comparison rather than the exact text.
+      expect(
+        new RegExp(`${fn}\\("?${column}"?\\)\\s*<=\\s*${max}\\b`).test(
+          def as string,
+        ),
+        `${constraint} does not pin ${fn}("${column}") <= ${max} — its definition is: ${def}`,
+      ).toBe(true);
+
+      // The measuring function is pinned above; this catches the swap in the
+      // other direction, where a second call to the wrong one is added rather
+      // than the right one replaced.
+      const otherFns = ["octet_length", "length", "bit_length"].filter(
+        (f) => f !== fn,
+      );
+      for (const other of otherFns) {
+        expect(
+          new RegExp(`\\b${other}\\(`).test(def as string),
+          `${constraint} measures with ${other}, which disagrees with ${fn} on multi-byte text — its definition is: ${def}`,
+        ).toBe(false);
+      }
+
+      if (nullable) {
+        // Without the allowance a plain `char_length(col) <= n` is UNKNOWN for
+        // NULL, which a CHECK treats as satisfied — so this one is belt rather
+        // than braces, and it is asserted because the day the column goes NOT
+        // NULL the allowance becomes wrong and nothing else would notice.
+        expect(
+          /IS NULL/i.test(def as string),
+          `${constraint} guards a nullable column but has no "IS NULL" allowance`,
+        ).toBe(true);
+      } else {
         expect(
           /IS NULL/i.test(def as string),
           `${constraint} guards a non-nullable column but unexpectedly contains an "IS NULL" allowance`,

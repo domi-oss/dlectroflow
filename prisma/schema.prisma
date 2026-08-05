@@ -367,6 +367,21 @@ model Task {
   scheduleDueAt    DateTime?
   schedulePriority String?    // critical | high | normal | low
   scheduleHours    String?    // work | personal
+  // #44 — the owner's freeform note on this task, threaded into the scheduled
+  // artifact (ICS VEVENT DESCRIPTION + Google Task notes) alongside the #39
+  // focus deep-link. Nullable, and the NULL is load-bearing: "nobody has
+  // written a note" is what stops an empty line being composed into somebody's
+  // calendar entry, so `normalizeTaskNote` (src/lib/task-notes.ts) folds "" and
+  // whitespace-only back to NULL rather than storing them.
+  // Bounded at 2000 CHARACTERS by Task_notes_check
+  // (20260805120000_task_notes) — Google Tasks rejects a `notes` value over
+  // 8192 characters and this is one part of that envelope. Prisma can't express
+  // a CHECK, so that migration and this comment are its only trace in the
+  // schema; it is registered in src/lib/enum-constraint-sync.integration.test.ts
+  // (LENGTH_REGISTRY) so dropping it out of band fails the suite.
+  // TASK-level only, deliberately (#44): step-level notes are asked for in the
+  // same issue and deferred, and would add the mirror column on `Step`.
+  notes            String?
   steps            Step[]
   turns            BreakdownTurn[]
   brainDumpItems   BrainDumpItem[]
