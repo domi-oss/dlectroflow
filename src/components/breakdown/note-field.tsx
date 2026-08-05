@@ -134,13 +134,27 @@ export function NoteField({
     [],
   );
 
+  // Which save is the current one.
+  //
+  // The debounce guarantees at most one save is ever SCHEDULED — it does NOT
+  // guarantee one is in flight. Typing again while a save is awaiting starts a
+  // second, and if the first then resolves LAST, adopting its `notes` would
+  // overwrite the user's newer text with an older stored value. That is silent
+  // loss of the only copy that exists, so the response is matched to its
+  // request and a superseded one is dropped on the floor.
+  const saveSeq = useRef(0);
+
   const flush = async () => {
+    const seq = ++saveSeq.current;
     markSaving();
     // "" is not a note. Sending null is what puts the column back to NULL, which
     // is the state that keeps a blank line out of somebody's calendar entry.
     const next = latest.current.trim() === "" ? null : latest.current;
     try {
       const res = await onSave(next);
+      // A newer save started while this one was in flight: its result is the
+      // truth, and this one's status has already been superseded too.
+      if (seq !== saveSeq.current) return;
       if (!res.ok) {
         markError();
         return;
@@ -154,6 +168,7 @@ export function NoteField({
         setNote(res.notes ?? "");
       }
     } catch {
+      if (seq !== saveSeq.current) return;
       // A rejected action (a network drop, not a handled failure) must land on
       // the same visible affordance rather than an unhandled rejection.
       markError();

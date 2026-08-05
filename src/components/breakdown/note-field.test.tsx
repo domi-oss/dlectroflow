@@ -2,7 +2,10 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { NoteField } from "@/components/breakdown/note-field";
+import {
+  NoteField,
+  type NoteSaveResult,
+} from "@/components/breakdown/note-field";
 import { TASK_NOTE_MAX_LENGTH } from "@/lib/task-notes";
 
 /**
@@ -280,6 +283,45 @@ describe("NoteField — autosave", () => {
     await waitFor(() =>
       expect(screen.getByRole("textbox")).toHaveProperty("value", "trimmed"),
     );
+  });
+
+  it("ignores a slow save that lands after a newer one", async () => {
+    // Two flushes CAN be in flight at once: the debounce only guarantees one is
+    // ever SCHEDULED, so typing again while a save is awaiting starts a second.
+    // If the first then resolves last, adopting its `notes` would overwrite the
+    // user's newer text with an older stored value — silent loss of the only
+    // copy that exists.
+    let release: ((v: NoteSaveResult) => void) | null = null;
+    onSave
+      .mockImplementationOnce(
+        () => new Promise<NoteSaveResult>((r) => (release = r)),
+      )
+      .mockImplementationOnce(async () => ({
+        ok: true as const,
+        notes: "second",
+      }));
+
+    const user = userEvent.setup();
+    renderField();
+    await user.click(screen.getByRole("button", { name: /add note/i }));
+    await user.type(screen.getByRole("textbox"), "first");
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+
+    await user.clear(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"), "second");
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2));
+
+    // Now let the FIRST call finish, out of order and carrying stale text, and
+    // WAIT for its continuation to actually run. Asserting straight after the
+    // release passes without the stale write ever having been attempted, which
+    // is a test that proves nothing.
+    (release as unknown as (v: NoteSaveResult) => void)({
+      ok: true,
+      notes: "first",
+    });
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(screen.getByRole("textbox")).toHaveProperty("value", "second");
   });
 
   it("announces the remaining budget politely as the bound approaches", async () => {
