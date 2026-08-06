@@ -3,6 +3,18 @@ import { FABLE_LINES, randomFableLine } from "@/lib/fable-lines";
 
 afterEach(() => vi.restoreAllMocks());
 
+/** Pin the next `pickOne` draw to a chosen 32-bit value (see pick-one.ts). */
+function mockDraw(value: number) {
+  return vi.spyOn(globalThis.crypto, "getRandomValues").mockImplementation((<
+    T extends ArrayBufferView | null,
+  >(
+    arr: T,
+  ): T => {
+    new Uint32Array((arr as Uint32Array).buffer).fill(value);
+    return arr;
+  }) as typeof globalThis.crypto.getRandomValues);
+}
+
 describe("fable decoy lines (#72 follow-up)", () => {
   it("always returns one of the defined lines", () => {
     expect(FABLE_LINES.length).toBeGreaterThan(1);
@@ -12,9 +24,13 @@ describe("fable decoy lines (#72 follow-up)", () => {
   });
 
   it("can reach the first and last line", () => {
-    vi.spyOn(Math, "random").mockReturnValue(0);
+    // `randomFableLine` draws from the platform CSPRNG via `pickOne`
+    // (src/lib/pick-one.ts), so a `Math.random` spy no longer reaches it. The
+    // cases are the same two ends of the range, expressed as the 32-bit draw
+    // the code now reads: 0 is the bottom, 0xffffffff the top.
+    mockDraw(0);
     expect(randomFableLine()).toBe(FABLE_LINES[0]);
-    vi.spyOn(Math, "random").mockReturnValue(0.999999);
+    mockDraw(0xffffffff);
     expect(randomFableLine()).toBe(FABLE_LINES[FABLE_LINES.length - 1]);
   });
 

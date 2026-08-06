@@ -223,6 +223,24 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+/**
+ * Pin the next `pickOne` draw (src/lib/pick-one.ts) to a chosen 32-bit value.
+ *
+ * `pickOne` reads the platform CSPRNG rather than `Math.random`, so the done
+ * message can only be made deterministic by controlling that. Returns the spy
+ * so callers keep the existing `mockRestore()` in their `finally`.
+ */
+function mockDraw(value: number) {
+  return vi.spyOn(globalThis.crypto, "getRandomValues").mockImplementation((<
+    T extends ArrayBufferView | null,
+  >(
+    arr: T,
+  ): T => {
+    new Uint32Array((arr as Uint32Array).buffer).fill(value);
+    return arr;
+  }) as typeof globalThis.crypto.getRandomValues);
+}
+
 describe("FocusTimer — header, back, hierarchy", () => {
   it("← Back links to /focus (no server call to leave — session stays open)", () => {
     render(<FocusTimer {...base()} />);
@@ -1314,7 +1332,11 @@ describe("FocusTimer — complete", () => {
   // random (it used to be rolled during render into a ref — impure render +
   // a ref read during render; it is now picked when the step is completed).
   it("celebrates with a randomly chosen done message", async () => {
-    const random = vi.spyOn(Math, "random").mockReturnValue(0.9); // → last entry
+    // pickOne draws from the platform CSPRNG (see src/lib/pick-one.ts), so a
+    // Math.random spy no longer reaches it. A full-range draw is the top of the
+    // range, which pickOne maps to the LAST entry — the same case this test
+    // has always covered, expressed in the unit the code now reads.
+    const random = mockDraw(0xffffffff);
     try {
       const user = userEvent.setup();
       render(<FocusTimer {...base()} />);
@@ -1329,7 +1351,7 @@ describe("FocusTimer — complete", () => {
   });
 
   it("picks a different done message for a different roll", async () => {
-    const random = vi.spyOn(Math, "random").mockReturnValue(0); // → first entry
+    const random = mockDraw(0); // → first entry
     try {
       const user = userEvent.setup();
       render(<FocusTimer {...base()} />);

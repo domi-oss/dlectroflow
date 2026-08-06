@@ -1,3 +1,5 @@
+import { pickOne } from "@/lib/pick-one";
+
 /**
  * Flavour text for the locked "Fable 5" decoy in the breakdown-model picker.
  *
@@ -25,5 +27,5 @@ export const FABLE_LINES = [
  * who actually uses it).
  */
 export function randomFableLine(): string {
-  return FABLE_LINES[Math.floor(Math.random() * FABLE_LINES.length)];
+  return pickOne(FABLE_LINES);
 }

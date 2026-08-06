@@ -64,6 +64,7 @@ import { usePrefersReducedMotion } from "@/lib/use-prefers-reduced-motion";
 import { useHyperFocus } from "@/lib/use-hyper-focus";
 import { t, type StringKey } from "@/lib/strings";
 import { cn } from "@/lib/utils";
+import { pickOne } from "@/lib/pick-one";
 import { useVoice } from "@/components/voice-provider";
 
 // #43 — the shared focus control strings carry a leading functional glyph
@@ -739,7 +740,7 @@ export function FocusTimer({
     setResult(res);
     stopSound();
     releaseWake();
-    setDoneMsg(DONE_MESSAGES[Math.floor(Math.random() * DONE_MESSAGES.length)]);
+    setDoneMsg(pickOne(DONE_MESSAGES));
     goToPhase("done");
     router.refresh();
   }, [sessionId, net, router, stopSound, goToPhase, run]);

@@ -3,6 +3,7 @@ import { getLLM } from "@/lib/llm";
 import { resolveUtilityModel } from "@/lib/models";
 import { SparkSource } from "@/lib/constants";
 import { isGuestWorkspace } from "@/lib/workspace-kind";
+import { pickOne } from "@/lib/pick-one";
 
 const FALLBACK_SPARKS = [
   "You don't have to do it all — just the next tiny thing.",
@@ -23,7 +24,7 @@ function today(): string {
 }
 
 function randomFallback(): string {
-  return FALLBACK_SPARKS[Math.floor(Math.random() * FALLBACK_SPARKS.length)];
+  return pickOne(FALLBACK_SPARKS);
 }
 
 async function generateQuote(): Promise<{ quote: string; source: string }> {
