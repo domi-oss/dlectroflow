@@ -651,7 +651,21 @@ describe("scripts/check-vuln-freshness.sh", () => {
   it("states the budget it is judging against, not just the verdict", () => {
     // "Stale" with no threshold is another unlabelled number.
     const result = drive(healthy());
-    expect(result.stdout).toMatch(/192h/);
+    expect(result.stdout).toMatch(/192h budget/);
+    expect(result.stdout).toMatch(/168h weekly rescan \+ 24h scheduler grace/);
+  });
+
+  it("does not claim the default derivation for an overridden budget", () => {
+    // "past the 1h budget (168h weekly rescan + 24h grace)" states the same
+    // fact two ways and contradicts itself — #166 in miniature. Two statements
+    // of one fact in a single line have to be reconciled.
+    const result = drive(healthy({ scanHours: 5 }), {
+      VULN_FRESHNESS_MAX_AGE_HOURS: "1",
+    });
+    expect(result.status).toBe(1);
+    expect(result.stdout).toMatch(/1h budget/);
+    expect(result.stdout).toMatch(/overridden via/);
+    expect(result.stdout).not.toMatch(/168h weekly rescan/);
   });
 });
 

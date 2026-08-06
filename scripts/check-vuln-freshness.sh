@@ -127,6 +127,18 @@ set -euo pipefail
 # and the answer is a schedule change, not a threshold change. Raise this if the
 # cadence is relaxed; do not lower it to make a red check green.
 # src/lib/vuln-freshness.test.ts asserts it stays at or above one full cycle.
+#
+# The verdict line prints where the budget came from as well as what it is. A
+# line reading "past the 1h budget (168h weekly rescan + 24h grace)" states the
+# same fact two ways and contradicts itself, which is the failure mode #166 is
+# made of in miniature — so the derivation is only claimed when it is the one
+# actually in force. Captured BEFORE the default is applied, since afterwards
+# the two cases are indistinguishable.
+if [ -n "${VULN_FRESHNESS_MAX_AGE_HOURS:-}" ]; then
+  MAX_AGE_SOURCE="overridden via \`VULN_FRESHNESS_MAX_AGE_HOURS\`"
+else
+  MAX_AGE_SOURCE="168h weekly rescan + 24h scheduler grace"
+fi
 VULN_FRESHNESS_MAX_AGE_HOURS="${VULN_FRESHNESS_MAX_AGE_HOURS:-192}"
 VULN_FRESHNESS_PIPELINE_DEPTH="${VULN_FRESHNESS_PIPELINE_DEPTH:-20}"
 VULN_FRESHNESS_MAX_PAGES="${VULN_FRESHNESS_MAX_PAGES:-50}"
@@ -296,6 +308,7 @@ jq -r -n \
   --arg nowIso "$NOW_ISO" \
   --arg branch "$DEFAULT_BRANCH" \
   --argjson maxAge "$VULN_FRESHNESS_MAX_AGE_HOURS" \
+  --arg maxAgeSource "$MAX_AGE_SOURCE" \
   --argjson depth "$VULN_FRESHNESS_PIPELINE_DEPTH" '
 def parse_ts:
   if . == null or . == "" then null
@@ -431,9 +444,9 @@ def code(s): "`" + s + "`";
        "- Newest `detectedAt` in the active set: \($newestDetected | todateiso8601), **\(age($now - $newestDetected)) ago**. Continuous Vulnerability Scanning re-evaluates the stored SBOM with no pipeline at all, so this is an independent second lower bound."
      end),
     (if $fresh then
-       "- ✅ **Fresh**: the newest evidence this surface moved is \(age($evidenceAge)) old, inside the \($maxAge)h budget (168h weekly rescan + 24h scheduler grace)."
+       "- ✅ **Fresh**: the newest evidence this surface moved is \(age($evidenceAge)) old, inside the \($maxAge)h budget (\($maxAgeSource))."
      else
-       "- 🔴 **Stale**: the newest evidence this surface moved is \(age($evidenceAge)) old, past the \($maxAge)h budget (168h weekly rescan + 24h scheduler grace). Every number above may be describing an older tree than the one on `\($branch)`."
+       "- 🔴 **Stale**: the newest evidence this surface moved is \(age($evidenceAge)) old, past the \($maxAge)h budget (\($maxAgeSource)). Every number above may be describing an older tree than the one on `\($branch)`."
      end),
     "- Surface note: "
       + code("project.pipeline(iid:).securityReportFindings")
