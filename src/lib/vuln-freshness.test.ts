@@ -381,7 +381,12 @@ describe("scripts/check-vuln-freshness.sh", () => {
     expect(result.stdout).toMatch(/\*\*0 active\*\*/);
     // Still dated, from the scan anchor rather than from the (absent) findings.
     expect(result.stdout).toMatch(/last succeeded 2026-08-06T19:00:00Z/);
-    expect(result.stdout).toMatch(/\b1\.0h\b/);
+    expect(result.stdout).toMatch(/\b1h old\b/);
+    // And it says so in as many words, so the bullet cannot be skimmed as a
+    // plain all-clear.
+    expect(result.stdout).toMatch(
+      /count of zero has no `detectedAt` of its own/,
+    );
   });
 
   it("goes stale, not clean, when nothing has scanned inside the budget", () => {
@@ -443,25 +448,84 @@ describe("scripts/check-vuln-freshness.sh", () => {
       vulnRoute([{ severity: "HIGH" }]),
     ]);
     expect(result.status).toBe(1);
-    expect(result.stdout).toMatch(/CONTAINER_SCANNING/);
+    expect(result.stdout).toMatch(/Oldest evidence: CONTAINER_SCANNING/);
     expect(result.stdout).toMatch(/20\.8d/);
   });
 
-  it("counts a fresh detectedAt as independent evidence the surface moved", () => {
+  it("counts a fresh detectedAt as independent evidence, for its own scanner", () => {
     // Continuous Vulnerability Scanning re-evaluates the stored SBOM against
     // new advisories with NO pipeline at all — proven on 2026-08-04 by eleven
     // records whose detectedAt fell in a window where no `main` pipeline ran.
-    // So a recent detectedAt is a genuine, independent lower bound on how stale
-    // the surface can be, and ignoring it would report a fresh report as stale.
+    // So a recent detection is a genuine, independent lower bound on how stale
+    // the report is, and ignoring it would call a fresh report stale.
+    //
+    // Here only the dependency scanner is old, and a DEPENDENCY_SCANNING
+    // finding was re-detected two hours ago — which is precisely the mechanism
+    // CVS provides, since the SBOM it re-evaluates is dependency scanning's
+    // artefact. That lifts the dependency scanner, so nothing is stale.
     const result = drive([
-      anchorRoute(freshPipelines(200)),
-      vulnRoute([{ severity: "HIGH", detectedAt: hoursAgo(2) }]),
+      anchorRoute([
+        {
+          iid: 1928,
+          finishedAt: hoursAgo(1),
+          jobs: [
+            ...freshJobs(1).filter((j) => j.type !== "dependency"),
+            {
+              name: "gemnasium-dependency_scanning",
+              type: "dependency",
+              finishedAt: hoursAgo(200),
+            },
+          ],
+        },
+      ]),
+      vulnRoute([
+        {
+          severity: "HIGH",
+          reportType: "DEPENDENCY_SCANNING",
+          detectedAt: hoursAgo(2),
+        },
+      ]),
     ]);
     expect(result.status).toBe(0);
     expect(result.stdout).toMatch(/Continuous Vulnerability Scanning/);
-    // Both anchors are shown; the check does not silently pick one.
-    expect(result.stdout).toMatch(/8\.3d/); // the scan
-    expect(result.stdout).toMatch(/2\.0h/); // the detection
+    // Both anchors are shown; the check does not silently pick one and hide
+    // the fact that the scanner itself has not run in eight days.
+    expect(result.stdout).toMatch(/scan 8\.3d/);
+    expect(result.stdout).toMatch(/re-detected 2h/);
+  });
+
+  it("does not let one scanner's fresh detection date a different scanner", () => {
+    // The correction that matters most, and the reading the first draft got
+    // wrong. CVS re-evaluates the stored SBOM — dependency scanning's artefact
+    // — so a dependency finding re-detected an hour ago is no evidence at all
+    // that container scanning has run this month. Under the naive "newest
+    // detectedAt anywhere" reading, a container scanner three weeks dead
+    // reported ✅ fresh.
+    const result = drive([
+      anchorRoute([
+        {
+          iid: 1928,
+          finishedAt: hoursAgo(1),
+          jobs: [
+            ...freshJobs(1).filter((j) => j.type !== "container"),
+            {
+              name: "container_scanning",
+              type: "container",
+              finishedAt: hoursAgo(500),
+            },
+          ],
+        },
+      ]),
+      vulnRoute([
+        {
+          severity: "HIGH",
+          reportType: "DEPENDENCY_SCANNING",
+          detectedAt: hoursAgo(1),
+        },
+      ]),
+    ]);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toMatch(/CONTAINER_SCANNING 20\.8d/);
   });
 
   it("splits still-detected on main from already-fixed-but-not-resolved", () => {

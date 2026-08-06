@@ -359,22 +359,39 @@ def code(s): "`" + s + "`";
      status: 2}
   else
 
-# The aggregate is only as fresh as its STALEST scanner. Taking the newest is
-# how a scanner that stopped running three weeks ago hides behind an hourly one.
-  ( $scanners | sort_by(.newest.ts) | first ) as $oldest
-| ( $scanners | map(.newest.ts) | max ) as $newestScan
-
 # ── the count ────────────────────────────────────────────────────────────────
-| ( $vulns ) as $all
+  ( $vulns ) as $all
 | ( $all | map(select(.resolvedOnDefaultBranch != true)) ) as $live
 | ( $all | map(.detectedAt | parse_ts) | map(select(. != null)) | max ) as $newestDetected
 
-# Both anchors are lower bounds on how stale the surface can be — the scan
-# proves a scanner looked, `detectedAt` proves the report was written to — so
-# the MORE RECENT of the two is the correct evidence to judge against.
-# Continuous Vulnerability Scanning moves the second with no pipeline at all,
-# so ignoring it would report a genuinely fresh report as stale.
-| ( [ $oldest.newest.ts, $newestDetected ] | map(select(. != null)) | max ) as $evidence
+# Evidence is accumulated PER REPORT TYPE, and this is the correction that
+# matters most. Two independent lower bounds date each scanner:
+#
+#   * its own last successful run — proof a scanner looked;
+#   * the newest `detectedAt` among findings OF ITS OWN TYPE — proof the report
+#     was written to, which Continuous Vulnerability Scanning does with no
+#     pipeline at all.
+#
+# The more recent of the two dates that scanner. What it must NOT do is date
+# any OTHER scanner: CVS re-evaluates the stored SBOM, which is dependency
+# scanning`s artefact, so a dependency finding re-detected an hour ago is no
+# evidence whatsoever that container scanning has run this month. Taking the
+# newest detection anywhere in the report — the obvious reading, and the one
+# this script did first — reported a container scanner three weeks dead as
+# fresh, which is exactly the shape of every failure in #166.
+| ( $scanners
+    | map(. as $s
+          | ( $all | map(select(.reportType == $s.type))
+                   | map(.detectedAt | parse_ts) | map(select(. != null)) | max
+            ) as $det
+          | $s + {detected: $det,
+                  evidence: ([$s.newest.ts, $det] | map(select(. != null)) | max)}) ) as $dated
+
+# The aggregate is only as fresh as its STALEST contributor. Taking the newest
+# is how a scanner that stopped running three weeks ago hides behind an hourly
+# one.
+| ( $dated | sort_by(.evidence) | first ) as $oldest
+| ( $oldest.evidence ) as $evidence
 | ( $now - $evidence ) as $evidenceAge
 | ( $evidenceAge <= ($maxAge * 3600) ) as $fresh
 
@@ -391,14 +408,20 @@ def code(s): "`" + s + "`";
       + "\($live | length) still detected on `\($branch)`, "
       + "\(($all | length) - ($live | length)) already fixed but not resolved.",
     "- Severity of the \($live | length) still detected: \($sevs).",
-    "- **Oldest scanner anchor: \($oldest.type)** — "
+    "- **Oldest evidence: \($oldest.type)**, **\(age($evidenceAge)) old** — "
       + code($oldest.newest.name)
-      + " last succeeded \($oldest.newest.ts | todateiso8601) in pipeline "
-      + "\($oldest.newest.iid), **\(age($now - $oldest.newest.ts)) ago**. "
-      + "A count of zero has no `detectedAt` of its own, so this is the only thing that can date it.",
-    "- Every scanner: "
-      + ($scanners | sort_by(.newest.ts)
-         | map("\(.type) \(age($now - .newest.ts))") | join(" · "))
+      + " last succeeded \($oldest.newest.ts | todateiso8601) in pipeline \($oldest.newest.iid)"
+      + (if ($oldest.detected != null) and ($oldest.detected > $oldest.newest.ts)
+         then ", and a finding of that type was re-detected \($oldest.detected | todateiso8601)"
+         else "" end)
+      + ". A count of zero has no `detectedAt` of its own, so a scan is the only thing that can date it.",
+    "- Every scanner, oldest evidence first: "
+      + ($dated | sort_by(.evidence)
+         | map("\(.type) \(age($now - .evidence))"
+               + (if (.detected != null) and (.detected > .newest.ts)
+                  then " (scan \(age($now - .newest.ts)), re-detected \(age($now - .detected)))"
+                  else "" end))
+         | join(" · "))
       + ". Anchored on the JOB, not the pipeline: the scanners are "
       + code("allow_failure: true")
       + " on `\($branch)` by design, so a green pipeline does not prove a scan ran.",
