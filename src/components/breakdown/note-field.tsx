@@ -7,7 +7,7 @@ import {
 } from "@/components/settings/use-save-status";
 import { TASK_NOTE_MAX_LENGTH } from "@/lib/task-notes";
 import { t, type Voice } from "@/lib/strings";
-import { cn } from "@/lib/utils";
+import { cn, touchTarget } from "@/lib/utils";
 
 /** What the caller's save did. Structurally satisfied by both
  *  `UpdateTaskNotesResult` and `UpdateStepNotesResult`, so neither server action
@@ -318,11 +318,27 @@ export function NoteField({
         // control user saying "add note" activates it.
         aria-label={`${triggerLabel} for ${subject}`}
         onClick={() => (expanded ? close() : open())}
-        // min-h-11 is 44px — WCAG 2.5.8 Target Size, and it survives the move
-        // into the action group, where every sibling control carries the same
-        // floor. `focus-visible:ring-2` rather than a colour swap, because WCAG
-        // 2.4.11 Focus Appearance is not satisfied by a change of hue alone.
-        className="focus-visible:ring-ring focus-visible:ring-offset-background hover:bg-accent inline-flex min-h-11 items-center rounded-md px-2 text-left font-medium outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+        // The shared `touchTarget` — 44x44, BOTH axes. It previously carried a
+        // bare `min-h-11` and no width floor, which is the #184 defect in
+        // miniature: a control can pass a height check and still be a 30px-wide
+        // sliver on a phone.
+        //
+        // The citation this comment used to carry was wrong and is corrected
+        // here rather than repeated. 44x44 is **2.5.5 Target Size (Enhanced),
+        // AAA**. **2.5.8 (Minimum) is the AA one and asks for 24x24** — which
+        // this button already met. So the app is choosing to exceed its own AA
+        // bar on row controls, deliberately, and that is a house convention
+        // (see `touchTarget` in `@/lib/utils`) rather than a conformance
+        // requirement. Saying "2.5.8" made a voluntary 44px look mandatory and
+        // would have made a future reader think dropping it was a regression
+        // against AA.
+        //
+        // `focus-visible:ring-2` rather than a colour swap, because WCAG 2.4.11
+        // Focus Appearance is not satisfied by a change of hue alone.
+        className={cn(
+          touchTarget,
+          "focus-visible:ring-ring focus-visible:ring-offset-background hover:bg-accent rounded-md px-2 font-medium outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
+        )}
       >
         {triggerLabel}
       </button>

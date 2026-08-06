@@ -1192,7 +1192,10 @@ export function InboxView({
                                           key="break-now"
                                           type="button"
                                           onClick={() => breakdown(item.id)}
-                                          className="bg-destructive text-destructive-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90"
+                                          className={cn(
+                                            touchTarget,
+                                            "bg-destructive text-destructive-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
+                                          )}
                                         >
                                           {t("prompt.breakNow", voice)}
                                         </button>,
@@ -1204,7 +1207,10 @@ export function InboxView({
                                           key="focus"
                                           type="button"
                                           onClick={() => focusNextStep(item)}
-                                          className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
+                                          className={cn(
+                                            touchTarget,
+                                            "bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
+                                          )}
                                         >
                                           ▶ Start Focus
                                         </button>,
@@ -1437,7 +1443,10 @@ export function InboxView({
                                     key="focus"
                                     type="button"
                                     onClick={() => focusOnItem(item.id)}
-                                    className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
+                                    className={cn(
+                                      touchTarget,
+                                      "bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
+                                    )}
                                   >
                                     ▶ Start Focus
                                   </button>,
@@ -1609,20 +1618,29 @@ export function InboxView({
                               <button
                                 key="breakdown"
                                 onClick={() => breakdown(item.id)}
-                                className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
+                                className={cn(
+                                  touchTarget,
+                                  "bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
+                                )}
                               >
                                 {t("action.breakdown", voice)} →
                               </button>,
                               <button
                                 key="keep"
-                                className="hover:bg-accent rounded-md px-2.5 py-1 font-medium"
+                                className={cn(
+                                  touchTarget,
+                                  "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
+                                )}
                                 onClick={() => run(() => keepAsTask(item.id))}
                               >
                                 {t("action.addTodo", voice)}
                               </button>,
                               <button
                                 key="save"
-                                className="hover:bg-accent rounded-md px-2.5 py-1 font-medium"
+                                className={cn(
+                                  touchTarget,
+                                  "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
+                                )}
                                 onClick={() => {
                                   setSavedOptionsId(null);
                                   run(() => snoozeBrainDumpItem(item.id, 60));
@@ -1705,7 +1723,10 @@ export function InboxView({
                               type="button"
                               aria-expanded={optionsOpen}
                               onClick={() => setSavedOptionsId(item.id)}
-                              className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
+                              className={cn(
+                                touchTarget,
+                                "bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
+                              )}
                             >
                               {t("action.reviewNow", voice)}
                             </button>
@@ -1787,10 +1808,26 @@ export function InboxView({
                             />
                           )}
                         </div>
-                        <div className="mt-2 flex flex-wrap items-center gap-2 pl-9 text-xs">
+                        {/* The Done bucket hand-rolls its action line instead
+                            of rendering <RowActions>, because it needs Reopen
+                            where the primary CTA goes and none of the rest.
+                            It still carries `data-row-actions` (#184): without
+                            the marker this line is invisible to the target-size
+                            guard, which is exactly how its Reopen button sat at
+                            24px while every other bucket's CTA was checked.
+                            The layout classes are duplicated from RowActions
+                            deliberately-for-now — folding this into that
+                            component is worth doing and is not this issue. */}
+                        <div
+                          data-row-actions=""
+                          className="mt-2 flex flex-wrap items-center gap-2 pl-9 text-xs"
+                        >
                           <button
                             type="button"
-                            className="hover:bg-accent rounded-md px-2.5 py-1 font-medium"
+                            className={cn(
+                              touchTarget,
+                              "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
+                            )}
                             onClick={() =>
                               item.stepsTotal > 1
                                 ? setReopenPickerId(
@@ -2344,21 +2381,30 @@ function ItemRow({
               <button
                 key="breakdown"
                 onClick={onBreakdown}
-                className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
+                className={cn(
+                  touchTarget,
+                  "bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
+                )}
               >
                 {t("action.breakdown", voice)} →
               </button>,
               <button
                 key="keep"
                 onClick={onKeep}
-                className="hover:bg-accent rounded-md px-2.5 py-1 font-medium"
+                className={cn(
+                  touchTarget,
+                  "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
+                )}
               >
                 {t("action.addTodo", voice)}
               </button>,
               <button
                 key="save-for-later"
                 onClick={onSaveForLater}
-                className="hover:bg-accent rounded-md px-2.5 py-1 font-medium"
+                className={cn(
+                  touchTarget,
+                  "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
+                )}
               >
                 {t("action.saveShort", voice)}
               </button>,

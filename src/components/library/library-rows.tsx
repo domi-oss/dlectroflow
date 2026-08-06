@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { cn } from "@/lib/utils";
+import { cn, touchTarget } from "@/lib/utils";
 import { RowActions } from "@/components/inbox/row-actions";
 import { CompleteButton } from "@/components/inbox/complete-button";
 import {
@@ -298,7 +298,10 @@ export function LibraryRows({
                             key="focus"
                             type="button"
                             onClick={() => focusOnItem(item.id)}
-                            className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
+                            className={cn(
+                              touchTarget,
+                              "bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
+                            )}
                           >
                             {t("action.startFocus", voice)}
                           </button>,

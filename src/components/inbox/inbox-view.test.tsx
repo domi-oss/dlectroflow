@@ -3028,3 +3028,96 @@ describe("InboxView — the capture input's accessible name (#183)", () => {
     );
   });
 });
+
+describe("InboxView — row action group target size (#184)", () => {
+  // Every control in a row's action group is a 44x44 target, on the app's own
+  // convention — not on a WCAG requirement, and the difference matters for how
+  // this gets described and prioritised:
+  //
+  //   - 2.5.8 Target Size (Minimum) is **AA** and asks for 24x24. "▶ Start
+  //     Focus" measured exactly 24px, so it PASSED, with zero margin.
+  //   - 2.5.5 Target Size (Enhanced) is **AAA** and asks for 44x44. That is the
+  //     one it failed, and the project's stated bar is AA.
+  //
+  // So nothing here was non-conformant, and any comment or report saying "a
+  // 2.5.8 failure" is wrong. It is fixed anyway for two reasons specific to
+  // this app. Sitting exactly on the threshold means any change to font size,
+  // line height or a Tailwind padding default silently drops it below and
+  // nothing catches it — this spec is that "nothing". And the primary call to
+  // action on every row was the smallest thing in the row while the
+  // end-cluster icons beside it were all 44px, in a tool for people with ADHD
+  // used mostly on a phone, where a mis-tap costs the thread you were holding.
+  //
+  // Asserted over the WHOLE group rather than one control, because that is the
+  // shape the gap hid in: !270 measured only the note trigger and the buttons
+  // either side of it were 24px. jsdom computes no layout, so this checks the
+  // classes that produce the box; the pixel measurement at 390px lives in
+  // e2e/smoke/row-menu-viewport-fit.spec.ts, which measures the same group.
+  const expectFullTargets = (scope: HTMLElement) => {
+    const groups = scope.querySelectorAll<HTMLElement>("[data-row-actions]");
+    expect(groups.length).toBeGreaterThan(0);
+    for (const group of Array.from(groups)) {
+      const controls = group.querySelectorAll<HTMLElement>("button, a");
+      expect(controls.length).toBeGreaterThan(0);
+      for (const control of Array.from(controls)) {
+        const name = control.getAttribute("aria-label") ?? control.textContent;
+        expect(control.className, `"${name}" is under 44px tall`).toContain(
+          "min-h-11",
+        );
+        expect(control.className, `"${name}" is under 44px wide`).toContain(
+          "min-w-11",
+        );
+      }
+    }
+  };
+
+  it("sizes every control in every bucket's action group", () => {
+    const { container } = render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[
+          // One row per frame that renders its own `inline` array.
+          makeItem({ id: "t184a", text: "review row" }),
+          makeMultiStep(),
+          makeItem({
+            id: "t184b",
+            text: "awaiting breakdown",
+            status: "triaged",
+            taskId: "t184bt",
+            breakdownRequestedAt: new Date(),
+          }),
+          makeItem({ id: "t184c", text: "single todo", status: "triaged" }),
+        ]}
+        settings={settings}
+        google={{ configured: true, connected: true, needsReconnect: false }}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    expectFullTargets(container);
+  });
+
+  it("sizes the saved-for-later options too, which only render once opened", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[
+          makeItem({
+            id: "t184d",
+            text: "stored thing",
+            snoozedUntil: new Date(Date.now() + 60 * 60_000),
+          }),
+        ]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "stored thing" }));
+    expect(
+      screen.getByRole("button", { name: /Break into steps/ }),
+    ).toBeInTheDocument();
+    expectFullTargets(container);
+  });
+});
