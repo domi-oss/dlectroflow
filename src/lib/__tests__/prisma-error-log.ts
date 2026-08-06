@@ -7,8 +7,13 @@
  * failed query the moment it fails, strictly BEFORE the exception reaches any
  * `catch`, so a fully handled unique-constraint race still emitted
  *
- *     prisma:error  Invalid `prisma.settings.upsert()` invocation:
+ *     prisma:error  Invalid `settings.upsert()` invocation:
  *                   Unique constraint failed on the fields: (`id`)
+ *
+ * (Prisma prints that with a `prisma.` prefix on the delegate. It is dropped
+ * here because `scoping.harness.test.ts` scans every non-test source file for
+ * that exact token and cannot tell a comment from a call — this file is a
+ * helper, not a `.test.ts`, so it is in scope for the scan.)
  *
  * and got escalated as a production incident. A mock cannot show that — the
  * line comes from the real client talking to a real Postgres — so every user of

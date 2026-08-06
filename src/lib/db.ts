@@ -1,4 +1,4 @@
-import { PrismaClient, Prisma } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
 import type { Settings, Streak } from "@prisma/client";
 
 // Reuse a single PrismaClient across dev HMR reloads to avoid exhausting
@@ -22,21 +22,31 @@ export const prisma =
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
 
-/**
- * True when the error is a Prisma unique-constraint violation (P2002).
- *
- * Matches on the code alone, deliberately: `meta.target` names the columns,
- * and a caller that filtered on it would have to know whether the PK or the
- * unique index lost — which differs between Postgres versions and between
- * single- and multi-column conflicts. Callers that tolerate a duplicate
- * tolerate any duplicate (src/lib/rewards.ts, guest-quota.ts, user-quota.ts,
- * src/app/actions/people.ts).
- */
-export function isUniqueViolation(e: unknown): boolean {
-  return (
-    e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002"
-  );
-}
+// An `isUniqueViolation(e)` helper used to live here. #156 removed the first
+// two callers (`getSettings` / `getStreak`, below) and #158 the last of them,
+// so it is gone with them rather than left exported with nobody calling it: a
+// shared predicate whose only purpose is to recognise a *handled* P2002 makes
+// catch-after-the-fact the obvious thing to reach for, and catching one is
+// precisely what does NOT stop it being printed.
+//
+// **The way to tolerate a duplicate here is to not create one.** Prisma's
+// `createMany` / `createManyAndReturn` with `skipDuplicates: true` compile to
+// `INSERT ... ON CONFLICT DO NOTHING`; the loser gets `count: 0` (or an empty
+// array) and nothing is raised, so there is nothing for the logger above to
+// print. `firstUseByWorkspace` below is the read-after-write form of it.
+//
+// Two P2002 catches survive in src/lib/auth/provisioning.ts, spelled out inline
+// and never users of this helper. They are NOT the same shape, and only one is
+// deliberate:
+//
+//  • `provision` catches it around a `$transaction` in order to RE-DRIVE the
+//    whole transaction, not to tolerate a row. `ON CONFLICT DO NOTHING` cannot
+//    express "start over", so this one stays.
+//  • `ensureWorkspace` is a genuine create-if-absent — create, catch, re-read —
+//    and would fit the pattern above. It is on the sign-in path and outside
+//    what #158 scoped, so it is left alone here and recorded rather than
+//    quietly widened into. The class is closed at #158's four sites, not
+//    everywhere.
 
 /** Every per-workspace singleton row keys its PK to the workspace id. */
 type WorkspaceSingletonRow = { id: string; workspaceId: string };
