@@ -147,6 +147,83 @@ export interface WeldFinding {
   reason: string;
 }
 
+/** A {@link WeldFinding} carrying the path it was found in. */
+export interface LocatedWeld extends WeldFinding {
+  /** Path the source was read from, as the scan walked it. */
+  file: string;
+}
+
+/**
+ * One entry in the allowlist of welds somebody has read and judged intentional.
+ *
+ * Keyed by `<file>:<rendered>` — no line number, deliberately, so the entry
+ * survives the code moving down the file. The price of that is that the key
+ * names a **class** of boundary rather than one of them, and the count is what
+ * pays it: `12<abbr>kg</abbr>` twice in one file is two reviews, not one, and
+ * reviewing the first used to absolve the second in silence. The stale check
+ * could not catch that either, because both boundaries are live. Reported on
+ * !272.
+ */
+export interface ReviewedWeld {
+  /** Why the two words are supposed to touch — a unit suffix, a flag's `=`. */
+  reason: string;
+  /** How many boundaries in that file render this exact string. */
+  count: number;
+}
+
+/** The two ways an allowlist and a tree can disagree, as printable lines. */
+export interface WeldReview {
+  /** Findings no entry accounts for. */
+  unreviewed: string[];
+  /** Entries licensing boundaries the tree does not have — including
+   *  `count: 0`, which reads as reviewed while permitting nothing. */
+  stale: string[];
+}
+
+/** The allowlist key. No line number, so it survives the code moving. */
+export function weldKey(finding: LocatedWeld): string {
+  return `${finding.file}:${finding.rendered}`;
+}
+
+/**
+ * Findings the allowlist does not cover, and entries the tree does not need.
+ *
+ * Exported and `fs`-free so the arithmetic can be exercised on synthetic
+ * findings. The allowlist is empty on this tree, and an allowlist nobody has
+ * seen fail is exactly the hole the gate exists to close.
+ */
+export function reviewWelds(
+  findings: readonly LocatedWeld[],
+  reviewed: Readonly<Record<string, ReviewedWeld>>,
+): WeldReview {
+  const seen = new Map<string, number>();
+  const unreviewed: string[] = [];
+
+  for (const finding of findings) {
+    const key = weldKey(finding);
+    const alreadySeen = seen.get(key) ?? 0;
+    seen.set(key, alreadySeen + 1);
+    // The entry licenses the first `count` boundaries of its class; which ones
+    // those are is arbitrary, so the message names the line of every boundary
+    // beyond them and the reader picks it up from there.
+    if (alreadySeen < (reviewed[key]?.count ?? 0)) continue;
+    unreviewed.push(
+      `${finding.file}:${finding.line} renders "${finding.rendered}" as one word — insert {" "}`,
+    );
+  }
+
+  const stale = Object.entries(reviewed)
+    .filter(
+      ([key, entry]) => entry.count < 1 || (seen.get(key) ?? 0) < entry.count,
+    )
+    .map(
+      ([key, entry]) =>
+        `${key} — the allowlist claims ${entry.count}, the tree has ${seen.get(key) ?? 0}`,
+    );
+
+  return { unreviewed, stale };
+}
+
 /**
  * JSX's whitespace cleaning for one text child, as the compilers implement it.
  *

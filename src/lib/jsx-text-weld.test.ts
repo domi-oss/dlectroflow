@@ -1,7 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { findTextWelds, renderJsxText } from "@/lib/jsx-text-weld";
+import {
+  findTextWelds,
+  renderJsxText,
+  reviewWelds,
+  type LocatedWeld,
+  type ReviewedWeld,
+} from "@/lib/jsx-text-weld";
 
 /**
  * #182 — the JSX rule that welds two words into one.
@@ -39,8 +45,13 @@ import { findTextWelds, renderJsxText } from "@/lib/jsx-text-weld";
 // the map does not rot when a component moves, the same contract
 // `REVIEWED_TEXT_COLORS` carries in `a11y-class-hygiene.test.ts`.
 //
+// Each entry states **how many** boundaries in that file render that string,
+// because the key carries no line number and therefore names a class of
+// boundary rather than one of them. See {@link ReviewedWeld} for why presence
+// alone is not enough.
+//
 // Empty today: every boundary in the tree either has its space or was fixed.
-const REVIEWED_WELDS: Record<string, string> = {};
+const REVIEWED_WELDS: Record<string, ReviewedWeld> = {};
 
 // `src/` only, and not the test files. A test that asserts a weld is GONE has to
 // be able to name it — `help-page.test.tsx` renders the very strings this module
@@ -420,24 +431,99 @@ describe("the real tree", () => {
     expect(caught / injected).toBeGreaterThanOrEqual(0.85);
   });
 
+  const review = reviewWelds(findings, REVIEWED_WELDS);
+
   it("has no unreviewed welds", () => {
-    const unreviewed = findings.filter(
-      (finding) => !(`${finding.file}:${finding.rendered}` in REVIEWED_WELDS),
-    );
-    expect(
-      unreviewed.map(
-        (finding) =>
-          `${finding.file}:${finding.line} renders "${finding.rendered}" as one word — insert {" "}`,
-      ),
-    ).toEqual([]);
+    expect(review.unreviewed).toEqual([]);
   });
 
   it("has no stale allowlist entries", () => {
-    const live = new Set(
-      findings.map((finding) => `${finding.file}:${finding.rendered}`),
+    expect(review.stale).toEqual([]);
+  });
+});
+
+describe("reviewWelds", () => {
+  // The allowlist arithmetic, exercised on synthetic findings rather than only
+  // through a real tree that has none. An allowlist nobody can see fail is the
+  // hole this whole gate exists to close.
+  const weld = (file: string, rendered: string, line: number): LocatedWeld => ({
+    file,
+    rendered,
+    line,
+    reason: "renders as one word",
+  });
+
+  it("reports a weld no entry covers", () => {
+    expect(reviewWelds([weld("a.tsx", "PressN", 3)], {}).unreviewed).toEqual([
+      'a.tsx:3 renders "PressN" as one word — insert {" "}',
+    ]);
+  });
+
+  it("accepts a weld its entry covers", () => {
+    const review = reviewWelds([weld("a.tsx", "12kg", 3)], {
+      "a.tsx:12kg": { reason: "a unit suffix", count: 1 },
+    });
+    expect(review).toEqual({ unreviewed: [], stale: [] });
+  });
+
+  it("still reports the second of two welds one entry would have hidden", () => {
+    // The finding this replaced the `in` test for. `<file>:<rendered>` names a
+    // *class* of boundary, so reviewing one `PressN` in a file used to silently
+    // absolve every other `PressN` in it — and the stale check could not see
+    // that, because both are live. Duo review, !272.
+    const review = reviewWelds(
+      [weld("a.tsx", "PressN", 3), weld("a.tsx", "PressN", 40)],
+      { "a.tsx:PressN": { reason: "reviewed the one on line 3", count: 1 } },
     );
-    expect(Object.keys(REVIEWED_WELDS).filter((key) => !live.has(key))).toEqual(
-      [],
+    expect(review.unreviewed).toEqual([
+      'a.tsx:40 renders "PressN" as one word — insert {" "}',
+    ]);
+    expect(review.stale).toEqual([]);
+  });
+
+  it("accepts both when the entry says there are two", () => {
+    const review = reviewWelds(
+      [weld("a.tsx", "12kg", 3), weld("a.tsx", "12kg", 40)],
+      { "a.tsx:12kg": { reason: "both are unit suffixes", count: 2 } },
     );
+    expect(review).toEqual({ unreviewed: [], stale: [] });
+  });
+
+  it("reports an entry claiming more boundaries than the tree has", () => {
+    // The other half: a weld gets fixed, the count is not decremented, and the
+    // entry quietly keeps a licence for a boundary that no longer exists.
+    const review = reviewWelds([weld("a.tsx", "12kg", 3)], {
+      "a.tsx:12kg": { reason: "a unit suffix", count: 2 },
+    });
+    expect(review.stale).toEqual([
+      "a.tsx:12kg — the allowlist claims 2, the tree has 1",
+    ]);
+  });
+
+  it("reports an entry whose weld is gone entirely", () => {
+    expect(
+      reviewWelds([], { "a.tsx:12kg": { reason: "a unit suffix", count: 1 } })
+        .stale,
+    ).toEqual(["a.tsx:12kg — the allowlist claims 1, the tree has 0"]);
+  });
+
+  it("reports an entry that licenses nothing", () => {
+    // `count: 0` is not a way to keep a note in the map. It reads as reviewed
+    // and permits nothing, so it can only ever mislead.
+    expect(
+      reviewWelds([], { "a.tsx:12kg": { reason: "a unit suffix", count: 0 } })
+        .stale,
+    ).toEqual(["a.tsx:12kg — the allowlist claims 0, the tree has 0"]);
+  });
+
+  it("keeps the two files' entries apart", () => {
+    const review = reviewWelds(
+      [weld("a.tsx", "12kg", 3), weld("b.tsx", "12kg", 3)],
+      { "a.tsx:12kg": { reason: "a unit suffix", count: 1 } },
+    );
+    expect(review.unreviewed).toEqual([
+      'b.tsx:3 renders "12kg" as one word — insert {" "}',
+    ]);
+    expect(review.stale).toEqual([]);
   });
 });
