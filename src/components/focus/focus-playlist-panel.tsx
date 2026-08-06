@@ -85,7 +85,6 @@ export function FocusPlaylistPanel({
 }) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
-  const playlistsLabelId = useId();
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -237,8 +236,12 @@ export function FocusPlaylistPanel({
             // instance with nothing selected. A group holding one permanently
             // ticked "All tracks" row would be noise on a screen whose job is to
             // stay out of the way.
-            <fieldset aria-labelledby={playlistsLabelId} className="space-y-1">
-              <legend id={playlistsLabelId} className="text-sm font-medium">
+            // The name comes from the `legend` natively (HTML-AAM), with no
+            // `aria-labelledby` pointing back at it: that would be a second,
+            // redundant route to the same string, and the repo's rule is to let
+            // native semantics do the job where they can. Duo review, !274.
+            <fieldset className="space-y-1">
+              <legend className="text-sm font-medium">
                 {t("focus.sound.playlists", voice)}
               </legend>
               <p className="text-muted-foreground text-xs">

@@ -177,6 +177,43 @@ describe("FocusSoundPlayer", () => {
     expect(volBtn).toHaveFocus();
   });
 
+  it("Escape in the playlist panel closes ONLY it, not the volume popover (#181)", async () => {
+    // The same collision in the other direction, and it is keyboard-only:
+    // opening the panel with the MOUSE fires a mousedown that the popover's own
+    // click-away handler already acts on, so the two are never open at once
+    // that way. Reached with the keyboard, where no mousedown ever fires.
+    const user = userEvent.setup();
+    render(
+      <FocusSoundPlayer
+        controls={controls()}
+        voice="plain"
+        categories={[]}
+        onCategoriesChange={noop}
+      />,
+    );
+    const volBtn = screen.getByRole("button", { name: /^volume$/i });
+    volBtn.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("slider")).toBeInTheDocument();
+
+    const panelToggle = screen.getByRole("button", {
+      name: /playlists and tracks/i,
+    });
+    panelToggle.focus();
+    await user.keyboard("{Enter}");
+    expect(panelToggle).toHaveAttribute("aria-expanded", "true");
+    // Both open, and no mousedown has been dispatched.
+    expect(screen.getByRole("slider")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    expect(panelToggle).toHaveAttribute("aria-expanded", "false");
+    // The volume popover was not what the user was in, so it is left alone —
+    // and it must not steal the focus the panel just handed back.
+    expect(screen.getByRole("slider")).toBeInTheDocument();
+    expect(panelToggle).toHaveFocus();
+  });
+
   it("shows a playback progress bar reflecting currentTime / duration (display only)", () => {
     const c = controls({ getTime: () => ({ currentTime: 30, duration: 120 }) });
     render(
