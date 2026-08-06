@@ -299,8 +299,18 @@ describe("HelpPage", () => {
     for (const key of keys) {
       // `textContent` on the paragraph is the rendered string, with JSX's
       // whitespace rule already applied — exactly what a reader sees.
-      const sentence = key.closest("li, p")!.textContent!;
-      expect(sentence).toContain(` ${key.textContent} `);
+      //
+      // The ancestor is asserted rather than assumed. A `<kbd>` moving out of
+      // its sentence — into a `<blockquote>`, or straight into a `<section>` —
+      // is a realistic edit to this page, and `closest()` returning null then
+      // threw `TypeError: Cannot read properties of null`, which names neither
+      // the key nor the cause. Duo review, !272.
+      const sentence = key.closest("li, p");
+      expect(
+        sentence,
+        `<kbd>${key.textContent}</kbd> is not inside a <li> or <p>, so the sentence around it cannot be read`,
+      ).not.toBeNull();
+      expect(sentence?.textContent).toContain(` ${key.textContent} `);
     }
 
     // And the specific phrasings, so a copy edit that reflows them has to
