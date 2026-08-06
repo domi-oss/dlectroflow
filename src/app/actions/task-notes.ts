@@ -67,8 +67,15 @@ export async function updateTaskNotes(
   // in line to render — #44 asks for it, and it is deferred rather than
   // dropped. Invalidating one path too many costs a re-render; one too few is
   // the class of bug #139 was filed for.
+  //
+  // The id comes from the row we just authorised, not from the argument. Here
+  // the two are provably the same value — the `findFirst` is keyed on
+  // `id: taskId` — so this is not a fix for a live arbitrary-invalidation bug
+  // (an unowned id returns `not_found` above, revalidating nothing). It is the
+  // same sourcing rule `step-notes.ts` states, applied so the pair does not
+  // have to be reasoned about twice (!270).
   revalidatePath("/");
-  revalidatePath(`/tasks/${taskId}`);
+  revalidatePath(`/tasks/${task.id}`);
 
   // The STORED value, not the caller's input. Normalisation trims, strips and
   // clamps, and a field that keeps displaying text the database does not have

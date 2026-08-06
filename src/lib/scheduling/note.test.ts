@@ -175,6 +175,25 @@ describe("buildScheduleNote — task note AND step note together (#44)", () => {
     expect((note.match(/same thing/g) ?? []).length).toBe(1);
   });
 
+  it("keeps a step note that is a SUBSTRING of the task note (!270)", () => {
+    // The dedupe is whole-value equality, never a substring test. Duo review
+    // (!270) named the bug the other reading would be, so it is pinned here
+    // rather than left to the comment: a step note that merely appears inside
+    // the task's is a DIFFERENT, narrower instruction, and dropping it would
+    // silently lose the more specific one — the exact failure the both-notes
+    // decision above exists to avoid.
+    const note = buildScheduleNote({
+      ...base,
+      stepId: "s1",
+      taskNote: "call Sam first, then the bank",
+      stepNote: "call Sam",
+    });
+    expect(note).toContain("call Sam first, then the bank");
+    expect(
+      note.startsWith("call Sam first, then the bank\n\ncall Sam\n\n"),
+    ).toBe(true);
+  });
+
   it("uses whichever one exists when only one does", () => {
     const onlyStep = buildScheduleNote({
       ...base,

@@ -81,8 +81,13 @@ export function buildScheduleNote(input: {
   const parts: string[] = [];
   for (const raw of [input.taskNote, input.stepNote]) {
     const note = raw?.trim();
-    // `includes`, not equality: the dedupe is there for the paste, and the two
-    // values have already been trimmed independently.
+    // Whole-value equality (`includes` is SameValueZero over the array, i.e.
+    // `===` for strings), never a substring test. The dedupe exists for the
+    // paste case — the same sentence typed at both grains — and both values
+    // have been trimmed independently by then, so an exact match is what
+    // "the same note twice" means. A substring rule would be a bug: "call Sam"
+    // is a narrower instruction than "call Sam first, then the bank", and
+    // suppressing it would lose the more specific of the two (!270).
     if (note && !parts.includes(note)) parts.push(note);
   }
 

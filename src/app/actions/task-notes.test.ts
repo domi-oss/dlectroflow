@@ -92,6 +92,25 @@ describe("updateTaskNotes", () => {
     expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 
+  it("invalidates the path from the ROW it authorised, not the argument", async () => {
+    // Duo review (!270) read `revalidatePath(`/tasks/${taskId}`)` as arbitrary
+    // path invalidation. It is not: the `findFirst` above is keyed on
+    // `id: taskId`, so a returned row's `id` IS the argument, and a task the
+    // workspace does not own returns early (asserted directly above — nothing
+    // is revalidated on that path).
+    //
+    // The value is sourced from the row anyway, and this test locks that,
+    // because it is the property the sibling `step-notes.ts` depends on and
+    // the two actions should not have to be reasoned about differently. The
+    // mock returns an id the caller did not pass, which cannot happen against
+    // real Prisma — that is the point: the test fails if the path is ever
+    // rebuilt from unvalidated input.
+    findFirstMock.mockResolvedValue({ id: "t-from-db" });
+    await updateTaskNotes("t-from-caller", "hi");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/tasks/t-from-db");
+    expect(revalidatePathMock).not.toHaveBeenCalledWith("/tasks/t-from-caller");
+  });
+
   it("reports a failed write instead of throwing at the client", async () => {
     // Autosave has no submit button to re-enable, so the action resolves with a
     // reason and the field paints its error affordance. An unhandled rejection

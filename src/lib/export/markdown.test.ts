@@ -107,6 +107,50 @@ describe("tasks.md — the human tier", () => {
     expect(secondStep).not.toContain("- Note:");
   });
 
+  it("keeps a MULTI-PARAGRAPH step note inside its own list item (!270)", () => {
+    // Duo review (!270) claimed a blank line in a step note terminates the
+    // nested item and renders the remainder as a code block. It does neither,
+    // and the arithmetic is the reason — checked here rather than trusted,
+    // because the failure it describes would be silent and only visible once
+    // rendered.
+    //
+    //   `  - Note: ` puts the item's CONTENT INDENT at 4 (2 spaces + "- ").
+    //   `indentContinuation` indents continuations by 6.
+    //
+    //   6 >= 4      -> the line stays part of the list item
+    //   6 <  4 + 4  -> it is NOT an indented code block (that needs 8)
+    //
+    // So the blank line makes the item LOOSE — two paragraphs in one bullet,
+    // which is what a two-paragraph note is. The suggested fix (collapsing
+    // `\n{2,}` to `\n`) was rejected: it merges the user's paragraphs, and
+    // this file is the Art. 20 human tier, where that is silent data loss.
+    const twoPara = makeSnapshot();
+    twoPara.tasks[0].steps[0].notes = "first para\n\nsecond para";
+    const rendered = tasksMarkdown(twoPara);
+    const steps = rendered.slice(rendered.indexOf("### Steps"));
+
+    const noteBlock = steps.slice(
+      steps.indexOf("  - Note: first para"),
+      steps.indexOf("- [ ] Write it"),
+    );
+    const lines = noteBlock.split("\n");
+
+    // The blank line is not column-zero blank: it carries the continuation
+    // indent, and a column-zero blank line WOULD end the item.
+    expect(lines[1]).toBe("      ");
+    // The continuation clears the content indent without reaching the
+    // code-block threshold. Both bounds, because only the pair is the claim.
+    const indent = (lines[2].match(/^ */) as RegExpMatchArray)[0].length;
+    expect(indent).toBeGreaterThanOrEqual(4);
+    expect(indent).toBeLessThan(8);
+    expect(lines[2]).toBe("      second para");
+
+    // And the user's paragraph break survives the round trip.
+    expect(noteBlock).toContain("first para");
+    expect(noteBlock).toContain("second para");
+    expect(noteBlock).not.toContain("first para second para");
+  });
+
   it("includes the coaching conversation, attributed and in order", () => {
     // Agreed on the issue: the turns are the most personal content in the
     // database and squarely data "provided by the data subject" (Art. 20).
