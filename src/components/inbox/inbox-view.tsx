@@ -228,7 +228,61 @@ export function InboxView({
 }) {
   const router = useRouter();
   const voice = useVoice();
-  const [pending, startTransition] = useTransition();
+  /**
+   * #169 — TWO pending signals, because there are two different questions here
+   * and one flag was answering both, wrongly.
+   *
+   * `refreshing` is list-wide, and honest about it: every wrapper below ends in
+   * `router.refresh()`, which redraws the whole list, so dimming the whole list
+   * while one is in flight is exactly what it means.
+   *
+   * `schedulingIds` is keyed by item id and is the ONLY thing the 📅 controls
+   * read. It exists because `refreshing` used to be wired straight to
+   * `disabled` on every row's Schedule control — and 20 of the call sites that
+   * set it go through the generic `run()` below: rename, complete, snooze,
+   * delete, freshen, keepAsTask, reopen, dismissPrompt. So renaming one item
+   * disabled every Schedule button in the list, and a press landing in that
+   * window was discarded with no error and no explanation. `row-actions.tsx`
+   * documents the prop as "a schedule call for THIS row"; now the parent
+   * honours it.
+   *
+   * **Concurrent Schedule pushes get no broader guard, deliberately.** #169
+   * asked for that decision to be made rather than inherited, and the answer is
+   * no:
+   *
+   *   - Two rows pushing at once write disjoint records.
+   *     `pushStepsToGoogleTasks(taskId)` and `scheduleSingleTask(itemId)` upsert
+   *     against each step's own persisted `googleTaskId` (`upsertGoogleTask`,
+   *     #104), so there is no shared row to race over and no duplicate calendar
+   *     block to create — which is the failure a lock would exist to prevent.
+   *   - The one genuinely workspace-wide failure, `reconnect_required`, already
+   *     has a workspace-wide response: `setReconnectRequired` swaps EVERY row's
+   *     control to the Reconnect link. A second, weaker lock aimed at the same
+   *     condition would only obscure the one that works.
+   *   - The remaining shared resource is the OAuth access token, which
+   *     `getValidAccessToken` may refresh mid-push. That is a server-side
+   *     concurrency question reachable from any two requests — a second tab,
+   *     the focus lane, a scheduled action — so a lock inside one client list
+   *     component could not arbitrate it, and having one would imply a
+   *     guarantee that is not there.
+   *
+   * The hazard the prop was actually written for — double-submitting the SAME
+   * row — is per-control by definition, and that is what this guards.
+   */
+  const [refreshing, startTransition] = useTransition();
+  const [schedulingIds, setSchedulingIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  // Never mutates the previous Set: React bails out of a re-render when the
+  // reference is unchanged, which would strand the row's control disabled.
+  const markScheduling = (itemId: string, active: boolean) =>
+    setSchedulingIds((prev) => {
+      if (prev.has(itemId) === active) return prev;
+      const next = new Set(prev);
+      if (active) next.add(itemId);
+      else next.delete(itemId);
+      return next;
+    });
   const [text, setText] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -378,38 +432,63 @@ export function InboxView({
     fn: () => Promise<
       { ok: true } | { ok: false; reason: string; message?: string }
     >,
-  ) =>
-    startTransition(async () => {
-      setScheduleErrors((prev) => {
-        if (!(itemId in prev)) return prev;
-        const next = { ...prev };
-        delete next[itemId];
-        return next;
-      });
-      const res = await fn();
-      if (res.ok) {
-        router.refresh();
-        return;
-      }
-      if (res.reason === "reconnect_required") {
-        setReconnectRequired(true);
-        // Every row's control just swapped to the Reconnect link, so any per-row
-        // schedule error left from an earlier attempt is now stale — clear them
-        // all rather than show a red error beside a Reconnect prompt (Duo review).
-        setScheduleErrors({});
-        return;
-      }
-      setScheduleErrors((prev) => ({
-        ...prev,
-        // Prefer the action's own message — e.g. pushStepsToGoogleTasks's
-        // no_reclaim_list failure lists the available lists, which is more
-        // useful than the generic dictionary copy for the same reason.
-        [itemId]:
-          res.message ??
-          SCHEDULE_ERROR_MESSAGES[res.reason] ??
-          "Scheduling failed.",
-      }));
+  ) => {
+    // #169 — both of these are URGENT and deliberately outside the transition.
+    // React 19 holds an async transition's own state updates until the action
+    // settles, so a flag raised inside it would first paint at the moment it
+    // stopped being true: a double-submit guard that guards nothing, and a
+    // stale error still on screen for the whole round trip. The transition is
+    // for the `router.refresh()` that follows, which is what it is good at.
+    markScheduling(itemId, true);
+    setScheduleErrors((prev) => {
+      if (!(itemId in prev)) return prev;
+      const next = { ...prev };
+      delete next[itemId];
+      return next;
     });
+    return startTransition(async () => {
+      try {
+        const res = await fn();
+        if (res.ok) {
+          router.refresh();
+          return;
+        }
+        if (res.reason === "reconnect_required") {
+          setReconnectRequired(true);
+          // Every row's control just swapped to the Reconnect link, so any
+          // per-row schedule error left from an earlier attempt is now stale —
+          // clear them all rather than show a red error beside a Reconnect
+          // prompt (Duo review).
+          setScheduleErrors({});
+          return;
+        }
+        setScheduleErrors((prev) => ({
+          ...prev,
+          // Prefer the action's own message — e.g. pushStepsToGoogleTasks's
+          // no_reclaim_list failure lists the available lists, which is more
+          // useful than the generic dictionary copy for the same reason.
+          [itemId]:
+            res.message ??
+            SCHEDULE_ERROR_MESSAGES[res.reason] ??
+            "Scheduling failed.",
+        }));
+      } catch {
+        // #169 — "a discarded press should never be silent", by the other door.
+        // A server action that REJECTS (dropped connection, a redeploy mid-push)
+        // resolves to no `res` at all, so without this the row shows nothing and
+        // the user is back to "I pressed Schedule and nothing happened".
+        setScheduleErrors((prev) => ({
+          ...prev,
+          [itemId]: "Scheduling failed.",
+        }));
+      } finally {
+        // Must run on every exit, including the two early returns and a throw:
+        // a row left in `schedulingIds` is a control disabled for the rest of
+        // the session, which is the #169 harm made permanent.
+        markScheduling(itemId, false);
+      }
+    });
+  };
 
   // ICS "Add to calendar" runner: builds the .ics server-side (marks + rewards),
   // then downloads it client-side. Guest-allowed (no owner gate) + no reconnect
@@ -420,28 +499,42 @@ export function InboxView({
       | { ok: true; ics: string; icsFilename: string }
       | { ok: false; reason: string; message?: string }
     >,
-  ) =>
-    startTransition(async () => {
-      setScheduleErrors((prev) => {
-        if (!(itemId in prev)) return prev;
-        const next = { ...prev };
-        delete next[itemId];
-        return next;
-      });
-      const res = await fn();
-      if (res.ok) {
-        downloadIcs(res.ics, res.icsFilename);
-        router.refresh();
-        return;
-      }
-      setScheduleErrors((prev) => ({
-        ...prev,
-        [itemId]:
-          res.message ??
-          SCHEDULE_ERROR_MESSAGES[res.reason] ??
-          "Couldn't build the calendar file.",
-      }));
+  ) => {
+    // Urgent, outside the transition — see runSchedule above for why (#169).
+    markScheduling(itemId, true);
+    setScheduleErrors((prev) => {
+      if (!(itemId in prev)) return prev;
+      const next = { ...prev };
+      delete next[itemId];
+      return next;
     });
+    return startTransition(async () => {
+      try {
+        const res = await fn();
+        if (res.ok) {
+          downloadIcs(res.ics, res.icsFilename);
+          router.refresh();
+          return;
+        }
+        setScheduleErrors((prev) => ({
+          ...prev,
+          [itemId]:
+            res.message ??
+            SCHEDULE_ERROR_MESSAGES[res.reason] ??
+            "Couldn't build the calendar file.",
+        }));
+      } catch {
+        // #169 — same reasoning as runSchedule: a rejected action must say so
+        // rather than leave the row looking like nothing was pressed.
+        setScheduleErrors((prev) => ({
+          ...prev,
+          [itemId]: "Couldn't build the calendar file.",
+        }));
+      } finally {
+        markScheduling(itemId, false);
+      }
+    });
+  };
 
   // Guest primary control + owner ▾ alternative both use this. State depends
   // on whether the task already has steps (per-step events vs. one timed event).
@@ -457,7 +550,7 @@ export function InboxView({
         ),
       );
     },
-    pending,
+    pending: schedulingIds.has(item.id),
   });
 
   const breakdown = (id: string) =>
@@ -848,7 +941,7 @@ export function InboxView({
                   : t("inbox.zero", voice)}
               </p>
             ) : (
-              <ul className={cn("space-y-2", pending && "opacity-70")}>
+              <ul className={cn("space-y-2", refreshing && "opacity-70")}>
                 {needsReview.map((item) => {
                   // v5: review rows are now schedulable — an unclarified
                   // capture has no steps, so 📅 always offers the same
@@ -860,7 +953,7 @@ export function InboxView({
                           runSchedule(item.id, () =>
                             scheduleSingleTask(item.id, minutes),
                           ),
-                        pending,
+                        pending: schedulingIds.has(item.id),
                       }
                     : icsProps(item);
                   return (
@@ -949,7 +1042,7 @@ export function InboxView({
               {multiStep.length === 0 ? (
                 <EmptyBucket voice={voice} />
               ) : (
-                <ul className={cn("space-y-2", pending && "opacity-70")}>
+                <ul className={cn("space-y-2", refreshing && "opacity-70")}>
                   {multiStep.map((item) => {
                     /* multi-step row — extended in Task 9 (step count + expand) and Task 10 (drag/menu).
                        A 0-step row is awaiting its breakdown (breakdownRequestedAt): instead of a
@@ -978,7 +1071,7 @@ export function InboxView({
                                 runSchedule(item.id, () =>
                                   scheduleSingleTask(item.id, minutes),
                                 ),
-                              pending,
+                              pending: schedulingIds.has(item.id),
                             }
                           : {
                               state: scheduleState(
@@ -1001,7 +1094,7 @@ export function InboxView({
                                     pushStepsToGoogleTasks(tid, intent),
                                   );
                               },
-                              pending,
+                              pending: schedulingIds.has(item.id),
                             };
                     return (
                       <li
@@ -1276,7 +1369,7 @@ export function InboxView({
               {singleTask.length === 0 ? (
                 <EmptyBucket voice={voice} />
               ) : (
-                <ul className={cn("space-y-2", pending && "opacity-70")}>
+                <ul className={cn("space-y-2", refreshing && "opacity-70")}>
                   {singleTask.map((item) => {
                     const schedule: ScheduleControlProps | null =
                       effectiveGoogle
@@ -1289,7 +1382,7 @@ export function InboxView({
                               runSchedule(item.id, () =>
                                 scheduleSingleTask(item.id, minutes),
                               ),
-                            pending,
+                            pending: schedulingIds.has(item.id),
                           }
                         : icsProps(item);
                     return (

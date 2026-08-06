@@ -2252,38 +2252,22 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     ).toBeInTheDocument();
   });
 
-  it("holds every row's Schedule control while one row's schedule is in flight (#168)", async () => {
-    // The trap behind #168, pinned so the next spec to press two Schedule
-    // controls in sequence finds it documented rather than rediscovering it as
-    // a load-dependent flake.
+  it("holds only the scheduling row's own control while its push is in flight (#169)", async () => {
+    // The spec !265 landed, turned round. That one pinned the shared flag as
+    // OBSERVED behaviour and said so in as many words — "not as correct
+    // behaviour — #169" — so fixing #169 means inverting it, not deleting it:
+    // the same scenario, the opposite expectation, and the #168 trap it
+    // documented removed at the source rather than merely renamed.
     //
-    // `pending` comes from ONE `useTransition` shared by the whole list
-    // (inbox-view.tsx:230) and every Schedule control carries
-    // `disabled={pending}` (row-actions.tsx), so an action started on one row
-    // disables the control on all of them.
+    // What survives unchanged is the guard the prop was written for. Row A's
+    // own control is still held while row A's push is in flight, which is all
+    // double-submit protection ever needed. What goes is the reach: `pending`
+    // used to come from ONE `useTransition` shared by every action in the list,
+    // so 20 call sites through the generic `run()` — rename, complete, snooze,
+    // delete, dismissPrompt — disabled every Schedule button in the list.
     //
-    // This spec pins that as OBSERVED BEHAVIOUR, not as correct behaviour —
-    // #169. An earlier version of this comment justified the shared lock as
-    // "pushing to Google Tasks is workspace-wide"; that is wrong, and the
-    // codebase disproves it. The same flag is flipped by 20 call sites through
-    // the generic `run()` — completeItem, renameItem, snoozeBrainDumpItem,
-    // deleteBrainDumpItem, freshenItem, keepAsTask, reopenItem, dismissPrompt —
-    // so RENAMING an item disables every Schedule button in the list, which no
-    // workspace-wide argument covers. `row-actions.tsx:44` documents the prop as
-    // "a schedule call for THIS row", and two of its own unit tests say the same,
-    // so the prop is honest about the intent and the parent does not honour it.
-    //
-    // Waiting for the control to be enabled is the right thing for a test to do
-    // either way, which is why this MR still lands ahead of #169: it removes a
-    // dropped press, and it does not depend on who wins the design argument.
-    //
-    // The consequence for tests is the part that cost a pipeline: `await
-    // user.click` does not await the transition, and `userEvent` discards a
-    // press on a disabled control WITHOUT raising anything. So a spec that
-    // presses a second Schedule control without waiting gets no error at the
-    // press — it gets a timeout, one second later, on a find for something that
-    // was never going to render. Holding the action's promise unresolved makes
-    // the window real rather than a race (the technique !237 and !264 used).
+    // Holding the action's promise unresolved makes the in-flight window real
+    // rather than a race (the technique !237, !264 and !265 used).
     const { scheduleSingleTask, pushStepsToGoogleTasks } =
       await import("@/app/actions/google-schedule");
     let release!: (value: { ok: true }) => void;
@@ -2313,11 +2297,17 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
 
     await user.click(within(rowA).getByRole("button", { name: /schedule/i }));
     await user.click(within(rowA).getByRole("button", { name: /^30 min$/i }));
-    expect(scheduleB).toBeDisabled();
 
-    // The press that goes nowhere, and says nothing about having gone nowhere.
+    // Row A's own control: held, and it says why rather than going quietly
+    // grey — a disabled button swallows a press with no error and no toast.
+    const scheduleA = within(rowA).getByRole("button", { name: /schedule/i });
+    expect(scheduleA).toBeDisabled();
+    expect(scheduleA).toHaveAccessibleName(/already in progress for this row/i);
+
+    // Row B: never a party to row A's push, so its press must land.
+    expect(scheduleB).toBeEnabled();
     await user.click(scheduleB);
-    expect(pushStepsToGoogleTasks).not.toHaveBeenCalled();
+    expect(pushStepsToGoogleTasks).toHaveBeenCalledWith("t1", undefined);
 
     // Settle the transition before returning. An unresolved action outliving
     // the spec fires its state update during or after `afterEach(cleanup)`,
@@ -2326,7 +2316,77 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     // live again is the observable end of the transition, so waiting on it
     // needs no arbitrary timeout.
     release({ ok: true });
-    await waitFor(() => expect(scheduleB).toBeEnabled());
+    await waitFor(() => expect(scheduleA).toBeEnabled());
+  });
+
+  it("renaming a row disables no Schedule control at all — the live half of #169", async () => {
+    // The production defect, driven through the exact path a user takes.
+    //
+    // `pending` came from one `useTransition` shared by every action in the
+    // list while ONLY the Schedule controls read it, so renaming a row — which
+    // has nothing to do with scheduling, and no workspace-wide argument covers
+    // — greyed out the 📅 button on that row AND on every other row for the
+    // length of the round trip. A press landing in that window was discarded
+    // with no error, no toast and no visual explanation beyond a briefly grey
+    // control the user probably was not looking at. Completing, snoozing,
+    // deleting and dismissing a freshness prompt all did the same.
+    //
+    // Rename is the case with no defensible reading whatsoever, which is why it
+    // is the one pinned here.
+    const { renameItem } = await import("@/app/actions/braindump");
+    const { pushStepsToGoogleTasks } =
+      await import("@/app/actions/google-schedule");
+    let release!: () => void;
+    (renameItem as ReturnType<typeof vi.fn>).mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        release = () => resolve();
+      }),
+    );
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[
+          makeItem({ id: "r1", text: "old name" }),
+          makeMultiStep(),
+        ]}
+        settings={settings}
+        google={connected}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const rowB = screen.getByText("plan trip").closest("li")!;
+    const scheduleB = within(rowB).getByRole("button", { name: /schedule/i });
+    expect(scheduleB).toBeEnabled();
+
+    const rowA = screen.getByText("old name").closest("li")!;
+    await user.click(
+      within(rowA).getByRole("button", { name: "Edit old name" }),
+    );
+    const input = screen.getByRole("textbox", { name: "Edit title" });
+    await user.clear(input);
+    await user.type(input, "new name{Enter}");
+    expect(renameItem).toHaveBeenCalledWith("r1", "new name");
+
+    // The rename is still in flight. No Schedule control is a party to it —
+    // not the renaming row's, and certainly not another row's. (The title
+    // itself still reads "old name": there is no optimistic update, the row
+    // re-reads from the server on `router.refresh()`.)
+    const renamingRow = screen.getByText("old name").closest("li")!;
+    expect(
+      within(renamingRow).getByRole("button", { name: /schedule/i }),
+    ).toBeEnabled();
+    expect(scheduleB).toBeEnabled();
+
+    // And the press that used to vanish now lands.
+    await user.click(scheduleB);
+    expect(pushStepsToGoogleTasks).toHaveBeenCalledWith("t1", undefined);
+
+    // Settle the held rename before returning, for the !264 reason above.
+    await act(async () => {
+      release();
+    });
   });
 
   it("a reconnect_required response clears a stale schedule error left on another row (Duo review)", async () => {

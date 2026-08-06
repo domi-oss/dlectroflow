@@ -204,6 +204,31 @@ export function ScheduleControl({
   };
 
   const iconLabel = isIcs ? "Add to calendar (.ics)" : "Schedule";
+
+  // #169 — a disabled control has to say why it is disabled.
+  //
+  // `disabled` is still the right mechanism: it is the double-submit guard this
+  // prop was written for, and it stops the press rather than merely discouraging
+  // it. But a bare disabled button swallows a press with no error, no toast and
+  // no explanation beyond a briefly grey control, and "I pressed Schedule and
+  // nothing happened" was the whole of #169's user-visible harm.
+  //
+  // Saying why is only possible now that the reason is TRUE per row. `pending`
+  // used to be one list-wide flag set by rename, complete, snooze and delete
+  // (inbox-view.tsx), so the only honest sentence would have been "something,
+  // somewhere in this list, is busy". It now means one thing, so the control
+  // states it.
+  //
+  // Appended to the existing name rather than replacing it, for two reasons:
+  // the visible/idle name stays a stable query target, and for the `menu`
+  // variant — whose name comes from visible, voice-resolved text — an accessible
+  // name that dropped the visible label would break WCAG 2.5.3 (Label in Name).
+  const busyReason = "already in progress for this row";
+  const iconBusyLabel = pending ? `${iconLabel} — ${busyReason}` : iconLabel;
+  const menuBusyLabel = pending ? `${label} — ${busyReason}` : undefined;
+  // A disabled element is skipped by most screen readers, so the reason has to
+  // ride on the name itself; `aria-busy` is the machine-readable half.
+  const busyProps = pending ? ({ "aria-busy": true } as const) : {};
   const triggerClassName = cn(
     isMenu
       ? "hover:bg-accent w-full rounded-md px-2.5 py-1 text-left font-medium disabled:opacity-50"
@@ -222,6 +247,9 @@ export function ScheduleControl({
             key={minutes}
             type="button"
             disabled={pending}
+            // #169 — same rule as the trigger: if it is off, say why.
+            title={pending ? busyReason : undefined}
+            {...busyProps}
             className={cn(
               "hover:bg-accent rounded-md px-2.5 py-1 font-medium disabled:opacity-50",
               touchTarget,
@@ -255,6 +283,11 @@ export function ScheduleControl({
         <button
           type="button"
           disabled={pending || custom === "" || customOutOfRange}
+          // #169 — three different reasons this can be off, so name the one
+          // that applies. Out-of-range already has its own visible message
+          // below; an empty box explains itself.
+          title={pending ? busyReason : undefined}
+          {...busyProps}
           className={cn(
             "hover:bg-accent rounded-md px-2.5 py-1 font-medium disabled:opacity-50",
             touchTarget,
@@ -282,6 +315,9 @@ export function ScheduleControl({
           aria-haspopup={needsDuration ? "dialog" : undefined}
           aria-expanded={needsDuration ? open : undefined}
           disabled={pending}
+          aria-label={menuBusyLabel}
+          title={menuBusyLabel}
+          {...busyProps}
           onClick={() => {
             if (state === "ready_steps") onScheduleSteps?.();
             else if (state === "ics_ready_steps") onScheduleIcs?.();
@@ -321,9 +357,10 @@ export function ScheduleControl({
         trigger={
           <button
             type="button"
-            aria-label={iconLabel}
-            title={iconLabel}
+            aria-label={iconBusyLabel}
+            title={iconBusyLabel}
             disabled={pending}
+            {...busyProps}
             className={triggerClassName}
           >
             📅
@@ -339,9 +376,10 @@ export function ScheduleControl({
       <span ref={rootRef} className="relative">
         <button
           type="button"
-          aria-label={iconLabel}
-          title={iconLabel}
+          aria-label={iconBusyLabel}
+          title={iconBusyLabel}
           disabled={pending}
+          {...busyProps}
           onClick={() => {
             if (state === "ready_steps") onScheduleSteps?.();
             else onScheduleIcs?.(); // ics_ready_steps
@@ -365,9 +403,10 @@ export function ScheduleControl({
         onOpenChange={(nextOpen) => (nextOpen ? setOpen(true) : close())}
       >
         <Popover.Trigger
-          aria-label={iconLabel}
-          title={iconLabel}
+          aria-label={iconBusyLabel}
+          title={iconBusyLabel}
           disabled={pending}
+          {...busyProps}
           className={triggerClassName}
         >
           📅
