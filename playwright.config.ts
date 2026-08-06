@@ -193,11 +193,19 @@ const MEMBER_SPECS = /member-[\w-]+\.spec\.ts/;
  * both and nothing else; anchoring on `/e2e/` keeps a checkout that happens to
  * sit under an `a11y/` directory from matching every spec in the suite.
  *
+ * The `\.spec\.ts$` tail is load-bearing, not decoration: a project's
+ * `testMatch` REPLACES the top-level `testMatch: "**\/*.spec.ts"` rather than
+ * intersecting with it (MEMBER_SPECS above gets away with the same thing only
+ * because it spells the extension out too). Without the tail this also matched
+ * `e2e/a11y/axe-helpers.ts`, and Playwright refused to collect the suite at all
+ * — "test file a11y-contrast.spec.ts should not import test file
+ * a11y/axe-helpers.ts", once per importer.
+ *
  * Put a new gate spec in `e2e/a11y/` and it lands here. Anything else keeps
  * the retry, which is the safe direction to fail: a spec in the wrong project
  * is over-tolerant, not silently unrun.
  */
-const A11Y_SPECS = /[\\/]e2e[\\/]a11y[-\\/]/;
+const A11Y_SPECS = /[\\/]e2e[\\/]a11y[-\\/].*\.spec\.ts$/;
 
 export default defineConfig({
   testDir: "./e2e",
