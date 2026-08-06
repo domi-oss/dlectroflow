@@ -878,10 +878,20 @@ deploy_production:
     # host to the ingress and the multi-SAN cert; the 301 is a SEPARATE hardcoded
     # rule in next.config.ts matching dlectroflow.dlectronique.dev alone, so a host
     # listed here but absent from that rule is simply served. That is deliberate:
-    # Google is verifying the OAuth consent screen against https://dlectroflow.dev
-    # right now, and its homepage / privacy / terms checks want a 200, not a hop.
-    # Do NOT add the apex to the next.config.ts redirect until verification has
-    # cleared AND the apex has moved to the instance that keeps it.
+    # Google's OAuth consent-screen review fetches the homepage / privacy / terms
+    # cold and wants a 200, not a hop.
+    # Do NOT add the apex to the next.config.ts redirect until the apex has moved
+    # to the instance that keeps it.
+    #
+    # #174 carved out the ONE exception, and it is not optional: the sign-in
+    # journey (/login and the OAuth routes — CANONICAL_ORIGIN_PREFIXES in
+    # src/lib/auth/gate.ts) is redirected to PUBLIC_ORIGIN from every hostname,
+    # including the apex. "Two hostnames can be SERVED, but only one can complete
+    # a sign-in" above is exactly why: the OAuth state and PKCE cookies are
+    # host-only, so a sign-in begun on a served-but-not-canonical host looped
+    # forever on missing_oauth_params. Everything OUTSIDE those prefixes — the
+    # homepage, the privacy notice, the terms — still answers 200 on every
+    # hostname, so the reviewer's cold fetch is unaffected.
     #
     # Both hostnames must also be in cert-manager's hostAliases or the HTTP-01
     # self-check never completes on GKE and the cert silently never issues —

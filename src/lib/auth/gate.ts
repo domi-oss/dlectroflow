@@ -65,6 +65,41 @@ export const OWNER_ONLY_PREFIXES: readonly string[] = [];
  */
 export const AUTHENTICATED_PREFIXES = ["/api/account/", "/api/google/oauth/"];
 
+/**
+ * Paths that only work on the ONE origin PUBLIC_ORIGIN names, and are therefore
+ * redirected there from any other hostname (#174).
+ *
+ * A fourth, orthogonal category: this is about *where* a path is served, not
+ * who may reach it. Everything here either sets or reads a cookie written with
+ * no `Domain` attribute — the PKCE verifier, the OAuth state, the session — and
+ * such a cookie is **host-only**. The app answers on more than one hostname,
+ * but the provider always returns the browser to PUBLIC_ORIGIN, because that is
+ * what the redirect URI is built from (src/lib/origin.ts `requestOrigin`). So a
+ * sign-in begun anywhere else set its cookies on a host the callback never
+ * reached, failed `missing_oauth_params`, and looped forever with no way out.
+ *
+ * **Deliberately not the whole app.** `/`, `/privacy` and `/terms` must keep
+ * answering 200 on every hostname the ingress serves — see the reasoning in
+ * `.gitlab-ci.yml`'s `deploy_production` — so this is the narrow set that has
+ * to move, not a blanket canonical-host redirect. It is also why the two
+ * Kubernetes probe paths need no exemption: they are outside these prefixes, so
+ * a probe addressing the pod by IP is never redirected. A 3xx counts as a pass
+ * to the kubelet, which would make readiness green without /api/health ever
+ * running its `SELECT 1`.
+ *
+ * `/login` is in the list so the whole visible journey — the button, the
+ * provider hop, the callback and any error page — happens on one origin, rather
+ * than starting on one hostname and silently finishing on another.
+ *
+ * Matching is exact-or-`prefix + "/"`, as PUBLIC_PREFIXES above, so `/login`
+ * here does not also catch `/loginhack`.
+ */
+export const CANONICAL_ORIGIN_PREFIXES = [
+  "/api/auth/",
+  "/api/google/oauth/",
+  "/login",
+];
+
 export function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some(
     (p) => pathname === p || pathname.startsWith(p.endsWith("/") ? p : p + "/"),
@@ -77,4 +112,10 @@ export function isOwnerOnlyPath(pathname: string): boolean {
 
 export function isAuthenticatedOnlyPath(pathname: string): boolean {
   return AUTHENTICATED_PREFIXES.some((p) => pathname.startsWith(p));
+}
+
+export function isCanonicalOriginPath(pathname: string): boolean {
+  return CANONICAL_ORIGIN_PREFIXES.some(
+    (p) => pathname === p || pathname.startsWith(p.endsWith("/") ? p : p + "/"),
+  );
 }

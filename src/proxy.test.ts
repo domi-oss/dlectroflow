@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
-import { requestOrigin } from "@/lib/origin";
+import { requestOrigin, canonicalOriginRedirect } from "@/lib/origin";
 import {
   GUEST_COOKIE,
   OWNER_COOKIE,
@@ -262,6 +262,98 @@ describe("proxy: a signed-in user is never also minted a guest", () => {
 
   it("still mints a guest sandbox for an anonymous visitor", async () => {
     const res = await proxy(new NextRequest("https://dlectroflow.dev/"));
+    expect(res.cookies.get(GUEST_COOKIE)?.value).toBeTruthy();
+  });
+});
+
+// #174 — the canonical-origin redirect runs FIRST, ahead of every session
+// decision. A sign-in begun on an off-canonical hostname sets its PKCE verifier
+// and state cookies there and can never complete, because the provider returns
+// the browser to the PUBLIC_ORIGIN host, where host-only cookies are not sent.
+describe("proxy: canonical-origin redirect", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.AUTH_SESSION_SECRET = SECRET;
+    vi.mocked(requestOrigin).mockReturnValue("https://canonical.example");
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("307s an off-canonical request to the target the helper computed", async () => {
+    vi.mocked(canonicalOriginRedirect).mockReturnValue(
+      "https://canonical.example/login?error=x",
+    );
+
+    const res = await proxy(new NextRequest("https://legacy.example/login"));
+
+    // 307, not 308: a permanent redirect between two hostnames the deployment
+    // can re-point is cached by the browser, and flipping the canonical host
+    // afterwards leaves a cache-only loop no reload can clear.
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(
+      "https://canonical.example/login?error=x",
+    );
+  });
+
+  it("is passed the inbound Host header, the pathname and the query", async () => {
+    vi.mocked(canonicalOriginRedirect).mockReturnValue(null);
+
+    await proxy(
+      new NextRequest("https://legacy.example/api/auth/gitlab/start?next=%2Fa"),
+    );
+
+    expect(canonicalOriginRedirect).toHaveBeenCalledWith({
+      host: "legacy.example",
+      pathname: "/api/auth/gitlab/start",
+      search: "?next=%2Fa",
+    });
+  });
+
+  it("prefers x-forwarded-host, and takes only its first entry", async () => {
+    // Mirrors requestOrigin(): behind the ingress the pod's own Host header is
+    // useless, and a forwarded chain arrives comma-separated.
+    vi.mocked(canonicalOriginRedirect).mockReturnValue(null);
+
+    await proxy(
+      new NextRequest("https://pod.internal/x", {
+        headers: { "x-forwarded-host": "legacy.example, proxy.internal" },
+      }),
+    );
+
+    expect(canonicalOriginRedirect).toHaveBeenCalledWith(
+      expect.objectContaining({ host: "legacy.example" }),
+    );
+  });
+
+  it("mints no guest cookie on the way out — it would land on the wrong host", async () => {
+    vi.mocked(canonicalOriginRedirect).mockReturnValue(
+      "https://canonical.example/",
+    );
+
+    const res = await proxy(new NextRequest("https://legacy.example/"));
+
+    expect(res.cookies.get(GUEST_COOKIE)).toBeUndefined();
+  });
+
+  it("redirects before the /login bounce, so an off-canonical guest is not sent to a login page it cannot use", async () => {
+    vi.mocked(canonicalOriginRedirect).mockReturnValue(
+      "https://canonical.example/api/account/export",
+    );
+
+    const res = await proxy(
+      new NextRequest("https://legacy.example/api/account/export"),
+    );
+
+    expect(res.headers.get("location")).toBe(
+      "https://canonical.example/api/account/export",
+    );
+  });
+
+  it("leaves a canonical request completely alone", async () => {
+    vi.mocked(canonicalOriginRedirect).mockReturnValue(null);
+
+    const res = await proxy(new NextRequest("https://canonical.example/"));
+
+    expect(res.status).toBe(200);
     expect(res.cookies.get(GUEST_COOKIE)?.value).toBeTruthy();
   });
 });
