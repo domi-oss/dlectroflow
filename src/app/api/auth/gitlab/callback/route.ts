@@ -9,6 +9,7 @@ import {
   USER_SESSION_TTL_SECONDS,
 } from "@/lib/auth/session";
 import { requestOrigin } from "@/lib/origin";
+import { recordAuthFailure } from "@/lib/observability";
 
 export const runtime = "nodejs";
 
@@ -24,6 +25,17 @@ export async function GET(req: Request): Promise<Response> {
   const verifier = jar.get("gitlab_pkce_verifier")?.value;
 
   const fail = (reason: string) => {
+    // Every branch below logs, because the alternative is #174: an owner
+    // reporting a sign-in that "hangs", and nothing on the server side to read
+    // but an ingress access log. `host` is deliberately the request's own Host
+    // rather than `origin` — `origin` is derived and would report the canonical
+    // hostname even when the mismatch between the two IS the failure.
+    recordAuthFailure({
+      reason,
+      host: req.headers.get("host"),
+      hadState: Boolean(expectedState),
+      hadVerifier: Boolean(verifier),
+    });
     const res = NextResponse.redirect(
       `${origin}/login?error=${encodeURIComponent(reason)}`,
     );

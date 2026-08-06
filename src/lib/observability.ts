@@ -51,6 +51,52 @@ export function recordLLMFailure(
   }
 }
 
+/**
+ * One structured, greppable line per failed sign-in (#174).
+ *
+ * Diagnosing #174 took an ingress access log and a `referer` field, because the
+ * app itself said nothing at all when a sign-in failed — every `fail()` branch
+ * redirected to `/login?error=…` and logged nothing. `host` is the field that
+ * would have answered it alone: a callback arriving on a hostname other than
+ * `PUBLIC_ORIGIN`'s is the entire bug, and nothing was recording it.
+ *
+ * Deliberately **not** counted like {@link recordLLMFailure}. That counter is
+ * surfaced on /api/livez and means "the LLM provider is down and every
+ * breakdown is falling back". A wrong password or a stale state cookie is not
+ * a health signal, and folding it in would make the probe lie.
+ *
+ * `warn`, not `error`: every branch here is a *handled* outcome the user is
+ * told about, and printing handled outcomes at error level is what #158 is
+ * about.
+ */
+export type AuthFailure = {
+  /** Machine-readable branch name, e.g. `missing_oauth_params`. */
+  reason: string;
+  /** The `Host` the request actually arrived on, or null if absent. */
+  host: string | null;
+  hadState?: boolean;
+  hadVerifier?: boolean;
+};
+
+export function recordAuthFailure(failure: AuthFailure): void {
+  try {
+    console.warn(
+      JSON.stringify({
+        tag: "auth_failure",
+        reason: failure.reason,
+        host: failure.host ?? null,
+        hadState: failure.hadState,
+        hadVerifier: failure.hadVerifier,
+        ts: new Date().toISOString(),
+      }),
+    );
+  } catch {
+    // Observability must never take the request down with it. Notably: the
+    // caller controls these values, so an unserialisable one must not turn a
+    // failed sign-in into a 500 on top of it.
+  }
+}
+
 /** @deprecated Use {@link llmFailureCount}. Kept for one release (#59). */
 export const anthropicFailureCount = llmFailureCount;
 

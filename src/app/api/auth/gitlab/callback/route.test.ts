@@ -238,3 +238,68 @@ describe("gitlab oauth callback — telling a lost attempt from a broken one", (
     );
   });
 });
+
+// #174 — the whole reason this bug took an ingress access log to diagnose is
+// that the callback failed silently. These assert the log line exists and
+// carries the two fields that would have answered it: the reason, and the host
+// the request actually arrived on.
+describe("gitlab oauth callback — failure telemetry (#174)", () => {
+  const emptyJar = { get: () => undefined };
+
+  const warned = () =>
+    vi
+      .mocked(console.warn)
+      .mock.calls.map((c) => JSON.parse(c[0] as string))
+      .filter((l) => l.tag === "auth_failure");
+
+  beforeEach(() => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("emits one auth_failure line naming the reason", async () => {
+    cookiesMock.mockResolvedValue(emptyJar);
+
+    await GET(new Request(CALLBACK_URL));
+
+    expect(warned()).toHaveLength(1);
+    expect(warned()[0]).toMatchObject({ reason: "expired" });
+  });
+
+  // The field that IS the bug. `origin` is derived and would report the
+  // canonical hostname on every request, including the ones whose whole problem
+  // is that they arrived somewhere else — so the Host header is read directly.
+  it("records the host the request actually arrived on, not the canonical one", async () => {
+    cookiesMock.mockResolvedValue(emptyJar);
+
+    await GET(
+      new Request(CALLBACK_URL, { headers: { host: "dlectroflow.dev" } }),
+    );
+
+    expect(warned()[0]).toMatchObject({ host: "dlectroflow.dev" });
+  });
+
+  // Distinguishes "the cookies were never set" from "they were set and one did
+  // not match" without needing a second log line or a second reason string.
+  it("says which of the two cookies survived", async () => {
+    await GET(
+      new Request(
+        "https://dlectroflow.test/api/auth/gitlab/callback?code=c&state=wrong",
+      ),
+    );
+
+    expect(warned()[0]).toMatchObject({
+      reason: "state_mismatch",
+      hadState: true,
+      hadVerifier: true,
+    });
+  });
+
+  it("stays quiet on a successful sign-in", async () => {
+    provisionMock.mockResolvedValue({ ok: true, userId: "u1" });
+
+    await GET(new Request(CALLBACK_URL));
+
+    expect(warned()).toEqual([]);
+  });
+});
