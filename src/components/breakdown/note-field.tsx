@@ -27,6 +27,28 @@ export type NoteSaveResult =
 const COUNTER_VISIBLE_BELOW = 200;
 
 /**
+ * Clamp typed input to the budget, IN CODE POINTS (!270).
+ *
+ * The unit is the whole point. `TASK_NOTE_MAX_LENGTH` is 2000 CODE POINTS —
+ * that is what `char_length()` counts in `Task_notes_check` and what `[...s]`
+ * counts in `normalizeTaskNote`. A `maxLength` attribute counts UTF-16 CODE
+ * UNITS instead, so on a note of emoji (🧠 is one code point, two units) the
+ * browser stopped accepting input at half the real budget while the counter,
+ * correctly measuring code points, still reported a thousand left.
+ *
+ * Fixed by moving the binding guard here rather than by moving the counter to
+ * code units: the counter was the half that already agreed with the column.
+ *
+ * No trimming — that belongs to `normalizeTaskNote` on the way to the
+ * database. Trimming mid-keystroke would eat the space the user just typed.
+ */
+function clampToBudget(value: string): string {
+  const points = [...value];
+  if (points.length <= TASK_NOTE_MAX_LENGTH) return value;
+  return points.slice(0, TASK_NOTE_MAX_LENGTH).join("");
+}
+
+/**
  * A saved note, rendered as read-only text.
  *
  * Shared rather than inlined because there are two places a note is READ without
@@ -309,7 +331,14 @@ export function NoteField({
           ref={fieldRef}
           value={note}
           rows={dense ? 2 : 3}
-          maxLength={TASK_NOTE_MAX_LENGTH}
+          // DOUBLE the budget, and not the budget itself. The attribute counts
+          // UTF-16 code units while the column counts code points, so set to
+          // 2000 it truncated a note of emoji at half its allowance (!270).
+          // A code point is at most two units, so 2x is the largest a
+          // within-budget value can be — the ceiling is real (it still stops a
+          // runaway paste if the clamp below never runs) but it can no longer
+          // bind before `clampToBudget` does.
+          maxLength={TASK_NOTE_MAX_LENGTH * 2}
           placeholder={t("note.placeholder", voice)}
           // The accessible NAME, and load-bearing now that the visible label is
           // gone: the placeholder is not a name (unreliable across assistive
@@ -318,7 +347,7 @@ export function NoteField({
           aria-label={`${fieldLabel} for ${subject}`}
           aria-describedby={showCounter ? `${hintId} ${counterId}` : hintId}
           onChange={(e) => {
-            setNote(e.target.value);
+            setNote(clampToBudget(e.target.value));
             scheduleSave();
           }}
           onBlur={flushPending}

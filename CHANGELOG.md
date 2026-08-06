@@ -61,12 +61,12 @@ operators upgrading a self-hosted instance don't get surprised.
   alongside the focus deep-link, so the reminder arrives carrying its own
   context instead of just a title.
 
-  **Collapsed until you want it.** With no note there is only a compact "Add
-  note"; once a note exists it is shown as text, so coming back to a task never
+  **Collapsed until you want it.** With no note there is only a compact "Note"
+  button; once a note exists it is shown as text, so coming back to a task never
   costs a tap to read what you wrote. It is a proper disclosure — keyboard
   operable, focus moves into the field when it opens and back to the trigger on
   Escape, and each control is named after the task or step it belongs to rather
-  than being one of a dozen buttons all called "Add note". Saving is automatic;
+  than being one of a dozen buttons all called "Note". Saving is automatic;
   there is no Save button.
 
   **Where both a task note and a step note exist, the scheduled item carries

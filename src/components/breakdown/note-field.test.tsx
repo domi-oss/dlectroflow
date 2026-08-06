@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  cleanup,
+  waitFor,
+  fireEvent,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   NoteField,
@@ -262,8 +268,58 @@ describe("NoteField — expanding", () => {
     const user = userEvent.setup();
     renderField();
     await user.click(screen.getByRole("button", { name: /^note for/i }));
+    // ASCII: one character is one code point is one UTF-16 unit, so every unit
+    // agrees and this says nothing about WHICH unit is enforced. The emoji
+    // spec below is the one that pins that down.
+    const box = screen.getByRole("textbox") as HTMLTextAreaElement;
+    fireEvent.change(box, {
+      target: { value: "y".repeat(TASK_NOTE_MAX_LENGTH + 50) },
+    });
+    expect(box.value).toHaveLength(TASK_NOTE_MAX_LENGTH);
+  });
+
+  it("bounds typed input in CODE POINTS, the unit the column enforces (!270)", async () => {
+    // Duo review (!270) spotted the counter and the `maxLength` attribute
+    // disagreeing for emoji, and proposed moving the counter to UTF-16 units
+    // to match the attribute. That is backwards: the BOUND is 2000 code
+    // points — `char_length()` in `Task_notes_check`, and `[...cleaned]` in
+    // `normalizeTaskNote` — and it is the attribute that was in the wrong
+    // unit. Matching the counter to it would have told an emoji user they
+    // were out of budget with half of it unspent.
+    //
+    // 🧠 is ONE code point and TWO UTF-16 units, so it separates the two.
+    const user = userEvent.setup();
+    renderField();
+    await user.click(screen.getByRole("button", { name: /^note for/i }));
+    const box = screen.getByRole("textbox") as HTMLTextAreaElement;
+
+    fireEvent.change(box, {
+      target: { value: "🧠".repeat(TASK_NOTE_MAX_LENGTH + 1) },
+    });
+
+    // Clamped to the budget in code points — NOT to 1000 emoji, which is what
+    // a code-unit bound of 2000 would have allowed.
+    expect([...box.value]).toHaveLength(TASK_NOTE_MAX_LENGTH);
+    expect(box.value.length).toBe(TASK_NOTE_MAX_LENGTH * 2);
+
+    // And the counter agrees with what the field just did, rather than
+    // reporting budget the user cannot actually spend.
+    expect(screen.getByTestId("note-counter").textContent).toContain(
+      "0 characters left",
+    );
+  });
+
+  it("keeps a native ceiling that can never bind before the clamp (!270)", async () => {
+    // The attribute is kept as a defence-in-depth ceiling for a broken-JS
+    // state, at DOUBLE the budget: a code point is at most two UTF-16 units,
+    // so 2 x the code-point budget is the largest the value can legitimately
+    // get, and the attribute therefore cannot truncate anything the clamp
+    // would have allowed.
+    const user = userEvent.setup();
+    renderField();
+    await user.click(screen.getByRole("button", { name: /^note for/i }));
     expect(screen.getByRole("textbox").getAttribute("maxLength")).toBe(
-      String(TASK_NOTE_MAX_LENGTH),
+      String(TASK_NOTE_MAX_LENGTH * 2),
     );
   });
 
