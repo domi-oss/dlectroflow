@@ -556,10 +556,13 @@ describe("useFocusSound — category pools (#70, multi-select #180)", () => {
     expect(ids.size).toBe(GROWN.length);
   });
 
-  it("switching category mid-session moves the ELEMENT, not just the label", () => {
-    // The desync this exists to stop: both categories hold two tracks, so a
-    // guard that only watches the playlist's LENGTH sees nothing, leaves the
-    // element on the old source, and reports a track that is not playing.
+  it("switching category mid-session keeps the LABEL on what is really playing (#181)", () => {
+    // #180 fixed this desync by moving the ELEMENT to match the label. #181
+    // reverses the direction — a stray tap must not silence you mid-bar — so the
+    // label follows the element instead: the chillhop track goes on playing and
+    // `track` goes on naming it. The thing that must never happen either way is
+    // reporting a track that is not the one coming out of the speakers, and both
+    // categories hold two tracks here, so a length-keyed guard still sees nothing.
     const { result, rerender } = renderHook(
       ({ category }: { category: string }) =>
         useFocusSound({ categories: category ? [category] : [] }),
@@ -570,10 +573,8 @@ describe("useFocusSound — category pools (#70, multi-select #180)", () => {
 
     rerender({ category: "jazzhop" });
 
-    expect(result.current.track?.id).toBe(jazzhopTrack.id);
-    expect(player.load).toHaveBeenCalledWith(jazzhopTrack.src);
-    // A switch is a deliberate "play something else", so it does interrupt —
-    // but it must not stop the session.
+    expect(result.current.track?.id).toBe(chillhopTrack.id);
+    expect(player.load).not.toHaveBeenCalled();
     expect(result.current.playing).toBe(true);
   });
 
@@ -587,10 +588,13 @@ describe("useFocusSound — category pools (#70, multi-select #180)", () => {
     act(() => result.current.next()); // exhaust the chillhop pass
     rerender({ category: "jazzhop" });
 
-    // A fresh two-track pass over jazz hop: neither entry may be a chillhop one,
-    // and the pass must not wrap early because the OLD heard-set said it was
-    // already exhausted.
-    const heard = [result.current.track!.id];
+    // #181 — what is audible carries on (the streamed chillhop track), and then
+    // a fresh two-track pass over jazz hop: no chillhop entry, no repeat, and no
+    // early wrap from the OLD heard-set saying the pass was already exhausted.
+    expect(result.current.track?.id).toBe("catalog:paper-cranes.mp3");
+    const heard: string[] = [];
+    act(() => result.current.next());
+    heard.push(result.current.track!.id);
     act(() => result.current.next());
     heard.push(result.current.track!.id);
     expect(new Set(heard).size).toBe(2);
@@ -631,5 +635,247 @@ describe("useFocusSound — category pools (#70, multi-select #180)", () => {
     // ...and the pass now reaches the track that just arrived.
     act(() => result.current.next());
     expect(result.current.track?.id).toBe("catalog:paper-cranes.mp3");
+  });
+});
+
+/**
+ * #181 — the two things the in-session player asks of this hook: jump to a named
+ * track, and survive the playlist being re-ticked underneath a playing session.
+ */
+describe("useFocusSound — jump + re-tick from the player (#181)", () => {
+  const streamed = (name: string, category: string, label: string) => ({
+    id: `catalog:${name}.mp3`,
+    title: name,
+    category,
+    categoryLabel: label,
+    src: `/api/focus-catalog/audio?track=${name}.mp3`,
+  });
+
+  const GROWN = [
+    ...FOCUS_SOUND_TRACKS,
+    streamed("paper-cranes", "chillhop", "Chillhop"),
+    streamed("terrace-dust", "jazzhop", "Jazz hop"),
+  ];
+  const chillhopTrack = FOCUS_SOUND_TRACKS.find(
+    (t) => t.category === "chillhop",
+  )!;
+  const jazzhopTrack = FOCUS_SOUND_TRACKS.find(
+    (t) => t.category === "jazzhop",
+  )!;
+
+  beforeEach(() => useFocusCatalogMock.mockReturnValue(GROWN));
+
+  it("exposes the catalogue and the resolved pool for the panel to draw", () => {
+    const { result } = renderHook(() =>
+      useFocusSound({ categories: ["chillhop"] }),
+    );
+    // The tick-list counts are read off the whole catalogue; the jump-list is
+    // read off the pool. Both come from here so the panel never re-resolves one
+    // of them from a second source that could disagree.
+    expect(result.current.catalog).toBe(GROWN);
+    expect(result.current.pool.map((t) => t.id)).toEqual([
+      chillhopTrack.id,
+      "catalog:paper-cranes.mp3",
+    ]);
+  });
+
+  it("jumpTo() plays the named track and continues from there through the pool", () => {
+    const { result } = renderHook(() => useFocusSound());
+    act(() => result.current.play());
+    player.load.mockClear();
+
+    act(() => result.current.jumpTo(jazzhopTrack.id));
+
+    expect(result.current.track?.id).toBe(jazzhopTrack.id);
+    expect(player.load).toHaveBeenCalledWith(jazzhopTrack.src);
+    // "…and continues from there": the next advance is the pool's NEXT entry,
+    // not a restart at the head.
+    act(() => result.current.next());
+    expect(result.current.track?.id).toBe(GROWN[3].id);
+  });
+
+  it("jumpTo() under shuffle deals the chosen track to the head of a full pass", () => {
+    // The `startAt` contract, reused rather than reinvented: every track still
+    // appears exactly once, and the chosen one is first.
+    const { result } = renderHook(() => useFocusSound({ shuffle: true }));
+    act(() => result.current.play());
+    act(() => result.current.jumpTo(jazzhopTrack.id));
+    expect(result.current.track?.id).toBe(jazzhopTrack.id);
+
+    const heard = new Set([result.current.track!.id]);
+    for (let i = 1; i < GROWN.length; i++) {
+      act(() => result.current.next());
+      heard.add(result.current.track!.id);
+    }
+    expect(heard.size).toBe(GROWN.length);
+  });
+
+  it("jumpTo() leaves the transport alone — a paused session stays paused", () => {
+    // Same contract as next()/prev(): the panel's click says "make this the
+    // current track", never "start my music". Starting it would also break the
+    // #43 coupling, which is the only thing allowed to resume audio mid-session.
+    const { result } = renderHook(() => useFocusSound());
+    act(() => result.current.jumpTo(jazzhopTrack.id));
+    expect(result.current.track?.id).toBe(jazzhopTrack.id);
+    expect(result.current.playing).toBe(false);
+    expect(player.play).not.toHaveBeenCalled();
+  });
+
+  it("jumpTo() ignores a track that is not in the pool", () => {
+    const { result } = renderHook(() =>
+      useFocusSound({ categories: ["chillhop"] }),
+    );
+    act(() => result.current.play());
+    player.load.mockClear();
+
+    act(() => result.current.jumpTo(jazzhopTrack.id));
+    act(() => result.current.jumpTo("no-such-track"));
+
+    expect(result.current.track?.id).toBe(chillhopTrack.id);
+    expect(player.load).not.toHaveBeenCalled();
+  });
+
+  it("unticking the playing track's playlist does not cut the audio", () => {
+    // The whole point: a stray tap must not silence you mid-bar. The track
+    // finishes; only what comes AFTER it is drawn from the new pool.
+    const { result, rerender } = renderHook(
+      ({ categories }: { categories: string[] }) =>
+        useFocusSound({ categories }),
+      { initialProps: { categories: ["chillhop", "jazzhop"] } },
+    );
+    act(() => result.current.play());
+    expect(result.current.track?.id).toBe(chillhopTrack.id);
+    player.load.mockClear();
+
+    rerender({ categories: ["jazzhop"] });
+
+    expect(player.load).not.toHaveBeenCalled();
+    expect(player.pause).not.toHaveBeenCalled();
+    expect(player.stop).not.toHaveBeenCalled();
+    expect(result.current.playing).toBe(true);
+    // …and it still says what is audible, rather than a jazz hop track it is not
+    // playing.
+    expect(result.current.track?.id).toBe(chillhopTrack.id);
+  });
+
+  it("the next advance after an untick comes from the new pool", () => {
+    const { result, rerender } = renderHook(
+      ({ categories }: { categories: string[] }) =>
+        useFocusSound({ categories }),
+      { initialProps: { categories: ["chillhop", "jazzhop"] } },
+    );
+    act(() => result.current.play());
+    rerender({ categories: ["jazzhop"] });
+
+    act(() => result.current.next());
+    expect(result.current.track?.id).toBe(jazzhopTrack.id);
+    expect(player.load).toHaveBeenCalledWith(jazzhopTrack.src);
+    // The pass over the new pool is whole — both jazz hop tracks, no repeat.
+    act(() => result.current.next());
+    expect(result.current.track?.id).toBe("catalog:terrace-dust.mp3");
+  });
+
+  it("a track ENDING after an untick advances into the new pool", () => {
+    // The realistic path: the user unticks and then simply lets the track run
+    // out. The element's own `ended` has to land in the new pool, not replay
+    // something that is no longer in it.
+    const { result, rerender } = renderHook(
+      ({ categories }: { categories: string[] }) =>
+        useFocusSound({ categories }),
+      { initialProps: { categories: ["chillhop", "jazzhop"] } },
+    );
+    act(() => result.current.play());
+    rerender({ categories: ["jazzhop"] });
+
+    endTrack();
+
+    expect(result.current.track?.id).toBe(jazzhopTrack.id);
+  });
+
+  it("re-ticking the playlist while its track is still audible re-adopts it", () => {
+    // The switch must never be destructive, so untick-then-tick has to land back
+    // where it started: still playing, still named, and the pass re-dealt AROUND
+    // it rather than restarted.
+    const { result, rerender } = renderHook(
+      ({ categories }: { categories: string[] }) =>
+        useFocusSound({ categories }),
+      { initialProps: { categories: ["chillhop", "jazzhop"] } },
+    );
+    act(() => result.current.play());
+    rerender({ categories: ["jazzhop"] });
+    player.load.mockClear();
+
+    rerender({ categories: ["chillhop", "jazzhop"] });
+
+    expect(player.load).not.toHaveBeenCalled();
+    expect(result.current.playing).toBe(true);
+    expect(result.current.track?.id).toBe(chillhopTrack.id);
+    // Re-adopted, not orphaned: the advance continues through the pool from
+    // where the current track sits, rather than from its head.
+    act(() => result.current.next());
+    expect(result.current.track?.id).toBe(jazzhopTrack.id);
+  });
+
+  it("unticking before anything has played opens the new pool at its head", () => {
+    // No element yet means there is nothing to protect, and pretending a silent
+    // session is mid-track would leave `track` naming something the next Start
+    // would not play.
+    const { result, rerender } = renderHook(
+      ({ categories }: { categories: string[] }) =>
+        useFocusSound({ categories }),
+      { initialProps: { categories: ["chillhop", "jazzhop"] } },
+    );
+    rerender({ categories: ["jazzhop"] });
+    expect(result.current.track?.id).toBe(jazzhopTrack.id);
+
+    act(() => result.current.play());
+    expect(createPlaylistPlayer).toHaveBeenCalledWith(
+      jazzhopTrack.src,
+      expect.anything(),
+    );
+  });
+
+  it("toggling shuffle while an unticked track is still audible does not interrupt it", () => {
+    const { result, rerender } = renderHook(
+      ({ categories }: { categories: string[] }) =>
+        useFocusSound({ categories }),
+      { initialProps: { categories: ["chillhop", "jazzhop"] } },
+    );
+    act(() => result.current.play());
+    rerender({ categories: ["jazzhop"] });
+    player.load.mockClear();
+
+    act(() => result.current.toggleShuffle());
+
+    expect(player.load).not.toHaveBeenCalled();
+    expect(result.current.track?.id).toBe(chillhopTrack.id);
+    // The re-dealt pass still covers the new pool in full.
+    const heard = new Set<string>();
+    act(() => result.current.next());
+    heard.add(result.current.track!.id);
+    act(() => result.current.next());
+    heard.add(result.current.track!.id);
+    expect(heard).toEqual(
+      new Set([jazzhopTrack.id, "catalog:terrace-dust.mp3"]),
+    );
+  });
+
+  it("jumping clears the unticked track and rejoins the pool", () => {
+    const { result, rerender } = renderHook(
+      ({ categories }: { categories: string[] }) =>
+        useFocusSound({ categories }),
+      { initialProps: { categories: ["chillhop", "jazzhop"] } },
+    );
+    act(() => result.current.play());
+    rerender({ categories: ["jazzhop"] });
+
+    act(() => result.current.jumpTo("catalog:terrace-dust.mp3"));
+
+    expect(result.current.track?.id).toBe("catalog:terrace-dust.mp3");
+    expect(player.load).toHaveBeenCalledWith(
+      "/api/focus-catalog/audio?track=terrace-dust.mp3",
+    );
+    act(() => result.current.next());
+    expect(result.current.track?.id).toBe(jazzhopTrack.id);
   });
 });
