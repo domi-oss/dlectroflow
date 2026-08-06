@@ -374,8 +374,8 @@ export function FocusTimer({
   // changed. See the effect below for why it is not the auto-advance panel.
   const doneSummaryRef = useRef<HTMLDivElement | null>(null);
   // #23 — the celebration line is rolled when the step is actually completed
-  // (an event), not during render into a ref: Math.random() in render is impure
-  // (react-hooks/purity) and reading a ref during render is unsafe
+  // (an event), not during render into a ref: an unseeded random draw in render
+  // is impure (react-hooks/purity) and reading a ref during render is unsafe
   // (react-hooks/refs) — under the React compiler a render could be repeated or
   // discarded, so a "stable" ref read is not guaranteed stable. The initial
   // value is never shown: `done` is only reachable through finishComplete.
