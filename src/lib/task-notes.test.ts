@@ -1,15 +1,41 @@
 import { describe, it, expect } from "vitest";
 import { TASK_NOTE_MAX_LENGTH, normalizeTaskNote } from "./task-notes";
+import { buildScheduleNote } from "./scheduling/note";
 
 describe("TASK_NOTE_MAX_LENGTH", () => {
   it("leaves room for the whole composed envelope inside Google's 8192 cap", () => {
     // The bound is not arbitrary, and the reasoning is pinned here as well as in
-    // 20260805120000_task_notes: the scheduled artifact carries a context line +
-    // the user note + the focus prompt + an absolute URL, and the Google Tasks
-    // API rejects a `notes` value over 8192 characters. A bound that could fill
-    // that cap on its own would turn a long note into a failed schedule.
+    // 20260805120000_task_and_step_notes: the scheduled artifact carries a
+    // context line + the task note + the step note + the focus prompt + an
+    // absolute URL, and the Google Tasks API rejects a `notes` value over 8192
+    // characters. A bound that could fill that cap would turn a long note into
+    // a FAILED schedule rather than a truncated one.
+    //
+    // Duo review (!270): this used to assert `TASK_NOTE_MAX_LENGTH * 4 < 8192`,
+    // which is the SINGLE-note margin. Since #44 ships both grains, the binding
+    // case is both notes full at once, and the 4x figure both overstated the
+    // headroom's meaning and contradicted `scheduling/note.ts`, which already
+    // said 2x.
     expect(TASK_NOTE_MAX_LENGTH).toBe(2000);
-    expect(TASK_NOTE_MAX_LENGTH * 4).toBeLessThan(8192);
+
+    // Measured against a real composed artifact rather than a restatement of
+    // the arithmetic — the envelope is whatever `buildScheduleNote` actually
+    // emits, plus the context line `encode-reclaim.ts` puts in front of it.
+    // A guessed constant here would drift the moment either string changes.
+    const full = "y".repeat(TASK_NOTE_MAX_LENGTH);
+    const context = `${"t".repeat(200)} — step 99 of 99 · est. 120m`;
+    const composed = `${context}\n${buildScheduleNote({
+      origin: "https://dlectroflow.dev",
+      voice: "playful",
+      stepId: "c".repeat(30),
+      taskNote: full,
+      stepNote: `${full}!`, // differs, so the dedupe cannot collapse the two
+    })}`;
+
+    expect(composed.length).toBeLessThan(8192);
+    // And the headroom is the ~2x the comments claim, not the ~4x they used to.
+    expect(8192 / composed.length).toBeGreaterThan(1.8);
+    expect(8192 / composed.length).toBeLessThan(2.2);
   });
 });
 

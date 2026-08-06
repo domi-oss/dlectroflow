@@ -6,9 +6,13 @@
  * client field that bounds what can be typed, and the DB CHECK constraint whose
  * bound this file has to agree with.
  *
- * #44 ships TASK-level notes only. Step-level notes are a real ask in the same
- * issue and were deliberately deferred, so nothing here is named for `Task` —
- * a later `Step.notes` reuses the constant and the normaliser unchanged.
+ * #44 ships notes at BOTH grains, `Task.notes` and `Step.notes`. This module is
+ * grain-neutral in substance: `step-notes.ts` imports this constant and this
+ * normaliser unchanged rather than declaring a second bound, and both DB CHECK
+ * constraints are asserted against this one number. The `Task` prefix on the
+ * names is historical — it dates from the plan in which the step grain was a
+ * later issue, and it survives because the column, the constraints and both
+ * server actions already reference it (!270).
  */
 
 /**
@@ -18,10 +22,15 @@
  * 2000, and the binding constraint is Google, not us. A scheduled task's note
  * is threaded into the Google Task `notes` field, which the Tasks API caps at
  * **8192 characters** and rejects above; the value written there is the context
- * line + this note + the focus prompt + an absolute deep-link URL, so the note
- * cannot be allowed to fill the cap on its own or a long note turns into a
- * failed schedule rather than a truncated one. 2000 leaves the envelope roughly
- * a 4x margin.
+ * line + the TASK note + the STEP note + the focus prompt + an absolute
+ * deep-link URL, so a note cannot be allowed to fill the cap on its own or a
+ * long one turns into a failed schedule rather than a truncated one.
+ *
+ * 2000 is per grain, so the binding case is BOTH notes full at once — 4000
+ * characters plus the envelope — which leaves roughly a 2x margin, not the 4x
+ * a single note would suggest. `src/lib/scheduling/note.ts` states the same
+ * figure, and the colocated test measures it against a real composed artifact
+ * rather than restating the arithmetic (!270).
  *
  * The ICS path has no equivalent cap — RFC 5545 bounds a *content line* at 75
  * octets and folds beyond that (`foldLine` in src/lib/ics.ts), not the value —
