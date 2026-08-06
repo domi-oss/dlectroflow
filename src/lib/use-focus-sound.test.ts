@@ -775,6 +775,31 @@ describe("useFocusSound — jump + re-tick from the player (#181)", () => {
     expect(result.current.track?.id).toBe("catalog:terrace-dust.mp3");
   });
 
+  it("prev() after an untick goes to the new pool's TAIL, like any other run off the head", () => {
+    // The pass dealt over the new pool has not been entered yet (cursor -1), so
+    // prev() runs off its head. #68's rule for that is "go to the tail of the
+    // SAME pass — a deliberate user tap is never a reason to re-deal", and an
+    // unticked track is not an exception to it. Stated as a test because the
+    // alternative (snapping to the head) would make prev() and next() do the
+    // same thing here, which is the one answer that is definitely wrong.
+    const { result, rerender } = renderHook(
+      ({ categories }: { categories: string[] }) =>
+        useFocusSound({ categories }),
+      { initialProps: { categories: ["chillhop", "jazzhop"] } },
+    );
+    act(() => result.current.play());
+    rerender({ categories: ["jazzhop"] });
+    // Orphaned: still naming the chillhop track the element is really on.
+    expect(result.current.track?.id).toBe(chillhopTrack.id);
+
+    act(() => result.current.prev());
+
+    expect(result.current.track?.id).toBe("catalog:terrace-dust.mp3");
+    expect(player.load).toHaveBeenCalledWith(
+      "/api/focus-catalog/audio?track=terrace-dust.mp3",
+    );
+  });
+
   it("a track ENDING after an untick advances into the new pool", () => {
     // The realistic path: the user unticks and then simply lets the track run
     // out. The element's own `ended` has to land in the new pool, not replay
