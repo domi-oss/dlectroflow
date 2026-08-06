@@ -276,6 +276,44 @@ export async function updateFocusShuffle(enabled: boolean) {
   });
 }
 
+/**
+ * #181 — the playlist tick-list in the in-session player.
+ *
+ * A dedicated action rather than a `categories`-only call to
+ * `updateFocusTimerSettings`, and the difference is a lost update rather than
+ * tidiness: that action writes five other focus preferences on every call, so
+ * the player would be posting the timer style, minimal mode, keep-awake, the
+ * alarm and the sound switch as they were when the page loaded — reverting
+ * anything changed on the Settings page in another tab since. `updateFocusShuffle`
+ * (#68) is the precedent: a player-side control owns exactly its own column.
+ *
+ * Same normalisation as `updateFocusTimerSettings`, through the same helper, so
+ * one selection has exactly one stored spelling whichever surface wrote it — and
+ * nothing outside `FocusSoundCategory` can reach
+ * `Settings_focusSoundCategories_check`. A non-array (a caller that predates the
+ * player, a malformed action payload) is the empty selection, which is the
+ * column's own way of saying "the whole catalogue"; the column is NOT NULL, so
+ * there is no other value it could take.
+ *
+ * Nothing is revalidated, for `updateFocusShuffle`'s reason: the tick-list's own
+ * state lives in the timer for the rest of the session, and the focus route is
+ * force-dynamic, so it re-reads Settings on the next load. The Settings page does
+ * not render the selection at all since #180.
+ */
+export async function updateFocusSoundCategories(
+  categories: readonly string[],
+) {
+  const workspaceId = await currentWorkspaceId();
+  const focusSoundCategories = normaliseFocusCategories(
+    Array.isArray(categories) ? categories : [],
+  );
+  await prisma.settings.upsert({
+    where: { workspaceId },
+    create: { id: workspaceId, workspaceId, focusSoundCategories },
+    update: { focusSoundCategories },
+  });
+}
+
 /** MR ② — record that the workspace dismissed the one-time "make this timer
  * yours" hint (via ✕ or by tapping through to settings). One-shot flag; the
  * force-dynamic timer route won't show it again on the next load. */

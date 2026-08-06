@@ -11,6 +11,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import {
   FocusTimer,
+  FOCUS_CATEGORY_SAVE_DEBOUNCE_MS,
   REESTIMATE_TIMEOUT_MS,
 } from "@/components/focus/focus-timer";
 import { AUTO_ADVANCE_SEC } from "@/components/focus/auto-advance";
@@ -64,6 +65,7 @@ vi.mock("@/app/actions/braindump", () => ({
 vi.mock("@/app/actions/settings", () => ({
   dismissFocusTimerTip: vi.fn().mockResolvedValue(undefined),
   updateFocusShuffle: vi.fn().mockResolvedValue(undefined),
+  updateFocusSoundCategories: vi.fn().mockResolvedValue(undefined),
 }));
 // #89 — the paused ring's breathing pacer must be absent entirely under reduced
 // motion, so this is per-test switchable (the mockVoice pattern below).
@@ -135,10 +137,14 @@ vi.mock("@/lib/use-focus-sound", () => ({
 vi.mock("@/components/focus/focus-sound-player", () => ({
   FocusSoundPlayer: ({
     controls,
+    categories,
+    onCategoriesChange,
     onPauseTogether,
     pauseTogetherPending,
   }: {
     controls: { toggle: () => void; setVolume: (v: number) => void };
+    categories: readonly string[];
+    onCategoriesChange: (next: string[]) => void;
     onPauseTogether?: () => void;
     pauseTogetherPending?: boolean;
   }) => (
@@ -152,6 +158,16 @@ vi.mock("@/components/focus/focus-sound-player", () => ({
       </button>
       <button type="button" onClick={() => controls.setVolume(0)}>
         mini volume zero
+      </button>
+      {/* #181 — the panel's own behaviour is covered in
+          focus-playlist-panel.test.tsx; this stub exposes the two props the
+          TIMER owns, so these tests can see what it seeds and what it persists. */}
+      <span data-testid="mini-categories">{categories.join(",")}</span>
+      <button type="button" onClick={() => onCategoriesChange(["jazzhop"])}>
+        mini tick jazzhop
+      </button>
+      <button type="button" onClick={() => onCategoriesChange(["late-night"])}>
+        mini tick late-night
       </button>
     </div>
   ),
@@ -168,6 +184,7 @@ import {
 import {
   dismissFocusTimerTip,
   updateFocusShuffle,
+  updateFocusSoundCategories,
 } from "@/app/actions/settings";
 import { ensureFocusStep } from "@/app/actions/braindump";
 
@@ -629,6 +646,104 @@ describe("FocusTimer — device effects behind the boundary", () => {
     expect(opts.shuffle).toBe(true);
     act(() => opts.onShuffleChange?.(false));
     expect(updateFocusShuffle).toHaveBeenCalledWith(false);
+  });
+
+  // #181 — the tick-list lives in the player, so the SELECTION is timer state
+  // now rather than a read-only prop: one value drives the pool the hook
+  // resolves and the ticks the panel draws, and it is persisted on a debounce
+  // because a tick is a click, not a form submit.
+  describe("the playlist selection (#181)", () => {
+    const withSound = (categories: string[]) =>
+      base({
+        settings: {
+          timerStyle: null,
+          minimalMode: false,
+          keepAwake: false,
+          alarmEnabled: false,
+          sound: "on",
+          categories,
+        },
+      });
+
+    it("hands the same live selection to the hook and to the player", async () => {
+      const user = userEvent.setup();
+      render(<FocusTimer {...withSound(["chillhop"])} />);
+      await start(user);
+      expect(
+        (soundHookArgs[0] as { categories?: readonly string[] }).categories,
+      ).toEqual(["chillhop"]);
+      expect(screen.getByTestId("mini-categories")).toHaveTextContent(
+        "chillhop",
+      );
+    });
+
+    it("a tick takes effect immediately, before anything is persisted", async () => {
+      const user = userEvent.setup();
+      render(<FocusTimer {...withSound(["chillhop"])} />);
+      await start(user);
+      await user.click(
+        screen.getByRole("button", { name: /mini tick jazzhop/i }),
+      );
+      // The pool must follow the tick straight away — waiting on a debounced
+      // round-trip to change what is playing would make the control feel broken.
+      expect(
+        (soundHookArgs[0] as { categories?: readonly string[] }).categories,
+      ).toEqual(["jazzhop"]);
+      expect(updateFocusSoundCategories).not.toHaveBeenCalled();
+    });
+
+    // The two below drive the DOM with act(...click()) rather than userEvent,
+    // matching the other fake-timer tests in this file: the timer runs a 1s
+    // countdown interval of its own, and userEvent's internal delay under fake
+    // timers deadlocks against it.
+    const press = async (name: RegExp) => {
+      await act(async () => {
+        screen.getByRole("button", { name }).click();
+      });
+    };
+
+    it("collapses a burst of ticks into ONE write, of the last value", async () => {
+      vi.useFakeTimers();
+      try {
+        render(<FocusTimer {...withSound([])} />);
+        await press(/start focusing/i);
+        await press(/mini tick jazzhop/i);
+        await press(/mini tick late-night/i);
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(FOCUS_CATEGORY_SAVE_DEBOUNCE_MS);
+        });
+        expect(updateFocusSoundCategories).toHaveBeenCalledTimes(1);
+        expect(updateFocusSoundCategories).toHaveBeenCalledWith(["late-night"]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("flushes a pending write when the timer unmounts", async () => {
+      // Ticking a playlist and then pressing Complete (or ← Back) inside the
+      // debounce window must not silently lose the tick. Unlike the settings
+      // page, this surface is one people leave abruptly and it has no save
+      // indicator that could tell them the write never happened.
+      vi.useFakeTimers();
+      try {
+        const { unmount } = render(<FocusTimer {...withSound([])} />);
+        await press(/start focusing/i);
+        await press(/mini tick jazzhop/i);
+        expect(updateFocusSoundCategories).not.toHaveBeenCalled();
+        act(() => unmount());
+        expect(updateFocusSoundCategories).toHaveBeenCalledWith(["jazzhop"]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("writes nothing on unmount when nothing was ticked", async () => {
+      const user = userEvent.setup();
+      const { unmount } = render(<FocusTimer {...withSound(["chillhop"])} />);
+      await start(user);
+      unmount();
+      expect(updateFocusSoundCategories).not.toHaveBeenCalled();
+    });
   });
 
   it("defaults shuffle to off when Settings has never stored it", () => {

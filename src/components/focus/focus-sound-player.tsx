@@ -9,6 +9,7 @@ import {
   SkipForward,
   Volume2,
 } from "lucide-react";
+import { FocusPlaylistPanel } from "@/components/focus/focus-playlist-panel";
 import { t, type Voice } from "@/lib/strings";
 import { cn } from "@/lib/utils";
 import type { FocusSoundControls } from "@/lib/use-focus-sound";
@@ -39,11 +40,24 @@ function formatTime(seconds: number): string {
 export function FocusSoundPlayer({
   controls,
   voice,
+  categories,
+  onCategoriesChange,
   onPauseTogether,
   pauseTogetherPending = false,
 }: {
   controls: FocusSoundControls;
   voice: Voice;
+  /**
+   * #181 — the live playlist selection (`Settings.focusSoundCategories`) and its
+   * setter, forwarded to the panel below the progress bar.
+   *
+   * Required rather than optional, unlike `onPauseTogether`: an absent
+   * persistence callback would be a tick-list that silently does not stick, and
+   * a default no-op would hide that from the one place it could be noticed —
+   * the type.
+   */
+  categories: readonly string[];
+  onCategoriesChange: (next: string[]) => void;
   /**
    * #65 — supplied only when the workspace opted into the music↔timer pause
    * coupling. The transport button then pauses/resumes the whole SESSION (the
@@ -264,6 +278,15 @@ export function FocusSoundPlayer({
         </div>
         <span aria-hidden="true">{formatTime(pos.duration)}</span>
       </div>
+      {/* #181 — "what am I listening to", inline and below the progress bar so
+          it never covers the timer's number. Collapsed by default; see
+          FocusPlaylistPanel for why it is not a popover or a drawer. */}
+      <FocusPlaylistPanel
+        controls={controls}
+        voice={voice}
+        categories={categories}
+        onCategoriesChange={onCategoriesChange}
+      />
     </section>
   );
 }

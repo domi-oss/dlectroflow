@@ -26,6 +26,7 @@ import {
 import {
   dismissFocusTimerTip,
   updateFocusShuffle,
+  updateFocusSoundCategories,
 } from "@/app/actions/settings";
 import { ensureFocusStep } from "@/app/actions/braindump";
 import { AutoAdvance } from "@/components/focus/auto-advance";
@@ -111,6 +112,16 @@ export const REESTIMATE_TIMEOUT_MS = 30_000;
  * round-trip. Ten seconds is already pathological for those.
  */
 const ACTION_TIMEOUT_MS = 10_000;
+
+/**
+ * #181 — how long the playlist tick-list waits before persisting.
+ *
+ * Matched to `AgingSection`'s auto-save, which is the repo's existing answer to
+ * the same question, and for the same reason: ticking three playlists is one
+ * decision, and it should cost one write rather than three. Exported so the test
+ * advances the real value rather than a copy of it.
+ */
+export const FOCUS_CATEGORY_SAVE_DEBOUNCE_MS = 600;
 
 /**
  * Which handler failed. Not cosmetic: it decides where the notice renders,
@@ -406,14 +417,56 @@ export function FocusTimer({
   const persistShuffle = useCallback((next: boolean) => {
     void updateFocusShuffle(next);
   }, []);
-  // #180 — the selected categories narrow the pool the hook walks; empty is the
-  // whole catalogue. Read-only here: #181 makes it editable from the player, and
-  // until then the only control over it is the switch in settings.
-  //
+  /**
+   * #180 — the selected categories narrow the pool the hook walks; empty is the
+   * whole catalogue. #181 makes them editable from the player, so this is state
+   * rather than a straight read of the prop: ONE value drives both the pool the
+   * hook resolves and the ticks the panel draws, and a tick has to change what is
+   * playing immediately rather than after a round-trip.
+   *
+   * Seeded from Settings and never re-seeded. The focus route is force-dynamic,
+   * so the prop only changes on a fresh load — and a `router.refresh()` from some
+   * unrelated action must not reach in and undo a tick that is still in its
+   * debounce window.
+   */
+  const [categories, setCategories] = useState<readonly string[]>(
+    settings.categories ?? [],
+  );
+  const categorySaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingCategoriesRef = useRef<string[] | null>(null);
+  /** Write the outstanding selection now, if there is one. Idempotent. */
+  const flushCategories = useCallback(() => {
+    if (categorySaveRef.current) {
+      clearTimeout(categorySaveRef.current);
+      categorySaveRef.current = null;
+    }
+    const pending = pendingCategoriesRef.current;
+    if (!pending) return;
+    pendingCategoriesRef.current = null;
+    void updateFocusSoundCategories(pending);
+  }, []);
+  const changeCategories = useCallback(
+    (next: string[]) => {
+      setCategories(next);
+      pendingCategoriesRef.current = next;
+      if (categorySaveRef.current) clearTimeout(categorySaveRef.current);
+      categorySaveRef.current = setTimeout(
+        flushCategories,
+        FOCUS_CATEGORY_SAVE_DEBOUNCE_MS,
+      );
+    },
+    [flushCategories],
+  );
+  // Flush rather than merely cancel on unmount, which is where this differs from
+  // AgingSection's otherwise identical debounce. A settings page is somewhere you
+  // linger; the focus timer is somewhere you leave abruptly — Complete, ← Back, a
+  // chained next step — and it has no save indicator, so a dropped write would be
+  // a tick that silently never happened.
+  useEffect(() => flushCategories, [flushCategories]);
   // No opening track is passed, and there is no longer one to pass: `focusSound`
   // is a two-value switch, so every session opens on the head of its pass.
   const sound = useFocusSound({
-    categories: settings.categories,
+    categories,
     shuffle: settings.shuffle ?? false,
     onShuffleChange: persistShuffle,
   });
@@ -1794,6 +1847,8 @@ export function FocusTimer({
         <FocusSoundPlayer
           controls={sound}
           voice={voice}
+          categories={categories}
+          onCategoriesChange={changeCategories}
           onPauseTogether={pauseTogether ? togglePauseFromPlayer : undefined}
           pauseTogetherPending={pending}
         />
