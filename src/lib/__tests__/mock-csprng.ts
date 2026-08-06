@@ -13,9 +13,9 @@ import { vi } from "vitest";
  *
  * It lives in `__tests__/` for the reason `src/lib/export/__tests__/fixture.ts`
  * gives: it is not app code, nothing under `src/app` or `src/components` may
- * import it, and the directory name is the signal. Vitest collects
- * `src/**‍/*.test.ts`, so a module without that suffix is not picked up as a
- * suite.
+ * import it, and the directory name is the signal. Vitest only collects files
+ * whose name ends in `.test.ts`, so this module sits in `__tests__/` without
+ * being run as a suite of its own.
  *
  * `fill` is applied to the array that was requested, rather than to a
  * `new Uint32Array(array.buffer)` view over it — which is what the three copies
