@@ -100,6 +100,40 @@ describe("FocusPlaylistPanel — the disclosure (#181)", () => {
     expect(disclosure()).toHaveFocus();
   });
 
+  it("Escape closes it from the disclosure button too, not only from inside", async () => {
+    // The handler is scoped to this disclosure's own subtree so that dismissing
+    // the mini-player's volume popover cannot close the panel with it (#181).
+    // The button sits OUTSIDE the panel element, so it needs its own arm of that
+    // scope: shift-tabbing back to it and pressing Escape must still close.
+    const user = userEvent.setup();
+    panel();
+    await user.click(disclosure());
+    disclosure().focus();
+    await user.keyboard("{Escape}");
+
+    expect(disclosure()).toHaveAttribute("aria-expanded", "false");
+    expect(disclosure()).toHaveFocus();
+  });
+
+  it("ignores an Escape aimed at something outside it, and stays open", async () => {
+    // The other half of the same scope. A press whose target is elsewhere on the
+    // page belongs to whatever the user is actually using; swallowing it here is
+    // what closed two disclosures on one keystroke.
+    const user = userEvent.setup();
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    try {
+      panel();
+      await user.click(disclosure());
+      outside.focus();
+      await user.keyboard("{Escape}");
+
+      expect(disclosure()).toHaveAttribute("aria-expanded", "true");
+    } finally {
+      outside.remove();
+    }
+  });
+
   it("pressing it again closes it, leaving focus on the button rather than on <body>", async () => {
     const user = userEvent.setup();
     panel();
