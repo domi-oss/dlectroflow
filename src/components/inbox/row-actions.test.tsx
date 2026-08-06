@@ -829,3 +829,20 @@ describe("ScheduleControl — the pick-your-account hint (#128)", () => {
     expect(screen.queryByText(GOOGLE_ACCOUNT_HINT)).toBeNull();
   });
 });
+
+// #183 sweep — the same shape as the brain-dump input: a placeholder standing
+// in for a name. One line, and the popup it lives in already says "duration",
+// so the field only has to name itself within that context.
+describe("ScheduleControl — the custom-duration input is named (#183)", () => {
+  it("has a computed accessible name, not just placeholder='min'", async () => {
+    const user = userEvent.setup();
+    render(
+      <ScheduleControl state="needs_duration" onScheduleSingle={vi.fn()} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Schedule" }));
+    const field = await screen.findByRole("spinbutton", {
+      name: "Custom duration in minutes",
+    });
+    expect(field.getAttribute("placeholder")).toBe("min");
+  });
+});

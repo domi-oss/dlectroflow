@@ -367,6 +367,23 @@ model Task {
   scheduleDueAt    DateTime?
   schedulePriority String?    // critical | high | normal | low
   scheduleHours    String?    // work | personal
+  // #44 — the owner's freeform note on this task, threaded into the scheduled
+  // artifact (ICS VEVENT DESCRIPTION + Google Task notes) alongside the #39
+  // focus deep-link. Nullable, and the NULL is load-bearing: "nobody has
+  // written a note" is what stops an empty line being composed into somebody's
+  // calendar entry, so `normalizeTaskNote` (src/lib/task-notes.ts) folds "" and
+  // whitespace-only back to NULL rather than storing them.
+  // Bounded at 2000 CHARACTERS by Task_notes_check
+  // (20260805120000_task_and_step_notes) — Google Tasks rejects a `notes` value
+  // over 8192 characters and this is one part of that envelope. Prisma can't
+  // express a CHECK, so that migration and this comment are its only trace in
+  // the schema; it is registered in
+  // src/lib/enum-constraint-sync.integration.test.ts (LENGTH_REGISTRY) so
+  // dropping it out of band fails the suite.
+  // `Step.notes` is the per-step twin, same bound and same migration. When both
+  // exist for one scheduled step, BOTH are composed into the artifact — see
+  // buildScheduleNote in src/lib/scheduling/note.ts for why.
+  notes            String?
   steps            Step[]
   turns            BreakdownTurn[]
   brainDumpItems   BrainDumpItem[]
@@ -398,6 +415,13 @@ model Step {
   googleTaskListId String?
   scheduledAt     DateTime?
   done            Boolean        @default(false)
+  // #44 — the per-step twin of `Task.notes`: context for THIS step, threaded
+  // into that step's own calendar event / Google Task alongside the task's
+  // note. Same 2000-character bound, same migration
+  // (20260805120000_task_and_step_notes), enforced by Step_notes_check, which
+  // Prisma also cannot express — read the note on `Task.notes` for the
+  // reasoning behind the number and the choice of char_length.
+  notes           String?
   estimateHistory String? // JSON array of prior estMinutes values
   createdAt       DateTime       @default(now())
   focusSessions   FocusSession[]

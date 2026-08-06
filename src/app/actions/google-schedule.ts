@@ -108,6 +108,12 @@ export async function pushStepsToGoogleTasks(
     const { windows } = deriveWindows(intent);
     const byUnit = new Map(windows.map((w) => [w.unitId, w]));
 
+    // #44 — step notes by id, built once from the SCOPED rows rather than
+    // looked up per unit inside the loop. `intent.units` comes from the client,
+    // so a unit id that is not one of this task's steps simply misses and gets
+    // no note; it cannot reach another task's.
+    const stepNotes = new Map(task.steps.map((s) => [s.id, s.notes]));
+
     let scheduled = 0;
     for (const unit of intent.units) {
       const window = byUnit.get(unit.id);
@@ -120,6 +126,12 @@ export async function pushStepsToGoogleTasks(
         parentEmoji: task.parentEmoji ?? "🗂️",
         origin,
         voice,
+        // #44 — the task's note on every unit, plus THIS step's own. Both are
+        // read from the scoped `task` above, so neither can come from the
+        // caller: `intent.units` is client-supplied and is used for the id
+        // only, exactly as the comment above already requires.
+        taskNote: task.notes,
+        stepNote: stepNotes.get(unit.id) ?? null,
       });
       const step = task.steps.find((s) => s.id === unit.id)!;
       const { id } = await upsertGoogleTask(
@@ -315,6 +327,12 @@ export async function scheduleSingleTask(
       parentEmoji: null,
       origin: publicOrigin(),
       voice,
+      // #44 — `item.task` is the workspace-scoped row already included above,
+      // so this costs no extra query. It is null when the Task was lazily
+      // created a few lines up, which is correct: a task that did not exist a
+      // moment ago has no note. No step note: this path schedules a stepless
+      // to-do, whose unit id is the TASK's id.
+      taskNote: item.task?.notes ?? null,
     });
     const existing = await prisma.task.findFirst({
       where: { id: taskId, workspaceId },

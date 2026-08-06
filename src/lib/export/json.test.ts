@@ -80,6 +80,10 @@ describe("export.json — the round-trippable tier", () => {
     expect(task.googleTaskId).toBe("g-task-1");
     expect(task.googleTaskListId).toBe("g-list-1");
     expect(task.scheduledVia).toBe("ics");
+    // #44 — the user's note, VERBATIM. `tasks.md` quotes it and the CSVs drop
+    // it, so this tier is the only one that reproduces the exact bytes the
+    // person typed, blank line included.
+    expect(task.notes).toBe("Bring the Figma link\n\ncall before 5");
   });
 
   it("keeps the unflattened title, newline and all", () => {

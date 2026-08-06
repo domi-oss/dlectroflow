@@ -490,6 +490,12 @@ export function BreakdownChat({
             </span>
           </div>
           <ol className="space-y-2">
+            {/* #44 — NO note affordance in the editor, deliberately. These
+                rows are an UNSAVED model proposal: they have no `Step` ids
+                until the breakdown is confirmed, so a per-step note would have
+                nowhere to be written. The task's own note is one click away in
+                the working view, which is where a task is read rather than
+                re-planned. */}
             {proposal.steps.map((s, i) => (
               <li
                 key={i}

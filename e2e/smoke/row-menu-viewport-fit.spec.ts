@@ -355,3 +355,145 @@ test.describe("#92 the 📅 duration popover fits the phone viewport", () => {
     expectInsideViewport(await measure(popover), "📅 duration popover");
   });
 });
+
+// ── #44 — the action group grew a third inline button at phone width ────────
+//
+// The note's collapsed trigger moved INTO the row's action group beside
+// Complete (owner request). That group already held two buttons and four icon
+// controls, and 390 is the width every layout fault in this project has shown
+// up at — so the question is not whether it wraps (it may, by design: the end
+// cluster is `ml-auto` + `flex-nowrap` + `shrink-0` precisely so it wraps as
+// ONE unit) but whether anything ends up off-screen or squeezed under its
+// touch target.
+//
+// Measured, not eyeballed, for the same reason the rest of this file is.
+test.describe("#44 the note trigger fits the phone viewport", () => {
+  test.use({ viewport: MOBILE });
+
+  const NOTE_MARKER = "note-fit-44";
+
+  test("every control in a note-bearing row's action group stays on screen", async ({
+    page,
+  }) => {
+    const prisma = new PrismaClient();
+    try {
+      await prisma.workspace.upsert({
+        where: { id: OWNER_WS_ID },
+        create: { id: OWNER_WS_ID, kind: "user" },
+        update: {},
+      });
+      // A row with a TASK behind it — that is what shows the note trigger. A
+      // task with no steps lands in the Single-task bucket, whose rows carry
+      // the full end cluster, so this is the densest action group in the app.
+      const task = await prisma.task.create({
+        data: { title: `${NOTE_MARKER} row`, workspaceId: OWNER_WS_ID },
+      });
+      await prisma.brainDumpItem.create({
+        data: {
+          text: `${NOTE_MARKER} row`,
+          status: "triaged",
+          triagedAt: new Date(),
+          estMinutes: 10,
+          workspaceId: OWNER_WS_ID,
+          taskId: task.id,
+        },
+      });
+
+      await page.goto("/");
+      await waitForShell(page);
+
+      const row = page
+        .getByRole("listitem")
+        .filter({ hasText: `${NOTE_MARKER} row` })
+        .first();
+      await expect(row).toBeVisible();
+
+      const trigger = row.getByRole("button", {
+        name: `Note for ${NOTE_MARKER} row`,
+      });
+      await expect(trigger).toBeVisible();
+
+      // NOTHING in the group may sit outside the viewport — that is the whole
+      // question a third inline button raises at 390.
+      const group = row.locator("[data-row-actions]").first();
+      const controls = await group.getByRole("button").all();
+      expect(controls.length).toBeGreaterThan(4);
+      for (const control of controls) {
+        const box = await control.evaluate((n: HTMLElement) => {
+          const b = n.getBoundingClientRect();
+          return {
+            left: b.left,
+            right: b.right,
+            vw: window.innerWidth,
+            label: n.getAttribute("aria-label") ?? n.textContent?.trim() ?? "",
+          };
+        });
+        expect(
+          box.left,
+          `"${box.label}" off the LEFT edge`,
+        ).toBeGreaterThanOrEqual(0);
+        expect(
+          box.right,
+          `"${box.label}" off the RIGHT edge`,
+        ).toBeLessThanOrEqual(box.vw);
+      }
+
+      // The NOTE TRIGGER specifically keeps its ≥44px target (WCAG 2.5.8) —
+      // `min-h-11` has to survive the move into a `text-xs` action row.
+      //
+      // Scoped to this control on purpose. A blanket assertion over the group
+      // was tried and it failed on "▶ Start Focus", which MEASURES 24px: the
+      // inline row buttons are `px-2.5 py-1` with no `touchTarget`, unlike the
+      // end-cluster icons which carry it. That is a real pre-existing 2.5.8 gap
+      // across every row in the app, filed rather than fixed here — widening
+      // this test into an unrelated redesign is not what it is for.
+      const triggerHeight = await trigger.evaluate(
+        (n: HTMLElement) => n.getBoundingClientRect().height,
+      );
+      expect(triggerHeight).toBeGreaterThanOrEqual(44);
+
+      // And the page itself must not have gained horizontal scroll.
+      const scrollWidth = await page.evaluate(
+        () => document.documentElement.scrollWidth,
+      );
+      expect(scrollWidth).toBeLessThanOrEqual(MOBILE.width);
+
+      // Expanding opens the editor BELOW the action line, inside the same row —
+      // the association the trigger's old placement was buying.
+      await trigger.click();
+      const box = row.getByRole("textbox", {
+        name: `Note for ${NOTE_MARKER} row`,
+      });
+      await expect(box).toBeVisible();
+      const below = await box.evaluate((n: HTMLElement) => {
+        const group = n.closest("li")?.querySelector("[data-row-actions]");
+        // Narrow rather than cast. `querySelector` is genuinely nullable, and a
+        // cast would turn a layout change into `getBoundingClientRect` of null
+        // — an opaque TypeError from inside evaluate(). Returning false instead
+        // would be worse still: the assertion below would then fail with "the
+        // editor opens below the action line", confidently blaming the editor's
+        // position for a group that is not there at all.
+        if (!group) {
+          throw new Error(
+            "no [data-row-actions] in the note row — the row layout changed, so " +
+              "this check is measuring against an element that no longer exists",
+          );
+        }
+        // No cast: getBoundingClientRect is defined on Element, not just
+        // HTMLElement, so narrowing is all this ever needed.
+        return (
+          n.getBoundingClientRect().top >= group.getBoundingClientRect().top
+        );
+      });
+      expect(below, "the editor opens below the action line").toBe(true);
+    } finally {
+      await prisma.brainDumpItem.deleteMany({
+        where: { workspaceId: OWNER_WS_ID, text: { startsWith: NOTE_MARKER } },
+      });
+      await prisma.task.deleteMany({
+        where: { workspaceId: OWNER_WS_ID, title: { startsWith: NOTE_MARKER } },
+      });
+      await prisma.$disconnect();
+    }
+  });
+});

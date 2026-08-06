@@ -49,15 +49,34 @@ export async function scheduleViaIcs(
   const settings = await getSettings(workspaceId);
   const voice: Voice = settings.voice === "playful" ? "playful" : "plain";
   const origin = publicOrigin();
+  //
+  // #44 — the notes are composed in above the prompt. The TASK's note goes on
+  // EVERY event rather than only the first: it is context for the task, and a
+  // calendar entry you open at step 3 needs it as much as one you open at step
+  // 1. Each event additionally carries ITS OWN step's note. Both reach the file
+  // through `esc()` like every other value — see the injection tests in this
+  // action's colocated spec, which cover both grains.
   const steps = task.steps.map((s) => ({
     text: s.text,
     estMinutes: s.estMinutes,
     subtaskEmoji: s.subtaskEmoji,
-    description: buildScheduleNote({ origin, voice, stepId: s.id }),
+    description: buildScheduleNote({
+      origin,
+      voice,
+      stepId: s.id,
+      taskNote: task.notes,
+      stepNote: s.notes,
+    }),
   }));
   // The stepless (fallback) event has no step to link to, so it keeps the
-  // launcher URL — which is what `buildTaskIcs`'s shared `description` is for.
-  const description = buildScheduleNote({ origin, voice, stepId: null });
+  // launcher URL — which is what `buildTaskIcs`'s shared `description` is for —
+  // and no step note, because there is no step to have written one.
+  const description = buildScheduleNote({
+    origin,
+    voice,
+    stepId: null,
+    taskNote: task.notes,
+  });
 
   const ics = buildTaskIcs({
     title: task.title,

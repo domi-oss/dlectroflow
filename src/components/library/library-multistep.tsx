@@ -7,6 +7,7 @@ import { t, type Voice } from "@/lib/strings";
 import { type AgingSettings } from "@/lib/aging";
 import type { Item } from "@/components/inbox/bucket";
 import { TaskSteps } from "@/components/breakdown/task-steps";
+import { TaskNoteRow } from "@/components/breakdown/task-note";
 import { bulkBrainDumpAction } from "@/app/actions/braindump";
 import { useSelectMode } from "./use-select-mode";
 import { SelectActionBar } from "./select-action-bar";
@@ -203,6 +204,23 @@ export function LibraryMultistep({
                 {!expanded && <ActiveStepPill item={item} voice={voice} />}
               </div>
 
+              {/* #44 — the TASK's own note. Distinct from the per-step notes
+                  in the expanded list below: this is context for the whole
+                  task, so it stays available whether or not the steps are
+                  showing.
+                  STACKED here, unlike the other list rows, and deliberately:
+                  this row has no `RowActions` group — it is a disclosure title
+                  that expands into the step list — so there is no action group
+                  for the trigger to join. */}
+              {!sel.selecting && (
+                <TaskNoteRow
+                  taskId={item.taskId}
+                  taskTitle={item.text}
+                  notes={item.notes}
+                  voice={voice}
+                />
+              )}
+
               {expanded && item.taskId && (
                 <div id={`lib-steps-${item.id}`} className="mt-3 space-y-2">
                   <TaskSteps
@@ -216,6 +234,7 @@ export function LibraryMultistep({
                       subtaskEmoji: s.subtaskEmoji,
                       estMinutes: s.estMinutes,
                       done: s.done,
+                      notes: s.notes ?? null,
                       resumable: s.resumable,
                     }))}
                   />

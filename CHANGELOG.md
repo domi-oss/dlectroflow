@@ -55,6 +55,30 @@ operators upgrading a self-hosted instance don't get surprised.
   Everyone's existing choice is carried across unchanged; where a row had both a
   track and a category, the category wins.
 
+- **Notes on a task and on a step, which ride along into what you schedule
+  (#44).** Jot the context you would otherwise lose — "bring the Figma link",
+  "call before 5" — and it travels into the calendar event or Google Task
+  alongside the focus deep-link, so the reminder arrives carrying its own
+  context instead of just a title.
+
+  **Collapsed until you want it.** With no note there is only a compact "Note"
+  button; once a note exists it is shown as text, so coming back to a task never
+  costs a tap to read what you wrote. It is a proper disclosure — keyboard
+  operable, focus moves into the field when it opens and back to the trigger on
+  Escape, and each control is named after the task or step it belongs to rather
+  than being one of a dozen buttons all called "Note". Saving is automatic;
+  there is no Save button.
+
+  **Where both a task note and a step note exist, the scheduled item carries
+  both**, task first. A calendar entry is read on its own, days later, so
+  letting the step's note suppress the task's would mean the more carefully you
+  annotate, the less each entry tells you. Notes are plain text (no markdown
+  rendering) and bounded at 2000 characters each — Google Tasks rejects a note
+  field over 8192, and yours is one part of what gets sent.
+
+  Both notes are included in a data export: quoted in `tasks.md`, verbatim in
+  `export.json`, and deliberately absent from the CSVs, where a paragraph with
+  embedded newlines is the thing spreadsheets import wrong.
 - **The focus timer can play the full lo-fi catalog (#61).** Ten CC0 tracks still
   ship inside the image, one per open-lofi category; the other 156 are read at run
   time from wherever an operator keeps them. **New optional environment variable:

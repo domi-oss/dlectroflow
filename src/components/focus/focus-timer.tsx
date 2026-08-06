@@ -31,6 +31,7 @@ import { ensureFocusStep } from "@/app/actions/braindump";
 import { AutoAdvance } from "@/components/focus/auto-advance";
 import { Celebration } from "@/components/focus/celebration";
 import { TimerVisual } from "@/components/focus/timer-visual";
+import { NoteText } from "@/components/breakdown/note-field";
 import { Button } from "@/components/ui/button";
 import {
   FocusStepTracker,
@@ -247,6 +248,8 @@ export function FocusTimer({
   nextStep,
   nextUp = null,
   isSingleTask,
+  taskNote = null,
+  stepNote = null,
   addTimeIncrementMin,
   settings,
   tipDismissed,
@@ -268,6 +271,13 @@ export function FocusTimer({
    * gets the "nothing else" ending. */
   nextUp?: NextUp | null;
   isSingleTask: boolean;
+  /** #44 — the task's freeform note, and this step's own. READ-ONLY here: the
+   *  issue asks for the jotted context to be present "while you're doing the
+   *  work", and the session's whole job is to remove decisions — a live text
+   *  field with an autosave is an invitation to edit instead of to work. Every
+   *  other surface that renders this task or step can edit it. */
+  taskNote?: string | null;
+  stepNote?: string | null;
   addTimeIncrementMin: number;
   settings: TimerSettings;
   tipDismissed: boolean;
@@ -1121,6 +1131,19 @@ export function FocusTimer({
           </h1>
         </>
       )}
+
+      {/* #44 — the context you jotted, where you actually need it. Both grains,
+          task first, matching the order `buildScheduleNote` composes them into
+          a calendar entry, so the same note reads the same way wherever it
+          surfaces. Deduped: on a single-task focus the two can be the same
+          string, and printing it twice reads as a bug. */}
+      {[taskNote?.trim(), stepNote?.trim()]
+        .filter((n, i, all): n is string => Boolean(n) && all.indexOf(n) === i)
+        .map((n) => (
+          <div key={n} className="mt-2">
+            <NoteText>{n}</NoteText>
+          </div>
+        ))}
     </div>
   );
 

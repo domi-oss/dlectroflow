@@ -95,6 +95,11 @@ function makeTaskWithSteps(): ExportTask {
     scheduleDueAt: new Date(Date.UTC(2026, 6, 5, 17, 0, 0)),
     schedulePriority: "high",
     scheduleHours: "work",
+    // #44 — deliberately MULTI-LINE and multi-paragraph: the note is free text
+    // typed by the data subject, and the tiers disagree about how to carry it
+    // (quoted in `tasks.md`, verbatim in `export.json`, absent from the CSVs).
+    // A single-line fixture would let all three look correct.
+    notes: "Bring the Figma link\n\ncall before 5",
     workspaceId: WORKSPACE_ID,
     steps: [
       {
@@ -109,6 +114,10 @@ function makeTaskWithSteps(): ExportTask {
         googleTaskListId: null,
         scheduledAt: new Date(Date.UTC(2026, 6, 2, 9, 0, 0)),
         done: true,
+        // #44 — a step-level note, so the export tiers are exercised at BOTH
+        // grains. `tasks.md` quotes it under its step, `export.json` reproduces
+        // it verbatim, and the CSVs drop it like every other free-text column.
+        notes: "the login page, not the marketing one",
         // The column holds a JSON *string*, which is the whole reason
         // export.json has to expand it.
         estimateHistory: "[10,15]",
@@ -126,6 +135,7 @@ function makeTaskWithSteps(): ExportTask {
         googleTaskListId: null,
         scheduledAt: null,
         done: false,
+        notes: null,
         estimateHistory: null,
         createdAt: new Date(Date.UTC(2026, 6, 1, 9, 2, 0)),
       },
@@ -168,6 +178,9 @@ function makeSteplessTask(): ExportTask {
     scheduleDueAt: new Date(Date.UTC(2026, 6, 10, 12, 0, 0)),
     schedulePriority: null,
     scheduleHours: null,
+    // No note — the common case, and what keeps the "omits what it has no
+    // value for" assertions honest (#44).
+    notes: null,
     workspaceId: WORKSPACE_ID,
     steps: [],
     turns: [],
@@ -191,6 +204,7 @@ function makeUnscheduledTask(): ExportTask {
     scheduleDueAt: null,
     schedulePriority: null,
     scheduleHours: null,
+    notes: null,
     workspaceId: WORKSPACE_ID,
     steps: [],
     turns: [],

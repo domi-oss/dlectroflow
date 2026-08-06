@@ -233,3 +233,82 @@ describe("LibraryPage — voice-aware", () => {
     expect(screen.getByText("🥫 Pantry")).toBeInTheDocument();
   });
 });
+
+// ── #44 — the note reaches the row through the PAGE, not just the component ─
+//
+// The gap the owner found on the review app was invisible to every component
+// test, because a component test cannot see a surface that never mounts the
+// component. These render the real page against a fake `findMany` and assert
+// the note arrives — which also pins that the query selects the column, since
+// a row mapper that drops `task.notes` fails here and nowhere else.
+describe("LibraryPage — the note reaches every task-bearing tab (#44)", () => {
+  it("Single-task rows offer the note and show an existing one", async () => {
+    findMany.mockResolvedValue([
+      raw({
+        id: "Reply to Sam's email",
+        text: "Reply to Sam's email",
+        taskId: "t-plated",
+        task: {
+          status: "active",
+          scheduledAt: null,
+          notes: "his reply is in the archive",
+          steps: [],
+        },
+      }),
+    ]);
+    await renderTab("plated");
+    expect(screen.getByTestId("note-text").textContent).toBe(
+      "his reply is in the archive",
+    );
+    expect(
+      screen.getByRole("button", {
+        name: "Note for Reply to Sam's email",
+      }),
+    ).toBeTruthy();
+  });
+
+  it("Multi-step rows offer the TASK's note, named after the task", async () => {
+    await renderTab("sorted");
+    expect(
+      screen.getByRole("button", { name: "Note for Plan the offsite" }),
+    ).toBeTruthy();
+  });
+
+  it("Saved-for-later rows offer it once they are task-backed", async () => {
+    findMany.mockResolvedValue([
+      raw({
+        id: "Book dentist",
+        text: "Book dentist",
+        status: "inbox",
+        snoozedUntil: new Date(Date.now() + DAY),
+        taskId: "t-pantry",
+        task: { status: "active", scheduledAt: null, notes: null, steps: [] },
+      }),
+    ]);
+    await renderTab("pantry");
+    expect(
+      screen.getByRole("button", { name: "Note for Book dentist" }),
+    ).toBeTruthy();
+  });
+
+  it("Done rows show the note read-only — no control, nothing hidden", async () => {
+    findMany.mockResolvedValue([
+      raw({
+        id: "Sort the tax docs",
+        text: "Sort the tax docs",
+        taskId: "t-done",
+        task: {
+          status: "active",
+          scheduledAt: new Date(),
+          notes: "receipts are in the blue folder",
+          steps: [step(true, 0), step(true, 1)],
+        },
+      }),
+    ]);
+    await renderTab("done");
+    expect(screen.getByTestId("note-text").textContent).toBe(
+      "receipts are in the blue folder",
+    );
+    expect(screen.queryByRole("button", { name: /note/i })).toBeNull();
+  });
+});

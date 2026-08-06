@@ -24,6 +24,16 @@ vi.mock("@/app/actions/focus", () => ({
   renameStep: vi.fn().mockResolvedValue(undefined),
   updateStepEstimate: vi.fn().mockResolvedValue(undefined),
 }));
+// #44 — every row now mounts a note disclosure, so the action it binds has to
+// exist even in the specs that are about something else entirely.
+vi.mock("@/app/actions/step-notes", () => ({
+  updateStepNotes: vi
+    .fn()
+    .mockImplementation(async (_id: string, notes: string | null) => ({
+      ok: true,
+      notes,
+    })),
+}));
 
 import { ejectStepToInbox } from "@/app/actions/breakdown";
 import {
@@ -42,6 +52,7 @@ function steps(overrides: Partial<ReturnType<typeof baseStep>>[] = []) {
       subtaskEmoji: "🌱",
       estMinutes: 10,
       done: false,
+      notes: null as string | null,
       resumable: false,
     },
     {
@@ -52,6 +63,7 @@ function steps(overrides: Partial<ReturnType<typeof baseStep>>[] = []) {
       subtaskEmoji: "🚀",
       estMinutes: 15,
       done: false,
+      notes: null as string | null,
       resumable: false,
     },
   ];
@@ -66,6 +78,7 @@ function baseStep() {
     subtaskEmoji: "🌱",
     estMinutes: 10,
     done: false,
+    notes: null as string | null,
     resumable: false,
   };
 }
@@ -282,5 +295,48 @@ describe("TaskSteps — inline editors", () => {
     await user.clear(input);
     await user.type(input, "999{Enter}");
     expect(updateStepEstimate).not.toHaveBeenCalled();
+  });
+});
+
+// #44 — placement, pinned at the step grain too. The disclosure behaves
+// identically wherever it is mounted, so only a container assertion can tell
+// the two placements apart, and only this stops it drifting back.
+describe("TaskSteps — the note trigger sits in the step's action group (#44)", () => {
+  it("puts the trigger in the SAME action group as that step's Complete", () => {
+    render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
+    const complete = screen.getByRole("button", { name: "✓ Complete" });
+    const trigger = screen.getByRole("button", {
+      name: "Note for step 1 of 2: First",
+    });
+    const group = complete.closest("[data-row-actions]");
+    expect(group).not.toBeNull();
+    expect(trigger.closest("[data-row-actions]")).toBe(group);
+  });
+
+  it("names each step's trigger after ITS step, not just 'Note'", () => {
+    // Twelve identical "Note" buttons down a list is the failure this prevents,
+    // and it is the one an automated a11y gate cannot see.
+    render(<TaskSteps taskId="t1" steps={steps()} />);
+    expect(
+      screen.getByRole("button", { name: "Note for step 1 of 2: First" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Note for step 2 of 2: Second" }),
+    ).toBeTruthy();
+  });
+
+  it("opens the editor below the action line, still inside that step's row", async () => {
+    const user = userEvent.setup();
+    render(<TaskSteps taskId="t1" steps={[steps()[0]]} />);
+    await user.click(
+      screen.getByRole("button", { name: "Note for step 1 of 2: First" }),
+    );
+    const box = screen.getByRole("textbox", {
+      name: "Note for step 1 of 2: First",
+    });
+    expect(box.closest("[data-row-actions]")).toBeNull();
+    expect(box.closest("li")).toBe(
+      screen.getByRole("button", { name: "✓ Complete" }).closest("li"),
+    );
   });
 });

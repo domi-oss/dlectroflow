@@ -246,6 +246,11 @@ export function MultiStepLane({
       rows={rows}
       hadRows={items.length > 0 || completedAny}
       pending={pending}
+      // #44 — NO note here, deliberately. These lanes are a navigation list:
+      // every entry exists to be picked, and picking one lands in the focus
+      // session, which shows both notes. Repeating them in the chooser would
+      // make a scan-and-pick surface into a reading one, and the lane rows are
+      // already carrying a task title, a step title and two counters.
       row={(e) => (
         <li
           key={e.stepId}

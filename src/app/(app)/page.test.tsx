@@ -72,12 +72,25 @@ vi.mock("@/lib/workspace-history", async (importOriginal) => {
 // would quietly stop describing the prop contract the moment the identity gains
 // or loses a field, which is exactly the drift identity.test.ts guards against.
 vi.mock("@/components/inbox/inbox-view", () => ({
-  InboxView: ({ newAccount }: { newAccount?: AccountIdentity | null }) => (
+  InboxView: ({
+    newAccount,
+    initialItems,
+  }: {
+    newAccount?: AccountIdentity | null;
+    // #44 — the mapped rows, so the page's own row mapper is observable. The
+    // rendering is inbox-view.test.tsx's job; what only the PAGE can get wrong
+    // is dropping a column on the way into the DTO, and that is invisible to
+    // every component test.
+    initialItems?: { id: string; notes?: string | null }[];
+  }) => (
     <div
       data-testid="inbox-view"
       data-new-account={
         newAccount ? `${newAccount.label}/${newAccount.provider}` : "null"
       }
+      data-notes={JSON.stringify(
+        (initialItems ?? []).map((i) => [i.id, i.notes ?? null]),
+      )}
     />
   ),
 }));
@@ -170,5 +183,82 @@ describe("Inbox page — brand-new account empty state (#111)", () => {
   it("scopes the probe to the resolved workspace", async () => {
     render(await renderInbox());
     expect(hasHistoryMock).toHaveBeenCalledExactlyOnceWith("ws-test");
+  });
+});
+
+// ── #44 — the task note has to survive the page's row mapper ────────────────
+//
+// The Library shipped this gap: the component was correct and the surface never
+// received the data. A component test cannot see that, and neither can a test
+// that only checks what InboxView renders — so this asserts the PROP.
+describe("Inbox page — the task note reaches the rows (#44)", () => {
+  it("carries Task.notes onto the item the row renders", async () => {
+    db.brainDumpItem.findMany.mockResolvedValue([
+      {
+        id: "i1",
+        text: "Renew the passport",
+        createdAt: new Date(),
+        status: "triaged",
+        triagedAt: new Date(),
+        remindedAt: null,
+        snoozedUntil: null,
+        freshenedAt: null,
+        promptDismissedAt: null,
+        completedAt: null,
+        breakdownRequestedAt: null,
+        taskId: "t1",
+        workspaceId: "ws-test",
+        estMinutes: null,
+        task: {
+          id: "t1",
+          status: "active",
+          scheduledAt: null,
+          scheduleDueAt: null,
+          schedulePriority: null,
+          scheduleHours: null,
+          notes: "photo booth on the high street",
+          steps: [],
+        },
+      },
+    ]);
+    render(await renderInbox());
+    expect(
+      JSON.parse(screen.getByTestId("inbox-view").dataset.notes as string),
+    ).toEqual([["i1", "photo booth on the high street"]]);
+  });
+
+  it("carries null for a row whose task has no note", async () => {
+    db.brainDumpItem.findMany.mockResolvedValue([
+      {
+        id: "i2",
+        text: "no note",
+        createdAt: new Date(),
+        status: "triaged",
+        triagedAt: new Date(),
+        remindedAt: null,
+        snoozedUntil: null,
+        freshenedAt: null,
+        promptDismissedAt: null,
+        completedAt: null,
+        breakdownRequestedAt: null,
+        taskId: "t2",
+        workspaceId: "ws-test",
+        estMinutes: null,
+        task: {
+          id: "t2",
+          status: "active",
+          scheduledAt: null,
+          scheduleDueAt: null,
+          schedulePriority: null,
+          scheduleHours: null,
+          notes: null,
+          steps: [],
+        },
+      },
+    ]);
+    render(await renderInbox());
+    expect(
+      JSON.parse(screen.getByTestId("inbox-view").dataset.notes as string),
+    ).toEqual([["i2", null]]);
   });
 });

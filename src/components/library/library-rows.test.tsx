@@ -295,3 +295,168 @@ describe("LibraryRows (plated) — meta, editable estimate, select mode", () => 
     );
   });
 });
+
+// ── #44 — the note affordance on a SINGLE-STEP task row ─────────────────────
+//
+// The gap the owner found on the review app: multi-step tasks reached the note
+// through their expanded step list, and single-step ones — which are real
+// `Task` rows with a real `notes` column — had no route to it at all outside
+// /tasks/[id]. The component tests for `NoteField` all passed throughout,
+// because a component test cannot see a surface that never mounts the
+// component. These assert PRESENCE on the surface.
+describe("LibraryRows — the note affordance (#44)", () => {
+  it("offers a note on a task-backed plated row, named after the task", () => {
+    render(
+      <LibraryRows
+        items={[
+          makeItem({ id: "p1", text: "Renew the passport", taskId: "t1" }),
+        ]}
+        tab="plated"
+        voice="plain"
+        now={Date.now()}
+        settings={settings}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Note for Renew the passport" }),
+    ).toBeTruthy();
+  });
+
+  it("shows an existing note as text without expanding anything", () => {
+    render(
+      <LibraryRows
+        items={[
+          makeItem({
+            id: "p1",
+            text: "Renew the passport",
+            taskId: "t1",
+            notes: "photo booth on the high street",
+          }),
+        ]}
+        tab="plated"
+        voice="plain"
+        now={Date.now()}
+        settings={settings}
+      />,
+    );
+    expect(screen.getByTestId("note-text").textContent).toBe(
+      "photo booth on the high street",
+    );
+  });
+
+  it("offers no note on a row with no Task behind it", () => {
+    // A saved-for-later brain-dump item that has never been triaged has no
+    // `Task` row, so there is no `notes` column to write to. The affordance is
+    // absent rather than present-and-failing.
+    render(
+      <LibraryRows
+        items={[makeItem({ id: "s1", text: "someday maybe", taskId: null })]}
+        tab="pantry"
+        voice="plain"
+        now={Date.now()}
+        settings={settings}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /^note for/i })).toBeNull();
+  });
+
+  it("offers a note on a task-backed pantry row", () => {
+    render(
+      <LibraryRows
+        items={[makeItem({ id: "s2", text: "later thing", taskId: "t2" })]}
+        tab="pantry"
+        voice="plain"
+        now={Date.now()}
+        settings={settings}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Note for later thing" }),
+    ).toBeTruthy();
+  });
+});
+
+// ── #44 — WHERE the collapsed trigger sits (owner request, review app) ──────
+//
+// It shipped on its own line under the action row. The owner asked for it in
+// the action group beside Complete. Pinned here because "which container is
+// this button in" is invisible to every behavioural test — the disclosure
+// worked correctly in both placements, which is exactly why it needs a test of
+// its own rather than being left to survive on somebody remembering.
+describe("LibraryRows — the note trigger sits in the action group (#44)", () => {
+  const renderRow = (over: Partial<Item> = {}) =>
+    render(
+      <LibraryRows
+        items={[
+          makeItem({ id: "p1", text: "Prep the deck", taskId: "t1", ...over }),
+        ]}
+        tab="plated"
+        voice="plain"
+        now={Date.now()}
+        settings={settings}
+      />,
+    );
+
+  it("puts the trigger in the SAME action group as Complete", () => {
+    renderRow();
+    const complete = screen.getByRole("button", { name: "✓ Complete" });
+    const trigger = screen.getByRole("button", {
+      name: "Note for Prep the deck",
+    });
+    const group = complete.closest("[data-row-actions]");
+    expect(group).not.toBeNull();
+    expect(trigger.closest("[data-row-actions]")).toBe(group);
+  });
+
+  it("keeps the editor body OUT of the action group, below the row", async () => {
+    // The textarea cannot live in a one-line flex row. It opens underneath —
+    // but it must still read as belonging to THIS row, so it stays inside the
+    // same <li> while sitting outside the action line.
+    const user = userEvent.setup();
+    renderRow();
+    await user.click(
+      screen.getByRole("button", { name: "Note for Prep the deck" }),
+    );
+    const box = screen.getByRole("textbox");
+    expect(box.closest("[data-row-actions]")).toBeNull();
+    expect(box.closest("li")).toBe(
+      screen.getByRole("button", { name: "✓ Complete" }).closest("li"),
+    );
+  });
+
+  it("keeps the save indicator with the trigger, not loose in the row", async () => {
+    // It reports on the NOTE. Left behind in the row it would read as the row's
+    // own status — "Saved ✓" next to Complete means something else entirely.
+    const user = userEvent.setup();
+    renderRow();
+    const trigger = screen.getByRole("button", {
+      name: "Note for Prep the deck",
+    });
+    await user.click(trigger);
+    await user.type(screen.getByRole("textbox"), "hi");
+    const indicator = await waitFor(() => {
+      const el = document.querySelector("[data-save-status]");
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    expect(trigger.parentElement?.contains(indicator)).toBe(true);
+  });
+
+  it("still resolves aria-controls while collapsed, and keeps the 44px target", () => {
+    renderRow();
+    const trigger = screen.getByRole("button", {
+      name: "Note for Prep the deck",
+    });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    const controls = trigger.getAttribute("aria-controls") as string;
+    expect(document.getElementById(controls)).not.toBeNull();
+    expect(trigger.className).toContain("min-h-11");
+  });
+
+  it("shows a saved note as text below the row, not inside the action group", () => {
+    renderRow({ notes: "bring the printed copy" });
+    const text = screen.getByTestId("note-text");
+    expect(text.closest("[data-row-actions]")).toBeNull();
+    expect(text.closest("li")).not.toBeNull();
+  });
+});
