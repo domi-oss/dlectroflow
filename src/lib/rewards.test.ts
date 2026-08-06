@@ -1,11 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Unit test for the P2002-safe once-only badge award (issue #21 P5.2).
-// prisma.badge is mocked; isUniqueViolation is provided by the @/lib/db mock
-// (mirrors the real predicate: PrismaClientKnownRequestError with code P2002).
+// Unit test for the once-only badge award (issue #21 P5.2), re-pointed at the
+// non-raising shape in #158. `prisma.badge` is mocked; what these prove is the
+// SHAPE and the return value — that a duplicate is resolved by
+// `createMany({ skipDuplicates: true })` returning `count: 0` rather than by a
+// rejection somebody catches. They cannot prove the log line is gone, because
+// the log line comes from a real client talking to a real Postgres: that half
+// is `src/lib/__tests__/handled-p2002.integration.test.ts`.
 const { prismaMock } = vi.hoisted(() => ({
   prismaMock: {
-    badge: { findUnique: vi.fn(), create: vi.fn() },
+    // `create` is mocked even though nothing should call it any more: a silent
+    // regression back to create-and-catch is exactly what this file guards.
+    badge: { findUnique: vi.fn(), create: vi.fn(), createMany: vi.fn() },
   },
 }));
 
@@ -13,16 +19,11 @@ vi.mock("@/lib/db", () => ({
   prisma: prismaMock,
   getSettings: vi.fn(),
   getStreak: vi.fn(),
-  isUniqueViolation: (e: unknown) =>
-    !!e && typeof e === "object" && (e as { code?: string }).code === "P2002",
 }));
 
 import { awardBadge } from "./rewards";
 import { BadgeKey } from "./constants";
 
-class FakeP2002 extends Error {
-  code = "P2002";
-}
 class FakeOtherError extends Error {
   code = "P1001";
 }
@@ -31,35 +32,46 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("awardBadge — P2002-safe, once-only", () => {
-  it("happy path: no existing badge → creates and returns true", async () => {
+describe("awardBadge — once-only, and never raises on a duplicate (#158)", () => {
+  it("happy path: no existing badge → inserts one row and returns true", async () => {
     prismaMock.badge.findUnique.mockResolvedValue(null);
-    prismaMock.badge.create.mockResolvedValue({});
-    const r = await awardBadge("ws", BadgeKey.Streak5);
-    expect(r).toBe(true);
-    expect(prismaMock.badge.create).toHaveBeenCalledTimes(1);
-  });
+    prismaMock.badge.createMany.mockResolvedValue({ count: 1 });
 
-  it("pre-existing badge → returns false without calling create", async () => {
-    prismaMock.badge.findUnique.mockResolvedValue({ id: "b1" });
-    const r = await awardBadge("ws", BadgeKey.Streak5);
-    expect(r).toBe(false);
+    expect(await awardBadge("ws", BadgeKey.Streak5)).toBe(true);
+    // `skipDuplicates` is the load-bearing flag: it is what makes Prisma emit
+    // INSERT ... ON CONFLICT DO NOTHING, so a concurrent award loses silently
+    // instead of raising P2002 and printing `prisma:error`.
+    expect(prismaMock.badge.createMany).toHaveBeenCalledWith({
+      data: { key: BadgeKey.Streak5, workspaceId: "ws" },
+      skipDuplicates: true,
+    });
     expect(prismaMock.badge.create).not.toHaveBeenCalled();
   });
 
-  it("concurrent award race: create throws P2002 → returns false (never throws)", async () => {
+  it("pre-existing badge → returns false without attempting a write", async () => {
+    prismaMock.badge.findUnique.mockResolvedValue({ id: "b1" });
+
+    expect(await awardBadge("ws", BadgeKey.Streak5)).toBe(false);
+    expect(prismaMock.badge.createMany).not.toHaveBeenCalled();
+    expect(prismaMock.badge.create).not.toHaveBeenCalled();
+  });
+
+  it("concurrent award race: nothing inserted → false, and nothing raised", async () => {
+    // ON CONFLICT DO NOTHING skipped the row, so Prisma resolves with count 0.
+    // Crucially it does NOT reject, so there is nothing for the client-level
+    // logger to print (#158).
     prismaMock.badge.findUnique.mockResolvedValue(null);
-    prismaMock.badge.create.mockRejectedValue(
-      new FakeP2002("Unique constraint failed"),
-    );
+    prismaMock.badge.createMany.mockResolvedValue({ count: 0 });
+
     await expect(awardBadge("ws", BadgeKey.Streak5)).resolves.toBe(false);
   });
 
-  it("non-P2002 create error → rethrows", async () => {
+  it("a genuine database failure still reaches the caller, unmasked", async () => {
     prismaMock.badge.findUnique.mockResolvedValue(null);
-    prismaMock.badge.create.mockRejectedValue(
+    prismaMock.badge.createMany.mockRejectedValue(
       new FakeOtherError("connection lost"),
     );
+
     await expect(awardBadge("ws", BadgeKey.Streak5)).rejects.toMatchObject({
       code: "P1001",
     });

@@ -23,7 +23,9 @@ const { prismaMock, txMock, getSettingsMock, getStreakMock } = vi.hoisted(
     const prismaMock = {
       badge: {
         findUnique: vi.fn().mockResolvedValue(null),
-        create: vi.fn().mockResolvedValue({}),
+        // #158: the award inserts with ON CONFLICT DO NOTHING and reads the
+        // count, so a duplicate is a resolved `{ count: 0 }`, never a rejection.
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       streakRecord: {
         aggregate: vi.fn().mockResolvedValue({ _max: { length: null } }),
@@ -55,8 +57,6 @@ vi.mock("@/lib/db", () => ({
   prisma: prismaMock,
   getSettings: getSettingsMock,
   getStreak: getStreakMock,
-  isUniqueViolation: (e: unknown) =>
-    !!e && typeof e === "object" && (e as { code?: string }).code === "P2002",
 }));
 
 import {
@@ -77,7 +77,7 @@ const daysAgo = (n: number) => {
 };
 
 function createdBadgeKeys(): string[] {
-  return prismaMock.badge.create.mock.calls.map(
+  return prismaMock.badge.createMany.mock.calls.map(
     (c) => (c[0] as { data: { key: string } }).data.key,
   );
 }
@@ -87,7 +87,7 @@ beforeEach(() => {
   getSettingsMock.mockResolvedValue({ workingDays: "1,2,3,4,5,6,7" });
   getStreakMock.mockResolvedValue({});
   prismaMock.badge.findUnique.mockResolvedValue(null);
-  prismaMock.badge.create.mockResolvedValue({});
+  prismaMock.badge.createMany.mockResolvedValue({ count: 1 });
   prismaMock.streakRecord.aggregate.mockResolvedValue({
     _max: { length: null },
   });
@@ -186,7 +186,7 @@ describe("touchStreakOnEngagement — once per working day", () => {
     });
     prismaMock.badge.findUnique.mockResolvedValue({ id: "b1" }); // already earned
     await touchStreakOnEngagement("ws");
-    expect(prismaMock.badge.create).not.toHaveBeenCalled();
+    expect(prismaMock.badge.createMany).not.toHaveBeenCalled();
   });
 });
 
@@ -217,13 +217,13 @@ describe("maybeAwardInboxZero — Inbox-zero badge", () => {
   it("does not award when items still need review", async () => {
     prismaMock.brainDumpItem.count.mockResolvedValue(2);
     await maybeAwardInboxZero("ws");
-    expect(prismaMock.badge.create).not.toHaveBeenCalled();
+    expect(prismaMock.badge.createMany).not.toHaveBeenCalled();
   });
 
   it("is idempotent — already-held badge is not re-created", async () => {
     prismaMock.brainDumpItem.count.mockResolvedValue(0);
     prismaMock.badge.findUnique.mockResolvedValue({ id: "b1" });
     await maybeAwardInboxZero("ws");
-    expect(prismaMock.badge.create).not.toHaveBeenCalled();
+    expect(prismaMock.badge.createMany).not.toHaveBeenCalled();
   });
 });

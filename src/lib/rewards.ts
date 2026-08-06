@@ -7,7 +7,7 @@ import {
   type RewardType as RewardTypeT,
   type BadgeKey as BadgeKeyT,
 } from "@/lib/constants";
-import { getSettings, getStreak, isUniqueViolation } from "@/lib/db";
+import { getSettings, getStreak } from "@/lib/db";
 
 // ── helpers ────────────────────────────────────────────────────────────────
 function ymd(d: Date): string {
@@ -74,10 +74,25 @@ export async function maybeAwardInboxZero(workspaceId: string) {
 // ── badges ─────────────────────────────────────────────────────────────────
 /**
  * Award a badge once. Returns true if it was newly earned, false if it was
- * already held. The findUnique→create pair is a TOCTOU: two concurrent awards
- * can both pass the existence check and one loses the unique (workspaceId,key)
- * constraint with P2002. Treat that as "already earned" (return false) rather
- * than throwing — the badge exists either way.
+ * already held.
+ *
+ * The findUnique→create pair is a TOCTOU by design: two concurrent awards can
+ * both pass the existence check and both write. That used to be handled by
+ * catching the resulting P2002, which was correct and still printed — Prisma's
+ * client logger fires before our `catch` ever sees the error (#158, and see the
+ * note on `log` in src/lib/db.ts). `createMany` + `skipDuplicates` compiles to
+ * `INSERT ... ON CONFLICT DO NOTHING`, so the loser inserts nothing and is told
+ * so by `count`, rather than raising.
+ *
+ * `createMany` rather than `!240`'s `createManyAndReturn`: the caller wants the
+ * boolean, never the row, so there is nothing to RETURNING. And `count` carries
+ * exactly the fact the old `catch` was reconstructing — 1 means this call
+ * earned it, 0 means somebody already had.
+ *
+ * The leading read stays. Most calls are for a badge already held
+ * (`maybeAwardTenStepsDay` fires on every step completion past the tenth), and
+ * an indexed SELECT is cheaper than a speculative insert that has to be rolled
+ * back on conflict.
  */
 export async function awardBadge(
   workspaceId: string,
@@ -87,13 +102,11 @@ export async function awardBadge(
     where: { workspaceId_key: { workspaceId, key } },
   });
   if (existing) return false;
-  try {
-    await prisma.badge.create({ data: { key, workspaceId } });
-    return true;
-  } catch (e) {
-    if (isUniqueViolation(e)) return false; // concurrent award won the race
-    throw e;
-  }
+  const { count } = await prisma.badge.createMany({
+    data: { key, workspaceId },
+    skipDuplicates: true,
+  });
+  return count > 0; // 0 = a concurrent award won the race; the badge exists
 }
 
 /** Award ten-steps-in-a-day once StepDone count for today reaches 10. */
@@ -224,7 +237,8 @@ export async function touchStreakOnEngagement(
   });
 
   // Streak badges — only when the streak actually moved (matches the prior
-  // early-return for same-day repeats). awardBadge is itself P2002-safe.
+  // early-return for same-day repeats). awardBadge tolerates a concurrent
+  // award without raising (#158).
   const { changed, ...update } = result;
   if (changed) {
     // Comeback — restarted after a gap (a prior streak had ended). No-shame.
