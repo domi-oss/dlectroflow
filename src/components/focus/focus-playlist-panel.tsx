@@ -224,7 +224,7 @@ export function FocusPlaylistPanel({
             // instance with nothing selected. A group holding one permanently
             // ticked "All tracks" row would be noise on a screen whose job is to
             // stay out of the way.
-            <fieldset aria-labelledby={playlistsLabelId}>
+            <fieldset aria-labelledby={playlistsLabelId} className="space-y-1">
               <legend id={playlistsLabelId} className="text-sm font-medium">
                 {t("focus.sound.playlists", voice)}
               </legend>
