@@ -1,4 +1,4 @@
-import { prisma, isUniqueViolation } from "@/lib/db";
+import { prisma } from "@/lib/db";
 import { AiPolicy } from "@/lib/constants";
 import { decryptNullable } from "@/lib/crypto/token-cipher";
 import {
@@ -92,12 +92,16 @@ function userMeterStore(userId: string): SlidingWindowStore {
           data: { count: { increment: 1 } },
         })
       ).count,
-    createFirstUse: async (now) => {
-      await prisma.userAiUsage.create({
-        data: { userId, count: 1, windowStartedAt: now },
-      });
-    },
-    isDuplicate: isUniqueViolation,
+    createFirstUse: async (now) =>
+      (
+        await prisma.userAiUsage.createMany({
+          data: { userId, count: 1, windowStartedAt: now },
+          // See the guest store: ON CONFLICT DO NOTHING, so a concurrent first
+          // use is reported by `count` rather than raised as a P2002 that
+          // Prisma's client logger would print at error level first (#158).
+          skipDuplicates: true,
+        })
+      ).count === 1,
   };
 }
 

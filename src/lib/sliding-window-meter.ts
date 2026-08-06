@@ -42,10 +42,22 @@ export type SlidingWindowStore = {
    * than substituting a bound of its own.
    */
   incrementInWindow(quota: number | null, threshold: Date): Promise<number>;
-  /** First-use insert of `{ count: 1, windowStartedAt: now }`. */
-  createFirstUse(now: Date): Promise<void>;
-  /** Does this error mean "a concurrent first use won the insert race"? */
-  isDuplicate(err: unknown): boolean;
+  /**
+   * First-use insert of `{ count: 1, windowStartedAt: now }`, resolving to
+   * whether THIS caller inserted the row.
+   *
+   * `false` means a concurrent first use won and its row is already committed —
+   * not that anything failed. An implementation MUST get that answer without
+   * raising: `createMany({ skipDuplicates: true })` compiles to
+   * `INSERT ... ON CONFLICT DO NOTHING`, whose `count` is exactly this boolean.
+   *
+   * It used to be `Promise<void>` alongside an `isDuplicate(err)` predicate, and
+   * the loser was identified by catching its P2002. That was correct and still
+   * printed: `log: ["error"]` is Prisma's client-level logger, so the line is
+   * emitted before the exception reaches any `catch` (#158, and the note on
+   * `log` in src/lib/db.ts). A real failure must still reject.
+   */
+  createFirstUse(now: Date): Promise<boolean>;
 };
 
 export type MeterResult = { allowed: boolean; remaining: number };
@@ -87,16 +99,11 @@ async function applyMeter(
   //    quota — the active window is exhausted. Only pay for a create when it is
   //    genuinely absent, otherwise every blocked request collides on the PK.
   const existing = await store.find();
-  if (!existing) {
-    try {
-      await store.createFirstUse(now);
-      return "created";
-    } catch (err) {
-      if (!store.isDuplicate(err)) throw err;
-      // Lost the create race — a concurrent first use won; fall through and
-      // increment against the row it created.
-    }
-  }
+  // `false` = a concurrent first use won the insert; its row is committed, so
+  // fall through and increment against that instead. The loser is identified by
+  // the insert's own row count rather than by catching its P2002 (#158).
+  if (!existing && (await store.createFirstUse(now))) return "created";
+
   return (await store.incrementInWindow(quota, windowThreshold)) > 0
     ? "incremented"
     : "blocked";

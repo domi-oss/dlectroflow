@@ -18,8 +18,6 @@ const QUOTA = 5;
 const NOW = new Date("2026-07-28T12:00:00.000Z");
 const THRESHOLD = new Date("2026-07-27T12:00:00.000Z");
 
-class FakeDuplicate extends Error {}
-
 function fakeStore(overrides: Partial<SlidingWindowStore> = {}): {
   store: SlidingWindowStore;
   mocks: {
@@ -33,11 +31,12 @@ function fakeStore(overrides: Partial<SlidingWindowStore> = {}): {
     find: vi.fn().mockResolvedValue(null),
     resetExpired: vi.fn().mockResolvedValue(0),
     incrementInWindow: vi.fn().mockResolvedValue(0),
-    createFirstUse: vi.fn().mockResolvedValue(undefined),
+    // #158: resolves to whether THIS caller inserted the row. `false` is a
+    // lost race, reported by ON CONFLICT DO NOTHING's row count — not an error.
+    createFirstUse: vi.fn().mockResolvedValue(true),
   };
   const store: SlidingWindowStore = {
     ...mocks,
-    isDuplicate: (e: unknown) => e instanceof FakeDuplicate,
     ...overrides,
   };
   return { store, mocks };
@@ -130,7 +129,9 @@ describe("meterConsume — step 3: first use", () => {
 
   it("recovers from a lost create race by incrementing the winner's row", async () => {
     const { store, mocks } = fakeStore();
-    mocks.createFirstUse.mockRejectedValue(new FakeDuplicate("dup"));
+    // Inserted nothing: a concurrent first use won, and said so by resolving
+    // false rather than by rejecting with a P2002 somebody has to catch (#158).
+    mocks.createFirstUse.mockResolvedValue(false);
     // The retry increment succeeds against the row the winner created.
     mocks.incrementInWindow
       .mockResolvedValueOnce(0) // step 2, before the create attempt
@@ -148,7 +149,9 @@ describe("meterConsume — step 3: first use", () => {
     expect(mocks.incrementInWindow).toHaveBeenCalledTimes(2);
   });
 
-  it("rethrows a create failure that is NOT a unique violation", async () => {
+  it("still propagates a genuine create failure, unmasked", async () => {
+    // A lost race is a resolved `false`; anything that REJECTS is a real
+    // failure and must still reach the caller — and Prisma's error log.
     const { store, mocks } = fakeStore();
     mocks.createFirstUse.mockRejectedValue(new Error("connection reset"));
 
@@ -241,14 +244,14 @@ describe("meterRecord — meters without enforcing anything", () => {
 
   it("recovers from a lost create race", async () => {
     const { store, mocks } = fakeStore();
-    mocks.createFirstUse.mockRejectedValue(new FakeDuplicate("dup"));
+    mocks.createFirstUse.mockResolvedValue(false);
     mocks.incrementInWindow.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
 
     await expect(meterRecord(store, NOW, THRESHOLD)).resolves.toBeUndefined();
     expect(mocks.incrementInWindow).toHaveBeenCalledTimes(2);
   });
 
-  it("rethrows a create failure that is NOT a unique violation", async () => {
+  it("still propagates a genuine create failure, unmasked", async () => {
     const { store, mocks } = fakeStore();
     mocks.createFirstUse.mockRejectedValue(new Error("connection reset"));
 
