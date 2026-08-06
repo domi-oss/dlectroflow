@@ -90,6 +90,21 @@ describe("updateStepNotes", () => {
     expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 
+  it("invalidates EVERY list that renders the note, /library included", async () => {
+    // The twin of the task action's assertion, and for the same reason: the
+    // Library's expanded multi-step row renders `TaskSteps`, which mounts a
+    // `StepNote` per step, and `library/page.tsx` selects `s.notes` into it.
+    // A step note saved from there has to survive a client-side navigation
+    // away and back (!270).
+    findFirstMock.mockResolvedValue({ id: "s1", taskId: "t-parent" });
+    await updateStepNotes("s1", "hi");
+    expect(revalidatePathMock.mock.calls.map(([p]) => p).sort()).toEqual([
+      "/",
+      "/library",
+      "/tasks/t-parent",
+    ]);
+  });
+
   it("reports a failed write instead of throwing at the client", async () => {
     updateMock.mockRejectedValue(new Error("db down"));
     const res = await updateStepNotes("s1", "hi");

@@ -54,10 +54,17 @@ export async function updateStepNotes(
     return { ok: false, reason: "error" };
   }
 
+  // The same three paths as `updateTaskNotes`, and for the same reason — every
+  // surface that renders a step note. The Library reaches them through its
+  // multi-step row, which expands into the same `TaskSteps` the task page
+  // renders, so a step note saved there has to survive a client-side
+  // navigation away and back (!270).
+  //
   // The parent path comes from the row we just authorised, never from a caller
   // parameter: a `taskId` argument would let a caller invalidate an arbitrary
   // path, and would be a second value needing its own workspace check.
   revalidatePath("/");
+  revalidatePath("/library");
   revalidatePath(`/tasks/${step.taskId}`);
 
   return { ok: true, notes: normalized };

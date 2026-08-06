@@ -92,6 +92,26 @@ describe("updateTaskNotes", () => {
     expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 
+  it("invalidates EVERY list that renders the note, /library included", async () => {
+    // Duo review (!270) found `/library` missing and was told by the comment
+    // above the call that the Library was a deferral. That comment was true
+    // when it was written and stopped being true two commits later: #44's
+    // surface sweep mounted `TaskNoteRow` in `library-rows.tsx` and
+    // `library-multistep.tsx`, and `library/page.tsx` selects `task.notes`
+    // into the row. So the Library renders the value and must be invalidated
+    // with the other two — one path too few is exactly #139.
+    //
+    // Asserted as a SET rather than three separate `toHaveBeenCalledWith`
+    // lines, because the failure this guards against is an omission, and an
+    // omission is invisible to an assertion that only looks at what is there.
+    await updateTaskNotes("t1", "hi");
+    expect(revalidatePathMock.mock.calls.map(([p]) => p).sort()).toEqual([
+      "/",
+      "/library",
+      "/tasks/t1",
+    ]);
+  });
+
   it("invalidates the path from the ROW it authorised, not the argument", async () => {
     // Duo review (!270) read `revalidatePath(`/tasks/${taskId}`)` as arbitrary
     // path invalidation. It is not: the `findFirst` above is keyed on

@@ -60,13 +60,25 @@ export async function updateTaskNotes(
     return { ok: false, reason: "error" };
   }
 
-  // The task page renders the note, so it must not serve a stale one after a
-  // reload. `/` is invalidated too: it is the list this app's writes
-  // consistently invalidate (the contract `revalidation-hygiene` polices for
-  // `focus.ts`), and the note is a `Task` column the Library overview is next
-  // in line to render — #44 asks for it, and it is deferred rather than
-  // dropped. Invalidating one path too many costs a re-render; one too few is
-  // the class of bug #139 was filed for.
+  // Every surface that RENDERS the note, so none of them serves a stale one:
+  // the task page, the Inbox at `/`, and the Library. Invalidating one path
+  // too many costs a re-render; one too few is the class of bug #139 was filed
+  // for, and `revalidation-hygiene` polices exactly this contract for
+  // `focus.ts`.
+  //
+  // `/library` was missing until !270. The comment here used to call it a
+  // deferral, and it was one for two commits — then #44's surface sweep
+  // mounted `TaskNoteRow` in `library-rows.tsx` and `library-multistep.tsx`,
+  // and `library/page.tsx` began selecting `task.notes` into the row. The
+  // deferral note outlived the deferral, which is the failure mode a comment
+  // asserting a fact about ANOTHER file always has; the colocated test now
+  // asserts the whole set of paths rather than the presence of any one, so an
+  // omission fails instead of reading as a decision.
+  //
+  // `force-dynamic` on those pages is not a substitute. It governs the SERVER
+  // render; `revalidatePath` is also what clears the client router cache, and
+  // that cache is what a client-side navigation away and back would otherwise
+  // serve.
   //
   // The id comes from the row we just authorised, not from the argument. Here
   // the two are provably the same value — the `findFirst` is keyed on
@@ -75,6 +87,7 @@ export async function updateTaskNotes(
   // same sourcing rule `step-notes.ts` states, applied so the pair does not
   // have to be reasoned about twice (!270).
   revalidatePath("/");
+  revalidatePath("/library");
   revalidatePath(`/tasks/${task.id}`);
 
   // The STORED value, not the caller's input. Normalisation trims, strips and
