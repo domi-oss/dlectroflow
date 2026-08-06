@@ -41,6 +41,19 @@ const COUNTER_VISIBLE_BELOW = 200;
  *
  * No trimming — that belongs to `normalizeTaskNote` on the way to the
  * database. Trimming mid-keystroke would eat the space the user just typed.
+ *
+ * No line-ending fold either, and that is a measured decision rather than an
+ * omission (!270). The worry is that a CRLF would cost two code points here
+ * and one in the column, so the counter would under-report near the bound. It
+ * cannot arise: the HTML Standard defines a textarea's API VALUE — what the
+ * `value` IDL attribute, and therefore `e.target.value`, returns — as
+ * newline-normalised to LF, and reserves CRLF for the FORM SUBMISSION value.
+ * This field submits no form; it hands a JS string to a server action.
+ * Measured, not assumed: typing Enter and assigning `"a\r\nb\rc"` both read
+ * back CR-free in Chromium, WebKit and jsdom. The only deviation found was
+ * WebKit's `execCommand("insertText")`, which this repo never calls. `note`
+ * has exactly three sources — this function, `initialNote` and `res.notes` —
+ * and the latter two come from the column, which `normalizeTaskNote` folds.
  */
 function clampToBudget(value: string): string {
   const points = [...value];

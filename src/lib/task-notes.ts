@@ -38,9 +38,24 @@ export const TASK_NOTE_MAX_LENGTH = 2000;
  * Every C0 control except HTAB and LF, plus DEL.
  *
  * CR is absent on purpose — it is folded into LF by the line-ending pass below
- * before this runs, so listing it here would be dead. The set mirrors the one
- * `esc()` in src/lib/ics.ts drops for RFC 5545 §3.3.11; this is the same gate
- * applied one layer earlier, because the Google Tasks path never reaches `esc`.
+ * before this runs, so listing it here would be dead. Both passes are steps of
+ * the SAME expression in `normalizeTaskNote`, so no caller can reach one
+ * without the other and the ordering cannot be broken from outside this file
+ * (!270). The set mirrors the one `esc()` in src/lib/ics.ts drops for RFC 5545
+ * §3.3.11; this is the same gate applied one layer earlier, because the Google
+ * Tasks path never reaches `esc`.
+ *
+ * **The `g` flag is load-bearing, not habit.** `replace` with a non-global
+ * regex substitutes only the FIRST match, so dropping it would leave every
+ * control character after the first in the note — and `char_length` would then
+ * count them against the user's budget. Both properties are pinned by the
+ * colocated tests ("strips C0 control characters" and "clamps AFTER
+ * stripping"), which fail if the flag goes.
+ *
+ * The flag is safe here only because `replace` resets `lastIndex` on every
+ * call. It would NOT be safe under `.test()` or `.exec()`, which advance
+ * `lastIndex` and make a module-level regex answer differently on alternate
+ * calls: never reach for those with this constant (!270).
  */
 const CONTROL_CHARS = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
 
