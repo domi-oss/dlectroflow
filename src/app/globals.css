@@ -351,7 +351,15 @@
    * reasons against it: it lifts the base rule's specificity from (0,0,1) to
    * (0,0,2) for one of its three selectors only, and the hygiene test matches
    * that rule by its exact selector list — so folding it in there unhooks the
-   * guard on the whole chip while looking like a one-line tightening. */
+   * guard on the whole chip while looking like a one-line tightening.
+   *
+   * `color: inherit` is the easy one to leave out and the one that most needs
+   * saying. The chip's surface and its text colour are a deliberate pair — the
+   * chip paints its OWN background so the page behind it cannot move the text
+   * ratio — so dropping the surface here and keeping `color: var(--foreground)`
+   * from the base rule leaves half of that pair standing. A code block sitting
+   * in muted prose would then render its text at full foreground, and nothing
+   * in the markup would say why. Added on !272. */
   pre code,
   pre kbd,
   pre samp {
@@ -359,6 +367,7 @@
     padding: 0;
     border-radius: 0;
     background-color: transparent;
+    color: inherit;
     box-shadow: none;
   }
 

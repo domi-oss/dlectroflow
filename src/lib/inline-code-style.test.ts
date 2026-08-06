@@ -247,7 +247,28 @@ describe("the real tree", () => {
     expect(rule!["background-color"]).toBe("transparent");
     expect(rule!["font-size"]).toBe("inherit");
     expect(rule!["padding"]).toBe("0");
+    expect(rule!["border-radius"]).toBe("0");
     expect(rule!["box-shadow"]).toBe("none");
+    // `color` is the one that is easy to leave out, and the one that must not
+    // be: the chip's surface and its text colour are a deliberate pair — the
+    // chip paints its own background precisely so the page behind it cannot
+    // move the text ratio. Dropping the surface and keeping
+    // `color: var(--foreground)` leaves half of that pair, so a code block
+    // inside muted prose would render its text at full foreground for no
+    // reason a reader of the markup could see. Reported on !272.
+    expect(rule!["color"]).toBe("inherit");
+
+    // Every property the reset declares is pinned, no more and no less. An
+    // unpinned one can be dropped in silence, which is the whole hazard with a
+    // rule that paints nothing today.
+    expect(Object.keys(rule!).sort()).toEqual([
+      "background-color",
+      "border-radius",
+      "box-shadow",
+      "color",
+      "font-size",
+      "padding",
+    ]);
   });
 
   it("gives kbd its keycap edge without changing the line box", () => {
