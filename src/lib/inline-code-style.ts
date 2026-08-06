@@ -67,9 +67,57 @@ const TAGS = new Set<string>(INLINE_CODE_TAGS);
  *
  * Matches the arbitrary form too (`text-[13px]`), which is the obvious way
  * round a check that only knew the named scale.
+ *
+ * The arbitrary arm reads the **shape** of the value rather than its unit, and
+ * that is the whole design. `text-` is overloaded — it prefixes the colour
+ * utilities as well — so the arm has to separate `text-[13px]` from
+ * `text-[#0af]`, and the tempting way to do that is to look for a unit
+ * somewhere inside the brackets. It fails in both directions, and both were
+ * measured on !272:
+ *
+ *  * **Misses.** Any unit not on the list walks through. A list of
+ *    `px|rem|em|pt|ch|%` missed `vw`, `dvh`, `lh` and `cqi`; extending it with
+ *    those still missed `vmin`, `mm`, `ex` and the explicit `length:` form.
+ *    CSS keeps adding units, so the list is wrong again on a schedule.
+ *  * **False positives.** A percentage is ordinary *inside a colour* — an alpha
+ *    channel, or an oklch lightness — so `text-[rgb(1_2_3_/_50%)]` and
+ *    `text-[color:oklch(50%_0_0)]` both read as font sizes and get reported as
+ *    drift to be removed.
+ *
+ * A font size instead starts with a number, a sign, a dot, a maths function, or
+ * Tailwind's explicit `length:` hint; a colour starts with `#`, a colour
+ * function, or the `color:` hint. Anchoring on that first character settles
+ * both directions at once and needs no maintenance as units are added.
+ *
+ * A bare `text-[var(--x)]` is deliberately **not** matched: it is genuinely
+ * ambiguous between the two, and Tailwind's own answer is to disambiguate it as
+ * `text-[length:var(--x)]`, which is matched.
  */
 const FONT_SIZE_UTILITY =
-  /^text-(xs|sm|base|lg|xl|[2-9]xl|\[[^\]]*(?:px|rem|em|pt|ch|%)[^\]]*\])$/;
+  /^text-(?:xs|sm|base|lg|xl|[2-9]xl|\[(?:length:|[-.\d]|(?:calc|clamp|min|max)\()[^\]]*\])$/;
+
+/**
+ * A utility with its variant chain stripped: `sm:text-xs` → `text-xs`.
+ *
+ * Only a colon **outside** the square brackets separates a variant. Reading the
+ * text after the last colon anywhere — the obvious one-liner — eats the colon
+ * in `text-[length:2vw]` and leaves `2vw]`, so the explicit length form, which
+ * is the form Tailwind documents for disambiguating an arbitrary value, walked
+ * past the detector entirely. `[@media(min-width:40rem)]:text-lg` breaks it the
+ * other way round: the separator there is the *last* colon, but only because
+ * the one before it is inside brackets. Tracking depth settles both. !272.
+ */
+function baseUtility(token: string): string {
+  let depth = 0;
+  let separator = -1;
+  for (let i = 0; i < token.length; i++) {
+    const character = token[i];
+    if (character === "[") depth++;
+    else if (character === "]") depth--;
+    else if (character === ":" && depth === 0) separator = i;
+  }
+  return token.slice(separator + 1);
+}
 
 /** One element that re-sizes itself out from under the base rule. */
 export interface SizeOverride {
@@ -129,9 +177,8 @@ export function findInlineCodeSizeOverrides(
               ts.isNoSubstitutionTemplateLiteral(inner)
             ) {
               for (const token of inner.text.split(/\s+/)) {
-                // Strip any variant chain: `sm:text-xs` re-sizes too.
-                const base = token.slice(token.lastIndexOf(":") + 1);
-                if (!FONT_SIZE_UTILITY.test(base)) continue;
+                // Variant chain stripped first: `sm:text-xs` re-sizes too.
+                if (!FONT_SIZE_UTILITY.test(baseUtility(token))) continue;
                 overrides.push({
                   line:
                     sourceFile.getLineAndCharacterOfPosition(

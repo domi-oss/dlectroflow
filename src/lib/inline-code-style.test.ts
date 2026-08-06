@@ -85,6 +85,67 @@ describe("findInlineCodeSizeOverrides", () => {
     ]);
   });
 
+  it("flags an arbitrary size in any unit, not a list of remembered ones", () => {
+    // The arbitrary form exists precisely to reach what the named scale cannot,
+    // so a detector that enumerates units is a detector with a hole in it — and
+    // CSS keeps adding units. Reported on !272 for `vw`/`dvh`/`cqi`/`lh`; the
+    // enumeration offered as the fix still missed `vmin`, `mm`, `ex` and the
+    // explicit `length:` form, which is why this reads the *shape* of the value
+    // instead. A font size starts with a number, a sign, a dot, a math
+    // function, or the `length:` hint.
+    const source = `export const A = () => (
+  <>
+    <code className="text-[2vw]">a</code>
+    <code className="text-[50dvh]">b</code>
+    <code className="text-[1.5lh]">c</code>
+    <code className="text-[3cqi]">d</code>
+    <code className="text-[2vmin]">e</code>
+    <code className="text-[10mm]">f</code>
+    <code className="text-[2ex]">g</code>
+    <code className="text-[.5rem]">h</code>
+    <code className="text-[-2px]">i</code>
+    <code className="text-[calc(1rem+2px)]">j</code>
+    <code className="text-[clamp(1rem,2vw,3rem)]">k</code>
+    <code className="text-[length:var(--s)]">l</code>
+  </>
+);`;
+    expect(findInlineCodeSizeOverrides(source).map((o) => o.token)).toEqual([
+      "text-[2vw]",
+      "text-[50dvh]",
+      "text-[1.5lh]",
+      "text-[3cqi]",
+      "text-[2vmin]",
+      "text-[10mm]",
+      "text-[2ex]",
+      "text-[.5rem]",
+      "text-[-2px]",
+      "text-[calc(1rem+2px)]",
+      "text-[clamp(1rem,2vw,3rem)]",
+      "text-[length:var(--s)]",
+    ]);
+  });
+
+  it("strips a variant chain without eating a colon inside the value", () => {
+    // Only a colon OUTSIDE the brackets separates a variant. Taking the text
+    // after the last colon anywhere reads the one in `text-[length:2vw]` as a
+    // separator and leaves `2vw]`, which matches nothing — so the explicit
+    // length form, the very form Tailwind documents for disambiguating an
+    // arbitrary value, walked straight past the detector. Found by the unit
+    // test above rather than by reading the code. !272.
+    const source = `export const A = () => (
+  <>
+    <code className="sm:text-[length:2vw]">a</code>
+    <code className="dark:hover:text-sm">b</code>
+    <code className="[@media(min-width:40rem)]:text-lg">c</code>
+  </>
+);`;
+    expect(findInlineCodeSizeOverrides(source).map((o) => o.token)).toEqual([
+      "sm:text-[length:2vw]",
+      "dark:hover:text-sm",
+      "[@media(min-width:40rem)]:text-lg",
+    ]);
+  });
+
   it("flags a size reached through cn() or a ternary arm", () => {
     const source = `export const A = () => (
   <code className={cn("break-all", wide ? "text-sm" : "font-medium")}>x</code>
@@ -100,6 +161,25 @@ describe("findInlineCodeSizeOverrides", () => {
     // is load-bearing on privacy/page.tsx's one long opaque identifier.
     const source = `export const A = () => (
   <code className="break-all font-medium text-muted-foreground">x</code>
+);`;
+    expect(findInlineCodeSizeOverrides(source)).toEqual([]);
+  });
+
+  it("does not read an arbitrary colour as a size", () => {
+    // `text-` is overloaded: it prefixes the colour utilities too. A percentage
+    // is ordinary inside a colour — an alpha channel, or an oklch lightness —
+    // so a detector that looks anywhere in the brackets for `%` reads all three
+    // of these as font sizes and demands their removal. Found while widening
+    // the unit list on !272; the enumeration approach had this in it from the
+    // start and nothing was looking.
+    const source = `export const A = () => (
+  <>
+    <code className="text-[rgb(1_2_3_/_50%)]">a</code>
+    <code className="text-[oklch(0.7_0.1_20_/_50%)]">b</code>
+    <code className="text-[color:oklch(50%_0_0)]">c</code>
+    <code className="text-[#0af]">d</code>
+    <code className="text-[color:var(--x)]">e</code>
+  </>
 );`;
     expect(findInlineCodeSizeOverrides(source)).toEqual([]);
   });
