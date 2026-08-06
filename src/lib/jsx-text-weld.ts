@@ -214,11 +214,25 @@ function tagNameOf(
   return ts.isIdentifier(tag) ? tag.text : null;
 }
 
-/** The literal string an expression container renders, or null if it is
- *  dynamic. `{" "}` is the repo's spacing idiom, so reading it is mandatory. */
+/**
+ * The literal string an expression container renders, or null if it is dynamic.
+ *
+ * `{" "}` is the repo's spacing idiom, so reading it is mandatory.
+ *
+ * A container with **no expression** — `{}`, or one holding only a comment,
+ * where TypeScript parks the comment in trivia and leaves `.expression`
+ * undefined — is not dynamic. It renders the empty string, and saying `null`
+ * there made {@link contributionOf} call it `unknown`, which kept it in the
+ * boundary list and suppressed the check on *both* sides of it. So
+ * `Press{/* … *\/}<kbd>N</kbd>` renders `PressN` and went unreported — and a
+ * comment is the idiom for stopping Prettier joining two lines, which is
+ * precisely where a reflow weld appears. Reported on !272; the `empty` arm's
+ * own doc has always named the comment case, so this was the code disagreeing
+ * with the type beside it.
+ */
 function literalOfExpression(node: ts.JsxExpression): string | null {
   const expression = node.expression;
-  if (!expression) return null; // `{}` and `{/* comment */}`
+  if (!expression) return "";
   if (ts.isStringLiteral(expression)) return expression.text;
   if (ts.isNoSubstitutionTemplateLiteral(expression)) return expression.text;
   return null;
@@ -248,14 +262,37 @@ function contributionOf(child: ts.JsxChild): Contribution {
 
   if (ts.isJsxFragment(child)) {
     // A fragment is transparent, so its edges are its children's edges — and it
-    // is genuinely used to group inline runs.
+    // is genuinely used to group inline runs. An empty one needs no further
+    // thought: a fragment has no box, so nothing can style it into occupying
+    // space, which is not true of the element case below.
     return innerEdges(child.children, "inline");
   }
 
   if (ts.isJsxElement(child)) {
     const tag = tagNameOf(child);
     if (tag === null || !INLINE_TAGS.has(tag)) return { kind: "unknown" };
-    return innerEdges(child.children, "inline");
+    const edges = innerEdges(child.children, "inline");
+    // An inline element with nothing visible in it contributes no glyph, so it
+    // should drop out and let its neighbours meet — `Press<span></span>` really
+    // does render `PressN`.
+    //
+    // Only when it is **bare**, though. Contentless-but-styled is a live idiom
+    // in this tree, not a hypothetical: `<span className="flex-1" />` is the
+    // spacer in five components and `<span aria-hidden className="h-1.5 w-1.5
+    // rounded-full" />` is `section-nav`'s current-page marker. Both occupy
+    // real width, and the long-hand spelling of either renders identically. An
+    // attribute is therefore the line between "renders nothing" and "renders no
+    // text": calling the styled form transparent would weld the two words
+    // either side of a visible gap. `unknown` is the safe verdict, per the note
+    // on {@link Contribution}. Narrowed from the report on !272, which asked
+    // for all of them.
+    if (
+      edges.kind === "empty" &&
+      child.openingElement.attributes.properties.length > 0
+    ) {
+      return { kind: "unknown" };
+    }
+    return edges;
   }
 
   return { kind: "unknown" };
@@ -269,6 +306,10 @@ function contributionOf(child: ts.JsxChild): Contribution {
  * at either edge makes that edge unknown — the element might render anything
  * there — which is why this returns a whole {@link Contribution} rather than a
  * pair of strings.
+ *
+ * No visible children at all is `empty`, not `unknown`: there is no glyph, so
+ * there is nothing to be uncertain about. The caller decides whether the *box*
+ * is also nothing — see the attribute test in {@link contributionOf}.
  */
 function innerEdges(
   children: readonly ts.JsxChild[],
@@ -276,7 +317,7 @@ function innerEdges(
 ): Contribution {
   const contributions = children.map(contributionOf);
   const visible = contributions.filter((c) => c.kind !== "empty");
-  if (visible.length === 0) return { kind: "unknown" };
+  if (visible.length === 0) return { kind: "empty" };
   const first = visible[0];
   const last = visible.at(-1)!;
   if (first.kind === "unknown" || last.kind === "unknown") {

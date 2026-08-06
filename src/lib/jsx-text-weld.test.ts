@@ -166,7 +166,88 @@ describe("findTextWelds", () => {
     ]);
   });
 
+  // ── Things that render nothing must not hide the weld behind them ───────
+  //
+  // Every one of these sits *between* the two words and contributes no glyph,
+  // so the words either side really are neighbours. Reading one as "I cannot
+  // tell" suppresses the boundary on both sides of it — a false negative in the
+  // shape most likely to occur, because a JSX comment is how a reflow gets
+  // pinned in the first place. Duo review on !272 caught all three.
+
+  it("does not let a JSX comment hide the weld beside it", () => {
+    // `{/* … */}` is the idiom for stopping Prettier joining two lines, so it
+    // lands in exactly the place the reflow weld appears.
+    const source = `export const A = () => (
+  <p>
+    Press{/* keep the tag on its own line */}
+    <kbd>N</kbd>
+  </p>
+);`;
+    expect(findTextWelds(source).map((f) => f.rendered)).toEqual(["PressN"]);
+  });
+
+  it("does not let an empty expression container hide the weld beside it", () => {
+    const source = `export const A = () => (
+  <p>
+    Press{}
+    <kbd>N</kbd>
+  </p>
+);`;
+    expect(findTextWelds(source).map((f) => f.rendered)).toEqual(["PressN"]);
+  });
+
+  it("sees through a bare inline element with nothing in it", () => {
+    const source = `export const A = () => (
+  <p>
+    Press<span></span>
+    <kbd>N</kbd>
+  </p>
+);`;
+    expect(findTextWelds(source).map((f) => f.rendered)).toEqual(["PressN"]);
+  });
+
+  it("sees through a bare inline element holding only a comment", () => {
+    const source = `export const A = () => (
+  <p>
+    Press<span>{/* nothing here */}</span>
+    <kbd>N</kbd>
+  </p>
+);`;
+    expect(findTextWelds(source).map((f) => f.rendered)).toEqual(["PressN"]);
+  });
+
+  it("sees through an empty fragment", () => {
+    // A fragment has no box to style, so unlike an element there is no case in
+    // which an empty one occupies space.
+    const source = `export const A = () => (
+  <p>
+    Press<></>
+    <kbd>N</kbd>
+  </p>
+);`;
+    expect(findTextWelds(source).map((f) => f.rendered)).toEqual(["PressN"]);
+  });
+
   // ── Precision: the shapes that must NOT fire ────────────────────────────
+
+  it("does not see through a contentless element that carries attributes", () => {
+    // The counter-example to the four above, and it is measured rather than
+    // imagined: `<span className="flex-1" />` is this tree's spacer idiom (five
+    // of them) and `<span aria-hidden className="h-1.5 w-1.5 rounded-full" />`
+    // its current-page marker. Contentless, and both occupy real width. The
+    // long-hand spelling renders identically, so an attribute is the line
+    // between "renders nothing" and "renders no *text*" — only the bare form is
+    // transparent. Reported as a plain false negative on !272; the fix is
+    // narrower than the report, because the wide version welds the words either
+    // side of a visible gap.
+    const source = `export const A = () => (
+  <p>
+    Press<span className="flex-1"></span>
+    <kbd>N</kbd>
+  </p>
+);`;
+    expect(findTextWelds(source)).toEqual([]);
+  });
 
   it("does not flag punctuation before an inline element", () => {
     // `(<code>x</code>)` is correct English, not a weld.
