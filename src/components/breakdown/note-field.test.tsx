@@ -499,6 +499,57 @@ describe("NoteField — autosave", () => {
     expect(onSave).toHaveBeenCalledTimes(1);
   });
 
+  it("fires the debounce against the CURRENT onSave, not the one it was scheduled with", async () => {
+    // Duo review (!270). `scheduleSave` captures `flush` in the timer closure,
+    // and `flush` is a new function every render closing over that render's
+    // `onSave`. Re-render between scheduling and firing and the timer calls
+    // the OLD `onSave`.
+    //
+    // Every OTHER value `flush` touches is already immune — `latest`,
+    // `saveSeq` and `debounce` are refs, `setNote` is stable, and
+    // `markSaving`/`markSaved`/`markError` are `useCallback`s from
+    // `useSaveStatus`. `onSave` was the one live capture, and it is the one
+    // prop every call site rebuilds on every render:
+    // `onSave={(next) => updateTaskNotes(taskId, next)}` in `TaskNote`,
+    // and the `updateStepNotes` twin in `StepNote`.
+    //
+    // Duo's suggested fix was `useCallback(flush, [onSave])`, which cannot
+    // work: `onSave` is a NEW identity on every parent render, so the
+    // dependency changes every render and the callback is rebuilt every
+    // render — the memo would be pure overhead and the timer would still hold
+    // whichever `flush` existed when it was set. A ref for `onSave` is the fix
+    // that actually closes it, and it is the shape `latest` already uses one
+    // effect above.
+    //
+    // Live today only because every call site closes over an id that is
+    // constant for a mounted instance (the rows are keyed `key={item.id}`).
+    // That is an invariant held by four call sites in three files, so this
+    // pins the component's own behaviour instead of trusting them.
+    const first = vi.fn(async () => ({ ok: true as const, notes: "x" }));
+    const second = vi.fn(async () => ({ ok: true as const, notes: "x" }));
+    const field = (fn: typeof first) => (
+      <NoteField
+        subject="Ship the thing"
+        initialNote={null}
+        onSave={fn}
+        voice="plain"
+        autoSaveDelayMs={200}
+      />
+    );
+
+    const user = userEvent.setup();
+    const { rerender } = render(field(first));
+    await user.click(screen.getByRole("button", { name: /^note for/i }));
+
+    // Schedule the save, then re-render with a different `onSave` before the
+    // timer fires. Both are synchronous, so this lands inside the 200ms window.
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "hi" } });
+    rerender(field(second));
+
+    await waitFor(() => expect(second).toHaveBeenCalledWith("hi"));
+    expect(first).not.toHaveBeenCalled();
+  });
+
   it("does not save on blur when nothing is pending", async () => {
     // Otherwise merely opening the field and tabbing away writes the column.
     const user = userEvent.setup();

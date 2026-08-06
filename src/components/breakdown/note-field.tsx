@@ -157,8 +157,26 @@ export function NoteField({
   // latest value rather than the one captured when the timer was set. Written
   // in an effect rather than during render — the same shape aging-section uses.
   const latest = useRef(note);
+  // `onSave` gets the same treatment, and it is not defensive (!270).
+  //
+  // `scheduleSave` puts `flush` in a `setTimeout` closure. `flush` is rebuilt
+  // every render, so a re-render between scheduling and firing leaves the
+  // timer holding the PREVIOUS render's `flush` — and with it that render's
+  // props. Every other value `flush` touches is already immune: `latest`,
+  // `saveSeq` and `debounce` are refs, `setNote` is stable, and the three
+  // `mark*` callbacks are `useCallback`s. `onSave` was the one live capture,
+  // and it is the one prop every call site rebuilds on every render
+  // (`onSave={(next) => updateTaskNotes(taskId, next)}` in `TaskNote`, and the
+  // `updateStepNotes` twin in `StepNote`).
+  //
+  // A ref rather than `useCallback(flush, [onSave])`, which cannot work: a new
+  // `onSave` identity every render means the dependency changes every render,
+  // so the memo rebuilds every render and the timer still holds whichever
+  // `flush` existed when it was set.
+  const latestOnSave = useRef(onSave);
   useEffect(() => {
     latest.current = note;
+    latestOnSave.current = onSave;
   });
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
@@ -185,7 +203,7 @@ export function NoteField({
     // is the state that keeps a blank line out of somebody's calendar entry.
     const next = latest.current.trim() === "" ? null : latest.current;
     try {
-      const res = await onSave(next);
+      const res = await latestOnSave.current(next);
       // A newer save started while this one was in flight: its result is the
       // truth, and this one's status has already been superseded too.
       if (seq !== saveSeq.current) return;
