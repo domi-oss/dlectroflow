@@ -62,9 +62,12 @@ export function makeSettings(overrides: Partial<Settings> = {}): Settings {
     focusKeepAwake: true,
     focusAlarmEnabled: true,
     focusSound: "off",
-    // #70 — null is "play the whole list", the state every row was in before the
-    // column existed, so it is the right value for a baseline fixture.
-    focusSoundCategory: null,
+    // #180 — the empty array is "play the whole catalogue", which is what #70's
+    // NULL meant, so it stays the right value for a baseline fixture. Held at
+    // off/[]/false rather than the new-account defaults on purpose: this fixture
+    // is a row an EXISTING account could have, and the export's job is to
+    // reproduce what was stored, not what a fresh install would store.
+    focusSoundCategories: [],
     focusShuffle: false,
     focusPauseTogether: false,
     focusTimerTipDismissedAt: null,

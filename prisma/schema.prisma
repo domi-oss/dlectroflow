@@ -155,20 +155,30 @@ model Settings {
   focusMinimalMode         Boolean   @default(false)
   focusKeepAwake           Boolean   @default(true)
   focusAlarmEnabled        Boolean   @default(true)
-  focusSound               String    @default("off") // off | lofi_* (see FocusSound; #43 lo-fi library)
-  // #70 — one category of the catalog = one playlist. NULL is the normal case,
-  // not an edge one: it means "play the whole list", which is what every row
-  // meant before this column and what every instance with no reachable catalog
-  // goes on meaning. A separate column rather than a `category:*` value in
-  // focusSound above, because that column's CHECK constraint mirrors FocusSound
-  // exactly and the two facts are orthogonal — a category still has to say which
-  // track the session opens on. Mirrors FocusSoundCategory in
-  // src/lib/constants.ts + Settings_focusSoundCategory_check.
-  focusSoundCategory       String?   // null = the whole list | one FocusSoundCategory slug
+  // #180 — a switch, not a track picker: the column narrowed to off | on and
+  // nothing persists an opening track any more. It defaults ON for NEW rows,
+  // which is the whole point — a catalogue you only hear after finding a
+  // settings page is a feature in hiding. Existing rows are untouched by that
+  // default, and src/lib/focus-sound-migration-hygiene.test.ts fails the build
+  // if a migration ever switches one on.
+  focusSound               String    @default("on") // off | on (see FocusSound)
+  // #180 — which categories the session's playlist draws from; chosen in the
+  // player, not here. An EMPTY array means the whole catalogue, which is what
+  // #70's nullable single slug meant by NULL, so no reader changed meaning.
+  // Collapsing "nothing narrowed" onto the empty array leaves exactly one way to
+  // say it and exactly one way to get silence (focusSound above).
+  //
+  // Postgres text[] guarded by CONTAINMENT (Settings_focusSoundCategories_check
+  // — `<@ ARRAY[…]`), mirroring FocusSoundCategory in src/lib/constants.ts. It
+  // is NOT NULL because `NULL <@ ARRAY[…]` is NULL and a CHECK passes on NULL,
+  // so a nullable column would accept a value nothing validated.
+  focusSoundCategories     String[]  @default(["ambient-lofi"])
   // #68 — playlist shuffle for the focus mini-player. A taste setting, so it
   // persists across sessions. Plain Boolean: no pseudo-enum, hence no CHECK
-  // constraint to mirror in src/lib/constants.ts.
-  focusShuffle             Boolean   @default(false)
+  // constraint to mirror in src/lib/constants.ts. #180 flipped the default to
+  // true for new accounts, alongside sound-on: an unshuffled default plays the
+  // same track first every session.
+  focusShuffle             Boolean   @default(true)
   // #65 — make the #43 music↔timer coupling bidirectional: pausing the music
   // from the mini-player also pauses the timer (and playing it resumes both).
   // Opt-in, so it defaults false — the timer→music direction is unconditional,

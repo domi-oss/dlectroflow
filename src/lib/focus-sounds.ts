@@ -9,12 +9,40 @@
 import { FocusSound, FocusSoundCategory } from "@/lib/constants";
 
 /**
+ * #43 — the id of each bundled CC0 track.
+ *
+ * These lived in `FocusSound` (src/lib/constants.ts) until #180, because
+ * `Settings.focusSound` used to persist one of them as the session's opening
+ * track. It does not any more — that column is a two-value switch — so they are
+ * no longer a DB value set and have no CHECK constraint to mirror. Keeping them
+ * in constants.ts would have left `enum-constraint-sync`'s neighbours implying a
+ * constraint that does not exist.
+ *
+ * They are still ids, and still stable ones: `/api/focus-catalog` distinguishes a
+ * bundled track from a streamed one by the absence of `CATALOG_TRACK_ID_PREFIX`,
+ * and `lofi_calm` is retained from MR ② rather than renamed to match its
+ * category, so nothing that recorded a track id by value has to be rewritten.
+ */
+export const BundledFocusTrack = {
+  Calm: "lofi_calm",
+  Chillhop: "lofi_chillhop",
+  Jazzhop: "lofi_jazzhop",
+  SoulRnb: "lofi_soul_rnb",
+  LateNight: "lofi_late_night",
+  FunkSoul: "lofi_funk_soul",
+  Asian: "lofi_asian",
+  Seasonal: "lofi_seasonal",
+  Activities: "lofi_activities",
+  Hybrid: "lofi_hybrid",
+} as const;
+export type BundledFocusTrack =
+  (typeof BundledFocusTrack)[keyof typeof BundledFocusTrack];
+
+/**
  * #43 — the curated, bundled lo-fi library. One CC0 track per open-lofi category
  * (see public/audio/lofi/ + public/audio/LICENSE.md for provenance). This array
- * is BOTH the settings-picker data source and the in-timer mini-player playlist;
- * its order is the playlist's in-order pass (#68). `id` is the FocusSound value
- * persisted in Settings.focusSound. Titles/categories mirror open-lofi's
- * catalog.json.
+ * is the in-timer mini-player's playlist, and its order is the in-order pass
+ * (#68). Titles/categories mirror open-lofi's catalog.json.
  */
 export type FocusTrack = {
   id: string;
@@ -34,70 +62,70 @@ export type FocusTrack = {
 
 export const FOCUS_SOUND_TRACKS: readonly FocusTrack[] = [
   {
-    id: FocusSound.LofiCalm,
+    id: BundledFocusTrack.Calm,
     title: "Aurora on Mute",
     category: FocusSoundCategory.AmbientLofi,
     categoryLabel: "Ambient lo-fi",
     src: "/audio/lofi/aurora-on-mute.mp3",
   },
   {
-    id: FocusSound.LofiChillhop,
+    id: BundledFocusTrack.Chillhop,
     title: "Porchlight Golden Hour",
     category: FocusSoundCategory.Chillhop,
     categoryLabel: "Chillhop",
     src: "/audio/lofi/porchlight-golden-hour.mp3",
   },
   {
-    id: FocusSound.LofiJazzhop,
+    id: BundledFocusTrack.Jazzhop,
     title: "Breezy Afternoon Terrace",
     category: FocusSoundCategory.Jazzhop,
     categoryLabel: "Jazz hop",
     src: "/audio/lofi/breezy-afternoon-terrace.mp3",
   },
   {
-    id: FocusSound.LofiSoulRnb,
+    id: BundledFocusTrack.SoulRnb,
     title: "Barefoot in the Kitchen",
     category: FocusSoundCategory.SoulRnb,
     categoryLabel: "Soul / R&B",
     src: "/audio/lofi/barefoot-in-the-kitchen.mp3",
   },
   {
-    id: FocusSound.LofiLateNight,
+    id: BundledFocusTrack.LateNight,
     title: "3 AM Echoes",
     category: FocusSoundCategory.LateNight,
     categoryLabel: "Late night",
     src: "/audio/lofi/3-am-echoes.mp3",
   },
   {
-    id: FocusSound.LofiFunkSoul,
+    id: BundledFocusTrack.FunkSoul,
     title: "Burnt Sunset Groove",
     category: FocusSoundCategory.FunkSoul,
     categoryLabel: "Funk / soul",
     src: "/audio/lofi/burnt-sunset-groove.mp3",
   },
   {
-    id: FocusSound.LofiAsian,
+    id: BundledFocusTrack.Asian,
     title: "Lanterns in Slow Motion",
     category: FocusSoundCategory.AsianLofi,
     categoryLabel: "Asian lo-fi",
     src: "/audio/lofi/lanterns-in-slow-motion.mp3",
   },
   {
-    id: FocusSound.LofiSeasonal,
+    id: BundledFocusTrack.Seasonal,
     title: "After School Rain",
     category: FocusSoundCategory.SeasonalWeather,
     categoryLabel: "Seasonal / weather",
     src: "/audio/lofi/after-school-rain.mp3",
   },
   {
-    id: FocusSound.LofiActivities,
+    id: BundledFocusTrack.Activities,
     title: "Chapter By Lamplight",
     category: FocusSoundCategory.Activities,
     categoryLabel: "Activities",
     src: "/audio/lofi/chapter-by-lamplight.mp3",
   },
   {
-    id: FocusSound.LofiHybrid,
+    id: BundledFocusTrack.Hybrid,
     title: "Cafe Da Tarde",
     category: FocusSoundCategory.Hybrid,
     categoryLabel: "Hybrid / world",
