@@ -86,7 +86,6 @@ export function FocusPlaylistPanel({
   const [open, setOpen] = useState(false);
   const panelId = useId();
   const playlistsLabelId = useId();
-  const tracksHeadingId = useId();
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -115,16 +114,19 @@ export function FocusPlaylistPanel({
   const categoryKey = JSON.stringify([...categories].sort());
 
   /**
-   * Both lists are gated on `open`, and that is the answer to "can the counts be
-   * computed without a second pass over the manifest on every render?".
+   * Everything derived from a track list is memoised AND gated on `open`, which
+   * together answer "can the counts be computed without a second pass over the
+   * manifest on every render?".
    *
-   * The counts need no extra pass at all: `focusPlaylistCategories` already
+   * The counts need no pass of their own at all: `focusPlaylistCategories` already
    * accumulates them in the single pass it makes to find the categories, so
    * `pickerFocusCategories` returns them as a field. Grouping the POOL is a
-   * genuinely different pass over a different list, and it is memoised on the
-   * pool's identity, which `useFocusSound` keeps stable. Gating both on `open`
-   * then means the collapsed default — where nothing is on screen — costs zero
-   * passes rather than two.
+   * genuinely different pass over a different list, and the all-tracks state is a
+   * third (`resolveFocusPool` filters). Each is keyed on an identity its owner
+   * keeps stable — `useFocusCatalog` returns the bundled array itself when the
+   * catalog added nothing, and `useFocusSound` memoises the pool — so the
+   * mini-player's 250ms progress tick recomputes none of them. Gating on `open`
+   * then means the collapsed default, which shows none of this, costs nothing.
    */
   const playlists = useMemo(
     () =>
@@ -140,8 +142,19 @@ export function FocusPlaylistPanel({
     () => (open ? groupTracksByCategory(controls.pool) : NO_GROUPS),
     [open, controls.pool],
   );
+  // Derived from the SELECTION rather than from `controls.pool`, so the row and
+  // the ticks under it can never disagree — both answer the same question about
+  // the same array. It is the same function the hook resolves the pool with.
+  const allTracks = useMemo(
+    () =>
+      open &&
+      poolIsWholeCatalogue(
+        controls.catalog,
+        JSON.parse(categoryKey) as string[],
+      ),
+    [open, controls.catalog, categoryKey],
+  );
 
-  const allTracks = poolIsWholeCatalogue(controls.catalog, categories);
   const selected = new Set(categories);
 
   /**
@@ -266,7 +279,11 @@ export function FocusPlaylistPanel({
           )}
 
           <div>
-            <h2 id={tracksHeadingId} className="text-sm font-medium">
+            {/* h2 under the timer's h1, with the category headings below at h3 —
+                no level is skipped. It names the section for anyone moving by
+                heading; the per-category lists are named by their own h3, which
+                is the association that has to exist in the tree. */}
+            <h2 className="text-sm font-medium">
               {t("focus.sound.tracks", voice)}
             </h2>
             {groups.map((g) => (
