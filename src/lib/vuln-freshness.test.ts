@@ -665,10 +665,14 @@ describe("scripts/ops-digest.sh wiring (#166 — the digest was the count's firs
   });
 
   it("renders an undetermined check as an unknown, never an all-clear", () => {
-    // The 2b/2c/2d contract: exit 2 must never render as ✅.
-    const block = digest.split("check-vuln-freshness.sh")[1] ?? "";
-    expect(block).toMatch(/⚠️ \*\*undetermined\*\*/);
-    expect(block).toMatch(/not an all-clear/);
+    // The 2b/2c/2d contract: exit 2 must never render as ✅. Asserted on the
+    // catch-all arm specifically, because that is the one exit 2 lands in —
+    // and the one a future edit would most plausibly "tidy" into a pass.
+    const arms = /case "\$vuln_status" in[\s\S]*?esac/.exec(digest)?.[0] ?? "";
+    expect(arms).not.toBe("");
+    expect(arms).toMatch(/\*\)\s*vuln_headline="⚠️ \*\*undetermined\*\*/);
+    expect(arms).toMatch(/not an all-clear/);
+    expect(arms).not.toMatch(/\*\)\s*vuln_headline="✅/);
   });
 
   it("no longer prints a vulnerability count with no date on it", () => {
@@ -695,9 +699,22 @@ describe("scripts/security-assessment.sh wiring (#166 — #152's snapshot had no
   it("does not fail the monthly assessment on an undetermined freshness read", () => {
     // The assessment's own query already exits non-zero when it cannot read the
     // report. Freshness is context on that number, not a second gate — an
-    // unknown belongs in the issue, not in a red maintenance pipeline.
-    const block = assessment.split("check-vuln-freshness.sh")[1] ?? "";
-    expect(block).toMatch(/set \+e/);
+    // unknown belongs in the issue where a human sees it, not in a red
+    // maintenance pipeline nobody is watching. The script runs under
+    // `set -euo pipefail`, so without the guard a stale (exit 1) or
+    // undetermined (exit 2) read would abort the job and file nothing at all.
+    expect(assessment).toMatch(
+      /set \+e\s*\nFRESHNESS_BLOCK="\$\(bash "\$\{HERE\}\/check-vuln-freshness\.sh"\)"\s*\nset -e/,
+    );
+  });
+
+  it("puts the freshness block above the count it qualifies", () => {
+    // Below the numbers it would read as a footnote. #152's snapshot was
+    // skimmed, not studied.
+    const body = assessment.slice(assessment.indexOf("## Snapshot"));
+    expect(body.indexOf("${FRESHNESS_BLOCK}")).toBeLessThan(
+      body.indexOf("Active findings"),
+    );
   });
 });
 

@@ -96,3 +96,46 @@ effect without a manual `kubectl rollout restart`.
 > reports "still detected on `main`" separately from "already fixed but never
 > resolved", because the Vulnerability Report's default view does not
 > distinguish them.
+
+### Which surface is authoritative, and how old is its answer (#166)
+
+Two surfaces report vulnerability counts for this project and they **disagree
+without saying so**. On 2026-08-04, against the same tree, the pipeline query
+read 12 dependency findings where the Vulnerability Report read 11.
+Reconciling them cost an afternoon, twice, before the answer was written down:
+
+| Question | Query | Notes |
+|---|---|---|
+| What is on `main` right now? | `project.vulnerabilities(state: [DETECTED, CONFIRMED])` | **Authoritative.** Paginate it — this project already holds 100 records on page one. |
+| What did *this merge request* introduce? | `project.pipeline(iid:).securityReportFindings` | Merge-request pipelines **only**. |
+
+**A pipeline-level query against `main` returns `0` by design.** Once findings
+are ingested into the Vulnerability Report they stop being reported at pipeline
+level. Re-verified 2026-08-06: `main` pipeline iid 1606 reads 0 dependency
+findings on the exact tree (`cca6fdd`) that MR pipeline iid 1611 reads 12 on.
+Getting this backwards once produced a confident "main has zero untriaged
+findings" that was wrong.
+
+**Every count must carry its age.** `scripts/check-vuln-freshness.sh` emits the
+count together with the query that produced it and the instant that dates it;
+the weekly `ops_digest` and the monthly `security_assessment` both embed it, so
+neither files a number a reader cannot date. Its freshness budget is **192h** —
+the 168h weekly rescan cycle plus 24h of scheduler grace.
+
+Two things date the answer, and they are **not** interchangeable:
+
+- **The scanner job**, not the pipeline. The scanners are `allow_failure: true`
+  on `main` on purpose (a scanner flake must not block a production deploy), so
+  a green `main` pipeline does not prove a scan ran and a red one does not
+  prove it did not. Measured 2026-08-06, four of the last six `main` pipelines
+  were red with all five analyzers green, and the last green pipeline finished
+  33.6h before the last successful scan.
+- **`detectedAt`**, which moves when Continuous Vulnerability Scanning
+  re-evaluates the stored SBOM with no pipeline at all. It dates only the
+  scanner whose findings it belongs to — the SBOM is dependency scanning's
+  artefact, so a dependency finding re-detected an hour ago says nothing about
+  whether container scanning has run this month.
+
+An aggregate count is only as fresh as its **stalest** contributing scanner,
+and a count of zero has no `detectedAt` of its own — so when the scan cannot be
+found, the honest answer is *undetermined*, never *clean*.

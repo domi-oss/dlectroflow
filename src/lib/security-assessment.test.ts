@@ -327,9 +327,19 @@ describe("scripts/security-assessment.sh", () => {
         page([{ title: "p2", severity: "HIGH", reportType: "SAST" }]),
       ],
     });
-    expect(result.calls.filter((c) => c.includes("/api/graphql"))).toHaveLength(
-      2,
+    // Counted on THIS script's own query, not on every GraphQL call that
+    // passes through the stub: since #166 the script also shells out to
+    // `check-vuln-freshness.sh`, which queries the same endpoint. Only the
+    // assessment's query selects `title`, so that is the discriminator — a
+    // plain call count would silently start measuring two scripts at once.
+    const ownPages = result.bodies.filter(
+      (body) =>
+        typeof body === "object" &&
+        body !== null &&
+        typeof (body as { query?: unknown }).query === "string" &&
+        (body as { query: string }).query.includes("nodes { title severity"),
     );
+    expect(ownPages).toHaveLength(2);
     expect(result.created?.description).toContain("p2");
   });
 
