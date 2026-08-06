@@ -168,3 +168,73 @@ describe("gitlab oauth callback — authorization", () => {
     expect(res.headers.get("location")).toContain("/login?error=");
   });
 });
+
+// #174 — the callback cannot tell an expired attempt from one begun in a
+// different browser: both leave the state and PKCE cookies simply absent. It
+// CAN tell either of those from a malformed return, and that distinction is
+// what turns "Sign-in failed. Please try again." into something the reader can
+// act on. The reasons below feed the login page's copy, so they are part of the
+// contract, not an internal detail.
+describe("gitlab oauth callback — telling a lost attempt from a broken one", () => {
+  const emptyJar = { get: () => undefined };
+
+  it("reports an absent verifier and state as expired, not as missing params", async () => {
+    cookiesMock.mockResolvedValue(emptyJar);
+
+    const res = await GET(new Request(CALLBACK_URL));
+
+    expect(res.headers.get("location")).toBe(
+      "https://dlectroflow.test/login?error=expired",
+    );
+  });
+
+  it("reports an absent verifier alone as expired", async () => {
+    cookiesMock.mockResolvedValue({
+      get: (name: string) =>
+        name === "gitlab_oauth_state" ? { value: "st" } : undefined,
+    });
+
+    const res = await GET(new Request(CALLBACK_URL));
+
+    expect(res.headers.get("location")).toBe(
+      "https://dlectroflow.test/login?error=expired",
+    );
+  });
+
+  it("keeps missing_oauth_params for a return with no code or state in the URL", async () => {
+    // A malformed return is not an expiry — the browser still holds the cookies.
+    for (const url of [
+      "https://dlectroflow.test/api/auth/gitlab/callback",
+      "https://dlectroflow.test/api/auth/gitlab/callback?code=c",
+      "https://dlectroflow.test/api/auth/gitlab/callback?state=st",
+    ]) {
+      const res = await GET(new Request(url));
+      expect(res.headers.get("location")).toBe(
+        "https://dlectroflow.test/login?error=missing_oauth_params",
+      );
+    }
+  });
+
+  it("still fails closed, and never reaches provisioning, when the cookies are gone", async () => {
+    // The reason string got friendlier; the gate did not move.
+    cookiesMock.mockResolvedValue(emptyJar);
+
+    await GET(new Request(CALLBACK_URL));
+
+    expect(exchangeCodeMock).not.toHaveBeenCalled();
+    expect(provisionMock).not.toHaveBeenCalled();
+    expect(signUserSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("still calls a mismatched state a mismatch, not an expiry", async () => {
+    const res = await GET(
+      new Request(
+        "https://dlectroflow.test/api/auth/gitlab/callback?code=c&state=wrong",
+      ),
+    );
+
+    expect(res.headers.get("location")).toBe(
+      "https://dlectroflow.test/login?error=state_mismatch",
+    );
+  });
+});

@@ -33,8 +33,20 @@ export async function GET(req: Request): Promise<Response> {
   };
 
   if (oauthError) return fail(oauthError);
-  if (!code || !state || !verifier) return fail("missing_oauth_params");
-  if (!expectedState) return fail("state_mismatch");
+  // Three failures, three reasons — they are not interchangeable to the reader
+  // (#174). A return with no code or state in the URL is MALFORMED: the browser
+  // still holds its cookies and retrying blindly will not help. Cookies gone
+  // while the URL is intact is a LOST ATTEMPT, which is recoverable by simply
+  // starting again, and is the one the login page phrases differently. Only a
+  // present-but-wrong state is a genuine mismatch.
+  //
+  // "Expired" is the friendliest true label for the middle case, not a
+  // certainty: an attempt that timed out and one begun in a different browser
+  // both arrive here as an absent cookie, with nothing left to tell them apart.
+  // The copy on /login names both, rather than the server guessing.
+  if (!code || !state) return fail("missing_oauth_params");
+  if (!verifier || !expectedState) return fail("expired");
+  // Fails closed exactly as before; only the labels above were split.
   if (state !== expectedState) return fail("state_mismatch");
 
   let profile: AuthProfile;
