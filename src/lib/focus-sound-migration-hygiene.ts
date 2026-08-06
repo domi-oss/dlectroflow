@@ -163,19 +163,36 @@ const SETTINGS_UPDATE = /^UPDATE\s+"?Settings"?\b/i;
  * defaults #180 introduces are applied by `ALTER COLUMN … SET DEFAULT` instead,
  * which touches nothing already stored.
  */
-const SILENT_ADD_COLUMN_DEFAULTS: ReadonlyArray<{
-  column: string;
-  allowed: RegExp;
-  description: string;
-}> = [
-  { column: "focusSound", allowed: /^'off'$/i, description: "'off'" },
-  {
-    column: "focusSoundCategories",
-    allowed: /^(ARRAY\s*\[\s*\]|'\{\}')(\s*::\s*TEXT\s*\[\s*\])?$/i,
-    description: "an empty array",
-  },
-  { column: "focusShuffle", allowed: /^false$/i, description: "false" },
-];
+const SILENT_ADD_COLUMN_DEFAULTS: ReadonlyMap<
+  string,
+  { allowed: RegExp; description: string }
+> = new Map([
+  ["focusSound", { allowed: /^'off'$/i, description: "'off'" }],
+  [
+    "focusSoundCategories",
+    {
+      allowed: /^(ARRAY\s*\[\s*\]|'\{\}')(\s*::\s*TEXT\s*\[\s*\])?$/i,
+      description: "an empty array",
+    },
+  ],
+  ["focusShuffle", { allowed: /^false$/i, description: "false" }],
+]);
+
+/** `ALTER TABLE "Settings" …` — the only table these columns live on. */
+const SETTINGS_ALTER = /^ALTER\s+TABLE\s+"?Settings"?\b/i;
+
+/**
+ * `ADD COLUMN <name> … DEFAULT <expr>`, capturing both.
+ *
+ * One static pattern that reads the column NAME out of the statement, rather
+ * than one pattern compiled per column from a template. Static because a
+ * dynamically constructed pattern is a SAST finding (CWE-1333-adjacent) even
+ * when every interpolated value is a literal from the table above — and because
+ * reading the name once beats recompiling three patterns for every statement in
+ * every migration.
+ */
+const ADD_COLUMN_WITH_DEFAULT =
+  /\bADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?"?(\w+)"?\b[\s\S]*?\bDEFAULT\s+(.+?)\s*$/i;
 
 /** The SET clause of an UPDATE — everything between `SET` and `WHERE`/end. */
 function setClauseOf(statement: string): string {
@@ -225,19 +242,16 @@ export function findFocusSoundViolations(
 
       // Rule 2. `ADD COLUMN … DEFAULT x` backfills x into every existing row;
       // `ALTER COLUMN … SET DEFAULT x` does not, and is the intended mechanism.
-      for (const {
-        column,
-        allowed,
-        description,
-      } of SILENT_ADD_COLUMN_DEFAULTS) {
-        const m = new RegExp(
-          `\\bADD\\s+COLUMN\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?"?${column}"?\\b[\\s\\S]*?\\bDEFAULT\\s+(.+?)\\s*$`,
-          "i",
-        ).exec(statement);
-        if (m && !allowed.test(m[1].trim())) {
-          add(
-            `adds Settings.${column} with DEFAULT ${m[1].trim()}, which is written into every existing row — an ADD COLUMN default may only be ${description}; use ALTER COLUMN … SET DEFAULT for the new-account value`,
-          );
+      if (SETTINGS_ALTER.test(statement)) {
+        const added = ADD_COLUMN_WITH_DEFAULT.exec(statement);
+        const rule = added && SILENT_ADD_COLUMN_DEFAULTS.get(added[1]);
+        if (added && rule) {
+          const declared = added[2].trim();
+          if (!rule.allowed.test(declared)) {
+            add(
+              `adds Settings.${added[1]} with DEFAULT ${declared}, which is written into every existing row — an ADD COLUMN default may only be ${rule.description}; use ALTER COLUMN … SET DEFAULT for the new-account value`,
+            );
+          }
         }
       }
     }

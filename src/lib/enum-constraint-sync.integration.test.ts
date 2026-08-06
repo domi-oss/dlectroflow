@@ -410,11 +410,14 @@ describe("array containment CHECK constraints ↔ constants.ts are in sync (#180
       // Containment, not equality. A `= ANY (…)` here would mean the column had
       // silently gone back to holding one slug, which the whole point of #180 is
       // that it does not. The column name is quoted by Postgres when it is
-      // mixed-case; tolerate both renderings rather than pinning one.
+      // mixed-case, so the pattern tolerates both renderings; it is a literal
+      // that CAPTURES the name rather than one built around it, because a
+      // dynamically constructed pattern is a SAST finding even here.
+      const contained = /"?(\w+)"?\s*<@\s*ARRAY\[/.exec(def as string);
       expect(
-        new RegExp(`"?${column}"?\\s*<@\\s*ARRAY\\[`).test(def as string),
-        `${constraint} is not a containment (<@) check — its definition is: ${def}`,
-      ).toBe(true);
+        contained?.[1],
+        `${constraint} is not a containment (<@) check on "${column}" — its definition is: ${def}`,
+      ).toBe(column);
 
       const constrained = literalsFromDef(def as string);
       const expectedValues = new Set(Object.values(values));
@@ -464,10 +467,18 @@ describe("numeric-range CHECK constraints are applied (#78)", () => {
 
       // Postgres normalises `CHECK ("estMinutes" >= 1)` to
       // `CHECK (("estMinutes" >= 1))`; match the comparison, not the parens.
+      // A literal pattern that CAPTURES the column and the bound, rather than one
+      // built around them — same assertion, and it keeps this file free of the
+      // dynamically-constructed patterns SAST flags (#180 removed the other one).
+      const bound = /"(\w+)"\s*>=\s*(\d+)\b/.exec(def as string);
       expect(
-        new RegExp(`"${column}"\\s*>=\\s*${min}\\b`).test(def as string),
+        bound?.[1],
+        `${constraint} does not compare "${column}" — its definition is: ${def}`,
+      ).toBe(column);
+      expect(
+        Number(bound?.[2]),
         `${constraint} does not pin "${column}" >= ${min} — its definition is: ${def}`,
-      ).toBe(true);
+      ).toBe(min);
 
       if (nullable) {
         // #80 — on a nullable column the bound alone is not the invariant: a
