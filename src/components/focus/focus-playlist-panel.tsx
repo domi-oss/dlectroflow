@@ -236,6 +236,7 @@ export function FocusPlaylistPanel({
             // instance with nothing selected. A group holding one permanently
             // ticked "All tracks" row would be noise on a screen whose job is to
             // stay out of the way.
+            //
             // The name comes from the `legend` natively (HTML-AAM), with no
             // `aria-labelledby` pointing back at it: that would be a second,
             // redundant route to the same string, and the repo's rule is to let
