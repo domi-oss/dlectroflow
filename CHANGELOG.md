@@ -31,6 +31,29 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Added
 
+- **Pick your playlists and jump to any track, from inside the focus timer
+  (#181).** The mini-player gains one expandable panel, collapsed by default and
+  opening below the progress bar at a capped height with its own scroll. It holds
+  both halves of "what am I listening to": a tick-list of the playlists the
+  session draws from — ticking several plays the union, and each row shows how
+  many tracks it has, because on an instance with no catalog configured they
+  would otherwise all look identical — and, under it, the tracks that selection
+  resolves to, grouped under their category headings, any of which starts playing
+  when you tap its title.
+
+  **Neither list interrupts what you are hearing.** Ticking a playlist while
+  something is playing re-orders what comes next and nothing else; unticking the
+  playlist of the track currently playing lets that track finish and draws the
+  next one from the new selection, rather than cutting the audio mid-bar. Tapping
+  a title plays it and then carries on through the rest of the list, so it is a
+  jump rather than a filter. Changes save by themselves, a moment after the last
+  tick.
+
+  The panel is a real disclosure throughout: keyboard operable, Escape closes it,
+  each playlist's track count is part of what a screen reader reads out rather
+  than decoration beside it, and the playing track is marked in words as well as
+  in colour.
+
 - **Focus sounds are on by default, and Settings holds one switch (#180).** A new
   account starts with sound on, the ambient lo-fi playlist and shuffle — a
   catalogue you only hear after finding a settings page is a feature in hiding.
