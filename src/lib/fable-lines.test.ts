@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { FABLE_LINES, randomFableLine } from "@/lib/fable-lines";
+import { mockCsprngDraw } from "@/lib/__tests__/mock-csprng";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -12,9 +13,13 @@ describe("fable decoy lines (#72 follow-up)", () => {
   });
 
   it("can reach the first and last line", () => {
-    vi.spyOn(Math, "random").mockReturnValue(0);
+    // `randomFableLine` draws from the platform CSPRNG via `pickOne`
+    // (src/lib/pick-one.ts), so a `Math.random` spy no longer reaches it. The
+    // cases are the same two ends of the range, expressed as the 32-bit draw
+    // the code now reads: 0 is the bottom, 0xffffffff the top.
+    mockCsprngDraw(0);
     expect(randomFableLine()).toBe(FABLE_LINES[0]);
-    vi.spyOn(Math, "random").mockReturnValue(0.999999);
+    mockCsprngDraw(0xffffffff);
     expect(randomFableLine()).toBe(FABLE_LINES[FABLE_LINES.length - 1]);
   });
 
