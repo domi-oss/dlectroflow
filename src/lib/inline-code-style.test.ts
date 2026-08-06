@@ -230,6 +230,26 @@ describe("the real tree", () => {
     }
   });
 
+  it("does not let a code block wear the chip", () => {
+    // Leaving `pre` out of the base rule's selector list is not by itself an
+    // exclusion. `code` reaches the `<code>` inside a `<pre>` — the standard
+    // block shape — so a code block added tomorrow would arrive wearing an
+    // oversized inline chip: background, padding, radius and a shrunk size.
+    // There is no `<pre>` in the tree, so the reset paints nothing today, which
+    // is exactly why it needs a test: deleting it would be silent right up
+    // until the first code block. Reported on !272.
+    const rule = findCssRule(readFileSync(GLOBALS, "utf8"), [
+      "pre code",
+      "pre kbd",
+      "pre samp",
+    ]);
+    expect(rule).not.toBeNull();
+    expect(rule!["background-color"]).toBe("transparent");
+    expect(rule!["font-size"]).toBe("inherit");
+    expect(rule!["padding"]).toBe("0");
+    expect(rule!["box-shadow"]).toBe("none");
+  });
+
   it("gives kbd its keycap edge without changing the line box", () => {
     const rule = findCssRule(readFileSync(GLOBALS, "utf8"), ["kbd"]);
     expect(rule).not.toBeNull();

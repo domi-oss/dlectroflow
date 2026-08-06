@@ -44,6 +44,12 @@ import ts from "typescript";
  * `pre` is deliberately absent. A code *block* wants none of the chip
  * treatment, and there is no `<pre>` in the tree — so including it here would
  * assert something about markup that does not exist.
+ *
+ * Keeping the chip off a block is the stylesheet's job rather than this list's,
+ * and the two are not the same question: `code` in the base rule reaches
+ * `<pre><code>` however this list is written. A `pre` reset in `globals.css`
+ * does that, guarded by "does not let a code block wear the chip". Reported
+ * on !272.
  */
 export const INLINE_CODE_TAGS = ["code", "kbd", "samp"] as const;
 

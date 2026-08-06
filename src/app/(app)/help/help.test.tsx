@@ -310,7 +310,16 @@ describe("HelpPage", () => {
         sentence,
         `<kbd>${key.textContent}</kbd> is not inside a <li> or <p>, so the sentence around it cannot be read`,
       ).not.toBeNull();
-      expect(sentence?.textContent).toContain(` ${key.textContent} `);
+      // A space on *each* side, which is the whole assertion — and it is only
+      // the right assertion while every key sits mid-sentence, as all three do
+      // and as the exact-set check above holds them to. A key that legitimately
+      // opened or closed its sentence would have no space on one side and this
+      // is the line that would have to change, so the message says so rather
+      // than leaving `expected '…' to contain ' N '` to be decoded.
+      expect(
+        sentence?.textContent,
+        `<kbd>${key.textContent}</kbd> has no space on one side of it; if the key now opens or closes its sentence, this assertion is what needs changing, not the page`,
+      ).toContain(` ${key.textContent} `);
     }
 
     // And the specific phrasings, so a copy edit that reflows them has to

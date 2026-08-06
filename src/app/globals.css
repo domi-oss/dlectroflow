@@ -304,8 +304,10 @@
    * this UI — the Library hub's count pill and the save-status chip are both
    * 9999px. A code token should not look like a badge.
    *
-   * `pre` is excluded on purpose: a code BLOCK wants none of this, and there is
-   * no <pre> in the tree for the rule to get wrong. */
+   * `pre` is absent from the selector list, but leaving it out is not by itself
+   * an exclusion — `code` still reaches the <code> inside a <pre>, which is the
+   * standard block shape. The `pre` reset below is what actually keeps a code
+   * BLOCK out of the chip treatment. Reported on !272. */
   code,
   kbd,
   samp {
@@ -332,6 +334,32 @@
     box-shadow: inset 0 -2px 0 var(--code-edge);
     padding-bottom: 0.15em;
     font-weight: 500;
+  }
+
+  /* A code BLOCK is not a chip. The two rules above reach anything inside a
+   * <pre>, so without this a code block would arrive wearing an oversized
+   * inline chip — background, padding, radius, and a size shrunk to 0.875em of
+   * a block that should set its own.
+   *
+   * There is still no <pre> in the tree, so this paints nothing today. It is
+   * here because the alternative is that the first code block anyone adds looks
+   * wrong for a reason that is two rules away from the markup, and
+   * `inline-code-style.test.ts` asserts it stays.
+   *
+   * A separate reset rather than folding `:not(pre) > code` into the base rule,
+   * which is the tidier-looking form and was the suggestion on !272. Two
+   * reasons against it: it lifts the base rule's specificity from (0,0,1) to
+   * (0,0,2) for one of its three selectors only, and the hygiene test matches
+   * that rule by its exact selector list — so folding it in there unhooks the
+   * guard on the whole chip while looking like a one-line tightening. */
+  pre code,
+  pre kbd,
+  pre samp {
+    font-size: inherit;
+    padding: 0;
+    border-radius: 0;
+    background-color: transparent;
+    box-shadow: none;
   }
 
   /* a11y: honour the OS "reduce motion" setting for CSS-driven animation and
