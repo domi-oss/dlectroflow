@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma, getSettings, getStreak } from "@/lib/db";
+import { prismaErrorsDuring } from "@/lib/__tests__/prisma-error-log";
 
 // Real-DB proof for #156, and the only place the actual defect is observable.
 //
@@ -35,30 +36,9 @@ const workspaceIds = Array.from(
   (_, i) => `${WS_PREFIX}-${i}`,
 );
 
-/**
- * Capture Prisma's client-level error log for the duration of a call.
- *
- * `log: ["error"]` (src/lib/db.ts) is Prisma's *stdout* logger: it writes to
- * `console.log`, one argument, prefixed `prisma:error` — verified against
- * @prisma/client 6.19, and the reason this hooks `console.log` rather than the
- * `console.error` you would expect. Everything else is passed through so a
- * failing run still prints whatever it was going to print.
- */
-async function prismaErrorsDuring(fn: () => Promise<void>): Promise<string[]> {
-  const captured: string[] = [];
-  const passThrough = console.log;
-  console.log = (...args: unknown[]) => {
-    const line = args.map(String).join(" ");
-    if (line.startsWith("prisma:error")) captured.push(line);
-    else passThrough(...args);
-  };
-  try {
-    await fn();
-  } finally {
-    console.log = passThrough;
-  }
-  return captured;
-}
+// `prismaErrorsDuring` moved to `@/lib/__tests__/prisma-error-log` when #158
+// gave the same capture two more callers; read its docblock for why it hooks
+// `console.log` rather than `console.error`.
 
 beforeAll(async () => {
   await cleanup();
