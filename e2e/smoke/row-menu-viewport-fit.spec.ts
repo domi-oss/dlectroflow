@@ -467,9 +467,22 @@ test.describe("#44 the note trigger fits the phone viewport", () => {
       await expect(box).toBeVisible();
       const below = await box.evaluate((n: HTMLElement) => {
         const group = n.closest("li")?.querySelector("[data-row-actions]");
+        // Narrow rather than cast. `querySelector` is genuinely nullable, and a
+        // cast would turn a layout change into `getBoundingClientRect` of null
+        // — an opaque TypeError from inside evaluate(). Returning false instead
+        // would be worse still: the assertion below would then fail with "the
+        // editor opens below the action line", confidently blaming the editor's
+        // position for a group that is not there at all.
+        if (!group) {
+          throw new Error(
+            "no [data-row-actions] in the note row — the row layout changed, so " +
+              "this check is measuring against an element that no longer exists",
+          );
+        }
+        // No cast: getBoundingClientRect is defined on Element, not just
+        // HTMLElement, so narrowing is all this ever needed.
         return (
-          n.getBoundingClientRect().top >=
-          (group as HTMLElement).getBoundingClientRect().top
+          n.getBoundingClientRect().top >= group.getBoundingClientRect().top
         );
       });
       expect(below, "the editor opens below the action line").toBe(true);
