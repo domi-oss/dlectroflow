@@ -295,4 +295,60 @@ describe("HelpPage", () => {
       "/",
     );
   });
+
+  // #182 — the page the "words too close together" report was about.
+  //
+  // Two different things can produce that symptom and only one of them was
+  // here. Pinning the RENDERED text is what tells them apart: JSX drops a
+  // newline adjacent to a tag, so `press\n<kbd>/</kbd>` would render `press/`
+  // with no space, and Prettier writes that shape by itself whenever a line
+  // grows past 80 columns. These three assertions read the text the browser
+  // actually paints, so a reflow cannot quietly weld a key to its sentence.
+  //
+  // The keys were also completely unstyled, which is what was really wrong. That
+  // half is a base rule in globals.css, guarded by `inline-code-style.test.ts` —
+  // jsdom applies no stylesheet, so it cannot be asserted from here.
+  it("renders each keyboard key spaced from the words either side (#182)", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+
+    const keys = [...document.querySelectorAll("kbd")];
+    expect(keys.map((key) => key.textContent)).toEqual([
+      "/",
+      "Escape",
+      "delete",
+    ]);
+
+    for (const key of keys) {
+      // `textContent` on the paragraph is the rendered string, with JSX's
+      // whitespace rule already applied — exactly what a reader sees.
+      //
+      // The ancestor is asserted rather than assumed. A `<kbd>` moving out of
+      // its sentence — into a `<blockquote>`, or straight into a `<section>` —
+      // is a realistic edit to this page, and `closest()` returning null then
+      // threw `TypeError: Cannot read properties of null`, which names neither
+      // the key nor the cause. Duo review, !272.
+      const sentence = key.closest("li, p");
+      expect(
+        sentence,
+        `<kbd>${key.textContent}</kbd> is not inside a <li> or <p>, so the sentence around it cannot be read`,
+      ).not.toBeNull();
+      // A space on *each* side, which is the whole assertion — and it is only
+      // the right assertion while every key sits mid-sentence, as all three do
+      // and as the exact-set check above holds them to. A key that legitimately
+      // opened or closed its sentence would have no space on one side and this
+      // is the line that would have to change, so the message says so rather
+      // than leaving `expected '…' to contain ' N '` to be decoded.
+      expect(
+        sentence?.textContent,
+        `<kbd>${key.textContent}</kbd> has no space on one side of it; if the key now opens or closes its sentence, this assertion is what needs changing, not the page`,
+      ).toContain(` ${key.textContent} `);
+    }
+
+    // And the specific phrasings, so a copy edit that reflows them has to
+    // re-read them rather than silently losing a space.
+    const text = document.body.textContent!;
+    expect(text).toContain("press Enter (or / to jump to the capture bar)");
+    expect(text).toContain("finished step; Escape stops it too");
+    expect(text).toContain("type the word delete into");
+  });
 });

@@ -285,8 +285,8 @@ export default function PrivacyPage() {
           <li>
             <strong>From GitLab</strong>: your GitLab user id, your username,
             and your email address if GitLab returns one. The only permission
-            requested is <code className="text-xs">read_user</code> — no
-            repositories, no code, no groups, no ability to act as you.
+            requested is <code>read_user</code> — no repositories, no code, no
+            groups, no ability to act as you.
           </li>
           <li>
             <strong>The invitation record</strong>: the username or email
@@ -653,7 +653,7 @@ export default function PrivacyPage() {
         <LegalSubheading>One permission, and only one</LegalSubheading>
         <p>The connection requests exactly one OAuth scope:</p>
         <p>
-          <code className="text-xs break-all">
+          <code className="break-all">
             https://www.googleapis.com/auth/tasks
           </code>
         </p>
@@ -1038,26 +1038,24 @@ export default function PrivacyPage() {
         </p>
         <ul className="ml-5 list-disc space-y-2">
           <li>
-            <code className="text-xs">df_guest</code> — identifies your guest
-            sandbox so the app can show you your own work. Without it an
-            anonymous visitor has no workspace and the app cannot function.{" "}
-            <em>About a day.</em>
+            <code>df_guest</code> — identifies your guest sandbox so the app can
+            show you your own work. Without it an anonymous visitor has no
+            workspace and the app cannot function. <em>About a day.</em>
           </li>
           <li>
-            <code className="text-xs">df_owner</code> — your signed-in session.{" "}
+            <code>df_owner</code> — your signed-in session.{" "}
             <em>30 days, or until you sign out.</em>
           </li>
           <li>
-            <code className="text-xs">gitlab_oauth_state</code> and{" "}
-            <code className="text-xs">gitlab_pkce_verifier</code> — protect the
-            GitLab sign-in round trip against request forgery and code
-            interception. Deleted the moment sign-in finishes.{" "}
-            <em>10 minutes.</em>
+            <code>gitlab_oauth_state</code> and{" "}
+            <code>gitlab_pkce_verifier</code> — protect the GitLab sign-in round
+            trip against request forgery and code interception. Deleted the
+            moment sign-in finishes. <em>10 minutes.</em>
           </li>
           <li>
-            <code className="text-xs">google_oauth_state</code> and{" "}
-            <code className="text-xs">google_pkce_verifier</code> — the same
-            protection for connecting Google Tasks. <em>10 minutes.</em>
+            <code>google_oauth_state</code> and{" "}
+            <code>google_pkce_verifier</code> — the same protection for
+            connecting Google Tasks. <em>10 minutes.</em>
           </li>
         </ul>
         <p>
@@ -1070,9 +1068,8 @@ export default function PrivacyPage() {
         </p>
         <p>
           Separately, your light/dark theme choice is stored in your
-          browser&rsquo;s own local storage under{" "}
-          <code className="text-xs">df-theme</code>. It never leaves your device
-          and is never sent to the server.
+          browser&rsquo;s own local storage under <code>df-theme</code>. It
+          never leaves your device and is never sent to the server.
         </p>
       </LegalSection>
 
@@ -1244,10 +1241,10 @@ export default function PrivacyPage() {
           <strong>The export is the exception</strong> — it works in a sandbox
           exactly as it does for an account, and it is the only way anything you
           did in one outlives it. To be rid of it sooner, clear the{" "}
-          <code className="text-xs">df_guest</code> cookie or use a private
-          window. If you want it deleted now and can read the sandbox identifier
-          out of that cookie in your browser&rsquo;s developer tools, send it to
-          me and I will delete it.
+          <code>df_guest</code> cookie or use a private window. If you want it
+          deleted now and can read the sandbox identifier out of that cookie in
+          your browser&rsquo;s developer tools, send it to me and I will delete
+          it.
         </p>
         <p>
           Nothing in this policy or in the Terms limits your rights under UK

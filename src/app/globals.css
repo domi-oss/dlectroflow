@@ -180,6 +180,53 @@
   --tick-color: oklch(0.792 0.209 151.711); /* ~green-400, AA on dark */
 }
 
+/* #182 — the inline-code chip's two surfaces, as explicit per-theme tokens.
+ *
+ * Each is --foreground blended toward --muted (the chip 10% of the way, the
+ * keycap edge 30%), which is the relationship that makes them work in both
+ * themes: --foreground and --muted are always at opposite ends of the range, so
+ * the same blend darkens in light and lightens in dark.
+ *
+ * ── Why these are precomputed and not a color-mix() ────────────────────────
+ * They WERE `color-mix(in oklab, var(--foreground) 10%, var(--muted))`, which is
+ * the obvious way to say it and reads better. It shipped a hazard. Lightning CSS
+ * cannot evaluate a mix of two custom properties at build time, so it emits a
+ * fallback for engines that would drop the declaration — and the fallback it
+ * chooses is the first colour, neat:
+ *
+ *     code,kbd,samp{…;background-color:var(--foreground);…}   ← generated
+ *     code,kbd,samp{background-color:color-mix(in oklab,…)}
+ *
+ * A chip whose background is --foreground, with `color: var(--foreground)` on
+ * top, is 1:1 — text that is not merely low-contrast but literally invisible.
+ * It only bites an engine without color-mix, which is below this app's floor and
+ * so should never happen; a fallback that fails *this* way is still not one to
+ * leave in the stylesheet, and it was found by reading the CSS the review app
+ * actually served rather than the source. Precomputing removes the fallback
+ * because there is nothing left to fall back from.
+ *
+ * Measured on this palette, with a calculator calibrated against three ratios
+ * this file already publishes (--primary on --card 5.41 vs its documented 5.42,
+ * white on the dark --destructive 3.52, dark --background on --destructive
+ * 5.57 vs 5.58):
+ *
+ *              text on chip   chip vs --card   chip vs --background   edge vs chip
+ *   light        11.77:1          1.42:1             1.34:1              1.63:1
+ *   dark         10.29:1          1.34:1             1.44:1              1.72:1
+ *
+ * The text ratios are past AAA, not just AA. The chip-vs-surface figures are
+ * deliberately low — a code token is a quiet tint, not a badge — but not as low
+ * as --muted neat, which is 1.07:1 against --background and therefore invisible.
+ * That is why the tint exists at all rather than reusing --muted. */
+:root {
+  --code-surface: oklch(0.8851 0.0131 331.979);
+  --code-edge: oklch(0.7413 0.0176 322.794);
+}
+.dark {
+  --code-surface: oklch(0.3032 0.0376 300.522);
+  --code-edge: oklch(0.4376 0.0349 302.725);
+}
+
 /* #40 — user-selected UI typeface (a11y). typefaceRootAttrs sets data-font on
  * the app shell; these rules re-key --font-sans / --font-heading off it so the
  * whole subtree re-renders in the chosen face. figtree is the @theme default,
@@ -216,6 +263,112 @@
   }
   html {
     @apply font-sans;
+  }
+
+  /* #182 — inline code and keys, which until now had no treatment at all.
+   *
+   * The report was "words too close together" on /help. There are no missing
+   * spaces on that page: its three <kbd> elements simply carry no class, and
+   * nothing here styled `code` or `kbd`, so Tailwind's preflight left them at
+   * `font-size: 1em` in the mono face and nothing else. A monospace run at the
+   * same size as the proportional text around it, with no padding and no edge,
+   * reads as jammed into its neighbours — which is exactly what was reported.
+   * Seven bare <code> elements elsewhere had the same problem, and ten more in
+   * privacy/page.tsx wore an ad-hoc `text-xs` that sized them without ever
+   * separating them.
+   *
+   * A base rule rather than a <Kbd> component, for one reason: the defect is
+   * "somebody wrote the element and gave it nothing", and a component can only
+   * fix the sites that remember to opt in. This fixes all twenty across seven
+   * files while editing one of them, and the twenty-first cannot be written
+   * wrong.
+   *
+   * `em`, not `rem`. A chip has to stay proportional to whatever it sits in,
+   * and these sit in text-sm legal prose, text-sm help copy and default body
+   * text. Against the text-sm body, 0.875em resolves to the same 12px the
+   * `text-xs` sites already had, so nothing resizes — which is what let those
+   * ten drop the utility.
+   *
+   * The chip paints its OWN opaque surface, so the page behind it cannot move
+   * the text ratio (the property `a11y-class-hygiene` calls pinning your own
+   * background). --code-surface and --code-edge are defined per theme above,
+   * with the measured ratios and the reason they are precomputed rather than a
+   * color-mix().
+   *
+   * `box-decoration-break: clone` so a chip that wraps across a line keeps its
+   * padding and radius on both fragments; without it the second half loses its
+   * left edge and reads as a different token.
+   *
+   * The radius is deliberately NOT --radius-sm. At this chip's height that
+   * token (0.51rem) rounds to a full pill, and a pill already means "badge" in
+   * this UI — the Library hub's count pill and the save-status chip are both
+   * 9999px. A code token should not look like a badge.
+   *
+   * `pre` is absent from the selector list, but leaving it out is not by itself
+   * an exclusion — `code` still reaches the <code> inside a <pre>, which is the
+   * standard block shape. The `pre` reset below is what actually keeps a code
+   * BLOCK out of the chip treatment. Reported on !272. */
+  code,
+  kbd,
+  samp {
+    font-size: 0.875em;
+    padding-inline: 0.35em;
+    padding-block: 0.1em;
+    border-radius: calc(var(--radius) * 0.35);
+    background-color: var(--code-surface);
+    color: var(--foreground);
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+  }
+
+  /* A key is a keycap: the same chip with one heavier edge underneath. That
+   * edge is the whole convention, and it is what separates <kbd> from <code> at
+   * a glance on /help, where both appear within a few lines of each other. It
+   * reads 1.63:1 (light) and 1.72:1 (dark) against the chip it sits on, so the
+   * cue survives both themes.
+   *
+   * An inset shadow rather than a border-bottom: a border would add 2px to an
+   * INLINE box, nudging the line it sits on. A shadow paints inside the box the
+   * chip already occupies, so a paragraph's leading is untouched. */
+  kbd {
+    box-shadow: inset 0 -2px 0 var(--code-edge);
+    padding-bottom: 0.15em;
+    font-weight: 500;
+  }
+
+  /* A code BLOCK is not a chip. The two rules above reach anything inside a
+   * <pre>, so without this a code block would arrive wearing an oversized
+   * inline chip — background, padding, radius, and a size shrunk to 0.875em of
+   * a block that should set its own.
+   *
+   * There is still no <pre> in the tree, so this paints nothing today. It is
+   * here because the alternative is that the first code block anyone adds looks
+   * wrong for a reason that is two rules away from the markup, and
+   * `inline-code-style.test.ts` asserts it stays.
+   *
+   * A separate reset rather than folding `:not(pre) > code` into the base rule,
+   * which is the tidier-looking form and was the suggestion on !272. Two
+   * reasons against it: it lifts the base rule's specificity from (0,0,1) to
+   * (0,0,2) for one of its three selectors only, and the hygiene test matches
+   * that rule by its exact selector list — so folding it in there unhooks the
+   * guard on the whole chip while looking like a one-line tightening.
+   *
+   * `color: inherit` is the easy one to leave out and the one that most needs
+   * saying. The chip's surface and its text colour are a deliberate pair — the
+   * chip paints its OWN background so the page behind it cannot move the text
+   * ratio — so dropping the surface here and keeping `color: var(--foreground)`
+   * from the base rule leaves half of that pair standing. A code block sitting
+   * in muted prose would then render its text at full foreground, and nothing
+   * in the markup would say why. Added on !272. */
+  pre code,
+  pre kbd,
+  pre samp {
+    font-size: inherit;
+    padding: 0;
+    border-radius: 0;
+    background-color: transparent;
+    color: inherit;
+    box-shadow: none;
   }
 
   /* a11y: honour the OS "reduce motion" setting for CSS-driven animation and
