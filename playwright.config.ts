@@ -181,6 +181,24 @@ const memberServerEnv = {
  */
 const MEMBER_SPECS = /member-[\w-]+\.spec\.ts/;
 
+/**
+ * The specs that make up the ACCESSIBILITY GATE — the only project that runs
+ * with no retries (#127). See the `a11y` project below for why.
+ *
+ * Two shapes, because the gate grew in two places: the baseline-relative WCAG
+ * scans live in `e2e/a11y/`, and the zero-tolerance contrast gate is the
+ * single file `e2e/a11y-contrast.spec.ts` (deliberately left where it is —
+ * moving it would churn the half-dozen `src/` comments that cite it by path
+ * for no behavioural gain). `a11y` followed by `-` or a path separator catches
+ * both and nothing else; anchoring on `/e2e/` keeps a checkout that happens to
+ * sit under an `a11y/` directory from matching every spec in the suite.
+ *
+ * Put a new gate spec in `e2e/a11y/` and it lands here. Anything else keeps
+ * the retry, which is the safe direction to fail: a spec in the wrong project
+ * is over-tolerant, not silently unrun.
+ */
+const A11Y_SPECS = /[\\/]e2e[\\/]a11y[-\\/]/;
+
 export default defineConfig({
   testDir: "./e2e",
   testMatch: "**/*.spec.ts",
@@ -188,6 +206,8 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
+  // The default for the SMOKE projects only — the `a11y` project overrides it
+  // to 0 and explains why (#127).
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI
     ? [["list"], ["html", { open: "never" }]]
@@ -198,12 +218,65 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   projects: [
+    // ── #127: the accessibility gate gets no second chance ───────────────────
+    // `retries: 1` above is the right default for a smoke suite — a runner that
+    // drops a connection or a container that stalls under load is noise, and
+    // re-running it is cheaper than re-running a human. It is the WRONG default
+    // here, because a retry-masked flake in these specs is INDISTINGUISHABLE
+    // from a real AA regression that happens to be timing-dependent. Both read
+    // as "failed once, passed once"; Playwright calls both green and files the
+    // detail in a flaky-test summary that nothing gates on. One is noise, the
+    // other is a shipped contrast bug, and the gate cannot tell you which.
+    //
+    // #110 was exactly that shape: a genuine 1 ms race the suite had been
+    // quietly absorbing. It was found by instrumenting and CPU-throttling the
+    // page, not by the gate — because the gate had a retry to spend.
+    //
+    // Chosen over the two alternatives #127 also lists, on evidence rather than
+    // taste:
+    //   * `retries: 0` for the WHOLE suite is stricter than the problem. The
+    //     smoke specs boot two standalone servers against a real Postgres and
+    //     drive redirect chains; a one-off there is genuinely more likely to be
+    //     the infrastructure than the app, and the AA question is not on trial.
+    //   * `failOnFlakyTests` is a TestConfig field with no TestProject
+    //     equivalent (checked against @playwright/test 1.61's types), so it is
+    //     all-or-nothing across projects and cannot express "strict here,
+    //     tolerant there" at all.
+    // Measured before committing to it, 2026-08-06: these 59 tests were run
+    // 30x each locally (1,770 runs) at retries 0, zero failures. The gate is
+    // not absorbing anything today, so zero tolerance costs nothing now and
+    // starts failing loudly the day that stops being true.
+    //
+    // Declared FIRST so the execution order is the one the suite has always
+    // had: with `workers: 1` Playwright runs projects in declaration order, and
+    // these specs sort ahead of `e2e/smoke/` today. Several of them seed and
+    // delete rows in the shared owner workspace, so moving them behind the
+    // smoke suite would change the database state they scan against — a real
+    // behaviour change smuggled in by a config reshuffle.
+    {
+      name: "a11y",
+      testMatch: A11Y_SPECS,
+      retries: 0,
+      use: {
+        ...devices["Desktop Chrome"],
+        // Without this, `retries: 0` would cost this project its diagnostics:
+        // the global `trace: "on-first-retry"` records nothing when there is no
+        // first retry, so a failing contrast scan would arrive with no trace at
+        // all — strictly worse than what it replaces. `retain-on-failure` is
+        // the no-retry equivalent, and the html reporter inlines the trace into
+        // `playwright-report/`, which e2e_test already uploads on failure.
+        trace: "retain-on-failure",
+      },
+    },
     {
       name: "chromium",
       // The member specs need the member's own session, so they are excluded
       // here rather than skipped inside the spec: a spec that silently passes
-      // against the wrong server is worse than one that does not run.
-      testIgnore: MEMBER_SPECS,
+      // against the wrong server is worse than one that does not run. The a11y
+      // specs are excluded for a different reason — they are their own project
+      // above, and matching here too would run every scan twice, the second
+      // time with a retry that defeats the point.
+      testIgnore: [MEMBER_SPECS, A11Y_SPECS],
       use: { ...devices["Desktop Chrome"] },
     },
     {
