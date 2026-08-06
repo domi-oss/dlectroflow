@@ -331,6 +331,46 @@ model BrainDumpItem {
   // the Multi-step bucket with a "Break into steps now?" call-to-action.
   // Cleared by any move to another bucket.
   breakdownRequestedAt DateTime?
+  // #186 — the Schedule menu's three fields, at the ITEM grain. Mirrors the
+  // `Task` trio below field-for-field, including the NO COLUMN DEFAULT decision
+  // and for the same reason: NULL is what makes `mergePersistedIntent` fall
+  // back to `defaultIntentFor()` per field, so a default would make "the owner
+  // chose this" indistinguishable from "nobody has said yet".
+  //
+  // The item grain exists because the full menu was previously reachable only
+  // from a multi-step task — not a UI omission, but the absence of anywhere to
+  // persist a deadline for an item with no `Task` row. `loadScheduleIntent`
+  // (src/app/actions/schedule-intent.ts) resolves task-backed and item-backed
+  // intents to the same `ScheduleIntent` shape, so no call site learns which
+  // kind it got.
+  //
+  // Both pseudo-enum columns mirror SchedulePriority / ScheduleHours in
+  // src/lib/scheduling/types.ts and are CHECK-constrained by
+  // 20260807120000_braindump_item_notes_and_schedule; Prisma can't express a
+  // CHECK, so these comments are their only trace in the schema and the
+  // constraints are registered in
+  // src/lib/enum-constraint-sync.integration.test.ts.
+  scheduleDueAt    DateTime?
+  schedulePriority String?   // critical | high | normal | low
+  scheduleHours    String?   // work | personal
+  // #186 / #179 — the owner's freeform note on an UNTRIAGED item: typed into
+  // the Needs-review row's disclosure, or split off the capture itself when the
+  // text ends in a brace group (`water the plants {can under sink}`, #179).
+  //
+  // Nullable, and the NULL is load-bearing exactly as it is on `Task.notes`:
+  // "nobody has written a note" is what keeps a blank line out of a calendar
+  // entry, and `normalizeTaskNote` (src/lib/task-notes.ts) — shared, not
+  // re-declared — folds "" and whitespace-only back to NULL.
+  //
+  // Bounded at 2000 CHARACTERS by BrainDumpItem_notes_check
+  // (20260807120000_braindump_item_notes_and_schedule), the same bound as
+  // `Task.notes` because this value is COPIED into that column at triage by
+  // `brainDumpItemToTaskData` (src/lib/braindump-to-task.ts) — a wider bound
+  // here would be a value the narrower column refuses on a routine action.
+  // Registered in src/lib/enum-constraint-sync.integration.test.ts
+  // (LENGTH_REGISTRY); behavioural half in
+  // src/lib/notes-length-check.integration.test.ts.
+  notes            String?
   taskId           String?
   task             Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
   workspaceId      String
