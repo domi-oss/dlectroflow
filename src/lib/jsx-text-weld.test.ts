@@ -362,8 +362,8 @@ describe("the real tree", () => {
    * its own line — the precise edit Prettier's reflow makes — and require the
    * detector to notice.
    *
-   * **180 of 190 injected welds are caught** at the time of writing (61/68
-   * before an opening tag, 119/122 after a closing one). Every miss was
+   * **181 of 190 injected welds are caught** at the time of writing (61/68
+   * before an opening tag, 120/122 after a closing one). Every miss was
    * inspected, and none is a parser bug:
    *
    *  * **five** are `<strong>{EXPR}</strong>` / `<code>{EXPR}</code>`, where the
@@ -375,10 +375,10 @@ describe("the real tree", () => {
    *  * **one** is inside a JSX **comment** in `celebration.tsx`, and one is a
    *    TypeScript **ternary colon** in `breakdown-chat.tsx` — neither is markup,
    *    so neither mutant is a weld at all. A regex reports both, and this repo
-   *    has twice shipped a tool that read a comment as code. Two of the ten
+   *    has twice shipped a tool that read a comment as code. Two of the nine
    *    "misses" are therefore the AST being right.
    *
-   * The floor is 0.85 rather than the measured 0.947 so that ordinary copy
+   * The floor is 0.85 rather than the measured 0.953 so that ordinary copy
    * edits, which change the mix of literal and dynamic elements, cannot fail the
    * suite on their own. A drop past it means the parser regressed.
    */
