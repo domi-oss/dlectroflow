@@ -98,7 +98,20 @@ export function FocusPlaylistPanel({
     if (!open) return;
     panelRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
+      if (e.key !== "Escape") return;
+      // #181 — only OUR Escape. The mini-player's volume popover is a second
+      // disclosure on the same strip and installs its own document-level Escape
+      // handler, so an unscoped one here closes the panel too on the single
+      // press meant to dismiss the slider — and both handlers then call focus(),
+      // leaving the user on whichever ran last rather than on the control they
+      // were using. Scoping to the subtree is also the disclosure's own
+      // contract: Escape dismisses the thing you are inside.
+      const target = e.target as Node | null;
+      const mine =
+        target !== null &&
+        (panelRef.current?.contains(target) === true ||
+          target === buttonRef.current);
+      if (mine) close();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);

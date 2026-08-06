@@ -145,6 +145,38 @@ describe("FocusSoundPlayer", () => {
     expect(screen.queryByRole("slider")).not.toBeInTheDocument();
   });
 
+  it("Escape on the volume popover closes ONLY it, not the playlist panel (#181)", async () => {
+    // Two disclosures on one strip, each with its own document-level Escape
+    // handler, so an unscoped one closes both on a single press — and calls
+    // focus() twice, landing the user on whichever handler ran last rather than
+    // on the control they were using. Reachable with two clicks.
+    const user = userEvent.setup();
+    render(
+      <FocusSoundPlayer
+        controls={controls()}
+        voice="plain"
+        categories={[]}
+        onCategoriesChange={noop}
+      />,
+    );
+    const panelToggle = screen.getByRole("button", {
+      name: /playlists and tracks/i,
+    });
+    await user.click(panelToggle);
+    expect(panelToggle).toHaveAttribute("aria-expanded", "true");
+
+    const volBtn = screen.getByRole("button", { name: /^volume$/i });
+    await user.click(volBtn);
+    expect(screen.getByRole("slider")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("slider")).not.toBeInTheDocument();
+    expect(panelToggle).toHaveAttribute("aria-expanded", "true");
+    // The press belonged to the slider, so focus goes back to ITS button.
+    expect(volBtn).toHaveFocus();
+  });
+
   it("shows a playback progress bar reflecting currentTime / duration (display only)", () => {
     const c = controls({ getTime: () => ({ currentTime: 30, duration: 120 }) });
     render(
