@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma, isUniqueViolation } from "@/lib/db";
+import { prisma } from "@/lib/db";
 import { isOwnerRequest, currentUser } from "@/lib/workspace";
 import { freezeAccount } from "@/lib/account-lifecycle";
 import { AiPolicy } from "@/lib/constants";
@@ -83,20 +83,27 @@ export async function invitePerson(input: {
   }
   const note = input.note?.trim().slice(0, MAX_NOTE_LENGTH) || null;
 
-  try {
-    await prisma.allowlist.create({
-      data: {
-        provider: process.env.AUTH_PROVIDER ?? "gitlab",
-        identity,
-        note,
-      },
-    });
-  } catch (e) {
-    // The (provider, identity) unique index — this person is already invited,
-    // which is information, not a failure.
-    if (isUniqueViolation(e)) return { ok: false, error: "already_invited" };
-    throw e;
-  }
+  // The (provider, identity) unique index — an existing invitation is
+  // information, not a failure, and this is the one of #158's four sites with
+  // no concurrency in it at all: an owner inviting the same person twice is the
+  // ordinary path, and it printed `prisma:error` every single time. Nothing
+  // reads the created row, so `skipDuplicates` answers with a count instead:
+  // 0 means the row was already there.
+  //
+  // `ON CONFLICT DO NOTHING` carries no conflict target, so ANY unique index on
+  // Allowlist skips rather than raises — which is exactly what catching P2002
+  // did (it matched the code, never the columns). `claimedById` is the only
+  // other one, and it is not written here.
+  const { count } = await prisma.allowlist.createMany({
+    data: {
+      provider: process.env.AUTH_PROVIDER ?? "gitlab",
+      identity,
+      note,
+    },
+    skipDuplicates: true,
+  });
+  if (count === 0) return { ok: false, error: "already_invited" };
+
   revalidatePath("/settings");
   return { ok: true };
 }

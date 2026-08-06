@@ -9,7 +9,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // never grant ownership (`isOwnerSeed` / `role` are not writable from here).
 
 const db = vi.hoisted(() => ({
-  allowlist: { create: vi.fn(), deleteMany: vi.fn() },
+  // #158: the invite inserts with `createMany({ skipDuplicates: true })`, so
+  // "already invited" is `count: 0` rather than a caught P2002 that Prisma had
+  // already printed at error level. `create` stays mocked so a regression back
+  // to it fails loudly instead of silently passing.
+  allowlist: { create: vi.fn(), createMany: vi.fn(), deleteMany: vi.fn() },
   user: { updateMany: vi.fn() },
 }));
 const isOwnerRequestMock = vi.hoisted(() => vi.fn());
@@ -17,11 +21,7 @@ const currentUserMock = vi.hoisted(() => vi.fn());
 const revalidatePathMock = vi.hoisted(() => vi.fn());
 const tryDisconnectGoogleMock = vi.hoisted(() => vi.fn());
 
-vi.mock("@/lib/db", () => ({
-  prisma: db,
-  isUniqueViolation: (e: unknown) =>
-    !!e && typeof e === "object" && (e as { code?: string }).code === "P2002",
-}));
+vi.mock("@/lib/db", () => ({ prisma: db }));
 vi.mock("@/lib/workspace", () => ({
   isOwnerRequest: isOwnerRequestMock,
   currentUser: currentUserMock,
@@ -38,10 +38,6 @@ import {
   revokePerson,
 } from "./people";
 
-class FakeP2002 extends Error {
-  code = "P2002";
-}
-
 const OWNER = { id: "u-owner", role: "owner" as const, workspaceId: "ws-o" };
 
 beforeEach(() => {
@@ -49,13 +45,14 @@ beforeEach(() => {
   process.env.AUTH_PROVIDER = "gitlab";
   isOwnerRequestMock.mockResolvedValue(true);
   currentUserMock.mockResolvedValue(OWNER);
-  db.allowlist.create.mockResolvedValue({ id: "a-1" });
+  db.allowlist.createMany.mockResolvedValue({ count: 1 });
   db.allowlist.deleteMany.mockResolvedValue({ count: 1 });
   db.user.updateMany.mockResolvedValue({ count: 1 });
   tryDisconnectGoogleMock.mockResolvedValue(true);
 });
 
 function expectNoWrites() {
+  expect(db.allowlist.createMany).not.toHaveBeenCalled();
   expect(db.allowlist.create).not.toHaveBeenCalled();
   expect(db.allowlist.deleteMany).not.toHaveBeenCalled();
   expect(db.user.updateMany).not.toHaveBeenCalled();
@@ -108,24 +105,27 @@ describe("invitePerson", () => {
     const res = await invitePerson({ identity: "  Grace.Hopper  " });
 
     expect(res).toEqual({ ok: true });
-    expect(db.allowlist.create).toHaveBeenCalledWith({
+    expect(db.allowlist.createMany).toHaveBeenCalledWith({
       data: {
         provider: "gitlab",
         identity: "grace.hopper",
         note: null,
       },
+      skipDuplicates: true,
     });
     expect(revalidatePathMock).toHaveBeenCalledWith("/settings");
   });
 
   it("keeps an optional note, trimmed", async () => {
     await invitePerson({ identity: "grace", note: "  new teammate " });
-    expect(db.allowlist.create.mock.calls[0][0].data.note).toBe("new teammate");
+    expect(db.allowlist.createMany.mock.calls[0][0].data.note).toBe(
+      "new teammate",
+    );
   });
 
   it("NEVER writes isOwnerSeed or a role — the panel cannot mint an owner", async () => {
     await invitePerson({ identity: "grace" });
-    const data = db.allowlist.create.mock.calls[0][0].data;
+    const data = db.allowlist.createMany.mock.calls[0][0].data;
     expect(data).not.toHaveProperty("isOwnerSeed");
     expect(data).not.toHaveProperty("role");
   });
@@ -149,8 +149,11 @@ describe("invitePerson", () => {
     expectNoWrites();
   });
 
-  it("reports an existing invitation instead of throwing a unique violation", async () => {
-    db.allowlist.create.mockRejectedValue(new FakeP2002("dup"));
+  it("reports an existing invitation without raising anything (#158)", async () => {
+    // Inviting the same person twice is an ordinary owner action, not a race,
+    // and it used to print `prisma:error` every single time. ON CONFLICT DO
+    // NOTHING resolves with count 0 instead, so nothing is raised or logged.
+    db.allowlist.createMany.mockResolvedValue({ count: 0 });
 
     expect(await invitePerson({ identity: "grace" })).toEqual({
       ok: false,
@@ -158,8 +161,8 @@ describe("invitePerson", () => {
     });
   });
 
-  it("rethrows a database failure that is not a duplicate", async () => {
-    db.allowlist.create.mockRejectedValue(new Error("connection reset"));
+  it("still propagates a database failure that is not a duplicate", async () => {
+    db.allowlist.createMany.mockRejectedValue(new Error("connection reset"));
     await expect(invitePerson({ identity: "grace" })).rejects.toThrow(
       "connection reset",
     );
