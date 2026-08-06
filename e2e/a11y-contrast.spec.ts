@@ -341,6 +341,22 @@ for (const theme of THEMES) {
       });
       await expect(completeStep).toBeVisible();
       expectNoContrastViolations(await scanColorContrast(page));
+
+      // #181 — the playlist/jump panel is state-dependent chrome that is only
+      // painted once it is expanded, which is exactly the shape #109 kept
+      // shipping green. Its playing-track row is a token pair on a tinted
+      // background, and a token pair on a tint is the one thing
+      // a11y-class-hygiene says it cannot measure — so it is measured here, in
+      // both themes, at zero tolerance.
+      const panelToggle = page.getByRole("button", {
+        name: "Playlists and tracks",
+      });
+      await expect(panelToggle).toBeVisible();
+      await panelToggle.click();
+      // Guard the repro precondition: the row that carries the tint must be on
+      // screen, or this scan is a no-op that cannot see the thing it is for.
+      await expect(page.locator("[aria-current='true']").first()).toBeVisible();
+      expectNoContrastViolations(await scanColorContrast(page));
     });
 
     // The "Break into steps now?" CTA (bg-destructive + text-destructive-

@@ -607,6 +607,36 @@ export const STRINGS = {
     plain: "Resume music and timer",
     playful: "Resume music and timer",
   },
+  // #181 — the in-player playlist + jump panel. Every one of these is a
+  // functional control on a screen someone is using to concentrate, so they read
+  // identically in both voices: a playful flourish here would be the panel
+  // drawing attention to itself, which is the one thing it must not do.
+  //
+  // The disclosure keeps ONE label in both states, like the shuffle toggle above:
+  // aria-expanded carries open/closed, and a label that changed under the user
+  // would be a second thing to re-read on every press.
+  "focus.sound.panel": {
+    plain: "Playlists and tracks",
+    playful: "Playlists and tracks",
+  },
+  "focus.sound.playlists": { plain: "Playlists", playful: "Playlists" },
+  // Says how to leave the all-tracks state, because "All tracks" is the only row
+  // that cannot be unticked directly — you leave it by ticking a playlist. A
+  // control whose off-switch is elsewhere has to say where.
+  "focus.sound.playlistsHint": {
+    plain: "Tick a playlist to narrow what plays.",
+    playful: "Tick a playlist to narrow what plays.",
+  },
+  "focus.sound.allTracks": { plain: "All tracks", playful: "All tracks" },
+  "focus.sound.tracks": { plain: "Tracks", playful: "Tracks" },
+  // The playing track's mark, in text. aria-current announces it to a screen
+  // reader; this is the half that keeps it off colour alone (WCAG 1.4.1).
+  "focus.sound.playing": { plain: "Playing", playful: "Playing" },
+  // Counts belong INSIDE each checkbox's accessible name — a bare "(21)" beside
+  // a label is invisible to a screen reader reading the label alone — so the
+  // visible parenthesised figure is aria-hidden and these spell it out instead.
+  "focus.sound.trackOne": { plain: "track", playful: "track" },
+  "focus.sound.trackMany": { plain: "tracks", playful: "tracks" },
 
   // ── Breakdown confirm ──────────────────────────────────────────────────────
   "breakdown.looksRight": { plain: "Looks right", playful: "👍 Looks right" },

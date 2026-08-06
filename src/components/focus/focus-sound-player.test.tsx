@@ -7,6 +7,11 @@ import type { FocusSoundControls } from "@/lib/use-focus-sound";
 
 afterEach(cleanup);
 
+// #181 — the player now owns the playlist tick-list, so every render needs the
+// selection and its setter. Neither is exercised here: the panel has its own
+// file (focus-playlist-panel.test.tsx) and these tests are about the transport.
+const noop = () => {};
+
 function controls(over: Partial<FocusSoundControls> = {}): FocusSoundControls {
   return {
     track: {
@@ -29,13 +34,23 @@ function controls(over: Partial<FocusSoundControls> = {}): FocusSoundControls {
     setVolume: vi.fn(),
     stop: vi.fn(),
     getTime: () => ({ currentTime: 0, duration: 0 }),
+    catalog: [],
+    pool: [],
+    jumpTo: vi.fn(),
     ...over,
   };
 }
 
 describe("FocusSoundPlayer", () => {
   it("renders the now-playing track title + category as text (not colour-only)", () => {
-    render(<FocusSoundPlayer controls={controls()} voice="plain" />);
+    render(
+      <FocusSoundPlayer
+        controls={controls()}
+        voice="plain"
+        categories={[]}
+        onCategoriesChange={noop}
+      />,
+    );
     expect(screen.getByText("Aurora on Mute")).toBeInTheDocument();
     expect(screen.getByText("Ambient lo-fi")).toBeInTheDocument();
     expect(
@@ -47,7 +62,12 @@ describe("FocusSoundPlayer", () => {
     const user = userEvent.setup();
     const c = controls({ playing: false });
     const { rerender } = render(
-      <FocusSoundPlayer controls={c} voice="plain" />,
+      <FocusSoundPlayer
+        controls={c}
+        voice="plain"
+        categories={[]}
+        onCategoriesChange={noop}
+      />,
     );
     const playBtn = screen.getByRole("button", { name: /play focus sound/i });
     expect(playBtn).toHaveAttribute("aria-pressed", "false");
@@ -55,7 +75,12 @@ describe("FocusSoundPlayer", () => {
     expect(c.toggle).toHaveBeenCalled();
 
     rerender(
-      <FocusSoundPlayer controls={controls({ playing: true })} voice="plain" />,
+      <FocusSoundPlayer
+        controls={controls({ playing: true })}
+        voice="plain"
+        categories={[]}
+        onCategoriesChange={noop}
+      />,
     );
     const pauseBtn = screen.getByRole("button", { name: /pause focus sound/i });
     expect(pauseBtn).toHaveAttribute("aria-pressed", "true");
@@ -64,7 +89,14 @@ describe("FocusSoundPlayer", () => {
   it("prev / next buttons call the controls", async () => {
     const user = userEvent.setup();
     const c = controls();
-    render(<FocusSoundPlayer controls={c} voice="plain" />);
+    render(
+      <FocusSoundPlayer
+        controls={c}
+        voice="plain"
+        categories={[]}
+        onCategoriesChange={noop}
+      />,
+    );
     await user.click(screen.getByRole("button", { name: /previous track/i }));
     await user.click(screen.getByRole("button", { name: /next track/i }));
     expect(c.prev).toHaveBeenCalled();
@@ -74,7 +106,14 @@ describe("FocusSoundPlayer", () => {
   it("volume is behind a labeled speaker button; the slider pops out (closed by default) and forwards changes", async () => {
     const user = userEvent.setup();
     const c = controls({ volume: 0.5 });
-    render(<FocusSoundPlayer controls={c} voice="plain" />);
+    render(
+      <FocusSoundPlayer
+        controls={c}
+        voice="plain"
+        categories={[]}
+        onCategoriesChange={noop}
+      />,
+    );
     const volBtn = screen.getByRole("button", { name: /^volume$/i });
     expect(volBtn).toHaveAttribute("aria-expanded", "false");
     // Duo a11y fix: "dialog", not "true" (≡ "menu") — the popover is a
@@ -92,16 +131,99 @@ describe("FocusSoundPlayer", () => {
 
   it("Escape closes the volume popover", async () => {
     const user = userEvent.setup();
-    render(<FocusSoundPlayer controls={controls()} voice="plain" />);
+    render(
+      <FocusSoundPlayer
+        controls={controls()}
+        voice="plain"
+        categories={[]}
+        onCategoriesChange={noop}
+      />,
+    );
     await user.click(screen.getByRole("button", { name: /^volume$/i }));
     expect(screen.getByRole("slider")).toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("slider")).not.toBeInTheDocument();
   });
 
+  it("Escape on the volume popover closes ONLY it, not the playlist panel (#181)", async () => {
+    // Two disclosures on one strip, each with its own document-level Escape
+    // handler, so an unscoped one closes both on a single press — and calls
+    // focus() twice, landing the user on whichever handler ran last rather than
+    // on the control they were using. Reachable with two clicks.
+    const user = userEvent.setup();
+    render(
+      <FocusSoundPlayer
+        controls={controls()}
+        voice="plain"
+        categories={[]}
+        onCategoriesChange={noop}
+      />,
+    );
+    const panelToggle = screen.getByRole("button", {
+      name: /playlists and tracks/i,
+    });
+    await user.click(panelToggle);
+    expect(panelToggle).toHaveAttribute("aria-expanded", "true");
+
+    const volBtn = screen.getByRole("button", { name: /^volume$/i });
+    await user.click(volBtn);
+    expect(screen.getByRole("slider")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("slider")).not.toBeInTheDocument();
+    expect(panelToggle).toHaveAttribute("aria-expanded", "true");
+    // The press belonged to the slider, so focus goes back to ITS button.
+    expect(volBtn).toHaveFocus();
+  });
+
+  it("Escape in the playlist panel closes ONLY it, not the volume popover (#181)", async () => {
+    // The same collision in the other direction, and it is keyboard-only:
+    // opening the panel with the MOUSE fires a mousedown that the popover's own
+    // click-away handler already acts on, so the two are never open at once
+    // that way. Reached with the keyboard, where no mousedown ever fires.
+    const user = userEvent.setup();
+    render(
+      <FocusSoundPlayer
+        controls={controls()}
+        voice="plain"
+        categories={[]}
+        onCategoriesChange={noop}
+      />,
+    );
+    const volBtn = screen.getByRole("button", { name: /^volume$/i });
+    volBtn.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("slider")).toBeInTheDocument();
+
+    const panelToggle = screen.getByRole("button", {
+      name: /playlists and tracks/i,
+    });
+    panelToggle.focus();
+    await user.keyboard("{Enter}");
+    expect(panelToggle).toHaveAttribute("aria-expanded", "true");
+    // Both open, and no mousedown has been dispatched.
+    expect(screen.getByRole("slider")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    expect(panelToggle).toHaveAttribute("aria-expanded", "false");
+    // The volume popover was not what the user was in, so it is left alone —
+    // and it must not steal the focus the panel just handed back.
+    expect(screen.getByRole("slider")).toBeInTheDocument();
+    expect(panelToggle).toHaveFocus();
+  });
+
   it("shows a playback progress bar reflecting currentTime / duration (display only)", () => {
     const c = controls({ getTime: () => ({ currentTime: 30, duration: 120 }) });
-    render(<FocusSoundPlayer controls={c} voice="plain" />);
+    render(
+      <FocusSoundPlayer
+        controls={c}
+        voice="plain"
+        categories={[]}
+        onCategoriesChange={noop}
+      />,
+    );
     const bar = screen.getByRole("progressbar", { name: /playback progress/i });
     expect(bar).toHaveAttribute("aria-valuenow", "25");
     expect(bar).toHaveAttribute("aria-valuemin", "0");
@@ -111,7 +233,14 @@ describe("FocusSoundPlayer", () => {
   });
 
   it("is width-capped + centered so it aligns with the timer button row", () => {
-    render(<FocusSoundPlayer controls={controls()} voice="plain" />);
+    render(
+      <FocusSoundPlayer
+        controls={controls()}
+        voice="plain"
+        categories={[]}
+        onCategoriesChange={noop}
+      />,
+    );
     const region = screen.getByRole("region", { name: /focus sound/i });
     expect(region.className).toMatch(/max-w-md/);
     expect(region.className).toMatch(/mx-auto/);
@@ -123,7 +252,14 @@ describe("FocusSoundPlayer", () => {
   it("shuffle is an aria-pressed toggle with a decorative glyph and a text label", async () => {
     const user = userEvent.setup();
     const c = controls({ shuffle: false });
-    render(<FocusSoundPlayer controls={c} voice="plain" />);
+    render(
+      <FocusSoundPlayer
+        controls={c}
+        voice="plain"
+        categories={[]}
+        onCategoriesChange={noop}
+      />,
+    );
     const btn = screen.getByRole("button", { name: /shuffle tracks/i });
     expect(btn).toHaveAttribute("aria-pressed", "false");
     expect(btn.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
@@ -133,7 +269,12 @@ describe("FocusSoundPlayer", () => {
 
   it("shuffle-on is announced by aria-pressed AND shown as text (not colour-only)", () => {
     render(
-      <FocusSoundPlayer controls={controls({ shuffle: true })} voice="plain" />,
+      <FocusSoundPlayer
+        controls={controls({ shuffle: true })}
+        voice="plain"
+        categories={[]}
+        onCategoriesChange={noop}
+      />,
     );
     expect(
       screen.getByRole("button", { name: /shuffle tracks/i }),
@@ -142,7 +283,14 @@ describe("FocusSoundPlayer", () => {
   });
 
   it("does not claim shuffle in the now-playing line when it is off", () => {
-    render(<FocusSoundPlayer controls={controls()} voice="plain" />);
+    render(
+      <FocusSoundPlayer
+        controls={controls()}
+        voice="plain"
+        categories={[]}
+        onCategoriesChange={noop}
+      />,
+    );
     expect(screen.getByText("Now playing")).toBeInTheDocument();
     expect(screen.queryByText(/shuffled/i)).not.toBeInTheDocument();
   });
@@ -160,6 +308,8 @@ describe("FocusSoundPlayer", () => {
         <FocusSoundPlayer
           controls={c}
           voice="plain"
+          categories={[]}
+          onCategoriesChange={noop}
           onPauseTogether={onPauseTogether}
         />,
       );
@@ -180,6 +330,8 @@ describe("FocusSoundPlayer", () => {
         <FocusSoundPlayer
           controls={controls({ playing: false })}
           voice="plain"
+          categories={[]}
+          onCategoriesChange={noop}
           onPauseTogether={vi.fn()}
         />,
       );
@@ -196,6 +348,8 @@ describe("FocusSoundPlayer", () => {
         <FocusSoundPlayer
           controls={controls({ playing: true })}
           voice="plain"
+          categories={[]}
+          onCategoriesChange={noop}
           onPauseTogether={onPauseTogether}
           pauseTogetherPending
         />,
@@ -216,6 +370,8 @@ describe("FocusSoundPlayer", () => {
         <FocusSoundPlayer
           controls={c}
           voice="plain"
+          categories={[]}
+          onCategoriesChange={noop}
           onPauseTogether={onPauseTogether}
         />,
       );
@@ -234,7 +390,14 @@ describe("FocusSoundPlayer", () => {
     it("keeps the audio-only labels + behaviour when the prop is absent (default)", async () => {
       const user = userEvent.setup();
       const c = controls({ playing: true });
-      render(<FocusSoundPlayer controls={c} voice="plain" />);
+      render(
+        <FocusSoundPlayer
+          controls={c}
+          voice="plain"
+          categories={[]}
+          onCategoriesChange={noop}
+        />,
+      );
       const btn = screen.getByRole("button", { name: /^pause focus sound$/i });
       expect(btn).toBeEnabled();
       await user.click(btn);
@@ -243,7 +406,14 @@ describe("FocusSoundPlayer", () => {
   });
 
   it("every control button meets the ≥44px touch target", () => {
-    render(<FocusSoundPlayer controls={controls()} voice="plain" />);
+    render(
+      <FocusSoundPlayer
+        controls={controls()}
+        voice="plain"
+        categories={[]}
+        onCategoriesChange={noop}
+      />,
+    );
     for (const name of [
       /previous track/i,
       /play focus sound/i,
@@ -257,11 +427,73 @@ describe("FocusSoundPlayer", () => {
     }
   });
 
+  // #181 — the playlist/jump panel rides inside the player. These cover the
+  // wiring only; the panel's own behaviour is in focus-playlist-panel.test.tsx.
+  describe("the playlist panel (#181)", () => {
+    it("is present, collapsed, and BELOW the progress bar", () => {
+      const { container } = render(
+        <FocusSoundPlayer
+          controls={controls()}
+          voice="plain"
+          categories={[]}
+          onCategoriesChange={noop}
+        />,
+      );
+      const toggle = screen.getByRole("button", {
+        name: /playlists and tracks/i,
+      });
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      // Inline below the progress bar, not a popover over the timer's number.
+      const bar = screen.getByRole("progressbar");
+      expect(
+        bar.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(container.querySelector("[role='dialog']")).toBeNull();
+    });
+
+    it("forwards the selection and its setter through to the panel", async () => {
+      const user = userEvent.setup();
+      const onCategoriesChange = vi.fn();
+      render(
+        <FocusSoundPlayer
+          controls={controls({
+            catalog: [
+              {
+                id: "a",
+                title: "A",
+                category: "chillhop",
+                categoryLabel: "Chillhop",
+                src: "/a.mp3",
+              },
+              {
+                id: "b",
+                title: "B",
+                category: "chillhop",
+                categoryLabel: "Chillhop",
+                src: "/b.mp3",
+              },
+            ],
+          })}
+          voice="plain"
+          categories={["chillhop"]}
+          onCategoriesChange={onCategoriesChange}
+        />,
+      );
+      await user.click(
+        screen.getByRole("button", { name: /playlists and tracks/i }),
+      );
+      await user.click(screen.getByRole("checkbox", { name: /^Chillhop/i }));
+      expect(onCategoriesChange).toHaveBeenCalledWith([]);
+    });
+  });
+
   it("renders nothing when there is no track / no library", () => {
     const { container } = render(
       <FocusSoundPlayer
         controls={controls({ hasTracks: false, track: null })}
         voice="plain"
+        categories={[]}
+        onCategoriesChange={noop}
       />,
     );
     expect(container).toBeEmptyDOMElement();

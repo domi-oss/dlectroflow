@@ -18,6 +18,7 @@ import {
   updateFocusTimerSettings,
   dismissFocusTimerTip,
   updateFocusShuffle,
+  updateFocusSoundCategories,
 } from "@/app/actions/settings";
 
 beforeEach(() => vi.clearAllMocks());
@@ -281,6 +282,73 @@ describe("updateFocusShuffle (#68)", () => {
   it("is not owner-gated — a guest workspace keeps its own taste setting", async () => {
     isOwnerRequestMock.mockResolvedValueOnce(false);
     await updateFocusShuffle(true);
+    expect(upsert).toHaveBeenCalled();
+  });
+});
+
+/**
+ * #181 — the playlist tick-list writes from the PLAYER, mid-session.
+ *
+ * It gets its own action rather than reusing `updateFocusTimerSettings`, which
+ * the issue's wording suggested. That action takes five other focus preferences
+ * and writes every one of them, so calling it from the player would mean posting
+ * a snapshot of the timer style, minimal mode, keep-awake, the alarm and the
+ * sound switch as they were when the page loaded — reverting anything changed on
+ * the Settings page in another tab since. `updateFocusShuffle` is the precedent:
+ * a player-side control that owns exactly its own column.
+ */
+describe("updateFocusSoundCategories (#181)", () => {
+  it("stores the selection in catalogue order, deduplicated", async () => {
+    await updateFocusSoundCategories(["jazzhop", "chillhop", "jazzhop"]);
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { workspaceId: "ws-1" },
+        create: expect.objectContaining({
+          workspaceId: "ws-1",
+          focusSoundCategories: ["chillhop", "jazzhop"],
+        }),
+        update: { focusSoundCategories: ["chillhop", "jazzhop"] },
+      }),
+    );
+  });
+
+  it("drops a slug the CHECK constraint would refuse rather than failing the write", async () => {
+    // Same rule as updateFocusTimerSettings: a retired or manifest-invented slug
+    // shrinks the selection instead of rejecting the whole tick.
+    await updateFocusSoundCategories(["chillhop", "wind-chimes"]);
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: { focusSoundCategories: ["chillhop"] },
+      }),
+    );
+  });
+
+  it("stores the empty array for 'All tracks' — the one way to say the whole catalogue", async () => {
+    await updateFocusSoundCategories([]);
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: { focusSoundCategories: [] } }),
+    );
+  });
+
+  it("treats a missing or non-array argument as the empty selection", async () => {
+    // The column is NOT NULL, so there is no value of this the DB would take
+    // other than an array.
+    await updateFocusSoundCategories(undefined as unknown as readonly string[]);
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: { focusSoundCategories: [] } }),
+    );
+  });
+
+  it("writes nothing but its own column", async () => {
+    await updateFocusSoundCategories(["chillhop"]);
+    expect(Object.keys(upsert.mock.calls[0][0].update)).toEqual([
+      "focusSoundCategories",
+    ]);
+  });
+
+  it("is not owner-gated — a guest workspace picks its own playlists", async () => {
+    isOwnerRequestMock.mockResolvedValueOnce(false);
+    await updateFocusSoundCategories(["chillhop"]);
     expect(upsert).toHaveBeenCalled();
   });
 });

@@ -84,6 +84,32 @@ describe("focus-timer redesign strings (MR ②)", () => {
     }
   });
 
+  it("#181 — the player panel's labels resolve identically in both voices (functional controls)", () => {
+    // The panel sits on a screen someone is using to concentrate. A playful
+    // flourish here would be it drawing attention to itself, which is the one
+    // thing it must not do — so no key in this set may differ by voice.
+    for (const key of [
+      "focus.sound.panel",
+      "focus.sound.playlists",
+      "focus.sound.playlistsHint",
+      "focus.sound.allTracks",
+      "focus.sound.tracks",
+      "focus.sound.playing",
+      "focus.sound.trackOne",
+      "focus.sound.trackMany",
+    ] as const) {
+      expect(t(key, "plain")).toBe(t(key, "playful"));
+      expect(t(key, "plain")).not.toMatch(/\p{Extended_Pictographic}/u);
+    }
+  });
+
+  it("#181 — the hint says how to leave the all-tracks state", () => {
+    // "All tracks" is the only row that cannot be unticked directly; you leave
+    // it by ticking a playlist. A control whose off-switch is elsewhere has to
+    // say where, or it reads as broken.
+    expect(t("focus.sound.playlistsHint", "plain")).toMatch(/tick a playlist/i);
+  });
+
   it("#68 — shuffle label + state text resolve identically in both voices (functional control)", () => {
     expect(t("focus.sound.shuffle", "plain")).toBe("Shuffle tracks");
     expect(t("focus.sound.shuffle", "playful")).toBe("Shuffle tracks");
