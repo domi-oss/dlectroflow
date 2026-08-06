@@ -109,11 +109,18 @@ export function findInlineCodeSizeOverrides(
           if (attribute.name.getText(sourceFile) !== "className") continue;
           // Every string literal anywhere in the attribute, so a `cn()` call or
           // a ternary arm is read as well as a plain string.
+          //
+          // String literals *only*. A `JsxText` can reach here — `className`
+          // takes an element at the syntax level, so `className={<span>text-xs
+          // </span>}` parses with zero diagnostics and walks one in — but that
+          // text is what the element renders, not a class token; React would
+          // set the class to `[object Object]`. Reading it is the same
+          // comment-versus-code mistake this module exists to avoid, one level
+          // along. Removed on !272.
           const collect = (inner: ts.Node): void => {
             if (
               ts.isStringLiteral(inner) ||
-              ts.isNoSubstitutionTemplateLiteral(inner) ||
-              ts.isJsxText(inner)
+              ts.isNoSubstitutionTemplateLiteral(inner)
             ) {
               for (const token of inner.text.split(/\s+/)) {
                 // Strip any variant chain: `sm:text-xs` re-sizes too.

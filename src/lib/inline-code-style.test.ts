@@ -117,6 +117,21 @@ export const A = () => <input readOnly />;`;
     const source = `export const A = () => <span className="text-xs">x</span>;`;
     expect(findInlineCodeSizeOverrides(source)).toEqual([]);
   });
+
+  it("does not read an element's own text as a class token", () => {
+    // The same comment-versus-code trap as the case above, one level along:
+    // this is rendered text, not a utility. `className` accepts an element as
+    // its value at the *syntax* level — `JsxAttributeValue` includes
+    // `JsxElement` — so this parses with zero diagnostics and walks a `JsxText`
+    // straight into the collector, which is why the collector must not treat
+    // one as class tokens. React would set the class to `[object Object]`.
+    //
+    // Reported on !272 as dead code on the grounds that a `JsxText` can never
+    // reach an attribute initializer. It can; the arm was wrong for the other
+    // reason, and this pins the behaviour rather than the reachability.
+    const source = `export const A = () => <code className={<span>text-xs</span>}>x</code>;`;
+    expect(findInlineCodeSizeOverrides(source)).toEqual([]);
+  });
 });
 
 describe("findCssRule", () => {
