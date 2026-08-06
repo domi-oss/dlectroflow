@@ -9,12 +9,40 @@
 import { FocusSound, FocusSoundCategory } from "@/lib/constants";
 
 /**
+ * #43 — the id of each bundled CC0 track.
+ *
+ * These lived in `FocusSound` (src/lib/constants.ts) until #180, because
+ * `Settings.focusSound` used to persist one of them as the session's opening
+ * track. It does not any more — that column is a two-value switch — so they are
+ * no longer a DB value set and have no CHECK constraint to mirror. Keeping them
+ * in constants.ts would have left `enum-constraint-sync`'s neighbours implying a
+ * constraint that does not exist.
+ *
+ * They are still ids, and still stable ones: `/api/focus-catalog` distinguishes a
+ * bundled track from a streamed one by the absence of `CATALOG_TRACK_ID_PREFIX`,
+ * and `lofi_calm` is retained from MR ② rather than renamed to match its
+ * category, so nothing that recorded a track id by value has to be rewritten.
+ */
+export const BundledFocusTrack = {
+  Calm: "lofi_calm",
+  Chillhop: "lofi_chillhop",
+  Jazzhop: "lofi_jazzhop",
+  SoulRnb: "lofi_soul_rnb",
+  LateNight: "lofi_late_night",
+  FunkSoul: "lofi_funk_soul",
+  Asian: "lofi_asian",
+  Seasonal: "lofi_seasonal",
+  Activities: "lofi_activities",
+  Hybrid: "lofi_hybrid",
+} as const;
+export type BundledFocusTrack =
+  (typeof BundledFocusTrack)[keyof typeof BundledFocusTrack];
+
+/**
  * #43 — the curated, bundled lo-fi library. One CC0 track per open-lofi category
  * (see public/audio/lofi/ + public/audio/LICENSE.md for provenance). This array
- * is BOTH the settings-picker data source and the in-timer mini-player playlist;
- * its order is the playlist's in-order pass (#68). `id` is the FocusSound value
- * persisted in Settings.focusSound. Titles/categories mirror open-lofi's
- * catalog.json.
+ * is the in-timer mini-player's playlist, and its order is the in-order pass
+ * (#68). Titles/categories mirror open-lofi's catalog.json.
  */
 export type FocusTrack = {
   id: string;
@@ -34,70 +62,70 @@ export type FocusTrack = {
 
 export const FOCUS_SOUND_TRACKS: readonly FocusTrack[] = [
   {
-    id: FocusSound.LofiCalm,
+    id: BundledFocusTrack.Calm,
     title: "Aurora on Mute",
     category: FocusSoundCategory.AmbientLofi,
     categoryLabel: "Ambient lo-fi",
     src: "/audio/lofi/aurora-on-mute.mp3",
   },
   {
-    id: FocusSound.LofiChillhop,
+    id: BundledFocusTrack.Chillhop,
     title: "Porchlight Golden Hour",
     category: FocusSoundCategory.Chillhop,
     categoryLabel: "Chillhop",
     src: "/audio/lofi/porchlight-golden-hour.mp3",
   },
   {
-    id: FocusSound.LofiJazzhop,
+    id: BundledFocusTrack.Jazzhop,
     title: "Breezy Afternoon Terrace",
     category: FocusSoundCategory.Jazzhop,
     categoryLabel: "Jazz hop",
     src: "/audio/lofi/breezy-afternoon-terrace.mp3",
   },
   {
-    id: FocusSound.LofiSoulRnb,
+    id: BundledFocusTrack.SoulRnb,
     title: "Barefoot in the Kitchen",
     category: FocusSoundCategory.SoulRnb,
     categoryLabel: "Soul / R&B",
     src: "/audio/lofi/barefoot-in-the-kitchen.mp3",
   },
   {
-    id: FocusSound.LofiLateNight,
+    id: BundledFocusTrack.LateNight,
     title: "3 AM Echoes",
     category: FocusSoundCategory.LateNight,
     categoryLabel: "Late night",
     src: "/audio/lofi/3-am-echoes.mp3",
   },
   {
-    id: FocusSound.LofiFunkSoul,
+    id: BundledFocusTrack.FunkSoul,
     title: "Burnt Sunset Groove",
     category: FocusSoundCategory.FunkSoul,
     categoryLabel: "Funk / soul",
     src: "/audio/lofi/burnt-sunset-groove.mp3",
   },
   {
-    id: FocusSound.LofiAsian,
+    id: BundledFocusTrack.Asian,
     title: "Lanterns in Slow Motion",
     category: FocusSoundCategory.AsianLofi,
     categoryLabel: "Asian lo-fi",
     src: "/audio/lofi/lanterns-in-slow-motion.mp3",
   },
   {
-    id: FocusSound.LofiSeasonal,
+    id: BundledFocusTrack.Seasonal,
     title: "After School Rain",
     category: FocusSoundCategory.SeasonalWeather,
     categoryLabel: "Seasonal / weather",
     src: "/audio/lofi/after-school-rain.mp3",
   },
   {
-    id: FocusSound.LofiActivities,
+    id: BundledFocusTrack.Activities,
     title: "Chapter By Lamplight",
     category: FocusSoundCategory.Activities,
     categoryLabel: "Activities",
     src: "/audio/lofi/chapter-by-lamplight.mp3",
   },
   {
-    id: FocusSound.LofiHybrid,
+    id: BundledFocusTrack.Hybrid,
     title: "Cafe Da Tarde",
     category: FocusSoundCategory.Hybrid,
     categoryLabel: "Hybrid / world",
@@ -162,7 +190,7 @@ export function prevFocusTrackId(id: string): string {
  * track, which is what we already have". Two is therefore the floor at which a
  * category becomes a different thing from a track.
  *
- * It is a floor on OFFERING, not on honouring: see {@link resolveFocusPlaylist}.
+ * It is a floor on OFFERING, not on honouring: see {@link resolveFocusPool}.
  *
  * Deriving it from the data rather than from the env var is deliberate. The
  * origin is server-only configuration (`focus-catalog-source.ts`), the client has
@@ -243,16 +271,20 @@ export function focusPlaylistCategories(
  * The categories a PICKER may offer — {@link focusPlaylistCategories}, minus any
  * the database would refuse.
  *
- * `Settings.focusSoundCategory` is CHECK-constrained to `FocusSoundCategory`, so
- * a self-hoster whose manifest declares its own category gets tracks that play
- * (they are in the merged list, and they group) but a slug that cannot be SAVED.
- * Offering it would be a control that silently does not stick, which is worse
- * than not offering it — the server action coerces the unknown slug to null and
- * the radio would spring back on the next load with no explanation.
+ * `Settings.focusSoundCategories` is CHECK-constrained to `FocusSoundCategory`
+ * (by containment, #180), so a self-hoster whose manifest declares its own
+ * category gets tracks that play (they are in the merged list, and they group)
+ * but a slug that cannot be SAVED. Offering it would be a control that silently
+ * does not stick, which is worse than not offering it — the server action drops
+ * the unknown slug and the control would spring back on the next load with no
+ * explanation.
  *
  * Widening the constraint to accept arbitrary manifest slugs is the alternative,
  * and it was declined: a CHECK constraint over an open set is no constraint, and
  * `enum-constraint-sync` would have nothing to mirror.
+ *
+ * #180 moved the picker itself off the Settings page; this stays because the
+ * in-session player (#181) asks the same question of the same data.
  */
 export function offerableFocusCategories(
   tracks: readonly FocusTrack[],
@@ -265,44 +297,47 @@ export function offerableFocusCategories(
 }
 
 /**
- * The bundled track of a category — where a category selection opens.
+ * The pool a session draws from, given the categories stored in
+ * `Settings.focusSoundCategories`.
  *
- * Picking a category still has to answer "which track first", and that answer has
- * to be a value `Settings.focusSound` can hold. Each of the ten has exactly one
- * bundled track (#43), which is both persistable and playable with no store
- * reachable, so it is the only candidate that cannot fail.
- */
-export function focusTrackForCategory(
-  category: string,
-): FocusTrack | undefined {
-  return FOCUS_SOUND_TRACKS.find((t) => t.category === category);
-}
-
-/**
- * The playlist a stored category selection resolves to.
+ * #180 — this took one nullable slug until the column became an array. The union
+ * is built by FILTERING the catalogue rather than by concatenating a slice per
+ * category, and that is the behavioural difference rather than a style one: the
+ * player's in-order pass walks this list, so a concatenation would group it by
+ * category and sound like three short playlists played back to back. Filtering
+ * keeps catalogue order whatever order the categories were ticked in, and makes
+ * a repeated slug impossible to hear.
  *
- * Three cases, and the last two are the ones that matter:
+ * All three of #70's fallbacks are kept, because each one exists to stop a focus
+ * session going silent:
  *
- * 1. **No selection** — returns `tracks` ITSELF, same identity. `useFocusSound`
- *    re-deals its play order when the list changes, so "nobody picked a category"
- *    must not look like a change (the same reason `mergeFocusTracks` returns the
- *    bundled array when the catalog added nothing).
- * 2. **A category that has shrunk to one track** — honoured, not widened. A
+ * 1. **Nothing selected** — the whole catalogue, returned as `tracks` ITSELF,
+ *    same identity. `useFocusSound` re-deals its play order when the list
+ *    changes, so "the whole catalogue" must not look like a change (the same
+ *    reason `mergeFocusTracks` returns the bundled array when the catalog added
+ *    nothing). The empty array is what the column stores for this; `null` and
+ *    `undefined` are accepted because the prop is optional on the way down.
+ * 2. **A selection that has shrunk to one track** — honoured, not widened. A
  *    selection made while the store was reachable must not silently change genre
  *    when it stops answering: one chillhop track is what the user asked for, all
  *    ten categories is not. So the {@link MIN_CATEGORY_PLAYLIST_TRACKS} floor
- *    governs what the picker OFFERS and deliberately not what this honours.
- * 3. **A category with no tracks at all** — falls back to the whole list. A
- *    retired slug, or a manifest that no longer carries the category, must never
- *    leave a focus session with an empty playlist and therefore silent.
+ *    governs what a picker OFFERS and deliberately not what this honours.
+ * 3. **A selection that matches nothing at all** — falls back to the whole list.
+ *    A retired slug, or a manifest that no longer carries the category, must
+ *    never leave a focus session with an empty playlist and therefore silent.
+ *
+ * A category that is merely absent from a selection that also names a live one
+ * contributes nothing and does NOT trigger case 3: the live half is still
+ * exactly what was asked for.
  */
-export function resolveFocusPlaylist(
+export function resolveFocusPool(
   tracks: readonly FocusTrack[],
-  category: string | null | undefined,
+  categories: readonly string[] | null | undefined,
 ): readonly FocusTrack[] {
-  if (!category) return tracks;
-  const narrowed = tracksInCategory(tracks, category);
-  return narrowed.length > 0 ? narrowed : tracks;
+  if (!categories || categories.length === 0) return tracks;
+  const selected = new Set(categories);
+  const pool = tracks.filter((t) => selected.has(t.category));
+  return pool.length > 0 ? pool : tracks;
 }
 
 /** Clamp a volume to the [0, 1] range the <audio> element accepts. */

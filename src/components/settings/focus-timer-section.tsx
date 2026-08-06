@@ -1,20 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { Play, Square } from "lucide-react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { updateFocusTimerSettings } from "@/app/actions/settings";
 import { FocusTimerStyle, FocusSound } from "@/lib/constants";
 import { resolveTimerStyle } from "@/lib/focus-timer-style";
-import {
-  FOCUS_SOUND_TRACKS,
-  MIN_CATEGORY_PLAYLIST_TRACKS,
-  createPreviewPlayer,
-  focusTrackForCategory,
-  offerableFocusCategories,
-  type PreviewPlayer,
-} from "@/lib/focus-sounds";
-import { useFocusCatalog } from "@/lib/use-focus-catalog";
 import { t, type Voice } from "@/lib/strings";
 import {
   useSaveStatus,
@@ -28,12 +18,12 @@ type Prefs = {
   minimalMode: boolean;
   keepAwake: boolean;
   alarmEnabled: boolean;
-  sound: string;
   /**
-   * #70 — the category playlist (Settings.focusSoundCategory). null = the whole
-   * list, which is what every instance with no reachable catalog stores.
+   * #180 — Settings.focusSound, now just "off" | "on". Which playlists and which
+   * track are decisions made in the player during a session (#181), so this page
+   * holds the switch and nothing else about music.
    */
-  category: string | null;
+  sound: string;
   /** #65 — opt-in music↔timer pause coupling (Settings.focusPauseTogether). */
   pauseTogether: boolean;
 };
@@ -55,7 +45,6 @@ export function FocusTimerSection({
   keepAwake,
   alarmEnabled,
   sound,
-  category,
   pauseTogether,
   voice,
   defaultExpanded,
@@ -69,44 +58,8 @@ export function FocusTimerSection({
     keepAwake,
     alarmEnabled,
     sound,
-    category,
     pauseTogether,
   });
-
-  // #70 — which categories are worth offering is a question about the DATA, not
-  // about configuration: `useFocusCatalog` returns the bundled ten plus whatever
-  // the streamed catalog added, and a category only becomes a playlist once it
-  // holds more than one of them. On an instance with no reachable catalog this is
-  // empty, and the whole group below is absent rather than disabled — ten radios
-  // that each play a single track is exactly what #70 was blocked on.
-  const tracks = useFocusCatalog();
-  const categories = useMemo(() => {
-    // `min: 1` then filtered, rather than the default floor, so a STORED
-    // selection that has dropped below the floor (the store stopped answering)
-    // stays on screen. It is still live — the player honours it — and hiding it
-    // would leave a preference nobody can see or clear.
-    return offerableFocusCategories(tracks, 1).filter(
-      (c) =>
-        c.count >= MIN_CATEGORY_PLAYLIST_TRACKS || c.slug === prefs.category,
-    );
-  }, [tracks, prefs.category]);
-
-  // #43 — one shared preview player: auditioning a track stops any previous
-  // preview. Created lazily on first click (a user gesture, so autoplay unlocks).
-  const previewRef = useRef<PreviewPlayer | null>(null);
-  const [previewingId, setPreviewingId] = useState<string | null>(null);
-  useEffect(() => () => previewRef.current?.stop(), []);
-
-  const togglePreview = (id: string, src: string) => {
-    if (!previewRef.current) previewRef.current = createPreviewPlayer();
-    if (previewingId === id) {
-      previewRef.current.stop();
-      setPreviewingId(null);
-      return;
-    }
-    previewRef.current.play(src, () => setPreviewingId(null));
-    setPreviewingId(id);
-  };
 
   const persist = (next: Prefs) =>
     startTransition(async () => {
@@ -122,22 +75,6 @@ export function FocusTimerSection({
 
   const set = <K extends keyof Prefs>(key: K, value: Prefs[K]) => {
     const next = { ...prefs, [key]: value };
-    setPrefs(next);
-    persist(next);
-  };
-
-  /**
-   * #70 — the sound selection is TWO fields, and one radio group.
-   *
-   * "Off", a category and an individual track are mutually exclusive options in
-   * `name="focusSound"`, but the answer they produce needs both "which category is
-   * the playlist" and "which track does the session open on" — a category still
-   * has to start somewhere. So every choice here writes both, and `set` (one key
-   * at a time) cannot express it: two sequential `set` calls would persist the
-   * intermediate state, briefly saving a category against the wrong track.
-   */
-  const pickSound = (sound: string, category: string | null) => {
-    const next = { ...prefs, sound, category };
     setPrefs(next);
     persist(next);
   };
@@ -206,122 +143,24 @@ export function FocusTimerSection({
         onChange={(v) => set("alarmEnabled", v)}
       />
 
-      <fieldset className="space-y-1">
-        <legend className="text-sm font-medium">
-          {t("focusSettings.sound", voice)}
-        </legend>
-        <p className="text-muted-foreground text-xs">
-          {t("focusSettings.soundPickerHint", voice)}
-        </p>
-        {/* Off */}
-        <label className="flex min-h-[44px] items-center gap-2 text-sm">
-          <input
-            type="radio"
-            name="focusSound"
-            checked={prefs.sound === FocusSound.Off}
-            onChange={() => pickSound(FocusSound.Off, null)}
-          />
-          {t("focusSettings.soundOff", voice)}
-        </label>
-
-        {/* #70 — category playlists, in the SAME radio group as the tracks:
-            "off", "this whole category" and "start on this track" are three
-            answers to one question, so exactly one of them can be selected.
-            Rendered only when the data supports it (see `categories` above) —
-            absent, not disabled, on an instance with no reachable catalog. */}
-        {categories.length > 0 && (
-          <>
-            <p className="text-muted-foreground text-xs">
-              {t("focusSettings.soundCategoryHint", voice)}
-            </p>
-            {categories.map((c) => (
-              <label
-                key={c.slug}
-                className="flex min-h-[44px] items-center gap-2 text-sm"
-              >
-                <input
-                  type="radio"
-                  name="focusSound"
-                  checked={prefs.category === c.slug}
-                  onChange={() =>
-                    // The bundled track of the category. `offerableFocusCategories`
-                    // only returns the ten, and each has exactly one bundled track
-                    // (asserted in focus-sounds.test.ts), so the fallback is
-                    // unreachable — it is here so a future eleventh category
-                    // cannot silently persist a category against no track.
-                    pickSound(
-                      focusTrackForCategory(c.slug)?.id ?? prefs.sound,
-                      c.slug,
-                    )
-                  }
-                />
-                <span className="min-w-0">
-                  <span className="font-medium">
-                    {c.label} — {t("focusSettings.soundWholeCategory", voice)}
-                  </span>{" "}
-                  <span className="text-muted-foreground">
-                    · {c.count}{" "}
-                    {t(
-                      c.count === 1
-                        ? "focusSettings.soundTrackCountOne"
-                        : "focusSettings.soundTrackCount",
-                      voice,
-                    )}
-                  </span>
-                </span>
-              </label>
-            ))}
-          </>
-        )}
-
-        {/* One curated CC0 track per category, each with a preview toggle. The
-            list stays the BUNDLED ten: a streamed track's id cannot be persisted
-            (see CATALOG_TRACK_ID_PREFIX), so offering one as a start track would
-            be a control that does not stick. Its category can be, which is what
-            the group above is for. */}
-        {FOCUS_SOUND_TRACKS.map((track) => {
-          const isPreviewing = previewingId === track.id;
-          return (
-            <div key={track.id} className="flex items-center gap-2">
-              <label className="flex min-h-[44px] flex-1 items-center gap-2 text-sm">
-                <input
-                  type="radio"
-                  name="focusSound"
-                  // A category selection owns the group: the track it opens on is
-                  // not separately "chosen", and showing two checked radios in one
-                  // group would misstate the state.
-                  checked={!prefs.category && prefs.sound === track.id}
-                  onChange={() => pickSound(track.id, null)}
-                />
-                <span className="min-w-0">
-                  <span className="font-medium">{track.title}</span>{" "}
-                  <span className="text-muted-foreground">
-                    · {track.categoryLabel}
-                  </span>
-                </span>
-              </label>
-              <button
-                type="button"
-                onClick={() => togglePreview(track.id, track.src)}
-                aria-pressed={isPreviewing}
-                aria-label={`${t(
-                  isPreviewing
-                    ? "focusSettings.stopPreview"
-                    : "focusSettings.preview",
-                  voice,
-                )} — ${track.title}`}
-                className="hover:bg-accent inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md border"
-              >
-                {isPreviewing ? (
-                  <Square aria-hidden="true" className="h-4 w-4" />
-                ) : (
-                  <Play aria-hidden="true" className="h-4 w-4" />
-                )}
-              </button>
-            </div>
-          );
-        })}
-      </fieldset>
+      {/* #180 — one switch, and nothing else about music on this page.
+          "Is there sound" is a settled preference; "what do I want to hear" is a
+          decision you make while listening, so the ten tracks, their previews and
+          the category playlists all moved to the in-session player (#181). Two
+          surfaces answering overlapping questions was the problem, not the number
+          of controls. */}
+      <Toggle
+        label={t("focusSettings.sound", voice)}
+        hint={t("focusSettings.soundHint", voice)}
+        checked={prefs.sound === FocusSound.On}
+        onChange={(v) => set("sound", v ? FocusSound.On : FocusSound.Off)}
+      />
+      {/* Says where the rest of it went. Without this the removal reads as a lost
+          feature rather than a moved one, which is the single most likely way a
+          simplification gets reported as a regression. */}
+      <p className="text-muted-foreground -mt-1 text-xs">
+        {t("focusSettings.soundPlayerHint", voice)}
+      </p>
 
       {/* #65 — sits under the sound picker rather than with the timer toggles
           above: it's a behaviour of the MUSIC (what pausing it should do), and

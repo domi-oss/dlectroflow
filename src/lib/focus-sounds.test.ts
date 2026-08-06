@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { FocusSound, FocusSoundCategory } from "@/lib/constants";
+import { FocusSoundCategory } from "@/lib/constants";
 
 // A fake HTMLAudioElement — records construction + play/pause + mutations.
 const audioPlay = vi.fn().mockResolvedValue(undefined);
@@ -40,15 +40,14 @@ describe("focus-sounds — FOCUS_SOUND_SRC + track catalog", () => {
     );
   });
 
-  it("has one curated track per non-off FocusSound value, all under /audio/lofi/", async () => {
-    const { FOCUS_SOUND_TRACKS, FOCUS_SOUND_SRC } =
+  it("has one curated track per BundledFocusTrack id, all under /audio/lofi/", async () => {
+    const { FOCUS_SOUND_TRACKS, FOCUS_SOUND_SRC, BundledFocusTrack } =
       await import("@/lib/focus-sounds");
-    const nonOff = Object.values(FocusSound).filter(
-      (v) => v !== FocusSound.Off,
-    );
-    // Every non-off enum value is a real track, and vice-versa.
+    // #180 — the ids moved out of FocusSound (now a two-value switch) into their
+    // own object. The bijection they had with the catalogue is the thing that
+    // must survive the move, so it is still asserted, just against the new home.
     expect(FOCUS_SOUND_TRACKS.map((t) => t.id).sort()).toEqual(
-      [...nonOff].sort(),
+      Object.values(BundledFocusTrack).sort(),
     );
     for (const t of FOCUS_SOUND_TRACKS) {
       expect(t.src).toMatch(/^\/audio\/lofi\/.+\.mp3$/);
@@ -186,50 +185,6 @@ describe("focus-sounds — category playlists (#70)", () => {
     ]);
   });
 
-  it("resolveFocusPlaylist returns the SAME array when no category is selected", async () => {
-    // Identity, not equality: useFocusSound re-deals its play order when the
-    // list changes, and "no category" must not look like a change.
-    const { resolveFocusPlaylist, FOCUS_SOUND_TRACKS } =
-      await import("@/lib/focus-sounds");
-    expect(resolveFocusPlaylist(FOCUS_SOUND_TRACKS, null)).toBe(
-      FOCUS_SOUND_TRACKS,
-    );
-    expect(resolveFocusPlaylist(FOCUS_SOUND_TRACKS, "")).toBe(
-      FOCUS_SOUND_TRACKS,
-    );
-  });
-
-  it("resolveFocusPlaylist narrows to the selected category", async () => {
-    const { resolveFocusPlaylist, FOCUS_SOUND_TRACKS } =
-      await import("@/lib/focus-sounds");
-    const grown = [
-      ...FOCUS_SOUND_TRACKS,
-      streamed("Paper Cranes", "chillhop", "Chillhop"),
-    ];
-    expect(resolveFocusPlaylist(grown, "chillhop").map((t) => t.title)).toEqual(
-      ["Porchlight Golden Hour", "Paper Cranes"],
-    );
-  });
-
-  it("resolveFocusPlaylist honours a category that has shrunk to one track", async () => {
-    // The catalog went away under a stored selection. Playing the one bundled
-    // chillhop track is what the user asked for; falling back to all ten would
-    // silently change the genre, which is worse than a short playlist.
-    const { resolveFocusPlaylist, FOCUS_SOUND_TRACKS } =
-      await import("@/lib/focus-sounds");
-    expect(
-      resolveFocusPlaylist(FOCUS_SOUND_TRACKS, "chillhop").map((t) => t.title),
-    ).toEqual(["Porchlight Golden Hour"]);
-  });
-
-  it("resolveFocusPlaylist never empties the playlist for an unknown category", async () => {
-    const { resolveFocusPlaylist, FOCUS_SOUND_TRACKS } =
-      await import("@/lib/focus-sounds");
-    expect(resolveFocusPlaylist(FOCUS_SOUND_TRACKS, "retired-slug")).toBe(
-      FOCUS_SOUND_TRACKS,
-    );
-  });
-
   it("trackIndexIn addresses a track inside the resolved list, not the bundled one", async () => {
     // focusTrackIndex() searches FOCUS_SOUND_TRACKS, so it returns 1 for the
     // chillhop track wherever that track actually is. Inside a narrowed playlist
@@ -237,21 +192,22 @@ describe("focus-sounds — category playlists (#70)", () => {
     const {
       trackIndexIn,
       focusTrackIndex,
-      resolveFocusPlaylist,
+      resolveFocusPool,
       FOCUS_SOUND_TRACKS,
+      BundledFocusTrack,
     } = await import("@/lib/focus-sounds");
-    const narrowed = resolveFocusPlaylist(FOCUS_SOUND_TRACKS, "chillhop");
-    expect(focusTrackIndex(FocusSound.LofiChillhop)).toBe(1);
-    expect(trackIndexIn(narrowed, FocusSound.LofiChillhop)).toBe(0);
-    expect(trackIndexIn(narrowed, FocusSound.LofiJazzhop)).toBe(-1);
+    const narrowed = resolveFocusPool(FOCUS_SOUND_TRACKS, ["chillhop"]);
+    expect(focusTrackIndex(BundledFocusTrack.Chillhop)).toBe(1);
+    expect(trackIndexIn(narrowed, BundledFocusTrack.Chillhop)).toBe(0);
+    expect(trackIndexIn(narrowed, BundledFocusTrack.Jazzhop)).toBe(-1);
     expect(trackIndexIn(narrowed, "off")).toBe(-1);
   });
 
   it("offerableFocusCategories drops a category the database could not store", async () => {
     // A self-hoster's manifest may declare categories outside open-lofi's ten.
     // Those tracks still play (they are in the merged list), but the category
-    // cannot be SAVED — Settings_focusSoundCategory_check would reject it — so
-    // offering it would produce a radio that silently does not stick.
+    // cannot be SAVED — Settings_focusSoundCategories_check would reject it — so
+    // offering it would produce a control that silently does not stick.
     const {
       offerableFocusCategories,
       focusPlaylistCategories,
@@ -270,22 +226,139 @@ describe("focus-sounds — category playlists (#70)", () => {
       "chillhop",
     ]);
   });
+});
 
-  it("focusTrackForCategory finds the bundled track a category selection opens on", async () => {
-    const { focusTrackForCategory } = await import("@/lib/focus-sounds");
-    expect(focusTrackForCategory("chillhop")?.id).toBe(FocusSound.LofiChillhop);
-    expect(focusTrackForCategory("seasonal-weather")?.id).toBe(
-      FocusSound.LofiSeasonal,
+/**
+ * #180 — the pool a session draws from is now the UNION of several categories.
+ *
+ * `resolveFocusPlaylist` took one nullable slug; `resolveFocusPool` takes an
+ * array, and empty means the whole catalogue (what #70's NULL meant). All three
+ * of the old fallbacks are kept, because each one exists to stop a focus session
+ * going silent — the failure a user reports as the feature being broken.
+ */
+describe("focus-sounds — the multi-category pool (#180)", () => {
+  const streamed = (title: string, category: string, label: string) => ({
+    id: `catalog:${title.toLowerCase().replace(/\W+/g, "-")}.mp3`,
+    title,
+    category,
+    categoryLabel: label,
+    src: `/api/focus-catalog/audio?track=${title.toLowerCase().replace(/\W+/g, "-")}.mp3`,
+  });
+
+  it("returns the SAME array when nothing is selected", async () => {
+    // Identity, not equality: useFocusSound re-deals its play order when the
+    // list changes, and "the whole catalogue" must not look like a change. All
+    // three spellings of "nothing" have to behave alike — the column is NOT NULL
+    // so `[]` is the real one, but the prop is optional on the way down.
+    const { resolveFocusPool, FOCUS_SOUND_TRACKS } =
+      await import("@/lib/focus-sounds");
+    expect(resolveFocusPool(FOCUS_SOUND_TRACKS, [])).toBe(FOCUS_SOUND_TRACKS);
+    expect(resolveFocusPool(FOCUS_SOUND_TRACKS, null)).toBe(FOCUS_SOUND_TRACKS);
+    expect(resolveFocusPool(FOCUS_SOUND_TRACKS, undefined)).toBe(
+      FOCUS_SOUND_TRACKS,
     );
-    expect(focusTrackForCategory("wind-chimes")).toBeUndefined();
+  });
+
+  it("narrows to one selected category", async () => {
+    const { resolveFocusPool, FOCUS_SOUND_TRACKS } =
+      await import("@/lib/focus-sounds");
+    const grown = [
+      ...FOCUS_SOUND_TRACKS,
+      streamed("Paper Cranes", "chillhop", "Chillhop"),
+    ];
+    expect(resolveFocusPool(grown, ["chillhop"]).map((t) => t.title)).toEqual([
+      "Porchlight Golden Hour",
+      "Paper Cranes",
+    ]);
+  });
+
+  it("returns the union in CATALOGUE order, not selection order", async () => {
+    // The distinction that matters: the pool is a filter over the list, so the
+    // player's in-order pass reads in the same order as the catalogue however
+    // the categories were ticked. Building it by concatenating per-category
+    // slices would group the playlist by category instead, which sounds like
+    // three short playlists rather than one.
+    const { resolveFocusPool, FOCUS_SOUND_TRACKS } =
+      await import("@/lib/focus-sounds");
+    const grown = [
+      ...FOCUS_SOUND_TRACKS,
+      streamed("Paper Cranes", "chillhop", "Chillhop"),
+    ];
+    expect(
+      resolveFocusPool(grown, ["hybrid", "chillhop"]).map((t) => t.title),
+    ).toEqual(["Porchlight Golden Hour", "Cafe Da Tarde", "Paper Cranes"]);
+  });
+
+  it("never yields the same track twice, however the selection is spelled", async () => {
+    // Duplicates are not reachable through the UI, but the column is a plain
+    // text[] — a hand-edited row, or a future writer that forgets to dedupe,
+    // must not make the player think it has two tracks and skip one on wrap.
+    const { resolveFocusPool, FOCUS_SOUND_TRACKS } =
+      await import("@/lib/focus-sounds");
+    expect(
+      resolveFocusPool(FOCUS_SOUND_TRACKS, [
+        "chillhop",
+        "chillhop",
+        "jazzhop",
+      ]).map((t) => t.title),
+    ).toEqual(["Porchlight Golden Hour", "Breezy Afternoon Terrace"]);
+  });
+
+  it("honours a selection that has shrunk to one track", async () => {
+    // The catalog went away under a stored selection. Playing the one bundled
+    // chillhop track is what the user asked for; falling back to all ten would
+    // silently change the genre, which is worse than a short playlist.
+    const { resolveFocusPool, FOCUS_SOUND_TRACKS } =
+      await import("@/lib/focus-sounds");
+    expect(
+      resolveFocusPool(FOCUS_SOUND_TRACKS, ["chillhop"]).map((t) => t.title),
+    ).toEqual(["Porchlight Golden Hour"]);
+  });
+
+  it("falls back to the whole catalogue when every selected category is absent", async () => {
+    // A retired slug, or a manifest that stopped carrying the category. Silence
+    // is the one outcome a focus session must never reach by accident.
+    const { resolveFocusPool, FOCUS_SOUND_TRACKS } =
+      await import("@/lib/focus-sounds");
+    expect(resolveFocusPool(FOCUS_SOUND_TRACKS, ["retired-slug"])).toBe(
+      FOCUS_SOUND_TRACKS,
+    );
+    expect(resolveFocusPool(FOCUS_SOUND_TRACKS, ["retired", "gone"])).toBe(
+      FOCUS_SOUND_TRACKS,
+    );
+  });
+
+  it("lets an absent category contribute nothing rather than emptying the union", async () => {
+    // The fallback above is for a selection that resolves to NOTHING. One dead
+    // slug alongside a live one must not widen the pool back to all ten — the
+    // live half is still exactly what was asked for.
+    const { resolveFocusPool, FOCUS_SOUND_TRACKS } =
+      await import("@/lib/focus-sounds");
+    expect(
+      resolveFocusPool(FOCUS_SOUND_TRACKS, ["retired-slug", "jazzhop"]).map(
+        (t) => t.title,
+      ),
+    ).toEqual(["Breezy Afternoon Terrace"]);
+  });
+
+  it("returns an empty list only when the catalogue itself is empty", async () => {
+    const { resolveFocusPool } = await import("@/lib/focus-sounds");
+    expect(resolveFocusPool([], ["chillhop"])).toEqual([]);
+    expect(resolveFocusPool([], [])).toEqual([]);
   });
 });
 
 describe("focus-sounds — pure playlist helpers", () => {
   it("focusTrackById / focusTrackIndex resolve real tracks and reject off/unknown", async () => {
-    const { focusTrackById, focusTrackIndex, FOCUS_SOUND_TRACKS } =
-      await import("@/lib/focus-sounds");
-    expect(focusTrackById(FocusSound.LofiCalm)?.id).toBe(FocusSound.LofiCalm);
+    const {
+      focusTrackById,
+      focusTrackIndex,
+      FOCUS_SOUND_TRACKS,
+      BundledFocusTrack,
+    } = await import("@/lib/focus-sounds");
+    expect(focusTrackById(BundledFocusTrack.Calm)?.id).toBe(
+      BundledFocusTrack.Calm,
+    );
     expect(focusTrackById("off")).toBeUndefined();
     expect(focusTrackById("nope")).toBeUndefined();
     expect(focusTrackIndex(FOCUS_SOUND_TRACKS[0].id)).toBe(0);

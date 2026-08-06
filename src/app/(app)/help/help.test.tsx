@@ -161,13 +161,35 @@ describe("HelpPage", () => {
     expect(text).not.toMatch(/nothing is streamed from anywhere else/i);
   });
 
-  it("routes from the focus section to the Settings page that owns the track picker", async () => {
+  // #180 — Settings kept the switch and gave everything else to the player, and
+  // new accounts start with sound ON. A help page that still sends someone to
+  // Settings to pick a track sends them somewhere the control is not, which is
+  // worse than saying nothing.
+  it("documents the single Settings switch, sound-on by default, and the player (#180)", async () => {
     render(await HelpPage({ searchParams: Promise.resolve({}) }));
     const section = screen
       .getByRole("heading", { name: /The focus session/i, level: 2 })
       .closest("section");
     expect(section).not.toBeNull();
-    // The picker lives in Settings, so this section must link there rather than
+    const text = section!.textContent ?? "";
+    // Sound is on unless you say otherwise — the surprise this must pre-empt.
+    expect(text).toMatch(/on (?:to start with|by default)|starts on/i);
+    // Where the switch is, and where everything else is.
+    expect(text).toMatch(/switch/i);
+    expect(text).toMatch(/from the player|in the player/i);
+    // The retired instruction must be gone, not merely softened: there is no
+    // track picker and no preview toggle on the Settings page any more.
+    expect(text).not.toMatch(/preview toggle/i);
+    expect(text).not.toMatch(/choose a track under/i);
+  });
+
+  it("routes from the focus section to the Settings page that owns the switch", async () => {
+    render(await HelpPage({ searchParams: Promise.resolve({}) }));
+    const section = screen
+      .getByRole("heading", { name: /The focus session/i, level: 2 })
+      .closest("section");
+    expect(section).not.toBeNull();
+    // The switch lives in Settings, so this section must link there rather than
     // naming a control the reader then has to hunt for.
     const hrefs = Array.from(section!.querySelectorAll("a")).map((a) =>
       a.getAttribute("href"),

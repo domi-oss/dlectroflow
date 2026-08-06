@@ -138,17 +138,6 @@ const REGISTRY: ReadonlyArray<{
     values: FocusSound,
     nullable: false,
   },
-  // #70 — the category playlist selection. Nullable, and the NULL is the common
-  // case rather than an edge one: it means "play the whole list", which is what
-  // every row said before this column existed and what every row on an instance
-  // with no reachable catalog will keep saying.
-  {
-    constraint: "Settings_focusSoundCategory_check",
-    table: "Settings",
-    column: "focusSoundCategory",
-    values: FocusSoundCategory,
-    nullable: true,
-  },
   {
     constraint: "Settings_completeTickColor_check",
     table: "Settings",
@@ -210,6 +199,38 @@ const REGISTRY: ReadonlyArray<{
     column: "llmProvider",
     values: LlmProvider,
     nullable: true,
+  },
+];
+
+// #180 — the schema's CHECK constraints over ARRAY columns.
+//
+// `Settings.focusSoundCategories` holds zero or more category slugs (empty = the
+// whole catalogue), so the guard has to be CONTAINMENT — `col <@ ARRAY[…]` —
+// rather than the `= ANY` equality the scalar REGISTRY above mirrors. Every
+// element must be one of the ten, and holding none must stay legal.
+//
+// It can reuse `literalsFromDef` because Postgres renders the containment form
+// as `CHECK ((col <@ ARRAY['a'::text, 'b'::text]))` — the same single-quoted
+// literals, in the same place. What it CANNOT reuse is the nullability field:
+// there is no `IS NULL` allowance to look for, and one appearing would be a bug
+// rather than a style choice, because `NULL <@ ARRAY[…]` evaluates to NULL and a
+// CHECK passes on NULL. A nullable column would therefore accept a NULL that no
+// constraint had actually validated, which is why the column is NOT NULL and why
+// that is asserted here rather than assumed.
+const ARRAY_REGISTRY: ReadonlyArray<{
+  constraint: string;
+  table: string;
+  column: string;
+  values: Readonly<Record<string, string>>;
+}> = [
+  {
+    // 20260806100000_settings_focus_sound_categories — replaces the single
+    // nullable `focusSoundCategory` (#70) with a multi-select. Behavioural half
+    // in src/lib/settings-focus-sound-categories-check.integration.test.ts.
+    constraint: "Settings_focusSoundCategories_check",
+    table: "Settings",
+    column: "focusSoundCategories",
+    values: FocusSoundCategory,
   },
 ];
 
@@ -367,6 +388,64 @@ describe("enum CHECK constraints ↔ constants.ts are in sync", () => {
   );
 });
 
+describe("array containment CHECK constraints ↔ constants.ts are in sync (#180)", () => {
+  it("has exactly the managed array CHECK constraints (no missing, no strays)", () => {
+    const managedNames = new Set(ARRAY_REGISTRY.map((r) => r.constraint));
+    const applied = [...checks.keys()]
+      .filter((n) => managedNames.has(n))
+      .sort();
+    const expected = ARRAY_REGISTRY.map((r) => r.constraint).sort();
+    expect(applied).toEqual(expected);
+  });
+
+  it.each(ARRAY_REGISTRY)(
+    "$constraint ($table.$column) contains exactly its constants.ts value set",
+    ({ constraint, column, values }) => {
+      const def = checks.get(constraint);
+      expect(
+        def,
+        `constraint ${constraint} is not applied to the DB — add the migration`,
+      ).toBeDefined();
+
+      // Containment, not equality. A `= ANY (…)` here would mean the column had
+      // silently gone back to holding one slug, which the whole point of #180 is
+      // that it does not. The column name is quoted by Postgres when it is
+      // mixed-case, so the pattern tolerates both renderings; it is a literal
+      // that CAPTURES the name rather than one built around it, because a
+      // dynamically constructed pattern is a SAST finding even here.
+      const contained = /"?(\w+)"?\s*<@\s*ARRAY\[/.exec(def as string);
+      expect(
+        contained?.[1],
+        `${constraint} is not a containment (<@) check on "${column}" — its definition is: ${def}`,
+      ).toBe(column);
+
+      const constrained = literalsFromDef(def as string);
+      const expectedValues = new Set(Object.values(values));
+      for (const v of expectedValues) {
+        expect(
+          constrained.has(v),
+          `value "${v}" is in constants.ts but NOT in ${constraint} — add a migration to update the constraint`,
+        ).toBe(true);
+      }
+      for (const v of constrained) {
+        expect(
+          expectedValues.has(v),
+          `value "${v}" is in ${constraint} but NOT in constants.ts — remove it from the constraint or add the constant`,
+        ).toBe(true);
+      }
+      expect([...constrained].sort()).toEqual([...expectedValues].sort());
+
+      // See the registry comment: an `IS NULL` allowance on a containment check
+      // is not a widening, it is a hole — `NULL <@ ARRAY[…]` is NULL and a CHECK
+      // passes on NULL, so the column would accept an unvalidated NULL.
+      expect(
+        /IS NULL/i.test(def as string),
+        `${constraint} carries an "IS NULL" allowance; the column must be NOT NULL, because a NULL array passes containment unchecked`,
+      ).toBe(false);
+    },
+  );
+});
+
 describe("numeric-range CHECK constraints are applied (#78)", () => {
   it("has exactly the managed range CHECK constraints (no missing, no strays)", () => {
     const managedNames = new Set(RANGE_REGISTRY.map((r) => r.constraint));
@@ -388,10 +467,18 @@ describe("numeric-range CHECK constraints are applied (#78)", () => {
 
       // Postgres normalises `CHECK ("estMinutes" >= 1)` to
       // `CHECK (("estMinutes" >= 1))`; match the comparison, not the parens.
+      // A literal pattern that CAPTURES the column and the bound, rather than one
+      // built around them — same assertion, and it keeps this file free of the
+      // dynamically-constructed patterns SAST flags (#180 removed the other one).
+      const bound = /"(\w+)"\s*>=\s*(\d+)\b/.exec(def as string);
       expect(
-        new RegExp(`"${column}"\\s*>=\\s*${min}\\b`).test(def as string),
+        bound?.[1],
+        `${constraint} does not compare "${column}" — its definition is: ${def}`,
+      ).toBe(column);
+      expect(
+        Number(bound?.[2]),
         `${constraint} does not pin "${column}" >= ${min} — its definition is: ${def}`,
-      ).toBe(true);
+      ).toBe(min);
 
       if (nullable) {
         // #80 — on a nullable column the bound alone is not the invariant: a

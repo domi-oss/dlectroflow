@@ -181,28 +181,50 @@ export async function updateFirstRunPreview(enabled: boolean) {
  * never silently switch a workspace's focus session over to "the music can stop
  * my timer". Omitted ⇒ false, same as the column default.
  *
- * #70 — `category` (Settings.focusSoundCategory) narrows the playlist to one
- * open-lofi category, allowlist-validated against FocusSoundCategory so a bad
- * slug cannot reach Settings_focusSoundCategory_check. Omitted ⇒ null, i.e. the
- * whole list, which is safe for exactly the reason pauseTogether's default is:
- * this call already replaces `sound` outright, and the category is part of that
- * same selection rather than an independent taste. Two normalisations:
+ * #180 — `sound` is now a two-value switch, and `categories`
+ * (Settings.focusSoundCategories) is the playlist selection. Three decisions
+ * here, all of them reversals of what #70 did, because the two facts stopped
+ * being one radio group:
  *
- *  * an out-of-set slug becomes null, so a retired category widens the playlist
- *    rather than emptying it;
- *  * `sound: "off"` clears the category. It and "off" are options in one radio
- *    group, so choosing one replaces the other, and `(off, chillhop)` would be a
- *    stored state the picker has no way to show. This is deliberately UNLIKE
- *    focusShuffle / focusPauseTogether, which are orthogonal tastes left inert
- *    while sound is off — those describe HOW music plays, this describes WHICH.
+ *  * **Omitted ⇒ the column is not written at all**, rather than cleared. The
+ *    Settings page sends only the switch now — the playlist is chosen from the
+ *    player (#181) — so treating "not mentioned" as "empty it" would wipe a
+ *    selection every time somebody toggled sound off and on again.
+ *  * **`sound: "off"` no longer clears the selection.** They were mutually
+ *    exclusive options in one group and are now two independent controls on two
+ *    surfaces; keeping the playlist through a silent spell is what makes the
+ *    switch reversible. This makes it behave like focusShuffle and
+ *    focusPauseTogether, which are also left inert rather than reset.
+ *  * **Out-of-set slugs are dropped rather than rejected**, so a retired category
+ *    shrinks the selection instead of failing the whole write — and the survivors
+ *    are stored in catalogue order with duplicates removed, so one selection has
+ *    exactly one stored spelling. Nothing out-of-set can reach
+ *    Settings_focusSoundCategories_check.
  */
+/**
+ * #180 — the stored form of a category selection: known slugs only, no
+ * duplicates, in catalogue order.
+ *
+ * Canonicalising the ORDER is what stops two rows that mean the same thing from
+ * looking different — the pool is a filter over the catalogue, so order carries
+ * no meaning and preserving the caller's would only make equality checks and
+ * diffs lie. `FocusSoundCategory`'s declaration order is the catalogue's, which
+ * is why it is read from there rather than sorted alphabetically.
+ */
+function normaliseFocusCategories(input: readonly string[]): string[] {
+  const chosen = new Set(input);
+  return (Object.values(FocusSoundCategory) as string[]).filter((slug) =>
+    chosen.has(slug),
+  );
+}
+
 export async function updateFocusTimerSettings(input: {
   timerStyle: string | null;
   minimalMode: boolean;
   keepAwake: boolean;
   alarmEnabled: boolean;
   sound: string;
-  category?: string | null;
+  categories?: readonly string[];
   pauseTogether?: boolean;
 }) {
   const workspaceId = await currentWorkspaceId();
@@ -215,21 +237,18 @@ export async function updateFocusTimerSettings(input: {
   const focusSound = sounds.includes(input.sound)
     ? input.sound
     : FocusSound.Off;
-  const categories = Object.values(FocusSoundCategory) as string[];
-  const focusSoundCategory =
-    focusSound !== FocusSound.Off &&
-    typeof input.category === "string" &&
-    categories.includes(input.category)
-      ? input.category
-      : null;
   const data = {
     focusTimerStyle,
     focusMinimalMode: Boolean(input.minimalMode),
     focusKeepAwake: Boolean(input.keepAwake),
     focusAlarmEnabled: Boolean(input.alarmEnabled),
     focusSound,
-    focusSoundCategory,
     focusPauseTogether: Boolean(input.pauseTogether),
+    // Spread, not a null: an absent key leaves the stored selection alone, which
+    // is the difference between "the switch moved" and "the playlist changed".
+    ...(input.categories === undefined
+      ? {}
+      : { focusSoundCategories: normaliseFocusCategories(input.categories) }),
   };
   await prisma.settings.upsert({
     where: { workspaceId },

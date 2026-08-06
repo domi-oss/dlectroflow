@@ -31,6 +31,30 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Added
 
+- **Focus sounds are on by default, and Settings holds one switch (#180).** A new
+  account starts with sound on, the ambient lo-fi playlist and shuffle — a
+  catalogue you only hear after finding a settings page is a feature in hiding.
+  **Existing accounts are not changed**: those are column defaults, applying to
+  rows created after the upgrade, and there is deliberately no data migration
+  turning anyone's audio on. `src/lib/focus-sound-migration-hygiene.test.ts`
+  fails the build if a later migration ever tries.
+
+  **Settings → Focus timer now holds a single on/off switch** and nothing else
+  about music. The ten track radios, their preview buttons and #70's category
+  radios are gone; which playlists and which track are chosen from the
+  in-session player instead, because both are decisions you make while
+  listening. One consequence is deliberate and worth knowing: **nothing
+  persists an opening track any more**, so a session opens on the head of its
+  playlist rather than on a track picked in advance.
+
+  Under it, `Settings.focusSound` narrows from eleven values to `off | on`, and
+  `Settings.focusSoundCategory` (one slug, or null) becomes
+  `Settings.focusSoundCategories` — a text array guarded by a containment CHECK,
+  so a playlist can draw from **several genre categories at once**. An empty
+  array means the whole catalogue, which is exactly what the old `null` meant.
+  Everyone's existing choice is carried across unchanged; where a row had both a
+  track and a category, the category wins.
+
 - **The focus timer can play the full lo-fi catalog (#61).** Ten CC0 tracks still
   ship inside the image, one per open-lofi category; the other 156 are read at run
   time from wherever an operator keeps them. **New optional environment variable:

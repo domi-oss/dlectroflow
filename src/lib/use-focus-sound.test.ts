@@ -59,21 +59,19 @@ function endTrack() {
 }
 
 describe("useFocusSound", () => {
-  it("seeds the current track from the initial sound, paused, at the default volume", () => {
-    const { result } = renderHook(() => useFocusSound("lofi_calm"));
-    expect(result.current.track?.id).toBe("lofi_calm");
+  it("opens on the head of the pool, paused, at the default volume (#180)", () => {
+    // #180 removed the opening-track input: `Settings.focusSound` is a switch,
+    // so there is nothing left that could name a different track and the hook
+    // takes no positional argument at all.
+    const { result } = renderHook(() => useFocusSound());
+    expect(result.current.track?.id).toBe(FOCUS_SOUND_TRACKS[0].id);
     expect(result.current.playing).toBe(false);
     expect(result.current.volume).toBe(DEFAULT_FOCUS_VOLUME);
     expect(result.current.hasTracks).toBe(true);
   });
 
-  it("falls back to the first track when initial sound is off/unknown", () => {
-    const { result } = renderHook(() => useFocusSound("off"));
-    expect(result.current.track?.id).toBe(FOCUS_SOUND_TRACKS[0].id);
-  });
-
   it("play() lazily creates the playlist player (with volume) and starts it", () => {
-    const { result } = renderHook(() => useFocusSound("lofi_calm"));
+    const { result } = renderHook(() => useFocusSound());
     act(() => result.current.play());
     expect(createPlaylistPlayer).toHaveBeenCalledTimes(1);
     expect(createPlaylistPlayer).toHaveBeenCalledWith(
@@ -85,7 +83,7 @@ describe("useFocusSound", () => {
   });
 
   it("toggle() pauses when playing and resumes when paused", () => {
-    const { result } = renderHook(() => useFocusSound("lofi_calm"));
+    const { result } = renderHook(() => useFocusSound());
     act(() => result.current.play());
     act(() => result.current.toggle());
     expect(player.pause).toHaveBeenCalled();
@@ -95,7 +93,7 @@ describe("useFocusSound", () => {
   });
 
   it("pause() then play() resume the SAME element — never load() (position preserved)", () => {
-    const { result } = renderHook(() => useFocusSound("lofi_calm"));
+    const { result } = renderHook(() => useFocusSound());
     act(() => result.current.play());
     act(() => result.current.pause());
     expect(player.pause).toHaveBeenCalled();
@@ -112,7 +110,7 @@ describe("useFocusSound", () => {
   });
 
   it("next()/prev() cycle the playlist via load() (wrapping), reusing one element", () => {
-    const { result } = renderHook(() => useFocusSound("lofi_calm"));
+    const { result } = renderHook(() => useFocusSound());
     act(() => result.current.play()); // creates the element
     act(() => result.current.next());
     expect(result.current.track?.id).toBe(FOCUS_SOUND_TRACKS[1].id);
@@ -127,7 +125,7 @@ describe("useFocusSound", () => {
   });
 
   it("setVolume clamps and forwards to the player", () => {
-    const { result } = renderHook(() => useFocusSound("lofi_calm"));
+    const { result } = renderHook(() => useFocusSound());
     act(() => result.current.play());
     act(() => result.current.setVolume(0.8));
     expect(player.setVolume).toHaveBeenLastCalledWith(0.8);
@@ -138,7 +136,7 @@ describe("useFocusSound", () => {
   });
 
   it("stop() halts playback and clears the playing flag", () => {
-    const { result } = renderHook(() => useFocusSound("lofi_calm"));
+    const { result } = renderHook(() => useFocusSound());
     act(() => result.current.play());
     act(() => result.current.stop());
     expect(player.stop).toHaveBeenCalled();
@@ -146,7 +144,7 @@ describe("useFocusSound", () => {
   });
 
   it("stops the element on unmount", () => {
-    const { result, unmount } = renderHook(() => useFocusSound("lofi_calm"));
+    const { result, unmount } = renderHook(() => useFocusSound());
     act(() => result.current.play());
     expect(player.stop).not.toHaveBeenCalled();
     unmount();
@@ -172,7 +170,7 @@ describe("useFocusSound — auto-advance + no repeats until exhausted (#68)", ()
   }
 
   it("a finished track auto-advances the playlist (no user tap needed)", () => {
-    const { result } = renderHook(() => useFocusSound("lofi_calm"));
+    const { result } = renderHook(() => useFocusSound());
     act(() => result.current.play());
     expect(result.current.track?.id).toBe(FOCUS_SOUND_TRACKS[0].id);
     endTrack();
@@ -183,7 +181,7 @@ describe("useFocusSound — auto-advance + no repeats until exhausted (#68)", ()
   });
 
   it("in-order playback hears every track exactly once, then wraps to the start", () => {
-    const { result } = renderHook(() => useFocusSound("lofi_calm"));
+    const { result } = renderHook(() => useFocusSound());
     act(() => result.current.play());
     const heard = playPass(result);
     expect(heard).toEqual(FOCUS_SOUND_TRACKS.map((t) => t.id));
@@ -194,14 +192,13 @@ describe("useFocusSound — auto-advance + no repeats until exhausted (#68)", ()
   });
 
   it("shuffled playback hears every track exactly once per pass (never twice)", () => {
-    const { result } = renderHook(() =>
-      useFocusSound("lofi_calm", { shuffle: true }),
-    );
+    const { result } = renderHook(() => useFocusSound({ shuffle: true }));
     act(() => result.current.play());
     const heard = playPass(result);
     expect(new Set(heard).size).toBe(N);
-    // Shuffled, not merely reordered by chance: the pass still starts on the
-    // track the user chose in settings.
+    // Shuffled, not merely reordered by chance: the pass is dealt with the pool
+    // head swapped into position 0, so a session still opens somewhere
+    // predictable while everything after it is shuffled.
     expect(heard[0]).toBe(FOCUS_SOUND_TRACKS[0].id);
   });
 
@@ -209,7 +206,7 @@ describe("useFocusSound — auto-advance + no repeats until exhausted (#68)", ()
     // Repeat: a random-pick-per-advance implementation passes this only by luck.
     for (let attempt = 0; attempt < 25; attempt++) {
       const { result, unmount } = renderHook(() =>
-        useFocusSound("lofi_calm", { shuffle: true }),
+        useFocusSound({ shuffle: true }),
       );
       act(() => result.current.play());
       const first = playPass(result);
@@ -231,7 +228,7 @@ describe("useFocusSound — auto-advance + no repeats until exhausted (#68)", ()
   // so the next forward move owes them an unheard track, not a re-deal (which
   // could serve up what they just heard).
   it("in order: prev to the tail then forward plays an unheard track, not the head again", () => {
-    const { result } = renderHook(() => useFocusSound("lofi_calm"));
+    const { result } = renderHook(() => useFocusSound());
     act(() => result.current.play());
     act(() => result.current.prev()); // head → tail of the same pass
     expect(result.current.track?.id).toBe(FOCUS_SOUND_TRACKS[N - 1].id);
@@ -242,7 +239,7 @@ describe("useFocusSound — auto-advance + no repeats until exhausted (#68)", ()
   it("shuffled: prev to the tail then forward keeps the pass (still no repeat until exhausted)", () => {
     for (let attempt = 0; attempt < 25; attempt++) {
       const { result, unmount } = renderHook(() =>
-        useFocusSound("lofi_calm", { shuffle: true }),
+        useFocusSound({ shuffle: true }),
       );
       act(() => result.current.play());
       const heard = [result.current.track!.id];
@@ -259,24 +256,28 @@ describe("useFocusSound — auto-advance + no repeats until exhausted (#68)", ()
     }
   });
 
-  it("a pass that starts mid-list plays the tracks it skipped before repeating any", () => {
-    const mid = FOCUS_SOUND_TRACKS[5].id;
-    const { result } = renderHook(() => useFocusSound(mid));
+  it("every session opens at the head, and one rotation brings it back (#180)", () => {
+    // Until #180 a session could open mid-list, from the track stored in
+    // settings, and the heard-set existed partly to make that pass behave. There
+    // is no stored track any more, so the head is the only opening position —
+    // and the pass invariant it guarded is exercised instead by the prev()-to-
+    // the-tail tests below, which are now the only way to read a pass off-head.
+    const { result } = renderHook(() => useFocusSound());
     act(() => result.current.play());
-    const heard = [result.current.track!.id];
+    const head = result.current.track!.id;
+    expect(head).toBe(FOCUS_SOUND_TRACKS[0].id);
+    const heard = [head];
     for (let i = 1; i < N; i++) {
       endTrack();
       heard.push(result.current.track!.id);
     }
-    expect(heard[0]).toBe(mid);
     expect(new Set(heard).size).toBe(N);
-    // A full rotation later, the track it opened on comes round again.
     endTrack();
-    expect(result.current.track?.id).toBe(mid);
+    expect(result.current.track?.id).toBe(head);
   });
 
   it("a track ending while the timer has it paused does not advance (#43 coupling)", () => {
-    const { result } = renderHook(() => useFocusSound("lofi_calm"));
+    const { result } = renderHook(() => useFocusSound());
     act(() => result.current.play());
     act(() => result.current.pause());
     player.load.mockClear();
@@ -288,7 +289,7 @@ describe("useFocusSound — auto-advance + no repeats until exhausted (#68)", ()
   });
 
   it("a track ending after the session stopped the playlist does not restart it", () => {
-    const { result } = renderHook(() => useFocusSound("lofi_calm"));
+    const { result } = renderHook(() => useFocusSound());
     act(() => result.current.play());
     act(() => result.current.stop());
     player.load.mockClear();
@@ -302,17 +303,15 @@ describe("useFocusSound — shuffle toggle (#68)", () => {
   const N = FOCUS_SOUND_TRACKS.length;
 
   it("exposes the persisted preference as the initial shuffle state", () => {
-    const off = renderHook(() => useFocusSound("lofi_calm"));
+    const off = renderHook(() => useFocusSound());
     expect(off.result.current.shuffle).toBe(false);
-    const on = renderHook(() => useFocusSound("lofi_calm", { shuffle: true }));
+    const on = renderHook(() => useFocusSound({ shuffle: true }));
     expect(on.result.current.shuffle).toBe(true);
   });
 
   it("toggleShuffle flips the state and reports it for persistence", () => {
     const onShuffleChange = vi.fn();
-    const { result } = renderHook(() =>
-      useFocusSound("lofi_calm", { onShuffleChange }),
-    );
+    const { result } = renderHook(() => useFocusSound({ onShuffleChange }));
     act(() => result.current.toggleShuffle());
     expect(result.current.shuffle).toBe(true);
     expect(onShuffleChange).toHaveBeenLastCalledWith(true);
@@ -322,7 +321,7 @@ describe("useFocusSound — shuffle toggle (#68)", () => {
   });
 
   it("toggling shuffle never interrupts the track that's playing", () => {
-    const { result } = renderHook(() => useFocusSound("lofi_calm"));
+    const { result } = renderHook(() => useFocusSound());
     act(() => result.current.play());
     player.load.mockClear();
     act(() => result.current.toggleShuffle());
@@ -335,9 +334,7 @@ describe("useFocusSound — shuffle toggle (#68)", () => {
   });
 
   it("turning shuffle off returns the playlist to the in-order pass from here", () => {
-    const { result } = renderHook(() =>
-      useFocusSound("lofi_calm", { shuffle: true }),
-    );
+    const { result } = renderHook(() => useFocusSound({ shuffle: true }));
     act(() => result.current.play());
     act(() => result.current.next()); // somewhere in the shuffled pass
     act(() => result.current.toggleShuffle()); // → in order
@@ -377,7 +374,7 @@ describe("useFocusSound — the catalog arriving mid-session (#61)", () => {
   const GROWN = [...FOCUS_SOUND_TRACKS, ...STREAMED];
 
   it("does not interrupt the track that is playing", () => {
-    const { result, rerender } = renderHook(() => useFocusSound("lofi_calm"));
+    const { result, rerender } = renderHook(() => useFocusSound());
     act(() => result.current.play());
     const before = result.current.track;
     player.load.mockClear();
@@ -392,7 +389,7 @@ describe("useFocusSound — the catalog arriving mid-session (#61)", () => {
   });
 
   it("plays the streamed tracks once the pass reaches them", () => {
-    const { result, rerender } = renderHook(() => useFocusSound("lofi_calm"));
+    const { result, rerender } = renderHook(() => useFocusSound());
     act(() => result.current.play());
     useFocusCatalogMock.mockReturnValue(GROWN);
     rerender();
@@ -409,7 +406,7 @@ describe("useFocusSound — the catalog arriving mid-session (#61)", () => {
   });
 
   it("reports the grown length through hasTracks and the pass", () => {
-    const { result, rerender } = renderHook(() => useFocusSound("off"));
+    const { result, rerender } = renderHook(() => useFocusSound());
     expect(result.current.hasTracks).toBe(true);
     useFocusCatalogMock.mockReturnValue(GROWN);
     rerender();
@@ -419,7 +416,7 @@ describe("useFocusSound — the catalog arriving mid-session (#61)", () => {
 
   it("keeps working when the catalog never arrives", () => {
     // The bundled-only path, which is what most instances run.
-    const { result, rerender } = renderHook(() => useFocusSound("lofi_calm"));
+    const { result, rerender } = renderHook(() => useFocusSound());
     act(() => result.current.play());
     rerender();
     expect(result.current.track?.id).toBe("lofi_calm");
@@ -440,7 +437,7 @@ describe("useFocusSound — the catalog arriving mid-session (#61)", () => {
  * the "the picker says chillhop, the speakers say jazz hop" desync a user would
  * report as the feature not working.
  */
-describe("useFocusSound — category playlists (#70)", () => {
+describe("useFocusSound — category pools (#70, multi-select #180)", () => {
   const streamed = (name: string, category: string, label: string) => ({
     id: `catalog:${name}.mp3`,
     title: name,
@@ -467,7 +464,7 @@ describe("useFocusSound — category playlists (#70)", () => {
 
   it("narrows the playlist to the selected category", () => {
     const { result } = renderHook(() =>
-      useFocusSound(chillhopTrack.id, { category: "chillhop" }),
+      useFocusSound({ categories: ["chillhop"] }),
     );
     expect(result.current.track?.id).toBe(chillhopTrack.id);
     expect(result.current.hasTracks).toBe(true);
@@ -480,11 +477,57 @@ describe("useFocusSound — category playlists (#70)", () => {
     expect(result.current.track?.id).toBe(chillhopTrack.id);
   });
 
-  it("starts on the category's first track when the stored sound is outside it", () => {
+  it("draws the UNION of several selected categories, in catalogue order (#180)", () => {
     const { result } = renderHook(() =>
-      useFocusSound(jazzhopTrack.id, { category: "chillhop" }),
+      useFocusSound({ categories: ["jazzhop", "chillhop"] }),
     );
+    // Four tracks: the two bundled ones and the two streamed ones, read in the
+    // catalogue's own order rather than grouped by category.
+    const heard = [result.current.track!.id];
+    for (let i = 0; i < 3; i++) {
+      act(() => result.current.next());
+      heard.push(result.current.track!.id);
+    }
+    expect(heard).toEqual([
+      chillhopTrack.id,
+      jazzhopTrack.id,
+      "catalog:paper-cranes.mp3",
+      "catalog:terrace-dust.mp3",
+    ]);
+  });
+
+  it("is unaffected by the order the categories arrive in", () => {
+    // The pool is a filter over the catalogue, so the two spellings are the same
+    // selection — and the hook must not treat the reorder as a playlist change,
+    // which would re-deal the pass under a playing session.
+    const { result, rerender } = renderHook(
+      ({ categories }: { categories: string[] }) =>
+        useFocusSound({ categories }),
+      { initialProps: { categories: ["chillhop", "jazzhop"] } },
+    );
+    act(() => result.current.play());
+    player.load.mockClear();
+    rerender({ categories: ["jazzhop", "chillhop"] });
     expect(result.current.track?.id).toBe(chillhopTrack.id);
+    expect(player.load).not.toHaveBeenCalled();
+  });
+
+  it("does not re-deal the pass when the caller passes a fresh array each render", () => {
+    // The realistic caller writes `categories={settings.focusSoundCategories}`,
+    // and a `?? []` anywhere on that path makes a new array every render. If the
+    // hook keyed its memo on identity, that alone would replace the playlist on
+    // every render and restart the pass forever.
+    const { result, rerender } = renderHook(() =>
+      useFocusSound({ categories: ["chillhop"] }),
+    );
+    act(() => result.current.play());
+    act(() => result.current.next());
+    const before = result.current.track;
+    player.load.mockClear();
+    rerender();
+    rerender();
+    expect(result.current.track).toBe(before);
+    expect(player.load).not.toHaveBeenCalled();
   });
 
   it("honours a category that has shrunk to one track", () => {
@@ -492,18 +535,18 @@ describe("useFocusSound — category playlists (#70)", () => {
     // is what the user asked for; all ten categories is not.
     useFocusCatalogMock.mockReturnValue(FOCUS_SOUND_TRACKS);
     const { result } = renderHook(() =>
-      useFocusSound(chillhopTrack.id, { category: "chillhop" }),
+      useFocusSound({ categories: ["chillhop"] }),
     );
     expect(result.current.track?.id).toBe(chillhopTrack.id);
     act(() => result.current.next());
     expect(result.current.track?.id).toBe(chillhopTrack.id);
   });
 
-  it("falls back to the whole list for a category nothing matches", () => {
+  it("falls back to the whole list for a selection nothing matches", () => {
     const { result } = renderHook(() =>
-      useFocusSound(chillhopTrack.id, { category: "retired-slug" }),
+      useFocusSound({ categories: ["retired-slug"] }),
     );
-    expect(result.current.track?.id).toBe(chillhopTrack.id);
+    expect(result.current.track?.id).toBe(GROWN[0].id);
     // The full list is back, so a track from another category is reachable.
     const ids = new Set<string>();
     for (let i = 0; i < GROWN.length; i++) {
@@ -519,7 +562,7 @@ describe("useFocusSound — category playlists (#70)", () => {
     // element on the old source, and reports a track that is not playing.
     const { result, rerender } = renderHook(
       ({ category }: { category: string }) =>
-        useFocusSound(chillhopTrack.id, { category }),
+        useFocusSound({ categories: category ? [category] : [] }),
       { initialProps: { category: "chillhop" } },
     );
     act(() => result.current.play());
@@ -537,7 +580,7 @@ describe("useFocusSound — category playlists (#70)", () => {
   it("switching category mid-session restarts the pass inside the new playlist", () => {
     const { result, rerender } = renderHook(
       ({ category }: { category: string }) =>
-        useFocusSound(chillhopTrack.id, { category }),
+        useFocusSound({ categories: category ? [category] : [] }),
       { initialProps: { category: "chillhop" } },
     );
     act(() => result.current.play());
@@ -559,7 +602,7 @@ describe("useFocusSound — category playlists (#70)", () => {
     // track is still in the list, so nothing may interrupt.
     const { result, rerender } = renderHook(
       ({ category }: { category: string | null }) =>
-        useFocusSound(chillhopTrack.id, { category }),
+        useFocusSound({ categories: category ? [category] : [] }),
       { initialProps: { category: "chillhop" } as { category: string | null } },
     );
     act(() => result.current.play());
@@ -575,7 +618,7 @@ describe("useFocusSound — category playlists (#70)", () => {
   it("the catalog arriving under a selected category does not interrupt", () => {
     useFocusCatalogMock.mockReturnValue(FOCUS_SOUND_TRACKS);
     const { result, rerender } = renderHook(() =>
-      useFocusSound(chillhopTrack.id, { category: "chillhop" }),
+      useFocusSound({ categories: ["chillhop"] }),
     );
     act(() => result.current.play());
     player.load.mockClear();
