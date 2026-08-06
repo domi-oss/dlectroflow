@@ -73,14 +73,24 @@ describe("detectForeignProviderKey — known-foreign is rejected", () => {
     // account panel, so anything derived from the key itself would put a secret
     // on screen (and in an RSC payload) that `account.ts` is deliberately built
     // to keep server-side.
-    const secret = "sk-proj-THIS-IS-THE-SECRET-9f2c";
-    const match = detectForeignProviderKey(secret, ANTHROPIC);
+    // The marker deliberately does NOT contain the word "secret" in caps.
+    // GitLab redacts secret-NAME-shaped strings — not just real credentials —
+    // from a diff before an automated reviewer sees it, so a fixture reading
+    // `sk-proj-THIS-IS-THE-SECRET-…` arrived at review as the literal
+    // `"[REDACTED]"`. Three review rounds in a row then filed the same finding:
+    // that this test is vacuous, because a key of `"[REDACTED]"` matches no
+    // prefix and the function would always return null. The reasoning was
+    // sound; the input it reasoned about was not the input in this file.
+    // Renaming the marker is the root fix — dismissing the finding each round
+    // would have left it recurring forever.
+    const foreignKey = "sk-proj-DO-NOT-ECHO-THIS-9f2c";
+    const match = detectForeignProviderKey(foreignKey, ANTHROPIC);
     // Guard the two assertions below against becoming vacuous: they only mean
     // anything while `match` is a real object to leak from. A refactor that
     // made this input stop resolving as foreign would otherwise leave the
     // no-leak property "passing" over `null` forever, and nothing would say so.
     expect(match).not.toBeNull();
-    expect(JSON.stringify(match)).not.toContain("THIS-IS-THE-SECRET");
+    expect(JSON.stringify(match)).not.toContain("DO-NOT-ECHO-THIS");
     expect(JSON.stringify(match)).not.toContain("9f2c");
   });
 });
