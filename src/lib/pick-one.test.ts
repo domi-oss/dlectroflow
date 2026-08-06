@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { pickOne } from "./pick-one";
+import { mockCsprngDraw } from "./__tests__/mock-csprng";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -30,14 +31,12 @@ describe("pickOne", () => {
     // The failure this exists for: scaling a full-range unsigned integer by
     // `n / 2**32` must never round up to `n`. Force the largest value the
     // generator can produce.
-    vi.spyOn(globalThis.crypto, "getRandomValues").mockImplementation((<
-      T extends ArrayBufferView | null,
-    >(
-      arr: T,
-    ): T => {
-      new Uint32Array((arr as Uint32Array).buffer).fill(0xffffffff);
-      return arr;
-    }) as typeof globalThis.crypto.getRandomValues);
+    //
+    // This is also the drift guard for the shared helper (!275 review). The
+    // helper encodes how `indexBelow` reads the CSPRNG, and this is the
+    // canonical test of that mapping — so if the two ever disagree, it fails
+    // here, next to the code, rather than in a consumer suite.
+    mockCsprngDraw(0xffffffff);
     expect(pickOne(["a", "b", "c"])).toBe("c");
   });
 
