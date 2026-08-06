@@ -75,6 +75,11 @@ describe("detectForeignProviderKey — known-foreign is rejected", () => {
     // to keep server-side.
     const secret = "sk-proj-THIS-IS-THE-SECRET-9f2c";
     const match = detectForeignProviderKey(secret, ANTHROPIC);
+    // Guard the two assertions below against becoming vacuous: they only mean
+    // anything while `match` is a real object to leak from. A refactor that
+    // made this input stop resolving as foreign would otherwise leave the
+    // no-leak property "passing" over `null` forever, and nothing would say so.
+    expect(match).not.toBeNull();
     expect(JSON.stringify(match)).not.toContain("THIS-IS-THE-SECRET");
     expect(JSON.stringify(match)).not.toContain("9f2c");
   });
