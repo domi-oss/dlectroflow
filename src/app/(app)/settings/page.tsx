@@ -119,7 +119,6 @@ export default async function SettingsPage({
           keepAwake={settings.focusKeepAwake}
           alarmEnabled={settings.focusAlarmEnabled}
           sound={settings.focusSound}
-          category={settings.focusSoundCategory}
           pauseTogether={settings.focusPauseTogether}
           voice={voice}
           defaultExpanded

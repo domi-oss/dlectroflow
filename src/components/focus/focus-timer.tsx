@@ -157,10 +157,10 @@ export type TimerSettings = {
   keepAwake: boolean;
   alarmEnabled: boolean;
   sound: string;
-  /** #70 — persisted category playlist (Settings.focusSoundCategory). Optional
-   * and null by default: omitted means the whole track list, which is what an
-   * instance with no reachable catalog plays. */
-  category?: string | null;
+  /** #180 — the persisted category selection (Settings.focusSoundCategories).
+   * Optional and empty by default: no categories means the whole catalogue,
+   * which is what an instance with no reachable catalog plays anyway. */
+  categories?: readonly string[] | null;
   /** #68 — persisted playlist shuffle (Settings.focusShuffle). Optional: the
    * column defaults false, so a caller that predates the pref (or a test that
    * doesn't care) simply gets in-order playback. */
@@ -395,10 +395,14 @@ export function FocusTimer({
   const persistShuffle = useCallback((next: boolean) => {
     void updateFocusShuffle(next);
   }, []);
-  // #70 — the category narrows the playlist the hook walks; null is the whole
-  // list. Read-only here: it is chosen in settings, not from the timer.
-  const sound = useFocusSound(settings.sound, {
-    category: settings.category ?? null,
+  // #180 — the selected categories narrow the pool the hook walks; empty is the
+  // whole catalogue. Read-only here: #181 makes it editable from the player, and
+  // until then the only control over it is the switch in settings.
+  //
+  // No opening track is passed, and there is no longer one to pass: `focusSound`
+  // is a two-value switch, so every session opens on the head of its pass.
+  const sound = useFocusSound({
+    categories: settings.categories,
     shuffle: settings.shuffle ?? false,
     onShuffleChange: persistShuffle,
   });

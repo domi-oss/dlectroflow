@@ -190,7 +190,7 @@ export function prevFocusTrackId(id: string): string {
  * track, which is what we already have". Two is therefore the floor at which a
  * category becomes a different thing from a track.
  *
- * It is a floor on OFFERING, not on honouring: see {@link resolveFocusPlaylist}.
+ * It is a floor on OFFERING, not on honouring: see {@link resolveFocusPool}.
  *
  * Deriving it from the data rather than from the env var is deliberate. The
  * origin is server-only configuration (`focus-catalog-source.ts`), the client has
@@ -271,16 +271,20 @@ export function focusPlaylistCategories(
  * The categories a PICKER may offer — {@link focusPlaylistCategories}, minus any
  * the database would refuse.
  *
- * `Settings.focusSoundCategory` is CHECK-constrained to `FocusSoundCategory`, so
- * a self-hoster whose manifest declares its own category gets tracks that play
- * (they are in the merged list, and they group) but a slug that cannot be SAVED.
- * Offering it would be a control that silently does not stick, which is worse
- * than not offering it — the server action coerces the unknown slug to null and
- * the radio would spring back on the next load with no explanation.
+ * `Settings.focusSoundCategories` is CHECK-constrained to `FocusSoundCategory`
+ * (by containment, #180), so a self-hoster whose manifest declares its own
+ * category gets tracks that play (they are in the merged list, and they group)
+ * but a slug that cannot be SAVED. Offering it would be a control that silently
+ * does not stick, which is worse than not offering it — the server action drops
+ * the unknown slug and the control would spring back on the next load with no
+ * explanation.
  *
  * Widening the constraint to accept arbitrary manifest slugs is the alternative,
  * and it was declined: a CHECK constraint over an open set is no constraint, and
  * `enum-constraint-sync` would have nothing to mirror.
+ *
+ * #180 moved the picker itself off the Settings page; this stays because the
+ * in-session player (#181) asks the same question of the same data.
  */
 export function offerableFocusCategories(
   tracks: readonly FocusTrack[],
@@ -293,44 +297,47 @@ export function offerableFocusCategories(
 }
 
 /**
- * The bundled track of a category — where a category selection opens.
+ * The pool a session draws from, given the categories stored in
+ * `Settings.focusSoundCategories`.
  *
- * Picking a category still has to answer "which track first", and that answer has
- * to be a value `Settings.focusSound` can hold. Each of the ten has exactly one
- * bundled track (#43), which is both persistable and playable with no store
- * reachable, so it is the only candidate that cannot fail.
- */
-export function focusTrackForCategory(
-  category: string,
-): FocusTrack | undefined {
-  return FOCUS_SOUND_TRACKS.find((t) => t.category === category);
-}
-
-/**
- * The playlist a stored category selection resolves to.
+ * #180 — this took one nullable slug until the column became an array. The union
+ * is built by FILTERING the catalogue rather than by concatenating a slice per
+ * category, and that is the behavioural difference rather than a style one: the
+ * player's in-order pass walks this list, so a concatenation would group it by
+ * category and sound like three short playlists played back to back. Filtering
+ * keeps catalogue order whatever order the categories were ticked in, and makes
+ * a repeated slug impossible to hear.
  *
- * Three cases, and the last two are the ones that matter:
+ * All three of #70's fallbacks are kept, because each one exists to stop a focus
+ * session going silent:
  *
- * 1. **No selection** — returns `tracks` ITSELF, same identity. `useFocusSound`
- *    re-deals its play order when the list changes, so "nobody picked a category"
- *    must not look like a change (the same reason `mergeFocusTracks` returns the
- *    bundled array when the catalog added nothing).
- * 2. **A category that has shrunk to one track** — honoured, not widened. A
+ * 1. **Nothing selected** — the whole catalogue, returned as `tracks` ITSELF,
+ *    same identity. `useFocusSound` re-deals its play order when the list
+ *    changes, so "the whole catalogue" must not look like a change (the same
+ *    reason `mergeFocusTracks` returns the bundled array when the catalog added
+ *    nothing). The empty array is what the column stores for this; `null` and
+ *    `undefined` are accepted because the prop is optional on the way down.
+ * 2. **A selection that has shrunk to one track** — honoured, not widened. A
  *    selection made while the store was reachable must not silently change genre
  *    when it stops answering: one chillhop track is what the user asked for, all
  *    ten categories is not. So the {@link MIN_CATEGORY_PLAYLIST_TRACKS} floor
- *    governs what the picker OFFERS and deliberately not what this honours.
- * 3. **A category with no tracks at all** — falls back to the whole list. A
- *    retired slug, or a manifest that no longer carries the category, must never
- *    leave a focus session with an empty playlist and therefore silent.
+ *    governs what a picker OFFERS and deliberately not what this honours.
+ * 3. **A selection that matches nothing at all** — falls back to the whole list.
+ *    A retired slug, or a manifest that no longer carries the category, must
+ *    never leave a focus session with an empty playlist and therefore silent.
+ *
+ * A category that is merely absent from a selection that also names a live one
+ * contributes nothing and does NOT trigger case 3: the live half is still
+ * exactly what was asked for.
  */
-export function resolveFocusPlaylist(
+export function resolveFocusPool(
   tracks: readonly FocusTrack[],
-  category: string | null | undefined,
+  categories: readonly string[] | null | undefined,
 ): readonly FocusTrack[] {
-  if (!category) return tracks;
-  const narrowed = tracksInCategory(tracks, category);
-  return narrowed.length > 0 ? narrowed : tracks;
+  if (!categories || categories.length === 0) return tracks;
+  const selected = new Set(categories);
+  const pool = tracks.filter((t) => selected.has(t.category));
+  return pool.length > 0 ? pool : tracks;
 }
 
 /** Clamp a volume to the [0, 1] range the <audio> element accepts. */

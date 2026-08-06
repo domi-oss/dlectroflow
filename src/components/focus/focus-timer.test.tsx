@@ -606,25 +606,33 @@ describe("FocusTimer — device effects behind the boundary", () => {
             minimalMode: false,
             keepAwake: false,
             alarmEnabled: false,
-            sound: "lofi_calm",
+            sound: "on",
+            categories: ["chillhop"],
             shuffle: true,
           },
         })}
       />,
     );
-    const opts = soundHookArgs[1] as {
+    // #180 — the hook takes one options object and no opening track: focusSound
+    // is a switch, so there is no stored track to seed a session from.
+    const opts = soundHookArgs[0] as {
+      categories?: readonly string[];
       shuffle?: boolean;
       onShuffleChange?: (v: boolean) => void;
     };
-    expect(soundHookArgs[0]).toBe("lofi_calm");
+    expect(soundHookArgs).toHaveLength(1);
+    expect(opts.categories).toEqual(["chillhop"]);
     expect(opts.shuffle).toBe(true);
     act(() => opts.onShuffleChange?.(false));
     expect(updateFocusShuffle).toHaveBeenCalledWith(false);
   });
 
   it("defaults shuffle to off when Settings has never stored it", () => {
+    // The prop, not the column: Settings.focusShuffle defaults TRUE for new
+    // accounts since #180, but a caller that omits it still gets in-order
+    // playback rather than a silently different default on the way down.
     render(<FocusTimer {...base()} />);
-    expect((soundHookArgs[1] as { shuffle?: boolean }).shuffle).toBe(false);
+    expect((soundHookArgs[0] as { shuffle?: boolean }).shuffle).toBe(false);
   });
 });
 

@@ -29,7 +29,7 @@ describe("updateFocusTimerSettings", () => {
       minimalMode: true,
       keepAwake: false,
       alarmEnabled: true,
-      sound: "lofi_calm",
+      sound: "on",
     });
     expect(upsert).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -39,77 +39,115 @@ describe("updateFocusTimerSettings", () => {
           focusMinimalMode: true,
           focusKeepAwake: false,
           focusAlarmEnabled: true,
-          focusSound: "lofi_calm",
-          focusSoundCategory: null,
+          focusSound: "on",
           focusPauseTogether: false,
         },
       }),
     );
   });
 
-  // #70 — the category playlist. A separate nullable column rather than a
-  // `category:*` value in focusSound, so both facts survive: which category is
-  // the playlist, and which track the session opens on.
-  it("persists an allowlisted category alongside the start track", async () => {
+  // #180 — the category selection is an array now, written only when the caller
+  // actually supplies one. These four cover the whole contract, and three of them
+  // are reversals of what #70 did.
+  it("stores an allowlisted selection in catalogue order, without duplicates", async () => {
     await updateFocusTimerSettings({
       timerStyle: "ring",
       minimalMode: false,
       keepAwake: true,
       alarmEnabled: true,
-      sound: "lofi_chillhop",
-      category: "chillhop",
+      sound: "on",
+      // Reverse catalogue order, with a repeat: one selection must have exactly
+      // one stored spelling, or two rows that mean the same thing look different.
+      categories: ["jazzhop", "chillhop", "jazzhop"],
     });
     expect(upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         update: expect.objectContaining({
-          focusSound: "lofi_chillhop",
-          focusSoundCategory: "chillhop",
+          focusSound: "on",
+          focusSoundCategories: ["chillhop", "jazzhop"],
         }),
-        create: expect.objectContaining({ focusSoundCategory: "chillhop" }),
+        create: expect.objectContaining({
+          focusSoundCategories: ["chillhop", "jazzhop"],
+        }),
       }),
     );
   });
 
-  it("coerces an out-of-set category to null (mirrors Settings_focusSoundCategory_check)", async () => {
+  it("drops an out-of-set slug rather than failing the write (mirrors the containment CHECK)", async () => {
     // `ambient` is the slug #70's own description carried before it was corrected
     // against the code, so it is the realistic bad value rather than an invented
-    // one. `lofi_chillhop` is the paired mistake: a track id in the category slot.
-    for (const category of ["ambient", "lofi_chillhop", "category:chillhop"]) {
-      await updateFocusTimerSettings({
-        timerStyle: "ring",
-        minimalMode: false,
-        keepAwake: true,
-        alarmEnabled: true,
-        sound: "lofi_chillhop",
-        category,
-      });
-      expect(upsert).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          update: expect.objectContaining({ focusSoundCategory: null }),
+    // one. `lofi_chillhop` is the paired mistake: a track id in the category slot,
+    // which #180 makes likelier because a track id has no persistable home now.
+    await updateFocusTimerSettings({
+      timerStyle: "ring",
+      minimalMode: false,
+      keepAwake: true,
+      alarmEnabled: true,
+      sound: "on",
+      categories: ["ambient", "lofi_chillhop", "category:chillhop", "chillhop"],
+    });
+    expect(upsert).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          focusSoundCategories: ["chillhop"],
         }),
-      );
-    }
+      }),
+    );
   });
 
-  it("clears the category when the sound is off — the pair has no meaning", async () => {
-    // Unlike focusShuffle / focusPauseTogether, which are orthogonal tastes left
-    // inert while sound is off, the category IS part of the sound selection: it
-    // and "off" are options in the same radio group, so choosing one replaces the
-    // other. Storing (off, chillhop) would leave a state the picker cannot show.
+  // The behaviour the Settings switch depends on. Omitting the key must leave the
+  // stored selection alone: the switch is the only music control on that page, so
+  // treating "not mentioned" as "empty it" would wipe a playlist on every toggle.
+  it("does not touch the selection when the caller omits it", async () => {
     await updateFocusTimerSettings({
       timerStyle: "ring",
       minimalMode: false,
       keepAwake: true,
       alarmEnabled: true,
       sound: "off",
-      category: "chillhop",
+    });
+    const [call] = upsert.mock.calls.at(-1) as [
+      { update: Record<string, unknown>; create: Record<string, unknown> },
+    ];
+    expect(call.update).not.toHaveProperty("focusSoundCategories");
+    expect(call.create).not.toHaveProperty("focusSoundCategories");
+  });
+
+  // Deliberately UNLIKE #70, where "off" cleared the category because they were
+  // options in one radio group. They are two independent controls on two surfaces
+  // now, and keeping the playlist through a silent spell is what makes the switch
+  // reversible.
+  it("keeps the selection when the sound is switched off", async () => {
+    await updateFocusTimerSettings({
+      timerStyle: "ring",
+      minimalMode: false,
+      keepAwake: true,
+      alarmEnabled: true,
+      sound: "off",
+      categories: ["chillhop"],
     });
     expect(upsert).toHaveBeenLastCalledWith(
       expect.objectContaining({
         update: expect.objectContaining({
           focusSound: "off",
-          focusSoundCategory: null,
+          focusSoundCategories: ["chillhop"],
         }),
+      }),
+    );
+  });
+
+  it("stores an explicitly empty selection as the whole catalogue", async () => {
+    await updateFocusTimerSettings({
+      timerStyle: "ring",
+      minimalMode: false,
+      keepAwake: true,
+      alarmEnabled: true,
+      sound: "on",
+      categories: [],
+    });
+    expect(upsert).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ focusSoundCategories: [] }),
       }),
     );
   });
@@ -130,6 +168,26 @@ describe("updateFocusTimerSettings", () => {
   });
 
   it("coerces an out-of-set style to null and an out-of-set sound to off (mirrors the CHECKs)", async () => {
+    // `lofi_calm` is the interesting one: it was a legal focusSound value until
+    // #180 narrowed the column, so a stale caller sending it must land on "off"
+    // rather than writing a value Settings_focusSound_check now rejects.
+    for (const sound of ["spotify", "lofi_calm"]) {
+      await updateFocusTimerSettings({
+        timerStyle: "hourglass",
+        minimalMode: false,
+        keepAwake: true,
+        alarmEnabled: false,
+        sound,
+      });
+      expect(upsert).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({
+            focusTimerStyle: null,
+            focusSound: "off",
+          }),
+        }),
+      );
+    }
     await updateFocusTimerSettings({
       timerStyle: "hourglass",
       minimalMode: false,

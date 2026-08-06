@@ -5,7 +5,7 @@ import {
   buildPlayOrder,
   createPlaylistPlayer,
   playOrderCursor,
-  resolveFocusPlaylist,
+  resolveFocusPool,
   trackIndexIn,
   clampVolume,
   type FocusTrack,
@@ -38,13 +38,19 @@ import { useFocusCatalog } from "@/lib/use-focus-catalog";
  * in a row) and is a persisted taste setting: seeded from Settings.focusShuffle
  * and reported back through onShuffleChange.
  *
- * #70 — the playlist can also be NARROWED to one category (Settings
- * .focusSoundCategory). Phase 1's pass model needed no changes for that: it walks
- * whatever list it is given. What did need deciding is the difference between a
- * list that GREW and a list that was REPLACED — see the effect below. Growing is
- * #61's case and must never interrupt; replacing is a category switch and must,
- * because continuing to play a track that is no longer in the playlist means the
- * picker says one thing and the speakers say another.
+ * #70 — the playlist can also be NARROWED to a category selection (Settings
+ * .focusSoundCategories, an array since #180). Phase 1's pass model needed no
+ * changes for that: it walks whatever list it is given. What did need deciding is
+ * the difference between a list that GREW and a list that was REPLACED — see the
+ * effect below. Growing is #61's case and must never interrupt; replacing is a
+ * selection change and must, because continuing to play a track that is no longer
+ * in the playlist means the picker says one thing and the speakers say another.
+ *
+ * #180 — the hook no longer takes an opening track. `Settings.focusSound` became
+ * a two-value switch, so nothing persists "which track does the session open on"
+ * and every session opens on the head of the pass built over the resolved pool.
+ * That is the accepted regression #180 records, not an oversight: once the player
+ * can jump to any track (#181), pre-selecting one in advance earns nothing.
  */
 export type FocusSoundControls = {
   track: FocusTrack | null;
@@ -71,12 +77,15 @@ export type FocusSoundControls = {
 
 export type FocusSoundOptions = {
   /**
-   * #70 — Settings.focusSoundCategory. One of the ten open-lofi slugs, or
-   * null/undefined for "the whole list", which is the normal case. A slug that
-   * matches nothing widens back to the whole list rather than going silent
-   * (`resolveFocusPlaylist`).
+   * #180 — Settings.focusSoundCategories. Zero or more of the ten open-lofi
+   * slugs; empty (or omitted) means the whole catalogue, which is the normal
+   * case. A selection nothing matches widens back to the whole catalogue rather
+   * than going silent (`resolveFocusPool`).
+   *
+   * Order is irrelevant — the pool is a filter over the catalogue, so ticking
+   * chillhop then jazzhop gives the same list as the reverse.
    */
-  category?: string | null;
+  categories?: readonly string[] | null;
   /** Seed from Settings.focusShuffle (#68) — a taste setting, not per-session. */
   shuffle?: boolean;
   /** Called with the new value when the user toggles shuffle, so the caller can
@@ -97,40 +106,56 @@ export const DEFAULT_FOCUS_VOLUME = 0.5;
  */
 type Pass = { order: number[]; cursor: number; heard: Set<number> };
 
+/**
+ * Where every session opens: the head of the pool.
+ *
+ * #180 removed the only input that could have said otherwise. Named rather than
+ * inlined because three separate places have to agree on it — the initial state,
+ * the initial refs, and the pass re-dealt when the playlist is replaced.
+ */
+const POOL_HEAD = 0;
+
 export function useFocusSound(
-  initialSound: string,
   opts: FocusSoundOptions = {},
 ): FocusSoundControls {
   // #61 — the bundled ten, then whatever the streamed catalog adds once it
   // loads. Identical to FOCUS_SOUND_TRACKS (same array) until then, and on every
   // instance with no catalog configured, so a session always has music.
   const available = useFocusCatalog();
-  // #70 — then narrowed to one category, if one is selected. useMemo is
-  // load-bearing rather than an optimisation: the effect below treats a new array
-  // identity as "the playlist changed", so a fresh filter on every render would
-  // re-deal the pass on every render.
+  /**
+   * #180 — the selection, flattened to a string, and that is load-bearing.
+   *
+   * The effect below treats a new track-list IDENTITY as "the playlist changed",
+   * so the memo underneath must not re-run on renders where nothing changed. An
+   * array prop cannot be a dependency for that: every caller that writes
+   * `categories={settings.focusSoundCategories ?? []}` hands over a fresh array
+   * on every render, which would re-resolve the pool, hand the effect a new
+   * identity, and re-deal the pass — forever.
+   *
+   * Sorted, because the pool is a filter over the catalogue and therefore does
+   * not depend on the order the categories were given in; without the sort, a
+   * caller reordering the same selection would count as a change. JSON rather
+   * than a joined string so the key round-trips exactly — a separator would be a
+   * correctness hazard rather than a style choice, because a slug containing it
+   * would split into two slugs and resolve a different pool.
+   */
+  const categoryKey = JSON.stringify([...(opts.categories ?? [])].sort());
+  // #70 — the catalog, narrowed to the selected categories. useMemo is
+  // load-bearing rather than an optimisation, for the reason above.
   const tracks = useMemo(
-    () => resolveFocusPlaylist(available, opts.category),
-    [available, opts.category],
+    () => resolveFocusPool(available, JSON.parse(categoryKey) as string[]),
+    [available, categoryKey],
   );
-  // Where the session opens. Resolved against the list the player will actually
-  // walk, NOT against FOCUS_SOUND_TRACKS: a bundled track keeps its index in the
-  // merged list, but not in a category-narrowed one (the chillhop track is index
-  // 1 of ten and index 0 of a chillhop playlist). `Settings.focusSound` can still
-  // only hold a bundled track's id — that column is enum-constrained, and a
-  // streamed track has no persistable identity — so a category whose stored
-  // start track sits outside it simply opens at its own head.
-  const startIndex = Math.max(0, trackIndexIn(tracks, initialSound));
   const initialShuffle = Boolean(opts.shuffle);
 
-  const [index, setIndex] = useState(startIndex);
+  const [index, setIndex] = useState(POOL_HEAD);
   const [playing, setPlaying] = useState(false);
   const [volume, setVolumeState] = useState(DEFAULT_FOCUS_VOLUME);
   const [shuffle, setShuffleState] = useState(initialShuffle);
 
   // Refs mirror state so the memoised callbacks always act on current values
   // without being re-created (and without stale-closure bugs).
-  const indexRef = useRef(startIndex);
+  const indexRef = useRef(POOL_HEAD);
   const playingRef = useRef(false);
   const volumeRef = useRef(DEFAULT_FOCUS_VOLUME);
   const shuffleRef = useRef(initialShuffle);
@@ -162,13 +187,15 @@ export function useFocusSound(
     return { order, cursor, heard: new Set([cursor]) };
   };
 
-  // The pass is dealt lazily (a shuffle spends randomness we shouldn't spend on
-  // every render) and starts on the track settings chose, so a session opens with
-  // the sound the user picked even when shuffle is on.
+  // The pass is dealt lazily — a shuffle spends randomness we shouldn't spend on
+  // every render — and always at the head of the pool (#180: nothing persists an
+  // opening track). Under shuffle the head is whatever the deal put there, so a
+  // session opens on something different each time rather than always the same
+  // first track, which is the point of shuffling by default for new accounts.
   const pass = useCallback((): Pass => {
-    passRef.current ??= dealPass(tracks, startIndex);
+    passRef.current ??= dealPass(tracks, POOL_HEAD);
     return passRef.current;
-  }, [tracks, startIndex]);
+  }, [tracks]);
 
   /**
    * The playlist changed underneath a live hook. Two cases, and telling them
@@ -182,7 +209,8 @@ export function useFocusSound(
    * index can still have moved, so `index` is reconciled first; without that,
    * `tracks[index]` reports a neighbour of what is actually playing.
    *
-   * **It was REPLACED** (#70: a category switch). The current track is not in the
+   * **It was REPLACED** (#70/#180: the category selection changed). The current
+   * track is not in the
    * new playlist, and continuing to play it would mean the picker says chillhop
    * while the speakers play jazz hop — the desync a user would report as the
    * feature being broken. So the pass restarts at the new list's head and the
@@ -226,17 +254,17 @@ export function useFocusSound(
       return;
     }
 
-    const start = Math.max(0, trackIndexIn(tracks, initialSound));
-    passRef.current = dealPass(tracks, start);
-    setIdx(start);
+    // #180 — the anchor used to be the stored opening track, resolved inside the
+    // new list. Nothing persists one now, so a replacement restarts at the pool's
+    // head, which is what the old code already fell back to whenever the stored
+    // track was outside the new selection.
+    passRef.current = dealPass(tracks, POOL_HEAD);
+    setIdx(POOL_HEAD);
     // Only if an element exists. Creating one here would be outside a user
     // gesture (the browser would refuse to play it later), and with nothing
     // playing there is nothing to keep in sync.
-    playerRef.current?.load(tracks[start].src);
-    // `initialSound` is in the dependency list only to satisfy the linter — the
-    // identity guard on the first line means a caller changing it, on its own,
-    // does nothing. It is the ANCHOR for a reset, not a trigger for one.
-  }, [tracks, initialSound]);
+    playerRef.current?.load(tracks[POOL_HEAD].src);
+  }, [tracks]);
 
   // Latest step(), for the element's `ended` handler — that handler is installed
   // once, at creation, so it must not close over a stale callback.

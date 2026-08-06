@@ -535,6 +535,8 @@ export const STRINGS = {
     playful:
       "Play a short chime (and vibrate on mobile) when the timer reaches zero.",
   },
+  // #180 — the label of the one music control left on this page. It is a switch
+  // now, so the label has to name the THING rather than an option within it.
   "focusSettings.sound": { plain: "Focus sounds", playful: "🎧 Focus sounds" },
   // #68 — the timer plays a real playlist now (it advances itself and only
   // wraps once every track has played), so this copy must not promise a loop.
@@ -542,48 +544,15 @@ export const STRINGS = {
     plain: "Play a calm lo-fi playlist while you focus.",
     playful: "Play a calm lo-fi playlist while you focus.",
   },
-  "focusSettings.soundOff": { plain: "Off", playful: "Off" },
-  "focusSettings.soundLofiCalm": {
-    plain: "Lo-fi (calm)",
-    playful: "Lo-fi (calm)",
-  },
-  // #43 — lo-fi library picker + preview. Labels stay identical across voices
-  // (functional controls); the composed aria-labels append the track title.
-  "focusSettings.soundPickerHint": {
+  // #180 — where the ten tracks, their previews and the category playlists went.
+  // This line is the whole mitigation for the removal reading as a lost feature,
+  // so it names both of the things that moved and where they moved TO; "in the
+  // player" alone would leave someone hunting on this page.
+  "focusSettings.soundPlayerHint": {
     plain:
-      "Pick the track your focus playlist starts on, or preview each one first.",
+      "Choose which playlists and which track from the player, while a session is running.",
     playful:
-      "Pick the track your focus playlist starts on, or preview each one first. 🎧",
-  },
-  // #70 — category playlists. These four only ever render when the catalog has
-  // actually given some category more than one track, so the hint can talk about
-  // categories in the present tense without lying on a default install (where the
-  // whole group is absent, not disabled).
-  //
-  // "whole category" and the count are part of each radio's LABEL rather than
-  // decoration around it: read aloud, a radio called "Chillhop" sitting next to
-  // one called "Porchlight Golden Hour · Chillhop" says nothing about which is the
-  // playlist.
-  "focusSettings.soundCategoryHint": {
-    plain:
-      "Or play a whole category: every track in it, in one pass, with no repeats until it's done.",
-    playful:
-      "Or play a whole category: every track in it, in one pass, with no repeats until it's done. 🎶",
-  },
-  "focusSettings.soundWholeCategory": {
-    plain: "whole category",
-    playful: "whole category",
-  },
-  // Composed as "· 14 tracks". Singular is reachable only for a stored selection
-  // whose category has shrunk below the offer floor (the store stopped
-  // answering) — that radio stays on screen so the preference can still be
-  // cleared, so its label still has to read correctly.
-  "focusSettings.soundTrackCount": { plain: "tracks", playful: "tracks" },
-  "focusSettings.soundTrackCountOne": { plain: "track", playful: "track" },
-  "focusSettings.preview": { plain: "Preview", playful: "Preview" },
-  "focusSettings.stopPreview": {
-    plain: "Stop preview",
-    playful: "Stop preview",
+      "Choose which playlists and which track from the player, while a session is running. 🎧",
   },
   // #65 — the opt-in music↔timer pause coupling. The label gets a playful glyph
   // anchor (same convention as the alarm toggle) and the hint spells out the
