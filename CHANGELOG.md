@@ -461,6 +461,18 @@ operators upgrading a self-hosted instance don't get surprised.
   Start button** once the step is back, rather than being dropped nowhere at the
   moment you have just fixed a mistake.
 
+  **Pressing undo twice takes back one reward, not two.** A double-tap that
+  outruns the button, or the same step open on a phone and a laptop, used to run
+  the undo twice — and because taking a reward back means removing the most
+  recent one, the second pass removed a *different* step's points. The undo now
+  claims the step as it reopens it, so whichever press arrives second finds the
+  work already done and stops, silently and without an error. **And one row's
+  undo no longer greys out another's:** completing, renaming or re-estimating any
+  step used to disable every "Mark not done" button on the page for the length of
+  that request, so a press landing in the gap vanished with nothing to explain
+  it. Each button now waits only on its own step, and while it is waiting it says
+  so out loud rather than just going grey.
+
 - **The focus timer's "Complete step" sat where Pause belongs (#197).** In a
   running session the controls read *Complete step, then Pause*, with Complete
   the only filled button in the row — so the leading, most prominent, most
