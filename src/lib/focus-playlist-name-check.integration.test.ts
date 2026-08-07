@@ -68,11 +68,18 @@ async function wipe() {
  * Insert a playlist name straight through SQL, bypassing every normaliser.
  * Returns the Postgres SQLSTATE on rejection, or `null` when the row landed.
  */
+// A counter, not `Math.random()`. Two reasons, and the second is the real one:
+// SAST flags `Math.random()` as a weak PRNG wherever it appears (the finding this
+// very file produced on its first pipeline, `!282`), and a test that needs unique
+// ids does not need unpredictable ones. A counter is also deterministic, so a
+// failure reproduces with the same ids it failed with.
+let seq = 0;
+
 async function insertName(name: string): Promise<string | null> {
   try {
     await prisma.$executeRaw`
       INSERT INTO "FocusPlaylist" ("id", "workspaceId", "name")
-      VALUES (${`p-${Math.random().toString(36).slice(2)}`}, ${WS}, ${name})
+      VALUES (${`p-${++seq}`}, ${WS}, ${name})
     `;
     return null;
   } catch (e) {
