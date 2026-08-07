@@ -104,28 +104,48 @@ UPDATE "Settings"
  WHERE "focusSoundCategory" IS NULL
    AND "focusSound" <> 'off';
 
--- 4. Every row that meant "play something" now means "on". Guarded on the off
+-- 4. The OLD constraint has to go before the conversion, not after it.
+--
+--    It permits 'off' plus the ten `lofi_*` track ids and nothing else, so the
+--    UPDATE below — which writes 'on' — violates it on every existing row.
+--    Dropping it here rather than at step 6 is the whole fix for the incident
+--    on 2026-08-07: this migration failed in production with
+--
+--      ERROR: new row for relation "Settings" violates check constraint
+--             "Settings_focusSound_check"  (SQLSTATE 23514)
+--
+--    and rolled back, after which Prisma refused every later migration (P3009)
+--    and no deploy could reach the cluster for two days.
+--
+--    The comment that used to sit at step 6 had the reasoning inverted: it
+--    guarded against the NEW constraint rejecting PRE-conversion rows, when the
+--    real hazard is the OLD constraint rejecting POST-conversion ones. Only the
+--    ADD needs to come after the conversion; the DROP must come before it.
+ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+
+-- 5. Every row that meant "play something" now means "on". Guarded on the off
 --    state: see the note above on why no row may cross from off to on here.
 UPDATE "Settings"
    SET "focusSound" = 'on'
  WHERE "focusSound" <> 'off';
 
--- 5. #70's column and its constraint are dropped, not merely left unused —
+-- 6. #70's column and its constraint are dropped, not merely left unused —
 --    keeping them would give a future writer a second, differently-shaped place
 --    to record the same preference.
 ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSoundCategory_check";
 ALTER TABLE "Settings" DROP COLUMN "focusSoundCategory";
 
--- 6. Settings_focusSound_check shrinks with FocusSound in src/lib/constants.ts.
---    Applied AFTER the conversion above, or step 4's own rows would violate it.
---    Non-nullable column, so no IS NULL allowance (matches the constraint it
---    replaces).
-ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+-- 7. The replacement constraint, mirroring FocusSound in src/lib/constants.ts.
+--    This half genuinely does belong AFTER the conversion: applied earlier it
+--    would reject the pre-conversion `lofi_*` rows that step 5 is on its way to
+--    rewriting. Non-nullable column, so no IS NULL allowance (matches the
+--    constraint it replaces). The DROP that used to be on the line above now
+--    sits at step 4 — see the note there.
 ALTER TABLE "Settings"
   ADD CONSTRAINT "Settings_focusSound_check"
   CHECK ("focusSound" IN ('off', 'on'));
 
--- 7. The containment guard. Mirrors FocusSoundCategory in src/lib/constants.ts
+-- 8. The containment guard. Mirrors FocusSoundCategory in src/lib/constants.ts
 --    and is registered in src/lib/enum-constraint-sync.integration.test.ts,
 --    which fails the suite if it is dropped out of band or drifts from the
 --    constant. A NEW category needs a paired migration replacing this.
@@ -144,7 +164,7 @@ ALTER TABLE "Settings"
     'hybrid'
   ]::TEXT[]);
 
--- 8. New accounts only. A column default applies to rows inserted after it, so
+-- 9. New accounts only. A column default applies to rows inserted after it, so
 --    nothing above this line is re-read and nothing already stored changes.
 --
 --    Ambient lo-fi rather than chillhop because it holds 21 tracks to chillhop's
