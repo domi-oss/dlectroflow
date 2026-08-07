@@ -216,6 +216,86 @@ describe("TaskSteps — un-completing a done step (#198)", () => {
       screen.queryByRole("button", { name: "All options" }),
     ).not.toBeInTheDocument();
   });
+
+  // Round 10 — the same defect #169 fixed in the inbox, reintroduced here. The
+  // undo carried `disabled={pending}` from the ONE `useTransition` shared by every
+  // action in this list, so completing, renaming or re-estimating any *other* step
+  // greyed out this row's undo for the length of that round trip, and a press
+  // landing in the window was discarded with no error and no toast.
+  //
+  // Holding the action's promise unresolved makes the in-flight window real rather
+  // than a race — the technique !237, !264, !265 and the #169 fix all use.
+  it("holds only the undoing row's own control while its call is in flight", async () => {
+    const user = userEvent.setup();
+    let release!: () => void;
+    vi.mocked(uncompleteStep).mockImplementationOnce(
+      () => new Promise<void>((res) => (release = res)),
+    );
+    render(
+      <TaskSteps
+        taskId="t1"
+        steps={[
+          { ...baseStep(), id: "s1", text: "First", done: true },
+          { ...baseStep(), id: "s2", order: 2, text: "Second", done: true },
+        ]}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /mark not done: first/i }),
+    );
+
+    // Its own control: still held — that is all double-submit protection ever
+    // needed, and it now says why rather than going quietly grey.
+    const first = screen.getByRole("button", {
+      name: /mark not done: first/i,
+    });
+    expect(first).toBeDisabled();
+    expect(first).toHaveAccessibleName(/already in progress for this row/i);
+    expect(first).toHaveAttribute("aria-busy", "true");
+
+    // The other row was never a party to it, so its press must land.
+    const second = screen.getByRole("button", {
+      name: /mark not done: second/i,
+    });
+    expect(second).toBeEnabled();
+    expect(second).not.toHaveAttribute("aria-busy");
+
+    release();
+    await waitFor(() => expect(first).toBeEnabled());
+  });
+
+  it("completing a different step disables no undo control at all", async () => {
+    // The live half, driven through the path a user actually takes: a task with
+    // one outstanding step and one already done. Completing the outstanding one
+    // has nothing to do with the done one's undo, and no list-wide argument
+    // covers it — the same case rename was for #169.
+    const user = userEvent.setup();
+    let release!: () => void;
+    vi.mocked(completeStep).mockImplementationOnce(
+      () => new Promise<void>((res) => (release = res)),
+    );
+    render(
+      <TaskSteps
+        taskId="t1"
+        steps={[
+          { ...baseStep(), id: "s1", text: "Still open", done: false },
+          { ...baseStep(), id: "s2", order: 2, text: "Second", done: true },
+        ]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "✓ Complete" }));
+
+    const undo = screen.getByRole("button", {
+      name: /mark not done: second/i,
+    });
+    expect(undo).toBeEnabled();
+    expect(undo).toHaveAccessibleName(/^mark not done: second$/i);
+
+    release();
+    await waitFor(() => expect(completeStep).toHaveBeenCalledWith("s1"));
+  });
 });
 
 describe("TaskSteps — complete step", () => {

@@ -21,6 +21,13 @@ import { DonePill } from "@/components/completion/done-pill";
 import { StepNote } from "@/components/breakdown/task-note";
 import { NoteText } from "@/components/breakdown/note-field";
 
+/**
+ * Word-for-word the sentence `row-actions.tsx` uses for the same state (#169).
+ * Deliberately identical: two different phrasings for "this row's own action is
+ * still running" would be two things for a screen-reader user to learn.
+ */
+const UNDO_BUSY_REASON = "already in progress for this row";
+
 export type TaskStepRow = {
   id: string;
   order: number;
@@ -86,11 +93,36 @@ export function TaskSteps({
   // one that matters most (it is where an accidental completion is discovered),
   // but a mistake noticed later still has to be fixable, and this is the only
   // screen that shows a done step inside an unfinished task.
-  const uncomplete = (stepId: string) =>
+  //
+  // #169's shape, keyed per step (review round 10). `undoingIds` is the ONLY thing
+  // the undo controls read for their disabled state. `pending` above comes from one
+  // `useTransition` shared by every action in this file — complete, rename,
+  // re-estimate, send-to-review — so reading it here meant re-estimating step 3
+  // greyed out step 1's undo, and a press landing in that window was discarded
+  // with no error and no toast. That is #169 exactly, and it is worth not
+  // reintroducing one MR after it was fixed in the inbox.
+  const [undoingIds, setUndoingIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+
+  const uncomplete = (stepId: string) => {
+    setUndoingIds((ids) => new Set(ids).add(stepId));
     start(async () => {
-      await uncompleteStep(stepId);
-      router.refresh();
+      try {
+        await uncompleteStep(stepId);
+        router.refresh();
+      } finally {
+        // `finally`, not after the await: a throw that left the id in the set
+        // would disable that row's undo for the rest of the page's life, which is
+        // a worse failure than the double-submit the flag exists to prevent.
+        setUndoingIds((ids) => {
+          const next = new Set(ids);
+          next.delete(stepId);
+          return next;
+        });
+      }
     });
+  };
 
   const rename = (stepId: string, title: string) =>
     start(async () => {
@@ -142,6 +174,8 @@ export function TaskSteps({
           // focus/complete actions — but they DO carry an un-complete (#198),
           // because until it existed a step completed inside an unfinished task
           // could not be reopened anywhere in the app.
+          const undoing = undoingIds.has(s.id);
+          const undoLabel = `${t("step.uncomplete", voice)}: ${s.text}`;
           return (
             <li key={s.id} className="rounded-lg border px-3 py-2 text-sm">
               <div className="flex items-center gap-3">
@@ -167,8 +201,20 @@ export function TaskSteps({
                 <button
                   type="button"
                   onClick={() => uncomplete(s.id)}
-                  disabled={pending}
-                  aria-label={`${t("step.uncomplete", voice)}: ${s.text}`}
+                  disabled={undoing}
+                  // #169 — a disabled control has to say why, because a bare
+                  // disabled button swallows a press with no error and no toast.
+                  // Saying it is only honest now the reason is TRUE per row:
+                  // list-wide, the only accurate sentence would have been
+                  // "something, somewhere in this list, is busy". Appended rather
+                  // than replacing, so the idle name stays a stable query target.
+                  // `aria-busy` is the machine-readable half; a disabled element
+                  // is skipped by most screen readers, so the reason has to ride
+                  // on the name itself.
+                  {...(undoing ? ({ "aria-busy": true } as const) : {})}
+                  aria-label={
+                    undoing ? `${undoLabel} — ${UNDO_BUSY_REASON}` : undoLabel
+                  }
                   className="text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded outline-none focus-visible:ring-2 disabled:opacity-50"
                 >
                   <RotateCcw aria-hidden="true" className="h-4 w-4" />
