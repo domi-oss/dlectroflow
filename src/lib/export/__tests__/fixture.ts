@@ -68,6 +68,11 @@ export function makeSettings(overrides: Partial<Settings> = {}): Settings {
     // is a row an EXISTING account could have, and the export's job is to
     // reproduce what was stored, not what a fresh install would store.
     focusSoundCategories: [],
+    // #185 — held at `[]` for the same reason as its sibling above: this
+    // fixture is a row an EXISTING account could have, and an account that
+    // predates custom playlists has selected none. The export's job is to
+    // reproduce what was stored, not what a fresh install would store.
+    focusPlaylistIds: [],
     focusShuffle: false,
     focusPauseTogether: false,
     focusTimerTipDismissedAt: null,
