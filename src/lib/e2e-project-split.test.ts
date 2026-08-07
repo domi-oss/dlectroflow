@@ -19,7 +19,7 @@ import {
  * input, so the parser can be shown to FAIL rather than only shown to pass — a
  * guard whose logic is only ever run against the real repo cannot be trusted to
  * fire when the repo is wrong. The second reads the committed `e2e/` tree and
- * the real `playwright.config.ts` and asserts the invariants hold today.
+ * the real `config/playwright.config.ts` and asserts the invariants hold today.
  */
 
 /** The suite-wide `testMatch: "**\/*.spec.ts"`, expressed as a predicate. */
@@ -212,7 +212,7 @@ async function realProjects(): Promise<{
   raw: RawProject[];
   suiteTestMatch: unknown;
 }> {
-  const url = new URL("../../playwright.config.ts", import.meta.url).href;
+  const url = new URL("../../config/playwright.config.ts", import.meta.url).href;
   const mod = (await import(/* @vite-ignore */ url)) as {
     default: { testMatch?: unknown; projects?: RawProject[] };
   };
@@ -324,7 +324,7 @@ describe("the committed e2e tree routes cleanly (#127)", () => {
     const { raw } = await realProjects();
     expect(
       raw[0]?.name,
-      "a11y is no longer declared first — the dependencies above should still hold the ordering, but this pairing is deliberate; read the comment in playwright.config.ts before changing it",
+      "a11y is no longer declared first — the dependencies above should still hold the ordering, but this pairing is deliberate; read the comment in config/playwright.config.ts before changing it",
     ).toBe("a11y");
   });
 });
