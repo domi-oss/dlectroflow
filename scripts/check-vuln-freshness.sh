@@ -181,6 +181,43 @@ done
 [ -n "${CI_PROJECT_PATH:-}" ] ||
   undetermined "\`CI_PROJECT_PATH\` is unset, so there is no project to query"
 
+# ── Every numeric knob is validated HERE, before it reaches jq ────────────────
+# `jq --argjson depth abc` is a jq USAGE error, not a program error: jq exits
+# before evaluating anything. The request builders below sit OUTSIDE the `set +e`
+# window that guards the verdict, so under `set -euo pipefail` the whole script
+# died right there — measured exit 2 with EMPTY stdout.
+#
+# That is not a cosmetic bug. security-assessment.sh discards this script's exit
+# status on purpose (freshness is context on the count, not a second gate), so
+# the permanent issue it files rendered "How old are these numbers?" followed by
+# nothing, then the counts: a snapshot with no age marker, which is #166
+# verbatim. EVERY exit path has to print, so a bad knob is caught here and
+# reported through undetermined() like any other unknown.
+#
+# Checked with jq rather than a shell glob for the hours budget, because `case`
+# cannot cheaply express "a JSON number" and the value is handed to jq as
+# `--arg` (a string), which cannot itself be a usage error. The two counts are
+# checked with a glob because they are also used in shell integer comparisons
+# below, where only a whole number will do.
+positive_int() { # value → 0 if it is a whole number greater than zero
+  case "$1" in
+    '' | *[!0-9]*) return 1 ;;
+  esac
+  [ "$1" -gt 0 ]
+}
+positive_number() { # value → 0 if it parses as a JSON number greater than zero
+  jq -e -n --arg v "$1" \
+    '(try ($v | tonumber) catch null) | (type == "number") and . > 0' \
+    >/dev/null 2>&1
+}
+
+positive_int "$VULN_FRESHNESS_PIPELINE_DEPTH" ||
+  undetermined "\`VULN_FRESHNESS_PIPELINE_DEPTH\` must be a whole number of pipelines greater than zero, and is \`${VULN_FRESHNESS_PIPELINE_DEPTH}\`"
+positive_int "$VULN_FRESHNESS_MAX_PAGES" ||
+  undetermined "\`VULN_FRESHNESS_MAX_PAGES\` must be a whole number of pages greater than zero, and is \`${VULN_FRESHNESS_MAX_PAGES}\`"
+positive_number "$VULN_FRESHNESS_MAX_AGE_HOURS" ||
+  undetermined "\`VULN_FRESHNESS_MAX_AGE_HOURS\` must be a number of hours greater than zero, and is \`${VULN_FRESHNESS_MAX_AGE_HOURS}\`"
+
 # GL_TOKEN when it exists, the job token otherwise. Both reads need only
 # read_api; nothing here mutates.
 if [ -n "${GL_TOKEN:-}" ]; then
@@ -259,10 +296,15 @@ ANCHOR_QUERY='query($path: ID!, $ref: String!, $depth: Int!) {
   }
 }'
 
+# Guarded as well as validated: the knobs above are the failure mode that was
+# actually measured, but ANY jq failure here would abort the script under
+# `set -e` with nothing on stdout, and this script exists so that a consumer
+# never renders a count with no age beside it.
 jq -n --arg q "$ANCHOR_QUERY" --arg path "$CI_PROJECT_PATH" \
   --arg ref "$DEFAULT_BRANCH" --argjson depth "$VULN_FRESHNESS_PIPELINE_DEPTH" \
   '{query: $q, variables: {path: $path, ref: $ref, depth: $depth}}' \
-  >"$WORK/anchor-req.json"
+  >"$WORK/anchor-req.json" ||
+  undetermined "the scan-anchor request could not be built"
 
 code="$(post_graphql "$WORK/anchor-req.json" "$WORK/anchor.json")"
 check_response "$WORK/anchor.json" "$code" "the scan-anchor query"
@@ -294,7 +336,8 @@ while :; do
   jq -n --arg q "$VULN_QUERY" --arg path "$CI_PROJECT_PATH" --arg a "$after" \
     '{query: $q, variables: {path: $path,
                              after: (if $a == "" then null else $a end)}}' \
-    >"$WORK/vuln-req.json"
+    >"$WORK/vuln-req.json" ||
+    undetermined "the vulnerability request could not be built for page ${page}"
 
   code="$(post_graphql "$WORK/vuln-req.json" "$WORK/vuln-page.json")"
   check_response "$WORK/vuln-page.json" "$code" "the vulnerability query"
@@ -518,6 +561,16 @@ set -e
   undetermined "the verdict could not be computed from the responses"
 
 # The exit code rides out on the last line rather than in jq's own status, which
-# is reserved for "the program itself failed" above.
+# is reserved for "the program itself failed" above. Read and range-checked
+# BEFORE the block is printed: `exit ""` is a shell error, so an absent or
+# malformed trailer would have printed a verdict and then died with a status
+# nobody chose — the last shape in this script that could exit non-zero without
+# saying why.
+exit_code="$(sed -n '$s/^EXIT://p' "$WORK/verdict.txt")"
+case "$exit_code" in
+  0 | 1 | 2) ;;
+  *) undetermined "the verdict carried no exit code, so its own status cannot be trusted" ;;
+esac
+
 sed '$d' "$WORK/verdict.txt"
-exit "$(sed -n '$s/^EXIT://p' "$WORK/verdict.txt")"
+exit "$exit_code"

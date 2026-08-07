@@ -761,6 +761,42 @@ describe("scripts/check-vuln-freshness.sh", () => {
     expect(result.stdout).toMatch(/overridden via/);
     expect(result.stdout).not.toMatch(/168h weekly rescan/);
   });
+
+  // Every exit path prints. `security-assessment.sh` discards this script's exit
+  // status by design — freshness is context on the count, not a second gate — so
+  // a silent non-zero exit renders the permanent issue as "How old are these
+  // numbers?" followed by nothing, then the counts. A snapshot with no age
+  // marker, which is #166 verbatim.
+  //
+  // Measured before the fix: VULN_FRESHNESS_PIPELINE_DEPTH=abc gave exit 2 with
+  // EMPTY stdout. `jq --argjson depth abc` is a jq USAGE error, jq dies before
+  // evaluating anything, and the request builders sit outside the `set +e`
+  // window that guards the verdict — so `set -euo pipefail` took the whole
+  // script down before undetermined() could print.
+  describe.each([
+    ["VULN_FRESHNESS_PIPELINE_DEPTH", "abc"],
+    ["VULN_FRESHNESS_PIPELINE_DEPTH", "0"],
+    ["VULN_FRESHNESS_PIPELINE_DEPTH", "-3"],
+    ["VULN_FRESHNESS_MAX_PAGES", "abc"],
+    ["VULN_FRESHNESS_MAX_PAGES", "0"],
+    ["VULN_FRESHNESS_MAX_AGE_HOURS", "abc"],
+    ["VULN_FRESHNESS_MAX_AGE_HOURS", "-1"],
+  ])("a malformed %s=%s", (knob, value) => {
+    it("still prints, rather than exiting non-zero into silence", () => {
+      const result = drive(healthy(), { [knob]: value });
+      expect(result.status).toBe(2);
+      // THE assertion. Not "says the right thing" — says ANYTHING.
+      expect(result.stdout.trim()).not.toBe("");
+      // And names the knob, so the fix does not need a bisect.
+      expect(result.stdout).toContain(knob);
+      expect(result.stdout).toContain("This is an unknown, not an all-clear.");
+      // Never a pass, and never the misleading message the unvalidated
+      // MAX_PAGES produced ("did not terminate within abc pages" blamed
+      // pagination for a bad input).
+      expect(result.stdout).not.toContain("✅");
+      expect(result.stdout).not.toMatch(/did not terminate within/);
+    });
+  });
 });
 
 // ── the wiring ───────────────────────────────────────────────────────────────
