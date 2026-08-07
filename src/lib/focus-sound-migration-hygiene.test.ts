@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  findLateConstraintDrops,
   findFocusSoundViolations,
   parseFocusSoundCategoryBackfill,
   splitStatements,
@@ -185,5 +186,95 @@ describe("the real prisma/migrations", () => {
       FOCUS_SOUND_TRACKS.map((t) => [t.id, t.category]),
     );
     expect(backfill).toEqual(expected);
+  });
+});
+
+/**
+ * The guard behind the 2026-08-07 production incident.
+ *
+ * Synthetic first, so it can be watched failing on the exact shape it claims to
+ * catch — which matters more here than usual, because the bug it exists for was
+ * INVISIBLE to every other gate. The real migration's `UPDATE`s touch zero rows
+ * on an empty database, so CI, the integration suite and every local run passed
+ * it. Only production had rows.
+ */
+describe("findLateConstraintDrops — synthetic", () => {
+  const file = (sql: string) => [{ name: "20260101000000_x", sql }];
+
+  it("flags a write that lands before its constraint is dropped", () => {
+    const v = findLateConstraintDrops(
+      file(`
+        UPDATE "Settings" SET "focusSound" = 'on' WHERE "focusSound" <> 'off';
+        ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+        ALTER TABLE "Settings" ADD CONSTRAINT "Settings_focusSound_check"
+          CHECK ("focusSound" IN ('off', 'on'));
+      `),
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].reason).toMatch(/still live when the write runs/);
+  });
+
+  it("passes once the drop moves above the write — the actual fix", () => {
+    expect(
+      findLateConstraintDrops(
+        file(`
+          ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+          UPDATE "Settings" SET "focusSound" = 'on' WHERE "focusSound" <> 'off';
+          ALTER TABLE "Settings" ADD CONSTRAINT "Settings_focusSound_check"
+            CHECK ("focusSound" IN ('off', 'on'));
+        `),
+      ),
+    ).toEqual([]);
+  });
+
+  it("ignores a write to a column with no CHECK constraint in the file", () => {
+    expect(
+      findLateConstraintDrops(
+        file(`UPDATE "Settings" SET "typeface" = 'figtree';`),
+      ),
+    ).toEqual([]);
+  });
+
+  // A drop for a DIFFERENT column must not excuse the write.
+  it("matches on the column, not merely on the presence of a drop", () => {
+    const v = findLateConstraintDrops(
+      file(`
+        UPDATE "Settings" SET "focusSound" = 'on';
+        ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSoundCategory_check";
+      `),
+    );
+    expect(v).toEqual([]);
+  });
+
+  // The comment in the real migration names the constraint; a commented-out
+  // drop is not a drop.
+  it("does not count a drop that only appears in a comment", () => {
+    const v = findLateConstraintDrops(
+      file(`
+        UPDATE "Settings" SET "focusSound" = 'on';
+        -- ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+      `),
+    );
+    expect(v).toHaveLength(0);
+  });
+});
+
+describe("findLateConstraintDrops — the committed migrations", () => {
+  it("no migration writes to a column whose CHECK it drops too late", () => {
+    const violations = findLateConstraintDrops(readMigrations());
+    expect(
+      violations,
+      violations
+        .map((v) => `${v.migration}: ${v.reason}\n  ${v.statement}`)
+        .join("\n\n"),
+    ).toEqual([]);
+  });
+
+  // Proves the scan above is looking at something. A zero from a scanner
+  // pointed at nothing is indistinguishable from a zero that means clean.
+  it("actually read the migration this guard was written for", () => {
+    const names = readMigrations().map((m) => m.name);
+    expect(names).toContain("20260806100000_settings_focus_sound_categories");
+    expect(names.length).toBeGreaterThan(30);
   });
 });

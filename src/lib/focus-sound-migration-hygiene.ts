@@ -287,3 +287,75 @@ export function parseFocusSoundCategoryBackfill(
   }
   return map;
 }
+
+/**
+ * A write that a still-live CHECK constraint would reject (#180 / the 2026-08-07
+ * production incident).
+ *
+ * `20260806100000_settings_focus_sound_categories` wrote `focusSound = 'on'`
+ * and only THEN dropped `Settings_focusSound_check`, which permitted `'off'`
+ * plus ten `lofi_*` track ids and nothing else. Every existing row violated it:
+ *
+ *     ERROR: new row for relation "Settings" violates check constraint
+ *            "Settings_focusSound_check"   (SQLSTATE 23514)
+ *
+ * The transaction rolled back, Prisma recorded a failed migration, and P3009
+ * then refused every later migration — no deploy reached the cluster for two
+ * days while `main` moved on.
+ *
+ * **It could not fail anywhere but production.** Steps 2–5 of that file are
+ * `UPDATE`s, and CI, the integration suite and every local run migrate a fresh,
+ * EMPTY `Settings` table. Zero rows updated means no constraint is ever
+ * evaluated, so the migration passed every gate the project has. Only real rows
+ * expose it — which is the definition of a check that cannot be shown to fail.
+ *
+ * This guard closes that by reading the ORDER of statements rather than their
+ * effect, so it needs no database and no data. Within one migration: if a
+ * column is written and that column's CHECK constraint is dropped later in the
+ * same file, the drop is too late.
+ *
+ * The constraint→column mapping leans on this repo's naming convention,
+ * `<Table>_<column>_check`, which every constraint in `prisma/migrations`
+ * follows. A constraint named otherwise is skipped rather than guessed at —
+ * a false accusation would get the guard relaxed, and a guard that cries wolf
+ * is worse than none.
+ */
+export function findLateConstraintDrops(
+  files: readonly MigrationFile[],
+): MigrationViolation[] {
+  const violations: MigrationViolation[] = [];
+
+  for (const file of files) {
+    const statements = splitStatements(stripSqlComments(file.sql));
+
+    // Where each column's CHECK constraint is dropped, by statement index.
+    const dropIndexByColumn = new Map<string, number>();
+    statements.forEach((s, i) => {
+      const m =
+        /DROP\s+CONSTRAINT\s+"([A-Za-z0-9_]+)_([A-Za-z0-9]+)_check"/i.exec(s);
+      if (m) dropIndexByColumn.set(`${m[1]}.${m[2]}`, i);
+    });
+
+    statements.forEach((s, i) => {
+      const upd =
+        /UPDATE\s+"([A-Za-z0-9_]+)"[\s\S]*?SET\s+"([A-Za-z0-9]+)"\s*=/i.exec(s);
+      if (!upd) return;
+      const key = `${upd[1]}.${upd[2]}`;
+      const dropAt = dropIndexByColumn.get(key);
+      if (dropAt === undefined || dropAt < i) return;
+      violations.push({
+        migration: file.name,
+        statement: s.replace(/\s+/g, " ").trim().slice(0, 160),
+        reason:
+          `writes "${upd[2]}" at statement ${i + 1} but drops ` +
+          `"${upd[1]}_${upd[2]}_check" at statement ${dropAt + 1}. The old ` +
+          `constraint is still live when the write runs, so any EXISTING row ` +
+          `whose new value it forbids fails with SQLSTATE 23514 and rolls the ` +
+          `whole migration back. Move the DROP above the write; only the ` +
+          `replacement ADD belongs after it.`,
+      });
+    });
+  }
+
+  return violations;
+}
