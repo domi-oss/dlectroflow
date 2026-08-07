@@ -48,16 +48,23 @@ function instantOf(value: Date | string | null | undefined): Date | null {
  * so the server's markup and the browser's hydration are rendered from the same
  * instant.
  *
- * `timeZone` is likewise passed by the page. `schedulingTimeZone()` reads a
- * server-only env var, which is `undefined` in the browser bundle — so relying
- * on its default inside a client component would silently format in
- * Europe/London for a self-hoster who set another zone, and disagree with the
- * server's own markup.
+ * `timeZone` is likewise passed by the page, and it is **required** rather than
+ * defaulted. `schedulingTimeZone()` reads a server-only env var, which is
+ * `undefined` in the browser bundle — so relying on its default inside a client
+ * component would silently format in Europe/London for a self-hoster who set
+ * another zone, and disagree with the server's own markup.
+ *
+ * It was optional until review on `!284` pointed out that an optional parameter
+ * re-opens the very hole the paragraph above describes: a future client-component
+ * caller that forgets it gets the silent wrong zone instead of a compile error.
+ * The rest of this MR already made `SingleFocusable.dueAt` and `.taskId` required
+ * on that exact reasoning, so leaving this one optional was inconsistent with its
+ * own argument. A failure that cannot be seen has to be made impossible to write.
  */
 export function dueByLabel(
   dueAt: Date | string | null | undefined,
   now: number,
-  timeZone?: string,
+  timeZone: string,
 ): DueBy | null {
   const due = instantOf(dueAt);
   if (!due) return null;

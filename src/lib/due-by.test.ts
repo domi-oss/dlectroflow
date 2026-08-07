@@ -6,28 +6,34 @@ import { dueByLabel } from "./due-by";
  *  because the fixture happened to straddle a midnight. */
 const NOW = Date.parse("2026-08-06T12:00:00Z");
 
+// The zone every case that does not care about zoning uses. Named and explicit
+// because `timeZone` became REQUIRED in review on `!284` — these calls used to
+// inherit `schedulingTimeZone()`, so what they were actually asserting depended
+// on an env var the test never set. Stating it is the point of the change.
+const TZ = "Europe/London";
+
 describe("dueByLabel (#187)", () => {
   it("has nothing to say when there is no deadline", () => {
     // A row with no deadline renders NOTHING — not an em dash, not "not
     // scheduled" — so the absence has to be representable, and `null` is it.
-    expect(dueByLabel(null, NOW)).toBeNull();
-    expect(dueByLabel(undefined, NOW)).toBeNull();
+    expect(dueByLabel(null, NOW, TZ)).toBeNull();
+    expect(dueByLabel(undefined, NOW, TZ)).toBeNull();
   });
 
   it("treats an unreadable date as no deadline rather than as 'Invalid Date'", () => {
-    expect(dueByLabel("not a date", NOW)).toBeNull();
-    expect(dueByLabel(new Date(Number.NaN), NOW)).toBeNull();
+    expect(dueByLabel("not a date", NOW, TZ)).toBeNull();
+    expect(dueByLabel(new Date(Number.NaN), NOW, TZ)).toBeNull();
   });
 
   it("formats the day weekday-first and unambiguous, never as a number pair", () => {
-    const label = dueByLabel("2026-08-13T09:00:00Z", NOW);
+    const label = dueByLabel("2026-08-13T09:00:00Z", NOW, TZ);
     expect(label?.dayText).toBe("Thu 13 Aug");
     // The machine-readable twin for <time dateTime>, in the scheduling zone.
     expect(label?.isoDate).toBe("2026-08-13");
   });
 
   it("accepts a Date as readily as an ISO string", () => {
-    expect(dueByLabel(new Date("2026-08-13T09:00:00Z"), NOW)?.dayText).toBe(
+    expect(dueByLabel(new Date("2026-08-13T09:00:00Z"), NOW, TZ)?.dayText).toBe(
       "Thu 13 Aug",
     );
   });
@@ -38,12 +44,12 @@ describe("dueByLabel (#187)", () => {
     // due today into "Overdue" at one minute past whatever time of day the
     // previous value happened to carry.
     const dueEarlyToday = "2026-08-06T00:30:00Z";
-    expect(dueByLabel(dueEarlyToday, NOW)?.overdue).toBe(false);
+    expect(dueByLabel(dueEarlyToday, NOW, TZ)?.overdue).toBe(false);
   });
 
   it("is overdue once the due day itself has passed", () => {
     // 20:00Z is 21:00 on the 5th in BST — yesterday, and therefore missed.
-    expect(dueByLabel("2026-08-05T20:00:00Z", NOW)?.overdue).toBe(true);
+    expect(dueByLabel("2026-08-05T20:00:00Z", NOW, TZ)?.overdue).toBe(true);
   });
 
   it("reads the due day in the scheduling zone, not in UTC", () => {
@@ -71,6 +77,6 @@ describe("dueByLabel (#187)", () => {
   });
 
   it("marks a far-future deadline as not overdue", () => {
-    expect(dueByLabel("2027-01-04T09:00:00Z", NOW)?.overdue).toBe(false);
+    expect(dueByLabel("2027-01-04T09:00:00Z", NOW, TZ)?.overdue).toBe(false);
   });
 });

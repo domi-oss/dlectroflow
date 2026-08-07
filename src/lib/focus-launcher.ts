@@ -143,12 +143,29 @@ export type SingleFocusable = {
    *
    * **This is the seam, and it is one line at the caller** (`/focus/page.tsx`).
    * `focusLauncherData` has no DB access, so it neither knows nor decides where
-   * a to-do's deadline is stored — it carries what it was handed. Today the page
-   * reads the linked `Task.scheduleDueAt`, which is the only deadline column a
-   * single-task row can reach; a to-do with no Task therefore has no deadline to
-   * show yet. #186 gives `BrainDumpItem` its own schedule columns, and the page's
-   * mapping is where that becomes authoritative — nothing below this type has to
-   * change.
+   * a to-do's deadline is stored — it carries what it was handed.
+   *
+   * **What the page passes today, per lane — corrected in review on `!284`,
+   * because this paragraph used to claim more than the code does:**
+   *
+   * - **Multi-step task rows:** `task.scheduleDueAt` (`page.tsx`, the `tasks`
+   *   mapping). Real deadlines flow.
+   * - **Single-task rows:** `null`, **unconditionally**. The mapping does not
+   *   read a linked `Task.scheduleDueAt` and could not — `items` is built as
+   *   `rawItems.map(({ task, ...item }) => …)`, which strips the `task` object
+   *   before `singleTasks` is assembled, so it is not in scope at that line.
+   *
+   * The earlier wording said "the page reads the linked `Task.scheduleDueAt` ...
+   * a to-do with no Task therefore has no deadline to show yet", which reads as
+   * though a single-task row *with* a linked Task already shows one. It does not,
+   * and someone picking this up would have gone looking for a bug that is really
+   * an unimplemented branch. `page.tsx`'s own comment at that line has always
+   * been accurate; only this one drifted.
+   *
+   * #186 (`!281`) gives `BrainDumpItem` its own schedule columns, at which point
+   * that line becomes `i.scheduleDueAt` and nothing below this type changes. The
+   * field is REQUIRED rather than optional precisely so the line has to exist and
+   * be read as a decision.
    */
   dueAt: Date | string | null;
 };
