@@ -39,6 +39,28 @@ function normalizeIdentity(value: string | undefined): string | undefined {
 
 const GITLAB = "https://gitlab.com";
 
+/**
+ * Whole-request deadline for both provider calls the sign-in callback makes
+ * (#174).
+ *
+ * Neither carried one, and Node's fetch defaults to a 300 s header timeout — so
+ * a stalled provider left the callback sitting on a blank screen for five
+ * minutes with no error, no retry affordance and no explanation. Every failure
+ * branch in the callback redirects to /login?error=…; a deadline is what makes
+ * sure one of them is reached.
+ *
+ * `AbortSignal.timeout` rather than a hand-owned timer cleared on headers (the
+ * shape `fetchFromStore` in focus-catalog-source.ts uses) because both
+ * responses here are a few hundred bytes of JSON: a provider that answers
+ * promptly and then trickles the body should hit this too, and there is no long
+ * stream to truncate.
+ *
+ * 10 s is the budget: comfortably above a slow mobile round trip to the
+ * provider, and short enough that the user reads it as a failure rather than as
+ * the page having died.
+ */
+export const PROVIDER_FETCH_TIMEOUT_MS = 10_000;
+
 const gitlabProvider: AuthProvider = {
   buildAuthorizeUrl({ redirectUri, state, codeChallenge }) {
     const { clientId } = authConfig();
@@ -65,6 +87,7 @@ const gitlabProvider: AuthProvider = {
         redirect_uri: redirectUri,
         code_verifier: codeVerifier,
       }),
+      signal: AbortSignal.timeout(PROVIDER_FETCH_TIMEOUT_MS),
     });
     if (!res.ok)
       throw new Error(`GitLab token exchange failed (${res.status})`);
@@ -74,6 +97,7 @@ const gitlabProvider: AuthProvider = {
   async fetchProfile(accessToken) {
     const res = await fetch(`${GITLAB}/api/v4/user`, {
       headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(PROVIDER_FETCH_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`GitLab user fetch failed (${res.status})`);
     const data = (await res.json()) as {

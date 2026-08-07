@@ -12,7 +12,11 @@ import {
   isOwnerOnlyPath,
   isAuthenticatedOnlyPath,
 } from "@/lib/auth/gate";
-import { requestOrigin } from "@/lib/origin";
+import {
+  canonicalOriginRedirect,
+  requestOrigin,
+  inboundHost,
+} from "@/lib/origin";
 
 export const config = {
   // Skip Next internals + static assets; run on everything else.
@@ -21,6 +25,35 @@ export const config = {
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  // #174 — move the request onto the canonical origin before anything else.
+  //
+  // FIRST, ahead of every session decision, because everything below this line
+  // sets a host-only cookie. The bug this fixes was a sign-in begun on a
+  // non-canonical hostname: the PKCE verifier and OAuth state landed there, the
+  // provider returned the browser to the PUBLIC_ORIGIN host, and the callback
+  // failed `missing_oauth_params` on cookies the browser held but would not
+  // send — an unbreakable loop with no way out. Minting a guest sandbox on a
+  // host we are about to leave has the same shape, one cookie down.
+  //
+  // Host precedence is `inboundHost` (src/lib/origin.ts) — x-forwarded-host,
+  // then host. Both are attacker-controllable, and that is fine here:
+  // canonicalOriginRedirect only ever COMPARES the inbound host, and builds the
+  // destination from PUBLIC_ORIGIN, so a spoofed Host can at worst trigger a
+  // redirect to where the request was already going.
+  const host = inboundHost(req.headers) ?? req.nextUrl.host;
+  const canonical = canonicalOriginRedirect({
+    host,
+    pathname,
+    search: req.nextUrl.search,
+  });
+  // 307, not 308. A permanent redirect between two hostnames is cached by the
+  // browser indefinitely, and the canonical host is a runtime value a redeploy
+  // can change — flip it after a 308 is cached and the two hosts point at each
+  // other from cache alone, a loop no reload can clear. The SEO value of a
+  // legacy hostname is not worth that.
+  if (canonical) return NextResponse.redirect(canonical, 307);
+
   const { sessionSecret } = authConfig();
   const guestTtlHours = Number(process.env.GUEST_SANDBOX_TTL_HOURS ?? 24);
 
