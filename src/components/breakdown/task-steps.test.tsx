@@ -476,3 +476,70 @@ describe("TaskSteps — the note trigger sits in the step's action group (#44)",
     );
   });
 });
+
+describe("TaskSteps — a failed un-complete says so, and is retryable (#198, round 11)", () => {
+  // Round 11's second finding. The timer's undo routes through `run()` and shows
+  // "it is still marked done" with a Try again; this row-level one had no `catch`
+  // at all, so a failed undo cleared the spinner and reverted to the idle done
+  // appearance with nothing said. The CHANGELOG entry for #198 claims "an undo
+  // that fails is an undo you can retry" — that was true on the timer and false
+  // here, which makes it a defect in this MR rather than a pre-existing gap.
+  it("surfaces the failure, keeps the row usable, and retries on demand", async () => {
+    const user = userEvent.setup();
+    vi.mocked(uncompleteStep).mockRejectedValueOnce(new Error("db down"));
+    render(
+      <TaskSteps
+        taskId="t1"
+        steps={[{ ...baseStep(), id: "s1", text: "First", done: true }]}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /mark not done: first/i }),
+    );
+
+    // Said out loud, not just coloured: `role="alert"` is what reaches a screen
+    // reader without moving focus off whatever the user was doing.
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/still marked done/i);
+    // The claim is TRUE, which is why this string can be reused verbatim from the
+    // timer: the guarded transaction rolls back, so the step really is still done.
+    expect(refresh).not.toHaveBeenCalled();
+
+    // Not left stuck disabled — `finally` clears the in-flight id even on a throw.
+    const undo = screen.getByRole("button", { name: /mark not done: first/i });
+    expect(undo).toBeEnabled();
+
+    // And the retry actually retries.
+    await user.click(screen.getByRole("button", { name: /try again/i }));
+    await waitFor(() => expect(uncompleteStep).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
+    );
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("keeps one row's failure to that row", async () => {
+    const user = userEvent.setup();
+    vi.mocked(uncompleteStep).mockRejectedValueOnce(new Error("db down"));
+    render(
+      <TaskSteps
+        taskId="t1"
+        steps={[
+          { ...baseStep(), id: "s1", text: "First", done: true },
+          { ...baseStep(), id: "s2", order: 2, text: "Second", done: true },
+        ]}
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: /mark not done: first/i }),
+    );
+    await screen.findByRole("alert");
+    // One notice, on the row that failed — not a page-level banner that leaves the
+    // user guessing which of several done rows it refers to.
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(
+      screen.getByRole("button", { name: /mark not done: second/i }),
+    ).toBeEnabled();
+  });
+});

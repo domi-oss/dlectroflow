@@ -105,21 +105,46 @@ export function TaskSteps({
     () => new Set(),
   );
 
+  // #198 round 11 — this handler had no `catch`, so a failed undo cleared the
+  // spinner and left the row looking idle with nothing said: no notice, no retry,
+  // and `router.refresh()` skipped. The timer's undo has surfaced exactly this
+  // failure since round 4, and #198's own CHANGELOG entry promises "an undo that
+  // fails is an undo you can retry" — true there, false here, which makes it a
+  // defect in this MR rather than a gap it inherited.
+  //
+  // Keyed per step for the same reason `undoingIds` is: a page-level banner would
+  // leave the user working out which of several identical-looking done rows it
+  // referred to.
+  const [undoFailedIds, setUndoFailedIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const withoutId = (ids: ReadonlySet<string>, stepId: string) => {
+    const next = new Set(ids);
+    next.delete(stepId);
+    return next;
+  };
+
   const uncomplete = (stepId: string) => {
     setUndoingIds((ids) => new Set(ids).add(stepId));
+    // Cleared on the way in, not only on success: a retry that is still in flight
+    // must not still be showing the previous attempt's failure.
+    setUndoFailedIds((ids) => withoutId(ids, stepId));
     start(async () => {
       try {
         await uncompleteStep(stepId);
         router.refresh();
+      } catch {
+        // Deliberately not rethrown. The server action is atomic, so a rejection
+        // means nothing was committed and the step really is still done — which is
+        // what the notice says. Swallowing it here is what keeps the page alive to
+        // offer the retry; the alternative is an error boundary that takes the
+        // whole list down over one row's failed write.
+        setUndoFailedIds((ids) => new Set(ids).add(stepId));
       } finally {
         // `finally`, not after the await: a throw that left the id in the set
         // would disable that row's undo for the rest of the page's life, which is
         // a worse failure than the double-submit the flag exists to prevent.
-        setUndoingIds((ids) => {
-          const next = new Set(ids);
-          next.delete(stepId);
-          return next;
-        });
+        setUndoingIds((ids) => withoutId(ids, stepId));
       }
     });
   };
@@ -220,6 +245,28 @@ export function TaskSteps({
                   <RotateCcw aria-hidden="true" className="h-4 w-4" />
                 </button>
               </div>
+              {/* #198 round 11 — a failed undo has to say so. The string is the
+                  timer's own, verbatim, because the failure is the same one and the
+                  claim is literally true here: the action is atomic, so a rejection
+                  means nothing committed and the step really is still done. The red
+                  is `SaveIndicator`'s AA-measured pair (#109) rather than a fresh
+                  `red-600`, which fails AA at this size by 0.02 and is exactly the
+                  shade nobody catches by eye. */}
+              {undoFailedIds.has(s.id) && (
+                <p
+                  role="alert"
+                  className="mt-2 flex flex-wrap items-center gap-2 text-xs text-red-700 dark:text-red-400"
+                >
+                  <span>{t("focus.error.undo", voice)}</span>
+                  <button
+                    type="button"
+                    onClick={() => uncomplete(s.id)}
+                    className="focus-visible:ring-ring inline-flex min-h-11 items-center rounded underline underline-offset-4 outline-none focus-visible:ring-2"
+                  >
+                    {t("focus.error.retry", voice)}
+                  </button>
+                </p>
+              )}
               {/* #44 — a DONE step gets its note READ-ONLY and no control.
                   Annotating finished work has no purpose, so the "Note"
                   affordance would be clutter on a row that deliberately carries
