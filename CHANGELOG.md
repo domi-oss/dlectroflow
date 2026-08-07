@@ -443,7 +443,12 @@ operators upgrading a self-hosted instance don't get surprised.
   otherwise finishing that last step again would have paid for the same task twice.
   **Points for time spent focusing are yours to keep**, on both sides of an undo:
   you really did focus, and focusing on the step again means running another real
-  session for it.
+  session for it. **An undo that fails is an undo you can retry** — it either
+  happens completely or not at all, so a hiccup leaves the step exactly as it was
+  rather than half put-back with the points still banked, and pressing the button
+  again finishes the job. And **using the keyboard, focus lands on the step's own
+  Start button** once the step is back, rather than being dropped nowhere at the
+  moment you have just fixed a mistake.
 
 - **The focus timer's "Complete step" sat where Pause belongs (#197).** In a
   running session the controls read *Complete step, then Pause*, with Complete
