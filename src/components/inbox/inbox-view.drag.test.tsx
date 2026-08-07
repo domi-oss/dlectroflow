@@ -166,6 +166,62 @@ function announcer(): HTMLElement {
   return screen.getByTestId("move-announcer");
 }
 
+/**
+ * Records every `[data-drag-ghost]` the drag mounts, wherever it mounts it, so
+ * an assertion about the preview cannot race the frame that takes it away
+ * again (#178).
+ *
+ * A `MutationObserver` rather than a `querySelector` after the fact, because
+ * the preview's whole life is ONE animation frame and "is it in the DOM right
+ * now?" is therefore a question whose answer depends on machine load — see the
+ * spec below for the full derivation. Mutation records are queued at mutation
+ * time and outlive the removal, so this answers the question #62 is actually
+ * asking — "was a ghost of ours mounted, outside the row, with the row's text"
+ * — rather than "is it still there at the instant I happened to look".
+ *
+ * `parent` is the node it was mounted INTO, captured at mount time: after
+ * cleanup the container is detached, so reading `ghost.parentElement` later
+ * would answer `null` and quietly turn the "rendered outside the row"
+ * assertion into one that passes for the wrong reason.
+ */
+function watchForGhost() {
+  const seen: { node: Element; parent: Node }[] = [];
+  const collect = (records: MutationRecord[]) => {
+    for (const record of records) {
+      for (const added of Array.from(record.addedNodes)) {
+        if (!(added instanceof Element)) continue;
+        const ghost = added.matches("[data-drag-ghost]")
+          ? added
+          : added.querySelector("[data-drag-ghost]");
+        // `record.target` is the parent of `added`, which is the parent of
+        // `ghost` ONLY when the ghost is itself the appended node. With
+        // `setCustomNativeDragPreview` the ghost is nested inside an appended
+        // container, so `record.target` would be its grandparent —
+        // `document.body` — and `parent` would not mean what its JSDoc says.
+        // Read at mount time, while the subtree is still attached.
+        if (ghost)
+          seen.push({
+            node: ghost,
+            parent:
+              ghost === added ? record.target : (ghost.parentNode ?? added),
+          });
+      }
+    }
+  };
+  const observer = new MutationObserver(collect);
+  observer.observe(document.body, { childList: true, subtree: true });
+  return {
+    /** The first ghost mounted, or null. Drains records still pending delivery
+     * — the observer's own callback is a microtask, so a synchronous read
+     * straight after `act` would otherwise miss the very thing it is for. */
+    mounted() {
+      collect(observer.takeRecords());
+      return seen[0] ?? null;
+    },
+    stop: () => observer.disconnect(),
+  };
+}
+
 /** pragmatic-drag-and-drop defers `onDragStart` to the animation frame after
  * the native `dragstart`, so a test that asserts on lift has to let one
  * frame pass. (A later `drop` flushes it, but the lift assertions cannot
@@ -292,29 +348,65 @@ describe("#62 the drag preview is our own element, not the grip's box", () => {
   // What this can assert in jsdom is that the ghost really is rendered from
   // our own component during `dragstart` (real-browser pixels still need a
   // device — see the MR).
+  // #178 — this spec used to read `document.body` straight after `dragstart`
+  // and it failed intermittently, with exactly "no preview was mounted", on
+  // commits that touched nothing in its path.
+  //
+  // The cause is a race, and the losing side is the assertion. The preview's
+  // whole life is ONE animation frame: `setCustomNativeDragPreview` appends its
+  // container synchronously during the native `dragstart`, then removes it from
+  // its OWN `monitorForElements({ onDragStart: cleanup })` — and
+  // pragmatic-drag-and-drop fires `onDragStart` on the frame after the lift,
+  // which is the very frame `nextFrame()` above exists to wait for
+  // (`dist/cjs/public-utils/element/custom-native-drag-preview/
+  // set-custom-native-drag-preview.js`). An awaited async `act` yields to the
+  // macrotask queue, so jsdom's ~16ms `requestAnimationFrame` can fire inside
+  // that yield: on a loaded runner the container is already gone by the time
+  // the query runs, and on an idle laptop it never is.
+  //
+  // Measured on this branch before the fix: 0 failures in 30 isolated runs and
+  // 0 in 8 full-suite runs — the window is narrow, which is why it only ever
+  // showed up on CI. Forcing the frame reproduced it 30 times out of 30.
+  //
+  // Two earlier theories, both ruled out by measurement rather than argument:
+  // the module graph slowing setup past a timeout (1.71s vs 1.73s, #178), and
+  // #169's shared `useTransition` dropping a press on a disabled control (the
+  // way #168 failed) — this file presses nothing before the assertion, and
+  // `move-to-menu.tsx`, the only control it does press, has no disabled state.
+  //
+  // The fix is to stop asking a question with a timing-dependent answer, NOT to
+  // wait longer or retry: both would turn a visible intermittent failure into
+  // an invisible one. `watchForGhost` records the mount as it happens, so the
+  // assertion is about what the drag DID rather than about what survived until
+  // we looked. The frame is then taken deliberately, so the hard case — the
+  // cleanup landing first — is the case this runs every time.
   it("renders the ghost row into a preview container while the drag starts, then takes it away", async () => {
     const { container } = renderInbox([
       makeItem({ id: "p1", text: "Test de UI-elementen in de checkout flow" }),
     ]);
+    const watch = watchForGhost();
 
-    // The container's whole life is one tick of `dragstart` plus the frame the
-    // lift completes on. `act` flushes React's portal into it; the frame after
-    // that, `setCustomNativeDragPreview` removes it.
-    await act(async () => {
-      fireEvent.dragStart(gripFor(container, "p1"));
-    });
+    try {
+      await act(async () => {
+        fireEvent.dragStart(gripFor(container, "p1"));
+      });
+      // The frame the flake was losing to, taken on purpose.
+      await nextFrame();
 
-    const ghost = document.body.querySelector("[data-drag-ghost]");
-    expect(ghost, "no preview was mounted").not.toBeNull();
-    expect(ghost!.textContent).toContain(
-      "Test de UI-elementen in de checkout flow",
-    );
-    // …rendered outside the row, which is the point: the browser photographs
-    // this element, so nothing about the 28×44 grip's box can shape it.
-    expect(container.contains(ghost)).toBe(false);
+      const ghost = watch.mounted();
+      expect(ghost, "no preview was mounted").not.toBeNull();
+      expect(ghost!.node.textContent).toContain(
+        "Test de UI-elementen in de checkout flow",
+      );
+      // …rendered outside the row, which is the point: the browser photographs
+      // this element, so nothing about the 28×44 grip's box can shape it.
+      expect(container.contains(ghost!.parent)).toBe(false);
 
-    await nextFrame();
-    expect(document.body.querySelector("[data-drag-ghost]")).toBeNull();
+      // …and taken away again, so the user never sees the container itself.
+      expect(document.body.querySelector("[data-drag-ghost]")).toBeNull();
+    } finally {
+      watch.stop();
+    }
   });
 });
 

@@ -2252,38 +2252,22 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     ).toBeInTheDocument();
   });
 
-  it("holds every row's Schedule control while one row's schedule is in flight (#168)", async () => {
-    // The trap behind #168, pinned so the next spec to press two Schedule
-    // controls in sequence finds it documented rather than rediscovering it as
-    // a load-dependent flake.
+  it("holds only the scheduling row's own control while its push is in flight (#169)", async () => {
+    // The spec !265 landed, turned round. That one pinned the shared flag as
+    // OBSERVED behaviour and said so in as many words — "not as correct
+    // behaviour — #169" — so fixing #169 means inverting it, not deleting it:
+    // the same scenario, the opposite expectation, and the #168 trap it
+    // documented removed at the source rather than merely renamed.
     //
-    // `pending` comes from ONE `useTransition` shared by the whole list
-    // (inbox-view.tsx:230) and every Schedule control carries
-    // `disabled={pending}` (row-actions.tsx), so an action started on one row
-    // disables the control on all of them.
+    // What survives unchanged is the guard the prop was written for. Row A's
+    // own control is still held while row A's push is in flight, which is all
+    // double-submit protection ever needed. What goes is the reach: `pending`
+    // used to come from ONE `useTransition` shared by every action in the list,
+    // so 20 call sites through the generic `run()` — rename, complete, snooze,
+    // delete, dismissPrompt — disabled every Schedule button in the list.
     //
-    // This spec pins that as OBSERVED BEHAVIOUR, not as correct behaviour —
-    // #169. An earlier version of this comment justified the shared lock as
-    // "pushing to Google Tasks is workspace-wide"; that is wrong, and the
-    // codebase disproves it. The same flag is flipped by 20 call sites through
-    // the generic `run()` — completeItem, renameItem, snoozeBrainDumpItem,
-    // deleteBrainDumpItem, freshenItem, keepAsTask, reopenItem, dismissPrompt —
-    // so RENAMING an item disables every Schedule button in the list, which no
-    // workspace-wide argument covers. `row-actions.tsx:44` documents the prop as
-    // "a schedule call for THIS row", and two of its own unit tests say the same,
-    // so the prop is honest about the intent and the parent does not honour it.
-    //
-    // Waiting for the control to be enabled is the right thing for a test to do
-    // either way, which is why this MR still lands ahead of #169: it removes a
-    // dropped press, and it does not depend on who wins the design argument.
-    //
-    // The consequence for tests is the part that cost a pipeline: `await
-    // user.click` does not await the transition, and `userEvent` discards a
-    // press on a disabled control WITHOUT raising anything. So a spec that
-    // presses a second Schedule control without waiting gets no error at the
-    // press — it gets a timeout, one second later, on a find for something that
-    // was never going to render. Holding the action's promise unresolved makes
-    // the window real rather than a race (the technique !237 and !264 used).
+    // Holding the action's promise unresolved makes the in-flight window real
+    // rather than a race (the technique !237, !264 and !265 used).
     const { scheduleSingleTask, pushStepsToGoogleTasks } =
       await import("@/app/actions/google-schedule");
     let release!: (value: { ok: true }) => void;
@@ -2313,11 +2297,17 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
 
     await user.click(within(rowA).getByRole("button", { name: /schedule/i }));
     await user.click(within(rowA).getByRole("button", { name: /^30 min$/i }));
-    expect(scheduleB).toBeDisabled();
 
-    // The press that goes nowhere, and says nothing about having gone nowhere.
+    // Row A's own control: held, and it says why rather than going quietly
+    // grey — a disabled button swallows a press with no error and no toast.
+    const scheduleA = within(rowA).getByRole("button", { name: /schedule/i });
+    expect(scheduleA).toBeDisabled();
+    expect(scheduleA).toHaveAccessibleName(/already in progress for this row/i);
+
+    // Row B: never a party to row A's push, so its press must land.
+    expect(scheduleB).toBeEnabled();
     await user.click(scheduleB);
-    expect(pushStepsToGoogleTasks).not.toHaveBeenCalled();
+    expect(pushStepsToGoogleTasks).toHaveBeenCalledWith("t1", undefined);
 
     // Settle the transition before returning. An unresolved action outliving
     // the spec fires its state update during or after `afterEach(cleanup)`,
@@ -2326,7 +2316,77 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     // live again is the observable end of the transition, so waiting on it
     // needs no arbitrary timeout.
     release({ ok: true });
-    await waitFor(() => expect(scheduleB).toBeEnabled());
+    await waitFor(() => expect(scheduleA).toBeEnabled());
+  });
+
+  it("renaming a row disables no Schedule control at all — the live half of #169", async () => {
+    // The production defect, driven through the exact path a user takes.
+    //
+    // `pending` came from one `useTransition` shared by every action in the
+    // list while ONLY the Schedule controls read it, so renaming a row — which
+    // has nothing to do with scheduling, and no workspace-wide argument covers
+    // — greyed out the 📅 button on that row AND on every other row for the
+    // length of the round trip. A press landing in that window was discarded
+    // with no error, no toast and no visual explanation beyond a briefly grey
+    // control the user probably was not looking at. Completing, snoozing,
+    // deleting and dismissing a freshness prompt all did the same.
+    //
+    // Rename is the case with no defensible reading whatsoever, which is why it
+    // is the one pinned here.
+    const { renameItem } = await import("@/app/actions/braindump");
+    const { pushStepsToGoogleTasks } =
+      await import("@/app/actions/google-schedule");
+    let release!: () => void;
+    (renameItem as ReturnType<typeof vi.fn>).mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        release = () => resolve();
+      }),
+    );
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[
+          makeItem({ id: "r1", text: "old name" }),
+          makeMultiStep(),
+        ]}
+        settings={settings}
+        google={connected}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const rowB = screen.getByText("plan trip").closest("li")!;
+    const scheduleB = within(rowB).getByRole("button", { name: /schedule/i });
+    expect(scheduleB).toBeEnabled();
+
+    const rowA = screen.getByText("old name").closest("li")!;
+    await user.click(
+      within(rowA).getByRole("button", { name: "Edit old name" }),
+    );
+    const input = screen.getByRole("textbox", { name: "Edit title" });
+    await user.clear(input);
+    await user.type(input, "new name{Enter}");
+    expect(renameItem).toHaveBeenCalledWith("r1", "new name");
+
+    // The rename is still in flight. No Schedule control is a party to it —
+    // not the renaming row's, and certainly not another row's. (The title
+    // itself still reads "old name": there is no optimistic update, the row
+    // re-reads from the server on `router.refresh()`.)
+    const renamingRow = screen.getByText("old name").closest("li")!;
+    expect(
+      within(renamingRow).getByRole("button", { name: /schedule/i }),
+    ).toBeEnabled();
+    expect(scheduleB).toBeEnabled();
+
+    // And the press that used to vanish now lands.
+    await user.click(scheduleB);
+    expect(pushStepsToGoogleTasks).toHaveBeenCalledWith("t1", undefined);
+
+    // Settle the held rename before returning, for the !264 reason above.
+    await act(async () => {
+      release();
+    });
   });
 
   it("a reconnect_required response clears a stale schedule error left on another row (Duo review)", async () => {
@@ -2364,23 +2424,19 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     // Row B (multi-step) then hits the workspace-wide reconnect_required condition.
     const rowB = screen.getByText("plan trip").closest("li")!;
     const scheduleB = within(rowB).getByRole("button", { name: /schedule/i });
-    // #168 — wait for row B's control to be live before pressing it, or this
-    // press is silently discarded and the spec fails 1000ms later on a find
-    // that could never have succeeded.
+    // This used to be `await waitFor(() => expect(scheduleB).toBeEnabled())`,
+    // carrying a long comment about row A's in-flight action disabling row B's
+    // button through ONE shared `useTransition`. **#169 deleted that behaviour**,
+    // so the comment described a world that no longer exists and the `waitFor`
+    // resolved on its first tick — a guard that guarded nothing, wearing the
+    // explanation of a real bug. Raised by an independent review of !278.
     //
-    // Every Schedule control in the list is `disabled={pending}` from ONE
-    // shared `useTransition` (inbox-view.tsx:230), so row A's in-flight action
-    // disables row B's button too. **Not deliberately** — see #169; the same
-    // flag is set by rename, complete, snooze and delete, none of which is a
-    // workspace-wide operation. Row A's error text and the clearing of `pending` land in
-    // SEPARATE render passes, error first, and `await user.click` does not
-    // await the transition. Measured: at the instant the error text is inserted
-    // into the DOM, this button is still disabled. `findByText` above normally
-    // resolves after the second pass — but under full-suite load it can resolve
-    // inside the gap, and `userEvent` drops a press on a disabled control
-    // without raising anything. That is how this spec turned `main` red on
-    // ccbc8dc while passing 8/8 in isolation.
-    await waitFor(() => expect(scheduleB).toBeEnabled());
+    // Inverted into the assertion the fix actually earns: row B is enabled
+    // ALREADY, with no waiting, because row A's schedule is none of its
+    // business. A plain `expect` rather than a `waitFor` on purpose — `waitFor`
+    // would pass again if the shared flag ever came back, and being unable to
+    // regress silently is the whole point.
+    expect(scheduleB).toBeEnabled();
     await user.click(scheduleB);
     // One `waitFor` for both halves, deliberately: row A's now-stale error must
     // not sit beside a Reconnect prompt, and a bare `queryByText(...).not.
@@ -2398,6 +2454,51 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
         within(rowA).queryByText(/Reclaim-synced Google Tasks list/i),
       ).not.toBeInTheDocument();
     });
+  });
+
+  // #169's `finally` is the reason a rejected schedule does not strand the row
+  // disabled forever, and nothing tested it — `mockRejected` appears in 34
+  // files across `src/` and zero times in this one, so both `catch` blocks the
+  // fix introduced had no coverage at all. Raised by an independent review of
+  // !278. A THROWN action, not an `{ ok: false }` result: the resolved-but-failed
+  // path is already covered below, and it never reaches the `catch`.
+  it("re-enables the row after a schedule that throws, not just one that fails", async () => {
+    const { scheduleSingleTask } =
+      await import("@/app/actions/google-schedule");
+    (scheduleSingleTask as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("network died mid-push"),
+    );
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[
+          makeItem({ id: "thr1", text: "single todo", status: "triaged" }),
+        ]}
+        settings={settings}
+        google={connected}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const row = screen.getByText("single todo").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: /schedule/i }));
+    await user.click(within(row).getByRole("button", { name: /^30 min$/i }));
+
+    // The control comes back. Without the `finally` this row would be dead for
+    // the rest of the session with no error and no way to retry — strictly
+    // worse than the bug #169 fixed, because that one at least cleared.
+    await waitFor(() =>
+      expect(
+        within(row).getByRole("button", { name: /schedule/i }),
+      ).toBeEnabled(),
+    );
+
+    // And it is genuinely usable again, not merely un-disabled.
+    await user.click(within(row).getByRole("button", { name: /schedule/i }));
+    expect(
+      within(row).getByRole("button", { name: /^30 min$/i }),
+    ).toBeInTheDocument();
   });
 
   it("a scheduleSingleTask failure shows an inline error message under the row", async () => {
@@ -2966,5 +3067,111 @@ describe("InboxView — the capture input's accessible name (#183)", () => {
     expect(document.getElementById(describedBy)?.textContent).toContain(
       "Press Enter to capture instantly",
     );
+  });
+});
+
+describe("InboxView — row action group target size (#184)", () => {
+  // Every control in a row's action group is a 44x44 target, on the app's own
+  // convention — not on a WCAG requirement, and the difference matters for how
+  // this gets described and prioritised:
+  //
+  //   - 2.5.8 Target Size (Minimum) is **AA** and asks for 24x24. "▶ Start
+  //     Focus" measured exactly 24px, so it PASSED, with zero margin.
+  //   - 2.5.5 Target Size (Enhanced) is **AAA** and asks for 44x44. That is the
+  //     one it failed, and the project's stated bar is AA.
+  //
+  // So nothing here was non-conformant, and any comment or report saying "a
+  // 2.5.8 failure" is wrong. It is fixed anyway for two reasons specific to
+  // this app. Sitting exactly on the threshold means any change to font size,
+  // line height or a Tailwind padding default silently drops it below and
+  // nothing catches it — this spec is that "nothing". And the primary call to
+  // action on every row was the smallest thing in the row while the
+  // end-cluster icons beside it were all 44px, in a tool for people with ADHD
+  // used mostly on a phone, where a mis-tap costs the thread you were holding.
+  //
+  // Asserted over the WHOLE group rather than one control, because that is the
+  // shape the gap hid in: !270 measured only the note trigger and the buttons
+  // either side of it were 24px. jsdom computes no layout, so this checks the
+  // classes that produce the box; the pixel measurement at 390px lives in
+  // e2e/smoke/row-menu-viewport-fit.spec.ts, which measures the same group.
+  const expectFullTargets = (scope: HTMLElement) => {
+    const groups = scope.querySelectorAll<HTMLElement>("[data-row-actions]");
+    expect(groups.length).toBeGreaterThan(0);
+    for (const group of Array.from(groups)) {
+      const controls = group.querySelectorAll<HTMLElement>("button, a");
+      expect(controls.length).toBeGreaterThan(0);
+      for (const control of Array.from(controls)) {
+        const name = control.getAttribute("aria-label") ?? control.textContent;
+        expect(control.className, `"${name}" is under 44px tall`).toContain(
+          "min-h-11",
+        );
+        expect(control.className, `"${name}" is under 44px wide`).toContain(
+          "min-w-11",
+        );
+      }
+    }
+  };
+
+  it("sizes every control in every bucket's action group", () => {
+    const { container } = render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[
+          // One row per frame that renders its own `inline` array.
+          makeItem({ id: "t184a", text: "review row" }),
+          makeMultiStep(),
+          makeItem({
+            id: "t184b",
+            text: "awaiting breakdown",
+            status: "triaged",
+            taskId: "t184bt",
+            breakdownRequestedAt: new Date(),
+          }),
+          makeItem({ id: "t184c", text: "single todo", status: "triaged" }),
+          // The Done bucket, which hand-rolls its action line rather than
+          // rendering <RowActions>. Without a completed item here the bucket
+          // never mounts, so neither its `data-row-actions` marker nor its
+          // Reopen button was ever measured — the marker was added by this MR
+          // precisely because the line was invisible to this guard, and adding
+          // it while leaving it unexercised proves nothing. Raised by an
+          // independent review of !278.
+          makeItem({
+            id: "t184d",
+            text: "finished thing",
+            status: "triaged",
+            completedAt: new Date(),
+          }),
+        ]}
+        settings={settings}
+        google={{ configured: true, connected: true, needsReconnect: false }}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    expectFullTargets(container);
+  });
+
+  it("sizes the saved-for-later options too, which only render once opened", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[
+          makeItem({
+            id: "t184d",
+            text: "stored thing",
+            snoozedUntil: new Date(Date.now() + 60 * 60_000),
+          }),
+        ]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "stored thing" }));
+    expect(
+      screen.getByRole("button", { name: /Break into steps/ }),
+    ).toBeInTheDocument();
+    expectFullTargets(container);
   });
 });

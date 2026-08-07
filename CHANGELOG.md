@@ -436,6 +436,20 @@ operators upgrading a self-hosted instance don't get surprised.
   origin before the flow starts. Every failed sign-in also writes one structured
   log line naming the reason and the hostname it arrived on — diagnosing this
   one needed an ingress access log, because the app itself said nothing.
+- **Scheduling one inbox row disabled the Schedule button on every other row
+  (#169).** A single `useTransition` was shared by the whole list, so its
+  `pending` flag meant "some schedule call is in flight somewhere" while the
+  control it guarded was documented as meaning "a schedule call for *this* row".
+  On a list of any length that reads as the app locking up. `pending` is now
+  keyed by item id and raised only by the schedule runners; the list-wide signal
+  keeps its own name, `refreshing`, and keeps driving the list dimming, which is
+  honest because every wrapper does end in a refresh.
+- **Row action buttons sat exactly on the minimum touch target (#184).** The
+  primary call to action on every item row was the smallest thing in the row,
+  while the icon cluster beside it was already 44px — in a tool for people with
+  ADHD, used mostly on a phone, where a mis-tap costs the thread you were
+  holding. Every control in a row's action group is now 44x44, across the inbox,
+  the library and the note trigger.
 
 - **The inbox's drag instructions were being announced to nobody (#94).** On
   every hard load of `/`, the drag handle's `aria-describedby` named an element
