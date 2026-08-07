@@ -1407,6 +1407,59 @@ describe("FocusTimer — time-up: keep going for N more minutes (#138)", () => {
   });
 });
 
+describe("FocusTimer — the accidental-completion guard (#197)", () => {
+  // Reported as FIVE separate accidental completions by one user: `Complete step`
+  // held the leading slot of the running-session control row, which is where
+  // every media and timer convention puts Pause. The irreversible action was
+  // sitting in the muscle-memory position of the reversible one, wearing the only
+  // filled colour in the row — and until #198 there was no way back at all for a
+  // step whose task still had other open steps.
+  //
+  // The decision on #197 was reorder + undo and explicitly NOT a confirm dialog,
+  // so these two assertions are the entire mechanical guard. That is why they
+  // assert order rather than looks alone: a future style pass may re-colour the
+  // row, and the ordering must survive it.
+  //
+  // DOM order is the right axis to pin. The row is `flex-wrap` with no `order-*`
+  // utilities, so source order IS visual order, and it is also the sequence a
+  // keyboard or switch user tabs through — one assertion covering both.
+  async function running(user: ReturnType<typeof userEvent.setup>) {
+    render(<FocusTimer {...base()} />);
+    await start(user);
+    return {
+      complete: screen.getByRole("button", { name: /complete step/i }),
+      pause: screen.getByRole("button", { name: /pause/i }),
+    };
+  }
+
+  it("puts Pause BEFORE Complete step, in DOM and therefore tab order", async () => {
+    const user = userEvent.setup();
+    const { complete, pause } = await running(user);
+    // compareDocumentPosition rather than an index into `children`: it still
+    // holds if the two ever stop being siblings, which a later layout change
+    // could easily do without meaning to reopen this bug.
+    expect(
+      pause.compareDocumentPosition(complete) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("gives Pause the filled treatment, so Complete is no longer the only filled button", async () => {
+    const user = userEvent.setup();
+    const { complete, pause } = await running(user);
+    // `bg-primary`/`text-primary-foreground` and not a new colour pair: globals.css
+    // documents the light token at 5.42:1 and ships a dark variant, so this
+    // re-weighting cannot introduce the state-dependent contrast failure #109 and
+    // #99 were both about.
+    expect(pause.className).toContain("bg-primary");
+    expect(pause.className).toContain("text-primary-foreground");
+    // Complete keeps #99's measured AA green. This issue re-weights the row; it
+    // does not reopen the contrast question.
+    expect(complete.className).toContain("bg-green-700");
+    expect(complete.className).toContain("text-white");
+  });
+});
+
 describe("FocusTimer — complete", () => {
   it("Complete step calls completeFocus and stops the lofi player", async () => {
     const user = userEvent.setup();

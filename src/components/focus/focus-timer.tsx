@@ -1621,6 +1621,46 @@ export function FocusTimer({
 
       {(phase === "running" || phase === "paused") && (
         <div className="flex flex-wrap items-center justify-center gap-2">
+          {/* #197 — Pause LEADS this row, and Complete step follows it.
+              It was the other way round, and one user completed a step by
+              accident five separate times reaching for pause. Two reasons the
+              order matters more than it looks:
+
+              1. Pause is reversible and frequent; Complete is irreversible and
+                 happens once per step. Every media and timer convention puts the
+                 transport control in the leading slot, so muscle memory arrives
+                 there expecting pause — and the row is `flex-wrap` with no
+                 `order-*` utilities, so this source order is also the visual
+                 order and the tab/switch order.
+              2. `sessionCtaRef` — the element focus returns to after a resume —
+                 has always been on THIS button, so the code's own idea of the
+                 primary control disagreed with what the row looked like.
+
+              Pause also takes the filled `bg-primary` treatment so that Complete
+              is no longer the only filled button competing for the eye. Deliberately
+              NOT a confirm dialog on Complete: that was weighed and declined
+              (recorded on #197) because it taxes the app's happy path forever, and
+              #198 supplies the recovery path instead. `focus-timer.test.tsx`
+              asserts both the order and the weighting, so a later style pass
+              cannot quietly undo this. */}
+          <button
+            ref={sessionCtaRef}
+            onClick={togglePause}
+            disabled={pending}
+            className="bg-primary text-primary-foreground hover:bg-primary/80 inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-5 font-medium disabled:opacity-50"
+          >
+            {phase === "running" ? (
+              <>
+                <Pause aria-hidden="true" className="h-4 w-4 shrink-0" />
+                {stripLeadingGlyph(t("focus.pause", voice))}
+              </>
+            ) : (
+              <>
+                <Play aria-hidden="true" className="h-4 w-4 shrink-0" />
+                {stripLeadingGlyph(t("focus.resume", voice))}
+              </>
+            )}
+          </button>
           {/* #99 a11y — green-700, not green-600. White on `bg-green-600`
               (#00a63e) measures 3.21:1 and AA-normal needs 4.5:1: at 16px /
               weight 500 this is not "large text" (that needs 18.66px bold or
@@ -1638,28 +1678,10 @@ export function FocusTimer({
           <button
             onClick={finishComplete}
             disabled={pending}
-            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-md bg-green-700 px-5 font-medium text-white disabled:opacity-50"
+            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-md bg-green-700 px-4 font-medium text-white disabled:opacity-50"
           >
             <Check aria-hidden="true" className="h-4 w-4 shrink-0" />
             {stripLeadingGlyph(t("focus.timer.completeStep", voice))}
-          </button>
-          <button
-            ref={sessionCtaRef}
-            onClick={togglePause}
-            disabled={pending}
-            className="hover:bg-accent inline-flex min-h-[44px] items-center gap-1.5 rounded-md border px-4 disabled:opacity-50"
-          >
-            {phase === "running" ? (
-              <>
-                <Pause aria-hidden="true" className="h-4 w-4 shrink-0" />
-                {stripLeadingGlyph(t("focus.pause", voice))}
-              </>
-            ) : (
-              <>
-                <Play aria-hidden="true" className="h-4 w-4 shrink-0" />
-                {stripLeadingGlyph(t("focus.resume", voice))}
-              </>
-            )}
           </button>
           <button
             onClick={() => changeTime(-inc)}

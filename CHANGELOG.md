@@ -424,6 +424,20 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **The focus timer's "Complete step" sat where Pause belongs (#197).** In a
+  running session the controls read *Complete step, then Pause*, with Complete
+  the only filled button in the row — so the leading, most prominent, most
+  colourful slot belonged to the one action that cannot be undone, in the exact
+  position where every media player and timer puts pause. Reached for by muscle
+  memory, it ended the step instead of pausing it: five separate accidental
+  completions by one user before it was reported. **Pause now leads** and carries
+  the filled treatment; Complete follows it, keeping the AA-measured green from
+  #99. There is deliberately no confirmation dialog — that would put a tap
+  between finishing a step and the reward, on every step, forever — so the
+  recovery path is un-completing a step instead (#198). The code's own idea of
+  the primary control (`sessionCtaRef`, where focus lands after a resume) was
+  already on Pause; the row now agrees with it.
+
 - **Signing in from any hostname but the canonical one looped forever (#174).**
   The app answers on more than one hostname, but every OAuth redirect URI is
   built from the single origin `PUBLIC_ORIGIN` names, and the PKCE verifier and
