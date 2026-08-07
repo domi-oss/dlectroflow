@@ -49,6 +49,13 @@ yarn-error.log*
 .vercel
 .idea
 .vscode
+# ...except the workspace settings, which are shared project configuration
+# rather than personal state (#133): they pin the Vitest extension to the
+# config file that moved out of the root. Everything else VS Code writes here
+# (launch.json, per-user overrides, extension caches) stays ignored.
+!.vscode/
+.vscode/*
+!.vscode/settings.json
 *.tsbuildinfo
 
 # Superpowers SDD agent scratch (briefs, reports, review diffs, ledger)

@@ -150,6 +150,18 @@ include:
   # `Caddyfile` root entries, so a new file added under docker/ is covered
   # automatically instead of needing its own line here.
   - "docker/**/*"
+  # The test and formatting configuration (#133): vitest, its setup file,
+  # playwright and prettier. Code, not documentation — vitest.config.ts decides
+  # which files the suite collects and prettier.config.mjs decides whether the
+  # format gate passes, so a change here can turn the gate green on a tree it
+  # should reject. Same recursive-glob shape as docker/ for the same reason: a
+  # fifth config added later is covered without another line.
+  - "config/**/*"
+  # Editor workspace settings (#133). Cannot affect the app, but it is not
+  # documentation either — the docs-only fast path only admits prose file types,
+  # so this is classified as code and takes the full gate. It changes about once
+  # a year, so the cost is theoretical.
+  - ".vscode/**/*"
   # Root-level code + config. `*` does not cross `/`, so these match the repo
   # root only; leading-dot files are listed explicitly because a `*` glob does
   # not match them.
@@ -488,7 +500,7 @@ test_app:
     # set-state-in-effect and refs are all at ERROR now and block CI. New
     # violations are bugs, not backlog. See eslint.config.mjs.
     - npm run lint
-    # #32: fail the gate on unformatted code. Config in prettier.config.mjs
+    # #32: fail the gate on unformatted code. Config in config/prettier.config.mjs
     # (double quotes, semicolons, 2-space, trailing-comma:all, 80 cols — the
     # style the tree already follows); scope carved by .prettierignore (app code
     # + JSON/CSS, not docs/infra YAML). Cheap static check, reuses this npm ci.
@@ -529,7 +541,7 @@ test_app:
 # image's `CMD` — with `public/` and `.next/static` grafted on the way
 # docker/Dockerfile.ci grafts them (the bundle omits both; skip the copy and every HTML
 # route still answers 200 while every stylesheet and client chunk 404s).
-# playwright.config.ts owns that assembly, so this job is unchanged: the
+# config/playwright.config.ts owns that assembly, so this job is unchanged: the
 # `npm run build` below already produced `.next/standalone`, and the copy costs
 # ~0.2s for 31 MB. src/lib/dockerfile-hygiene.test.ts keeps the two sides in
 # lock-step.
@@ -537,7 +549,7 @@ test_app:
 # ships Node, so no apk/openssl before_script is needed here (unlike test_app's
 # alpine image) — npm ci's postinstall (`prisma generate`) downloads the
 # Debian-matched engine directly. Auth/session boot-guard env vars are supplied
-# by playwright.config.ts's webServer.env, so this job only needs the
+# by config/playwright.config.ts's webServer.env, so this job only needs the
 # Postgres/DB vars, same as test_app.
 #
 # #31: this job also runs the mechanical accessibility (axe) gate — the axe spec
@@ -563,7 +575,9 @@ e2e_test:
     - npm ci --cache .npm --prefer-offline --no-audit --no-fund
     - npx prisma migrate deploy   # schema for the smoke suite's service DB
     - npm run build
-    - npx playwright test
+    # --config because the file moved out of the root in #133 and Playwright's
+    # auto-discovery only looks there. `npm run test:e2e` carries the same flag.
+    - npx playwright test --config config/playwright.config.ts
   artifacts:
     when: on_failure
     paths:
