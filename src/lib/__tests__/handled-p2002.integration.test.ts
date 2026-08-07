@@ -62,14 +62,24 @@ const subjects = Array.from({ length: TRIALS }, (_, i) => `${PREFIX}-${i}`);
 beforeAll(async () => {
   await cleanup();
 
-  process.env.AUTH_PROVIDER = "gitlab";
+  // `vi.stubEnv` rather than assigning `process.env` directly, so that
+  // `vi.unstubAllEnvs()` in afterAll RESTORES whatever each variable held
+  // before — including "was not set at all". Six variables are set here and the
+  // teardown used to clear exactly one, leaking the other five into whichever
+  // file Vitest scheduled next in the same worker.
+  //
+  // Deleting all six in afterAll would fix the leak but introduce a quieter
+  // bug: `delete` cannot tell "this file set it" from "the developer's shell
+  // already had it set", so it would silently unset a real value for the rest
+  // of the run. Stubbing is the only form of this that is correct both ways.
+  vi.stubEnv("AUTH_PROVIDER", "gitlab");
   // Quotas well above CONCURRENCY: this file is about the first-use insert, not
   // about enforcement (that is guest-quota/user-quota.integration.test.ts).
-  process.env.GUEST_AI_QUOTA_PER_WINDOW = "100";
-  process.env.GUEST_AI_WINDOW_HOURS = "24";
-  process.env.GUEST_GLOBAL_DAILY_GUEST_CAP = "1000";
-  process.env.GUEST_IP_HASH_SALT = "test-salt";
-  process.env.USER_AI_WINDOW_HOURS = "24";
+  vi.stubEnv("GUEST_AI_QUOTA_PER_WINDOW", "100");
+  vi.stubEnv("GUEST_AI_WINDOW_HOURS", "24");
+  vi.stubEnv("GUEST_GLOBAL_DAILY_GUEST_CAP", "1000");
+  vi.stubEnv("GUEST_IP_HASH_SALT", "test-salt");
+  vi.stubEnv("USER_AI_WINDOW_HOURS", "24");
 
   await prisma.workspace.createMany({
     data: subjects.map((id) => ({ id, kind: "guest" })),
@@ -109,7 +119,8 @@ async function cleanup() {
 
 afterAll(async () => {
   await cleanup();
-  delete process.env.USER_AI_WINDOW_HOURS;
+  // Restores all six, to whatever they were before this file ran.
+  vi.unstubAllEnvs();
   await prisma.$disconnect();
 });
 
