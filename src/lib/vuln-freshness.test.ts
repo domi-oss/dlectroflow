@@ -137,6 +137,14 @@ if [ -z "$line" ]; then
   exit 22
 fi
 bodyf="\${line%%|*}"; code="\${line##*|}"
+# A connection failure, modelled the way real curl behaves: the -w template
+# still lands on stdout as 000, the diagnostic goes to stderr, exit 7. Both
+# halves matter — the script used to append its OWN 000 to curl's.
+if [ "$code" = "000" ]; then
+  printf 'curl: (7) Failed to connect to %s port 443 after 12 ms: Could not connect to server\\n' "$url" >&2
+  printf '000'
+  exit 7
+fi
 if [ -n "$bodyf" ]; then
   if [ -n "$out" ]; then cat "$bodyf" > "$out"; else cat "$bodyf"; fi
 elif [ -n "$out" ]; then
@@ -149,6 +157,11 @@ exit 0
 interface Route {
   body?: unknown;
   code?: number;
+  /**
+   * The transport never completed — no HTTP status was ever received. Distinct
+   * from `code: 502`, which is an answer.
+   */
+  transportError?: boolean;
 }
 
 interface Vuln {
@@ -289,7 +302,7 @@ function drive(
       bodyFile = join(work, `body-${i}.json`);
       writeFileSync(bodyFile, JSON.stringify(route.body));
     }
-    return `${bodyFile}|${route.code ?? 200}`;
+    return `${bodyFile}|${route.transportError ? "000" : (route.code ?? 200)}`;
   });
   const routesFile = join(work, "routes");
   writeFileSync(routesFile, lines.join("\n") + "\n");
@@ -718,6 +731,26 @@ describe("scripts/check-vuln-freshness.sh", () => {
     const result = drive([{ body: {}, code: 502 }]);
     expect(result.status).toBe(2);
     expect(result.stdout).toMatch(/502/);
+  });
+
+  it("names the transport failure instead of reporting HTTP 000000", () => {
+    // Real curl writes the `-w` template to stdout as `000` when it never got a
+    // response, AND exits non-zero — so appending our own `000` on the failure
+    // path produced "answered HTTP 000000", a status code that does not exist,
+    // while the actual reason sat unread in `$WORK/curl.err`. DNS failure, TLS
+    // handshake failure and a firewall drop all rendered as the same number.
+    //
+    // Inherited from check-registry-drain.sh:154-156, not introduced by #166.
+    const result = drive([{ transportError: true }]);
+    expect(result.status).toBe(2);
+    expect(result.stdout).not.toMatch(/000000/);
+    expect(result.stdout).toMatch(/could not reach/i);
+    // The cause, quoted, so the reader does not have to reproduce it.
+    expect(result.stdout).toMatch(/Could not connect to server/);
+    expect(result.stdout).toContain("This is an unknown, not an all-clear.");
+    // curl's own stderr stays captured — the script must not leak it into the
+    // digest's stderr and redden a maintenance pipeline over an unknown.
+    expect(result.stderr).toBe("");
   });
 
   it("reports undetermined when the token cannot see the project", () => {

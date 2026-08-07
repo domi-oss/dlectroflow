@@ -236,10 +236,37 @@ NOW_ISO="${VULN_FRESHNESS_NOW:-}"
 # path or cursor can never break out of the JSON. `--data-binary @file` keeps
 # the query off the process list.
 post_graphql() { # payload_file response_file → prints the HTTP status code
+  # The `-w` output goes to a FILE, not to this function's stdout. Real curl
+  # still writes the template (`000`) to stdout when the transport never
+  # completed and THEN exits non-zero, so the old `curl … || printf '000'` form
+  # concatenated the two and reported "HTTP 000000" — a status code that does not
+  # exist. Routing it through a file means the two cannot join up. (#166)
+  local rc=0
   curl -sS --max-time 60 -o "$2" -w '%{http_code}' -X POST \
     -H "$AUTH" -H "Content-Type: application/json" \
-    --data-binary @"$1" "$GRAPHQL_URL" </dev/null 2>>"$WORK/curl.err" ||
+    --data-binary @"$1" "$GRAPHQL_URL" </dev/null \
+    >"$WORK/http-code" 2>>"$WORK/curl.err" || rc=$?
+  # An empty template is the same unknown as a failed exit: curl got no status.
+  if [ "$rc" -ne 0 ] || [ ! -s "$WORK/http-code" ]; then
     printf '000'
+  else
+    cat "$WORK/http-code"
+  fi
+}
+
+# curl says WHY on stderr, and this script was capturing that to a file nobody
+# read — so a DNS failure, a TLS handshake failure and a firewall drop all
+# rendered as the same bare number, in a weekly digest where nobody can re-run
+# the command to find out which. Inherited from check-registry-drain.sh:154-156
+# rather than introduced by #166; fixed here, and the sibling is called out in
+# the MR rather than changed silently.
+#
+# `awk` rather than `grep -v … | tail`: the last non-blank line is the current
+# attempt (the file is appended to across requests), and awk cannot exit non-zero
+# for "nothing matched" the way grep does under `set -o pipefail`.
+curl_cause() { # → prints the most recent diagnostic curl wrote, if any
+  [ -s "$WORK/curl.err" ] || return 0
+  tr -d '\r' <"$WORK/curl.err" | awk 'NF { last = $0 } END { if (last != "") print last }'
 }
 
 # `.errors` present means the query was rejected or only partially resolved.
@@ -252,6 +279,16 @@ graphql_errors() { # response_file → prints a joined error string, or nothing
 }
 
 check_response() { # response_file http_code what
+  # `000` is not an HTTP status — it is curl reporting that it never received
+  # one, which is a different unknown from a server that answered badly and has
+  # a different fix. Say which, and quote the reason.
+  if [ "$2" = "000" ]; then
+    local cause
+    cause="$(curl_cause)"
+    [ -z "$cause" ] ||
+      undetermined "$3 could not reach \`${GRAPHQL_URL}\` — \`${cause}\`"
+    undetermined "$3 could not reach \`${GRAPHQL_URL}\`, and curl reported no reason"
+  fi
   [ "$2" = "200" ] || undetermined "$3 answered HTTP ${2}"
   local errors
   errors="$(graphql_errors "$1")"
