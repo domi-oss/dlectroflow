@@ -193,7 +193,18 @@ function watchForGhost() {
         const ghost = added.matches("[data-drag-ghost]")
           ? added
           : added.querySelector("[data-drag-ghost]");
-        if (ghost) seen.push({ node: ghost, parent: record.target });
+        // `record.target` is the parent of `added`, which is the parent of
+        // `ghost` ONLY when the ghost is itself the appended node. With
+        // `setCustomNativeDragPreview` the ghost is nested inside an appended
+        // container, so `record.target` would be its grandparent —
+        // `document.body` — and `parent` would not mean what its JSDoc says.
+        // Read at mount time, while the subtree is still attached.
+        if (ghost)
+          seen.push({
+            node: ghost,
+            parent:
+              ghost === added ? record.target : (ghost.parentNode ?? added),
+          });
       }
     }
   };
