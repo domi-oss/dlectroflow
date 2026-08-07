@@ -473,6 +473,14 @@ operators upgrading a self-hosted instance don't get surprised.
   it. Each button now waits only on its own step, and while it is waiting it says
   so out loud rather than just going grey.
 
+  **Un-completing two steps of the same finished task no longer takes back two
+  task rewards.** The task only reopens once, so only one reopening is paid back —
+  before, the second undo removed some other, already-finished task's reward
+  instead. And **a failed undo on a step row now says so and offers to try
+  again**, the way the timer's has all along: it was the one place this promise
+  was made and not kept, because a failure there left the row looking untouched
+  with nothing said.
+
 - **The focus timer's "Complete step" sat where Pause belongs (#197).** In a
   running session the controls read *Complete step, then Pause*, with Complete
   the only filled button in the row — so the leading, most prominent, most
