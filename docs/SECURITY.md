@@ -139,3 +139,11 @@ Two things date the answer, and they are **not** interchangeable:
 An aggregate count is only as fresh as its **stalest** contributing scanner,
 and a count of zero has no `detectedAt` of its own — so when the scan cannot be
 found, the honest answer is *undetermined*, never *clean*.
+
+**Neither is a timestamp ahead of the clock.** A finish time or a `detectedAt`
+later than the instant the check ran is not a fresh one, it is one that cannot
+be read, and it is reported as *undetermined* like any other unknown. Five
+minutes of runner clock skew is allowed for, because gitlab.com dispatches jobs
+from a shared pool and a runner clock is not the API clock; anything past that
+is data, not drift. Without the bound a container scanner three weeks dead read
+`✅ Fresh, 1h old` as soon as one row carried a future stamp.
