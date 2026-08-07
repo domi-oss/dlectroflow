@@ -389,6 +389,22 @@ describe("scripts/check-vuln-freshness.sh", () => {
     );
   });
 
+  it("only explains the zero case when the count is actually zero", () => {
+    // "A count of zero has no `detectedAt` of its own" printed unconditionally,
+    // including in the block above this one where the count is 3. It is a true
+    // sentence about a reading that is not the one on the page, and a block
+    // whose prose does not describe its own numbers is the failure mode #166 is
+    // made of — a reader cannot tell which parts still apply.
+    const result = drive(healthy());
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(/\*\*3 active\*\*/);
+    expect(result.stdout).not.toMatch(/count of zero has no `detectedAt`/);
+    // Still dated, and the anchor is still named — the sentence going away must
+    // not take the evidence with it.
+    expect(result.stdout).toMatch(/Oldest evidence: \w+/);
+    expect(result.stdout).toMatch(/last succeeded 2026-08-06T19:00:00Z/);
+  });
+
   it("goes stale, not clean, when nothing has scanned inside the budget", () => {
     const result = drive(healthy({ vulns: [], scanHours: 400 }));
     expect(result.status).toBe(1);
@@ -747,6 +763,44 @@ describe("scripts/check-vuln-freshness.sh", () => {
     const result = drive(healthy());
     expect(result.stdout).toMatch(/192h budget/);
     expect(result.stdout).toMatch(/168h weekly rescan \+ 24h scheduler grace/);
+  });
+
+  it("never prints one age string against two different verdicts", () => {
+    // Past 48h the age renders in days, so 191h and 193h both read "8d" — and
+    // the budget is 192h. The verdict line therefore said "8d old" on BOTH
+    // sides of the threshold while the verdict itself flipped between ✅ and 🔴.
+    // A reader who trusts the number disagrees with the verdict beside it, and
+    // two statements of one fact that contradict each other is #166 in
+    // miniature.
+    const inside = drive(healthy({ vulns: [], scanHours: 191 }));
+    const outside = drive(healthy({ vulns: [], scanHours: 193 }));
+    expect(inside.status).toBe(0);
+    expect(outside.status).toBe(1);
+    const verdict = (stdout: string) =>
+      stdout.split("\n").find((line) => /Fresh|Stale/.test(line)) ?? "";
+    expect(verdict(inside.stdout)).not.toBe("");
+    expect(verdict(outside.stdout)).not.toBe("");
+    // Whatever the wording, the two lines must not read the same.
+    expect(verdict(inside.stdout)).not.toBe(verdict(outside.stdout));
+    // The age is legible in the budget's own unit, so the arithmetic behind the
+    // verdict is checkable without re-running anything…
+    expect(verdict(inside.stdout)).toMatch(/191h/);
+    expect(verdict(outside.stdout)).toMatch(/193h/);
+    // …and the line says which side of the threshold it is on, by how much.
+    expect(verdict(inside.stdout)).toMatch(/1h inside the 192h budget/);
+    expect(verdict(outside.stdout)).toMatch(/1h past the 192h budget/);
+    // The day form is still there for scale, because "193h" alone reads as
+    // noise where "8d" reads as a problem.
+    expect(verdict(outside.stdout)).toMatch(/8d/);
+  });
+
+  it("does not repeat itself when hours and days render the same", () => {
+    // Below two days the two renderings are identical, and "1h old (1h)" is
+    // clutter that makes the line look like it is stating two facts.
+    const result = drive(healthy({ vulns: [] }));
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(/is \*\*1h old\*\*/);
+    expect(result.stdout).not.toMatch(/1h \(1h\)/);
   });
 
   it("does not claim the default derivation for an overridden budget", () => {

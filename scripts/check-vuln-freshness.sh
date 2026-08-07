@@ -388,6 +388,23 @@ def age(seconds):
   then "\(((seconds / 3600) * 10 | round) / 10)h"
   else "\(((seconds / 86400) * 10 | round) / 10)d"
   end;
+
+# The exception, and the reason it is one. The verdict line compares an age to a
+# budget stated in HOURS, and `age()` alone rounds 191h and 193h to the same
+# "8d" — so with a 192h budget the verdict read "8d old" on BOTH sides of the
+# threshold while the verdict itself flipped between ✅ and 🔴. A reader who
+# trusts the number then disagrees with the label beside it, which is two
+# statements of one fact contradicting each other: #166 in miniature, and the
+# same trap the overridden-budget derivation above already closed.
+#
+# So anywhere an age is compared to the budget it renders in the budget unit
+# first, with the day form after it for scale — and only when the day form says
+# something different, so a short age does not read "1h (1h)".
+def hours(seconds): "\(((seconds / 3600) * 10 | round) / 10)h";
+def budgetAge(seconds):
+  (hours(seconds)) as $h
+  | (age(seconds)) as $a
+  | if $a == $h then $h else "\($h) (\($a))" end;
 def code(s): "`" + s + "`";
 
 ($nowIso | if . == "" then now else parse_ts end) as $now
@@ -523,7 +540,14 @@ def code(s): "`" + s + "`";
       + (if ($oldest.detected != null) and ($oldest.detected > $oldest.newest.ts)
          then ", and a finding of that type was re-detected \($oldest.detected | todateiso8601)"
          else "" end)
-      + ". A count of zero has no `detectedAt` of its own, so a scan is the only thing that can date it.",
+      + "."
+      # Printed only when it describes the count on the page. It used to print
+      # unconditionally, including beside a count of 12 — a true sentence about a
+      # reading that is not this one, which leaves a reader unable to tell which
+      # of the prose still applies. That is the #166 failure in miniature.
+      + (if ($all | length) == 0
+         then " A count of zero has no `detectedAt` of its own, so a scan is the only thing that can date it."
+         else "" end),
     "- Every scanner, oldest evidence first: "
       + ($dated | sort_by(.evidence)
          | map("\(.type) \(age(since(.evidence)))"
@@ -540,9 +564,9 @@ def code(s): "`" + s + "`";
        "- Newest `detectedAt` in the active set: \($newestDetected | todateiso8601), **\(age(since($newestDetected))) ago**. Continuous Vulnerability Scanning re-evaluates the stored SBOM with no pipeline at all, so this is an independent second lower bound."
      end),
     (if $fresh then
-       "- ✅ **Fresh**: the newest evidence this surface moved is \(age($evidenceAge)) old, inside the \($maxAge)h budget (\($maxAgeSource))."
+       "- ✅ **Fresh**: the newest evidence this surface moved is **\(budgetAge($evidenceAge)) old**, \(hours(($maxAge * 3600) - $evidenceAge)) inside the \($maxAge)h budget (\($maxAgeSource))."
      else
-       "- 🔴 **Stale**: the newest evidence this surface moved is \(age($evidenceAge)) old, past the \($maxAge)h budget (\($maxAgeSource)). Every number above may be describing an older tree than the one on `\($branch)`."
+       "- 🔴 **Stale**: the newest evidence this surface moved is **\(budgetAge($evidenceAge)) old**, \(hours($evidenceAge - ($maxAge * 3600))) past the \($maxAge)h budget (\($maxAgeSource)). Every number above may be describing an older tree than the one on `\($branch)`."
      end),
     "- Surface note: "
       + code("project.pipeline(iid:).securityReportFindings")
