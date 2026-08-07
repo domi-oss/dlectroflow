@@ -424,6 +424,19 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **Signing in from any hostname but the canonical one looped forever (#174).**
+  The app answers on more than one hostname, but every OAuth redirect URI is
+  built from the single origin `PUBLIC_ORIGIN` names, and the PKCE verifier and
+  state cookies are set with no `Domain` attribute — so they are host-only. A
+  sign-in begun elsewhere set its cookies there, was returned by the provider to
+  the `PUBLIC_ORIGIN` host, and failed on cookies the browser held but would not
+  send. It then bounced to a login page on the *other* hostname, so retrying
+  repeated it exactly. Reported as a hang on mobile, where the collapsed URL bar
+  hides the hostname change; the auth-flow paths now move to the canonical
+  origin before the flow starts. Every failed sign-in also writes one structured
+  log line naming the reason and the hostname it arrived on — diagnosing this
+  one needed an ingress access log, because the app itself said nothing.
+
 - **The inbox's drag instructions were being announced to nobody (#94).** On
   every hard load of `/`, the drag handle's `aria-describedby` named an element
   that was not in the document: the old library built that id from a per-render
