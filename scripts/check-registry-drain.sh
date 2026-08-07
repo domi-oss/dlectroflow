@@ -151,10 +151,37 @@ NOW_ISO="${REGISTRY_DRAIN_NOW:-}"
 # path or cursor can never break out of the JSON. `--data-binary @file` keeps
 # the query off the process list.
 post_graphql() { # payload_file response_file → prints the HTTP status code
+  rc=0
+  # `-w` goes to a FILE, not straight to stdout. Written the obvious way, a
+  # transport failure makes curl emit its own `000` and then the `|| printf
+  # '000'` appends a second one, so the caller reports `HTTP 000000` — a status
+  # that does not exist, for the failure mode most likely to produce it. Same
+  # defect and same fix as `check-vuln-freshness.sh` (#166); this is the sibling
+  # it was inherited from.
   curl -sS --max-time 60 -o "$2" -w '%{http_code}' -X POST \
     -H "$AUTH" -H "Content-Type: application/json" \
-    --data-binary @"$1" "$GRAPHQL_URL" </dev/null 2>>"$WORK/curl.err" ||
+    --data-binary @"$1" "$GRAPHQL_URL" </dev/null \
+    >"$WORK/http-code" 2>>"$WORK/curl.err" || rc=$?
+  # An empty template is the same unknown as a failed exit: curl got no status.
+  if [ "$rc" -ne 0 ] || [ ! -s "$WORK/http-code" ]; then
     printf '000'
+  else
+    cat "$WORK/http-code"
+  fi
+}
+
+# curl says WHY on stderr, and this script was capturing that to a file nobody
+# read — so a DNS failure, a TLS handshake failure and a firewall drop all
+# surfaced in the digest as the same bare `000`, which is exactly the "a number
+# that lost its provenance" problem #166 is about.
+#
+# `awk` over the LAST non-empty line rather than a tail: the file is appended to
+# across requests, so the most recent diagnostic is the relevant one, and awk
+# cannot exit non-zero for "nothing matched" the way grep does under
+# `set -o pipefail`.
+curl_cause() { # → prints the most recent diagnostic curl wrote, if any
+  [ -s "$WORK/curl.err" ] || return 0
+  tr -d '\r' <"$WORK/curl.err" | awk 'NF { last = $0 } END { if (last != "") print last }'
 }
 
 # `.errors` present means the query was rejected or partially resolved. Either
@@ -167,6 +194,7 @@ graphql_errors() { # response_file → prints a joined error string, or nothing
 }
 
 # ── 1. The policy and the repositories ───────────────────────────────────────
+# shellcheck disable=SC2016  # GraphQL variables, not shell expansions
 POLICY_QUERY='query($path: ID!) {
   project(fullPath: $path) {
     containerExpirationPolicy {
@@ -195,8 +223,17 @@ jq -n --arg q "$POLICY_QUERY" --arg path "$CI_PROJECT_PATH" \
   '{query: $q, variables: {path: $path}}' >"$WORK/policy-req.json"
 
 code="$(post_graphql "$WORK/policy-req.json" "$WORK/policy.json")"
-[ "$code" = "200" ] ||
+if [ "$code" != "200" ]; then
+  # `000` means curl never got a status at all, so quoting it as an HTTP code
+  # is a fiction. Name the transport cause it wrote to stderr instead.
+  if [ "$code" = "000" ]; then
+    cause="$(curl_cause)"
+    [ -z "$cause" ] ||
+      undetermined "the cleanup-policy query could not reach \`${GRAPHQL_URL}\` — \`${cause}\`"
+    undetermined "the cleanup-policy query could not reach \`${GRAPHQL_URL}\`, and curl reported no reason"
+  fi
   undetermined "the GraphQL endpoint answered HTTP ${code}"
+fi
 errors="$(graphql_errors "$WORK/policy.json")"
 [ -z "$errors" ] ||
   undetermined "GraphQL reported an error: ${errors}"
@@ -214,6 +251,7 @@ jq -e '.data.project.containerExpirationPolicy' "$WORK/policy.json" >/dev/null 2
 # from what you REQUESTED — so 20 is the only value for which that computation
 # is correct, and any larger number ends the walk early with a subset and a
 # confident `hasNextPage: false`. See trap 3 in the header.
+# shellcheck disable=SC2016  # GraphQL variables, not shell expansions
 TAGS_QUERY_TEMPLATE='query($after: String) {
   containerRepository(id: "REPO_GID") {
     tags(first: 20, after: $after) {
@@ -256,8 +294,15 @@ while [ "$i" -lt "$repo_count" ]; do
     fi
 
     code="$(post_graphql "$WORK/tags-req.json" "$WORK/tags-page.json")"
-    [ "$code" = "200" ] ||
+    if [ "$code" != "200" ]; then
+      if [ "$code" = "000" ]; then
+        cause="$(curl_cause)"
+        [ -z "$cause" ] ||
+          undetermined "listing tags could not reach \`${GRAPHQL_URL}\` on page $((pages + 1)) — \`${cause}\`"
+        undetermined "listing tags could not reach \`${GRAPHQL_URL}\` on page $((pages + 1)), and curl reported no reason"
+      fi
       undetermined "listing tags answered HTTP ${code} on page $((pages + 1))"
+    fi
     errors="$(graphql_errors "$WORK/tags-page.json")"
     [ -z "$errors" ] ||
       undetermined "listing tags reported a GraphQL error: ${errors}"
