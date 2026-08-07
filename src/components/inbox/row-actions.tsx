@@ -246,10 +246,16 @@ export function ScheduleControl({
           <button
             key={minutes}
             type="button"
+            // `disabled` stays as defence in depth; the busy AFFORDANCE does
+            // not, because it can never paint. Every path that raises `pending`
+            // calls `close()` first in the same handler, and re-opening needs
+            // the trigger, which is itself `disabled={pending}` — so this popup
+            // is unmounted for the whole time `pending` is true. A `title` and
+            // an `aria-busy` that no user or screen reader can reach are worse
+            // than nothing: they read as tested a11y work. Removed after an
+            // independent review of !278 flagged them as unreachable. The
+            // TRIGGER keeps both, where they do paint.
             disabled={pending}
-            // #169 — same rule as the trigger: if it is off, say why.
-            title={pending ? busyReason : undefined}
-            {...busyProps}
             className={cn(
               "hover:bg-accent rounded-md px-2.5 py-1 font-medium disabled:opacity-50",
               touchTarget,
@@ -282,12 +288,12 @@ export function ScheduleControl({
         />
         <button
           type="button"
+          // Three reasons this can be off, and only two are reachable: the
+          // popup is unmounted whenever `pending` is true (see the presets
+          // above), so the busy title and `aria-busy` were dead. Out-of-range
+          // has its own visible message below and an empty box explains itself,
+          // so neither needs a title either.
           disabled={pending || custom === "" || customOutOfRange}
-          // #169 — three different reasons this can be off, so name the one
-          // that applies. Out-of-range already has its own visible message
-          // below; an empty box explains itself.
-          title={pending ? busyReason : undefined}
-          {...busyProps}
           className={cn(
             "hover:bg-accent rounded-md px-2.5 py-1 font-medium disabled:opacity-50",
             touchTarget,

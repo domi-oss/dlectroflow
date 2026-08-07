@@ -438,19 +438,43 @@ test.describe("#44 the note trigger fits the phone viewport", () => {
         ).toBeLessThanOrEqual(box.vw);
       }
 
-      // The NOTE TRIGGER specifically keeps its ≥44px target (WCAG 2.5.8) —
-      // `min-h-11` has to survive the move into a `text-xs` action row.
+      // EVERY control in the group is a 44x44 target, measured in real layout.
       //
-      // Scoped to this control on purpose. A blanket assertion over the group
-      // was tried and it failed on "▶ Start Focus", which MEASURES 24px: the
-      // inline row buttons are `px-2.5 py-1` with no `touchTarget`, unlike the
-      // end-cluster icons which carry it. That is a real pre-existing 2.5.8 gap
-      // across every row in the app, filed rather than fixed here — widening
-      // this test into an unrelated redesign is not what it is for.
-      const triggerHeight = await trigger.evaluate(
-        (n: HTMLElement) => n.getBoundingClientRect().height,
-      );
-      expect(triggerHeight).toBeGreaterThanOrEqual(44);
+      // This was scoped to the note trigger alone until #184, with a comment
+      // saying a blanket assertion had been tried and failed on "▶ Start Focus"
+      // at 24px — "a real pre-existing gap across every row in the app, filed
+      // rather than fixed here". #184 fixed it, so that comment had become a
+      // description of the previous release, and the narrow assertion was
+      // guarding one control out of six. Widened rather than reworded.
+      //
+      // The citation it carried was also wrong and is not repeated: 44x44 is
+      // **2.5.5 Target Size (Enhanced), AAA**. **2.5.8 (Minimum) is the AA one
+      // and asks for 24x24**, which these controls already met. The app exceeds
+      // its own AA bar here deliberately — a house convention (`touchTarget` in
+      // `@/lib/utils`), not a conformance requirement.
+      //
+      // The unit spec in `inbox-view.test.tsx` asserts the CLASSES, because
+      // jsdom computes no layout. This is the half that can see pixels, and it
+      // is the one that matters for a filled pill whose painted box grows with
+      // the target.
+      for (const control of controls) {
+        const size = await control.evaluate((n: HTMLElement) => {
+          const b = n.getBoundingClientRect();
+          return {
+            h: b.height,
+            w: b.width,
+            label: n.getAttribute("aria-label") ?? n.textContent?.trim() ?? "",
+          };
+        });
+        expect(
+          size.h,
+          `"${size.label}" is ${size.h}px tall`,
+        ).toBeGreaterThanOrEqual(44);
+        expect(
+          size.w,
+          `"${size.label}" is ${size.w}px wide`,
+        ).toBeGreaterThanOrEqual(44);
+      }
 
       // And the page itself must not have gained horizontal scroll.
       const scrollWidth = await page.evaluate(

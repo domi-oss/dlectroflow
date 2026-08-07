@@ -141,7 +141,8 @@ export function NoteField({
    *  (the settings sections take the same prop, for the same reason). */
   autoSaveDelayMs?: number;
   /** Step rows are tighter than the task header card. Type scale only — the hit
-   *  target stays 44px either way (WCAG 2.5.8). */
+   *  target stays 44px either way — 2.5.5 AAA, a house convention rather than
+   *  the AA 2.5.8 minimum of 24x24, which is met regardless. */
   dense?: boolean;
   /**
    * PLACEMENT (owner request, #44). Omit and the two halves render stacked,
