@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
-  () => {
+const { prismaMock, txClient, revalidatePathMock, currentWorkspaceIdMock } =
+  vi.hoisted(() => {
     const prismaMock = {
       brainDumpItem: {
         findFirst: vi.fn(),
@@ -29,18 +29,26 @@ const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
       streakRecord: {},
       $transaction: vi.fn(),
     };
+    // Review round 4 — `uncompleteStep` now runs its local writes AND the reward
+    // reversal in one interactive transaction. The client handed to the callback
+    // is a distinct object from `prismaMock`, sharing the very same model
+    // delegates so every existing assertion still sees the calls. The only thing
+    // the separate identity buys is that a test can tell "this ran inside the
+    // transaction" from "this ran on the module singleton" — which is exactly the
+    // difference between the atomicity fix working and looking like it works.
+    const txClient = { ...prismaMock };
     prismaMock.$transaction.mockImplementation((arg: unknown) =>
       typeof arg === "function"
-        ? (arg as (tx: unknown) => unknown)(prismaMock)
+        ? (arg as (tx: unknown) => unknown)(txClient)
         : Promise.all(arg as Promise<unknown>[]),
     );
     return {
       prismaMock,
+      txClient,
       revalidatePathMock: vi.fn(),
       currentWorkspaceIdMock: vi.fn().mockResolvedValue("owner"),
     };
-  },
-);
+  });
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/lib/db", () => ({ prisma: prismaMock }));
 vi.mock("@/lib/workspace", () => ({
@@ -415,9 +423,11 @@ describe("uncompleteStep (#198)", () => {
     prismaMock.step.findFirst.mockResolvedValueOnce(doneStep());
     const { uncompleteStep } = await import("./focus");
     await uncompleteStep("s1");
-    expect(rewards.reverseStepCompletionRewards).toHaveBeenCalledWith("owner", {
-      includeTaskComplete: false,
-    });
+    expect(rewards.reverseStepCompletionRewards).toHaveBeenCalledWith(
+      "owner",
+      { includeTaskComplete: false },
+      txClient,
+    );
   });
 
   // Duo review round 3, and it was right: `markTaskCompleted` logs `task_complete`
@@ -432,9 +442,11 @@ describe("uncompleteStep (#198)", () => {
     );
     const { uncompleteStep } = await import("./focus");
     await uncompleteStep("s1");
-    expect(rewards.reverseStepCompletionRewards).toHaveBeenCalledWith("owner", {
-      includeTaskComplete: true,
-    });
+    expect(rewards.reverseStepCompletionRewards).toHaveBeenCalledWith(
+      "owner",
+      { includeTaskComplete: true },
+      txClient,
+    );
   });
 
   it("does NOT reverse task_complete when the task was already open", async () => {
@@ -444,9 +456,96 @@ describe("uncompleteStep (#198)", () => {
     prismaMock.step.findFirst.mockResolvedValueOnce(doneStep());
     const { uncompleteStep } = await import("./focus");
     await uncompleteStep("s1");
-    expect(rewards.reverseStepCompletionRewards).toHaveBeenCalledWith("owner", {
-      includeTaskComplete: false,
+    expect(rewards.reverseStepCompletionRewards).toHaveBeenCalledWith(
+      "owner",
+      { includeTaskComplete: false },
+      txClient,
+    );
+  });
+
+  // ── Review round 4: the undo is atomic, so a failure is retryable ──────────
+  //
+  // Round 2 moved the reversal ahead of the Google call and wrapped that call, on
+  // the reasoning that "anything that throws after the step write is
+  // unrecoverable, because the retry sees `!step.done` and returns". That
+  // reasoning was right and the fix was one step short: the REVERSAL itself can
+  // throw, and it still ran after the step write had committed. So a P2025 from a
+  // concurrent reversal (or any transient DB error) left the step flipped to
+  // not-done, skipped the Google patch and all three revalidations, reported
+  // `focus.error.undo` — "it is still marked done", which by then was false — and
+  // made every retry a silent no-op. The points stayed banked for work that had
+  // been un-done, permanently.
+  //
+  // The property that fixes it is atomicity, not ordering: if the reversal fails,
+  // the step write must not have committed. These tests pin the SHAPE that
+  // delivers it; `uncomplete-step.integration.test.ts` proves the rollback itself
+  // against real Postgres, which a mock cannot do.
+  it("puts the local writes and the reward reversal in ONE transaction", async () => {
+    const rewards = await import("@/lib/rewards");
+    prismaMock.step.findFirst.mockResolvedValueOnce(
+      doneStep({ task: { id: "t1", status: "done" } }),
+    );
+    const { uncompleteStep } = await import("./focus");
+    await uncompleteStep("s1");
+
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    // An interactive transaction (a callback), not an array: the reversal has to
+    // read and then write inside it, which the array form cannot express.
+    expect(typeof prismaMock.$transaction.mock.calls[0][0]).toBe("function");
+    // All three local writes, and the reversal, on the transaction's client. A
+    // write left on the singleton would commit on its own and survive the
+    // rollback — the bug wearing the fix's clothes.
+    expect(rewards.reverseStepCompletionRewards).toHaveBeenCalledWith(
+      "owner",
+      { includeTaskComplete: true },
+      txClient,
+    );
+  });
+
+  it("a failing reversal aborts the undo rather than committing half of one", async () => {
+    const google = await import("@/lib/google");
+    const rewards = await import("@/lib/rewards");
+    (
+      rewards.reverseStepCompletionRewards as ReturnType<typeof vi.fn>
+    ).mockRejectedValueOnce(new Error("P2025"));
+    prismaMock.step.findFirst.mockResolvedValueOnce(doneStep());
+    const { uncompleteStep } = await import("./focus");
+
+    // It must NOT resolve. `run()` in focus-timer.tsx turns a rejection into the
+    // undo failure notice, and that notice's claim — the step is still marked
+    // done — is only true if this rolled back.
+    await expect(uncompleteStep("s1")).rejects.toThrow("P2025");
+    // Nothing downstream of the transaction runs, which is correct: there is no
+    // Google state to correct and nothing to revalidate for a write that never
+    // landed.
+    expect(google.patchGoogleTask).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it("and the retry then completes the undo, reward reversal included", async () => {
+    const rewards = await import("@/lib/rewards");
+    const reverse = rewards.reverseStepCompletionRewards as ReturnType<
+      typeof vi.fn
+    >;
+    reverse.mockRejectedValueOnce(new Error("P2025"));
+    prismaMock.step.findFirst.mockResolvedValueOnce(doneStep());
+    const { uncompleteStep } = await import("./focus");
+    await expect(uncompleteStep("s1")).rejects.toThrow("P2025");
+
+    // The step write rolled back with the reversal, so the guard still sees
+    // `done: true` — which is the ONLY reason the retry gets past
+    // `if (!step.done) return` and reaches the reversal a second time. Before
+    // this fix the retry read a not-done step and returned silently, and the
+    // reward was stranded for good.
+    prismaMock.step.findFirst.mockResolvedValueOnce(doneStep());
+    await expect(uncompleteStep("s1")).resolves.toBeUndefined();
+
+    expect(reverse).toHaveBeenCalledTimes(2);
+    expect(prismaMock.step.update).toHaveBeenCalledWith({
+      where: { id: "s1" },
+      data: { done: false },
     });
+    expect(revalidatePathMock).toHaveBeenCalledWith("/dashboard");
   });
 
   // Duo review round 3 also showed round 2's session_finished fix was the wrong

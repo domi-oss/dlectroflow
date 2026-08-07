@@ -282,15 +282,33 @@ export async function completeStep(stepId: string) {
  *     user has asked to get their work back, and an unreachable Google must not be
  *     able to refuse them.
  *
- *     The ordering is load-bearing, not stylistic (Duo review round 2). The local
- *     write commits first, and the guard below is `if (!step.done) return` — so
- *     anything that throws *after* that write is unrecoverable: the retry sees a
- *     step that is already not-done and returns immediately, silently skipping
- *     whatever had not run. That made a transient Google error permanently strand
- *     the reward reversal while showing a notice that falsely said the step was
- *     still done. So the reversal now runs BEFORE the Google call, and the Google
- *     call is wrapped — which is what finally makes the word "best-effort" true of
- *     the code rather than only of the comment.
+ *     The ordering is load-bearing, not stylistic (Duo review round 2). The guard
+ *     above is `if (!step.done) return`, so anything that throws *after* the step
+ *     write has committed is unrecoverable: the retry sees a step that is already
+ *     not-done and returns immediately, silently skipping whatever had not run.
+ *     That made a transient Google error permanently strand the reward reversal
+ *     while showing a notice that falsely said the step was still done. So the
+ *     reversal runs BEFORE the Google call, and the Google call is wrapped — which
+ *     is what makes the word "best-effort" true of the code rather than only of
+ *     the comment.
+ *
+ *     **Round 4: ordering was necessary and not sufficient, because the reversal
+ *     can throw too.** Moving it earlier only relocated the unrecoverable window
+ *     — `reverseLatestReward` reads the newest row then deletes it, so two
+ *     concurrent undos raced and the loser got P2025 (now fixed at source with
+ *     `deleteMany`, but a dead connection can still fail the write). With the step
+ *     already committed, that failure skipped the Google patch and all three
+ *     revalidations, told the user "it is still marked done" — false by then — and
+ *     turned every retry into a silent no-op via the guard. The points stayed
+ *     banked for work that had been un-done, permanently.
+ *
+ *     The fix is therefore **atomicity, not ordering**: the local writes and the
+ *     reversal share one `$transaction`, so a failed reversal rolls the step write
+ *     back and leaves the undo exactly as retryable as it was before it was
+ *     pressed — and the failure notice's claim becomes true again. The Google call
+ *     and the revalidations stay OUTSIDE it: a Google failure must still not fail
+ *     the undo (that is this whole point), and revalidating a transaction that
+ *     went on to abort would publish a rollback.
  *  2. **The parent task is reopened if THIS step had closed it**, along with its
  *     inbox item(s) — otherwise the step is open inside a task the Done view
  *     still renders as finished.
@@ -310,30 +328,42 @@ export async function uncompleteStep(stepId: string) {
   });
   if (!step || !step.done) return;
 
-  await prisma.step.update({ where: { id: stepId }, data: { done: false } });
-
   // Whether this undo actually reopened a CLOSED task is the gate for the
   // task-level reward below, so it is recorded as a fact rather than re-derived.
+  // Read outside the transaction on purpose: it describes the state the undo is
+  // correcting, so re-reading it inside would only invite it to change.
   const reopenedTask = step.task?.status === TaskStatus.Done;
-  if (reopenedTask) {
-    await prisma.task.update({
-      where: { id: step.taskId, workspaceId },
-      data: { status: TaskStatus.Active },
-    });
-    await prisma.brainDumpItem.updateMany({
-      where: { taskId: step.taskId, workspaceId },
-      data: { completedAt: null },
-    });
-  }
 
-  // `markTaskCompleted` logs `task_complete` whenever a step closes its task, and
-  // nothing stops it running again when the step is re-completed — `awardBadge` is
-  // idempotent, `logReward` is not. So reopening a task has to take that reward
-  // back, or the farm this action exists to close is simply moved one level up
-  // (review round 3). Gated on `reopenedTask`, which is state, not inference: a
-  // task that was already open never earned one to reverse.
-  await reverseStepCompletionRewards(workspaceId, {
-    includeTaskComplete: reopenedTask,
+  // One transaction, for the reason in (1) above: if the reward reversal fails,
+  // the step must still be `done` when the user retries. Every write in here runs
+  // on `tx` — one left on `prisma` would commit independently and survive the
+  // rollback, which is the original bug wearing this fix's clothes.
+  await prisma.$transaction(async (tx) => {
+    await tx.step.update({ where: { id: stepId }, data: { done: false } });
+
+    if (reopenedTask) {
+      await tx.task.update({
+        where: { id: step.taskId, workspaceId },
+        data: { status: TaskStatus.Active },
+      });
+      await tx.brainDumpItem.updateMany({
+        where: { taskId: step.taskId, workspaceId },
+        data: { completedAt: null },
+      });
+    }
+
+    // `markTaskCompleted` logs `task_complete` whenever a step closes its task,
+    // and nothing stops it running again when the step is re-completed —
+    // `awardBadge` is idempotent, `logReward` is not. So reopening a task has to
+    // take that reward back, or the farm this action exists to close is simply
+    // moved one level up (review round 3). Gated on `reopenedTask`, which is
+    // state, not inference: a task that was already open never earned one to
+    // reverse.
+    await reverseStepCompletionRewards(
+      workspaceId,
+      { includeTaskComplete: reopenedTask },
+      tx,
+    );
   });
 
   // Last, and swallowed: see (1) above. A Google failure must not fail an undo

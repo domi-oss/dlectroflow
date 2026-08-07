@@ -910,9 +910,14 @@ export function FocusTimer({
       resumeExisting: () => void resumeExisting(),
       togglePause: () => void togglePause(),
       complete: () => void finishComplete(),
-      // #198 — retrying an undo is safe to repeat: `uncompleteStep` no-ops on a
-      // step that is already not done, so a retry after a partial failure cannot
-      // reverse a second reward or reopen anything twice.
+      // #198 — retrying an undo is both safe and effective, and it took review
+      // round 4 to make the second half true. `uncompleteStep` is atomic, so a
+      // failure rolled every one of its writes back and the retry re-runs the
+      // whole undo, reward reversal included. Safe for the reason this comment
+      // always gave: an undo that DID succeed leaves a step that is already not
+      // done, which the action's own guard no-ops on, so nothing can be reversed
+      // or reopened twice. Before that fix only the safety held — a retry after a
+      // partial failure hit the same guard and silently did nothing at all.
       undo: () => void undoComplete(),
       reestimate: () => void startReestimate(),
       requeue: () => void confirmRequeue(),

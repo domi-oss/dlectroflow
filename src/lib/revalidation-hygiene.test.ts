@@ -74,6 +74,57 @@ describe("scanServerActions", () => {
     expect(scanServerActions(source)[0].writes).toEqual([]);
   });
 
+  // #198 review round 4 — found by making `uncompleteStep` atomic, which dropped
+  // it straight out of the focus.ts census below. The walk already goes INTO a
+  // `$transaction` callback on purpose (see the note beside `ts.forEachChild`),
+  // but the receiver check then demanded the identifier `prisma`, so every write
+  // it walked in to find was discarded for being on `tx`. The guard's own comment
+  // claimed to cover this case and did not, which is the worst state for a
+  // compensating control to be in: refactoring an action into a transaction —
+  // exactly what a correctness fix tends to do — silently exempted it from #139.
+  //
+  // The alias list matches the scoping harness's, which has always accepted
+  // `prisma|tx|db`; two guards reading the same code disagreeing about what a
+  // client is called is its own defect.
+  it("counts a write on a transaction client, not just on `prisma`", () => {
+    const source = [
+      "export async function act(id: string) {",
+      "  await prisma.$transaction(async (tx) => {",
+      "    await tx.step.update({ where: { id }, data: {} });",
+      "  });",
+      "  revalidatePath('/');",
+      "}",
+    ].join("\n");
+    expect(scanServerActions(source)[0]).toMatchObject({
+      name: "act",
+      writes: ["step"],
+      revalidates: ["/"],
+    });
+  });
+
+  it("counts a write on an injected `db` client too", () => {
+    // `reverseStepCompletionRewards(workspaceId, opts, db)` — the shape #198 added
+    // so the reversal can join its caller's transaction.
+    const source = [
+      "export async function act(id: string, db: unknown) {",
+      "  await db.rewardEvent.deleteMany({ where: { id } });",
+      "}",
+    ].join("\n");
+    expect(scanServerActions(source)[0].writes).toEqual(["rewardEvent"]);
+  });
+
+  it("still ignores a write-shaped call on an unrelated receiver", () => {
+    // The alias list is three names, not "anything with a matching method": a
+    // guard that credits `cache.step.delete(…)` as a Prisma write would report
+    // models nothing touched.
+    const source = [
+      "export async function act(id: string) {",
+      "  await cache.step.delete({ where: { id } });",
+      "}",
+    ].join("\n");
+    expect(scanServerActions(source)[0].writes).toEqual([]);
+  });
+
   // closeSession() and markTaskCompleted() are private helpers in focus.ts, so
   // an action that writes only through them still writes.
   it("follows a write through a module-local helper", () => {

@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
   RewardType,
@@ -196,33 +197,74 @@ export async function rewardStepDone(
  *
  * Returns what was actually removed, so callers can be tested on it and so
  * "nothing to reverse" is a normal answer rather than an error.
+ *
+ * ── `db`: why this takes a transaction client ────────────────────────────────
+ *
+ * `uncompleteStep` (src/app/actions/focus.ts) runs its local writes and this
+ * reversal inside ONE `prisma.$transaction`, so that a reversal that fails rolls
+ * the step write back with it and the undo stays retryable — read the note there
+ * for the failure it closes (review round 4). That only holds if the reversal
+ * actually joins the transaction, so the client is a parameter rather than the
+ * module-level singleton. It defaults to `prisma`, which keeps every other
+ * caller and the unit tests unchanged.
  */
 export async function reverseStepCompletionRewards(
   workspaceId: string,
   opts: { includeTaskComplete: boolean },
+  db: Prisma.TransactionClient = prisma,
 ): Promise<{ stepDone: boolean; taskComplete: boolean }> {
-  const stepDone = await reverseLatestReward(workspaceId, RewardType.StepDone);
+  const stepDone = await reverseLatestReward(
+    workspaceId,
+    RewardType.StepDone,
+    db,
+  );
   const taskComplete = opts.includeTaskComplete
-    ? await reverseLatestReward(workspaceId, RewardType.TaskComplete)
+    ? await reverseLatestReward(workspaceId, RewardType.TaskComplete, db)
     : false;
   return { stepDone, taskComplete };
 }
 
-/** Remove the newest reward of one type in one workspace. See above for why "newest". */
+/**
+ * Remove the newest reward of one type in one workspace. See above for why
+ * "newest", and for why the client is a parameter.
+ *
+ * `deleteMany` on a single id, rather than `delete` — the read and the write are
+ * a TOCTOU, the same shape `awardBadge` above has and for the same reason: two
+ * concurrent reversals can both see the same newest row, and the loser's
+ * `delete` then raises P2025 because the row is already gone (review round 4).
+ * `deleteMany` compiles to a plain `DELETE … WHERE id = …` and reports how many
+ * rows it matched instead of raising, so a lost race resolves to `count: 0` and
+ * is reported as `false` — which is already this function's word for "there was
+ * nothing to take back". Fixing it here rather than by catching P2025 at the
+ * call site keeps the primitive honest for every caller.
+ *
+ * A genuine failure (a dead connection, say) still rejects, and must: at the
+ * call site it is what rolls the step write back.
+ */
 async function reverseLatestReward(
   workspaceId: string,
   type: RewardTypeT,
+  db: Prisma.TransactionClient,
 ): Promise<boolean> {
-  const latest = await prisma.rewardEvent.findFirst({
+  const latest = await db.rewardEvent.findFirst({
     where: { workspaceId, type },
     orderBy: { createdAt: "desc" },
     select: { id: true },
   });
   if (!latest) return false;
-  // Safe to delete by id alone: the id came from a workspace-scoped read above,
-  // so this cannot reach another workspace's row (the scoping invariant).
-  await prisma.rewardEvent.delete({ where: { id: latest.id } });
-  return true;
+  // `workspaceId` in the filter as well as the id, not because the id is in doubt
+  // — it came from the workspace-scoped read directly above — but because
+  // `deleteMany` is a BULK operation, and the scoping harness
+  // (src/lib/__tests__/scoping.harness.test.ts) requires every bulk write to
+  // carry the scope in its own arguments rather than inherit it from a read a few
+  // lines up. It is right to: the previous by-id `delete` was accepted only as a
+  // primary-key write guarded by that read, and swapping in a bulk op quietly
+  // changed which rule applied. Belt and braces either way — a foreign id now
+  // resolves to `count: 0` instead of reaching another workspace's row.
+  const { count } = await db.rewardEvent.deleteMany({
+    where: { id: latest.id, workspaceId },
+  });
+  return count > 0; // 0 = a concurrent reversal already took this row
 }
 
 // ── streak ───────────────────────────────────────────────────────────────
