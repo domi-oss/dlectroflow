@@ -1600,6 +1600,122 @@ describe("FocusTimer — putting a step back after an accident (#198)", () => {
     // retry and the undo can be pressed again.
     expect(screen.getByTestId("focus-done-summary")).toBeInTheDocument();
   });
+
+  // ── a11y (WCAG 2.4.3), review round 4 ──────────────────────────────────────
+  //
+  // The undo button lives inside the `done` block, which the return to `setup`
+  // unmounts. Nothing handed focus on, so a keyboard or screen-reader user was
+  // dropped to <body> at the precise moment they had corrected a mistake and most
+  // needed to know where they were — and the only announcement, the polite
+  // notice, says the step is open again without saying where "here" now is.
+  //
+  // The existing hand-offs cover every neighbouring transition and not this one:
+  // the #142 effect fires on arrival INTO `done`, and the #66 one on
+  // `startingFresh`, which an undo never touches.
+  describe("focus after the undo (WCAG 2.4.3)", () => {
+    it("hands focus to the setup CTA rather than dropping it to <body>", async () => {
+      const user = userEvent.setup();
+      await completeAStep(user);
+      await user.click(
+        screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+      );
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: /^start focusing$/i }),
+        ).toHaveFocus(),
+      );
+      expect(document.body).not.toHaveFocus();
+    });
+
+    it("follows whichever CTA is primary — Resume, when a paused session is offered", async () => {
+      // `setupCtaRef` is attached at two mutually-exclusive call sites, and which
+      // one mounts depends on `resumable`. A fix that only worked for the Start
+      // branch would silently do nothing for anyone with a paused session — the
+      // same class of miss as the #66 effect's own two branches.
+      const user = userEvent.setup();
+      render(
+        <FocusTimer
+          {...base({
+            existingSession: {
+              id: "sess-paused",
+              plannedMin: 10,
+              totalSec: 600,
+              remainingSec: 300,
+            },
+          })}
+        />,
+      );
+      await user.click(screen.getByRole("button", { name: /resume/i }));
+      await user.click(screen.getByRole("button", { name: /complete step/i }));
+      await user.click(
+        screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+      );
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /resume/i })).toHaveFocus(),
+      );
+    });
+
+    it("still announces the notice — the focus move does not replace it", async () => {
+      // Two separate jobs, and the hand-off must not be mistaken for doing both.
+      // The notice is a sibling <p role=status>, not an ancestor of the CTA, so
+      // the polite announcement queues rather than being suppressed — the same
+      // coexistence the #142 done-summary focus has with the auto-advance panel's
+      // live region.
+      const user = userEvent.setup();
+      await completeAStep(user);
+      await user.click(
+        screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+      );
+      const notice = await screen.findByTestId("focus-undone-notice");
+      expect(notice).toHaveAttribute("role", "status");
+      expect(notice).toHaveTextContent(/open again/i);
+      expect(notice).not.toContainElement(
+        screen.getByRole("button", { name: /^start focusing$/i }),
+      );
+      expect(
+        screen.getByRole("button", { name: /^start focusing$/i }),
+      ).toHaveFocus();
+    });
+
+    it("an ordinary arrival at setup steals nothing", async () => {
+      // Opening /focus/[stepId] normally lands in `setup` with nothing pressed and
+      // nothing unmounted, so moving focus would be the rudeness the hand-off
+      // exists to prevent. This is what the `undone` gate buys.
+      render(<FocusTimer {...base()} />);
+      await waitFor(() => expect(document.body).toHaveFocus());
+      expect(
+        screen.getByRole("button", { name: /^start focusing$/i }),
+      ).not.toHaveFocus();
+    });
+
+    it("leaves the #66 disclosure hand-off working after an undo", async () => {
+      // The two effects want the same element but fire on different deps, so
+      // neither may disarm the other: after an undo, "Start fresh" must still move
+      // focus to the action it makes primary.
+      const user = userEvent.setup();
+      render(
+        <FocusTimer
+          {...base({
+            existingSession: {
+              id: "sess-paused",
+              plannedMin: 10,
+              totalSec: 600,
+              remainingSec: 300,
+            },
+          })}
+        />,
+      );
+      await user.click(screen.getByRole("button", { name: /resume/i }));
+      await user.click(screen.getByRole("button", { name: /complete step/i }));
+      await user.click(
+        screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+      );
+      await user.click(screen.getByRole("button", { name: /start fresh/i }));
+      expect(
+        screen.getByRole("button", { name: /^start focusing$/i }),
+      ).toHaveFocus();
+    });
+  });
 });
 
 describe("FocusTimer — complete", () => {

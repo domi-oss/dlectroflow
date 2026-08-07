@@ -1049,6 +1049,35 @@ export function FocusTimer({
     if (phase === "done") doneSummaryRef.current?.focus();
   }, [phase]);
 
+  // #198 a11y (WCAG 2.4.3) — the mirror image of the effect above, for the way
+  // back. An undo returns to `setup`, which unmounts the whole `done` block
+  // including the "Actually, I hadn't finished" button that was just pressed, so
+  // focus fell to <body> at the precise moment the user had corrected a mistake
+  // and most needed to know where they were. It goes to whichever setup CTA is now
+  // primary — the same landing spot the #66 disclosure effect uses, and it works
+  // for either of `setupCtaRef`'s two mutually-exclusive call sites because only
+  // one is ever mounted.
+  //
+  // Gated on `undone`, which is the state the notice is ALREADY gated on, so the
+  // announcement and the hand-off cannot disagree about whether an undo happened.
+  // That gate is also what stops it stealing focus on first render or on an
+  // ordinary arrival at `setup` — opening /focus/[stepId] normally, where nothing
+  // was pressed and nothing unmounted, and moving focus would be the rudeness the
+  // hand-off exists to prevent. `undone` is reset when a session begins, so it
+  // cannot re-fire later either.
+  //
+  // No conflict with the #66 effect: that one fires on `startingFresh`, which an
+  // undo does not touch, and these deps do not change when the disclosure is
+  // toggled — so each transition is handled exactly once, by one of them.
+  //
+  // Focusing does not disturb the notice. It is a sibling <p role="status">, not
+  // an ancestor of the CTA, so the polite announcement queues behind the button's
+  // own rather than being suppressed or repeated — the same coexistence the
+  // done-summary focus has with the auto-advance panel's live region.
+  useEffect(() => {
+    if (undone && phase === "setup") setupCtaRef.current?.focus();
+  }, [undone, phase]);
+
   const remainingInTask = steps
     .filter((s) => !s.done)
     .reduce((n, s) => n + s.estMinutes, 0);
