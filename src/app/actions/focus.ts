@@ -338,8 +338,32 @@ export async function uncompleteStep(stepId: string) {
   // the step must still be `done` when the user retries. Every write in here runs
   // on `tx` — one left on `prisma` would commit independently and survive the
   // rollback, which is the original bug wearing this fix's clothes.
-  await prisma.$transaction(async (tx) => {
-    await tx.step.update({ where: { id: stepId }, data: { done: false } });
+  const applied = await prisma.$transaction(async (tx) => {
+    // The `!step.done` guard above is read OUTSIDE this transaction and takes no
+    // lock, so it cannot stop two undos of the same step — a double-click that
+    // outruns the button's own `disabled`, or the step open in two tabs, and both
+    // pass it before either commits (review round 10). A second pass through here
+    // is not harmlessly idempotent: `reverseLatestReward` takes back *the newest
+    // `step_done` in the workspace*, not one tied to this step, so the loser
+    // reverses an UNRELATED step's reward. One press, two rewards gone.
+    //
+    // So the precondition moves INTO the write, which is the same guarded-bulk
+    // shape `reverseLatestReward` itself adopted in round 4 and for the same
+    // reason: Postgres re-evaluates an UPDATE's WHERE after the row lock it was
+    // waiting on is released, so the loser matches nothing and reports
+    // `count: 0` rather than quietly overwriting. `count: 0` means "another
+    // caller has already done all of this", which is a no-op, not an error —
+    // nothing may be raised at a user who merely clicked twice.
+    //
+    // Scoped by `task.workspaceId` as well as by id: `updateMany` is a bulk write,
+    // and `scoping.harness.test.ts` requires those to carry the scope in their own
+    // arguments rather than inherit it from a read further up. `Step` has no
+    // `workspaceId` column of its own, so the scope comes through its task.
+    const { count } = await tx.step.updateMany({
+      where: { id: stepId, done: true, task: { workspaceId } },
+      data: { done: false },
+    });
+    if (count === 0) return false;
 
     if (reopenedTask) {
       await tx.task.update({
@@ -364,13 +388,19 @@ export async function uncompleteStep(stepId: string) {
       { includeTaskComplete: reopenedTask },
       tx,
     );
+    return true;
   });
 
   // Last, and swallowed: see (1) above. A Google failure must not fail an undo
   // the user asked for, and must not strand anything behind it — there is
   // nothing behind it.
+  //
+  // Skipped when this call lost the race above: the winner has already reopened
+  // the Google task, and a second PATCH would be a redundant round trip to an
+  // API this app is rate-limited against. `revalidatePath` below is NOT skipped —
+  // each request still has to refresh its own render, whoever did the write.
   try {
-    await reopenGoogleTaskForStep(step);
+    if (applied) await reopenGoogleTaskForStep(step);
   } catch {
     // Best-effort by design. The local state is already correct, and #196 covers
     // the wider "reopen does not tell Google" gap this shares a helper with.

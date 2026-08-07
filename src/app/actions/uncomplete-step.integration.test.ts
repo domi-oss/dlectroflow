@@ -272,3 +272,69 @@ describe("reverseLatestReward's deleteMany absorbs a lost race (#198)", () => {
     );
   });
 });
+
+describe("two undos of ONE step take back one reward, not two (#198, round 10)", () => {
+  /**
+   * `reverseLatestReward` absorbing a lost race (the block above) protects the
+   * REWARD row. It does not protect the *decision to reverse*, and that is a
+   * separate hole one level up.
+   *
+   * `uncompleteStep` reads `step.done` outside the transaction and takes no lock,
+   * so two near-simultaneous undos of the same step both pass
+   * `if (!step || !step.done) return` before either commits. Both then entered
+   * their own transaction, both flipped `done` to `false` (idempotent, harmless),
+   * and both called `reverseStepCompletionRewards` — which takes back *the newest
+   * `step_done` in the workspace*, not one tied to this step. So the loser
+   * silently reversed an UNRELATED step's reward: one press, two rewards gone.
+   *
+   * Reachable without contriving anything: a double-click that outruns the
+   * button's own `disabled`, or the same step open in two tabs.
+   *
+   * **This is deterministic, not a race the test hopes to hit.** The first
+   * transaction's write takes a row lock, so the second blocks on it and only
+   * proceeds after the first has committed — which is precisely when a guarded
+   * write must re-read `done` and find it already `false`.
+   */
+  it("leaves an unrelated step's step_done alone when two undos of one step race", async () => {
+    // An earlier, unrelated completion's payout. Older, so it is the row the
+    // buggy second reversal reaches for once the first has taken the newest.
+    const unrelated = await prisma.rewardEvent.create({
+      data: {
+        type: RewardType.StepDone,
+        points: RewardPoints[RewardType.StepDone],
+        workspaceId: WS,
+        createdAt: new Date(Date.now() - 60_000),
+      },
+    });
+    const { task, step } = await seedCompletedStep();
+    const { uncompleteStep } = await import("./focus");
+
+    // Neither call may raise: a duplicate undo is a no-op, not an error the user
+    // should ever see.
+    const errors = await prismaErrorsDuring(async () => {
+      await expect(
+        Promise.all([uncompleteStep(step.id), uncompleteStep(step.id)]),
+      ).resolves.toHaveLength(2);
+    });
+    expect(errors).toEqual([]);
+
+    // The undo itself still happened, exactly once over.
+    expect(
+      (await prisma.step.findUnique({ where: { id: step.id } }))?.done,
+    ).toBe(false);
+    expect(
+      (await prisma.task.findUnique({ where: { id: task.id } }))?.status,
+    ).toBe(TaskStatus.Active);
+
+    // The point of the test: the unrelated reward is untouched, and it is
+    // identified BY ID rather than by a count, because "one step_done remains"
+    // would also pass if the wrong one had survived.
+    const survivors = await prisma.rewardEvent.findMany({
+      where: { workspaceId: WS },
+      select: { id: true, type: true },
+    });
+    expect(survivors).toEqual([
+      { id: unrelated.id, type: RewardType.StepDone },
+    ]);
+  });
+});

@@ -9,7 +9,12 @@ const { prismaMock, txClient, revalidatePathMock, currentWorkspaceIdMock } =
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       step: {
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        // `{ count: 1 }` — the write matched its row, which is the normal case and
+        // the one `uncompleteStep` now branches on (review round 10: its `done`
+        // precondition moved INTO the write, so `count: 0` means "another caller
+        // got there first" and is a no-op). `completeItem` and `reopenItem` ignore
+        // the count, so this default is inert for them.
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         update: vi.fn(),
         findFirst: vi.fn(),
         count: vi.fn(),
@@ -349,21 +354,47 @@ describe("uncompleteStep (#198)", () => {
       id: "s1",
       task: { workspaceId: "owner" },
     });
-    expect(prismaMock.step.update).toHaveBeenCalledWith({
-      where: { id: "s1" },
+    // Round 10 — the `done: true` precondition is part of the WRITE now, not just
+    // the read above it, and the write carries its own workspace scope because
+    // `updateMany` is a bulk op (`scoping.harness.test.ts`). Both halves are
+    // asserted, because either one missing is a real defect: without `done: true`
+    // a second concurrent undo reverses an unrelated step's reward, and without
+    // the scope the harness rule is silently sidestepped.
+    expect(prismaMock.step.updateMany).toHaveBeenCalledWith({
+      where: { id: "s1", done: true, task: { workspaceId: "owner" } },
       data: { done: false },
     });
+    // And the superseded shape is gone rather than merely unused — an unguarded
+    // primary-key `update` left anywhere on this path reopens the hole.
+    expect(prismaMock.step.update).not.toHaveBeenCalled();
   });
 
   it("no-ops on a missing step, and on one that is not done", async () => {
     prismaMock.step.findFirst.mockResolvedValueOnce(null);
     const { uncompleteStep } = await import("./focus");
     await uncompleteStep("nope");
-    expect(prismaMock.step.update).not.toHaveBeenCalled();
+    expect(prismaMock.step.updateMany).not.toHaveBeenCalled();
 
     prismaMock.step.findFirst.mockResolvedValueOnce(doneStep({ done: false }));
     await uncompleteStep("s1");
-    expect(prismaMock.step.update).not.toHaveBeenCalled();
+    expect(prismaMock.step.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("stops dead when the guarded write matches nothing — a lost race is a no-op", async () => {
+    // The whole point of moving the precondition into the write: `count: 0` means
+    // a concurrent undo already did all of this, so this call must NOT go on to
+    // reverse a reward. Before round 10 it did, and `reverseLatestReward` takes
+    // back the newest `step_done` in the WORKSPACE — so the loser reversed an
+    // unrelated step's reward. Proved against real Postgres in
+    // `uncomplete-step.integration.test.ts`; pinned here as the shape.
+    prismaMock.step.findFirst.mockResolvedValueOnce(doneStep());
+    prismaMock.step.updateMany.mockResolvedValueOnce({ count: 0 });
+    const rewards = await import("@/lib/rewards");
+    const { uncompleteStep } = await import("./focus");
+    await expect(uncompleteStep("s1")).resolves.toBeUndefined();
+    expect(prismaMock.step.updateMany).toHaveBeenCalled();
+    expect(rewards.reverseStepCompletionRewards).not.toHaveBeenCalled();
+    expect(prismaMock.task.update).not.toHaveBeenCalled();
   });
 
   it("reopens the task and its inbox item when THAT step had closed the task", async () => {
@@ -415,7 +446,7 @@ describe("uncompleteStep (#198)", () => {
     const { uncompleteStep } = await import("./focus");
     await uncompleteStep("s1");
     expect(google.patchGoogleTask).not.toHaveBeenCalled();
-    expect(prismaMock.step.update).toHaveBeenCalled();
+    expect(prismaMock.step.updateMany).toHaveBeenCalled();
   });
 
   it("takes back the step_done reward, so completing again cannot award twice", async () => {
@@ -541,8 +572,8 @@ describe("uncompleteStep (#198)", () => {
     await expect(uncompleteStep("s1")).resolves.toBeUndefined();
 
     expect(reverse).toHaveBeenCalledTimes(2);
-    expect(prismaMock.step.update).toHaveBeenCalledWith({
-      where: { id: "s1" },
+    expect(prismaMock.step.updateMany).toHaveBeenCalledWith({
+      where: { id: "s1", done: true, task: { workspaceId: "owner" } },
       data: { done: false },
     });
     expect(revalidatePathMock).toHaveBeenCalledWith("/dashboard");
@@ -581,7 +612,7 @@ describe("uncompleteStep (#198)", () => {
     );
     const { uncompleteStep } = await import("./focus");
     await expect(uncompleteStep("s1")).resolves.toBeUndefined();
-    expect(prismaMock.step.update).toHaveBeenCalled();
+    expect(prismaMock.step.updateMany).toHaveBeenCalled();
     expect(rewards.reverseStepCompletionRewards).toHaveBeenCalled();
   });
 
