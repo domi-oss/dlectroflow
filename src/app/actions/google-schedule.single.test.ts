@@ -517,3 +517,55 @@ describe("scheduleSingleTask", () => {
     expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 });
+
+describe("scheduleSingleTask — the lazily-created Task's note reaches Google (#179)", () => {
+  // Review finding on `!281`, and it is the self-contradiction shape again. This
+  // MR made `brainDumpItemToTaskData` copy `item.notes` onto the new `Task`, but
+  // the Google Task payload a few lines further down still read
+  // `item.task?.notes`. `item.task` was fetched BEFORE the lazy-create branch, so
+  // in the `!taskId` path it is always null — and the comment on that line said
+  // exactly that ("a task that did not exist a moment ago has no note"), which was
+  // true before this MR and false after it.
+  //
+  // Net effect: a note captured with #179's inline `{...}` syntax was persisted to
+  // `Task.notes` and silently dropped from the Google Task, surfacing only if
+  // someone later opened the task page. The opposite of what #179 exists to do.
+  it("carries the note into the Google Task payload on first schedule", async () => {
+    process.env.PUBLIC_ORIGIN = "https://app.example";
+    workspaceMock.mockResolvedValue("ws-1");
+    currentUserMock.mockResolvedValue({ id: OWNER_ID, role: "owner" });
+    getSettingsMock.mockResolvedValue({ voice: "plain" });
+    tokenMock.mockResolvedValue("tok");
+    // No linked Task yet — the lazy-create path — and the ITEM carries the note.
+    itemFindFirstMock.mockResolvedValue({
+      id: "item-1",
+      text: "Call the dentist",
+      taskId: null,
+      task: null,
+      notes: "ask about the crown",
+    });
+    taskCreateMock.mockResolvedValue({
+      id: "task-new",
+      notes: "ask about the crown",
+    });
+    findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
+    upsertGoogleTaskMock.mockResolvedValue({ id: "gtask-9", created: true });
+
+    const res = await scheduleSingleTask("item-1", 45);
+    expect(res).toEqual({ ok: true });
+
+    // The Task really was created carrying the note — the control, so that a
+    // failure below means "the payload dropped it" rather than "nothing wrote it".
+    expect(taskCreateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ notes: "ask about the crown" }),
+      }),
+    );
+
+    // And the Google Task's own notes field carries it too. Asserted on the
+    // payload rather than on an internal variable, because the user-visible
+    // failure was in Google, not in Postgres.
+    const payload = upsertGoogleTaskMock.mock.calls[0][3];
+    expect(JSON.stringify(payload)).toContain("ask about the crown");
+  });
+});
