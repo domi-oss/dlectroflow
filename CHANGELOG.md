@@ -424,6 +424,17 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **The focus timer's Start and Resume no longer fail in silence (#139's shape,
+  found via #198).** Both buttons handled a server that could not be *reached*,
+  and neither handled a server that answered and *declined* — so in those cases
+  the button did nothing at all: no message, no movement, nothing announced. Most
+  reachable right after putting a step back, where the screen briefly still
+  offered "Resume · ~Xm left" for the session that completion had just closed.
+  Pressing it now says so and offers a retry, and that spent offer is **no longer
+  shown in the first place** — once a step has been put back, the screen offers a
+  fresh start, which is the only thing that can actually work. A genuinely paused
+  session is still offered exactly as before.
+
 - **A step completed by accident can now be put back (#198).** There was no way
   to un-complete a step while its task still had other steps outstanding: the
   only reopen path in the app worked on a whole inbox item, which an unfinished
