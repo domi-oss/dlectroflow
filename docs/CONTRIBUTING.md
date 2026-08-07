@@ -216,7 +216,7 @@ a genuine 1 ms race the suite had been absorbing for that reason, and it was
 found by CPU-throttling the page rather than by the gate.
 
 So if an a11y spec fails, **treat it as a real finding first.** Reproduce it
-with `npx playwright test e2e/a11y --repeat-each=20` before concluding it was
+with `npx playwright test --project=a11y --repeat-each=20` before concluding it was
 the runner; the trace is in the job's `playwright-report/` artifact
 (`trace: "retain-on-failure"`, because a project that never retries would
 otherwise record none). A11y assertions that live *inside* a smoke spec — the

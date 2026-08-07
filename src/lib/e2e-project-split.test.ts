@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readdirSync } from "node:fs";
 import { join, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   claimingProjects,
   routeFiles,
@@ -130,7 +131,12 @@ describe("claimingProjects — synthetic", () => {
 
 // ── The real tree ────────────────────────────────────────────────────────────
 
-const REPO_ROOT = new URL("../../", import.meta.url).pathname;
+// `fileURLToPath`, not `.pathname`. A `file://` URL's pathname is
+// percent-encoded and, on Windows, carries a leading slash before the drive
+// letter — so a checkout under a directory containing a space would hand
+// `readdirSync` a path with `%20` in it and `walk()` would find no `e2e/` at
+// all. Raised in review on !277.
+const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
 function walk(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -161,21 +167,38 @@ function patterns(value: unknown): RegExp[] {
   return list.filter((p): p is RegExp => p instanceof RegExp);
 }
 
+/** A project exactly as the config declares it, before routing normalisation. */
+type RawProject = {
+  name: string;
+  testMatch?: unknown;
+  testIgnore?: unknown;
+  retries?: number;
+  dependencies?: string[];
+};
+
+/**
+ * The ONE place that knows how to load `playwright.config.ts`.
+ *
+ * It returns the raw project list alongside the normalised routing, because
+ * there were briefly two copies of this dynamic import — the second added only
+ * to read `retries` off a project — and two loaders that can drift is exactly
+ * the class of gap this file exists to close. Raised in review on !277.
+ */
 async function realProjects(): Promise<{
   projects: ProjectRouting[];
+  raw: RawProject[];
   suiteTestMatch: unknown;
 }> {
   const url = new URL("../../playwright.config.ts", import.meta.url).href;
   const mod = (await import(/* @vite-ignore */ url)) as {
-    default: {
-      testMatch?: unknown;
-      projects?: { name: string; testMatch?: unknown; testIgnore?: unknown }[];
-    };
+    default: { testMatch?: unknown; projects?: RawProject[] };
   };
   const cfg = mod.default;
+  const raw = cfg.projects ?? [];
   return {
     suiteTestMatch: cfg.testMatch,
-    projects: (cfg.projects ?? []).map((p) => ({
+    raw,
+    projects: raw.map((p) => ({
       name: p.name,
       testMatch: p.testMatch == null ? null : patterns(p.testMatch),
       testIgnore: patterns(p.testIgnore),
@@ -221,12 +244,44 @@ describe("the committed e2e tree routes cleanly (#127)", () => {
   it("the a11y project is the one configured with no retries", async () => {
     // The whole point of #127. If someone renames the project or moves the
     // setting, the split above would still pass while buying nothing.
-    const url = new URL("../../playwright.config.ts", import.meta.url).href;
-    const mod = (await import(/* @vite-ignore */ url)) as {
-      default: { projects?: { name: string; retries?: number }[] };
-    };
-    const a11y = (mod.default.projects ?? []).find((p) => p.name === "a11y");
+    const { raw } = await realProjects();
+    const a11y = raw.find((p) => p.name === "a11y");
     expect(a11y, "no project named a11y — did it get renamed?").toBeDefined();
     expect(a11y?.retries).toBe(0);
+  });
+
+  // The a11y specs seed and delete rows in the shared owner workspace, so
+  // running them after the smoke suite would change the database state the
+  // smoke specs scan against. The config used to secure that by being declared
+  // first and relying on "with `workers: 1`, Playwright runs projects in
+  // declaration order" — an observed implementation detail, not a contract, and
+  // nothing checked it. Reordering the array would have reintroduced the hazard
+  // in silence. Raised in review on !277.
+  //
+  // Two assertions on purpose. `dependencies` is the one the RUNNER enforces;
+  // the array position is a second line of defence for the day someone removes
+  // the dependencies without understanding why they were there.
+  it("makes every other project wait for the a11y gate", async () => {
+    const { raw } = await realProjects();
+    const others = raw.filter((p) => p.name !== "a11y");
+
+    expect(others.length).toBeGreaterThan(0);
+    for (const p of others) {
+      // `?? []` so a project with no `dependencies` at all fails on the
+      // assertion's own message rather than on chai complaining about
+      // `undefined` — the message IS the finding here.
+      expect(
+        p.dependencies ?? [],
+        `project "${p.name}" does not wait for a11y, so it can observe workspace rows the a11y specs are still mutating`,
+      ).toContain("a11y");
+    }
+  });
+
+  it("keeps a11y first in the projects array", async () => {
+    const { raw } = await realProjects();
+    expect(
+      raw[0]?.name,
+      "a11y is no longer declared first — the dependencies above should still hold the ordering, but this pairing is deliberate; read the comment in playwright.config.ts before changing it",
+    ).toBe("a11y");
   });
 });

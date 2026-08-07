@@ -255,12 +255,26 @@ export default defineConfig({
     // not absorbing anything today, so zero tolerance costs nothing now and
     // starts failing loudly the day that stops being true.
     //
-    // Declared FIRST so the execution order is the one the suite has always
-    // had: with `workers: 1` Playwright runs projects in declaration order, and
-    // these specs sort ahead of `e2e/smoke/` today. Several of them seed and
-    // delete rows in the shared owner workspace, so moving them behind the
-    // smoke suite would change the database state they scan against — a real
-    // behaviour change smuggled in by a config reshuffle.
+    // Runs FIRST, and that is now ENFORCED rather than assumed. Several of
+    // these specs seed and delete rows in the shared owner workspace, so
+    // running them after the smoke suite would change the database state they
+    // scan against — a real behaviour change that a config reshuffle could
+    // smuggle in.
+    //
+    // This used to rest on "with `workers: 1` Playwright runs projects in
+    // declaration order". That is an observed implementation detail, not a
+    // documented contract, and nothing verified it — so reordering this array
+    // would have silently reintroduced the hazard (raised in review on !277).
+    // The other two projects now declare `dependencies: ["a11y"]`, which makes
+    // the runner itself responsible for the ordering, and
+    // `e2e-project-split.test.ts` additionally pins the array position as a
+    // second line of defence in case the dependencies are ever removed.
+    //
+    // The cost, stated because it is a real change to the CI signal: a failing
+    // a11y project now SKIPS chromium and member rather than letting them run
+    // independently. That is the right trade for this suite — the a11y gate
+    // failing means the shared workspace state is not what the smoke specs
+    // assume anyway, so their result would not have been trustworthy.
     {
       name: "a11y",
       testMatch: A11Y_SPECS,
@@ -278,6 +292,8 @@ export default defineConfig({
     },
     {
       name: "chromium",
+      // Ordering, enforced by the runner — see the a11y project above.
+      dependencies: ["a11y"],
       // The member specs need the member's own session, so they are excluded
       // here rather than skipped inside the spec: a spec that silently passes
       // against the wrong server is worse than one that does not run. The a11y
@@ -292,6 +308,8 @@ export default defineConfig({
       // session", and Google was merely its first occupant. Self-serve account
       // deletion is the second, and it is not a Google feature.
       name: "member",
+      // Ordering, enforced by the runner — see the a11y project above.
+      dependencies: ["a11y"],
       testMatch: MEMBER_SPECS,
       use: {
         ...devices["Desktop Chrome"],
