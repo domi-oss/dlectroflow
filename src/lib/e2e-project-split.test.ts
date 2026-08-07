@@ -212,7 +212,8 @@ async function realProjects(): Promise<{
   raw: RawProject[];
   suiteTestMatch: unknown;
 }> {
-  const url = new URL("../../config/playwright.config.ts", import.meta.url).href;
+  const url = new URL("../../config/playwright.config.ts", import.meta.url)
+    .href;
   const mod = (await import(/* @vite-ignore */ url)) as {
     default: { testMatch?: unknown; projects?: RawProject[] };
   };
