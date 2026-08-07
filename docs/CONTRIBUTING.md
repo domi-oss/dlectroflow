@@ -192,6 +192,37 @@ npx tsc --noEmit       # typecheck
 - **Keep the diff focused.** One logical change per MR; avoid repo-wide reformatting (it re-fingerprints security findings and blocks unrelated work).
 - **This is not stock Next.js** — it tracks a fast-moving version with breaking changes. Check `node_modules/next/dist/docs/` before reaching for an API you remember.
 
+### Which e2e suites are allowed to retry
+
+`npm run test:e2e` is three Playwright projects, and they are **not** held to the
+same standard (#127):
+
+| Project | Specs | Retries in CI |
+| --- | --- | --- |
+| `a11y` | `e2e/a11y/`, `e2e/a11y-contrast.spec.ts` | **0** |
+| `chromium` | everything else under `e2e/` (today, all of `e2e/smoke/`) | 1 |
+| `member` | `e2e/smoke/member-*.spec.ts` | 1 |
+
+The smoke projects boot two standalone servers against a real Postgres and drive
+redirect chains, so a single odd failure there is more often the infrastructure
+than the app, and a retry is cheaper than a human re-run.
+
+The accessibility gate gets no such benefit of the doubt, because **a
+retry-masked flake in an axe spec looks exactly like a real AA regression that
+happens to be timing-dependent.** Both are "failed once, passed once"; one is
+noise and the other is a shipped contrast bug, and a retry throws away the
+distinction — the flaky-test summary that records it gates on nothing. #110 was
+a genuine 1 ms race the suite had been absorbing for that reason, and it was
+found by CPU-throttling the page rather than by the gate.
+
+So if an a11y spec fails, **treat it as a real finding first.** Reproduce it
+with `npx playwright test --project=a11y --repeat-each=20` before concluding it was
+the runner; the trace is in the job's `playwright-report/` artifact
+(`trace: "retain-on-failure"`, because a project that never retries would
+otherwise record none). A11y assertions that live *inside* a smoke spec — the
+touch-target measurements in `e2e/smoke/member-google.spec.ts`, for instance —
+still retry; only the axe gate is zero-tolerance.
+
 ## Adding a dependency
 
 Three steps, and one trap that has cost this project real time twice (#67, #76).
