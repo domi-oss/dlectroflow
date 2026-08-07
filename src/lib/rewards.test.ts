@@ -86,10 +86,8 @@ describe("reverseStepCompletionRewards — undoing a step completion (#198)", ()
     prismaMock.rewardEvent.delete.mockResolvedValue({});
 
     expect(
-      await reverseStepCompletionRewards("ws", {
-        includeSessionFinished: false,
-      }),
-    ).toEqual({ stepDone: true, sessionFinished: false });
+      await reverseStepCompletionRewards("ws", { includeTaskComplete: false }),
+    ).toEqual({ stepDone: true, taskComplete: false });
 
     // The read carries the workspace scope; the delete then goes by the id it
     // returned, which is why the read must be both filtered and ordered.
@@ -103,63 +101,64 @@ describe("reverseStepCompletionRewards — undoing a step completion (#198)", ()
     });
   });
 
-  // Duo review round 2. `completeFocus` logs BOTH rewards for one step, and the
-  // undo added in #198 lives on the timer's done screen — exactly that path — so
-  // reversing only step_done left session_finished farmable.
-  it("also removes a session_finished row when asked, and only then", async () => {
+  // Review round 3: `markTaskCompleted` logs `task_complete` every time a step
+  // closes its task, and `logReward` has no idempotency guard, so the farm this
+  // whole feature closes for `step_done` was left open one level up.
+  it("also removes a task_complete row when asked", async () => {
     prismaMock.rewardEvent.findFirst.mockResolvedValue({ id: "re-1" });
     prismaMock.rewardEvent.delete.mockResolvedValue({});
 
     expect(
-      await reverseStepCompletionRewards("ws", {
-        includeSessionFinished: true,
-      }),
-    ).toEqual({ stepDone: true, sessionFinished: true });
+      await reverseStepCompletionRewards("ws", { includeTaskComplete: true }),
+    ).toEqual({ stepDone: true, taskComplete: true });
 
-    const types = prismaMock.rewardEvent.findFirst.mock.calls.map(
-      (c) => (c[0] as { where: { type: string } }).where.type,
-    );
-    expect(types).toEqual([RewardType.StepDone, RewardType.SessionFinished]);
+    expect(types()).toEqual([RewardType.StepDone, RewardType.TaskComplete]);
     expect(prismaMock.rewardEvent.delete).toHaveBeenCalledTimes(2);
   });
 
-  it("leaves session_finished alone when the completion had no session", async () => {
+  it("leaves task_complete alone when no task was reopened", async () => {
     prismaMock.rewardEvent.findFirst.mockResolvedValue({ id: "re-1" });
     prismaMock.rewardEvent.delete.mockResolvedValue({});
 
-    await reverseStepCompletionRewards("ws", { includeSessionFinished: false });
+    await reverseStepCompletionRewards("ws", { includeTaskComplete: false });
 
-    // Reversing one here would take back points a DIFFERENT, genuinely finished
-    // session earned — the one case where "which row goes is unobservable" stops
-    // being true, because the types are not interchangeable.
-    const types = prismaMock.rewardEvent.findFirst.mock.calls.map(
-      (c) => (c[0] as { where: { type: string } }).where.type,
-    );
-    expect(types).not.toContain(RewardType.SessionFinished);
+    // A task that never closed never earned one, so reversing here would take
+    // points from a different, genuinely finished task.
+    expect(types()).not.toContain(RewardType.TaskComplete);
     expect(prismaMock.rewardEvent.delete).toHaveBeenCalledTimes(1);
   });
 
-  it("touches no other reward type at all", async () => {
+  // Rounds 2 and 3 together. Round 2 flagged that `session_finished` was not
+  // reversed; round 3 showed the conditional reversal was the wrong remedy. It is
+  // now never reversed, on the same reasoning that keeps the streak: it pays for
+  // time genuinely spent, and re-completing through the timer needs a NEW
+  // FocusSession, so a second row is paid for by a second real session. This test
+  // exists so that decision cannot be quietly reverted.
+  it("NEVER removes a session_finished row, on either path", async () => {
     prismaMock.rewardEvent.findFirst.mockResolvedValue({ id: "re-1" });
-    await reverseStepCompletionRewards("ws", { includeSessionFinished: true });
-    const types = prismaMock.rewardEvent.findFirst.mock.calls.map(
-      (c) => (c[0] as { where: { type: string } }).where.type,
-    );
-    // task_complete in particular: closing a task is its own achievement and
-    // un-completing one step of it does not undo that.
-    expect(types).not.toContain(RewardType.TaskComplete);
+    prismaMock.rewardEvent.delete.mockResolvedValue({});
+
+    await reverseStepCompletionRewards("ws", { includeTaskComplete: true });
+    await reverseStepCompletionRewards("ws", { includeTaskComplete: false });
+
+    expect(types()).not.toContain(RewardType.SessionFinished);
   });
 
   it("nothing to reverse is a normal answer, not an error", async () => {
     prismaMock.rewardEvent.findFirst.mockResolvedValue(null);
 
     expect(
-      await reverseStepCompletionRewards("ws", {
-        includeSessionFinished: true,
-      }),
-    ).toEqual({ stepDone: false, sessionFinished: false });
+      await reverseStepCompletionRewards("ws", { includeTaskComplete: true }),
+    ).toEqual({ stepDone: false, taskComplete: false });
     // Deleting on a null read would throw on a real client; reporting false lets
     // the caller carry on un-completing, which is the user's actual intent.
     expect(prismaMock.rewardEvent.delete).not.toHaveBeenCalled();
   });
+
+  /** Reward types the mock was asked for, in call order. */
+  function types(): string[] {
+    return prismaMock.rewardEvent.findFirst.mock.calls.map(
+      (c) => (c[0] as { where: { type: string } }).where.type,
+    );
+  }
 });

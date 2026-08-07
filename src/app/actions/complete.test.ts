@@ -65,7 +65,7 @@ vi.mock("@/lib/rewards", () => ({
   rewardStepDone: vi.fn().mockResolvedValue(null),
   reverseStepCompletionRewards: vi
     .fn()
-    .mockResolvedValue({ stepDone: true, sessionFinished: false }),
+    .mockResolvedValue({ stepDone: true, taskComplete: false }),
   touchStreakOnCompletion: vi.fn().mockResolvedValue(null),
   maybeAwardInboxZero: vi.fn().mockResolvedValue(undefined),
   maybeAwardTenStepsDay: vi.fn().mockResolvedValue(undefined),
@@ -413,48 +413,53 @@ describe("uncompleteStep (#198)", () => {
   it("takes back the step_done reward, so completing again cannot award twice", async () => {
     const rewards = await import("@/lib/rewards");
     prismaMock.step.findFirst.mockResolvedValueOnce(doneStep());
-    prismaMock.focusSession.findFirst.mockResolvedValueOnce(null);
     const { uncompleteStep } = await import("./focus");
     await uncompleteStep("s1");
     expect(rewards.reverseStepCompletionRewards).toHaveBeenCalledWith("owner", {
-      includeSessionFinished: false,
+      includeTaskComplete: false,
     });
   });
 
-  // Duo review round 2, and it was right: `completeFocus` logs TWO rewards for
-  // one step — `rewardStepDone` AND `RewardType.SessionFinished` — and the undo
-  // this MR adds lives on the timer's done screen, i.e. exactly the path that
-  // logs the second one. Reversing only `step_done` left the session reward
-  // farmable, which is the loophole the MR claims to close.
-  it("also reverses the SESSION reward when the completion came through a focus session", async () => {
+  // Duo review round 3, and it was right: `markTaskCompleted` logs `task_complete`
+  // when a step closes its task, and nothing stops it running a second time once
+  // the step is re-completed. `awardBadge` is idempotent so the badge is safe, but
+  // `logReward` is not — so the exact farm this MR closes for `step_done` was left
+  // open one level up, at the task.
+  it("also reverses task_complete when it actually reopens a completed task", async () => {
     const rewards = await import("@/lib/rewards");
-    prismaMock.step.findFirst.mockResolvedValueOnce(doneStep());
-    prismaMock.focusSession.findFirst.mockResolvedValueOnce({ id: "fs-1" });
+    prismaMock.step.findFirst.mockResolvedValueOnce(
+      doneStep({ task: { id: "t1", status: "done" } }),
+    );
     const { uncompleteStep } = await import("./focus");
     await uncompleteStep("s1");
-    expect(prismaMock.focusSession.findFirst.mock.calls[0][0].where).toEqual({
-      stepId: "s1",
-      workspaceId: "owner",
-      outcome: "completed",
-    });
     expect(rewards.reverseStepCompletionRewards).toHaveBeenCalledWith("owner", {
-      includeSessionFinished: true,
+      includeTaskComplete: true,
     });
   });
 
-  it("does NOT reverse a session reward for a step completed without one", async () => {
-    // `completeStep` (the step row's ✓, no timer) awards only `step_done`.
-    // Reversing a `session_finished` here would take back points earned by a
-    // DIFFERENT, genuinely finished session — the one case where "which row goes
-    // is unobservable" stops being true.
+  it("does NOT reverse task_complete when the task was already open", async () => {
+    // No `task_complete` was awarded for a task that never closed, so reversing
+    // one would take back points a different, genuinely finished task earned.
     const rewards = await import("@/lib/rewards");
     prismaMock.step.findFirst.mockResolvedValueOnce(doneStep());
-    prismaMock.focusSession.findFirst.mockResolvedValueOnce(null);
     const { uncompleteStep } = await import("./focus");
     await uncompleteStep("s1");
     expect(rewards.reverseStepCompletionRewards).toHaveBeenCalledWith("owner", {
-      includeSessionFinished: false,
+      includeTaskComplete: false,
     });
+  });
+
+  // Duo review round 3 also showed round 2's session_finished fix was the wrong
+  // remedy: it inferred "this completion came from a session" from whether ANY
+  // completed FocusSession existed for the step, and those rows are never
+  // cleared. The inference is gone entirely rather than made cleverer — see
+  // `reverseStepCompletionRewards` for why `session_finished` is not reversed at
+  // all.
+  it("never consults FocusSession — the session reward is not reversed", async () => {
+    prismaMock.step.findFirst.mockResolvedValueOnce(doneStep());
+    const { uncompleteStep } = await import("./focus");
+    await uncompleteStep("s1");
+    expect(prismaMock.focusSession.findFirst).not.toHaveBeenCalled();
   });
 
   // Duo review round 2: the local write commits FIRST, so anything that throws
@@ -475,7 +480,6 @@ describe("uncompleteStep (#198)", () => {
     prismaMock.step.findFirst.mockResolvedValueOnce(
       doneStep({ googleTaskId: "g1", googleTaskListId: "l1" }),
     );
-    prismaMock.focusSession.findFirst.mockResolvedValueOnce(null);
     const { uncompleteStep } = await import("./focus");
     await expect(uncompleteStep("s1")).resolves.toBeUndefined();
     expect(prismaMock.step.update).toHaveBeenCalled();

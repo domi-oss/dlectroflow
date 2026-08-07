@@ -142,54 +142,70 @@ export async function rewardStepDone(
  * Take back the points a step completion awarded, because that completion is
  * being undone (#198).
  *
- * **A step completion can award TWO rewards, not one.** `completeStep` logs only
- * `step_done`, but `completeFocus` — the timer path, which is exactly where this
- * MR's undo lives — logs `step_done` **and** `session_finished`. Reversing only
- * the first left the session reward farmable by complete → un-complete →
- * complete, which is the loophole this was supposed to close (caught in review).
- * So the caller says which happened, via `includeSessionFinished`, and it must
- * decide that from real state (a `FocusSession` for this step with outcome
- * `completed`) rather than assuming: reversing a `session_finished` for a step
- * that never had a session would take back points a genuinely finished session
- * elsewhere had earned.
+ * ── What gets reversed, and the rule behind it ──────────────────────────────
  *
- * **Each reversal removes the most recent row of its type, not "the one that step
- * earned", because there is no such thing.** `RewardEvent` carries type, points
- * and workspace and holds no step or session reference (see
- * `prisma/schema.prisma`), so every row of one type in a workspace is an
- * identical `RewardPoints[type]`. Which row goes is **unobservable**: the points
- * total, the dashboard and the day rollup all read the same afterwards.
- * Attributing rewards to steps would need a nullable `stepId` column, and a
- * migration is not worth buying an identical outcome — the reasoning is recorded
- * here rather than the column being added "just in case", because a schema change
- * is the expensive kind of guess. The one place that argument does NOT hold is
- * the cross-type case in the paragraph above, which is why it is gated.
+ * A reward is reversed when **the same work could otherwise be paid for twice**.
+ * It is kept when the reward records something that genuinely happened and does
+ * not un-happen. Applying that rule to the four types this app awards:
  *
- * Two things are deliberately NOT reversed:
+ *  * **`step_done` — reversed.** Awarded once per completion of a step, and a
+ *    step can be completed, undone and completed again with no new work in
+ *    between. Duplicable, so it comes back.
+ *  * **`task_complete` — reversed, but only when this undo actually reopens a
+ *    task that was closed.** `markTaskCompleted` logs it whenever a step closes
+ *    its task, and nothing stops it running again when that step is re-completed
+ *    (`awardBadge` is idempotent; `logReward` is not). Same farm as `step_done`,
+ *    one level up — found in review round 3. The gate is real state (the task WAS
+ *    `Done` and is now Active), never an inference.
+ *  * **`session_finished` — NOT reversed, deliberately.** It pays for *having
+ *    focused for a stretch of time*, not for the step being finished, and that
+ *    time was really spent. This is the same argument that keeps the streak
+ *    below, and it has to be the same or the two are incoherent. It is also not
+ *    farmable: re-completing through the timer requires pressing Start, which
+ *    calls `beginFocus` and opens a **new** `FocusSession`, so a second
+ *    `session_finished` is paid for by a second real session.
  *
- *  * **The streak.** It records that you engaged on a working day, and you did —
- *    un-completing a step does not un-happen the focus session that earned it.
- *    `touchStreakOnEngagement` is also idempotent per day, so there is nothing
- *    meaningful to undo.
- *  * **Badges.** Once-ever achievements. Revoking one would make the collection
- *    lie about the past, and `awardBadge` is idempotent anyway.
+ *    Review round 2 flagged the missing reversal and round 3 showed the fix was
+ *    the wrong remedy: it inferred "this completion came from a session" from
+ *    whether *any* completed `FocusSession` existed for the step, and those rows
+ *    are never cleared — so after one timer completion, every later undo claimed
+ *    a session and deleted the newest `session_finished` in the workspace, which
+ *    could belong to unrelated, legitimately finished work. The inference is gone
+ *    rather than made cleverer, because there was nothing correct for it to infer
+ *    from.
+ *  * **Badges — not reversed.** Once-ever achievements; revoking one would make
+ *    the collection lie about the past, and `awardBadge` is idempotent anyway.
  *
- * Without this, complete → un-complete → complete awards twice for one step. That
- * farm is **not new** — `reopenItem` has always allowed it — so this closes an
- * existing hole as well as the one #198 would otherwise open.
+ * ── Why "the newest row of that type" is enough ─────────────────────────────
+ *
+ * Each reversal removes the most recent row of its type, not "the one this step
+ * earned", because there is no such thing: `RewardEvent` carries type, points and
+ * workspace and holds no step or task reference (see `prisma/schema.prisma`), so
+ * every row of one type in a workspace is an identical `RewardPoints[type]`.
+ * **Within a type, which row goes is unobservable** — the points total, the
+ * dashboard and the day rollup all read the same afterwards, and nothing displays
+ * per-step or per-task points. Attributing rewards to their source would need a
+ * nullable column and a migration, which is not worth buying an identical
+ * outcome.
+ *
+ * That argument holds **within** a type and **not across** types, which is
+ * exactly where round 2's fix went wrong: deleting a `session_finished` to
+ * compensate for a `step_done` is not a relabelling, it is taking points from
+ * different work. Every gate here is therefore a fact about state, not a guess
+ * about provenance.
  *
  * Returns what was actually removed, so callers can be tested on it and so
  * "nothing to reverse" is a normal answer rather than an error.
  */
 export async function reverseStepCompletionRewards(
   workspaceId: string,
-  opts: { includeSessionFinished: boolean },
-): Promise<{ stepDone: boolean; sessionFinished: boolean }> {
+  opts: { includeTaskComplete: boolean },
+): Promise<{ stepDone: boolean; taskComplete: boolean }> {
   const stepDone = await reverseLatestReward(workspaceId, RewardType.StepDone);
-  const sessionFinished = opts.includeSessionFinished
-    ? await reverseLatestReward(workspaceId, RewardType.SessionFinished)
+  const taskComplete = opts.includeTaskComplete
+    ? await reverseLatestReward(workspaceId, RewardType.TaskComplete)
     : false;
-  return { stepDone, sessionFinished };
+  return { stepDone, taskComplete };
 }
 
 /** Remove the newest reward of one type in one workspace. See above for why "newest". */

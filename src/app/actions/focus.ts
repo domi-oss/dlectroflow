@@ -294,13 +294,13 @@ export async function completeStep(stepId: string) {
  *  2. **The parent task is reopened if THIS step had closed it**, along with its
  *     inbox item(s) — otherwise the step is open inside a task the Done view
  *     still renders as finished.
- *  3. **The rewards that completion awarded are taken back**, so complete →
- *     un-complete → complete cannot award twice. Which rewards depends on HOW the
- *     step was completed: the timer path (`completeFocus`) logs `session_finished`
- *     as well as `step_done`, so that is read from real state — a `FocusSession`
- *     for this step that ended `completed` — rather than assumed either way. See
- *     `reverseStepCompletionRewards` for what is deliberately *not* reversed (the
- *     streak, and badges).
+ *  3. **The rewards that could otherwise be earned twice are taken back**, so
+ *     complete → un-complete → complete cannot pay for one piece of work twice.
+ *     `step_done` always; `task_complete` only when this undo actually reopened a
+ *     task that was closed. `session_finished` is deliberately kept — it pays for
+ *     time genuinely spent focusing, and re-completing through the timer needs a
+ *     *new* session to do it. `reverseStepCompletionRewards` carries the full rule
+ *     and the two review rounds that shaped it.
  */
 export async function uncompleteStep(stepId: string) {
   const workspaceId = await currentWorkspaceId();
@@ -312,7 +312,10 @@ export async function uncompleteStep(stepId: string) {
 
   await prisma.step.update({ where: { id: stepId }, data: { done: false } });
 
-  if (step.task?.status === TaskStatus.Done) {
+  // Whether this undo actually reopened a CLOSED task is the gate for the
+  // task-level reward below, so it is recorded as a fact rather than re-derived.
+  const reopenedTask = step.task?.status === TaskStatus.Done;
+  if (reopenedTask) {
     await prisma.task.update({
       where: { id: step.taskId, workspaceId },
       data: { status: TaskStatus.Active },
@@ -323,15 +326,14 @@ export async function uncompleteStep(stepId: string) {
     });
   }
 
-  // Was this step completed through the focus timer? That path awards a second
-  // reward (`session_finished`), and reversing it for a step that never had a
-  // session would take back points a different, genuinely finished session
-  // earned.
-  const completedSession = await prisma.focusSession.findFirst({
-    where: { stepId, workspaceId, outcome: FocusOutcome.Completed },
-  });
+  // `markTaskCompleted` logs `task_complete` whenever a step closes its task, and
+  // nothing stops it running again when the step is re-completed — `awardBadge` is
+  // idempotent, `logReward` is not. So reopening a task has to take that reward
+  // back, or the farm this action exists to close is simply moved one level up
+  // (review round 3). Gated on `reopenedTask`, which is state, not inference: a
+  // task that was already open never earned one to reverse.
   await reverseStepCompletionRewards(workspaceId, {
-    includeSessionFinished: completedSession != null,
+    includeTaskComplete: reopenedTask,
   });
 
   // Last, and swallowed: see (1) above. A Google failure must not fail an undo
