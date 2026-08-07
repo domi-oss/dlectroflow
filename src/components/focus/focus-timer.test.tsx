@@ -1627,11 +1627,12 @@ describe("FocusTimer — putting a step back after an accident (#198)", () => {
       expect(document.body).not.toHaveFocus();
     });
 
-    it("follows whichever CTA is primary — Resume, when a paused session is offered", async () => {
-      // `setupCtaRef` is attached at two mutually-exclusive call sites, and which
-      // one mounts depends on `resumable`. A fix that only worked for the Start
-      // branch would silently do nothing for anyone with a paused session — the
-      // same class of miss as the #66 effect's own two branches.
+    it("lands on Start after an undo that spent a resumable session", async () => {
+      // Review round 5 — the post-undo CTA is ALWAYS the Start branch, because the
+      // Resume offer is retired by then (see the describe below for why). So this
+      // is the only landing site the undo path can produce; `setupCtaRef`'s other
+      // call site is exercised by the #66 disclosure test in the single-task
+      // block, which is where that branch is actually reachable.
       const user = userEvent.setup();
       render(
         <FocusTimer
@@ -1651,7 +1652,9 @@ describe("FocusTimer — putting a step back after an accident (#198)", () => {
         screen.getByRole("button", { name: /actually, i hadn't finished/i }),
       );
       await waitFor(() =>
-        expect(screen.getByRole("button", { name: /resume/i })).toHaveFocus(),
+        expect(
+          screen.getByRole("button", { name: /^start focusing$/i }),
+        ).toHaveFocus(),
       );
     });
 
@@ -1688,10 +1691,12 @@ describe("FocusTimer — putting a step back after an accident (#198)", () => {
       ).not.toHaveFocus();
     });
 
-    it("leaves the #66 disclosure hand-off working after an undo", async () => {
-      // The two effects want the same element but fire on different deps, so
-      // neither may disarm the other: after an undo, "Start fresh" must still move
-      // focus to the action it makes primary.
+    it("does not fight the #66 disclosure effect", async () => {
+      // The two effects want the same element and must not disarm each other. They
+      // cannot collide, because they fire on disjoint deps — `startingFresh` for
+      // #66, `undone`/`phase` here — and this pins the half that is checkable
+      // without an undo: toggling the disclosure still hands focus over, with the
+      // undo effect present and its gate closed (`undone` false).
       const user = userEvent.setup();
       render(
         <FocusTimer
@@ -1705,16 +1710,172 @@ describe("FocusTimer — putting a step back after an accident (#198)", () => {
           })}
         />,
       );
-      await user.click(screen.getByRole("button", { name: /resume/i }));
-      await user.click(screen.getByRole("button", { name: /complete step/i }));
-      await user.click(
-        screen.getByRole("button", { name: /actually, i hadn't finished/i }),
-      );
       await user.click(screen.getByRole("button", { name: /start fresh/i }));
       expect(
         screen.getByRole("button", { name: /^start focusing$/i }),
       ).toHaveFocus();
+      expect(
+        screen.queryByTestId("focus-undone-notice"),
+      ).not.toBeInTheDocument();
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Review round 5 — the two handlers #139 never reached.
+//
+// `run()` reports a THROW. A server action that RUNS and answers `ok: false` (or
+// `null`) was discarded with a bare `return`, so the button did nothing at all —
+// no notice, no state change, nothing announced. That is verbatim the defect #139
+// named on `confirmRequeue`: "a failed requeue indistinguishable from a
+// successful one".
+//
+// The trigger was the undo. `undoComplete` returns to `setup` synchronously and
+// only then awaits `router.refresh()`, so for that window the screen still
+// rendered the page's `existingSession` prop — a FocusSession that
+// `completeFocus` had already closed via `closeSession`'s `endedAt`. `resumeFocus`
+// filters on `endedAt: null`, so pressing "Resume · ~Xm left" resolved
+// `ok: false` and fell straight down the bare return.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("FocusTimer — a refused resume or start is not a silent no-op (#139)", () => {
+  const paused = {
+    id: "sess-paused",
+    plannedMin: 10,
+    totalSec: 600,
+    remainingSec: 300,
+  };
+  const refused = { ok: false, remainingSec: 0, totalSec: 0, plannedMin: 0 };
+
+  it("a resume the server refuses says so, rather than doing nothing", async () => {
+    vi.mocked(resumeFocus).mockResolvedValueOnce(refused);
+    const user = userEvent.setup();
+    render(<FocusTimer {...base({ existingSession: paused })} />);
+    await user.click(screen.getByRole("button", { name: /resume/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /couldn't reach the server/i,
+    );
+    // Still in `setup`, so both the offer and the Retry are there to press. The
+    // fail-safe direction matters: a refused resume must not advance the phase to
+    // a running session the server does not have.
+    expect(screen.getByRole("button", { name: /resume/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^pause$/i })).toBeNull();
+  });
+
+  it("offers Retry, not Reload — a returned ok:false proves the deployment is current", async () => {
+    // `stale: false`, on the reasoning `confirmRequeue` already records: the action
+    // was found and ran, so its id is live and pressing again can legitimately
+    // work. A stale-deployment failure is the case that must NOT offer a retry.
+    vi.mocked(resumeFocus).mockResolvedValueOnce(refused);
+    const user = userEvent.setup();
+    render(<FocusTimer {...base({ existingSession: paused })} />);
+    await user.click(screen.getByRole("button", { name: /resume/i }));
+
+    expect(
+      await screen.findByRole("button", { name: /try again/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /reload/i })).toBeNull();
+  });
+
+  it("Retry re-runs the resume and starts the session when it works", async () => {
+    vi.mocked(resumeFocus).mockResolvedValueOnce(refused);
+    const user = userEvent.setup();
+    render(<FocusTimer {...base({ existingSession: paused })} />);
+    await user.click(screen.getByRole("button", { name: /resume/i }));
+    await user.click(await screen.findByRole("button", { name: /try again/i }));
+
+    expect(vi.mocked(resumeFocus)).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /^pause$/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("a Start the server cannot satisfy says so too", async () => {
+    // The same bare return, one function up: `beginFocus` answers `null` when the
+    // step is not in the resolved workspace, and `start()` discarded it. Folded in
+    // rather than left for the next review round — same defect, same handler
+    // union, same message.
+    vi.mocked(beginFocus).mockResolvedValueOnce(null);
+    const user = userEvent.setup();
+    render(<FocusTimer {...base()} />);
+    await user.click(screen.getByRole("button", { name: /^start focusing$/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /couldn't reach the server/i,
+    );
+    expect(screen.queryByRole("button", { name: /^pause$/i })).toBeNull();
+  });
+});
+
+// Review round 5, the cause rather than the symptom. Surfacing the failure (above)
+// is the defect fixed; this stops the app offering an affordance it already knows
+// cannot work, which is the same rule the `stale` flag encodes — see the notice's
+// own comment on why a stale failure offers Reload and never Retry.
+describe("FocusTimer — a spent session is not offered again (#198)", () => {
+  const paused = {
+    id: "sess-paused",
+    plannedMin: 10,
+    totalSec: 600,
+    remainingSec: 300,
+  };
+
+  it("undoing a resumed session withdraws the Resume offer it just closed", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimer {...base({ existingSession: paused })} />);
+    // The offer is legitimately there to begin with — the non-zero control, so a
+    // pass cannot mean "Resume was never rendered at all".
+    expect(screen.getByRole("button", { name: /resume/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /resume/i }));
+    await user.click(screen.getByRole("button", { name: /complete step/i }));
+    await user.click(
+      screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+    );
+
+    // `completeFocus` closed that row, so resuming it can only ever be refused.
+    // Offering it anyway is a control the app knows is dead.
+    expect(screen.queryByRole("button", { name: /resume/i })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /^start focusing$/i }),
+    ).toBeInTheDocument();
+    // …and the undo is still announced. Withdrawing the offer must not cost the
+    // confirmation.
+    expect(screen.getByTestId("focus-undone-notice")).toHaveTextContent(
+      /open again/i,
+    );
+  });
+
+  it("the fresh-start route was already safe, and stays safe", async () => {
+    // Honest about which mechanism does the work here: `beginFocus` retires any
+    // open session on the step, so the prop is just as stale on this route — but
+    // `startingFresh` is latched by then and never cleared, so `resumable` was
+    // already null without the `sessionId` gate. Pinned anyway, because the two
+    // mechanisms answer different questions ("the user asked for a fresh one" vs
+    // "the server row is spent") and a future tidy-up that collapses them into one
+    // would reopen this on whichever route it dropped.
+    const user = userEvent.setup();
+    render(<FocusTimer {...base({ existingSession: paused })} />);
+    await user.click(screen.getByRole("button", { name: /start fresh/i }));
+    await user.click(screen.getByRole("button", { name: /^start focusing$/i }));
+    await user.click(screen.getByRole("button", { name: /complete step/i }));
+    await user.click(
+      screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+    );
+
+    expect(screen.queryByRole("button", { name: /resume/i })).toBeNull();
+  });
+
+  it("still offers a genuinely paused session on arrival", async () => {
+    // The regression guard: the prop exists for exactly this, and #27's decision
+    // was to ask rather than silently resume. Nothing above may cost that.
+    render(<FocusTimer {...base({ existingSession: paused })} />);
+    expect(
+      screen.getByRole("button", { name: /resume.*5m.*left/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^start focusing$/i }),
+    ).not.toBeInTheDocument();
   });
 });
 

@@ -643,7 +643,15 @@ export function FocusTimer({
     const outcome = await run("start", () => beginFocus(step.id, plannedMin));
     if (!outcome.ok) return;
     const id = outcome.value;
-    if (!id) return;
+    if (!id) {
+      // #139's shape, one function above the case that exposed it (review round
+      // 5). `beginFocus` answers `null` when the step is not in the resolved
+      // workspace, and discarding that left Start visibly doing nothing — the
+      // dead end #139 is about. `stale: false`: a returned value proves the
+      // action was found and ran, so pressing again can legitimately work.
+      setFailure({ handler: "start", stale: false });
+      return;
+    }
     // Prime device effects inside the user gesture (unlocks audio playback).
     if (settings.alarmEnabled) alarmRef.current = createAlarm();
     if (!soundOff) playSound();
@@ -668,7 +676,25 @@ export function FocusTimer({
     );
     if (!outcome.ok) return;
     const res = outcome.value;
-    if (!res.ok) return;
+    if (!res.ok) {
+      // #139's shape, and the case that made it matter (review round 5).
+      // `resumeFocus` filters on `endedAt: null`, so it refuses a session that has
+      // been closed — and discarding that answer left this button doing nothing at
+      // all: no notice, no phase change, nothing announced. Verbatim the defect
+      // #139 named on `confirmRequeue`, "indistinguishable from a successful one".
+      //
+      // The commonest cause is now prevented rather than explained: a spent
+      // `existingSession` is no longer offered at all (see `resumable` below), so
+      // what reaches here is a genuine refusal — another device closed the row, or
+      // it turns out not to be paused — which a retry can legitimately answer.
+      // `stale: false` for the reason `confirmRequeue` records: a returned
+      // `ok: false` proves the action was found and ran, so its id is live.
+      //
+      // Staying in `setup` is the fail-safe direction, matching `togglePause`: do
+      // not advance to a running session the server does not have.
+      setFailure({ handler: "resumeExisting", stale: false });
+      return;
+    }
     if (settings.alarmEnabled) alarmRef.current = createAlarm();
     if (!soundOff) playSound();
     setSessionId(existingSession.id);
@@ -1093,7 +1119,26 @@ export function FocusTimer({
   // The paused session the setup screen is currently OFFERING (null once the
   // user has asked to start fresh). Every setup-phase figure below derives from
   // this single value, so the ring and the CTA cannot disagree.
-  const resumable = startingFresh ? null : existingSession;
+  //
+  // A live `sessionId` retires it as well (review round 5). `existingSession` is a
+  // PROP: it keeps describing the row the page loaded long after that row has been
+  // closed, and it is only replaced when `router.refresh()` lands. Both routes out
+  // of this screen close it — `resumeExisting` adopts the row and `finishComplete`
+  // ends it, while `beginFocus` retires any open session on the step before
+  // creating its own — so once this component holds a `sessionId`, the prop is
+  // spent and `resumeFocus` can only refuse it. Offering "Resume · ~Xm left" for
+  // it was a control the app already knew was dead, which is the same thing the
+  // `stale` flag refuses to do by never offering Retry it cannot honour.
+  //
+  // In practice this only bites after an undo, since `goToPhase("setup")` has
+  // exactly one call site (`undoComplete`) and `sessionId` is never cleared. That
+  // is an invariant, not a coincidence: a NEW transition back to `setup` while a
+  // session is still open would need this gate revisited, or it would hide a
+  // legitimate offer. Kept separate from `startingFresh` deliberately — that flag
+  // means "the user asked for a fresh one", this means "the server row is spent",
+  // and collapsing them would reopen whichever question it dropped.
+  const resumable =
+    startingFresh || sessionId !== null ? null : existingSession;
   // Rounded UP to whole minutes, once, and reused by both the CTA and the quiet
   // line — never recomputed differently in two places. No 1m floor: a session
   // paused with nothing left must read the same 0m the ring shows (resuming it
