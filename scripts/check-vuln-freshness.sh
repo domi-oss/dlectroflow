@@ -143,6 +143,25 @@ VULN_FRESHNESS_MAX_AGE_HOURS="${VULN_FRESHNESS_MAX_AGE_HOURS:-192}"
 VULN_FRESHNESS_PIPELINE_DEPTH="${VULN_FRESHNESS_PIPELINE_DEPTH:-20}"
 VULN_FRESHNESS_MAX_PAGES="${VULN_FRESHNESS_MAX_PAGES:-50}"
 
+# How far AHEAD of this check's own clock a timestamp may claim to be before it
+# stops being a timestamp. Not a knob: it is the width of the one ambiguity that
+# has a legitimate cause, and widening it would only buy a longer window in
+# which a bogus timestamp reads as a fresh one.
+#
+# 300s, because gitlab.com dispatches jobs from a shared runner pool and a runner
+# clock is not the API clock, so a job can honestly report finishing a couple of
+# minutes "after" the instant this check reads `now`. An exact `> now` test would
+# call that undetermined at random, and a check that fires at random says nothing
+# — the `next_run_at` lesson check-registry-drain.sh already paid for. Five
+# minutes covers ordinary NTP drift and nothing else: a 72h-ahead timestamp is
+# not skew, it is data that cannot be read.
+#
+# Anything past it is routed to the UNREADABLE state this script already has,
+# not to a new one. A time in the future is not a fresh time; it is an unknown,
+# and that is the same call ops-digest.sh makes for its 1969 window — "a wrong
+# number with a confident label is the exact failure class #147 is about". (#166)
+VULN_FRESHNESS_CLOCK_SKEW_SECONDS=300
+
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -309,6 +328,7 @@ jq -r -n \
   --arg branch "$DEFAULT_BRANCH" \
   --argjson maxAge "$VULN_FRESHNESS_MAX_AGE_HOURS" \
   --arg maxAgeSource "$MAX_AGE_SOURCE" \
+  --argjson skew "$VULN_FRESHNESS_CLOCK_SKEW_SECONDS" \
   --argjson depth "$VULN_FRESHNESS_PIPELINE_DEPTH" '
 def parse_ts:
   if . == null or . == "" then null
@@ -334,11 +354,33 @@ def code(s): "`" + s + "`";
      status: 2}
   else
 
+# Nothing may claim to have happened later than this. A timestamp AHEAD of the
+# instant this check ran is not a fresh one — it is one that cannot be read, and
+# it is routed to the same UNREADABLE state below rather than to a third state.
+# `$skew` is the allowance and its reasoning lives with the constant in the shell
+# above; the bound has to sit on BOTH lower bounds, because the evidence is the
+# more recent of them and clamping only one leaves the other able to lift a dead
+# scanner to fresh. (#166)
+  ( $now + $skew ) as $horizon
+
+# An age is never negative. Skew inside the allowance can put the evidence a few
+# minutes ahead of `now`, and "-0.1h old" is a wrong number with a confident
+# label — the thing this whole check exists to stop printing. Floor it at zero:
+# the honest reading is "no older than nothing".
+| def since($t): [($now - $t), 0] | max;
+
 # ── the per-scanner anchors ──────────────────────────────────────────────────
 # Only SUCCESS counts. A scanner that errored produced no report, so its
 # contribution to the aggregate count is whatever the last good run left behind
 # — which is exactly the staleness being measured.
   ( ($anchor[0].data.project.pipelines.nodes // []) ) as $pipes
+
+# ── the count ────────────────────────────────────────────────────────────────
+# Bound before the scanners, because each scanner is dated partly by the
+# findings OF ITS OWN TYPE and those timestamps go through the same horizon.
+| ( $vulns ) as $all
+| ( $all | map(select(.resolvedOnDefaultBranch != true)) ) as $live
+
 | ( [ {alias: "dependency", type: "DEPENDENCY_SCANNING"},
       {alias: "sast",       type: "SAST"},
       {alias: "container",  type: "CONTAINER_SCANNING"},
@@ -350,20 +392,33 @@ def code(s): "`" + s + "`";
                 | select(.status == "SUCCESS")
                 | {type: $s.type, name: .name, iid: $p.iid,
                    raw: .finishedAt, ts: (.finishedAt | parse_ts)} ] ) as $runs
+          | ( [ $all[] | select(.reportType == $s.type)
+                | {raw: .detectedAt, ts: (.detectedAt | parse_ts)}
+                | select(.ts != null) ] ) as $dets
           | $s + {runs: $runs,
                   # A run whose timestamp cannot be read is NOT dropped. Dropping
                   # it would quietly shrink the evidence toward whichever verdict
                   # the remaining rows happen to support, and this check exists
                   # because a number that lost its provenance still looked fine.
                   unreadable: ($runs | map(select(.ts == null)) | length),
-                  newest: ($runs | map(select(.ts != null)) | sort_by(-.ts) | first)}) ) as $scanners
+                  # Same treatment, other direction: a row claiming to be later
+                  # than `now` is held out of the evidence AND reported, rather
+                  # than being allowed to date anything.
+                  futureRuns: ($runs | map(select(.ts != null and .ts > $horizon))),
+                  futureDets: ($dets | map(select(.ts > $horizon))),
+                  detected: ($dets | map(select(.ts <= $horizon)) | map(.ts) | max),
+                  newest: ($runs | map(select(.ts != null and .ts <= $horizon))
+                                 | sort_by(-.ts) | first)}) ) as $scanners
 
 | ( [ $scanners[] | select(.unreadable > 0)
-      | "\(.type) reports a run whose finish time cannot be read, and an unreadable timestamp is not an old one — it is an unknown" ,
-      empty ] ) as $unreadable
+      | "\(.type) reports a run whose finish time cannot be read, and an unreadable timestamp is not an old one — it is an unknown" ]
+    + [ $scanners[] | select((.futureRuns | length) > 0)
+      | "\(.type) reports a successful run finishing \(.futureRuns[0].raw), which is in the FUTURE relative to \($now | todateiso8601) by more than the \($skew)s clock-skew allowance — a timestamp ahead of the clock is not a fresh one, it is one that cannot be read" ]
+    + [ $scanners[] | select((.futureDets | length) > 0)
+      | "\(.type) carries a finding detected \(.futureDets[0].raw), which is in the FUTURE relative to \($now | todateiso8601) by more than the \($skew)s clock-skew allowance — same reading, and it dates nothing" ] ) as $unreadable
 
 | ( [ $scanners[] | select(.newest == null)
-      | "\(.type) has no successful run in the last \($depth) `\($branch)` pipelines, so the part of the count it contributes cannot be dated at all" ] ) as $missing
+      | "\(.type) has no successful run in the last \($depth) `\($branch)` pipelines whose finish time can be read, so the part of the count it contributes cannot be dated at all" ] ) as $missing
 
 | if (($unreadable + $missing) | length) > 0 then
     {lines: ([ "- ⚠️ **could not determine how old the vulnerability count is**:" ]
@@ -372,10 +427,11 @@ def code(s): "`" + s + "`";
      status: 2}
   else
 
-# ── the count ────────────────────────────────────────────────────────────────
-  ( $vulns ) as $all
-| ( $all | map(select(.resolvedOnDefaultBranch != true)) ) as $live
-| ( $all | map(.detectedAt | parse_ts) | map(select(. != null)) | max ) as $newestDetected
+# Displayed only, and bounded by the same horizon: a future detection on a report
+# type this check does not track cannot lift any scanner to fresh, so it is held
+# out of the display rather than escalated to undetermined.
+  ( $all | map(.detectedAt | parse_ts)
+         | map(select(. != null and . <= $horizon)) | max ) as $newestDetected
 
 # Evidence is accumulated PER REPORT TYPE, and this is the correction that
 # matters most. Two independent lower bounds date each scanner:
@@ -394,18 +450,15 @@ def code(s): "`" + s + "`";
 # fresh, which is exactly the shape of every failure in #166.
 | ( $scanners
     | map(. as $s
-          | ( $all | map(select(.reportType == $s.type))
-                   | map(.detectedAt | parse_ts) | map(select(. != null)) | max
-            ) as $det
-          | $s + {detected: $det,
-                  evidence: ([$s.newest.ts, $det] | map(select(. != null)) | max)}) ) as $dated
+          | $s + {evidence: ([$s.newest.ts, $s.detected]
+                             | map(select(. != null)) | max)}) ) as $dated
 
 # The aggregate is only as fresh as its STALEST contributor. Taking the newest
 # is how a scanner that stopped running three weeks ago hides behind an hourly
 # one.
 | ( $dated | sort_by(.evidence) | first ) as $oldest
 | ( $oldest.evidence ) as $evidence
-| ( $now - $evidence ) as $evidenceAge
+| ( since($evidence) ) as $evidenceAge
 | ( $evidenceAge <= ($maxAge * 3600) ) as $fresh
 
 | ( ["CRITICAL","HIGH","MEDIUM","LOW","INFO","UNKNOWN"]
@@ -430,9 +483,9 @@ def code(s): "`" + s + "`";
       + ". A count of zero has no `detectedAt` of its own, so a scan is the only thing that can date it.",
     "- Every scanner, oldest evidence first: "
       + ($dated | sort_by(.evidence)
-         | map("\(.type) \(age($now - .evidence))"
+         | map("\(.type) \(age(since(.evidence)))"
                + (if (.detected != null) and (.detected > .newest.ts)
-                  then " (scan \(age($now - .newest.ts)), re-detected \(age($now - .detected)))"
+                  then " (scan \(age(since(.newest.ts))), re-detected \(age(since(.detected))))"
                   else "" end))
          | join(" · "))
       + ". Anchored on the JOB, not the pipeline: the scanners are "
@@ -441,7 +494,7 @@ def code(s): "`" + s + "`";
     (if $newestDetected == null then
        "- No active finding carries a `detectedAt`, so Continuous Vulnerability Scanning offers no second opinion on freshness here — the scan anchor above is the only evidence."
      else
-       "- Newest `detectedAt` in the active set: \($newestDetected | todateiso8601), **\(age($now - $newestDetected)) ago**. Continuous Vulnerability Scanning re-evaluates the stored SBOM with no pipeline at all, so this is an independent second lower bound."
+       "- Newest `detectedAt` in the active set: \($newestDetected | todateiso8601), **\(age(since($newestDetected))) ago**. Continuous Vulnerability Scanning re-evaluates the stored SBOM with no pipeline at all, so this is an independent second lower bound."
      end),
     (if $fresh then
        "- ✅ **Fresh**: the newest evidence this surface moved is \(age($evidenceAge)) old, inside the \($maxAge)h budget (\($maxAgeSource))."

@@ -571,6 +571,100 @@ describe("scripts/check-vuln-freshness.sh", () => {
     expect(result.stdout).toMatch(/CONTAINER_SCANNING/);
   });
 
+  it("treats a scan finish time in the FUTURE as unreadable, never as fresh", () => {
+    // The same class ops-digest.sh already guards with its 1969 window check —
+    // "a wrong number with a confident label is the exact failure class #147 is
+    // about". A future timestamp is not a fresh one; it is one that cannot be
+    // read, so it belongs in the `unreadable` state this script already has and
+    // not in a third one.
+    //
+    // Measured before the fix: this exact fixture — a container scanner 500h
+    // stale plus ONE extra row stamped 72h ahead — exited 0 reporting
+    // "✅ Fresh, 1h old" with the per-scanner line reading
+    // `CONTAINER_SCANNING -72h`. Nothing else changed. `sort_by(-.ts) | first`
+    // had no upper bound, and `$now - $evidence` passes any negative age.
+    const result = drive([
+      anchorRoute([
+        {
+          iid: 1928,
+          finishedAt: hoursAgo(1),
+          jobs: [
+            ...freshJobs(1).filter((j) => j.type !== "container"),
+            {
+              name: "container_scanning",
+              type: "container",
+              finishedAt: hoursAgo(500),
+            },
+            {
+              name: "container_scanning",
+              type: "container",
+              finishedAt: hoursAgo(-72),
+            },
+          ],
+        },
+      ]),
+      vulnRoute([{ severity: "HIGH" }]),
+    ]);
+    expect(result.status).toBe(2);
+    expect(result.stdout).toMatch(/CONTAINER_SCANNING/);
+    expect(result.stdout).toMatch(/future/i);
+    expect(result.stdout).toContain("This is an unknown, not an all-clear.");
+    // Neither a pass nor a negative duration reported as an age.
+    expect(result.stdout).not.toContain("✅");
+    expect(result.stdout).not.toMatch(/-\d+(\.\d+)?[hd]\b/);
+  });
+
+  it("does not let a `detectedAt` in the future date a scanner either", () => {
+    // The bound has to cover BOTH lower bounds, because the evidence is the
+    // more recent of them: with only the scan side clamped, a report whose
+    // detectedAt is ahead of the clock still lifts a dead scanner to fresh.
+    const result = drive([
+      anchorRoute([
+        {
+          iid: 1928,
+          finishedAt: hoursAgo(1),
+          jobs: [
+            ...freshJobs(1).filter((j) => j.type !== "dependency"),
+            {
+              name: "gemnasium-dependency_scanning",
+              type: "dependency",
+              finishedAt: hoursAgo(500),
+            },
+          ],
+        },
+      ]),
+      vulnRoute([
+        {
+          severity: "HIGH",
+          reportType: "DEPENDENCY_SCANNING",
+          detectedAt: hoursAgo(-72),
+        },
+      ]),
+    ]);
+    expect(result.status).toBe(2);
+    expect(result.stdout).toMatch(/DEPENDENCY_SCANNING/);
+    expect(result.stdout).toMatch(/future/i);
+    expect(result.stdout).not.toContain("✅");
+  });
+
+  it("tolerates a few minutes of runner clock skew rather than flapping", () => {
+    // gitlab.com dispatches jobs from a shared runner pool, so a job can finish
+    // a little "after" the instant this check reads the clock. An exact `> now`
+    // test would call that undetermined at random, and a check that fires at
+    // random is the `next_run_at` lesson check-registry-drain.sh already paid
+    // for. Three minutes is inside the allowance; 72h is not.
+    const result = drive([
+      anchorRoute([
+        { iid: 1928, finishedAt: hoursAgo(1), jobs: freshJobs(-0.05) },
+      ]),
+      vulnRoute([{ severity: "HIGH" }]),
+    ]);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(/✅ \*\*Fresh\*\*/);
+    // And the age is floored at zero rather than printed as a negative one.
+    expect(result.stdout).not.toMatch(/-\d+(\.\d+)?[hd]\b/);
+  });
+
   it("reports undetermined when a timestamp cannot be read, never dropping it", () => {
     // A dropped timestamp shrinks the evidence set toward "nothing recent",
     // or — worse, depending on which side it falls — toward a confident pass.
