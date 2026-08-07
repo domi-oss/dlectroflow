@@ -1565,6 +1565,23 @@ describe("FocusTimer — putting a step back after an accident (#198)", () => {
     }
   });
 
+  // Duo review round 2, and it was right: the notice sits in the shared
+  // setup/running/paused/timeup render tree, not inside a `setup &&` block, and
+  // `undone` was never reset — so "Put back. The step is open again." survived
+  // pressing Start and kept showing over a live countdown for the same step. The
+  // code comment claiming "starting the step again replaces this whole screen"
+  // was simply false: it is one component with `phase` toggling inside it.
+  it("the notice does not survive starting the step again", async () => {
+    const user = userEvent.setup();
+    await completeAStep(user);
+    await user.click(
+      screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+    );
+    expect(screen.getByTestId("focus-undone-notice")).toBeInTheDocument();
+    await start(user);
+    expect(screen.queryByTestId("focus-undone-notice")).not.toBeInTheDocument();
+  });
+
   it("a failed undo says the step is STILL done, and keeps the screen it failed on", async () => {
     (uncompleteStep as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new Error("boom"),

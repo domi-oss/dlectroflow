@@ -16,7 +16,7 @@ import {
   awardBadge,
   logReward,
   rewardStepDone,
-  reverseStepDoneReward,
+  reverseStepCompletionRewards,
 } from "@/lib/rewards";
 import { currentWorkspaceId, currentUser } from "@/lib/workspace";
 import { remainingSecForSession } from "@/lib/focus-timer-clock";
@@ -276,17 +276,31 @@ export async function completeStep(stepId: string) {
  *
  * Three things differ from `completeStep` on purpose:
  *
- *  1. **The Google patch happens AFTER the local write, not before.** Completing
- *     patches first so a step is never marked done locally while Google still
- *     shows it open. Undoing is the opposite priority: the user has asked to get
- *     their work back, and an unreachable Google must not be able to refuse them.
- *     Both are best-effort either way.
+ *  1. **The Google patch happens LAST, and cannot throw out of this action.**
+ *     Completing patches Google first, so a step is never marked done locally
+ *     while Google still shows it open. Undoing has the opposite priority: the
+ *     user has asked to get their work back, and an unreachable Google must not be
+ *     able to refuse them.
+ *
+ *     The ordering is load-bearing, not stylistic (Duo review round 2). The local
+ *     write commits first, and the guard below is `if (!step.done) return` — so
+ *     anything that throws *after* that write is unrecoverable: the retry sees a
+ *     step that is already not-done and returns immediately, silently skipping
+ *     whatever had not run. That made a transient Google error permanently strand
+ *     the reward reversal while showing a notice that falsely said the step was
+ *     still done. So the reversal now runs BEFORE the Google call, and the Google
+ *     call is wrapped — which is what finally makes the word "best-effort" true of
+ *     the code rather than only of the comment.
  *  2. **The parent task is reopened if THIS step had closed it**, along with its
  *     inbox item(s) — otherwise the step is open inside a task the Done view
  *     still renders as finished.
- *  3. **One `step_done` reward is taken back**, so complete → un-complete →
- *     complete cannot award twice. See `reverseStepDoneReward` for what is
- *     deliberately *not* reversed (the streak, and badges).
+ *  3. **The rewards that completion awarded are taken back**, so complete →
+ *     un-complete → complete cannot award twice. Which rewards depends on HOW the
+ *     step was completed: the timer path (`completeFocus`) logs `session_finished`
+ *     as well as `step_done`, so that is read from real state — a `FocusSession`
+ *     for this step that ended `completed` — rather than assumed either way. See
+ *     `reverseStepCompletionRewards` for what is deliberately *not* reversed (the
+ *     streak, and badges).
  */
 export async function uncompleteStep(stepId: string) {
   const workspaceId = await currentWorkspaceId();
@@ -309,8 +323,26 @@ export async function uncompleteStep(stepId: string) {
     });
   }
 
-  await reopenGoogleTaskForStep(step);
-  await reverseStepDoneReward(workspaceId);
+  // Was this step completed through the focus timer? That path awards a second
+  // reward (`session_finished`), and reversing it for a step that never had a
+  // session would take back points a different, genuinely finished session
+  // earned.
+  const completedSession = await prisma.focusSession.findFirst({
+    where: { stepId, workspaceId, outcome: FocusOutcome.Completed },
+  });
+  await reverseStepCompletionRewards(workspaceId, {
+    includeSessionFinished: completedSession != null,
+  });
+
+  // Last, and swallowed: see (1) above. A Google failure must not fail an undo
+  // the user asked for, and must not strand anything behind it — there is
+  // nothing behind it.
+  try {
+    await reopenGoogleTaskForStep(step);
+  } catch {
+    // Best-effort by design. The local state is already correct, and #196 covers
+    // the wider "reopen does not tell Google" gap this shares a helper with.
+  }
 
   revalidatePath(`/tasks/${step.taskId}`);
   revalidatePath("/");

@@ -438,7 +438,10 @@ operators upgrading a self-hosted instance don't get surprised.
   already existed through the inbox's Reopen. Your streak and any badges stay:
   the focus session really happened, and undoing a step does not un-happen it.
   On the timer, the undo also cancels the five-second countdown to the next step,
-  so nothing navigates away from the step just rescued.
+  so nothing navigates away from the step just rescued. Completing through the
+  **timer** awards two rewards rather than one, and both are taken back — read
+  from whether a focus session actually finished on that step, so a step ticked off
+  without a timer never loses points a real session earned elsewhere.
 
 - **The focus timer's "Complete step" sat where Pause belongs (#197).** In a
   running session the controls read *Complete step, then Pause*, with Complete

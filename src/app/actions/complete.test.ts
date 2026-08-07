@@ -63,7 +63,9 @@ vi.mock("@/lib/rewards", () => ({
   logReward: vi.fn().mockResolvedValue(undefined),
   awardBadge: vi.fn().mockResolvedValue(true),
   rewardStepDone: vi.fn().mockResolvedValue(null),
-  reverseStepDoneReward: vi.fn().mockResolvedValue(true),
+  reverseStepCompletionRewards: vi
+    .fn()
+    .mockResolvedValue({ stepDone: true, sessionFinished: false }),
   touchStreakOnCompletion: vi.fn().mockResolvedValue(null),
   maybeAwardInboxZero: vi.fn().mockResolvedValue(undefined),
   maybeAwardTenStepsDay: vi.fn().mockResolvedValue(undefined),
@@ -408,12 +410,76 @@ describe("uncompleteStep (#198)", () => {
     expect(prismaMock.step.update).toHaveBeenCalled();
   });
 
-  it("takes back one step_done reward, so completing again cannot award twice", async () => {
+  it("takes back the step_done reward, so completing again cannot award twice", async () => {
     const rewards = await import("@/lib/rewards");
     prismaMock.step.findFirst.mockResolvedValueOnce(doneStep());
+    prismaMock.focusSession.findFirst.mockResolvedValueOnce(null);
     const { uncompleteStep } = await import("./focus");
     await uncompleteStep("s1");
-    expect(rewards.reverseStepDoneReward).toHaveBeenCalledWith("owner");
+    expect(rewards.reverseStepCompletionRewards).toHaveBeenCalledWith("owner", {
+      includeSessionFinished: false,
+    });
+  });
+
+  // Duo review round 2, and it was right: `completeFocus` logs TWO rewards for
+  // one step — `rewardStepDone` AND `RewardType.SessionFinished` — and the undo
+  // this MR adds lives on the timer's done screen, i.e. exactly the path that
+  // logs the second one. Reversing only `step_done` left the session reward
+  // farmable, which is the loophole the MR claims to close.
+  it("also reverses the SESSION reward when the completion came through a focus session", async () => {
+    const rewards = await import("@/lib/rewards");
+    prismaMock.step.findFirst.mockResolvedValueOnce(doneStep());
+    prismaMock.focusSession.findFirst.mockResolvedValueOnce({ id: "fs-1" });
+    const { uncompleteStep } = await import("./focus");
+    await uncompleteStep("s1");
+    expect(prismaMock.focusSession.findFirst.mock.calls[0][0].where).toEqual({
+      stepId: "s1",
+      workspaceId: "owner",
+      outcome: "completed",
+    });
+    expect(rewards.reverseStepCompletionRewards).toHaveBeenCalledWith("owner", {
+      includeSessionFinished: true,
+    });
+  });
+
+  it("does NOT reverse a session reward for a step completed without one", async () => {
+    // `completeStep` (the step row's ✓, no timer) awards only `step_done`.
+    // Reversing a `session_finished` here would take back points earned by a
+    // DIFFERENT, genuinely finished session — the one case where "which row goes
+    // is unobservable" stops being true.
+    const rewards = await import("@/lib/rewards");
+    prismaMock.step.findFirst.mockResolvedValueOnce(doneStep());
+    prismaMock.focusSession.findFirst.mockResolvedValueOnce(null);
+    const { uncompleteStep } = await import("./focus");
+    await uncompleteStep("s1");
+    expect(rewards.reverseStepCompletionRewards).toHaveBeenCalledWith("owner", {
+      includeSessionFinished: false,
+    });
+  });
+
+  // Duo review round 2: the local write commits FIRST, so anything that throws
+  // after it left the user with a step already flipped to not-done, a notice
+  // falsely claiming it was "still marked done", and — because the guard is
+  // `if (!step.done) return` — a retry that no-ops and never reverses the
+  // reward. The reversal now happens before the Google call, and the Google
+  // call cannot throw out of the action.
+  it("a failing Google patch neither fails the undo nor skips the reward reversal", async () => {
+    const google = await import("@/lib/google");
+    const rewards = await import("@/lib/rewards");
+    (google.getValidAccessToken as ReturnType<typeof vi.fn>).mockResolvedValue(
+      "tok",
+    );
+    (google.patchGoogleTask as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("network"),
+    );
+    prismaMock.step.findFirst.mockResolvedValueOnce(
+      doneStep({ googleTaskId: "g1", googleTaskListId: "l1" }),
+    );
+    prismaMock.focusSession.findFirst.mockResolvedValueOnce(null);
+    const { uncompleteStep } = await import("./focus");
+    await expect(uncompleteStep("s1")).resolves.toBeUndefined();
+    expect(prismaMock.step.update).toHaveBeenCalled();
+    expect(rewards.reverseStepCompletionRewards).toHaveBeenCalled();
   });
 
   it("revalidates the three paths that render step state", async () => {

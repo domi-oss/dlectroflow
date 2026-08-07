@@ -142,16 +142,28 @@ export async function rewardStepDone(
  * Take back the points a step completion awarded, because that completion is
  * being undone (#198).
  *
- * **It deletes the most recent `step_done` row rather than "the one that step
+ * **A step completion can award TWO rewards, not one.** `completeStep` logs only
+ * `step_done`, but `completeFocus` — the timer path, which is exactly where this
+ * MR's undo lives — logs `step_done` **and** `session_finished`. Reversing only
+ * the first left the session reward farmable by complete → un-complete →
+ * complete, which is the loophole this was supposed to close (caught in review).
+ * So the caller says which happened, via `includeSessionFinished`, and it must
+ * decide that from real state (a `FocusSession` for this step with outcome
+ * `completed`) rather than assuming: reversing a `session_finished` for a step
+ * that never had a session would take back points a genuinely finished session
+ * elsewhere had earned.
+ *
+ * **Each reversal removes the most recent row of its type, not "the one that step
  * earned", because there is no such thing.** `RewardEvent` carries type, points
- * and workspace and holds no step reference (see `prisma/schema.prisma`), and
- * nothing in the app attributes points to a particular step — so every
- * `step_done` row in a workspace is an identical `RewardPoints.StepDone`. Which
- * row goes is therefore **unobservable**: the points total, the dashboard and the
- * day rollup all read the same afterwards. Attributing rewards to steps would
- * need a nullable `stepId` column, and a migration is not worth buying an
- * identical outcome — the reasoning is recorded here rather than the column being
- * added "just in case", because a schema change is the expensive kind of guess.
+ * and workspace and holds no step or session reference (see
+ * `prisma/schema.prisma`), so every row of one type in a workspace is an
+ * identical `RewardPoints[type]`. Which row goes is **unobservable**: the points
+ * total, the dashboard and the day rollup all read the same afterwards.
+ * Attributing rewards to steps would need a nullable `stepId` column, and a
+ * migration is not worth buying an identical outcome — the reasoning is recorded
+ * here rather than the column being added "just in case", because a schema change
+ * is the expensive kind of guess. The one place that argument does NOT hold is
+ * the cross-type case in the paragraph above, which is why it is gated.
  *
  * Two things are deliberately NOT reversed:
  *
@@ -162,18 +174,31 @@ export async function rewardStepDone(
  *  * **Badges.** Once-ever achievements. Revoking one would make the collection
  *    lie about the past, and `awardBadge` is idempotent anyway.
  *
- * Without this, complete → un-complete → complete awards `step_done` twice for
- * one step. That farm is **not new** — `reopenItem` has always allowed it — so
- * this closes an existing hole as well as the one #198 would otherwise open.
+ * Without this, complete → un-complete → complete awards twice for one step. That
+ * farm is **not new** — `reopenItem` has always allowed it — so this closes an
+ * existing hole as well as the one #198 would otherwise open.
  *
- * Returns whether a row was actually removed, so a caller can be tested on it
- * and so "nothing to reverse" is a normal answer rather than an error.
+ * Returns what was actually removed, so callers can be tested on it and so
+ * "nothing to reverse" is a normal answer rather than an error.
  */
-export async function reverseStepDoneReward(
+export async function reverseStepCompletionRewards(
   workspaceId: string,
+  opts: { includeSessionFinished: boolean },
+): Promise<{ stepDone: boolean; sessionFinished: boolean }> {
+  const stepDone = await reverseLatestReward(workspaceId, RewardType.StepDone);
+  const sessionFinished = opts.includeSessionFinished
+    ? await reverseLatestReward(workspaceId, RewardType.SessionFinished)
+    : false;
+  return { stepDone, sessionFinished };
+}
+
+/** Remove the newest reward of one type in one workspace. See above for why "newest". */
+async function reverseLatestReward(
+  workspaceId: string,
+  type: RewardTypeT,
 ): Promise<boolean> {
   const latest = await prisma.rewardEvent.findFirst({
-    where: { workspaceId, type: RewardType.StepDone },
+    where: { workspaceId, type },
     orderBy: { createdAt: "desc" },
     select: { id: true },
   });

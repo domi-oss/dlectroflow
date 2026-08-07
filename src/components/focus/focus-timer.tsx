@@ -636,6 +636,10 @@ export function FocusTimer({
   );
 
   const start = async () => {
+    // #198 — a new attempt on this step is no longer "just put back". Clearing it
+    // here rather than only gating the render keeps the state honest for anything
+    // that reads it later.
+    setUndone(false);
     const outcome = await run("start", () => beginFocus(step.id, plannedMin));
     if (!outcome.ok) return;
     const id = outcome.value;
@@ -656,6 +660,9 @@ export function FocusTimer({
   // the countdown, same as start().
   const resumeExisting = async () => {
     if (!existingSession) return;
+    // #198 — same reason as `start()`: resuming is a new attempt, not a state of
+    // having just undone something.
+    setUndone(false);
     const outcome = await run("resumeExisting", () =>
       resumeFocus(existingSession.id),
     );
@@ -1534,9 +1541,18 @@ export function FocusTimer({
           question in the moment after correcting an accident — the answer has to
           be stated, not inferred from the screen having changed. `role="status"`
           (polite) rather than an alert: this is good news arriving, not an
-          interruption. It is not dismissible and does not need to be — starting
-          the step again replaces this whole screen. */}
-      {undone && (
+          interruption.
+
+          **Gated on `phase === "setup"`, and `undone` is also reset when a session
+          begins.** An earlier version had neither, on the stated but false
+          reasoning that "starting the step again replaces this whole screen" — it
+          does not. This is ONE component with `phase` toggling inside it, and this
+          block sits in the shared tree above the phase-specific ones, so the
+          notice kept showing over a live countdown for the same step (Duo review
+          round 2). Belt and braces on purpose: the gate fixes what is displayed,
+          the reset fixes the state, and either alone would leave the other
+          misleading to the next reader. */}
+      {undone && phase === "setup" && (
         <p
           role="status"
           className="text-muted-foreground text-sm"
