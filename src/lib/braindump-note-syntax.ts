@@ -23,10 +23,17 @@
  * does not — nor does `rename {old} to {new}.`, because the `.` means the group
  * is not final. That refusal is the feature, not a limitation of it.
  *
- * There is a **second** condition, and it exists for the rename path rather than
- * for the syntax: the split must leave behind text that would not split again.
- * `fix {foo} {bar}` therefore stays literal. `splitInlineNote`'s own doc comment
- * argues it, because the reason is idempotence and not readability.
+ * That is the **whole** rule, with no second clause. `fix {foo} {bar}` therefore
+ * splits into text `fix {foo}` plus note `bar`: the last group is the note and
+ * the earlier one stays where it was typed. An earlier version of this module
+ * added a second clause — refuse any split whose own output would split again —
+ * to protect the rename path, and #179 decided against paying for that in the
+ * syntax. A rule with one clause is the rule people were told; a parser with two
+ * makes an exception nobody can predict from the sentence they read.
+ *
+ * The erosion that second clause prevented is real, and it is closed one layer
+ * up instead, by {@link inlineNoteSource} and {@link resolveInlineNoteEdit} at
+ * the foot of this file. Read those two together before changing either.
  *
  * ## The residual case, stated rather than left to be discovered
  *
@@ -87,12 +94,12 @@ function matchingOpenBrace(s: string, closeAt: number): number {
  * Apply the end-anchored rule once: the trailing group of `s`, or `null` when
  * the rule does not fire.
  *
- * Split out from `splitInlineNote` so the stability check below can ask the
- * question a SECOND time without recursing. Recursion would have been the
- * obvious spelling and is the wrong one — a capture is free-text of any length,
- * so `a {1} {2} … {N}` would recurse once per group and a long enough paste
- * would overflow the stack inside a server action. Two flat calls are O(n) and
- * cannot.
+ * A named function rather than the body of `splitInlineNote` so that the public
+ * entry point reads as the rule ("trim, take the trailing group, otherwise it is
+ * all text") and every brace-matching decision lives in exactly one place. It is
+ * also flat and non-recursive on purpose: a capture is free-text of any length,
+ * so a self-calling version would recurse once per group and a long enough paste
+ * would overflow the stack inside a server action.
  *
  * `s` is assumed already trimmed.
  */
@@ -126,43 +133,113 @@ function trailingGroup(s: string): { text: string; note: string } | null {
  * apply, which is the overwhelmingly common case — every caller can therefore
  * run this unconditionally instead of sniffing for a `{` first.
  *
- * ## Idempotence is enforced, not hoped for
- *
- * `renameItem` re-parses on every edit, and the edit affordance pre-fills its
- * input with the STORED text — so "the user typed this fresh" and "this is what
- * we saved last time" reach the parser as the same string, with nothing in it to
- * tell them apart. A function that split a second group off its own output would
- * therefore erode an item's text one group per save, and OVERWRITE the note it
- * already had, for anyone who opened the edit field and saved unchanged.
- *
- * So a split is performed only when its own output is stable: if the text that
- * would be left behind is itself splittable, the whole string stays literal.
- * `fix {foo} {bar}` is the case — it has a group at the very end, but leaving
- * `fix {foo}` behind would set that erosion going, so nothing is split and the
- * person sees exactly what they typed.
- *
- * That refusal costs a note in a shape nobody captures often (a mid-string
- * placeholder AND a trailing note), and it is the direction #179 argues for
- * everywhere else: a visible refusal beats a silent edit. It does not touch the
- * common mid-string case, because `deploy the {{VERSION}} chart` does not end in
- * a group — only a group sitting at the very end of the residual triggers it.
- *
- * The resulting invariant is the one the callers need: **`text` never
- * re-splits**, in either branch. `braindump-note-syntax.test.ts` asserts it over
- * every shape in the file rather than over one example, because the single-group
- * example cannot reach the failure.
+ * **Not idempotent, and that is by decision.** `fix {foo} {bar}` yields text
+ * `fix {foo}`, which this function would split again if it were ever handed its
+ * own output. Nothing may do that: a CAPTURE sees each string once, and the
+ * RENAME path goes through {@link resolveInlineNoteEdit}, which is built so the
+ * parser never sees a string it produced. Restoring a self-stability check here
+ * would cost a note in a shape people type (a placeholder plus a trailing note)
+ * to prevent something that is already impossible upstream — see this module's
+ * header for the argument, and the colocated test for the pinned example.
  */
 export function splitInlineNote(raw: string): InlineNoteSplit {
   const trimmed = raw.trim();
+  return trailingGroup(trimmed) ?? { text: trimmed, note: null };
+}
 
-  const group = trailingGroup(trimmed);
-  if (group === null) return { text: trimmed, note: null };
+/**
+ * The single string an edit input should hold for a stored item: its text with
+ * its note put back between braces, exactly as a capture would have received it.
+ *
+ * ## Why the input must not simply show the stored text
+ *
+ * `renameItem` re-parses whatever the edit field hands back, and the parser has
+ * no way to tell "the user typed this fresh" from "this is what we saved last
+ * time". Pre-filled with the stored text `fix {foo}`, an unchanged save therefore
+ * arrived as a capture of `fix {foo}` — text `fix`, note `foo` — eroding the text
+ * one group per save and overwriting the note (`bar`) that was already there.
+ * Silent, and repeatable until the text was gone.
+ *
+ * Reconstructing instead makes the round trip an identity **by construction**
+ * rather than by comparison: `splitInlineNote(inlineNoteSource(stored))` is
+ * `stored`, so a save that changed nothing writes back what was already there.
+ * It also gives the field one honest representation of the source string, which
+ * is what the "add note" affordance operates on — two representations would mean
+ * two answers to "where does the note start?".
+ *
+ * ## Why the reconstruction is verified before it is offered
+ *
+ * The composition is only reversible when the note's braces are balanced. Notes
+ * this parser produces always are — `matchingOpenBrace` returns the `{` at depth
+ * zero, which makes the extracted region a balanced string — but the column can
+ * also be written by an import, or by a note editor that has no reason to care.
+ * A note of `a}b` composes to `fix {a}b}`, whose final `}` has no matching `{`:
+ * the scan runs off the start, the whole string is literal, and an unchanged save
+ * would replace the text with that junk and drop the note.
+ *
+ * So the round trip is checked, and a note that cannot survive it is left out of
+ * the field rather than shown in a form that destroys it. The note is not lost —
+ * {@link resolveInlineNoteEdit} keeps it — it just cannot be edited from the
+ * title field until something rewrites it as balanced.
+ */
+export function inlineNoteSource({ text, note }: InlineNoteSplit): string {
+  if (note === null) return text;
 
-  // The stability check. `trailingGroup` rather than a `endsWith("}")` test,
-  // because a residual can end in `}` and still be stable: `a} b {note}` leaves
-  // `a} b`, whose brace has no opener and so would never split again. Testing
-  // the character would deny that note for no reason.
-  if (trailingGroup(group.text) !== null) return { text: trimmed, note: null };
+  const composed = `${text} {${note}}`;
+  const reparsed = splitInlineNote(composed);
+  return reparsed.text === text && reparsed.note === note ? composed : text;
+}
 
-  return group;
+/**
+ * What a rename should store, given what the user submitted and what was already
+ * there. The other half of {@link inlineNoteSource}; the two close a loop.
+ *
+ * Two rules, in this order.
+ *
+ * **1. An unchanged submission is not an edit.** The submitted string is
+ * compared against both strings an edit input could honestly have been holding —
+ * the reconstruction, and the bare stored text — and either one means the person
+ * opened the field and saved. Nothing is parsed, so nothing can drift. The bare
+ * text is included as well as the reconstruction on purpose: the erosion bug's
+ * whole shape was one call site pre-filling something the save layer did not
+ * expect, and a fix that only works for the current pre-fill has to be
+ * re-remembered by every future one.
+ *
+ * **2. A note is only ever written by note syntax.** When the submission IS an
+ * edit, its trailing group becomes the note — and when it has no trailing group,
+ * the stored note is kept rather than cleared. So text out of the text field can
+ * never end up in the note column, which is precisely what erosion did.
+ *
+ * ## What rule 2 costs, stated rather than left to be discovered
+ *
+ * Clearing the group does not delete the note. `buy milk {}` and `buy milk` both
+ * arrive as "no trailing group", so the note survives and reappears in the field
+ * the next time the editor opens; deleting a note needs a note affordance, not
+ * the title field.
+ *
+ * The alternative — treat a vanished group as a deletion — was rejected because
+ * its failure mode is worse in the direction that matters. A user who mistypes
+ * one brace (`… {can under sink`) would silently destroy the only copy of the
+ * note, and there is nothing on screen afterwards to say so. This way the worst
+ * case is a note that outstays its welcome, which is visible and reversible.
+ */
+export function resolveInlineNoteEdit(
+  submitted: string,
+  stored: InlineNoteSplit,
+): InlineNoteSplit {
+  const trimmed = submitted.trim();
+
+  // Rule 1. A fresh object rather than `stored` itself, so a caller cannot
+  // discover later that it is holding an alias of its own input.
+  if (
+    trimmed === "" ||
+    trimmed === inlineNoteSource(stored) ||
+    trimmed === stored.text.trim()
+  ) {
+    return { text: stored.text, note: stored.note };
+  }
+
+  // Rule 2.
+  const split = splitInlineNote(trimmed);
+  return { text: split.text, note: split.note ?? stored.note };
 }

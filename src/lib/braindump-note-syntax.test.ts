@@ -1,6 +1,54 @@
 import { describe, it, expect } from "vitest";
-import { splitInlineNote } from "@/lib/braindump-note-syntax";
+import {
+  splitInlineNote,
+  inlineNoteSource,
+  resolveInlineNoteEdit,
+  type InlineNoteSplit,
+} from "@/lib/braindump-note-syntax";
 import { TASK_NOTE_MAX_LENGTH, normalizeTaskNote } from "@/lib/task-notes";
+
+/**
+ * Every shape the parser has an opinion about, in one list.
+ *
+ * Used by three different loops below, which is the point: the failures this
+ * module can have are silent, and a property asserted over one example is a
+ * property asserted over the one example that cannot reach the failure. That is
+ * exactly how the erosion bug shipped — the colocated test had a single-group
+ * happy path, and a single group cannot re-split.
+ *
+ * Module scope rather than inside a `describe` so the save-layer suite runs the
+ * same shapes through the round trip that the parser suite runs through the
+ * split.
+ */
+const EVERY_SHAPE = [
+  "water the office plants {can under sink needs a wash}",
+  "fix the {foo} handler",
+  "rename {old} to {new}.",
+  "ship it {check {staging} first}",
+  "deploy the {{VERSION}} chart {check values.yaml}",
+  "fix {foo} {bar}",
+  "update {config} {see the wiki}",
+  "a} b {note}",
+  "a} b} c}",
+  "count the closing brace}",
+  "water the plants {can under sink",
+  "{just a note}",
+  "explain the empty object {}",
+  "buy milk",
+];
+
+/** True when every `{` in `s` closes, and no `}` arrives before its `{`. */
+const balanced = (s: string) => {
+  let depth = 0;
+  for (const ch of s) {
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth < 0) return false;
+    }
+  }
+  return depth === 0;
+};
 
 /**
  * #179 — the inline note syntax, exercised as a pure function.
@@ -162,72 +210,44 @@ describe("splitInlineNote (#179)", () => {
     });
   });
 
-  describe("idempotence", () => {
-    it("re-parsing a split result is a no-op — the rename path re-runs this", () => {
-      // `renameItem` re-parses on every edit (#179). If parsing the ALREADY
-      // parsed text produced a second split, an item's text would erode one
-      // brace group per edit.
-      const once = splitInlineNote("water the plants {can under sink}");
-      expect(splitInlineNote(once.text)).toEqual({
-        text: "water the plants",
-        note: null,
-      });
-    });
-
-    /**
-     * The invariant the module's own doc comment promises: **the emitted `text`
-     * never re-splits.** Stated as a loop over every shape above rather than as
-     * one example, because the failure it guards is silent and the single-group
-     * example cannot reach it.
-     *
-     * Why it is load-bearing rather than tidy: the edit affordance pre-fills the
-     * input with the STORED text, so "the user typed this fresh" and "this is
-     * what we saved last time" arrive at `renameItem` as the same string. A
-     * parser that splits its own output therefore erodes an item's text — and
-     * OVERWRITES the note it already had — every time somebody opens the edit
-     * field and saves without changing the trailing group.
-     */
-    const EVERY_SHAPE = [
-      "water the office plants {can under sink needs a wash}",
-      "fix the {foo} handler",
-      "rename {old} to {new}.",
-      "ship it {check {staging} first}",
-      "deploy the {{VERSION}} chart {check values.yaml}",
-      "fix {foo} {bar}",
-      "update {config} {see the wiki}",
-      "a} b {note}",
-      "a} b} c}",
-      "count the closing brace}",
-      "water the plants {can under sink",
-      "{just a note}",
-      "explain the empty object {}",
-      "buy milk",
-      "",
-    ];
-
-    it.each(EVERY_SHAPE)("emits text that does not re-split: %j", (raw) => {
-      const once = splitInlineNote(raw);
-      expect(splitInlineNote(once.text)).toEqual({
-        text: once.text,
-        note: null,
-      });
-    });
-
-    it("refuses rather than splitting when the residual text ends in a group", () => {
-      // `fix {foo} {bar}` has a group at the very end, so the end-anchored rule
-      // would fire — but the text it would leave behind (`fix {foo}`) ends in a
-      // group of its own, so the split is not stable and the whole string stays
-      // literal. Refusing is visible and costs a note; splitting is silent and
-      // costs the text. #179 argues for the visible failure throughout.
+  /**
+   * Decision 1, read literally: **only a group at the very end counts.** Nothing
+   * else. The rule people are told has one clause, and a parser that quietly
+   * adds a second is a second rule nobody was told.
+   *
+   * An earlier version of this module carried that second clause — it refused a
+   * split whose own output would split again, so `fix {foo} {bar}` stayed
+   * entirely literal. The refusal was there to stop a real erosion bug on the
+   * rename path, and #179 decided against paying for it in the syntax. The bug
+   * is closed at the SAVE layer instead; see the `resolveInlineNoteEdit` suite
+   * at the foot of this file for the loop that now cannot lose anything.
+   */
+  describe("only the LAST group counts — Decision 1, literally", () => {
+    it("splits the trailing group and leaves an earlier one in the text", () => {
       expect(splitInlineNote("fix {foo} {bar}")).toEqual({
-        text: "fix {foo} {bar}",
-        note: null,
+        text: "fix {foo}",
+        note: "bar",
       });
     });
 
-    it("still splits when an earlier group is not at the end of the text", () => {
-      // The refusal above must not swallow this: `{{VERSION}}` sits mid-text, so
-      // the residual is stable and the trailing note is real.
+    it("does the same when both groups are words rather than placeholders", () => {
+      expect(splitInlineNote("update {config} {see the wiki}")).toEqual({
+        text: "update {config}",
+        note: "see the wiki",
+      });
+    });
+
+    it("emits text that CAN itself re-split, by decision rather than by accident", () => {
+      // Pinned so nobody restores the refusal as a "fix". Re-parsing the emitted
+      // text is exactly the thing the save layer is built never to do; a parser
+      // that also refused it would cost a note in a shape people type, to
+      // prevent something that is already impossible upstream.
+      const once = splitInlineNote("fix {foo} {bar}");
+      expect(once).toEqual({ text: "fix {foo}", note: "bar" });
+      expect(splitInlineNote(once.text)).toEqual({ text: "fix", note: "foo" });
+    });
+
+    it("splits when an earlier group is not at the end of the text", () => {
       expect(
         splitInlineNote("deploy the {{VERSION}} chart {check values.yaml}"),
       ).toEqual({
@@ -236,14 +256,38 @@ describe("splitInlineNote (#179)", () => {
       });
     });
 
-    it("still splits when the residual ends in an UNMATCHED brace", () => {
-      // The stability check asks "would this split again?", not "does it end in
-      // `}`?". `a} b` ends in no group at all — its brace has no opener — so the
-      // note is real and denying it would be over-strict.
+    it("splits when the text left behind ends in an UNMATCHED brace", () => {
+      // `a} b` has a `}` with no opener, which is literal text and not a group.
+      // Nothing about the trailing note is affected by it.
       expect(splitInlineNote("a} b {note}")).toEqual({
         text: "a} b",
         note: "note",
       });
+    });
+
+    it("re-parsing a single-group result is still a no-op", () => {
+      // The common case, and the one the old test used as its only example:
+      // `water the plants` has no group of its own, so nothing re-splits. It is
+      // kept because it is the shape almost every real capture has — just no
+      // longer mistaken for a general property.
+      const once = splitInlineNote("water the plants {can under sink}");
+      expect(splitInlineNote(once.text)).toEqual({
+        text: "water the plants",
+        note: null,
+      });
+    });
+
+    it("never emits a note whose braces are unbalanced", () => {
+      // A property of the SCAN, and the one the save-layer reconstruction relies
+      // on: `matchingOpenBrace` only returns a `{` at depth zero, so the region
+      // between the two braces is a balanced string by construction. Asserted
+      // over the awkward shapes as well as the ordinary ones, because it is what
+      // makes `inlineNoteSource` able to put a note back where it came from.
+      for (const raw of [...EVERY_SHAPE, "x {a}b}", "x {{a}b}", "x {a{b}"]) {
+        const { note } = splitInlineNote(raw);
+        if (note === null) continue;
+        expect(balanced(note)).toBe(true);
+      }
     });
   });
 
@@ -426,6 +470,211 @@ describe("splitInlineNote (#179)", () => {
         "ring the dentist {09:00\x00\x07 sharp}",
       );
       expect(normalizeTaskNote(note)).toBe("09:00 sharp");
+    });
+  });
+});
+
+/**
+ * The save layer (#179) — where the erosion is actually stopped.
+ *
+ * `splitInlineNote` is deliberately not idempotent: `fix {foo} {bar}` emits text
+ * that would split again. That is harmless for a CAPTURE, which sees each string
+ * once, and fatal for a RENAME, which re-parses whatever the edit input hands
+ * back. So the round trip is closed by the two functions the rename path uses
+ * together:
+ *
+ *   stored ──inlineNoteSource──▶ what the input holds ──resolveInlineNoteEdit──▶ stored
+ *
+ * Every test below is a face of one invariant: **going round that loop without
+ * touching the input changes nothing** — not the text, not the note. That is a
+ * property of the loop, so it is asserted over the whole shape table rather than
+ * over the one example that motivated it.
+ */
+describe("the save layer (#179)", () => {
+  /**
+   * Stored pairs, including two this parser can never produce.
+   *
+   * The unbalanced-note rows (`a}b`) matter precisely because they are
+   * unreachable through capture: they are what an IMPORT, a future note editor,
+   * or a hand-written row could put in the column, and the loop has to be a
+   * no-op for them too or the first save on such a row destroys it.
+   */
+  const STORED: InlineNoteSplit[] = [
+    { text: "water the plants", note: null },
+    { text: "water the plants", note: "can under sink" },
+    { text: "fix {foo}", note: "bar" },
+    { text: "update {config}", note: "see the wiki" },
+    { text: "deploy the {{VERSION}} chart", note: "check values.yaml" },
+    { text: "a} b", note: "note" },
+    { text: "ship it", note: "check {staging} first" },
+    { text: "count the closing brace}", note: null },
+    { text: "fix", note: "a}b" },
+    { text: "fix {foo}", note: "a}b" },
+  ];
+
+  describe("inlineNoteSource — one honest string for the input to hold", () => {
+    it("is the text alone when there is no note", () => {
+      expect(inlineNoteSource({ text: "buy milk", note: null })).toBe(
+        "buy milk",
+      );
+    });
+
+    it("reconstructs the string a capture would have been given", () => {
+      expect(inlineNoteSource({ text: "fix {foo}", note: "bar" })).toBe(
+        "fix {foo} {bar}",
+      );
+    });
+
+    it.each(EVERY_SHAPE)(
+      "round-trips whatever the parser stored for %j",
+      (raw) => {
+        const stored = splitInlineNote(raw);
+        expect(splitInlineNote(inlineNoteSource(stored))).toEqual(stored);
+      },
+    );
+
+    it("refuses to compose a note whose braces would not survive re-parsing", () => {
+      // THE case that decided the design. A note carrying an unbalanced `}`
+      // cannot be put back between braces: `fix {a}b}` has no `{` to match its
+      // final `}`, the backward scan runs off the start, and the whole string is
+      // literal — so an unchanged save would have replaced the text with that
+      // junk AND dropped the note.
+      expect(splitInlineNote("fix {a}b}")).toEqual({
+        text: "fix {a}b}",
+        note: null,
+      });
+      // Verified before it is offered, so the input holds the bare text instead
+      // and the note stays in the column untouched.
+      expect(inlineNoteSource({ text: "fix", note: "a}b" })).toBe("fix");
+      expect(inlineNoteSource({ text: "fix {foo}", note: "a}b" })).toBe(
+        "fix {foo}",
+      );
+    });
+  });
+
+  describe("an unchanged edit-and-save is a no-op", () => {
+    it.each(STORED)("on both text and note, for %j", (stored) => {
+      expect(resolveInlineNoteEdit(inlineNoteSource(stored), stored)).toEqual(
+        stored,
+      );
+    });
+
+    it.each(STORED)(
+      "also when the input was pre-filled with the BARE text, for %j",
+      (stored) => {
+        // Belt as well as braces. The reconstruction is what the input should
+        // hold, but a surface offering only the stored text — which is what
+        // every edit affordance did before this — must not erode either, or the
+        // fix depends on every future call site remembering.
+        expect(resolveInlineNoteEdit(stored.text, stored)).toEqual(stored);
+      },
+    );
+
+    it.each(STORED)("and stays a no-op over five saves, for %j", (stored) => {
+      // Once is not the property. Erosion was one group per save, so a fix that
+      // survived a single round trip and drifted on the second would look
+      // identical in a one-shot test.
+      let current = stored;
+      for (let i = 0; i < 5; i++) {
+        current = resolveInlineNoteEdit(inlineNoteSource(current), current);
+      }
+      expect(current).toEqual(stored);
+    });
+
+    it("closes the exact path that used to lose data", () => {
+      // Capture `fix {foo} {bar}`, open the editor, save without typing.
+      // Before: the input showed `fix {foo}`, the rename re-parsed it to text
+      // `fix` + note `foo`, and `bar` was gone — repeatable until the text was
+      // empty.
+      const stored = splitInlineNote("fix {foo} {bar}");
+      expect(stored).toEqual({ text: "fix {foo}", note: "bar" });
+      expect(inlineNoteSource(stored)).toBe("fix {foo} {bar}");
+      expect(resolveInlineNoteEdit("fix {foo} {bar}", stored)).toEqual(stored);
+      expect(resolveInlineNoteEdit("fix {foo}", stored)).toEqual(stored);
+    });
+  });
+
+  describe("a note is never replaced by text out of the text field", () => {
+    it("keeps the note when only the text half is edited", () => {
+      expect(
+        resolveInlineNoteEdit("repair {foo} {bar}", {
+          text: "fix {foo}",
+          note: "bar",
+        }),
+      ).toEqual({ text: "repair {foo}", note: "bar" });
+    });
+
+    it("keeps the note when the edit leaves no trailing group at all", () => {
+      expect(
+        resolveInlineNoteEdit("water the plants today", {
+          text: "water the plants",
+          note: "can under sink",
+        }),
+      ).toEqual({ text: "water the plants today", note: "can under sink" });
+    });
+
+    it("keeps the note when a brace is mistyped", () => {
+      // A dropped `}` must not read as "delete the note". Same refusal to guess
+      // the parser makes about unbalanced braces, one layer up.
+      expect(
+        resolveInlineNoteEdit("water the plants {can under sink", {
+          text: "water the plants",
+          note: "can under sink",
+        }),
+      ).toEqual({
+        text: "water the plants {can under sink",
+        note: "can under sink",
+      });
+    });
+
+    it("keeps a note the input could not show", () => {
+      expect(
+        resolveInlineNoteEdit("repair the parser", {
+          text: "fix",
+          note: "a}b",
+        }),
+      ).toEqual({ text: "repair the parser", note: "a}b" });
+    });
+
+    it("writes the note only when the submitted string ends in a real group", () => {
+      expect(
+        resolveInlineNoteEdit("fix {foo} {other}", {
+          text: "fix {foo}",
+          note: "bar",
+        }),
+      ).toEqual({ text: "fix {foo}", note: "other" });
+    });
+
+    it("adds a note to an item that had none", () => {
+      expect(
+        resolveInlineNoteEdit("buy milk {2 pints}", {
+          text: "buy milk",
+          note: null,
+        }),
+      ).toEqual({ text: "buy milk", note: "2 pints" });
+    });
+
+    it("treats an empty submission as no edit at all", () => {
+      const stored: InlineNoteSplit = { text: "buy milk", note: "2 pints" };
+      expect(resolveInlineNoteEdit("   ", stored)).toEqual(stored);
+    });
+
+    it("emptying the group does NOT delete the note — the one cost, stated", () => {
+      // `{}` is not a note (the parser refuses it), so this arrives as "no
+      // trailing group", and no group means the text field said nothing about
+      // the note. Deleting a note therefore needs a note affordance rather than
+      // the title field.
+      //
+      // Chosen deliberately over the alternative: clearing the note whenever the
+      // group goes means a mistyped brace destroys it, and the note here is the
+      // only copy. This way it is still in the column and reappears in the input
+      // the next time the editor opens, which is visible and recoverable.
+      expect(
+        resolveInlineNoteEdit("buy milk {}", {
+          text: "buy milk",
+          note: "2 pints",
+        }),
+      ).toEqual({ text: "buy milk {}", note: "2 pints" });
     });
   });
 });
