@@ -309,6 +309,10 @@ check_response() { # response_file http_code what
 # gate on `main`, but a canceled one does not finish it). Looking back through
 # a window finds the most recent SUCCESSFUL run of each analyzer wherever it
 # happened to be.
+# shellcheck disable=SC2016  # `$path`, `$ref` and `$depth` are GRAPHQL
+# variables — they must reach the server unexpanded, so single quotes are the
+# correct quoting. Same directive security-assessment.sh carries for the same
+# reason.
 ANCHOR_QUERY='query($path: ID!, $ref: String!, $depth: Int!) {
   project(fullPath: $path) {
     pipelines(ref: $ref, first: $depth) {
@@ -353,6 +357,8 @@ check_response "$WORK/anchor.json" "$code" "the scan-anchor query"
 # Paginated rather than read once. Measured 2026-08-06 this project holds 100
 # records across all states on the first page alone, so a check that reads page
 # one and stops would undercount silently the moment the active set grows.
+# shellcheck disable=SC2016  # GRAPHQL variables, not shell — see the anchor
+# query above.
 VULN_QUERY='query($path: ID!, $after: String) {
   project(fullPath: $path) {
     vulnerabilities(state: [DETECTED, CONFIRMED], first: 100, after: $after) {
