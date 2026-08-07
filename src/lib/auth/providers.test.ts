@@ -133,8 +133,17 @@ describe("assertAuthConfig", () => {
 // timeout with a blank screen. Every failure path in the callback redirects to
 // /login?error=…; the point of the deadline is to make sure one is reached.
 describe("gitlab provider request deadlines (#174)", () => {
+  // Typed with `fetch`'s real parameters even though the body ignores them.
+  // `vi.fn(async () => …)` infers a zero-argument signature, which makes
+  // `mock.calls` an empty tuple — so reading `calls[0][1]` to get at the
+  // RequestInit is a type error, and the `as RequestInit` cast that hid it was
+  // casting `undefined`. The assertions below are about the second argument, so
+  // the mock has to admit it has one.
   function okFetch(body: unknown) {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(body)));
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify(body)),
+    );
     vi.stubGlobal("fetch", fetchMock);
     return fetchMock;
   }
@@ -156,9 +165,9 @@ describe("gitlab provider request deadlines (#174)", () => {
       redirectUri: "https://x/api/auth/gitlab/callback",
     });
 
-    const init = fetchMock.mock.calls[0][1] as RequestInit;
-    expect(init.signal).toBeInstanceOf(AbortSignal);
-    expect(init.signal!.aborted).toBe(false);
+    const init = fetchMock.mock.calls[0][1];
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+    expect(init?.signal?.aborted).toBe(false);
   });
 
   it("gives the profile fetch one too", async () => {
@@ -166,9 +175,9 @@ describe("gitlab provider request deadlines (#174)", () => {
 
     await getAuthProvider().fetchProfile("tok");
 
-    const init = fetchMock.mock.calls[0][1] as RequestInit;
-    expect(init.signal).toBeInstanceOf(AbortSignal);
-    expect(init.signal!.aborted).toBe(false);
+    const init = fetchMock.mock.calls[0][1];
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+    expect(init?.signal?.aborted).toBe(false);
   });
 
   // The user-facing half. An expired deadline surfaces from fetch as a
