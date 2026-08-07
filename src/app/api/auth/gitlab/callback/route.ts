@@ -8,7 +8,7 @@ import {
   OWNER_COOKIE,
   USER_SESSION_TTL_SECONDS,
 } from "@/lib/auth/session";
-import { requestOrigin } from "@/lib/origin";
+import { requestOrigin, inboundHost } from "@/lib/origin";
 import { recordAuthFailure } from "@/lib/observability";
 
 export const runtime = "nodejs";
@@ -27,12 +27,17 @@ export async function GET(req: Request): Promise<Response> {
   const fail = (reason: string) => {
     // Every branch below logs, because the alternative is #174: an owner
     // reporting a sign-in that "hangs", and nothing on the server side to read
-    // but an ingress access log. `host` is deliberately the request's own Host
-    // rather than `origin` — `origin` is derived and would report the canonical
-    // hostname even when the mismatch between the two IS the failure.
+    // but an ingress access log.
+    //
+    // The host is `inboundHost`, not `requestOrigin`'s: that one is pinned to
+    // PUBLIC_ORIGIN and would report the canonical hostname even when the
+    // mismatch between the two IS the failure. It is also not a bare `Host` —
+    // TLS terminates at ingress, so `Host` is not reliably what the browser
+    // used, and getting that wrong here would break the single field this
+    // whole change exists to record. Caught in review on !280.
     recordAuthFailure({
       reason,
-      host: req.headers.get("host"),
+      host: inboundHost(req.headers),
       hadState: Boolean(expectedState),
       hadVerifier: Boolean(verifier),
     });

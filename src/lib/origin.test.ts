@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { publicOrigin, canonicalOriginRedirect } from "./origin";
+import { publicOrigin, canonicalOriginRedirect, inboundHost } from "./origin";
 
 describe("publicOrigin", () => {
   const savedOrigin = process.env.PUBLIC_ORIGIN;
@@ -224,5 +224,42 @@ describe("canonicalOriginRedirect", () => {
         search: "",
       }),
     ).toBeNull();
+  });
+});
+
+// Extracted in review on !280 after the #174 diagnostic field was found reading
+// a bare `Host`. Tested directly because it is now shared by the proxy's
+// canonical-origin comparison and the auth-failure log line, and a regression
+// in either is silent.
+describe("inboundHost", () => {
+  const h = (init: Record<string, string>) => new Headers(init);
+
+  it("prefers x-forwarded-host over host", () => {
+    expect(
+      inboundHost(
+        h({ host: "pod.internal", "x-forwarded-host": "dlectroflow.dev" }),
+      ),
+    ).toBe("dlectroflow.dev");
+  });
+
+  it("takes the client-facing entry when a proxy chain appended to it", () => {
+    expect(
+      inboundHost(h({ "x-forwarded-host": "a.example, b.internal" })),
+    ).toBe("a.example");
+  });
+
+  it("falls back to host when nothing was forwarded", () => {
+    expect(inboundHost(h({ host: "dlectroflow.dev" }))).toBe("dlectroflow.dev");
+  });
+
+  // An empty forwarded header must not win the `||` and shadow a real Host.
+  it("ignores an empty forwarded header rather than returning a blank host", () => {
+    expect(
+      inboundHost(h({ host: "real.example", "x-forwarded-host": "" })),
+    ).toBe("real.example");
+  });
+
+  it("returns null when the request carries neither", () => {
+    expect(inboundHost(h({}))).toBeNull();
   });
 });

@@ -32,9 +32,13 @@ vi.mock("@/lib/auth/session", async (importOriginal) => {
   return { ...actual, signUserSession: signUserSessionMock };
 });
 
-vi.mock("@/lib/origin", () => ({
-  requestOrigin: () => "https://dlectroflow.test",
-}));
+// Only `requestOrigin` is stubbed. `inboundHost` keeps its real implementation
+// on purpose — the host-precedence tests below exist to exercise it, and a mock
+// would assert the mock.
+vi.mock("@/lib/origin", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/origin")>();
+  return { ...actual, requestOrigin: () => "https://dlectroflow.test" };
+});
 
 import { GET } from "./route";
 import { OWNER_COOKIE, USER_SESSION_TTL_SECONDS } from "@/lib/auth/session";
@@ -274,6 +278,39 @@ describe("gitlab oauth callback — failure telemetry (#174)", () => {
 
     await GET(
       new Request(CALLBACK_URL, { headers: { host: "dlectroflow.dev" } }),
+    );
+
+    expect(warned()[0]).toMatchObject({ host: "dlectroflow.dev" });
+  });
+
+  // Caught in review on !280. TLS terminates at ingress-nginx, so the raw Host
+  // the pod sees is not the hostname the browser used — and this field exists
+  // for no other purpose than to name that hostname. Reading bare `Host` would
+  // have made the one diagnostic #174 adds report the wrong answer in precisely
+  // the deployment that caused #174.
+  it("prefers x-forwarded-host, because the pod sits behind ingress", async () => {
+    cookiesMock.mockResolvedValue(emptyJar);
+
+    await GET(
+      new Request(CALLBACK_URL, {
+        headers: {
+          host: "dlectroflow.svc.cluster.local",
+          "x-forwarded-host": "dlectroflow.dev",
+        },
+      }),
+    );
+
+    expect(warned()[0]).toMatchObject({ host: "dlectroflow.dev" });
+  });
+
+  // Each proxy in a chain appends; the client-facing hostname is the first.
+  it("takes the first entry when the forwarded header carries a chain", async () => {
+    cookiesMock.mockResolvedValue(emptyJar);
+
+    await GET(
+      new Request(CALLBACK_URL, {
+        headers: { "x-forwarded-host": "dlectroflow.dev, internal.lb" },
+      }),
     );
 
     expect(warned()[0]).toMatchObject({ host: "dlectroflow.dev" });

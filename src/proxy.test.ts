@@ -16,7 +16,20 @@ import { proxy } from "./proxy";
 // http:// — the old `req.nextUrl.protocol === "https:"` check left the guest
 // cookie non-Secure in production. We mirror the owner cookie: derive from
 // requestOrigin (which pins PUBLIC_ORIGIN in prod).
-vi.mock("@/lib/origin");
+// `requestOrigin` and `canonicalOriginRedirect` are stubbed; `inboundHost` is
+// deliberately NOT. A bare `vi.mock("@/lib/origin")` auto-mocks every export,
+// which would leave the host-precedence test below asserting that a mock
+// returned what it was told to — the exact hollow-green this suite is supposed
+// to prevent. It is the real implementation that has to pick x-forwarded-host
+// over Host, because getting that wrong is #174.
+vi.mock("@/lib/origin", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/origin")>();
+  return {
+    ...actual,
+    requestOrigin: vi.fn(),
+    canonicalOriginRedirect: vi.fn(),
+  };
+});
 
 describe("proxy: guest session cookie Secure flag", () => {
   beforeEach(() => {

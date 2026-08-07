@@ -1,6 +1,34 @@
 import { isCanonicalOriginPath } from "./auth/gate";
 
 /**
+ * The hostname the browser actually used, as best the pod can tell.
+ *
+ * **`x-forwarded-host` first, deliberately.** TLS terminates at ingress-nginx,
+ * so the raw `Host` the pod sees is not reliably the hostname the user typed —
+ * and in a multi-hostname deployment that difference is not a detail, it is
+ * #174 itself. `.split(",")[0]` because each proxy in a chain appends to the
+ * header; the first entry is the client-facing one.
+ *
+ * Both headers are attacker-controllable and that is fine for every current
+ * caller, because none of them ECHO the value: `canonicalOriginRedirect`
+ * compares it and builds the destination from PUBLIC_ORIGIN, and
+ * `recordAuthFailure` writes it to a log line. Do not use this to construct a
+ * URL that is served back to the user.
+ *
+ * Extracted because there were three copies of this precedence and one of them
+ * had drifted — the #174 diagnostic field read bare `Host`, so the single field
+ * added to identify a wrong-hostname sign-in would itself have reported the
+ * wrong hostname, in exactly the topology that produced the bug.
+ */
+export function inboundHost(headers: Headers): string | null {
+  return (
+    headers.get("x-forwarded-host")?.split(",")[0].trim() ||
+    headers.get("host") ||
+    null
+  );
+}
+
+/**
  * External origin of the request.
  *
  * In production PUBLIC_ORIGIN pins the origin (e.g. https://dlectroflow.dev),

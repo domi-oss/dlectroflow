@@ -12,7 +12,11 @@ import {
   isOwnerOnlyPath,
   isAuthenticatedOnlyPath,
 } from "@/lib/auth/gate";
-import { canonicalOriginRedirect, requestOrigin } from "@/lib/origin";
+import {
+  canonicalOriginRedirect,
+  requestOrigin,
+  inboundHost,
+} from "@/lib/origin";
 
 export const config = {
   // Skip Next internals + static assets; run on everything else.
@@ -32,17 +36,14 @@ export async function proxy(req: NextRequest) {
   // send — an unbreakable loop with no way out. Minting a guest sandbox on a
   // host we are about to leave has the same shape, one cookie down.
   //
-  // Host precedence mirrors requestOrigin(): x-forwarded-host, then host. Both
-  // are attacker-controllable, and that is fine — canonicalOriginRedirect only
-  // ever COMPARES the inbound host, and builds the destination from
-  // PUBLIC_ORIGIN, so a spoofed Host can at worst trigger a redirect to where
-  // the request was already going.
-  const inboundHost =
-    req.headers.get("x-forwarded-host")?.split(",")[0].trim() ||
-    req.headers.get("host") ||
-    req.nextUrl.host;
+  // Host precedence is `inboundHost` (src/lib/origin.ts) — x-forwarded-host,
+  // then host. Both are attacker-controllable, and that is fine here:
+  // canonicalOriginRedirect only ever COMPARES the inbound host, and builds the
+  // destination from PUBLIC_ORIGIN, so a spoofed Host can at worst trigger a
+  // redirect to where the request was already going.
+  const host = inboundHost(req.headers) ?? req.nextUrl.host;
   const canonical = canonicalOriginRedirect({
-    host: inboundHost,
+    host,
     pathname,
     search: req.nextUrl.search,
   });

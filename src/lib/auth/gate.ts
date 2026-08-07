@@ -100,10 +100,27 @@ export const CANONICAL_ORIGIN_PREFIXES = [
   "/login",
 ];
 
-export function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PREFIXES.some(
+/**
+ * Exact match, or a prefix that ends on a path segment boundary.
+ *
+ * The trailing-slash normalisation is the whole point and is easy to lose: a
+ * plain `startsWith("/login")` also catches `/loginhack`, which would hand an
+ * attacker-chosen path the treatment `/login` gets. Shared between the two
+ * classifiers that need it rather than written twice — they had drifted apart
+ * once already in review (!280), and two copies of a security predicate is one
+ * copy too many.
+ */
+function matchesExactOrSegmentPrefix(
+  pathname: string,
+  prefixes: readonly string[],
+): boolean {
+  return prefixes.some(
     (p) => pathname === p || pathname.startsWith(p.endsWith("/") ? p : p + "/"),
   );
+}
+
+export function isPublicPath(pathname: string): boolean {
+  return matchesExactOrSegmentPrefix(pathname, PUBLIC_PREFIXES);
 }
 
 export function isOwnerOnlyPath(pathname: string): boolean {
@@ -115,7 +132,5 @@ export function isAuthenticatedOnlyPath(pathname: string): boolean {
 }
 
 export function isCanonicalOriginPath(pathname: string): boolean {
-  return CANONICAL_ORIGIN_PREFIXES.some(
-    (p) => pathname === p || pathname.startsWith(p.endsWith("/") ? p : p + "/"),
-  );
+  return matchesExactOrSegmentPrefix(pathname, CANONICAL_ORIGIN_PREFIXES);
 }
