@@ -118,3 +118,41 @@ export function brainDumpItemToTaskData(
     scheduleHours: inVocabulary(item.scheduleHours, HOURS),
   };
 }
+
+/** The two note columns a row can have, and which grain it is in. */
+export type NoteGrain = {
+  /** The `Task` behind this item, or null when it has never been triaged. */
+  taskId: string | null;
+  /** `BrainDumpItem.notes`. */
+  itemNotes: string | null;
+  /** `Task.notes`, or null when there is no task. */
+  taskNotes: string | null;
+};
+
+/**
+ * The note a row actually shows and writes (#179).
+ *
+ * There are two columns and only one of them is live, because the conversion
+ * above **copies** the item's note into `Task.notes` rather than moving it. From
+ * triage onwards every note surface — `NoteField`, the ICS description, the
+ * Google Task body — reads the task column, and the item's copy is a historical
+ * leftover.
+ *
+ * Three places need that answer and must not drift: the row's note disclosure,
+ * the ✎ title editor's pre-fill (which reconstructs `text {note}`), and
+ * `renameItem`, which writes whichever grain it read. If the editor pre-filled
+ * from one column and the save wrote the other, a note edited through
+ * `NoteField` would be silently reverted by a rename that never mentioned it.
+ *
+ * `taskId` decides, **not** a fallback chain — and the difference is a real case
+ * rather than a stylistic one. A note deleted through `NoteField` leaves
+ * `Task.notes` NULL while the item's copy still holds whatever triage wrote, so
+ * `taskNotes ?? itemNotes` would resurrect it and the deletion would not stick.
+ */
+export function liveNote({
+  taskId,
+  itemNotes,
+  taskNotes,
+}: NoteGrain): string | null {
+  return taskId ? taskNotes : itemNotes;
+}

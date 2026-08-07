@@ -65,6 +65,8 @@ import type { GoogleConnStatus, ScheduleIntent } from "@/lib/scheduling/types";
 import { StatusPill } from "@/components/inbox/status-pill";
 import { TaskSteps } from "@/components/breakdown/task-steps";
 import { TaskNoteRow } from "@/components/breakdown/task-note";
+import { inlineNoteSource } from "@/lib/braindump-note-syntax";
+import { liveNote } from "@/lib/braindump-to-task";
 import {
   bucketItems,
   bucketOfItem,
@@ -614,22 +616,46 @@ export function InboxView({
       {t("action.editTitle", voice)}
     </button>
   );
-  const titleEditor = (item: Item) => (
-    <EditTitleInput
-      initial={item.text}
-      // #186 — the row's own title, so the inline-note button beside this field
-      // is not a second control called "Add note". The capture bar's is mounted
-      // at the same time.
-      subject={item.text}
-      noteHintId={noteHintId}
-      voice={voice}
-      onSave={(value) => {
-        setEditingId(null);
-        if (value && value !== item.text) run(() => renameItem(item.id, value));
-      }}
-      onCancel={() => setEditingId(null)}
-    />
-  );
+  const titleEditor = (item: Item) => {
+    // #179 — the field holds the RECONSTRUCTION (`text {note}`), not the bare
+    // stored text. That is what makes the round trip an identity by construction:
+    // re-parsing it yields exactly what was stored, so a save that changed
+    // nothing writes back what was already there. Pre-filled with the bare text,
+    // an unchanged save re-split it — eroding the text one brace group per save
+    // and overwriting the note. `inlineNoteSource` also refuses to compose a note
+    // whose braces could not survive the round trip, falling back to the text
+    // alone; `renameItem` keeps such a note rather than losing it.
+    //
+    // `liveNote` picks the column, the same rule `TaskNoteRow` and `renameItem`
+    // use. Pre-filling from the other grain would show a note the row does not
+    // display and let a save revert one edited through `NoteField`.
+    const source = inlineNoteSource({
+      text: item.text,
+      note: liveNote({
+        taskId: item.taskId,
+        itemNotes: item.itemNotes ?? null,
+        taskNotes: item.notes ?? null,
+      }),
+    });
+    return (
+      <EditTitleInput
+        initial={source}
+        // #186 — the row's own title, so the inline-note button beside this field
+        // is not a second control called "Add note". The capture bar's is mounted
+        // at the same time.
+        subject={item.text}
+        noteHintId={noteHintId}
+        voice={voice}
+        onSave={(value) => {
+          setEditingId(null);
+          // Compared against what the field was GIVEN, not against `item.text` —
+          // otherwise every row carrying a note posts a rename on open-and-close.
+          if (value && value !== source) run(() => renameItem(item.id, value));
+        }}
+        onCancel={() => setEditingId(null)}
+      />
+    );
+  };
 
   const itemsById = new Map(initialItems.map((i) => [i.id, i]));
 
@@ -997,66 +1023,90 @@ export function InboxView({
                       }
                     : icsProps(item);
                   return (
-                    <ItemRow
-                      isDragging={activeDragId === item.id}
+                    // #186 — the wrapper picks the note grain and hands back the
+                    // two halves; the row places them. Untriaged rows are the
+                    // item grain, which is where #179's captured note lives.
+                    <TaskNoteRow
                       key={item.id}
-                      item={item}
-                      settings={settings}
+                      taskId={item.taskId}
+                      itemId={item.id}
+                      taskTitle={item.text}
+                      notes={item.notes}
+                      itemNotes={item.itemNotes}
                       voice={voice}
-                      now={now}
-                      onBreakdown={() => breakdown(item.id)}
-                      onKeep={() => run(() => keepAsTask(item.id))}
-                      onSaveForLater={() =>
-                        moveItemToBucket(item.id, "savedLater")
-                      }
-                      onSnooze={() =>
-                        run(() => snoozeBrainDumpItem(item.id, 60))
-                      }
-                      onComplete={() => run(() => completeItem(item.id))}
-                      confirmingDelete={confirmDeleteId === item.id}
-                      onRequestDelete={() => requestDelete(item.id)}
-                      onConfirmDelete={() => confirmDelete(item.id)}
-                      onCancelDelete={cancelDelete}
-                      onFreshen={() => run(() => freshenItem(item.id))}
-                      onDismissPrompt={() => run(() => dismissPrompt(item.id))}
-                      schedule={schedule}
-                      scheduled={item.scheduledAt != null}
-                      icsMenu={
-                        effectiveGoogle ? (
-                          <ScheduleControl
-                            key="ics-m"
-                            variant="menu"
-                            {...icsProps(item)}
-                            label={t("action.addToCalendar", voice)}
-                          />
-                        ) : null
-                      }
-                      scheduleError={scheduleErrors[item.id]}
-                      moveMenu={
-                        <MoveToMenu
-                          key="move"
-                          currentBucket={bucketOfItem(item, now)}
+                    >
+                      {({ trigger, body }) => (
+                        <ItemRow
+                          isDragging={activeDragId === item.id}
+                          item={item}
+                          noteTrigger={trigger}
+                          noteBody={body}
+                          settings={settings}
                           voice={voice}
-                          onMove={(target) => moveItemToBucket(item.id, target)}
+                          now={now}
+                          onBreakdown={() => breakdown(item.id)}
+                          onKeep={() => run(() => keepAsTask(item.id))}
+                          onSaveForLater={() =>
+                            moveItemToBucket(item.id, "savedLater")
+                          }
+                          onSnooze={() =>
+                            run(() => snoozeBrainDumpItem(item.id, 60))
+                          }
+                          onComplete={() => run(() => completeItem(item.id))}
+                          confirmingDelete={confirmDeleteId === item.id}
+                          onRequestDelete={() => requestDelete(item.id)}
+                          onConfirmDelete={() => confirmDelete(item.id)}
+                          onCancelDelete={cancelDelete}
+                          onFreshen={() => run(() => freshenItem(item.id))}
+                          onDismissPrompt={() =>
+                            run(() => dismissPrompt(item.id))
+                          }
+                          schedule={schedule}
+                          scheduled={item.scheduledAt != null}
+                          icsMenu={
+                            effectiveGoogle ? (
+                              <ScheduleControl
+                                key="ics-m"
+                                variant="menu"
+                                {...icsProps(item)}
+                                label={t("action.addToCalendar", voice)}
+                              />
+                            ) : null
+                          }
+                          scheduleError={scheduleErrors[item.id]}
+                          moveMenu={
+                            <MoveToMenu
+                              key="move"
+                              currentBucket={bucketOfItem(item, now)}
+                              voice={voice}
+                              onMove={(target) =>
+                                moveItemToBucket(item.id, target)
+                              }
+                            />
+                          }
+                          moveIcon={
+                            <MoveToMenu
+                              key="move-icon"
+                              compact
+                              describedById={moveInstructionsId}
+                              currentBucket={bucketOfItem(item, now)}
+                              voice={voice}
+                              onMove={(target) =>
+                                moveItemToBucket(item.id, target)
+                              }
+                            />
+                          }
+                          dragGrip={<DragGrip id={item.id} text={item.text} />}
+                          editButton={pencil(item)}
+                          editMenuItem={editMenuItem(item)}
+                          titleEditor={
+                            editingId === item.id
+                              ? titleEditor(item)
+                              : undefined
+                          }
                         />
-                      }
-                      moveIcon={
-                        <MoveToMenu
-                          key="move-icon"
-                          compact
-                          describedById={moveInstructionsId}
-                          currentBucket={bucketOfItem(item, now)}
-                          voice={voice}
-                          onMove={(target) => moveItemToBucket(item.id, target)}
-                        />
-                      }
-                      dragGrip={<DragGrip id={item.id} text={item.text} />}
-                      editButton={pencil(item)}
-                      editMenuItem={editMenuItem(item)}
-                      titleEditor={
-                        editingId === item.id ? titleEditor(item) : undefined
-                      }
-                    />
+                      )}
+                    </TaskNoteRow>
                   );
                 })}
               </ul>
@@ -1216,8 +1266,13 @@ export function InboxView({
                             rendered from inside `TaskNoteRow`. */}
                         <TaskNoteRow
                           taskId={item.taskId}
+                          // #186 — the item grain, for a row that is triaged but
+                          // has no `Task` yet (`triageBrainDumpItem` does not
+                          // create one). `TaskNoteRow` picks between the two.
+                          itemId={item.id}
                           taskTitle={item.text}
                           notes={item.notes}
+                          itemNotes={item.itemNotes}
                           voice={voice}
                         >
                           {({ trigger, body }) => (
@@ -1469,8 +1524,13 @@ export function InboxView({
                             no task. */}
                         <TaskNoteRow
                           taskId={item.taskId}
+                          // #186 — the item grain, for a row that is triaged but
+                          // has no `Task` yet (`triageBrainDumpItem` does not
+                          // create one). `TaskNoteRow` picks between the two.
+                          itemId={item.id}
                           taskTitle={item.text}
                           notes={item.notes}
+                          itemNotes={item.itemNotes}
                           voice={voice}
                         >
                           {({ trigger, body }) => (
@@ -1603,14 +1663,27 @@ export function InboxView({
                        Idle rows are dimmed; a row under review looks active. */
                     const optionsOpen = savedOptionsId === item.id;
                     return (
-                      <li
+                      // #186 — a parked row is untriaged too, so its note lives on
+                      // the item. A note that vanished because somebody moved a
+                      // row to the pantry would be the same defect in a quieter
+                      // place, which is exactly how the Library gap shipped.
+                      <TaskNoteRow
                         key={item.id}
-                        className={cn(
-                          "rounded-lg border px-4 py-3 text-sm",
-                          item.id === activeDragId && "opacity-40",
-                        )}
+                        taskId={item.taskId}
+                        itemId={item.id}
+                        taskTitle={item.text}
+                        notes={item.notes}
+                        itemNotes={item.itemNotes}
+                        voice={voice}
                       >
-                        {/* Title line + action row below — mirrors the Needs-review row layout.
+                        {({ trigger, body }) => (
+                          <li
+                            className={cn(
+                              "rounded-lg border px-4 py-3 text-sm",
+                              item.id === activeDragId && "opacity-40",
+                            )}
+                          >
+                            {/* Title line + action row below — mirrors the Needs-review row layout.
                             An idle row reads as "asleep" by dimming ONLY this title/metadata
                             line — NOT the whole row (#56). Layering opacity-70 over the <li>
                             also composited the bg-primary "Review now" CTA below WCAG-AA
@@ -1618,171 +1691,191 @@ export function InboxView({
                             Keeping the dim off the CTA lets it stay at its full 5.41:1 (light)
                             / 6.32:1 (dark). The dim lifts once the row is under review
                             (optionsOpen) or being dragged (the <li>'s opacity-40 covers it). */}
-                        <div
-                          className={cn(
-                            "flex items-start gap-2",
-                            !optionsOpen &&
-                              item.id !== activeDragId &&
-                              "opacity-70",
-                          )}
-                        >
-                          <DragGrip id={item.id} text={item.text} />
-                          {editingId === item.id ? (
-                            titleEditor(item)
-                          ) : (
-                            <span className="min-w-0 flex-1 break-words">
-                              <button
-                                type="button"
-                                aria-expanded={optionsOpen}
-                                onClick={() =>
-                                  setSavedOptionsId(
-                                    optionsOpen ? null : item.id,
-                                  )
-                                }
-                                className="text-lg font-semibold break-words text-left hover:underline"
-                              >
-                                {item.text}
-                              </button>{" "}
-                              {pencil(item)}
-                            </span>
-                          )}
-                        </div>
-                        {/* Idle: Review now + 📥 Move. Reviewing: the full v6
+                            <div
+                              className={cn(
+                                "flex items-start gap-2",
+                                !optionsOpen &&
+                                  item.id !== activeDragId &&
+                                  "opacity-70",
+                              )}
+                            >
+                              <DragGrip id={item.id} text={item.text} />
+                              {editingId === item.id ? (
+                                titleEditor(item)
+                              ) : (
+                                <span className="min-w-0 flex-1 break-words">
+                                  <button
+                                    type="button"
+                                    aria-expanded={optionsOpen}
+                                    onClick={() =>
+                                      setSavedOptionsId(
+                                        optionsOpen ? null : item.id,
+                                      )
+                                    }
+                                    className="text-lg font-semibold break-words text-left hover:underline"
+                                  >
+                                    {item.text}
+                                  </button>{" "}
+                                  {pencil(item)}
+                                </span>
+                              )}
+                            </div>
+                            {/* Idle: Review now + 📥 Move. Reviewing: the full v6
                             review-row frame (short buttons + ▾ full mirror);
                             the short "Save" re-snoozes and puts the row back
                             to sleep. */}
-                        {optionsOpen ? (
-                          <RowActions
-                            className="pl-9"
-                            inline={[
-                              <button
-                                key="breakdown"
-                                onClick={() => breakdown(item.id)}
-                                className={cn(
-                                  touchTarget,
-                                  "bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
-                                )}
-                              >
-                                {t("action.breakdown", voice)} →
-                              </button>,
-                              <button
-                                key="keep"
-                                className={cn(
-                                  touchTarget,
-                                  "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
-                                )}
-                                onClick={() => run(() => keepAsTask(item.id))}
-                              >
-                                {t("action.addTodo", voice)}
-                              </button>,
-                              <button
-                                key="save"
-                                className={cn(
-                                  touchTarget,
-                                  "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
-                                )}
-                                onClick={() => {
-                                  setSavedOptionsId(null);
-                                  run(() => snoozeBrainDumpItem(item.id, 60));
-                                }}
-                              >
-                                {t("action.saveShort", voice)}
-                              </button>,
-                              <CompleteButton
-                                key="complete"
-                                voice={voice}
-                                onClick={() => run(() => completeItem(item.id))}
-                              />,
-                            ]}
-                            move={
-                              <MoveToMenu
-                                key="move-icon"
-                                compact
-                                describedById={moveInstructionsId}
-                                currentBucket={bucketOfItem(item, now)}
-                                voice={voice}
-                                onMove={(target) =>
-                                  moveItemToBucket(item.id, target)
+                            {optionsOpen ? (
+                              <RowActions
+                                className="pl-9"
+                                inline={[
+                                  <button
+                                    key="breakdown"
+                                    onClick={() => breakdown(item.id)}
+                                    className={cn(
+                                      touchTarget,
+                                      "bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
+                                    )}
+                                  >
+                                    {t("action.breakdown", voice)} →
+                                  </button>,
+                                  <button
+                                    key="keep"
+                                    className={cn(
+                                      touchTarget,
+                                      "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
+                                    )}
+                                    onClick={() =>
+                                      run(() => keepAsTask(item.id))
+                                    }
+                                  >
+                                    {t("action.addTodo", voice)}
+                                  </button>,
+                                  <button
+                                    key="save"
+                                    className={cn(
+                                      touchTarget,
+                                      "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
+                                    )}
+                                    onClick={() => {
+                                      setSavedOptionsId(null);
+                                      run(() =>
+                                        snoozeBrainDumpItem(item.id, 60),
+                                      );
+                                    }}
+                                  >
+                                    {t("action.saveShort", voice)}
+                                  </button>,
+                                  <CompleteButton
+                                    key="complete"
+                                    voice={voice}
+                                    onClick={() =>
+                                      run(() => completeItem(item.id))
+                                    }
+                                  />,
+                                  // #186 — beside Complete, the placement !270
+                                  // settled for every list row.
+                                  trigger,
+                                ]}
+                                move={
+                                  <MoveToMenu
+                                    key="move-icon"
+                                    compact
+                                    describedById={moveInstructionsId}
+                                    currentBucket={bucketOfItem(item, now)}
+                                    voice={voice}
+                                    onMove={(target) =>
+                                      moveItemToBucket(item.id, target)
+                                    }
+                                  />
                                 }
+                                del={deleteControl(item.id, "delete-saved", {
+                                  icon: true,
+                                })}
+                                menu={[
+                                  <MoveToMenu
+                                    key="move"
+                                    currentBucket={bucketOfItem(item, now)}
+                                    voice={voice}
+                                    onMove={(target) =>
+                                      moveItemToBucket(item.id, target)
+                                    }
+                                  />,
+                                  <button
+                                    key="breakdown-m"
+                                    onClick={() => breakdown(item.id)}
+                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                  >
+                                    {t("action.breakdownFull", voice)}
+                                  </button>,
+                                  <button
+                                    key="keep-m"
+                                    onClick={() =>
+                                      run(() => keepAsTask(item.id))
+                                    }
+                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                  >
+                                    {t("action.addTodoFull", voice)}
+                                  </button>,
+                                  <button
+                                    key="save-m"
+                                    onClick={() => {
+                                      setSavedOptionsId(null);
+                                      run(() =>
+                                        snoozeBrainDumpItem(item.id, 60),
+                                      );
+                                    }}
+                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                  >
+                                    {t("action.saveForLater", voice)}
+                                  </button>,
+                                  <button
+                                    key="complete-m"
+                                    onClick={() =>
+                                      run(() => completeItem(item.id))
+                                    }
+                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                  >
+                                    {t("action.completeFull", voice)}
+                                  </button>,
+                                  editMenuItem(item),
+                                  deleteControl(item.id, "delete-saved-m", {
+                                    fullWidth: true,
+                                  }),
+                                ]}
                               />
-                            }
-                            del={deleteControl(item.id, "delete-saved", {
-                              icon: true,
-                            })}
-                            menu={[
-                              <MoveToMenu
-                                key="move"
-                                currentBucket={bucketOfItem(item, now)}
-                                voice={voice}
-                                onMove={(target) =>
-                                  moveItemToBucket(item.id, target)
-                                }
-                              />,
-                              <button
-                                key="breakdown-m"
-                                onClick={() => breakdown(item.id)}
-                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                              >
-                                {t("action.breakdownFull", voice)}
-                              </button>,
-                              <button
-                                key="keep-m"
-                                onClick={() => run(() => keepAsTask(item.id))}
-                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                              >
-                                {t("action.addTodoFull", voice)}
-                              </button>,
-                              <button
-                                key="save-m"
-                                onClick={() => {
-                                  setSavedOptionsId(null);
-                                  run(() => snoozeBrainDumpItem(item.id, 60));
-                                }}
-                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                              >
-                                {t("action.saveForLater", voice)}
-                              </button>,
-                              <button
-                                key="complete-m"
-                                onClick={() => run(() => completeItem(item.id))}
-                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                              >
-                                {t("action.completeFull", voice)}
-                              </button>,
-                              editMenuItem(item),
-                              deleteControl(item.id, "delete-saved-m", {
-                                fullWidth: true,
-                              }),
-                            ]}
-                          />
-                        ) : (
-                          <div className="mt-2 flex flex-wrap items-center gap-2 pl-9 text-xs">
-                            {/* Wakes the item for review IN the bucket — same
+                            ) : (
+                              <div className="mt-2 flex flex-wrap items-center gap-2 pl-9 text-xs">
+                                {/* Wakes the item for review IN the bucket — same
                                 toggle as pressing the row title. */}
-                            <button
-                              type="button"
-                              aria-expanded={optionsOpen}
-                              onClick={() => setSavedOptionsId(item.id)}
-                              className={cn(
-                                touchTarget,
-                                "bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
-                              )}
-                            >
-                              {t("action.reviewNow", voice)}
-                            </button>
-                            <span className="flex-1" />
-                            <MoveToMenu
-                              compact
-                              describedById={moveInstructionsId}
-                              currentBucket={bucketOfItem(item, now)}
-                              voice={voice}
-                              onMove={(target) =>
-                                moveItemToBucket(item.id, target)
-                              }
-                            />
-                          </div>
+                                <button
+                                  type="button"
+                                  aria-expanded={optionsOpen}
+                                  onClick={() => setSavedOptionsId(item.id)}
+                                  className={cn(
+                                    touchTarget,
+                                    "bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
+                                  )}
+                                >
+                                  {t("action.reviewNow", voice)}
+                                </button>
+                                <span className="flex-1" />
+                                <MoveToMenu
+                                  compact
+                                  describedById={moveInstructionsId}
+                                  currentBucket={bucketOfItem(item, now)}
+                                  voice={voice}
+                                  onMove={(target) =>
+                                    moveItemToBucket(item.id, target)
+                                  }
+                                />
+                              </div>
+                            )}
+                            {/* #186 — below the action line, inside this row's <li>,
+                            and where the saved note is READ while collapsed. */}
+                            {body}
+                          </li>
                         )}
-                      </li>
+                      </TaskNoteRow>
                     );
                   })}
                 </ul>
@@ -2246,11 +2339,18 @@ function EmptyBucket({ voice }: { voice: Voice }) {
 /**
  * A Needs-review row: an untriaged brain-dump item.
  *
- * #44 — NO note affordance here, deliberately. An item in this bucket has not
- * been triaged, which is precisely the state in which it has no `Task` row —
- * and therefore no `notes` column to write to. The affordance would render as
- * nothing on every row this bucket can hold. The moment triage creates a task,
- * the row moves to To-do or Multi-step, both of which offer it.
+ * #186 — this row DOES offer a note now, and the comment that used to say
+ * otherwise was right when it was written. #44's reasoning was that an untriaged
+ * item has no `Task` row and therefore no `notes` column, so the affordance could
+ * only render as nothing. #186 gave `BrainDumpItem` its own `notes` column and
+ * #179 began writing it at CAPTURE — which means a row in this bucket is now the
+ * most likely place in the app for a note to exist, and the one place it had
+ * nowhere to be read.
+ *
+ * The two halves arrive as props rather than being built here: the caller wraps
+ * this row in `TaskNoteRow`, which is what picks the grain, so the trigger can go
+ * inside `RowActions` beside Complete (owner request, settled on !270) with the
+ * body below the action line and still inside this row's `<li>`.
  */
 function ItemRow({
   item,
@@ -2279,6 +2379,8 @@ function ItemRow({
   editButton,
   editMenuItem,
   titleEditor,
+  noteTrigger,
+  noteBody,
 }: {
   item: Item;
   settings: AgingSettings;
@@ -2315,6 +2417,10 @@ function ItemRow({
   /** v6: "Edit task title" text entry for the ▾ dropdown (title line keeps editButton). */
   editMenuItem?: React.ReactNode;
   titleEditor?: React.ReactNode;
+  /** #186 — the note disclosure's two halves, from the `TaskNoteRow` this row is
+   *  wrapped in. The trigger joins the action group; the body opens below it. */
+  noteTrigger?: React.ReactNode;
+  noteBody?: React.ReactNode;
 }) {
   // #105 — every age question this row asks is answered by the ONE clock it was
   // handed. Each of these three used to default to a fresh `Date.now()`, and all
@@ -2486,6 +2592,10 @@ function ItemRow({
                 voice={voice}
                 onClick={onComplete}
               />,
+              // #186 — beside Complete, the placement !270 settled for every
+              // list row. Null on a row whose caller has not been given the
+              // item's id, which `RowActions` renders as nothing.
+              noteTrigger,
             ]}
             move={moveIcon}
             schedule={schedule}
@@ -2548,6 +2658,11 @@ function ItemRow({
           {scheduleError && (
             <p className="text-destructive mt-1 text-xs">{scheduleError}</p>
           )}
+          {/* #186 — below the action line, still inside this row's <li>, so the
+              note reads as belonging to this row. Also where the SAVED note is
+              rendered while collapsed: #179 splits notes off at capture, so this
+              is the bucket where one most often already exists. */}
+          {noteBody}
         </div>
       </div>
     </li>

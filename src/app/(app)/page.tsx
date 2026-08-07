@@ -96,6 +96,16 @@ export default async function InboxPage({
     // #44 — the task's own note, for the row-level disclosure. `task` is the
     // workspace-scoped relation already loaded here, so this costs no query.
     notes: task?.notes ?? null,
+    // #186 — the ITEM's own note, which is a different column and live at a
+    // different time: it is what an untriaged row carries (written at capture by
+    // #179's inline syntax) until triage copies it onto the task.
+    //
+    // Named apart from `notes` rather than merged, and the spread above is
+    // exactly why: `...item` already brings `BrainDumpItem.notes` in under the
+    // name `notes`, which the line above then OVERWRITES with the task's. One
+    // name for two columns meant the item's was silently unreachable here.
+    // `liveNote` is what decides between them at the point of use.
+    itemNotes: item.notes,
     completedAt: item.completedAt,
     scheduledAt: task?.scheduledAt ?? null,
     estMinutes: item.estMinutes,

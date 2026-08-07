@@ -2,6 +2,7 @@
 
 import { updateTaskNotes } from "@/app/actions/task-notes";
 import { updateStepNotes } from "@/app/actions/step-notes";
+import { updateItemNotes } from "@/app/actions/item-notes";
 import { NoteField } from "@/components/breakdown/note-field";
 import type { ReactNode } from "react";
 import type { Voice } from "@/lib/strings";
@@ -55,16 +56,78 @@ export function TaskNote({
 }
 
 /**
+ * The same disclosure bound to an UNTRIAGED brain-dump item (#186).
+ *
+ * A third grain rather than a fork: `NoteField` imports no server action, which
+ * is exactly what lets one component serve all three. This is the `TaskNote`
+ * wrapper with `updateItemNotes` in place of `updateTaskNotes` — nothing about
+ * the disclosure, the naming discipline or the autosave differs, because nothing
+ * about them should.
+ *
+ * It exists now and did not before because the COLUMN did not exist before.
+ * `!270` left the Needs-review row with no note affordance and said why: an
+ * untriaged item has no `Task` row, so the control could only ever fail. #186
+ * added `BrainDumpItem.notes`, and #179 then began WRITING it at capture — a note
+ * split off inline needs somewhere to be read, or an inline capture looks like
+ * text that went missing.
+ */
+export function ItemNote({
+  itemId,
+  itemTitle,
+  notes,
+  voice,
+  autoSaveDelayMs,
+  children,
+}: {
+  itemId: string;
+  /** Goes into the control's accessible name, same as `taskTitle` above. */
+  itemTitle: string;
+  notes: string | null;
+  voice: Voice;
+  autoSaveDelayMs?: number;
+  children?: (parts: { trigger: ReactNode; body: ReactNode }) => ReactNode;
+}) {
+  return (
+    <NoteField
+      subject={itemTitle}
+      initialNote={notes}
+      voice={voice}
+      autoSaveDelayMs={autoSaveDelayMs}
+      onSave={(next) => updateItemNotes(itemId, next)}
+    >
+      {children}
+    </NoteField>
+  );
+}
+
+/**
  * The task note as a LIST ROW mounts it (#44).
  *
  * One wrapper for the Inbox and both Library components, rather than the same
  * three-line conditional written out three times — the gap this exists to close
  * was exactly a surface where somebody wrote it twice and missed the third.
  *
- * `taskId` is nullable across every one of those surfaces, and the null is not
- * an edge case: a brain-dump item that has never been triaged has NO `Task`
- * row, so there is no `notes` column to write to. Rendering nothing is correct
- * — the alternative is an affordance whose save can only fail.
+ * `taskId` is nullable across every one of those surfaces, and the null is not an
+ * edge case: a brain-dump item that has never been triaged has no `Task` row.
+ *
+ * ## It picks the GRAIN, and that is the load-bearing part (#186)
+ *
+ * There are two note columns and only one of them is live. Before triage the note
+ * is on the item; `brainDumpItemToTaskData` then COPIES it onto the `Task`, and
+ * from that point every note surface reads `Task.notes` while the item's copy is a
+ * historical leftover. So `taskId` selects the column, exactly as `liveNote`
+ * (src/lib/braindump-to-task.ts) does for the ✎ title editor and for `renameItem`
+ * — three readers, one rule, because a reader that picked the other column would
+ * write an edit nothing displays.
+ *
+ * Until #186 the untriaged branch rendered NOTHING, and the reason was good: there
+ * was no `notes` column on `BrainDumpItem` at all, so the affordance's save could
+ * only fail. #186 added the column and #179 began writing it at CAPTURE, which is
+ * what changed the answer — a note split off inline has to be readable, or an
+ * inline capture looks like text that went missing.
+ *
+ * Both ids null is still "render nothing": a surface that has not been given the
+ * item's id has no row to write to either.
  *
  * ## Where the note is offered, and where it deliberately is not (#44)
  *
@@ -86,8 +149,10 @@ export function TaskNote({
  * | `/` Inbox — To-do rows | task | editable | in the action group | |
  * | `/` Inbox — Multi-step rows | task | editable | in the action group | |
  * | `/` Inbox — expanded step rows | step | editable | in the action group | `TaskSteps` |
- * | `/` Inbox — Needs review rows | item | none | — | untriaged ⇒ no `Task` row, so no `notes` column |
+ * | `/` Inbox — Needs review rows | item | editable | in the action group | #186 gave `BrainDumpItem` its own `notes`; #179 writes it at capture |
+ * | `/` Inbox — Saved-for-later rows | item | editable | in the action group | untriaged too, and a note must not vanish because a row was parked |
  * | `/library` Single-task + Saved-for-later | task | editable | in the action group | |
+ * | `/library` rows with no task | item | **none, for now** | — | #186 wired the item grain on the Inbox only; `library/page.tsx` does not select `BrainDumpItem.notes`, so `itemId` is not passed and the null branch still applies. Stated because a deliberate gap and a forgotten one look identical in a diff — which is how the #44 Library gap shipped |
  * | `/library` Multi-step row | task | editable | **stacked** | this row has no `RowActions` at all — it is a disclosure title that expands into the step list |
  * | `/library` Multi-step expanded steps | step | editable | in the action group | `TaskSteps` |
  * | `/library` Done | task | read-only | — | closure view with no other controls; same call as a done step row |
@@ -95,19 +160,35 @@ export function TaskNote({
  * | `/focus` launcher lanes | task + step | none | — | a navigation list; every entry links INTO the session, which shows the note |
  * | `/tasks/[id]?edit=1` breakdown chat | task + proposed steps | none | — | the steps are an unsaved model proposal with no ids, so a step note has nowhere to live |
  * | Dashboard | none | none | — | aggregates and badges, no task or step rows |
- * | Any row with `taskId === null` | — | none | — | no `Task` row exists, so there is no column to write |
+ * | Any row with BOTH ids null | — | none | — | no row of either grain to write to |
  */
 export function TaskNoteRow({
   taskId,
+  itemId = null,
   taskTitle,
   notes,
+  itemNotes,
   voice,
   autoSaveDelayMs,
   children,
 }: {
   taskId: string | null;
+  /**
+   * The `BrainDumpItem` behind this row, for the untriaged grain (#186).
+   *
+   * OPTIONAL and defaulting to null, so a surface that has not been taught about
+   * the second grain keeps exactly its old behaviour instead of silently
+   * mounting a control against `undefined`. The Library rows are that case
+   * today; their `page.tsx` does not select the column yet.
+   */
+  itemId?: string | null;
+  /** The row's title, whichever grain it is in. Goes into both controls'
+   *  accessible names. */
   taskTitle: string;
+  /** `Task.notes` — live once the row is task-backed. */
   notes?: string | null;
+  /** `BrainDumpItem.notes` — live until then (#186). */
+  itemNotes?: string | null;
   voice: Voice;
   autoSaveDelayMs?: number;
   /**
@@ -123,7 +204,22 @@ export function TaskNoteRow({
    */
   children?: (parts: { trigger: ReactNode; body: ReactNode }) => ReactNode;
 }) {
-  if (!taskId) return <>{children?.({ trigger: null, body: null })}</>;
+  if (!taskId) {
+    // #186 — the item grain. Nothing at all only when there is no row of EITHER
+    // kind to write to.
+    if (!itemId) return <>{children?.({ trigger: null, body: null })}</>;
+    return (
+      <ItemNote
+        itemId={itemId}
+        itemTitle={taskTitle}
+        notes={itemNotes ?? null}
+        voice={voice}
+        autoSaveDelayMs={autoSaveDelayMs}
+      >
+        {children}
+      </ItemNote>
+    );
+  }
   return (
     <TaskNote
       taskId={taskId}

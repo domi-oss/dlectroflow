@@ -81,7 +81,11 @@ vi.mock("@/components/inbox/inbox-view", () => ({
     // rendering is inbox-view.test.tsx's job; what only the PAGE can get wrong
     // is dropping a column on the way into the DTO, and that is invisible to
     // every component test.
-    initialItems?: { id: string; notes?: string | null }[];
+    initialItems?: {
+      id: string;
+      notes?: string | null;
+      itemNotes?: string | null;
+    }[];
   }) => (
     <div
       data-testid="inbox-view"
@@ -90,6 +94,13 @@ vi.mock("@/components/inbox/inbox-view", () => ({
       }
       data-notes={JSON.stringify(
         (initialItems ?? []).map((i) => [i.id, i.notes ?? null]),
+      )}
+      // #186 — the ITEM's own note column, exposed SEPARATELY. Merging the two
+      // here would hide the exact bug this pins: `...item` brings
+      // `BrainDumpItem.notes` in as `notes`, which the task's note then
+      // overwrites, so one name for two columns made the item's unreachable.
+      data-item-notes={JSON.stringify(
+        (initialItems ?? []).map((i) => [i.id, i.itemNotes ?? null]),
       )}
     />
   ),
@@ -225,6 +236,83 @@ describe("Inbox page — the task note reaches the rows (#44)", () => {
     expect(
       JSON.parse(screen.getByTestId("inbox-view").dataset.notes as string),
     ).toEqual([["i1", "photo booth on the high street"]]);
+  });
+
+  it("carries BOTH note columns, under distinct names (#186)", async () => {
+    // The shadowing regression, pinned. `items` spreads `...item` and then sets
+    // `notes` from the task — so before #186 named the second one, an item that
+    // had its own note handed the row the TASK's value under that name and the
+    // item's was silently unreachable. Only the page can get this wrong, and no
+    // component test can see it.
+    db.brainDumpItem.findMany.mockResolvedValue([
+      {
+        id: "i3",
+        text: "water the plants",
+        createdAt: new Date(),
+        status: "triaged",
+        triagedAt: new Date(),
+        remindedAt: null,
+        snoozedUntil: null,
+        freshenedAt: null,
+        promptDismissedAt: null,
+        completedAt: null,
+        breakdownRequestedAt: null,
+        taskId: "t3",
+        workspaceId: "ws-test",
+        estMinutes: null,
+        notes: "stale item copy",
+        task: {
+          id: "t3",
+          status: "active",
+          scheduledAt: null,
+          scheduleDueAt: null,
+          schedulePriority: null,
+          scheduleHours: null,
+          notes: "live task note",
+          steps: [],
+        },
+      },
+    ]);
+    render(await renderInbox());
+    const view = screen.getByTestId("inbox-view");
+    expect(JSON.parse(view.dataset.notes as string)).toEqual([
+      ["i3", "live task note"],
+    ]);
+    expect(JSON.parse(view.dataset.itemNotes as string)).toEqual([
+      ["i3", "stale item copy"],
+    ]);
+  });
+
+  it("carries an untriaged row's own note, where no task note exists", async () => {
+    // The grain #179 actually writes at capture. `taskId` null means `liveNote`
+    // reads this column, so the page dropping it would make an inline capture
+    // look like text that went missing.
+    db.brainDumpItem.findMany.mockResolvedValue([
+      {
+        id: "i4",
+        text: "water the plants",
+        createdAt: new Date(),
+        status: "inbox",
+        triagedAt: null,
+        remindedAt: null,
+        snoozedUntil: null,
+        freshenedAt: null,
+        promptDismissedAt: null,
+        completedAt: null,
+        breakdownRequestedAt: null,
+        taskId: null,
+        workspaceId: "ws-test",
+        estMinutes: null,
+        notes: "can under sink",
+        task: null,
+      },
+    ]);
+    render(await renderInbox());
+    const view = screen.getByTestId("inbox-view");
+    expect(JSON.parse(view.dataset.itemNotes as string)).toEqual([
+      ["i4", "can under sink"],
+    ]);
+    expect(JSON.parse(view.dataset.notes as string)).toEqual([["i4", null]]);
   });
 
   it("carries null for a row whose task has no note", async () => {

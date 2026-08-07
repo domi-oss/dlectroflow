@@ -37,6 +37,22 @@ export type Item = {
    *  rows the owner manages from; the focus launcher builds the same `Item`
    *  shape to pick what to work on next and renders no note. */
   notes?: string | null;
+  /**
+   * #186 — the note on the `BrainDumpItem` ITSELF, which is a different column
+   * from `notes` above and live at a different time. `notes` is the note on the
+   * `Task` behind this row; this is the one an untriaged item carries, written at
+   * capture by #179's inline syntax and copied onto the task at triage.
+   *
+   * The name moves rather than `notes` because `Task.notes` (#44) got there
+   * first and is read by more surfaces. `liveNote` (src/lib/braindump-to-task.ts)
+   * is the single answer to which of the two a row actually shows — never read
+   * one of them directly to decide what to display or write.
+   *
+   * OPTIONAL for the same reason `notes` is: not every read site fetches it. The
+   * Inbox does, because its untriaged buckets are the only place this grain is
+   * live; the focus launcher builds the same `Item` shape and renders no note.
+   */
+  itemNotes?: string | null;
   steps: {
     id: string;
     order: number;

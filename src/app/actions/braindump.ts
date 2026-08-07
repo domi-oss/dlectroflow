@@ -12,20 +12,45 @@ import {
 } from "@/lib/rewards";
 import {
   BrainDumpStatus,
-  TaskSource,
   TaskStatus,
   RewardType,
   BadgeKey,
 } from "@/lib/constants";
 import { currentWorkspaceId } from "@/lib/workspace";
+import {
+  splitInlineNote,
+  resolveInlineNoteEdit,
+} from "@/lib/braindump-note-syntax";
+import { brainDumpItemToTaskData, liveNote } from "@/lib/braindump-to-task";
+import { normalizeTaskNote } from "@/lib/task-notes";
 
 const INBOX_PATH = "/";
+const LIBRARY_PATH = "/library";
 
+/**
+ * Capture a brain dump, splitting off an inline note if it carries one (#179).
+ *
+ * `water the plants {can under sink}` stores text and note separately, so
+ * context can be jotted at the speed of capture rather than after triage. The
+ * rule is end-anchored and deliberately strict — see
+ * `src/lib/braindump-note-syntax.ts` for why that is the whole design.
+ *
+ * The note goes through `normalizeTaskNote` rather than being left to
+ * `BrainDumpItem_notes_check`: the constraint is the backstop for a writer that
+ * forgot, and reaching it from the writer that did not would surface to the
+ * person as a capture that silently failed.
+ *
+ * The empty guard reads the PARSED text, not the raw string. `{just a note}` is
+ * refused by the parser and stored literally, so this cannot create a row whose
+ * only content is hidden behind a note.
+ */
 export async function createBrainDumpItem(text: string) {
   const workspaceId = await currentWorkspaceId();
-  const trimmed = text.trim();
-  if (!trimmed) return;
-  await prisma.brainDumpItem.create({ data: { text: trimmed, workspaceId } });
+  const { text: itemText, note } = splitInlineNote(text);
+  if (!itemText) return;
+  await prisma.brainDumpItem.create({
+    data: { text: itemText, notes: normalizeTaskNote(note), workspaceId },
+  });
   // A capture is a qualifying engagement (Decision 1) — advances the streak at
   // most once per working day.
   await touchStreakOnEngagement(workspaceId);
@@ -108,6 +133,29 @@ export async function snoozeBrainDumpItem(id: string, minutes: number) {
  * Rename an item from its row (✎). Keeps a linked task's title in sync so
  * the breakdown editor / focus timer never show a stale name (steps keep
  * their own texts). Empty input is a no-op.
+ *
+ * ## This is also the note edit path, and therefore the erosion path (#179)
+ *
+ * The ✎ field is pre-filled with `inlineNoteSource(stored)` — the item's text
+ * with its note put back between braces, which is the string a capture would
+ * have received. So the field holds ONE honest representation of the source and
+ * a rename re-parses it, which means the same string can arrive as "the user
+ * typed this fresh" or as "this is what we saved last time" with nothing in it
+ * to tell the two apart.
+ *
+ * `resolveInlineNoteEdit` is what makes that safe rather than lossy: an
+ * unchanged submission is not an edit, and the note is only ever written by note
+ * syntax. Without it, saving without typing re-split the pre-filled text —
+ * eroding it one brace group per save and overwriting the note it already had.
+ * Read that function's doc comment before changing anything here.
+ *
+ * ## Which of the two note columns is written
+ *
+ * `liveNote` decides, and it is `taskId` that decides for it. Before triage the
+ * note lives on the item; after triage `brainDumpItemToTaskData` has copied it
+ * onto the `Task`, and that is the column every note surface reads. Writing the
+ * item's copy for a task-backed row would store an edit nothing displays, and
+ * pre-filling from it would silently revert a note edited through `NoteField`.
  */
 export async function renameItem(id: string, text: string) {
   const workspaceId = await currentWorkspaceId();
@@ -115,17 +163,43 @@ export async function renameItem(id: string, text: string) {
   if (!trimmed) return;
   const existing = await prisma.brainDumpItem.findFirst({
     where: { id, workspaceId },
+    // The task's note comes through the SAME workspace-scoped read as the item,
+    // so the value a rename compares against cannot arrive un-authorised.
+    include: { task: { select: { notes: true } } },
   });
   if (!existing) return;
-  await prisma.brainDumpItem.update({ where: { id }, data: { text: trimmed } });
+
+  const next = resolveInlineNoteEdit(trimmed, {
+    text: existing.text,
+    note: liveNote({
+      taskId: existing.taskId,
+      itemNotes: existing.notes,
+      taskNotes: existing.task?.notes ?? null,
+    }),
+  });
+  const note = normalizeTaskNote(next.note);
+
+  await prisma.brainDumpItem.update({
+    where: { id },
+    data: {
+      text: next.text,
+      // Only the live grain. A task-backed row's item copy is a leftover from
+      // triage, and rewriting it here would put a second, divergent answer in
+      // the database for something with one visible value.
+      ...(existing.taskId ? {} : { notes: note }),
+    },
+  });
   if (existing.taskId) {
     await prisma.task.update({
       where: { id: existing.taskId },
-      data: { title: trimmed },
+      data: { title: next.text, notes: note },
     });
     revalidatePath(`/tasks/${existing.taskId}`);
   }
   revalidatePath(INBOX_PATH);
+  // A rename can now change a NOTE, and the Library renders one — the same set
+  // `updateTaskNotes` invalidates, for the same reason (#139's class of bug).
+  revalidatePath(LIBRARY_PATH);
 }
 
 /**
@@ -222,13 +296,12 @@ export async function keepAsTask(id: string) {
     where: { id, workspaceId },
   });
   if (!item) return;
+  // #179 — the ONE conversion, so the item's note and its three schedule-intent
+  // columns cross with it. Triage is a routine action and must not silently drop
+  // content somebody typed; `braindump-to-task-hygiene` fails the build if a
+  // writer stops going through here.
   const task = await prisma.task.create({
-    data: {
-      title: item.text,
-      source: TaskSource.BrainDump,
-      status: TaskStatus.Active,
-      workspaceId,
-    },
+    data: brainDumpItemToTaskData(item, workspaceId),
   });
   await prisma.brainDumpItem.update({
     where: { id },
@@ -263,13 +336,10 @@ export async function ensureFocusStep(id: string): Promise<string | null> {
   let steps = item.task?.steps ?? [];
 
   if (!taskId) {
+    // #179 — same conversion as `keepAsTask`. Pressing ▶ Focus is a triage in
+    // everything but name, so it has to carry the note across too.
     const task = await prisma.task.create({
-      data: {
-        title: item.text,
-        source: TaskSource.BrainDump,
-        status: TaskStatus.Active,
-        workspaceId,
-      },
+      data: brainDumpItemToTaskData(item, workspaceId),
     });
     taskId = task.id;
     await prisma.brainDumpItem.update({ where: { id }, data: { taskId } });

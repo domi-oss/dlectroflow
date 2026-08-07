@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { brainDumpItemToTaskData } from "@/lib/braindump-to-task";
+import { brainDumpItemToTaskData, liveNote } from "@/lib/braindump-to-task";
 import { TaskSource, TaskStatus } from "@/lib/constants";
 import { TASK_NOTE_MAX_LENGTH } from "@/lib/task-notes";
 import { SchedulePriority, ScheduleHours } from "@/lib/scheduling/types";
@@ -133,5 +133,48 @@ describe("brainDumpItemToTaskData (#179)", () => {
       "title",
       "workspaceId",
     ]);
+  });
+});
+
+/**
+ * #179 — which of the two note columns is live.
+ *
+ * `brainDumpItemToTaskData` above COPIES `BrainDumpItem.notes` into `Task.notes`
+ * at triage, which means for the rest of an item's life there are two columns
+ * holding a note and only one of them is the one every surface reads. Anything
+ * that shows or writes "the row's note" has to answer the same question, so it
+ * is answered once, here, next to the code that creates the second copy.
+ */
+describe("liveNote (#179)", () => {
+  it("reads the ITEM's column while the item has no task", () => {
+    expect(
+      liveNote({ taskId: null, itemNotes: "can under sink", taskNotes: null }),
+    ).toBe("can under sink");
+  });
+
+  it("reads the TASK's column once the item is task-backed", () => {
+    expect(
+      liveNote({ taskId: "t1", itemNotes: "stale copy", taskNotes: "live" }),
+    ).toBe("live");
+  });
+
+  it("prefers the task's column even when it is NULL", () => {
+    // The case that makes this a decision rather than a fallback chain. A note
+    // DELETED through `NoteField` leaves `Task.notes` null while the item's copy
+    // still holds what triage wrote; falling back would resurrect it, which is a
+    // deletion that did not stick.
+    expect(
+      liveNote({
+        taskId: "t1",
+        itemNotes: "deleted through NoteField",
+        taskNotes: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("is null when neither grain has one", () => {
+    expect(
+      liveNote({ taskId: null, itemNotes: null, taskNotes: null }),
+    ).toBeNull();
   });
 });

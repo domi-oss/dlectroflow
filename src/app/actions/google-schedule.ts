@@ -11,7 +11,6 @@ import {
   getGoogleStatus,
   disconnectGoogle,
 } from "@/lib/google";
-import { TaskSource, TaskStatus } from "@/lib/constants";
 import { currentWorkspaceId, currentUser } from "@/lib/workspace";
 import { awardFirstSchedule } from "@/lib/scheduling/award";
 import { SchedulingMethod } from "@/lib/scheduling/types";
@@ -21,6 +20,7 @@ import { deriveWindows } from "@/lib/scheduling/windows";
 import { pickEncoder } from "@/lib/scheduling/encoder";
 import { publicOrigin } from "@/lib/origin";
 import type { Voice } from "@/lib/strings";
+import { brainDumpItemToTaskData } from "@/lib/braindump-to-task";
 
 export type GoogleScheduleResult =
   | { ok: true; scheduled: number; listTitle: string }
@@ -281,13 +281,11 @@ export async function scheduleSingleTask(
     // commit together — otherwise a failed link orphans the Task row and a
     // retry creates a second one (the item's taskId stays null).
     taskId = await prisma.$transaction(async (tx) => {
+      // #179 — the ONE conversion. It returns data only, which is exactly why it
+      // can be used inside this transaction: the insert and the item link still
+      // commit together.
       const task = await tx.task.create({
-        data: {
-          title: item.text,
-          source: TaskSource.BrainDump,
-          status: TaskStatus.Active,
-          workspaceId,
-        },
+        data: brainDumpItemToTaskData(item, workspaceId),
       });
       await tx.brainDumpItem.update({
         where: { id: item.id },
