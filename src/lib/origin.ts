@@ -1,4 +1,18 @@
 import { isCanonicalOriginPath } from "./auth/gate";
+import { recordAuthFailure } from "./observability";
+
+/**
+ * Latch so a malformed PUBLIC_ORIGIN is reported ONCE per process rather than
+ * once per auth-flow request — `canonicalOriginRedirect` runs on every one of
+ * them, and a bad deploy value would otherwise bury the logs it is trying to
+ * reach.
+ */
+let warnedMalformedOrigin = false;
+
+/** @internal Test hook — resets the once-per-process latch above. */
+export function _resetOriginWarningForTest(): void {
+  warnedMalformedOrigin = false;
+}
 
 /**
  * The hostname the browser actually used, as best the pod can tell.
@@ -119,6 +133,25 @@ export function canonicalOriginRedirect({
   } catch {
     // A malformed PUBLIC_ORIGIN is a deploy bug, but taking every request down
     // over it would be worse than serving them off-canonical.
+    //
+    // It must not be SILENT, though. Returning null here disables the whole
+    // canonical-origin protection, which is #174's own failure mode moved up a
+    // level: the app says nothing and the only symptom is users looping at
+    // sign-in. Raised in review on !280.
+    //
+    // Once per process, not per request — this runs on every auth-flow request,
+    // and a bad deploy value would otherwise bury the logs it is trying to
+    // reach.
+    if (!warnedMalformedOrigin) {
+      warnedMalformedOrigin = true;
+      recordAuthFailure({
+        reason: "public_origin_unparseable",
+        // Deliberately not the request's host: the fault is the configured
+        // value, and naming the visitor's hostname would point at the wrong
+        // thing. The bad value itself is a deploy config string, not a secret.
+        host: null,
+      });
+    }
     return null;
   }
 

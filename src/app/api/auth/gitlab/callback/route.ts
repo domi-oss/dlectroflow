@@ -40,6 +40,11 @@ export async function GET(req: Request): Promise<Response> {
       host: inboundHost(req.headers),
       hadState: Boolean(expectedState),
       hadVerifier: Boolean(verifier),
+      // RFC 6749 §4.1.2.1 — `access_denied` is the user pressing Cancel on the
+      // consent screen, not a fault. Logged, but as `auth_declined` at info,
+      // so a grep for `auth_failure` keeps meaning "something broke". Raised in
+      // review on !280.
+      declined: reason === "access_denied",
     });
     const res = NextResponse.redirect(
       `${origin}/login?error=${encodeURIComponent(reason)}`,

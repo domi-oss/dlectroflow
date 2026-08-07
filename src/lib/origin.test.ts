@@ -1,5 +1,10 @@
-import { describe, it, expect, afterEach } from "vitest";
-import { publicOrigin, canonicalOriginRedirect, inboundHost } from "./origin";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
+import {
+  publicOrigin,
+  canonicalOriginRedirect,
+  inboundHost,
+  _resetOriginWarningForTest,
+} from "./origin";
 
 describe("publicOrigin", () => {
   const savedOrigin = process.env.PUBLIC_ORIGIN;
@@ -261,5 +266,59 @@ describe("inboundHost", () => {
 
   it("returns null when the request carries neither", () => {
     expect(inboundHost(h({}))).toBeNull();
+  });
+});
+
+// Raised in review on !280: returning null on an unparseable PUBLIC_ORIGIN
+// disables the canonical-origin protection entirely, which is #174's own
+// failure mode moved one level up — the app says nothing and the only symptom
+// is users looping at sign-in.
+describe("canonicalOriginRedirect — a malformed PUBLIC_ORIGIN is not silent", () => {
+  beforeEach(() => {
+    _resetOriginWarningForTest();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  const call = () =>
+    canonicalOriginRedirect({
+      host: "somewhere.example",
+      pathname: "/login",
+      search: "",
+    });
+
+  it("still serves the request rather than taking it down", () => {
+    vi.stubEnv("PUBLIC_ORIGIN", "not a url");
+    expect(call()).toBeNull();
+  });
+
+  it("says so, once", () => {
+    vi.stubEnv("PUBLIC_ORIGIN", "not a url");
+
+    call();
+    call();
+    call();
+
+    const lines = vi
+      .mocked(console.warn)
+      .mock.calls.map((c) => JSON.parse(c[0] as string))
+      .filter((l) => l.reason === "public_origin_unparseable");
+    // Once per process, not once per request — this runs on every auth-flow
+    // request, so an unlatched warning would bury the logs it is trying to reach.
+    expect(lines).toHaveLength(1);
+  });
+
+  it("stays quiet when PUBLIC_ORIGIN parses", () => {
+    vi.stubEnv("PUBLIC_ORIGIN", "https://canonical.example");
+
+    call();
+
+    expect(
+      vi
+        .mocked(console.warn)
+        .mock.calls.filter((c) =>
+          String(c[0]).includes("public_origin_unparseable"),
+        ),
+    ).toEqual([]);
   });
 });

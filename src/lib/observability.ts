@@ -76,20 +76,34 @@ export type AuthFailure = {
   host: string | null;
   hadState?: boolean;
   hadVerifier?: boolean;
+  /**
+   * The user chose this — they pressed Cancel on the provider's consent
+   * screen. Emits `auth_declined` at `info` instead of `auth_failure` at
+   * `warn`.
+   *
+   * Raised in review on !280: on a public instance, declining consent is a
+   * normal and frequent action, and logging it identically to a genuine
+   * expiry or state mismatch dilutes the signal this diagnostic was added to
+   * surface. A grep for `auth_failure` has to mean "something went wrong",
+   * or nobody will keep grepping for it.
+   */
+  declined?: boolean;
 };
 
 export function recordAuthFailure(failure: AuthFailure): void {
   try {
-    console.warn(
-      JSON.stringify({
-        tag: "auth_failure",
-        reason: failure.reason,
-        host: failure.host ?? null,
-        hadState: failure.hadState,
-        hadVerifier: failure.hadVerifier,
-        ts: new Date().toISOString(),
-      }),
-    );
+    const line = JSON.stringify({
+      tag: failure.declined ? "auth_declined" : "auth_failure",
+      reason: failure.reason,
+      host: failure.host ?? null,
+      hadState: failure.hadState,
+      hadVerifier: failure.hadVerifier,
+      ts: new Date().toISOString(),
+    });
+    // Still recorded, because "how many people bail at the consent screen" is
+    // a real question — just not at a level that competes with faults.
+    if (failure.declined) console.info(line);
+    else console.warn(line);
   } catch {
     // Observability must never take the request down with it. Notably: the
     // caller controls these values, so an unserialisable one must not turn a

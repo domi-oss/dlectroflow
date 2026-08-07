@@ -332,6 +332,45 @@ describe("gitlab oauth callback — failure telemetry (#174)", () => {
     });
   });
 
+  // Raised in review on !280. Declining consent is a normal, frequent action on
+  // a public instance; logging it identically to a genuine expiry or state
+  // mismatch would dilute the signal this diagnostic exists to provide. A grep
+  // for `auth_failure` has to keep meaning "something broke".
+  it("records a declined consent as auth_declined at info, not a failure", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    await GET(
+      new Request(
+        "https://dlectroflow.test/api/auth/gitlab/callback?error=access_denied",
+      ),
+    );
+
+    // Nothing on the failure channel at all.
+    expect(warned()).toEqual([]);
+    const line = JSON.parse(info.mock.calls[0][0] as string);
+    expect(line).toMatchObject({
+      tag: "auth_declined",
+      reason: "access_denied",
+    });
+  });
+
+  // Only the RFC 6749 §4.1.2.1 value is a user choice. Any other provider error
+  // is still a fault and must stay on the warn channel.
+  it("keeps a non-access_denied provider error as a real failure", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+
+    await GET(
+      new Request(
+        "https://dlectroflow.test/api/auth/gitlab/callback?error=server_error",
+      ),
+    );
+
+    expect(warned()[0]).toMatchObject({
+      tag: "auth_failure",
+      reason: "server_error",
+    });
+  });
+
   it("stays quiet on a successful sign-in", async () => {
     provisionMock.mockResolvedValue({ ok: true, userId: "u1" });
 
