@@ -14,7 +14,9 @@ describe("splitInlineNote (#179)", () => {
   describe("a trailing brace group splits", () => {
     it("splits the issue's own example", () => {
       expect(
-        splitInlineNote("water the office plants {can under sink needs a wash}"),
+        splitInlineNote(
+          "water the office plants {can under sink needs a wash}",
+        ),
       ).toEqual({
         text: "water the office plants",
         note: "can under sink needs a wash",
@@ -22,7 +24,8 @@ describe("splitInlineNote (#179)", () => {
     });
 
     it("trims whitespace on BOTH sides of both halves", () => {
-      expect(splitInlineNote("  water the plants   {  can under sink  }  ")
+      expect(
+        splitInlineNote("  water the plants   {  can under sink  }  "),
       ).toEqual({
         text: "water the plants",
         note: "can under sink",
