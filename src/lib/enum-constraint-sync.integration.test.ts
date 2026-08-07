@@ -28,6 +28,7 @@ import { SchedulePriority, ScheduleHours } from "@/lib/scheduling/types";
 // here. Importing it is what makes task-notes.ts authoritative: raising the
 // constant without a matching migration fails the assertion below.
 import { TASK_NOTE_MAX_LENGTH } from "@/lib/task-notes";
+import { FOCUS_PLAYLIST_NAME_MAX_LENGTH } from "@/lib/focus-playlists";
 
 // #38 — keep the DB CHECK constraints (see the
 // 20260719171754_add_status_check_constraints migration) in lockstep with the
@@ -338,6 +339,32 @@ const LENGTH_REGISTRY: ReadonlyArray<{
     max: TASK_NOTE_MAX_LENGTH,
     fn: "char_length",
     nullable: true,
+  },
+  {
+    // 20260807140000_focus_playlists (#185) — a user-chosen playlist name.
+    //
+    // ADDED IN REVIEW, and it is the reason this registry earns its keep. The
+    // migration's own comment asserted the constraint was "registered in
+    // LENGTH_REGISTRY" while `FocusPlaylist` appeared nowhere in this file — so
+    // the comment described a safety net that did not exist, and the sentence
+    // asserting it was the only thing standing in for the net. `!282` review.
+    //
+    // `char_length`, never `octet_length`: the two disagree by up to 4x on
+    // astral characters, so a byte bound would reject an all-emoji name a
+    // quarter the length of a Latin one it accepts. Same argument as the notes
+    // bounds above (#44).
+    //
+    // `nullable: false` — `FocusPlaylist.name` is NOT NULL, so the constraint
+    // must carry no `IS NULL` allowance. The lower bound (a name cannot be
+    // whitespace-only) is a separate clause in the same CHECK and is proved
+    // behaviourally in src/lib/focus-playlist-name-check.integration.test.ts,
+    // because this registry pins upper bounds and measuring functions only.
+    constraint: "FocusPlaylist_name_check",
+    table: "FocusPlaylist",
+    column: "name",
+    max: FOCUS_PLAYLIST_NAME_MAX_LENGTH,
+    fn: "char_length",
+    nullable: false,
   },
 ];
 

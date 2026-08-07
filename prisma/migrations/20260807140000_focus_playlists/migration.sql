@@ -80,6 +80,14 @@ CREATE UNIQUE INDEX "FocusPlaylist_workspaceId_name_key"
 -- fails the suite if it is dropped or drifts from FOCUS_PLAYLIST_NAME_MAX_LENGTH
 -- in src/lib/focus-playlists.ts.
 --
+-- That sentence was FALSE when this migration was first written, and the review
+-- that caught it (`!282`) is worth recording here rather than only in git: the
+-- comment asserted a safety net, `FocusPlaylist` appeared nowhere in that file,
+-- and so the assertion was the only thing standing in for the net it described.
+-- A comment claiming a guard exists is worse than no comment, because it stops
+-- the next reader looking. The entry exists now, and it is checked against the
+-- constraint Postgres actually applied rather than against this text.
+--
 -- `char_length`, never `octet_length`: they differ by up to 4x on astral
 -- characters, so a byte bound would reject an all-emoji name a quarter the
 -- length of a Latin one it accepts. The same reason Task_notes_check pins its
