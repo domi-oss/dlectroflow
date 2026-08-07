@@ -88,6 +88,15 @@ export const STRINGS = {
     playful: "🍴 Resume focus timer",
   },
   "step.complete": { plain: "Complete step", playful: "✅ Complete step" },
+  // #198 — the inverse of step.complete, on a done row. Same wording in both
+  // voices: the playful register belongs on an achievement, not on correcting
+  // one. Phrased as the state being restored ("not done") rather than as the
+  // operation ("un-complete"), which is jargon for a database write the user
+  // never thinks about.
+  "step.uncomplete": {
+    plain: "Mark not done",
+    playful: "Mark not done",
+  },
   "step.editEstimate": {
     plain: "Edit time estimate",
     playful: "⏱️ Edit time estimate",
@@ -313,6 +322,20 @@ export const STRINGS = {
     plain: "Back to focus",
     playful: "Back to focus",
   },
+  // #198 — the undo, offered on the done screen because that is where the
+  // accidental completion #197 produced actually happens. Worded as what the
+  // user knows ("I hadn't finished") rather than as the mechanism
+  // ("un-complete"): they are not undoing a database write, they are correcting
+  // a claim the app made about their work. No exclamation in either voice — this
+  // is a mistake being fixed, and the playful register would be badly timed.
+  "focus.done.undo": {
+    plain: "Actually, I hadn't finished",
+    playful: "Actually, I hadn't finished",
+  },
+  "focus.done.undone": {
+    plain: "Put back. The step is open again.",
+    playful: "Put back. The step is open again.",
+  },
   "focus.done.queueEmpty": {
     plain: "No multi-step tasks left. Work through the single-task to-dos?",
     playful: "No big plates left. Work through the snacks?",
@@ -366,6 +389,14 @@ export const STRINGS = {
   "focus.error.complete": {
     plain: "Couldn't finish the step just now — nothing is lost.",
     playful: "Couldn't finish the step just now — nothing is lost.",
+  },
+  // #198 — a failed UNDO needs its own line, because the reassurance that fits
+  // every other failure here ("nothing is lost") is the one thing that is not
+  // true: the step really is still marked done, and saying otherwise would leave
+  // someone believing they had recovered work they had not.
+  "focus.error.undo": {
+    plain: "Couldn't put the step back just now — it is still marked done.",
+    playful: "Couldn't put the step back just now — it is still marked done.",
   },
   "focus.error.session": {
     plain: "Couldn't reach the server just now.",

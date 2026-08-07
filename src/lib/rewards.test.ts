@@ -12,6 +12,8 @@ const { prismaMock } = vi.hoisted(() => ({
     // `create` is mocked even though nothing should call it any more: a silent
     // regression back to create-and-catch is exactly what this file guards.
     badge: { findUnique: vi.fn(), create: vi.fn(), createMany: vi.fn() },
+    // #198 — reverseStepDoneReward reads the newest step_done row and removes it.
+    rewardEvent: { findFirst: vi.fn(), delete: vi.fn() },
   },
 }));
 
@@ -21,8 +23,8 @@ vi.mock("@/lib/db", () => ({
   getStreak: vi.fn(),
 }));
 
-import { awardBadge } from "./rewards";
-import { BadgeKey } from "./constants";
+import { awardBadge, reverseStepDoneReward } from "./rewards";
+import { BadgeKey, RewardType } from "./constants";
 
 class FakeOtherError extends Error {
   code = "P1001";
@@ -75,5 +77,45 @@ describe("awardBadge — once-only, and never raises on a duplicate (#158)", () 
     await expect(awardBadge("ws", BadgeKey.Streak5)).rejects.toMatchObject({
       code: "P1001",
     });
+  });
+});
+
+describe("reverseStepDoneReward — undoing a step completion (#198)", () => {
+  it("removes the most recent step_done row in that workspace and reports it", async () => {
+    prismaMock.rewardEvent.findFirst.mockResolvedValue({ id: "re-9" });
+    prismaMock.rewardEvent.delete.mockResolvedValue({});
+
+    expect(await reverseStepDoneReward("ws")).toBe(true);
+
+    // The read is what carries the workspace scope; the delete then goes by the
+    // id it returned, which is why the read must be filtered and ordered.
+    expect(prismaMock.rewardEvent.findFirst).toHaveBeenCalledWith({
+      where: { workspaceId: "ws", type: RewardType.StepDone },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    expect(prismaMock.rewardEvent.delete).toHaveBeenCalledWith({
+      where: { id: "re-9" },
+    });
+  });
+
+  it("takes back a step_done and nothing else — no other reward type is touched", async () => {
+    prismaMock.rewardEvent.findFirst.mockResolvedValue({ id: "re-1" });
+    await reverseStepDoneReward("ws");
+    // A task_complete or session_finished row must survive an un-complete: the
+    // step is what is being undone, not the session that ran or the task that
+    // closed. The `type` filter is the only thing enforcing that.
+    expect(prismaMock.rewardEvent.findFirst.mock.calls[0][0].where.type).toBe(
+      RewardType.StepDone,
+    );
+  });
+
+  it("nothing to reverse is a normal answer, not an error", async () => {
+    prismaMock.rewardEvent.findFirst.mockResolvedValue(null);
+
+    expect(await reverseStepDoneReward("ws")).toBe(false);
+    // Deleting on a null read would throw on a real client; returning false lets
+    // the caller carry on un-completing, which is the user's actual intent.
+    expect(prismaMock.rewardEvent.delete).not.toHaveBeenCalled();
   });
 });

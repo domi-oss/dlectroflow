@@ -12,7 +12,12 @@ import {
   TaskStatus,
 } from "@/lib/constants";
 import { isGuestWorkspace } from "@/lib/workspace-kind";
-import { awardBadge, logReward, rewardStepDone } from "@/lib/rewards";
+import {
+  awardBadge,
+  logReward,
+  rewardStepDone,
+  reverseStepDoneReward,
+} from "@/lib/rewards";
 import { currentWorkspaceId, currentUser } from "@/lib/workspace";
 import { remainingSecForSession } from "@/lib/focus-timer-clock";
 
@@ -219,6 +224,24 @@ async function completeGoogleTaskForStep(step: {
   });
 }
 
+/**
+ * The reverse patch, for {@link uncompleteStep} (#198). `needsAction` is the
+ * value `patchGoogleTask` has always accepted and never been sent — before this,
+ * the app could only ever tell Google a task was finished, never that it wasn't.
+ * (#196 is the other half of that: `reopenItem` still doesn't send it.)
+ */
+async function reopenGoogleTaskForStep(step: {
+  googleTaskId: string | null;
+  googleTaskListId: string | null;
+}): Promise<boolean> {
+  if (!step.googleTaskId || !step.googleTaskListId) return false;
+  const token = await actingUserGoogleToken();
+  if (!token) return false;
+  return patchGoogleTask(token, step.googleTaskListId, step.googleTaskId, {
+    status: "needsAction",
+  });
+}
+
 /** Complete a step directly (no focus session). Awards StepDone; finishes the task on the last step. */
 export async function completeStep(stepId: string) {
   const workspaceId = await currentWorkspaceId();
@@ -234,6 +257,60 @@ export async function completeStep(stepId: string) {
 
   const stillOpen = step.task.steps.filter((s) => s.id !== stepId && !s.done);
   if (stillOpen.length === 0) await markTaskCompleted(workspaceId, step.taskId);
+
+  revalidatePath(`/tasks/${step.taskId}`);
+  revalidatePath("/");
+  revalidatePath("/dashboard");
+}
+
+/**
+ * Un-complete a step (#198) — the inverse of {@link completeStep}, and the only
+ * recovery path in the app for a step that was completed by accident.
+ *
+ * It has to exist as its own action because `reopenItem`
+ * (src/app/actions/braindump.ts) — the one un-complete route that already
+ * existed — takes a **BrainDumpItem** id, so it is unreachable until the whole
+ * item is complete and sitting in the inbox Done view. A step completed while
+ * its task still had other open steps could not be undone anywhere, which is
+ * exactly the state #197's button placement kept producing.
+ *
+ * Three things differ from `completeStep` on purpose:
+ *
+ *  1. **The Google patch happens AFTER the local write, not before.** Completing
+ *     patches first so a step is never marked done locally while Google still
+ *     shows it open. Undoing is the opposite priority: the user has asked to get
+ *     their work back, and an unreachable Google must not be able to refuse them.
+ *     Both are best-effort either way.
+ *  2. **The parent task is reopened if THIS step had closed it**, along with its
+ *     inbox item(s) — otherwise the step is open inside a task the Done view
+ *     still renders as finished.
+ *  3. **One `step_done` reward is taken back**, so complete → un-complete →
+ *     complete cannot award twice. See `reverseStepDoneReward` for what is
+ *     deliberately *not* reversed (the streak, and badges).
+ */
+export async function uncompleteStep(stepId: string) {
+  const workspaceId = await currentWorkspaceId();
+  const step = await prisma.step.findFirst({
+    where: { id: stepId, task: { workspaceId } },
+    include: { task: true },
+  });
+  if (!step || !step.done) return;
+
+  await prisma.step.update({ where: { id: stepId }, data: { done: false } });
+
+  if (step.task?.status === TaskStatus.Done) {
+    await prisma.task.update({
+      where: { id: step.taskId, workspaceId },
+      data: { status: TaskStatus.Active },
+    });
+    await prisma.brainDumpItem.updateMany({
+      where: { taskId: step.taskId, workspaceId },
+      data: { completedAt: null },
+    });
+  }
+
+  await reopenGoogleTaskForStep(step);
+  await reverseStepDoneReward(workspaceId);
 
   revalidatePath(`/tasks/${step.taskId}`);
   revalidatePath("/");

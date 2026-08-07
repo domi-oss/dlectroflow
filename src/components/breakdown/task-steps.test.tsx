@@ -21,6 +21,7 @@ vi.mock("@/app/actions/breakdown", () => ({
 }));
 vi.mock("@/app/actions/focus", () => ({
   completeStep: vi.fn().mockResolvedValue(undefined),
+  uncompleteStep: vi.fn().mockResolvedValue(undefined),
   renameStep: vi.fn().mockResolvedValue(undefined),
   updateStepEstimate: vi.fn().mockResolvedValue(undefined),
 }));
@@ -38,6 +39,7 @@ vi.mock("@/app/actions/step-notes", () => ({
 import { ejectStepToInbox } from "@/app/actions/breakdown";
 import {
   completeStep,
+  uncompleteStep,
   renameStep,
   updateStepEstimate,
 } from "@/app/actions/focus";
@@ -152,6 +154,60 @@ describe("TaskSteps — done steps", () => {
     const pill = screen.getByText(/✓\s*done/i);
     expect(pill.className).toContain("text-[color:var(--tick-color)]");
     expect(pill.className).toContain("rounded-full");
+    expect(
+      screen.queryByRole("button", { name: "✓ Complete" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("▶ Start Focus")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "All options" }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("TaskSteps — un-completing a done step (#198)", () => {
+  // Until this existed, a step completed while its task still had other open
+  // steps could not be reopened anywhere: `reopenItem` takes a BrainDumpItem id
+  // and is only reachable from the inbox Done view, which the item never reaches
+  // while any step is outstanding.
+  it("a done row offers an un-complete, and it calls uncompleteStep for THAT step", async () => {
+    const user = userEvent.setup();
+    render(
+      <TaskSteps
+        taskId="t1"
+        steps={[{ ...baseStep(), id: "s7", done: true }]}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /mark not done/i }));
+    expect(uncompleteStep).toHaveBeenCalledWith("s7");
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it("names the control after its own step, so a page of done rows is navigable", () => {
+    render(
+      <TaskSteps
+        taskId="t1"
+        steps={[
+          { ...baseStep(), id: "s1", text: "First", done: true },
+          { ...baseStep(), id: "s2", order: 2, text: "Second", done: true },
+        ]}
+      />,
+    );
+    // Two controls both called "Mark not done" would be indistinguishable in a
+    // screen reader's list of buttons (WCAG 2.4.6) — the same reason the note
+    // triggers carry their step's text.
+    expect(
+      screen.getByRole("button", { name: /mark not done: first/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /mark not done: second/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("is the ONLY action a done row gains — Complete, Start Focus and the menu stay absent", () => {
+    render(<TaskSteps taskId="t1" steps={[{ ...baseStep(), done: true }]} />);
+    expect(
+      screen.getByRole("button", { name: /mark not done/i }),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "✓ Complete" }),
     ).not.toBeInTheDocument();

@@ -138,6 +138,52 @@ export async function rewardStepDone(
   return streak;
 }
 
+/**
+ * Take back the points a step completion awarded, because that completion is
+ * being undone (#198).
+ *
+ * **It deletes the most recent `step_done` row rather than "the one that step
+ * earned", because there is no such thing.** `RewardEvent` carries type, points
+ * and workspace and holds no step reference (see `prisma/schema.prisma`), and
+ * nothing in the app attributes points to a particular step — so every
+ * `step_done` row in a workspace is an identical `RewardPoints.StepDone`. Which
+ * row goes is therefore **unobservable**: the points total, the dashboard and the
+ * day rollup all read the same afterwards. Attributing rewards to steps would
+ * need a nullable `stepId` column, and a migration is not worth buying an
+ * identical outcome — the reasoning is recorded here rather than the column being
+ * added "just in case", because a schema change is the expensive kind of guess.
+ *
+ * Two things are deliberately NOT reversed:
+ *
+ *  * **The streak.** It records that you engaged on a working day, and you did —
+ *    un-completing a step does not un-happen the focus session that earned it.
+ *    `touchStreakOnEngagement` is also idempotent per day, so there is nothing
+ *    meaningful to undo.
+ *  * **Badges.** Once-ever achievements. Revoking one would make the collection
+ *    lie about the past, and `awardBadge` is idempotent anyway.
+ *
+ * Without this, complete → un-complete → complete awards `step_done` twice for
+ * one step. That farm is **not new** — `reopenItem` has always allowed it — so
+ * this closes an existing hole as well as the one #198 would otherwise open.
+ *
+ * Returns whether a row was actually removed, so a caller can be tested on it
+ * and so "nothing to reverse" is a normal answer rather than an error.
+ */
+export async function reverseStepDoneReward(
+  workspaceId: string,
+): Promise<boolean> {
+  const latest = await prisma.rewardEvent.findFirst({
+    where: { workspaceId, type: RewardType.StepDone },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+  if (!latest) return false;
+  // Safe to delete by id alone: the id came from a workspace-scoped read above,
+  // so this cannot reach another workspace's row (the scoping invariant).
+  await prisma.rewardEvent.delete({ where: { id: latest.id } });
+  return true;
+}
+
 // ── streak ───────────────────────────────────────────────────────────────
 export type StreakUpdate = {
   current: number;

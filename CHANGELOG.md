@@ -424,6 +424,22 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **A step completed by accident can now be put back (#198).** There was no way
+  to un-complete a step while its task still had other steps outstanding: the
+  only reopen path in the app worked on a whole inbox item, which an unfinished
+  task never becomes. Finishing the wrong step was therefore permanent. Two
+  places now undo it — **"Actually, I hadn't finished" on the timer's completion
+  screen**, which is where the mistake is actually noticed, and a **"Mark not
+  done"** control on any completed step row. Undoing reopens the parent task and
+  its inbox item if that step was what closed them, tells Google Tasks the task
+  is open again (the first time this app has ever sent that, rather than only
+  ever reporting completions), and **takes back the points that completion
+  awarded** so finishing the step again cannot bank them twice — a loophole that
+  already existed through the inbox's Reopen. Your streak and any badges stay:
+  the focus session really happened, and undoing a step does not un-happen it.
+  On the timer, the undo also cancels the five-second countdown to the next step,
+  so nothing navigates away from the step just rescued.
+
 - **The focus timer's "Complete step" sat where Pause belongs (#197).** In a
   running session the controls read *Complete step, then Pause*, with Complete
   the only filled button in the row — so the leading, most prominent, most

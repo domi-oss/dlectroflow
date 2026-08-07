@@ -63,6 +63,7 @@ vi.mock("@/lib/rewards", () => ({
   logReward: vi.fn().mockResolvedValue(undefined),
   awardBadge: vi.fn().mockResolvedValue(true),
   rewardStepDone: vi.fn().mockResolvedValue(null),
+  reverseStepDoneReward: vi.fn().mockResolvedValue(true),
   touchStreakOnCompletion: vi.fn().mockResolvedValue(null),
   maybeAwardInboxZero: vi.fn().mockResolvedValue(undefined),
   maybeAwardTenStepsDay: vi.fn().mockResolvedValue(undefined),
@@ -308,6 +309,122 @@ describe("completeStep", () => {
     const { completeStep } = await import("./focus");
     await completeStep("s1");
     expect(prismaMock.step.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("uncompleteStep (#198)", () => {
+  // The inverse of completeStep, and the only recovery path in the app for a
+  // step completed by accident. Before this, `reopenItem` was the sole
+  // un-complete route and it takes a BrainDumpItem id — so it is unreachable
+  // until the WHOLE item is complete and sitting in the Done view. A step
+  // completed while its task still had other open steps could not be undone
+  // anywhere.
+  function doneStep(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "s1",
+      taskId: "t1",
+      done: true,
+      googleTaskId: null,
+      googleTaskListId: null,
+      task: { id: "t1", status: "active" },
+      ...overrides,
+    };
+  }
+
+  it("flips done back, scoped to the resolved workspace", async () => {
+    prismaMock.step.findFirst.mockResolvedValueOnce(doneStep());
+    const { uncompleteStep } = await import("./focus");
+    await uncompleteStep("s1");
+    expect(prismaMock.step.findFirst.mock.calls[0][0].where).toEqual({
+      id: "s1",
+      task: { workspaceId: "owner" },
+    });
+    expect(prismaMock.step.update).toHaveBeenCalledWith({
+      where: { id: "s1" },
+      data: { done: false },
+    });
+  });
+
+  it("no-ops on a missing step, and on one that is not done", async () => {
+    prismaMock.step.findFirst.mockResolvedValueOnce(null);
+    const { uncompleteStep } = await import("./focus");
+    await uncompleteStep("nope");
+    expect(prismaMock.step.update).not.toHaveBeenCalled();
+
+    prismaMock.step.findFirst.mockResolvedValueOnce(doneStep({ done: false }));
+    await uncompleteStep("s1");
+    expect(prismaMock.step.update).not.toHaveBeenCalled();
+  });
+
+  it("reopens the task and its inbox item when THAT step had closed the task", async () => {
+    prismaMock.step.findFirst.mockResolvedValueOnce(
+      doneStep({ task: { id: "t1", status: "done" } }),
+    );
+    const { uncompleteStep } = await import("./focus");
+    await uncompleteStep("s1");
+    expect(prismaMock.task.update).toHaveBeenCalledWith({
+      where: { id: "t1", workspaceId: "owner" },
+      data: { status: "active" },
+    });
+    // Otherwise the step is open inside a task the Done view still shows as
+    // finished — the divergence this issue is about, moved one level up.
+    expect(prismaMock.brainDumpItem.updateMany).toHaveBeenCalledWith({
+      where: { taskId: "t1", workspaceId: "owner" },
+      data: { completedAt: null },
+    });
+  });
+
+  it("leaves an already-active task alone", async () => {
+    prismaMock.step.findFirst.mockResolvedValueOnce(doneStep());
+    const { uncompleteStep } = await import("./focus");
+    await uncompleteStep("s1");
+    expect(prismaMock.task.update).not.toHaveBeenCalled();
+    expect(prismaMock.brainDumpItem.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("patches the linked Google Task back to needsAction", async () => {
+    const google = await import("@/lib/google");
+    (google.getValidAccessToken as ReturnType<typeof vi.fn>).mockResolvedValue(
+      "tok",
+    );
+    prismaMock.step.findFirst.mockResolvedValueOnce(
+      doneStep({ googleTaskId: "g1", googleTaskListId: "l1" }),
+    );
+    const { uncompleteStep } = await import("./focus");
+    await uncompleteStep("s1");
+    // `needsAction` had no call site anywhere in the repo before this — the
+    // outbound sync only ever went one way, which is #196's other half.
+    expect(google.patchGoogleTask).toHaveBeenCalledWith("tok", "l1", "g1", {
+      status: "needsAction",
+    });
+  });
+
+  it("skips the Google patch when the step has no linked task, and still un-completes", async () => {
+    const google = await import("@/lib/google");
+    prismaMock.step.findFirst.mockResolvedValueOnce(doneStep());
+    const { uncompleteStep } = await import("./focus");
+    await uncompleteStep("s1");
+    expect(google.patchGoogleTask).not.toHaveBeenCalled();
+    expect(prismaMock.step.update).toHaveBeenCalled();
+  });
+
+  it("takes back one step_done reward, so completing again cannot award twice", async () => {
+    const rewards = await import("@/lib/rewards");
+    prismaMock.step.findFirst.mockResolvedValueOnce(doneStep());
+    const { uncompleteStep } = await import("./focus");
+    await uncompleteStep("s1");
+    expect(rewards.reverseStepDoneReward).toHaveBeenCalledWith("owner");
+  });
+
+  it("revalidates the three paths that render step state", async () => {
+    prismaMock.step.findFirst.mockResolvedValueOnce(doneStep());
+    const { uncompleteStep } = await import("./focus");
+    await uncompleteStep("s1");
+    // Same trio as completeStep — `revalidation-hygiene.test.ts` fails the build
+    // if a mutating action in this file drifts off any of them (#139).
+    expect(revalidatePathMock).toHaveBeenCalledWith("/tasks/t1");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/dashboard");
   });
 });
 

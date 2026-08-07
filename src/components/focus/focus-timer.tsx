@@ -18,6 +18,7 @@ import {
   beginFocus,
   completeFocus,
   requeueFocus,
+  uncompleteStep,
   proposeNewEstimate,
   pauseFocus,
   resumeFocus,
@@ -134,6 +135,9 @@ type FailedHandler =
   | "complete"
   | "reestimate"
   | "requeue"
+  // #198 — putting a step back after an accidental completion. Its own handler
+  // because its failure message is the one that cannot say "nothing is lost".
+  | "undo"
   // #142 — opening the next single-task to-do. It is a server action too
   // (`ensureFocusStep` creates the to-do's one step on demand), so a chain that
   // failed used to be indistinguishable from a button that does nothing —
@@ -229,6 +233,8 @@ function failureMessageKey(failure: ActionFailure): StringKey {
       return "focus.error.requeue";
     case "complete":
       return "focus.error.complete";
+    case "undo":
+      return "focus.error.undo";
     case "chain":
       return "focus.error.chain";
     // start / resumeExisting / togglePause — all "the session couldn't be
@@ -340,6 +346,10 @@ export function FocusTimer({
   const [failure, setFailure] = useState<ActionFailure | null>(null);
   const [newEst, setNewEst] = useState(step.estMinutes);
   const [result, setResult] = useState<CompleteResult | null>(null);
+  // #198 — set by the done-screen undo so the setup screen it lands on confirms
+  // what happened. A phase change is silent to a screen-reader user, and "did
+  // that work?" is the whole question in the moment after an accident.
+  const [undone, setUndone] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [tipVisible, setTipVisible] = useState(!tipDismissed);
   // #66 — progressive disclosure. While a resumable session exists the setup
@@ -808,6 +818,30 @@ export function FocusTimer({
     router.refresh();
   }, [sessionId, net, router, stopSound, goToPhase, run]);
 
+  /**
+   * #198 — put the step back after an accidental completion.
+   *
+   * Offered on the done screen because that is where the mistake #197 produced
+   * actually happens: before this, the only un-complete route in the app was
+   * `reopenItem` from the inbox Done view, which a step inside a still-open task
+   * never reaches. An undo two screens away from the error is not a recovery path.
+   *
+   * Returning to `setup` is doing real work, not just tidying the view: it
+   * unmounts the done block and with it `AutoAdvance`, whose five-second
+   * countdown would otherwise keep running and navigate away from the very step
+   * the user has just rescued. Leaving the closed FocusSession closed is also
+   * deliberate — the session genuinely ran, and the claim being corrected is
+   * "this step is finished", not "that time never happened".
+   */
+  const undoComplete = useCallback(async () => {
+    const outcome = await run("undo", () => uncompleteStep(step.id));
+    if (!outcome.ok) return;
+    setResult(null);
+    setUndone(true);
+    goToPhase("setup");
+    router.refresh();
+  }, [goToPhase, router, run, step.id]);
+
   const startReestimate = useCallback(async () => {
     goToPhase("reestimate");
     const outcome = await run(
@@ -869,6 +903,10 @@ export function FocusTimer({
       resumeExisting: () => void resumeExisting(),
       togglePause: () => void togglePause(),
       complete: () => void finishComplete(),
+      // #198 — retrying an undo is safe to repeat: `uncompleteStep` no-ops on a
+      // step that is already not done, so a retry after a partial failure cannot
+      // reverse a second reward or reopen anything twice.
+      undo: () => void undoComplete(),
       reestimate: () => void startReestimate(),
       requeue: () => void confirmRequeue(),
       chain: () => void startSingle(),
@@ -1412,6 +1450,33 @@ export function FocusTimer({
               </>
             )}
 
+          {/* #198 — the undo, and it belongs HERE rather than only on the step
+              row, because this screen is where an accidental completion is
+              discovered: the tick has just landed and the countdown to the next
+              step has started. Recovery that lives two screens away is not
+              recovery.
+
+              Rendered for every `ending.kind`, deliberately — a mis-tap on the
+              LAST step of a task lands on the celebration branch, and that is
+              the case with the most to put right, since it closed the task and
+              moved the inbox item to Done as well.
+
+              Quiet by design, and the only destructive-looking thing on a screen
+              whose job is to feel good: it sits under every other answer, in the
+              muted register the "Done for now" escape already uses, so it is
+              findable when wanted and not an invitation to second-guess a real
+              finish. No confirm dialog on it either — it is itself the
+              correction, and it is reversible by pressing Complete again. */}
+          <button
+            type="button"
+            onClick={() => void undoComplete()}
+            disabled={pending}
+            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex min-h-[44px] items-center gap-1.5 rounded text-sm underline underline-offset-4 outline-none focus-visible:ring-2 disabled:opacity-50"
+          >
+            <RotateCcw aria-hidden="true" className="h-4 w-4 shrink-0" />
+            {t("focus.done.undo", voice)}
+          </button>
+
           {/* #137/#142 — the same notice as everywhere else. The done screen
               returns early, so without this a failed chain would report
               nothing at all: a button that visibly does nothing, which is the
@@ -1463,6 +1528,23 @@ export function FocusTimer({
           </span>
         )}
       </div>
+
+      {/* #198 — confirm the undo actually landed. The phase change alone is
+          silent to a screen-reader user, and "did that work?" is the entire
+          question in the moment after correcting an accident — the answer has to
+          be stated, not inferred from the screen having changed. `role="status"`
+          (polite) rather than an alert: this is good news arriving, not an
+          interruption. It is not dismissible and does not need to be — starting
+          the step again replaces this whole screen. */}
+      {undone && (
+        <p
+          role="status"
+          className="text-muted-foreground text-sm"
+          data-testid="focus-undone-notice"
+        >
+          {t("focus.done.undone", voice)}
+        </p>
+      )}
 
       {tipVisible && (
         <TimerCustomizationHint voice={voice} onDismiss={dismissTip} />

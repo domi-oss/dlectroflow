@@ -335,6 +335,8 @@ describe("focus.ts actions invalidate the list they change (#139)", () => {
       "renameStep",
       "requeueFocus",
       "resumeFocus",
+      // #198 — the inverse of completeStep, so it carries the same trio.
+      "uncompleteStep",
       "updateStepEstimate",
     ]);
   });

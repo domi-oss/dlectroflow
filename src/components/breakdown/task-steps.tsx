@@ -3,9 +3,11 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { RotateCcw } from "lucide-react";
 import { ejectStepToInbox } from "@/app/actions/breakdown";
 import {
   completeStep,
+  uncompleteStep,
   renameStep,
   updateStepEstimate,
 } from "@/app/actions/focus";
@@ -80,6 +82,16 @@ export function TaskSteps({
       router.refresh();
     });
 
+  // #198 — the row-level half of the undo. The timer's done screen carries the
+  // one that matters most (it is where an accidental completion is discovered),
+  // but a mistake noticed later still has to be fixable, and this is the only
+  // screen that shows a done step inside an unfinished task.
+  const uncomplete = (stepId: string) =>
+    start(async () => {
+      await uncompleteStep(stepId);
+      router.refresh();
+    });
+
   const rename = (stepId: string, title: string) =>
     start(async () => {
       await renameStep(stepId, title);
@@ -127,7 +139,9 @@ export function TaskSteps({
       {steps.map((s) => {
         if (s.done) {
           // Done steps keep the completed state (strikethrough + ✓) with no
-          // focus/complete actions.
+          // focus/complete actions — but they DO carry an un-complete (#198),
+          // because until it existed a step completed inside an unfinished task
+          // could not be reopened anywhere in the app.
           return (
             <li key={s.id} className="rounded-lg border px-3 py-2 text-sm">
               <div className="flex items-center gap-3">
@@ -144,6 +158,21 @@ export function TaskSteps({
                   {s.estMinutes}m
                 </span>
                 <DonePill voice={voice} />
+                {/* #198 — quiet, and last in the row: this is a correction, not
+                    something to invite on a finished step. The accessible name
+                    carries the step text because a page of done rows would
+                    otherwise present several controls all called "Mark not
+                    done", which is exactly the WCAG 2.4.6 problem the inbox row
+                    actions already solve this way. */}
+                <button
+                  type="button"
+                  onClick={() => uncomplete(s.id)}
+                  disabled={pending}
+                  aria-label={`${t("step.uncomplete", voice)}: ${s.text}`}
+                  className="text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded outline-none focus-visible:ring-2 disabled:opacity-50"
+                >
+                  <RotateCcw aria-hidden="true" className="h-4 w-4" />
+                </button>
               </div>
               {/* #44 — a DONE step gets its note READ-ONLY and no control.
                   Annotating finished work has no purpose, so the "Note"

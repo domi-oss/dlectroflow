@@ -50,6 +50,7 @@ vi.mock("@/app/actions/focus", () => ({
     freshStart: false,
   }),
   requeueFocus: vi.fn().mockResolvedValue({ ok: true }),
+  uncompleteStep: vi.fn().mockResolvedValue(undefined),
   proposeNewEstimate: vi.fn().mockResolvedValue(20),
   pauseFocus: vi.fn().mockResolvedValue({ ok: true }),
   resumeFocus: vi.fn().mockResolvedValue({
@@ -180,6 +181,7 @@ import {
   proposeNewEstimate,
   requeueFocus,
   resumeFocus,
+  uncompleteStep,
 } from "@/app/actions/focus";
 import {
   dismissFocusTimerTip,
@@ -1457,6 +1459,129 @@ describe("FocusTimer — the accidental-completion guard (#197)", () => {
     // does not reopen the contrast question.
     expect(complete.className).toContain("bg-green-700");
     expect(complete.className).toContain("text-white");
+  });
+});
+
+describe("FocusTimer — putting a step back after an accident (#198)", () => {
+  // The recovery half of #197. It is on the DONE screen because that is where an
+  // accidental completion is discovered — the tick has landed and the countdown
+  // to the next step has already started. Before this the only un-complete route
+  // was `reopenItem` from the inbox Done view, which a step inside a
+  // still-unfinished task never reaches.
+  async function completeAStep(user: ReturnType<typeof userEvent.setup>) {
+    render(<FocusTimer {...base()} />);
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /complete step/i }));
+  }
+
+  it("offers the undo on the done screen and calls uncompleteStep for THIS step", async () => {
+    const user = userEvent.setup();
+    await completeAStep(user);
+    await user.click(
+      screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+    );
+    expect(uncompleteStep).toHaveBeenCalledWith("s2");
+  });
+
+  it("leaves the celebration and confirms out loud that the step is open again", async () => {
+    const user = userEvent.setup();
+    await completeAStep(user);
+    await user.click(
+      screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+    );
+    // Back on the step's own setup screen, so it can simply be started again.
+    expect(
+      await screen.findByRole("button", { name: /start focusing/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("focus-done-summary")).not.toBeInTheDocument();
+    // Announced, not merely implied: a phase change is silent to a screen-reader
+    // user, and "did that work?" is the whole question in this moment.
+    expect(screen.getByTestId("focus-undone-notice")).toHaveTextContent(
+      /open again/i,
+    );
+  });
+
+  it("also offers it when the completion finished the WHOLE task", async () => {
+    // The mis-tap with the most to put right: this branch closed the task and
+    // moved the inbox item to Done as well, and it renders a different ending.
+    (completeFocus as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      nextStepId: null,
+      points: 15,
+      googleSynced: false,
+      streak: 1,
+      freshStart: false,
+    });
+    const user = userEvent.setup();
+    render(
+      <FocusTimer
+        {...base({
+          nextStep: null,
+          step: {
+            id: "s3",
+            text: "Polish",
+            estMinutes: 1,
+            subtaskEmoji: null,
+            order: 3,
+            total: 3,
+            done: false,
+          },
+        })}
+      />,
+    );
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /complete step/i }));
+    await user.click(
+      screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+    );
+    expect(uncompleteStep).toHaveBeenCalledWith("s3");
+  });
+
+  it("cancels the auto-advance, so nothing navigates off the rescued step", async () => {
+    vi.useFakeTimers();
+    try {
+      render(<FocusTimer {...base()} />);
+      await act(async () => {
+        screen.getByRole("button", { name: /start focusing/i }).click();
+      });
+      await act(async () => {
+        screen.getByRole("button", { name: /complete step/i }).click();
+      });
+      await act(async () => {
+        screen
+          .getByRole("button", { name: /actually, i hadn't finished/i })
+          .click();
+      });
+      // The countdown lives inside the done block, so returning to `setup`
+      // unmounts it. Without that, the five-second timer would keep running and
+      // push to the NEXT step — navigating away from the one just rescued, which
+      // would make the undo look broken while having worked perfectly.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(AUTO_ADVANCE_SEC * 1000 + 1000);
+      });
+      expect(push).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a failed undo says the step is STILL done, and keeps the screen it failed on", async () => {
+    (uncompleteStep as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("boom"),
+    );
+    const user = userEvent.setup();
+    await completeAStep(user);
+    await user.click(
+      screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+    );
+    // Every other failure notice in this component reassures with "nothing is
+    // lost". Here that would be a lie — the step really is still marked done —
+    // and someone would walk away believing they had recovered work they had not.
+    expect(await screen.findByText(/still marked done/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("focus-undone-notice")).not.toBeInTheDocument();
+    // Still on the done screen, so the Retry in the notice has something to
+    // retry and the undo can be pressed again.
+    expect(screen.getByTestId("focus-done-summary")).toBeInTheDocument();
   });
 });
 
