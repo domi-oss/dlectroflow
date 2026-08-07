@@ -8,13 +8,23 @@ const push = vi.fn();
 const refresh = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, refresh }) }));
 vi.mock("next/link", () => ({
+  // Forwards `ref`, because the real `next/link` does and #206's focus hand-off
+  // depends on it. A mock that silently drops the ref makes a working focus fix
+  // look broken — which is exactly what it did on the first run of that spec.
+  // React 19 passes `ref` as an ordinary prop to function components.
   default: ({
     children,
     href,
+    ref,
   }: {
     children: React.ReactNode;
     href: string;
-  }) => <a href={href}>{children}</a>,
+    ref?: React.Ref<HTMLAnchorElement>;
+  }) => (
+    <a href={href} ref={ref}>
+      {children}
+    </a>
+  ),
 }));
 vi.mock("@/app/actions/breakdown", () => ({
   ejectStepToInbox: vi.fn(),
@@ -541,5 +551,55 @@ describe("TaskSteps — a failed un-complete says so, and is retryable (#198, ro
     expect(
       screen.getByRole("button", { name: /mark not done: second/i }),
     ).toBeEnabled();
+  });
+});
+
+describe("TaskSteps — focus survives a successful un-complete (#206, round 12)", () => {
+  // Duo round 12, and it confirms #206's suspicion independently. `steps.map()`
+  // renders two structurally different subtrees for the SAME `key={s.id}`
+  // depending on `s.done`, so when the refresh flips this row to not-done React
+  // reconciles in place and swaps the children — unmounting the very button the
+  // user just pressed. Nothing moved focus, so a keyboard or screen-reader user
+  // was dropped to `<body>` at the moment their correction succeeded. WCAG 2.4.3.
+  //
+  // The same class of bug this MR already fixed for the timer's undo in round 7,
+  // which is what makes leaving it here indefensible rather than merely untidy.
+  it("hands focus to the reopened row's Start Focus, not to <body>", async () => {
+    const user = userEvent.setup();
+    const done = { ...baseStep(), id: "s1", text: "First", done: true };
+    const { rerender } = render(<TaskSteps taskId="t1" steps={[done]} />);
+
+    await user.click(
+      screen.getByRole("button", { name: /mark not done: first/i }),
+    );
+    expect(uncompleteStep).toHaveBeenCalledWith("s1");
+
+    // What `router.refresh()` does in production: the server re-renders this step
+    // as not-done. `refresh` is a mock here, so the prop change is applied
+    // directly — same reconciliation, same key, same unmount of the pressed
+    // control.
+    rerender(<TaskSteps taskId="t1" steps={[{ ...done, done: false }]} />);
+
+    const startFocus = screen.getByRole("link", { name: /start focus/i });
+    await waitFor(() => expect(startFocus).toHaveFocus());
+    // NOT the Complete button: the user has just un-completed this step, so
+    // landing focus on the one control that would re-complete it turns a stray
+    // Enter into an undo of their undo.
+    expect(
+      screen.getByRole("button", { name: "✓ Complete" }),
+    ).not.toHaveFocus();
+  });
+
+  it("does not steal focus when a row flips to not-done on its own", async () => {
+    // Only an undo THIS component performed earns the hand-off. A step reopened
+    // elsewhere — the timer, another tab, a server revalidation — must not yank
+    // focus out from under whatever the user is currently doing.
+    const done = { ...baseStep(), id: "s1", text: "First", done: true };
+    const { rerender } = render(<TaskSteps taskId="t1" steps={[done]} />);
+    rerender(<TaskSteps taskId="t1" steps={[{ ...done, done: false }]} />);
+    expect(
+      screen.getByRole("link", { name: /start focus/i }),
+    ).not.toHaveFocus();
+    expect(document.body).toHaveFocus();
   });
 });

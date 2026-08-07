@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { RotateCcw } from "lucide-react";
@@ -124,6 +124,40 @@ export function TaskSteps({
     return next;
   };
 
+  // #206 / review round 12 — WCAG 2.4.3, and the same class this MR already fixed
+  // for the timer's undo in round 7. `steps.map()` renders two structurally
+  // different subtrees for the SAME `key={s.id}` depending on `s.done`, so when
+  // the refresh flips this row to not-done React reconciles in place and swaps the
+  // children — unmounting the button the user just pressed. Nothing moved focus,
+  // so a keyboard or screen-reader user was dropped to `<body>` at the exact
+  // moment their correction succeeded.
+  //
+  // Mirrors `focus-timer.tsx`'s `setupCtaRef` hand-off (gated there on
+  // `undone && phase === "setup"`): remember which id this component just undid,
+  // and once the row has actually re-rendered as not-done, focus its primary
+  // control. Gated on *this component having done the undo* so that a row
+  // reopening for any other reason — the timer, another tab, a routine
+  // revalidation — cannot yank focus out from under whatever the user is doing.
+  // Both of these are refs, not state, and deliberately so: `react-hooks/
+  // set-state-in-effect` is right that clearing a flag from inside an effect
+  // causes a cascading render, and none of this needs to drive one. The hand-off
+  // is a one-shot side effect on the DOM, which is exactly what a ref is for.
+  const justUndidRef = useRef<string | null>(null);
+  const ctaRefs = useRef(new Map<string, HTMLAnchorElement | null>());
+
+  useEffect(() => {
+    const id = justUndidRef.current;
+    if (!id) return;
+    const row = steps.find((s) => s.id === id);
+    // Still `done` means the refresh has not landed yet — the effect re-runs on
+    // the next `steps` change. A row that vanished entirely has nothing to
+    // receive focus, but the flag still has to be dropped or it would fire at
+    // some unrelated later render.
+    if (row?.done) return;
+    justUndidRef.current = null;
+    if (row) ctaRefs.current.get(id)?.focus();
+  }, [steps]);
+
   const uncomplete = (stepId: string) => {
     setUndoingIds((ids) => new Set(ids).add(stepId));
     // Cleared on the way in, not only on success: a retry that is still in flight
@@ -132,6 +166,9 @@ export function TaskSteps({
     start(async () => {
       try {
         await uncompleteStep(stepId);
+        // Recorded BEFORE the refresh, so the effect above is already armed when
+        // the re-render that unmounts this button arrives.
+        justUndidRef.current = stepId;
         router.refresh();
       } catch {
         // Deliberately not rethrown. The server action is atomic, so a rejection
@@ -356,6 +393,16 @@ export function TaskSteps({
                       <Link
                         key="focus"
                         href={`/focus/${s.id}`}
+                        // #206 — the hand-off target for a just-undone step.
+                        // Start/Resume Focus, deliberately NOT Complete: the user
+                        // has just un-completed this step, so landing focus on the
+                        // one control that re-completes it turns a stray Enter
+                        // into an undo of their undo. Registered per row rather
+                        // than conditionally, so no render depends on which row
+                        // was undone.
+                        ref={(el) => {
+                          ctaRefs.current.set(s.id, el);
+                        }}
                         className="bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90"
                       >
                         {focusLabel}
