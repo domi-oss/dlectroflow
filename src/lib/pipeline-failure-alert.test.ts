@@ -783,6 +783,113 @@ describe("scripts/ops-digest.sh", () => {
     },
   ];
 
+  /**
+   * The digest also runs `check-vuln-freshness.sh` (#166), and it POSTs to the
+   * same `/api/graphql` the drain check does — so these routes have to sit
+   * AFTER `registryRoutes()`, in the order the digest makes the calls (drain
+   * policy, drain tags, freshness anchor, freshness vulnerabilities).
+   *
+   * They exist for the same reason the drain routes do, and the failure they
+   * close is the one documented above: without them the stub replays the
+   * drain check's bodies on pass 2, the freshness check reads a
+   * `containerRepository` payload where it expected a `project`, and the
+   * digest's Security section renders "undetermined" — with all three tests
+   * still green and nothing asserting on it. An unexercised happy path is the
+   * #113 anti-pattern, and #166 is the issue about a number nobody can date.
+   */
+  const FRESHNESS_NOW = "2026-08-04T00:00:00Z";
+  const freshHoursAgo = (hours: number) =>
+    new Date(Date.parse(FRESHNESS_NOW) - hours * 3_600_000)
+      .toISOString()
+      .replace(".000Z", "Z");
+  const freshnessRoutes = (): Route[] => [
+    {
+      method: "POST",
+      match: "/api/graphql",
+      body: {
+        data: {
+          project: {
+            pipelines: {
+              nodes: [
+                {
+                  iid: "1928",
+                  status: "FAILED",
+                  finishedAt: freshHoursAgo(2),
+                  // One green run of each analyzer, in a RED pipeline: the
+                  // scanners are allow_failure: true on `main`, so the job is
+                  // the anchor and the pipeline's own status is not.
+                  sast: {
+                    nodes: [
+                      {
+                        name: "semgrep-sast",
+                        status: "SUCCESS",
+                        finishedAt: freshHoursAgo(2),
+                      },
+                    ],
+                  },
+                  dependency: {
+                    nodes: [
+                      {
+                        name: "gemnasium-dependency_scanning",
+                        status: "SUCCESS",
+                        finishedAt: freshHoursAgo(2),
+                      },
+                    ],
+                  },
+                  container: {
+                    nodes: [
+                      {
+                        name: "container_scanning",
+                        status: "SUCCESS",
+                        finishedAt: freshHoursAgo(2),
+                      },
+                    ],
+                  },
+                  secret: {
+                    nodes: [
+                      {
+                        name: "secret_detection",
+                        status: "SUCCESS",
+                        finishedAt: freshHoursAgo(2),
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    },
+    {
+      method: "POST",
+      match: "/api/graphql",
+      body: {
+        data: {
+          project: {
+            vulnerabilities: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: [
+                {
+                  severity: "HIGH",
+                  reportType: "DEPENDENCY_SCANNING",
+                  detectedAt: freshHoursAgo(5),
+                  resolvedOnDefaultBranch: false,
+                },
+                {
+                  severity: "MEDIUM",
+                  reportType: "SAST",
+                  detectedAt: freshHoursAgo(5),
+                  resolvedOnDefaultBranch: true,
+                },
+              ],
+            },
+          },
+        },
+      },
+    },
+  ];
+
   const digestRoutes = (behind: number): Route[] => [
     {
       method: "GET",
@@ -797,9 +904,9 @@ describe("scripts/ops-digest.sh", () => {
     },
     { method: "GET", match: `=${PROD_URL}/`, body: {} },
     ...registryRoutes(),
+    ...freshnessRoutes(),
     { method: "GET", match: "/pipelines", body: [] },
     { method: "GET", match: "/merge_requests", body: [] },
-    { method: "GET", match: "/vulnerabilities", body: [] },
     { method: "GET", match: "/issues?state=opened", body: [] },
     { method: "POST", match: "/notes", body: { id: 1 } },
   ];
@@ -824,6 +931,47 @@ describe("scripts/ops-digest.sh", () => {
     expect(body).toMatch(/registry cleanup policy is draining/);
     expect(body).toMatch(/name_regex_keep/);
     expect(body).toMatch(/UNSCHEDULED/);
+  });
+
+  it("carries a DATED vulnerability count into the posted digest (#166)", () => {
+    // The Security section used to print one number with nothing that said how
+    // old it was. Asserted on a POPULATED block rather than on the script being
+    // called: an "undetermined" block is also a block, and it is what this test
+    // saw before `freshnessRoutes()` existed.
+    const result = drive(DIGEST_SCRIPT, {
+      routes: digestRoutes(0),
+      env: {
+        OPS_DIGEST_ISSUE_IID: "16",
+        ALERT_ISSUE_IID: undefined,
+        CI_PROJECT_PATH: "acme/dlectroflow",
+        REGISTRY_DRAIN_NOW: DRAIN_NOW,
+        VULN_FRESHNESS_NOW: FRESHNESS_NOW,
+      },
+    });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    const body = result.bodies.find(
+      (b) => typeof b === "string" && b.includes("ops digest"),
+    ) as string;
+    const security = body.slice(
+      body.indexOf("**Security**"),
+      body.indexOf("**Dependencies**"),
+    );
+    expect(security).not.toBe("");
+    // The headline the digest derives from the exit code…
+    expect(security).toMatch(/✅ the vulnerability count below is current/);
+    // …and the block itself: the count, the query that produced it, the
+    // instant that dates it, and the age against the budget.
+    expect(security).toMatch(/\*\*2 active\*\* findings/);
+    expect(security).toContain(
+      "project.vulnerabilities(state: [DETECTED, CONFIRMED])",
+    );
+    expect(security).toContain(FRESHNESS_NOW);
+    expect(security).toMatch(/Oldest evidence: \w+/);
+    expect(security).toMatch(/192h budget/);
+    // The thing that must NOT happen, and did before this route existed.
+    expect(security).not.toMatch(/undetermined/);
+    expect(security).not.toMatch(/could not determine/);
   });
 
   it("drops the 7-day window rather than inventing a 1969 one", () => {
@@ -873,7 +1021,6 @@ describe("scripts/ops-digest.sh", () => {
         { method: "GET", match: `=${PROD_URL}/`, body: {} },
         { method: "GET", match: "/pipelines", body: [] },
         { method: "GET", match: "/merge_requests", body: [] },
-        { method: "GET", match: "/vulnerabilities", body: [] },
         { method: "GET", match: "/issues?state=opened", body: [] },
         { method: "POST", match: "/notes", body: { id: 1 } },
       ],

@@ -166,18 +166,29 @@ renovate_mrs="$(curl -s -H "$AUTH" "${API}/merge_requests?state=opened&per_page=
   | jq -r '([.[] | select(.source_branch | startswith("renovate/"))] | length) as $r
            | if length == 100 then "\($r)+" else "\($r)" end' 2>/dev/null || echo '?')"
 
-# ── 4. Security signal ───────────────────────────────────────────────────────
-# Vulnerability Report count (Ultimate). The REST vuln endpoint may be
-# unavailable → shows '?'; the authoritative source is the Vulnerability Report
-# UI + the Scan Result Policy. Open security-labelled issues is the reliable
-# secondary signal (Duo's security-assessment files those).
-# Filter by state SERVER-SIDE (`state[]=detected&state[]=confirmed`) so the 100
-# page cap bounds ACTIVE vulns only — otherwise a project with >100 total vulns
-# (mostly dismissed) could push the active ones off page 1 and silently
-# undercount. The client-side select stays as a belt-and-suspenders in case the
-# param is ignored; `100+` then honestly means ≥100 active.
-vulns="$(curl -s -H "$AUTH" "${API}/vulnerabilities?state[]=detected&state[]=confirmed&per_page=100" \
-  | jq -r '[.[] | select(.state=="detected" or .state=="confirmed")] | length | if . == 100 then "100+" else . end' 2>/dev/null || echo '?')"
+# ── 4. Security signal — and how old it is (#166) ────────────────────────────
+# This section used to print one number: "Active Vulnerability Report findings
+# (detected+confirmed): **N**". True, useful, and completely undateable — which
+# is the whole of #166. The same shape had already cost twice by the time it was
+# filed: #152 recorded a snapshot of `0` active and `0` Critical/High that read
+# 12 and 3 on the same surface three days later, and `!254`/`!252` were both
+# hard-blocked for twelve findings neither of them introduced, with no way for
+# either to tell "I introduced this" from "the baseline is old".
+#
+# So the count now arrives from check-vuln-freshness.sh with the query that
+# produced it and the instant that dates it attached, on the 2b/2c/2d pattern.
+# Exit 2 must never render as ✅: "could not date it" is an unknown, and an
+# unknown nobody can see is indistinguishable from a pass.
+set +e
+vuln_block="$(bash "${HERE}/check-vuln-freshness.sh")"
+vuln_status=$?
+set -e
+case "$vuln_status" in
+0) vuln_headline="✅ the vulnerability count below is current, and says so" ;;
+1) vuln_headline="🔴 **the vulnerability count below is stale** — see the age against the budget" ;;
+*) vuln_headline="⚠️ **undetermined** — this is an unknown, not an all-clear" ;;
+esac
+
 sec_issues="$(curl -s -H "$AUTH" "${API}/issues?state=opened&labels=security&per_page=100" \
   | jq -r 'length | if . == 100 then "100+" else . end' 2>/dev/null || echo '?')"
 
@@ -212,8 +223,9 @@ ${registry_block}
 **CI**
 - Failed \`main\` pipelines (${WINDOW_LABEL}): **${failed_pipes}**
 
-**Security**
-- Active Vulnerability Report findings (detected+confirmed): **${vulns}**
+**Security** — how old is the vulnerability count? (#166)
+- ${vuln_headline}
+${vuln_block}
 - Open \`security\`-labelled issues: **${sec_issues}**
 - Deep monthly assessment → run \`.gitlab/duo/prompts/security-assessment.md\` via Duo (#33 item 2).
 
