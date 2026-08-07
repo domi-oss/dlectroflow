@@ -23,6 +23,11 @@
  * does not — nor does `rename {old} to {new}.`, because the `.` means the group
  * is not final. That refusal is the feature, not a limitation of it.
  *
+ * There is a **second** condition, and it exists for the rename path rather than
+ * for the syntax: the split must leave behind text that would not split again.
+ * `fix {foo} {bar}` therefore stays literal. `splitInlineNote`'s own doc comment
+ * argues it, because the reason is idempotence and not readability.
+ *
  * ## The residual case, stated rather than left to be discovered
  *
  * `store this: {"a": 1}` DOES split, into `store this:` plus a note reading
@@ -79,37 +84,85 @@ function matchingOpenBrace(s: string, closeAt: number): number {
 }
 
 /**
+ * Apply the end-anchored rule once: the trailing group of `s`, or `null` when
+ * the rule does not fire.
+ *
+ * Split out from `splitInlineNote` so the stability check below can ask the
+ * question a SECOND time without recursing. Recursion would have been the
+ * obvious spelling and is the wrong one — a capture is free-text of any length,
+ * so `a {1} {2} … {N}` would recurse once per group and a long enough paste
+ * would overflow the stack inside a server action. Two flat calls are O(n) and
+ * cannot.
+ *
+ * `s` is assumed already trimmed.
+ */
+function trailingGroup(s: string): { text: string; note: string } | null {
+  if (!s.endsWith("}")) return null;
+
+  const open = matchingOpenBrace(s, s.length - 1);
+  // Unbalanced: a `}` whose `{` never arrives. No group, so the caller keeps the
+  // braces as literal text.
+  if (open === -1) return null;
+
+  const text = s.slice(0, open).trim();
+  // Nothing would be left to name the item. A row whose only content is hidden
+  // behind a note disclosure is not a captured thought, so this is not a group
+  // and the person sees exactly what they typed.
+  if (text === "") return null;
+
+  const note = s.slice(open + 1, s.length - 1).trim();
+  // `{}` — and `{   }`, which is the same intent typed more slowly. There is no
+  // note to make, and eating the characters would be a silent edit with nothing
+  // to show for it, so this is not a group either.
+  if (note === "") return null;
+
+  return { text, note };
+}
+
+/**
  * Split a captured string into its item text and its inline note.
  *
  * Returns the input trimmed and `note: null` whenever the syntax does not
  * apply, which is the overwhelmingly common case — every caller can therefore
  * run this unconditionally instead of sniffing for a `{` first.
  *
- * **Idempotent by construction**, and that is load-bearing rather than
- * incidental: `renameItem` re-parses on every edit, so a function that split a
- * second group off its own output would erode an item's text one brace group
- * per rename. The output's `text` never ends in `}` when a split happened, so
- * re-running it is a no-op.
+ * ## Idempotence is enforced, not hoped for
+ *
+ * `renameItem` re-parses on every edit, and the edit affordance pre-fills its
+ * input with the STORED text — so "the user typed this fresh" and "this is what
+ * we saved last time" reach the parser as the same string, with nothing in it to
+ * tell them apart. A function that split a second group off its own output would
+ * therefore erode an item's text one group per save, and OVERWRITE the note it
+ * already had, for anyone who opened the edit field and saved unchanged.
+ *
+ * So a split is performed only when its own output is stable: if the text that
+ * would be left behind is itself splittable, the whole string stays literal.
+ * `fix {foo} {bar}` is the case — it has a group at the very end, but leaving
+ * `fix {foo}` behind would set that erosion going, so nothing is split and the
+ * person sees exactly what they typed.
+ *
+ * That refusal costs a note in a shape nobody captures often (a mid-string
+ * placeholder AND a trailing note), and it is the direction #179 argues for
+ * everywhere else: a visible refusal beats a silent edit. It does not touch the
+ * common mid-string case, because `deploy the {{VERSION}} chart` does not end in
+ * a group — only a group sitting at the very end of the residual triggers it.
+ *
+ * The resulting invariant is the one the callers need: **`text` never
+ * re-splits**, in either branch. `braindump-note-syntax.test.ts` asserts it over
+ * every shape in the file rather than over one example, because the single-group
+ * example cannot reach the failure.
  */
 export function splitInlineNote(raw: string): InlineNoteSplit {
   const trimmed = raw.trim();
-  if (!trimmed.endsWith("}")) return { text: trimmed, note: null };
 
-  const open = matchingOpenBrace(trimmed, trimmed.length - 1);
-  // Unbalanced: a `}` whose `{` never arrives. Literal, whole string.
-  if (open === -1) return { text: trimmed, note: null };
+  const group = trailingGroup(trimmed);
+  if (group === null) return { text: trimmed, note: null };
 
-  const text = trimmed.slice(0, open).trim();
-  // Nothing would be left to name the item. A row whose only content is hidden
-  // behind a note disclosure is not a captured thought, so the braces stay
-  // literal and the person can see exactly what they typed.
-  if (text === "") return { text: trimmed, note: null };
+  // The stability check. `trailingGroup` rather than a `endsWith("}")` test,
+  // because a residual can end in `}` and still be stable: `a} b {note}` leaves
+  // `a} b`, whose brace has no opener and so would never split again. Testing
+  // the character would deny that note for no reason.
+  if (trailingGroup(group.text) !== null) return { text: trimmed, note: null };
 
-  const note = trimmed.slice(open + 1, trimmed.length - 1).trim();
-  // `{}` — and `{   }`, which is the same intent typed more slowly. There is no
-  // note to make, and eating the characters would be a silent edit with nothing
-  // to show for it, so the group stays literal too.
-  if (note === "") return { text: trimmed, note: null };
-
-  return { text, note };
+  return group;
 }
