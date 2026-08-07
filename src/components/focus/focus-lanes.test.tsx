@@ -36,6 +36,10 @@ const multi = (
   stepsTotal: 2,
   nextStepText: null,
   nextStepEmoji: null,
+  // #187 — defaulted here rather than at each call site, so the ~30 existing
+  // cases stay untouched and a spec that cares about a deadline opts in with
+  // one override. `null` is the honest default: most rows have no deadline.
+  dueAt: null,
   ...o,
 });
 
@@ -44,6 +48,12 @@ const single = (
 ): SingleFocusable => ({
   text: o.itemId,
   estMinutes: 8,
+  // Both #187 fields defaulted. `taskId: null` is the commoner shape — a to-do
+  // that has never been broken down, scheduled or focused has no Task yet, and
+  // that is exactly the row whose Schedule control has to degrade to the
+  // duration presets.
+  taskId: null,
+  dueAt: null,
   ...o,
 });
 
@@ -83,7 +93,15 @@ describe("SingleTaskLane", () => {
     render(
       <SingleTaskLane
         voice="plain"
-        items={[{ itemId: "i1", text: "Buy milk", estMinutes: 8 }]}
+        items={[
+          {
+            itemId: "i1",
+            text: "Buy milk",
+            estMinutes: 8,
+            taskId: null,
+            dueAt: null,
+          },
+        ]}
       />,
     );
     await user.click(screen.getByRole("button", { name: /start/i }));
@@ -96,7 +114,15 @@ describe("SingleTaskLane", () => {
     render(
       <SingleTaskLane
         voice="plain"
-        items={[{ itemId: "i1", text: "Buy milk", estMinutes: 8 }]}
+        items={[
+          {
+            itemId: "i1",
+            text: "Buy milk",
+            estMinutes: 8,
+            taskId: null,
+            dueAt: null,
+          },
+        ]}
       />,
     );
     await user.click(screen.getByRole("button", { name: /complete/i }));
