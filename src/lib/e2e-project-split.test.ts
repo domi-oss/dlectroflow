@@ -160,11 +160,34 @@ function e2eFiles(): string[] {
     .sort();
 }
 
-/** A project's `testMatch`/`testIgnore` normalised to an array of RegExp. */
+/**
+ * A project's `testMatch`/`testIgnore` normalised to an array of RegExp.
+ *
+ * **Throws rather than filtering.** Playwright's types allow a plain string
+ * glob, and this used to drop one silently — which would normalise the project
+ * to `testMatch: []`, and `claimingProjects` reads that as "matches nothing"
+ * rather than "matches via glob". The guard would then confidently report a
+ * routing model that has nothing to do with what Playwright actually does, and
+ * report it as a pass. Raised in review on !277.
+ *
+ * A loud failure is the only safe behaviour here: this whole file exists to
+ * catch the routing quietly drifting, so it cannot itself contain a quiet
+ * drift. If a string pattern is ever genuinely wanted, teach this function to
+ * translate globs — do not soften it back into a filter.
+ */
 function patterns(value: unknown): RegExp[] {
   if (value == null) return [];
   const list = Array.isArray(value) ? value : [value];
-  return list.filter((p): p is RegExp => p instanceof RegExp);
+  return list.map((p) => {
+    if (!(p instanceof RegExp)) {
+      throw new Error(
+        `e2e-project-split guard cannot model a non-RegExp pattern: ${JSON.stringify(p)}. ` +
+          `Playwright allows string globs, but this harness only understands RegExp, so ` +
+          `silently skipping it would make every routing assertion below measure the wrong thing.`,
+      );
+    }
+    return p;
+  });
 }
 
 /** A project exactly as the config declares it, before routing normalisation. */
@@ -205,6 +228,26 @@ async function realProjects(): Promise<{
     })),
   };
 }
+
+// `patterns()` is the bridge between the real config and this file's model of
+// it, so a value it cannot represent has to stop the run rather than be skipped.
+// Raised in review on !277.
+describe("patterns() refuses what it cannot model", () => {
+  it("throws on a string glob instead of dropping it", () => {
+    expect(() => patterns("**/*.spec.ts")).toThrow(/non-RegExp pattern/);
+  });
+
+  it("throws when a string hides among RegExps in an array", () => {
+    expect(() => patterns([/a/, "**/b.spec.ts"])).toThrow(/non-RegExp pattern/);
+  });
+
+  it("still passes RegExps through, singly and in arrays", () => {
+    expect(patterns(/a/)).toEqual([/a/]);
+    expect(patterns([/a/, /b/])).toEqual([/a/, /b/]);
+    expect(patterns(null)).toEqual([]);
+    expect(patterns(undefined)).toEqual([]);
+  });
+});
 
 describe("the committed e2e tree routes cleanly (#127)", () => {
   it("the suite-wide testMatch still means '*.spec.ts'", async () => {
