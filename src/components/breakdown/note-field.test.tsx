@@ -130,6 +130,38 @@ describe("NoteField — collapsed by default", () => {
     // body stays mounted behind `hidden` rather than being unmounted.
     expect(document.getElementById(controls as string)).not.toBeNull();
   });
+
+  it("keeps the trigger label left-aligned, against touchTarget's justify-center", () => {
+    // Raised by review on !278 (#184), and it is a real defect — though not
+    // quite the one reported. The report was that moving this button to the
+    // shared `touchTarget` dropped `inline-flex`, `items-center` and
+    // `text-left`, and suggested restoring all three. Two of those come back on
+    // their own: `touchTarget` is
+    // `inline-flex items-center justify-center min-h-11 min-w-11`, so it already
+    // supplies the flex context and the cross-axis centring.
+    //
+    // `justify-center` is the part that bites. It is NEW here — the old class
+    // string had `text-left` and no justification at all — and combined with
+    // `touchTarget`'s `min-w-11` floor a short label now sits centred in a box
+    // wider than its text, where it used to sit left. Restoring `text-left`
+    // does NOT fix that: `text-align` governs inline content inside a flex
+    // ITEM, not how the flex CONTAINER distributes its items along the main
+    // axis. Only an explicit `justify-start` overrides it.
+    //
+    // Pinned as a class assertion rather than a visual check because `cn` is
+    // `twMerge`, so the fix is order-dependent — `justify-start` wins only
+    // while it stays AFTER `touchTarget` in the argument list, and swapping
+    // those two would silently re-centre the label with no other symptom.
+    renderField();
+    const cls =
+      screen
+        .getByRole("button", { name: /^note for/i })
+        .getAttribute("class") ?? "";
+    expect(cls).toContain("justify-start");
+    expect(cls).not.toContain("justify-center");
+    // The floor that made the misalignment visible in the first place.
+    expect(cls).toContain("min-w-11");
+  });
 });
 
 describe("NoteField — an existing note is readable without expanding", () => {

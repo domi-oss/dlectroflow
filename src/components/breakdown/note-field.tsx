@@ -336,9 +336,16 @@ export function NoteField({
         //
         // `focus-visible:ring-2` rather than a colour swap, because WCAG 2.4.11
         // Focus Appearance is not satisfied by a change of hue alone.
+        //
+        // `justify-start text-left` AFTER `touchTarget`, not before: `cn` is
+        // `twMerge`, so the later `justify-start` is what displaces the
+        // `justify-center` that `touchTarget` carries. Raised by review on !278.
+        // This button is the one place a label sits beside its 44px floor rather
+        // than being an icon centred in it, so centring it would shift a short
+        // label off the text edge every other row control aligns to.
         className={cn(
           touchTarget,
-          "focus-visible:ring-ring focus-visible:ring-offset-background hover:bg-accent rounded-md px-2 font-medium outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
+          "focus-visible:ring-ring focus-visible:ring-offset-background hover:bg-accent justify-start rounded-md px-2 text-left font-medium outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
         )}
       >
         {triggerLabel}
