@@ -794,3 +794,111 @@ describe("acquireWakeLock", () => {
     expect(wakeRequest).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * #185 — the pool is now the union of ticked CATEGORIES and ticked CUSTOM
+ * PLAYLISTS, which are flat track-id lists rather than category references.
+ *
+ * The union is still built by FILTERING the catalogue, not by concatenating the
+ * two halves, and that is behavioural rather than stylistic for the same reason
+ * #180 gave: the player's in-order pass walks this list, so a concatenation
+ * would play the categories and then the playlist as two blocks, and a track in
+ * both would be heard twice in one pass.
+ */
+describe("focus-sounds — categories UNION custom playlists (#185)", () => {
+  const streamed = (title: string, category: string, label: string) => ({
+    id: `catalog:${title.toLowerCase().replace(/\W+/g, "-")}.mp3`,
+    title,
+    category,
+    categoryLabel: label,
+    src: `/api/focus-catalog/audio?track=${title.toLowerCase().replace(/\W+/g, "-")}.mp3`,
+  });
+
+  it("returns the SAME array when neither half selects anything", async () => {
+    const { resolveFocusPool, FOCUS_SOUND_TRACKS } =
+      await import("@/lib/focus-sounds");
+    expect(resolveFocusPool(FOCUS_SOUND_TRACKS, [], [])).toBe(
+      FOCUS_SOUND_TRACKS,
+    );
+    expect(resolveFocusPool(FOCUS_SOUND_TRACKS, null, null)).toBe(
+      FOCUS_SOUND_TRACKS,
+    );
+  });
+
+  it("narrows to a custom playlist's tracks with no category ticked at all", async () => {
+    const { resolveFocusPool, FOCUS_SOUND_TRACKS } =
+      await import("@/lib/focus-sounds");
+    const picked = [FOCUS_SOUND_TRACKS[3].id, FOCUS_SOUND_TRACKS[1].id];
+    // Catalogue order, NOT the order the ids were listed in.
+    expect(resolveFocusPool(FOCUS_SOUND_TRACKS, [], picked)).toEqual([
+      FOCUS_SOUND_TRACKS[1],
+      FOCUS_SOUND_TRACKS[3],
+    ]);
+  });
+
+  it("unions the two halves and plays a track in both exactly once", async () => {
+    const { resolveFocusPool, FOCUS_SOUND_TRACKS } =
+      await import("@/lib/focus-sounds");
+    const chillhop = FOCUS_SOUND_TRACKS.find((t) => t.category === "chillhop")!;
+    const jazzhop = FOCUS_SOUND_TRACKS.find((t) => t.category === "jazzhop")!;
+    const pool = resolveFocusPool(
+      FOCUS_SOUND_TRACKS,
+      ["chillhop"],
+      // The chillhop track is in the playlist too — the union must not repeat it.
+      [chillhop.id, jazzhop.id],
+    );
+    expect(pool).toEqual([chillhop, jazzhop]);
+  });
+
+  it("filters a track id this instance's catalogue does not carry", async () => {
+    // The reason `trackIds` has no CHECK constraint: ids are catalogue data, so
+    // an id that resolves on one instance simply does not exist on another.
+    const { resolveFocusPool, FOCUS_SOUND_TRACKS } =
+      await import("@/lib/focus-sounds");
+    const known = FOCUS_SOUND_TRACKS[2];
+    expect(
+      resolveFocusPool(
+        FOCUS_SOUND_TRACKS,
+        [],
+        ["catalog:nowhere.mp3", known.id],
+      ),
+    ).toEqual([known]);
+  });
+
+  it("widens back to the whole catalogue when the playlist resolves to nothing", async () => {
+    // Same never-go-silent rule a retired category slug already gets: a playlist
+    // whose every track has left the manifest must not leave a session silent.
+    const { resolveFocusPool, FOCUS_SOUND_TRACKS } =
+      await import("@/lib/focus-sounds");
+    expect(
+      resolveFocusPool(FOCUS_SOUND_TRACKS, [], ["catalog:nowhere.mp3"]),
+    ).toBe(FOCUS_SOUND_TRACKS);
+  });
+
+  it("a dead playlist alongside a live category is NOT the empty case", async () => {
+    const { resolveFocusPool, FOCUS_SOUND_TRACKS } =
+      await import("@/lib/focus-sounds");
+    const grown = [
+      ...FOCUS_SOUND_TRACKS,
+      streamed("Paper Cranes", "chillhop", "Chillhop"),
+    ];
+    expect(
+      resolveFocusPool(grown, ["jazzhop"], ["catalog:nowhere.mp3"]).map(
+        (t) => t.title,
+      ),
+    ).toEqual(["Breezy Afternoon Terrace"]);
+  });
+
+  it("poolIsWholeCatalogue sees the playlist half too", async () => {
+    const { poolIsWholeCatalogue, FOCUS_SOUND_TRACKS } =
+      await import("@/lib/focus-sounds");
+    // A playlist that narrows: the "All tracks" row must go quiet.
+    expect(
+      poolIsWholeCatalogue(FOCUS_SOUND_TRACKS, [], [FOCUS_SOUND_TRACKS[0].id]),
+    ).toBe(false);
+    // One that resolves to nothing is widened, so it is still "All tracks".
+    expect(
+      poolIsWholeCatalogue(FOCUS_SOUND_TRACKS, [], ["catalog:nowhere.mp3"]),
+    ).toBe(true);
+  });
+});
