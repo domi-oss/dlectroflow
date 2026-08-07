@@ -87,12 +87,42 @@ CREATE UNIQUE INDEX "FocusPlaylist_workspaceId_name_key"
 --
 -- The lower bound is here too, and it is not decoration. "An empty or
 -- whitespace-only name must be refused visibly" is a UI promise (#185); this is
--- what makes it a fact. `btrim` so a name of three spaces cannot satisfy it —
--- the normaliser trims before storing, and this is the backstop for a writer
--- that does not.
+-- what makes it a fact. The normaliser trims before storing, and this is the
+-- backstop for a writer that does not.
+--
+-- Stated as "contains at least one non-whitespace character" rather than as
+-- `char_length(btrim(...)) >= 1`, and the reason is a bug this constraint
+-- actually shipped with (review, `!282`, then a second round on the fix):
+--
+--   1. `btrim("name")` with no character set strips ONLY a plain space —
+--      Postgres defaults `characters` to `' '`. A name of three TABS satisfied
+--      the bound and reached the table, while JS `.trim()` on the TS side
+--      strips it and `focusPlaylistNameError` calls the same value empty. The
+--      backstop was weaker than the thing it backed up.
+--
+--   2. The obvious repair, `btrim("name", E' \t\n\r\f\v')`, is WORSE, and
+--      silently so. **Postgres's E'' syntax has no `\v` escape.** It is not an
+--      error — it degrades to a literal lowercase `v`. The applied set read
+--      codepoints 32,9,10,13,12,118: vertical tab still not stripped, and a
+--      playlist honestly named "v" or "vvv" now REJECTED as empty. Caught by
+--      the integration test in `src/lib/focus-playlist-name-check.integration.test.ts`,
+--      not by reading it back.
+--
+-- `[[:space:]]` is a POSIX class, so there is no escape sequence to get wrong,
+-- and `~` on a negated class also rejects the empty string without a separate
+-- clause. It says the invariant instead of encoding a way to compute it.
+--
+-- KNOWN RESIDUAL, recorded rather than papered over: `[[:space:]]` covers ASCII
+-- whitespace, while JS `.trim()` also strips Unicode separators such as U+00A0.
+-- A name of one non-breaking space is therefore refused by the TS validator and
+-- accepted here. Left alone deliberately — closing it means a Unicode property
+-- class whose behaviour varies with the server's collation, which trades a known
+-- narrow gap for an unknown portable one. The visible refusal is the UI promise;
+-- this is the backstop, and it now stops strictly more than it did.
 ALTER TABLE "FocusPlaylist"
   ADD CONSTRAINT "FocusPlaylist_name_check"
-  CHECK (char_length(btrim("name")) >= 1 AND char_length("name") <= 60);
+  CHECK ("name" ~ '[^[:space:]]' AND char_length("name") <= 60);
+
 
 -- The selection. Sibling of Settings.focusSoundCategories, and empty for every
 -- existing row — nobody has a custom playlist yet, so there is no conversion to
