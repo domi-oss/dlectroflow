@@ -453,6 +453,20 @@ operators upgrading a self-hosted instance don't get surprised.
   a genuine Prisma failure still prints exactly as before, and a test asserts
   both halves against a real database.
 
+- **…and the same false alarm is gone from the four other places it could still
+  come from (#158).** #156 fixed the one that had actually been reported and
+  deliberately left the rest recorded. Earning a badge you already hold, a guest
+  and a signed-in account each using AI for the first time, and — with no
+  concurrency involved at all — an owner inviting somebody who is already
+  invited: every one of those was handled correctly and every one still printed
+  `Unique constraint failed` at error level, because Prisma's logger fires
+  before the application's error handling ever sees it. All four now insert with
+  `INSERT ... ON CONFLICT DO NOTHING` and read the row count instead. No
+  behaviour changes: the same badge is awarded once, the same quotas are
+  enforced to the same numbers, and re-inviting somebody still reports "already
+  invited". Error logging is again untouched — the test that proves the four are
+  silent also proves a genuine database failure still prints.
+
 - **The WCAG-AA failures the accessibility suite could not see, and the gate that
   now catches them (#109, #117).** Both issues are one structural blind
   spot: the automated gates only measure what is painted during the scan, so a

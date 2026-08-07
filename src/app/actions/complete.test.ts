@@ -21,7 +21,7 @@ const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
       },
       badge: {
         findUnique: vi.fn().mockResolvedValue(null),
-        create: vi.fn().mockResolvedValue({}),
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       focusSession: { findFirst: vi.fn(), update: vi.fn() },
       streak: {},
