@@ -91,6 +91,29 @@ function matchingOpenBrace(s: string, closeAt: number): number {
 }
 
 /**
+ * Where the trailing brace pair of `s` is, or `null` when `s` has none.
+ *
+ * Purely about BRACES — it says nothing about whether they enclose a note. That
+ * separation is what {@link inlineNoteInsertion} needs: `buy milk {}` holds no
+ * note (the group is empty, so `trailingGroup` refuses it) while very much
+ * holding a trailing group, and the "add note" button must put the caret inside
+ * that one rather than appending a second pair beside it.
+ *
+ * `s` must have no trailing whitespace, since the pair has to be the last thing
+ * in the string for the rule to fire at all.
+ */
+function trailingGroupRange(s: string): { open: number; close: number } | null {
+  if (!s.endsWith("}")) return null;
+
+  const open = matchingOpenBrace(s, s.length - 1);
+  // Unbalanced: a `}` whose `{` never arrives. No group, so the caller keeps the
+  // braces as literal text.
+  if (open === -1) return null;
+
+  return { open, close: s.length - 1 };
+}
+
+/**
  * Apply the end-anchored rule once: the trailing group of `s`, or `null` when
  * the rule does not fire.
  *
@@ -104,13 +127,10 @@ function matchingOpenBrace(s: string, closeAt: number): number {
  * `s` is assumed already trimmed.
  */
 function trailingGroup(s: string): { text: string; note: string } | null {
-  if (!s.endsWith("}")) return null;
+  const range = trailingGroupRange(s);
+  if (range === null) return null;
 
-  const open = matchingOpenBrace(s, s.length - 1);
-  // Unbalanced: a `}` whose `{` never arrives. No group, so the caller keeps the
-  // braces as literal text.
-  if (open === -1) return null;
-
+  const { open } = range;
   const text = s.slice(0, open).trim();
   // Nothing would be left to name the item. A row whose only content is hidden
   // behind a note disclosure is not a captured thought, so this is not a group
@@ -145,6 +165,60 @@ function trailingGroup(s: string): { text: string; note: string } | null {
 export function splitInlineNote(raw: string): InlineNoteSplit {
   const trimmed = raw.trim();
   return trailingGroup(trimmed) ?? { text: trimmed, note: null };
+}
+
+/** Where an input's value and caret should go when the note braces are inserted. */
+export type InlineNoteInsertion = {
+  /** The input's new value. */
+  value: string;
+  /**
+   * Where the caret goes: the index of the group's closing `}`, so the next
+   * character typed lands INSIDE the braces. Always a collapsed caret and never
+   * a selection — selecting an existing note's text would mean the first
+   * keystroke wiped it.
+   */
+  caret: number;
+};
+
+/**
+ * Put the note braces into a capture/edit input's value and say where the caret
+ * belongs (#186).
+ *
+ * The affordance this backs exists for two reasons. On a phone `{` and `}` are
+ * two or three taps deep in the symbol keyboard, which is friction on the one
+ * control that has to be faster than the thought it captures; and nothing on
+ * screen otherwise tells anybody the syntax exists at all.
+ *
+ * Kept here, next to the parser, rather than in the component: the caret's
+ * position and the note's position are the same fact, and a component that
+ * worked it out for itself would be a second implementation of "where does a
+ * note start" that agrees until one of them is edited.
+ *
+ * ## Two branches, and why the second one is the whole point
+ *
+ * With no trailing group, ` {}` is appended. With one already there — including
+ * an EMPTY one, which is not a note but is certainly a group — the caret goes
+ * inside it and the value is left alone. Appending regardless would turn
+ * `fix {foo}` into `fix {foo} {}`, and under Decision 1 the note is the LAST
+ * group: the note the person was about to write would become `{bar}` while
+ * `{foo}` was silently demoted to text. Reusing the group also makes the button
+ * idempotent, so a double tap cannot produce `{} {}`.
+ *
+ * `trimEnd` rather than `trim`, because indices are measured from position 0 and
+ * must stay valid in the returned string — dropping LEADING whitespace would
+ * shift every one of them.
+ */
+export function inlineNoteInsertion(raw: string): InlineNoteInsertion {
+  const value = raw.trimEnd();
+
+  const range = trailingGroupRange(value);
+  if (range !== null) return { value, caret: range.close };
+
+  // No separator to add when there is nothing in front of the braces. The button
+  // is disabled on an empty field — a note is a note ABOUT something — so this
+  // is a total function rather than a reachable case.
+  const composed = value === "" ? "{}" : `${value} {}`;
+  return { value: composed, caret: composed.length - 1 };
 }
 
 /**

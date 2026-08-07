@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   splitInlineNote,
   inlineNoteSource,
+  inlineNoteInsertion,
   resolveInlineNoteEdit,
   type InlineNoteSplit,
 } from "@/lib/braindump-note-syntax";
@@ -676,5 +677,151 @@ describe("the save layer (#179)", () => {
         }),
       ).toEqual({ text: "buy milk {}", note: "2 pints" });
     });
+  });
+});
+
+/**
+ * The "add note" affordance's one piece of syntax knowledge (#186).
+ *
+ * The button exists because `{` and `}` are two or three taps deep in a phone's
+ * symbol keyboard, and because nothing on screen otherwise says the syntax
+ * exists. It puts the braces in and the caret between them; everything about
+ * WHERE that is lives here rather than in the component, so the caret and the
+ * parser cannot disagree about where a note starts.
+ *
+ * The function reasons about BRACES; `splitInlineNote` decides whether those
+ * braces are a note. That split matters for `buy milk {}` — an empty group is
+ * not a note, but it is very much an existing trailing group, and appending a
+ * second one to it is the failure this whole function exists to avoid.
+ */
+describe("inlineNoteInsertion (#186)", () => {
+  describe("no trailing group — append one", () => {
+    it("appends a space, the braces, and puts the caret between them", () => {
+      expect(inlineNoteInsertion("buy milk")).toEqual({
+        value: "buy milk {}",
+        caret: 10,
+      });
+    });
+
+    it("drops trailing whitespace rather than doubling the separator", () => {
+      expect(inlineNoteInsertion("buy milk   ")).toEqual({
+        value: "buy milk {}",
+        caret: 10,
+      });
+    });
+
+    it("adds no separator when there is nothing to separate from", () => {
+      // Unreachable through the button, which is disabled on an empty field —
+      // a note has to be a note ABOUT something. Defined anyway, because a
+      // total function is one less thing for a caller to get wrong.
+      expect(inlineNoteInsertion("")).toEqual({ value: "{}", caret: 1 });
+    });
+
+    it("appends when the only `}` has no opener", () => {
+      // Not a group: `splitInlineNote` reads it as literal text, so the button
+      // must not treat it as somewhere to put a note.
+      expect(inlineNoteInsertion("count the closing brace}")).toEqual({
+        value: "count the closing brace} {}",
+        caret: 26,
+      });
+    });
+
+    it("appends when the group is mid-string", () => {
+      expect(inlineNoteInsertion("fix the {foo} handler")).toEqual({
+        value: "fix the {foo} handler {}",
+        caret: 23,
+      });
+    });
+
+    it("appends when a group is followed by punctuation", () => {
+      expect(inlineNoteInsertion("rename {old} to {new}.")).toEqual({
+        value: "rename {old} to {new}. {}",
+        caret: 24,
+      });
+    });
+
+    it("composes into a string the parser reads as a note", () => {
+      // The whole point, end to end: type into the caret position and the
+      // result is what the person meant. Asserted against the real parser so
+      // the button cannot drift away from the syntax it is a shortcut for.
+      const { value, caret } = inlineNoteInsertion("buy milk");
+      const typed = `${value.slice(0, caret)}2 pints${value.slice(caret)}`;
+      expect(typed).toBe("buy milk {2 pints}");
+      expect(splitInlineNote(typed)).toEqual({
+        text: "buy milk",
+        note: "2 pints",
+      });
+    });
+  });
+
+  describe("an existing trailing group — reuse it, never append a second", () => {
+    it("puts the caret inside the group that is already there", () => {
+      expect(inlineNoteInsertion("buy milk {2 pints}")).toEqual({
+        value: "buy milk {2 pints}",
+        caret: 17,
+      });
+    });
+
+    it("reuses an EMPTY group, so pressing twice cannot make `{} {}`", () => {
+      const once = inlineNoteInsertion("buy milk");
+      expect(once.value).toBe("buy milk {}");
+      expect(inlineNoteInsertion(once.value)).toEqual(once);
+    });
+
+    it("ignores trailing whitespace after the group", () => {
+      expect(inlineNoteInsertion("buy milk {2 pints}   ")).toEqual({
+        value: "buy milk {2 pints}",
+        caret: 17,
+      });
+    });
+
+    it("lands after the last character of a group containing braces", () => {
+      expect(inlineNoteInsertion("ship it {check {staging} first}")).toEqual({
+        value: "ship it {check {staging} first}",
+        caret: 30,
+      });
+    });
+
+    it("does not append a second group — that would reassign which one is the note", () => {
+      // The case the requirement turns on. Under Decision 1 the LAST group is
+      // the note, so appending to `fix {foo}` would silently promote a brand new
+      // `{bar}` to note and demote `{foo}` to text. Reusing the existing group
+      // keeps the note the person is looking at.
+      const { value, caret } = inlineNoteInsertion("fix {foo}");
+      expect({ value, caret }).toEqual({ value: "fix {foo}", caret: 8 });
+
+      const typed = `${value.slice(0, caret)} and bar${value.slice(caret)}`;
+      expect(typed).toBe("fix {foo and bar}");
+      expect(splitInlineNote(typed)).toEqual({
+        text: "fix",
+        note: "foo and bar",
+      });
+
+      // What appending would have produced instead, for contrast.
+      expect(splitInlineNote("fix {foo} {bar}")).toEqual({
+        text: "fix {foo}",
+        note: "bar",
+      });
+    });
+
+    it("puts the caret in the braces even when they are not (yet) a note", () => {
+      // `{just a note}` has no text in front of it, so the parser refuses it —
+      // but the braces are still there, and a second pair would not help.
+      expect(inlineNoteInsertion("{just a note}")).toEqual({
+        value: "{just a note}",
+        caret: 12,
+      });
+    });
+  });
+
+  it("always leaves the caret on the closing brace, for every shape", () => {
+    // One property rather than fourteen assertions: whatever branch was taken,
+    // the character the caret sits in front of is the group's `}`. A caret that
+    // landed outside the braces would silently append the note to the title.
+    for (const raw of EVERY_SHAPE) {
+      const { value, caret } = inlineNoteInsertion(raw);
+      expect(value[caret]).toBe("}");
+      expect(value.slice(caret)).toBe("}");
+    }
   });
 });

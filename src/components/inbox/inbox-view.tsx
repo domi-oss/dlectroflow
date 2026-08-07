@@ -81,6 +81,7 @@ import {
   type ScheduleControlProps,
 } from "@/components/inbox/row-actions";
 import { CompleteButton } from "@/components/inbox/complete-button";
+import { AddNoteButton } from "@/components/inbox/add-note-button";
 import { WelcomeCard } from "@/components/inbox/welcome-card";
 import { newAccountLine, type AccountIdentity } from "@/lib/identity";
 import { SubHeader, SEE_ALL } from "@/components/inbox/sub-header";
@@ -306,6 +307,15 @@ export function InboxView({
 
   // Which row (any bucket) is editing its title via the ✎ pencil.
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  // #186 — the inline-note rule, as the ✎ editor's DESCRIPTION. Declared beside
+  // the state it serves (and before `titleEditor` reads it) rather than with the
+  // other two ids further down. The node it names is rendered `hidden` at the
+  // foot of the board: a dense row has nowhere to put a visible hint line, and
+  // one per editing row would be noise, but an `aria-describedby` target
+  // contributes its text whether or not it is painted — the same dialect
+  // `MOVE_INSTRUCTIONS` uses on this surface.
+  const noteHintId = useId();
 
   // Which completed multi-step row (if any) has its per-step Reopen picker open.
   const [reopenPickerId, setReopenPickerId] = useState<string | null>(null);
@@ -607,6 +617,12 @@ export function InboxView({
   const titleEditor = (item: Item) => (
     <EditTitleInput
       initial={item.text}
+      // #186 — the row's own title, so the inline-note button beside this field
+      // is not a second control called "Add note". The capture bar's is mounted
+      // at the same time.
+      subject={item.text}
+      noteHintId={noteHintId}
+      voice={voice}
       onSave={(value) => {
         setEditingId(null);
         if (value && value !== item.text) run(() => renameItem(item.id, value));
@@ -865,39 +881,63 @@ export function InboxView({
 
       {/* Capture bar */}
       <div className="space-y-1">
-        <input
-          ref={inputRef}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          placeholder="Brain dump anything… (Enter to save)"
-          // #183 — the app's most-used control had NO accessible name: a
-          // placeholder and nothing else. A placeholder is not a name. Support
-          // varies, and it VANISHES on the first keystroke, so anyone who tabs
-          // away mid-capture and back had a field full of text and no way to
-          // re-read what it was for. WCAG 4.1.2 Name, Role, Value; the gap also
-          // undermines 3.3.2 Labels or Instructions.
-          //
-          // `aria-label` rather than a visually-hidden <label>: nothing may
-          // change visually (the placeholder-led look is deliberate), and this
-          // is the smaller change. Short, and deliberately NOT the placeholder
-          // sentence — a name is what you call the control, and a voice-control
-          // user saying "brain dump" has to be able to hit it.
-          aria-label="Brain dump"
-          // The hint below is a DESCRIPTION, not a name. Associated so it is
-          // announced with the field instead of being orphaned text that a
-          // screen-reader user only meets after leaving the input.
-          aria-describedby={captureHintId}
-          className="border-input bg-background focus-visible:ring-ring w-full rounded-lg border px-4 py-3 text-base shadow-sm outline-none focus-visible:ring-2"
-          autoFocus
-        />
+        {/* #186 — the input and its inline-note button on one line. The input
+            keeps `flex-1 min-w-0` rather than `w-full`, so the button cannot be
+            pushed off the edge of a phone by a long capture. */}
+        <div className="flex items-center gap-2">
+          <input
+            ref={inputRef}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            placeholder="Brain dump anything… (Enter to save)"
+            // #183 — the app's most-used control had NO accessible name: a
+            // placeholder and nothing else. A placeholder is not a name. Support
+            // varies, and it VANISHES on the first keystroke, so anyone who tabs
+            // away mid-capture and back had a field full of text and no way to
+            // re-read what it was for. WCAG 4.1.2 Name, Role, Value; the gap also
+            // undermines 3.3.2 Labels or Instructions.
+            //
+            // `aria-label` rather than a visually-hidden <label>: nothing may
+            // change visually (the placeholder-led look is deliberate), and this
+            // is the smaller change. Short, and deliberately NOT the placeholder
+            // sentence — a name is what you call the control, and a voice-control
+            // user saying "brain dump" has to be able to hit it.
+            aria-label="Brain dump"
+            // The hint below is a DESCRIPTION, not a name. Associated so it is
+            // announced with the field instead of being orphaned text that a
+            // screen-reader user only meets after leaving the input.
+            aria-describedby={captureHintId}
+            className="border-input bg-background focus-visible:ring-ring min-w-0 flex-1 rounded-lg border px-4 py-3 text-base shadow-sm outline-none focus-visible:ring-2"
+            autoFocus
+          />
+          {/* #186 — inserts the note braces and puts the caret between them, so
+              nobody has to reach the symbol keyboard for `{`. Named after this
+              field, because an open ✎ row editor mounts a second one. */}
+          <AddNoteButton
+            subject="Brain dump"
+            value={text}
+            inputRef={inputRef}
+            onChange={setText}
+            voice={voice}
+          />
+        </div>
         <p id={captureHintId} className="text-muted-foreground px-1 text-xs">
-          No fields required. Press Enter to capture instantly.
+          {/* #186 — the second sentence is the only thing on screen saying the
+              note syntax exists, and it states the POSITION as well as the
+              punctuation: "at the end" IS the rule (#179 Decision 1), so anyone
+              who learns only the braces meets a mid-string group staying literal
+              and reads that refusal as a bug. Both sentences share this one
+              node, so they are announced together as the field's description.
+              The braces themselves live in `capture.noteHint` rather than in
+              this JSX, where a literal brace opens an expression. */}
+          No fields required. Press Enter to capture instantly.{" "}
+          {t("capture.noteHint", voice)}
         </p>
         {justCaptured && (
           <p
@@ -1893,6 +1933,13 @@ export function InboxView({
       <p id={moveInstructionsId} hidden>
         {MOVE_INSTRUCTIONS}
       </p>
+      {/* #186 — the ✎ row editor's description, once for the whole board. Same
+          reasoning as the node above: referenced text contributes to the
+          description without being painted, so the rule reaches a screen-reader
+          user without putting a hint line inside every row. */}
+      <p id={noteHintId} hidden>
+        {t("capture.noteHint", voice)}
+      </p>
     </div>
   );
 }
@@ -1901,29 +1948,55 @@ export function InboxView({
  * Enter saves, Escape cancels. */
 function EditTitleInput({
   initial,
+  subject,
+  noteHintId,
+  voice,
   onSave,
   onCancel,
 }: {
   initial: string;
+  /** #186 — this row's title, for the inline-note button's accessible name. */
+  subject: string;
+  /** #186 — the board's one hidden node describing the note syntax. */
+  noteHintId: string;
+  voice: Voice;
   onSave: (value: string) => void;
   onCancel: () => void;
 }) {
   const [value, setValue] = useState(initial);
+  // #186 — the note button places a caret, which is a DOM operation: `value`
+  // says what the text is and nothing says where in it the user is.
+  const inputRef = useRef<HTMLInputElement>(null);
   return (
-    <input
-      autoFocus
-      value={value}
-      aria-label="Edit title"
-      onChange={(e) => setValue(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          onSave(value.trim());
-        }
-        if (e.key === "Escape") onCancel();
-      }}
-      className="border-input bg-background focus-visible:ring-ring min-w-0 flex-1 rounded-md border px-2 py-1 text-sm outline-none focus-visible:ring-2"
-    />
+    <span className="flex min-w-0 flex-1 items-center gap-1">
+      <input
+        ref={inputRef}
+        autoFocus
+        value={value}
+        aria-label="Edit title"
+        // #186 — the same rule the capture bar states visibly. There is no room
+        // for a hint line inside a row, and one per editing row would be noise,
+        // so a screen-reader user gets it from the referenced hidden node while
+        // a sighted user has already met it under the capture bar.
+        aria-describedby={noteHintId}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            onSave(value.trim());
+          }
+          if (e.key === "Escape") onCancel();
+        }}
+        className="border-input bg-background focus-visible:ring-ring min-w-0 flex-1 rounded-md border px-2 py-1 text-sm outline-none focus-visible:ring-2"
+      />
+      <AddNoteButton
+        subject={subject}
+        value={value}
+        inputRef={inputRef}
+        onChange={setValue}
+        voice={voice}
+      />
+    </span>
   );
 }
 

@@ -692,6 +692,11 @@ describe("Plain voice is emoji-free for nav and badge keys", () => {
     // #136 — the emptied focus lane. Plain keeps only the functional ✅ (same
     // allowance `focus.launcher.allClear` uses); the 🎉 is playful-only.
     "focus.lane.cleared",
+    // #186 — the inline-note button and its hint. The label is read out by voice
+    // control and the hint is the field's DESCRIPTION, so plain stays literal;
+    // the 🗒️ is playful-only flavour.
+    "capture.addNote",
+    "capture.noteHint",
   ];
 
   for (const key of plainOnlyKeys) {

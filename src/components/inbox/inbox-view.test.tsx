@@ -3175,3 +3175,110 @@ describe("InboxView — row action group target size (#184)", () => {
     expectFullTargets(container);
   });
 });
+// ── #186 — the "add note" affordance on both brain-dump fields ──────────────
+//
+// #179 shipped the inline note syntax with nothing on screen announcing it, and
+// `{`/`}` are two or three taps deep in a phone's symbol keyboard. The button's
+// own behaviour (where the caret lands, both branches) is covered in
+// `add-note-button.test.tsx`; what is asserted here is that it is MOUNTED on
+// both fields and named after the right one — the capture bar and an open row
+// editor are on screen together, so two buttons called "Add note" would be two
+// controls a screen-reader or voice-control user cannot tell apart.
+describe("InboxView — the inline-note affordance (#186)", () => {
+  const renderInbox = (items: Item[] = []) =>
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={items}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+
+  it("puts a button on the capture bar, named after that field", () => {
+    renderInbox();
+    expect(
+      screen.getByRole("button", { name: "Add note for Brain dump" }),
+    ).toBeTruthy();
+  });
+
+  it("inserts the braces into the capture field", async () => {
+    const user = userEvent.setup();
+    renderInbox();
+    const input = screen.getByRole("textbox", { name: "Brain dump" });
+    await user.type(input, "buy milk");
+    await user.click(
+      screen.getByRole("button", { name: "Add note for Brain dump" }),
+    );
+    await waitFor(() => expect(input).toHaveValue("buy milk {}"));
+  });
+
+  it("teaches the syntax in the capture field's DESCRIPTION", () => {
+    // The hint is the only thing that says the rule is "at the END" — someone
+    // who learns only the braces meets a refusal (`fix the {foo} handler`) and
+    // reads it as a bug. Associated with the field rather than left as orphaned
+    // text, which is the #183 obligation this paragraph already carried.
+    renderInbox();
+    const input = screen.getByRole("textbox", { name: "Brain dump" });
+    const describedBy = input.getAttribute("aria-describedby") as string;
+    expect(document.getElementById(describedBy)?.textContent).toContain(
+      "Put a note in {curly braces} at the end.",
+    );
+  });
+
+  it("puts a button on the ✎ row editor, named after that row", async () => {
+    const user = userEvent.setup();
+    renderInbox([makeItem({ id: "r1", text: "water the plants" })]);
+    const row = screen.getByText("water the plants").closest("li")!;
+    await user.click(
+      within(row).getByRole("button", { name: "Edit water the plants" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Add note for water the plants" }),
+    ).toBeTruthy();
+    // And the capture bar's is still there, under its own name — the two are
+    // distinguishable, which is the whole reason `subject` exists.
+    expect(
+      screen.getByRole("button", { name: "Add note for Brain dump" }),
+    ).toBeTruthy();
+  });
+
+  it("carries the composed string through to renameItem", async () => {
+    const { renameItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    renderInbox([makeItem({ id: "r1", text: "water the plants" })]);
+    const row = screen.getByText("water the plants").closest("li")!;
+    await user.click(
+      within(row).getByRole("button", { name: "Edit water the plants" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Add note for water the plants" }),
+    );
+    const editor = screen.getByRole("textbox", { name: "Edit title" });
+    await waitFor(() => expect(editor).toHaveFocus());
+    await user.keyboard("can under sink{Enter}");
+    expect(renameItem).toHaveBeenCalledWith(
+      "r1",
+      "water the plants {can under sink}",
+    );
+  });
+
+  it("describes the row editor with the same rule, for a screen reader", () => {
+    // The row editor has no room for a visible hint line, and repeating one per
+    // row would be noise on a dense list. A referenced `hidden` node contributes
+    // its text to the description without rendering, which is the dialect
+    // `MOVE_INSTRUCTIONS` already uses on this surface.
+    renderInbox([makeItem({ id: "r1", text: "water the plants" })]);
+    const row = screen.getByText("water the plants").closest("li")!;
+    fireEvent.click(
+      within(row).getByRole("button", { name: "Edit water the plants" }),
+    );
+    const editor = screen.getByRole("textbox", { name: "Edit title" });
+    const describedBy = editor.getAttribute("aria-describedby") as string;
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy)?.textContent).toContain(
+      "Put a note in {curly braces} at the end.",
+    );
+  });
+});
