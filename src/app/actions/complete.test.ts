@@ -19,7 +19,13 @@ const { prismaMock, txClient, revalidatePathMock, currentWorkspaceIdMock } =
         findFirst: vi.fn(),
         count: vi.fn(),
       },
-      task: { update: vi.fn().mockResolvedValue({}) },
+      task: {
+        update: vi.fn().mockResolvedValue({}),
+        // Round 11 — the Done→Active transition is a guarded bulk write now, and
+        // `uncompleteStep` branches on its count: only the caller that actually
+        // performed the transition may reverse `task_complete`.
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       rewardEvent: {
         create: vi.fn().mockResolvedValue({}),
         count: vi.fn().mockResolvedValue(0),
@@ -394,6 +400,7 @@ describe("uncompleteStep (#198)", () => {
     await expect(uncompleteStep("s1")).resolves.toBeUndefined();
     expect(prismaMock.step.updateMany).toHaveBeenCalled();
     expect(rewards.reverseStepCompletionRewards).not.toHaveBeenCalled();
+    expect(prismaMock.task.updateMany).not.toHaveBeenCalled();
     expect(prismaMock.task.update).not.toHaveBeenCalled();
   });
 
@@ -403,10 +410,14 @@ describe("uncompleteStep (#198)", () => {
     );
     const { uncompleteStep } = await import("./focus");
     await uncompleteStep("s1");
-    expect(prismaMock.task.update).toHaveBeenCalledWith({
-      where: { id: "t1", workspaceId: "owner" },
+    // `status: "done"` in the WHERE is the round-11 fix: it makes the transition
+    // itself the thing that decides whether a `task_complete` reversal is owed, so
+    // two undos of two different steps of one task cannot reverse it twice.
+    expect(prismaMock.task.updateMany).toHaveBeenCalledWith({
+      where: { id: "t1", workspaceId: "owner", status: "done" },
       data: { status: "active" },
     });
+    expect(prismaMock.task.update).not.toHaveBeenCalled();
     // Otherwise the step is open inside a task the Done view still shows as
     // finished — the divergence this issue is about, moved one level up.
     expect(prismaMock.brainDumpItem.updateMany).toHaveBeenCalledWith({
@@ -419,6 +430,7 @@ describe("uncompleteStep (#198)", () => {
     prismaMock.step.findFirst.mockResolvedValueOnce(doneStep());
     const { uncompleteStep } = await import("./focus");
     await uncompleteStep("s1");
+    expect(prismaMock.task.updateMany).not.toHaveBeenCalled();
     expect(prismaMock.task.update).not.toHaveBeenCalled();
     expect(prismaMock.brainDumpItem.updateMany).not.toHaveBeenCalled();
   });

@@ -365,11 +365,34 @@ export async function uncompleteStep(stepId: string) {
     });
     if (count === 0) return false;
 
+    // Round 11 — the same hole one level up, and it does NOT contend on the step
+    // guard above: two undos of *different* steps of the same completed task touch
+    // different `Step` rows, so both sail through and both carry the
+    // `reopenedTask` snapshot read before either transaction opened. The task
+    // transitions Done→Active once, but the reversal would run twice, and
+    // `reverseLatestReward` takes back the newest `task_complete` in the
+    // WORKSPACE — so the second reaches an unrelated, already-settled task's
+    // reward. One reopening, two rewards gone.
+    //
+    // Note this is a different defect from the "which `step_done` row goes is
+    // unobservable" argument in (1): that is about not caring *which* of N
+    // equivalent rows is removed for one correctly-counted reversal. Here the
+    // COUNT is wrong, and a count is very much observable.
+    //
+    // So the same guarded-write shape again, and `reopenedNow` — did THIS call
+    // perform the transition — replaces the snapshot as the gate on the reward.
+    let reopenedNow = false;
     if (reopenedTask) {
-      await tx.task.update({
-        where: { id: step.taskId, workspaceId },
+      const { count: reopened } = await tx.task.updateMany({
+        where: { id: step.taskId, workspaceId, status: TaskStatus.Done },
         data: { status: TaskStatus.Active },
       });
+      reopenedNow = reopened > 0;
+      // Deliberately NOT gated on `reopenedNow`. Clearing `completedAt` is
+      // idempotent, and the loser of the race wants it cleared just as much as the
+      // winner did — while a task that some other path had already set Active
+      // could still be carrying a completed inbox item, and gating here would stop
+      // reopening it. The bug being fixed is a miscounted reward, not this write.
       await tx.brainDumpItem.updateMany({
         where: { taskId: step.taskId, workspaceId },
         data: { completedAt: null },
@@ -380,12 +403,15 @@ export async function uncompleteStep(stepId: string) {
     // and nothing stops it running again when the step is re-completed —
     // `awardBadge` is idempotent, `logReward` is not. So reopening a task has to
     // take that reward back, or the farm this action exists to close is simply
-    // moved one level up (review round 3). Gated on `reopenedTask`, which is
-    // state, not inference: a task that was already open never earned one to
-    // reverse.
+    // moved one level up (review round 3).
+    //
+    // Gated on `reopenedNow` rather than the `reopenedTask` snapshot (round 11):
+    // "this call reopened the task" is the only thing that earns a reversal. The
+    // snapshot means "the task looked closed when I read it", which two concurrent
+    // undos of different steps both see and only one of them acts on.
     await reverseStepCompletionRewards(
       workspaceId,
-      { includeTaskComplete: reopenedTask },
+      { includeTaskComplete: reopenedNow },
       tx,
     );
     return true;

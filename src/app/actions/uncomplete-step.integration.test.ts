@@ -338,3 +338,119 @@ describe("two undos of ONE step take back one reward, not two (#198, round 10)",
     ]);
   });
 });
+
+describe("two undos of DIFFERENT steps of one task reverse one task_complete (#198, round 11)", () => {
+  /**
+   * Round 10 closed the same-step race by folding `done: true` into the step write.
+   * Round 11 found the sibling one level up, and it is genuinely different: two
+   * undos of *different* steps of the same completed task never contend on that
+   * guard, because they touch different `Step` rows.
+   *
+   * `reopenedTask` is read BEFORE the transaction opens, so both calls see
+   * `status: Done` and both pass `includeTaskComplete: true`. The task itself only
+   * transitions Done→Active once — but the reversal runs twice, and
+   * `reverseLatestReward` takes back *the newest `task_complete` in the workspace*.
+   * The second one therefore reaches a completely unrelated, already-settled task's
+   * reward. One reopening, two `task_complete` rows gone.
+   *
+   * This is not the "which row goes is unobservable" argument the doc comment makes
+   * for `step_done`: that is about not caring *which* of N equivalent rows is
+   * removed for one correctly-counted reversal. Here the COUNT is wrong.
+   *
+   * Deterministic for the same reason as round 10's: both transactions write the
+   * same `Task` row, so the second blocks until the first commits — exactly when a
+   * guarded write must re-read `status`.
+   */
+  it("leaves an unrelated task's task_complete alone when two steps of one task are undone at once", async () => {
+    // A different task, settled long ago, whose payout is the one at risk.
+    const unrelated = await prisma.rewardEvent.create({
+      data: {
+        type: RewardType.TaskComplete,
+        points: RewardPoints[RewardType.TaskComplete],
+        workspaceId: WS,
+        createdAt: new Date(Date.now() - 120_000),
+      },
+    });
+
+    const task = await prisma.task.create({
+      data: {
+        title: "Two done steps",
+        workspaceId: WS,
+        status: TaskStatus.Done,
+      },
+    });
+    const mk = (order: number) =>
+      prisma.step.create({
+        data: {
+          taskId: task.id,
+          text: `step ${order}`,
+          order,
+          total: 2,
+          estMinutes: 5,
+          done: true,
+        },
+      });
+    const s1 = await mk(1);
+    const s2 = await mk(2);
+    await prisma.brainDumpItem.create({
+      data: {
+        text: "Two done steps",
+        workspaceId: WS,
+        taskId: task.id,
+        status: BrainDumpStatus.Triaged,
+        completedAt: new Date(),
+      },
+    });
+    // What completing both steps and thereby the task paid out.
+    await prisma.rewardEvent.createMany({
+      data: [
+        {
+          type: RewardType.StepDone,
+          points: RewardPoints[RewardType.StepDone],
+          workspaceId: WS,
+        },
+        {
+          type: RewardType.StepDone,
+          points: RewardPoints[RewardType.StepDone],
+          workspaceId: WS,
+        },
+        {
+          type: RewardType.TaskComplete,
+          points: RewardPoints[RewardType.TaskComplete],
+          workspaceId: WS,
+        },
+      ],
+    });
+
+    const { uncompleteStep } = await import("./focus");
+    const errors = await prismaErrorsDuring(async () => {
+      await expect(
+        Promise.all([uncompleteStep(s1.id), uncompleteStep(s2.id)]),
+      ).resolves.toHaveLength(2);
+    });
+    expect(errors).toEqual([]);
+
+    // Both steps really were reopened, and the task with them — this must not be
+    // "fixed" by making the second undo a no-op. Both undos are legitimate.
+    expect((await prisma.step.findUnique({ where: { id: s1.id } }))?.done).toBe(
+      false,
+    );
+    expect((await prisma.step.findUnique({ where: { id: s2.id } }))?.done).toBe(
+      false,
+    );
+    expect(
+      (await prisma.task.findUnique({ where: { id: task.id } }))?.status,
+    ).toBe(TaskStatus.Active);
+
+    // Two `step_done` reversed — one per undo, which is correct — and exactly ONE
+    // `task_complete`, because only one task reopened. The unrelated task's reward
+    // is identified by id: a bare count of 1 would also pass if the wrong row lived.
+    const survivors = await prisma.rewardEvent.findMany({
+      where: { workspaceId: WS },
+      select: { id: true, type: true },
+    });
+    expect(survivors).toEqual([
+      { id: unrelated.id, type: RewardType.TaskComplete },
+    ]);
+  });
+});
