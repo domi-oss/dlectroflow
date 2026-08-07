@@ -52,21 +52,32 @@ const PROJECT_ID = "4242";
 const PROJECT_PATH = "acme/apps/dlectroflow";
 
 /**
- * Test stub for curl. Understands only the flags the script passes.
+ * Test stub for curl. Understands only the flags the script passes — plus the
+ * `--data-binary @file` / `-o file -w '%{http_code}'` idiom of the sibling it
+ * shells out to, `check-vuln-freshness.sh` (#166).
  *
- * Routes are `METHOD|url-substring|body-file`, matched in order, so a test can
- * serve two different GraphQL pages by ordering two routes and having the stub
- * consume the first one. Anything unmatched exits non-zero, which is what makes
- * "the script never called the issues endpoint" assertable.
+ * That idiom is not optional to model. Without `-o`, the response BODY goes to
+ * stdout, which is where `-w` puts the status code — so the freshness check
+ * read a whole JSON document as its HTTP status and reported "answered HTTP
+ * {"data":{"project":…". A stub that cannot serve a script correctly makes
+ * every assertion about that script a statement about the stub.
+ *
+ * Routes are `METHOD|url-substring|body-file|http-code` (code optional,
+ * default 200), matched in order, so a test can serve several GraphQL pages by
+ * ordering routes and having the stub consume each one once. Anything unmatched
+ * exits non-zero, which is what makes "the script never called the issues
+ * endpoint" assertable.
  */
 const CURL_STUB = `#!/usr/bin/env bash
 set -u
-method=GET; url=""; data=""
+method=GET; url=""; data=""; out=""; wfmt=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -X) method="$2"; shift 2 ;;
     -H) shift 2 ;;
-    -d) data="$2"; shift 2 ;;
+    -d|--data|--data-binary) data="$2"; shift 2 ;;
+    -o) out="$2"; shift 2 ;;
+    -w) wfmt="$2"; shift 2 ;;
     --max-time) shift 2 ;;
     -*) shift ;;
     *) url="$1"; shift ;;
@@ -82,14 +93,19 @@ printf '%s %s\\n' "$method" "$url" >> "$STUB_LOG"
 printf '%s\\n' "$(printf '%s' "$data" | tr '\\n' ' ')" >> "$STUB_BODIES"
 served="$STUB_DIR/served"
 i=0
-while IFS='|' read -r m sub bodyf; do
+while IFS='|' read -r m sub bodyf code; do
   [ -n "\${m:-}" ] || continue
   i=$((i + 1))
   [ "$m" = "$method" ] || continue
   case "$url" in *"$sub"*) ;; *) continue ;; esac
   grep -qx "$i" "$served" 2>/dev/null && continue
   printf '%s\\n' "$i" >> "$served"
-  [ -n "$bodyf" ] && cat "$bodyf"
+  if [ -n "$bodyf" ]; then
+    if [ -n "$out" ]; then cat "$bodyf" > "$out"; else cat "$bodyf"; fi
+  elif [ -n "$out" ]; then
+    : > "$out"
+  fi
+  [ -n "$wfmt" ] && printf '%s' "\${code:-200}"
   exit 0
 done < "$STUB_ROUTES"
 printf 'stub: unrouted %s %s\\n' "$method" "$url" >&2
@@ -117,6 +133,66 @@ function page(nodes: Vulnerability[], endCursor: string | null = null) {
       },
     },
   };
+}
+
+/**
+ * The two GraphQL responses `check-vuln-freshness.sh` asks for (#166) — the
+ * scan anchor, then one page of the Vulnerability Report.
+ *
+ * They are appended AFTER the assessment's own pages because that is the order
+ * the script makes the calls: it walks the report first (section 1), then shells
+ * out for the freshness block (section 2b). Without them the stub answers the
+ * freshness check with `stub: unrouted` and the block renders "undetermined",
+ * which is a block, reads as a working test, and proves nothing — the #113
+ * anti-pattern, in the suite for the issue about numbers nobody can date.
+ */
+const FRESHNESS_NOW = "2026-08-04T00:00:00Z";
+const freshHoursAgo = (hours: number) =>
+  new Date(Date.parse(FRESHNESS_NOW) - hours * 3_600_000)
+    .toISOString()
+    .replace(".000Z", "Z");
+
+function freshnessPages(vulns: Vulnerability[], scanHours = 2): unknown[] {
+  const job = (name: string) => ({
+    nodes: [{ name, status: "SUCCESS", finishedAt: freshHoursAgo(scanHours) }],
+  });
+  return [
+    {
+      data: {
+        project: {
+          pipelines: {
+            nodes: [
+              {
+                iid: "1928",
+                // RED pipeline, green scanners: the scanners are
+                // allow_failure: true on `main`, so the JOB is the anchor.
+                status: "FAILED",
+                finishedAt: freshHoursAgo(scanHours),
+                sast: job("semgrep-sast"),
+                dependency: job("gemnasium-dependency_scanning"),
+                container: job("container_scanning"),
+                secret: job("secret_detection"),
+              },
+            ],
+          },
+        },
+      },
+    },
+    {
+      data: {
+        project: {
+          vulnerabilities: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: vulns.map((v) => ({
+              detectedAt: freshHoursAgo(scanHours + 3),
+              resolvedOnDefaultBranch: false,
+              ...v,
+            })),
+          },
+        },
+      },
+    },
+  ];
 }
 
 interface Scenario {
@@ -308,6 +384,38 @@ describe("scripts/security-assessment.sh", () => {
     expect(body).toContain("A genuinely live one");
     expect(body).toContain("CONTAINER_SCANNING");
     expect(body).not.toContain("Regular expression with non-literal value");
+  });
+
+  it("stamps the filed issue with a POPULATED freshness block (#166)", () => {
+    // #152 — Security Assessment — 2026-08-01 recorded `0` active and `0`
+    // Critical/High. The same surface read 12 and 3 three days later. The
+    // artefact this job files is PERMANENT, so the count has to arrive already
+    // carrying the query that produced it and the instant that dates it.
+    //
+    // Driven, not grepped. A source grep for `FRESHNESS_BLOCK` passes just as
+    // happily when the block renders "⚠️ could not determine how old the
+    // vulnerability count is" into every issue this job ever files.
+    const result = run({
+      graphql: [page(BASELINE), ...freshnessPages(BASELINE)],
+      env: { VULN_FRESHNESS_NOW: FRESHNESS_NOW },
+    });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    const body = result.created?.description ?? "";
+    // The count, the surface named as a query, and the instant of the read.
+    expect(body).toMatch(/\*\*5 active\*\* findings/);
+    expect(body).toContain(
+      "project.vulnerabilities(state: [DETECTED, CONFIRMED])",
+    );
+    expect(body).toContain(FRESHNESS_NOW);
+    // The age, and the budget it is judged against.
+    expect(body).toMatch(/Oldest evidence: \w+/);
+    expect(body).toMatch(/2h old/);
+    expect(body).toMatch(/✅ \*\*Fresh\*\*/);
+    expect(body).toMatch(/192h budget/);
+    // What must NOT be in a filed issue: the freshness check having silently
+    // failed to establish anything.
+    expect(body).not.toMatch(/could not determine how old/);
   });
 
   it("points at the prompt that does the actual assessment", () => {
