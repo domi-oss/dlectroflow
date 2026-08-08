@@ -192,17 +192,40 @@ available_cond="$(cond Available full)"
 count_line="- \`deployment/${DEPLOYMENT}\`: **${available}/${desired}** replicas available (${ready} ready, ${updated} on the current spec, image \`${spec_tag}\`)"
 cond_line="- conditions: \`Progressing\` ${progressing}; \`Available\` ${available_cond}"
 
-if [ "$available" -ge "$desired" ]; then
+# ── 1b. A stalled rollout outranks the replica count ─────────────────────────
+# **Checked BEFORE availability, and that ordering is the whole point.** `maxSurge`
+# is 25% of 2 = 1, so a new rollout adds ONE pod while the two old ones keep
+# serving. If the new pod's `migrate` initContainer is wedged, `availableReplicas`
+# stays at 2 and a check that returns ✅ on `available >= desired` calls a failed
+# deploy healthy — never even reading the condition that says otherwise.
+#
+# That is the shape of the incident's first hours, before the atomic rollback took
+# the old pods down as well, and it is the shape that repeats on every merge
+# afterwards, because P3009 blocks each later migration in turn. **Full
+# availability and a healthy Deployment are different claims.**
+#
+# `Progressing: False` is Kubernetes' own verdict that the rollout has stopped
+# making progress within `progressDeadlineSeconds`, so this needs no threshold of
+# its own — it is read, not computed.
+stalled=0
+if [ "$progressing_status" = "False" ]; then
+  stalled=1
+fi
+
+if [ "$stalled" = "0" ] && [ "$available" -ge "$desired" ]; then
   printf -- '%s\n%s\n- ✅ production is running every replica it is meant to\n' \
     "$count_line" "$cond_line"
   exit 0
 fi
 
-# ── 1b. Degraded, but is it a rollout in flight? ─────────────────────────────
+# ── 1c. Degraded or stalled — but is it a rollout still in flight? ───────────
 # See the header: this arm exists because `1/2` was MEASURED to be an ordinary
 # transient, and it defers to Kubernetes' own progress deadline rather than a
 # second clock. It deliberately does NOT print a tick — nothing here was verified
 # healthy, only verified self-limiting, and those are different claims.
+#
+# Unreachable when `stalled` is 1: `Progressing` cannot be False and True at once,
+# so a stalled rollout can never take this quiet path.
 if [ "$progressing_status" = "True" ] && [ "$progressing_reason" = "ReplicaSetUpdated" ]; then
   if [ "$deadline" -le "$MAX_DEADLINE" ]; then
     printf -- '%s\n%s\n- 🔄 a rollout is in progress and has **not** yet exceeded its progress deadline (`progressDeadlineSeconds: %s`), so this is not an alert yet. Kubernetes flips `Progressing` to False within that window if it stops making progress, and the next run of this check alerts on it.\n' \
@@ -299,7 +322,11 @@ else
 fi
 
 shortfall=$((desired - available))
-if [ "$available" -eq 0 ]; then
+if [ "$available" -ge "$desired" ]; then
+  # Stalled at full availability. Saying "N replicas short" here would be simply
+  # untrue, and an alert whose headline is wrong is one the reader learns to skim.
+  verdict="- 🔴 **production is fully available but its rollout has stopped making progress** — the old pods are still serving, so the site is up and the DEPLOY HAS NOT LANDED. \`${updated}\` of \`${desired}\` pods are on the current spec. A wedged migration looks exactly like this, and it blocks every later migration too, so each merge from here makes it worse."
+elif [ "$available" -eq 0 ]; then
   verdict="- 🔴 **production has no available replica at all** — the site is down"
 elif [ "$shortfall" -eq 1 ]; then
   verdict="- 🔴 **production is 1 replica short of ${desired}** — it is serving, with no redundancy left: one node event takes the site down"

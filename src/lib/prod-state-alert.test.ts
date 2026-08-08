@@ -426,6 +426,66 @@ describe("scripts/check-prod-replicas.sh", () => {
     expect(run.stdout).toContain("✅");
   });
 
+  it("alerts on a rollout past its deadline even at FULL availability", () => {
+    // The hole a second look at the P3009 case found. `maxSurge` is 25% of 2 = 1,
+    // so a new rollout adds ONE pod and the two old ones keep serving. If the new
+    // pod's `migrate` initContainer is wedged, `availableReplicas` stays at 2 —
+    // and a check that returns ✅ as soon as `available >= desired` never looks at
+    // the `Progressing` condition and calls a failed deploy healthy.
+    //
+    // That is the exact shape of the incident's FIRST hours, before the atomic
+    // rollback took the old pods down too, and it is the shape that repeats on
+    // every merge afterwards because P3009 blocks each later migration. Full
+    // availability is not the same claim as a healthy Deployment.
+    const run = replicas({
+      kubectl: [
+        {
+          match: "deployment",
+          body: deployment({
+            available: 2,
+            ready: 2,
+            updated: 1,
+            progressing: {
+              status: "False",
+              reason: "ProgressDeadlineExceeded",
+            },
+          }),
+        },
+        {
+          match: "pods",
+          body: podsWithWedgedMigrate(
+            "Error: P3009 migrate found failed migrations in the target database",
+          ),
+        },
+      ],
+    });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain("ProgressDeadlineExceeded");
+    expect(run.stdout).toContain("P3009");
+    expect(run.stdout).not.toContain("✅");
+  });
+
+  it("stays green at full availability while a rollout is legitimately mid-flight", () => {
+    // The counterpart, so the rule above does not simply alert on every deploy:
+    // `updated < desired` with `Progressing` still True and inside its deadline is
+    // what a healthy rollout looks like from the outside.
+    const run = replicas({
+      kubectl: [
+        {
+          match: "deployment",
+          body: deployment({
+            available: 2,
+            ready: 2,
+            updated: 1,
+            progressing: { status: "True", reason: "ReplicaSetUpdated" },
+          }),
+        },
+      ],
+    });
+    expect(run.status).toBe(0);
+    expect(run.stdout).not.toContain("🔴");
+  });
+
   it("exits 1 when fewer replicas are available than desired", () => {
     // THE incident reading. `1/2 READY` for a day, invisible to a SHA
     // comparison: production reported the right commit from its one surviving
