@@ -652,10 +652,10 @@ describe("InboxView — a capture that fails (#210)", () => {
    * the restored text and pressing Enter used to leave a stale alert beside the
    * fresh "captured ✓", inviting a Retry that would post a near-duplicate.
    *
-   * The discriminator is whether the words were RESTORED into the field: if they
-   * were, the user has seen them and replaced them, so this capture supersedes
-   * the notice. If they could not be restored the notice is the only copy of
-   * them, and the spec below pins that it survives.
+   * The discriminator is whether the words are IN THE FIELD: if they are, the
+   * user has seen them and replaced them, so this capture supersedes the notice.
+   * If they are not, the notice is the only copy of them, and the spec below pins
+   * that it survives.
    */
   it("clears the notice when the user edits the restored words and captures the edit", async () => {
     vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
@@ -698,6 +698,37 @@ describe("InboxView — a capture that fails (#210)", () => {
 
     expect(screen.getByText("captured ✓")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent(/buy milk/);
+  });
+
+  /**
+   * Duo review round 4 — the superseding rule, reached from the one path the
+   * round-3 specs did not walk: a **retry that fails again**.
+   *
+   * A retry does not clear the field (only success does), so on the second
+   * failure the words are already sitting there untouched. Deciding "were these
+   * words put back in the field?" by asking "was the field empty?" answered no,
+   * and the notice then refused to be superseded — leaving a stale alert beside
+   * a fresh "captured ✓" after the user had visibly typed over those words and
+   * captured the edit. Which is #210's own bug, from a different door.
+   */
+  it("still supersedes the notice after a retry that failed again", async () => {
+    vi.mocked(createBrainDumpItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockRejectedValueOnce(new Error("still offline"));
+    const input = renderInbox();
+    await capture(input, "buy milk");
+    await clickRetry();
+
+    // The words are back where the user can see them, twice over.
+    expect(input).toHaveValue("buy milk");
+    expect(screen.getByRole("alert")).toHaveTextContent(/buy milk/);
+
+    fireEvent.change(input, { target: { value: "buy oat milk" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await flush();
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(screen.getByText("captured ✓")).toBeInTheDocument();
   });
 
   /**

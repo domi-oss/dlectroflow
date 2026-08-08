@@ -179,17 +179,24 @@ type CaptureFailure = {
    */
   retrying: boolean;
   /**
-   * The words went back into the capture field.
+   * The words are sitting in the capture field, where the user can see them.
    *
    * Which decides whether a LATER successful capture supersedes this notice (Duo
-   * review round 3). If they were restored, the user has seen them sitting in the
-   * box and submitted something else from it — an edit, or a different thought
-   * typed over them — so they have moved on and the alert is only noise inviting
-   * a near-duplicate Retry. If they could not be restored (the field already held
-   * the user's next thought) the notice is the ONLY copy of them, and it has to
-   * outlive any number of successful captures.
+   * review round 3). If they are in the box and the user submits something else
+   * from it — an edit, or a different thought typed over them — they have seen
+   * them and moved on, so the alert is only noise inviting a near-duplicate
+   * Retry. If they are not (the field already held the user's next thought) the
+   * notice is the ONLY copy of them, and it has to outlive any number of
+   * successful captures.
+   *
+   * Deliberately "are they in the field", not "did we just put them there" (Duo
+   * review round 4). A retry does not clear the field — only success does — so on
+   * a retry that fails again the words are already there, untouched. Asking the
+   * narrower question answered no, and the notice then refused to be superseded:
+   * a stale alert beside a fresh "captured ✓" after the user had visibly typed
+   * over those words. Which is this issue's own bug, from a different door.
    */
-  restored: boolean;
+  wordsInField: boolean;
 };
 
 /**
@@ -1014,15 +1021,14 @@ export function InboxView({
         // are never only in a variable.
         //
         // Read off the DOM node rather than through a functional `setText`
-        // updater, because the answer is needed HERE — `restored` decides
+        // updater, because the answer is needed HERE — `wordsInField` decides
         // whether a later capture may clear this notice. An updater that also
         // reported what it decided would have to mutate on the way past, which
         // is not a pure updater and would run twice under StrictMode. The input
         // is controlled, so its value is `text` as currently rendered, which is
         // exactly what the updater would have been handed.
         const inField = (inputRef.current?.value ?? "").trim();
-        const restored = inField === "";
-        if (restored) setText(value);
+        if (inField === "") setText(value);
         setCaptureFailure({
           value,
           stale: isStaleActionError(error),
@@ -1030,7 +1036,9 @@ export function InboxView({
           // A fresh record, so the retry flag starts down: this attempt is over,
           // whatever it was.
           retrying: false,
-          restored,
+          // Either we just put them back, or a retry that failed again found
+          // them still there — both mean the user is looking at them.
+          wordsInField: inField === "" || inField === value,
         });
       } finally {
         // Must run on every exit including a throw: a retry flag left up is a
@@ -1068,7 +1076,9 @@ export function InboxView({
     // that would post a near-duplicate. The words are carried rather than a
     // boolean, so a failure that lands between this press and its response
     // cannot be cleared by it.
-    const supersedes = captureFailure?.restored ? captureFailure.value : null;
+    const supersedes = captureFailure?.wordsInField
+      ? captureFailure.value
+      : null;
     // Cleared synchronously and urgently, which is both the instant-capture
     // feel and the double-submit guard: a second Enter arriving before the
     // write resolves finds an empty field and returns below. Deliberately NOT
