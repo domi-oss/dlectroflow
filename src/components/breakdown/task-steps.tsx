@@ -262,22 +262,37 @@ export function TaskSteps({
                     actions already solve this way. */}
                 <button
                   type="button"
-                  onClick={() => uncomplete(s.id)}
-                  disabled={undoing}
-                  // #169 — a disabled control has to say why, because a bare
-                  // disabled button swallows a press with no error and no toast.
-                  // Saying it is only honest now the reason is TRUE per row:
-                  // list-wide, the only accurate sentence would have been
-                  // "something, somewhere in this list, is busy". Appended rather
-                  // than replacing, so the idle name stays a stable query target.
-                  // `aria-busy` is the machine-readable half; a disabled element
-                  // is skipped by most screen readers, so the reason has to ride
-                  // on the name itself.
+                  // Round 15 — `aria-disabled`, not `disabled`, and the same
+                  // reasoning `focus-timer.tsx` carries for the timer's Retry: a
+                  // disabled element cannot hold focus, so the browser blurs it to
+                  // <body> the instant the attribute lands — which here is the
+                  // instant a keyboard user presses it. They are then holding
+                  // nothing, in a list of visually identical done rows, while a
+                  // write they cannot observe runs. WCAG 2.4.3.
+                  //
+                  // The press is guarded in the handler instead, because an
+                  // aria-disabled button is still clickable and the double-submit
+                  // protection was the whole point of the flag.
+                  onClick={() => {
+                    if (!undoing) uncomplete(s.id);
+                  }}
+                  aria-disabled={undoing}
+                  // #169 — a held control has to say why, because one that
+                  // swallows a press with no error and no toast is indistinguishable
+                  // from a broken one. Saying it is only honest now the reason is
+                  // TRUE per row: list-wide, the only accurate sentence would have
+                  // been "something, somewhere in this list, is busy". Appended
+                  // rather than replacing, so the idle name stays a stable query
+                  // target. `aria-busy` is the machine-readable half; the reason
+                  // rides on the name itself because that is what a screen reader
+                  // reads out — and `aria-disabled` is what lets it read anything
+                  // at all here, a natively disabled element being skipped by most
+                  // of them.
                   {...(undoing ? ({ "aria-busy": true } as const) : {})}
                   aria-label={
                     undoing ? `${undoLabel} — ${UNDO_BUSY_REASON}` : undoLabel
                   }
-                  className="text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded outline-none focus-visible:ring-2 disabled:opacity-50"
+                  className="text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded outline-none focus-visible:ring-2 aria-disabled:opacity-50"
                 >
                   <RotateCcw aria-hidden="true" className="h-4 w-4" />
                 </button>
@@ -303,12 +318,19 @@ export function TaskSteps({
                       plus a wasted round trip. `aria-busy` and the spoken reason
                       are deliberately NOT repeated here: this button sits inside
                       a `role="alert"` that has already announced itself, and a
-                      second live announcement for one press would talk over it. */}
+                      second live announcement for one press would talk over it.
+                      Round 15 — held the same way as the control above, for the
+                      same WCAG 2.4.3 reason and so that one file does not carry
+                      two idioms for one state. It matters most here of anywhere:
+                      this is the control INSIDE the notice, so it is the likeliest
+                      thing holding focus when the press lands. */}
                   <button
                     type="button"
-                    onClick={() => uncomplete(s.id)}
-                    disabled={undoing}
-                    className="focus-visible:ring-ring inline-flex min-h-11 items-center rounded underline underline-offset-4 outline-none focus-visible:ring-2 disabled:opacity-50"
+                    onClick={() => {
+                      if (!undoing) uncomplete(s.id);
+                    }}
+                    aria-disabled={undoing}
+                    className="focus-visible:ring-ring inline-flex min-h-11 items-center rounded underline underline-offset-4 outline-none focus-visible:ring-2 aria-disabled:opacity-50"
                   >
                     {t("focus.error.retry", voice)}
                   </button>

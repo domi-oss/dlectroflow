@@ -95,6 +95,10 @@ function baseStep() {
   };
 }
 
+/** Tailwind classes as discrete tokens, so `aria-disabled:x` and `disabled:x`
+ *  are distinguishable — the first contains the second as a substring. */
+const classList = (el: Element) => el.className.split(/\s+/).filter(Boolean);
+
 const openMenu = async (user: ReturnType<typeof userEvent.setup>, index = 0) =>
   user.click(screen.getAllByRole("button", { name: "All options" })[index]);
 
@@ -256,11 +260,12 @@ describe("TaskSteps — un-completing a done step (#198)", () => {
     );
 
     // Its own control: still held — that is all double-submit protection ever
-    // needed, and it now says why rather than going quietly grey.
+    // needed, and it now says why rather than going quietly grey. Held via
+    // `aria-disabled`, not the native attribute; see the spec below for why.
     const first = screen.getByRole("button", {
       name: /mark not done: first/i,
     });
-    expect(first).toBeDisabled();
+    expect(first).toHaveAttribute("aria-disabled", "true");
     expect(first).toHaveAccessibleName(/already in progress for this row/i);
     expect(first).toHaveAttribute("aria-busy", "true");
 
@@ -269,10 +274,77 @@ describe("TaskSteps — un-completing a done step (#198)", () => {
       name: /mark not done: second/i,
     });
     expect(second).toBeEnabled();
+    expect(second).toHaveAttribute("aria-disabled", "false");
     expect(second).not.toHaveAttribute("aria-busy");
 
     release();
-    await waitFor(() => expect(first).toBeEnabled());
+    await waitFor(() =>
+      expect(first).toHaveAttribute("aria-disabled", "false"),
+    );
+  });
+
+  // Round 15 — WCAG 2.4.3, and the third time this MR has had to fix the same
+  // class: the timer's Retry in round 6, the reopened row's hand-off in round 12,
+  // and now the control that starts the undo. A `disabled` element cannot hold
+  // focus, so the browser blurs it to <body> the instant the attribute lands —
+  // which is the instant a keyboard user presses it. They are then holding
+  // nothing, in a list of visually identical done rows, while a write they cannot
+  // observe runs. `focus-timer.tsx` already carries the reasoning in a comment;
+  // this control was still on the native attribute.
+  //
+  // The #169 promise survives the swap and is strictly better served by it: the
+  // comment there notes that a `disabled` element is skipped by most screen
+  // readers, so an `aria-disabled` one is the version that can actually SAY why
+  // it is holding.
+  it("holds the undo with aria-disabled, so the press that starts it keeps focus", async () => {
+    const user = userEvent.setup();
+    vi.mocked(uncompleteStep).mockImplementationOnce(
+      () => new Promise<void>(() => {}),
+    );
+    render(
+      <TaskSteps
+        taskId="t1"
+        steps={[{ ...baseStep(), id: "s1", text: "First", done: true }]}
+      />,
+    );
+
+    const undo = screen.getByRole("button", { name: /mark not done: first/i });
+    await user.click(undo);
+
+    // Focusable, and still focused — the whole point of the swap.
+    expect(undo).not.toBeDisabled();
+    expect(undo).toHaveAttribute("aria-disabled", "true");
+    expect(undo).toHaveFocus();
+    // Dimming has to follow the attribute that now carries the state, or the
+    // control looks live while it is held. Matched on the class LIST, not the
+    // string: `aria-disabled:opacity-50` contains `disabled:opacity-50`, so a
+    // substring assertion for the absence of the old variant can never pass.
+    expect(classList(undo)).toContain("aria-disabled:opacity-50");
+    expect(classList(undo)).not.toContain("disabled:opacity-50");
+  });
+
+  it("does not fire a second call when the held undo is pressed again", async () => {
+    // An aria-disabled button is still clickable, so the handler guard is what
+    // replaces the double-submit protection the native attribute used to give
+    // for free. Without it the swap above would trade a focus bug for a
+    // double-write.
+    const user = userEvent.setup();
+    vi.mocked(uncompleteStep).mockImplementationOnce(
+      () => new Promise<void>(() => {}),
+    );
+    render(
+      <TaskSteps
+        taskId="t1"
+        steps={[{ ...baseStep(), id: "s1", text: "First", done: true }]}
+      />,
+    );
+
+    const undo = screen.getByRole("button", { name: /mark not done: first/i });
+    await user.click(undo);
+    await user.click(undo);
+    await user.click(undo);
+
+    expect(uncompleteStep).toHaveBeenCalledTimes(1);
   });
 
   it("completing a different step disables no undo control at all", async () => {
@@ -570,6 +642,40 @@ describe("TaskSteps — a failed un-complete says so, and is retryable (#198, ro
       screen.queryByRole("button", { name: /try again/i }),
     ).not.toBeInTheDocument();
     expect(uncompleteStep).toHaveBeenCalledTimes(2);
+  });
+
+  it("holds the retry with aria-disabled too, matching the control above it", async () => {
+    // Round 15's other half. The guard round 14 added used the native attribute
+    // while the control ten lines above it and the timer's own Retry both use
+    // `aria-disabled` — and a `disabled` element cannot hold focus, so on the one
+    // control that lives inside a `role="alert"` the user has just pressed, the
+    // native version is the one that drops them to <body>.
+    //
+    // The TRUE state is not observable from outside, for the reason the spec above
+    // records: pressing the retry clears this row from `undoFailedIds`, which
+    // unmounts the notice the button lives in, so it ceases to exist rather than
+    // becoming held. What is pinned here is therefore the contract — the state is
+    // published through ARIA, the dimming is driven off that attribute, and the
+    // press is guarded in the handler rather than by the DOM.
+    const user = userEvent.setup();
+    vi.mocked(uncompleteStep).mockRejectedValueOnce(new Error("db down"));
+    render(
+      <TaskSteps
+        taskId="t1"
+        steps={[{ ...baseStep(), id: "s1", text: "First", done: true }]}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /mark not done: first/i }),
+    );
+    await screen.findByRole("alert");
+
+    const retry = screen.getByRole("button", { name: /try again/i });
+    expect(retry).not.toBeDisabled();
+    expect(retry).toHaveAttribute("aria-disabled", "false");
+    expect(classList(retry)).toContain("aria-disabled:opacity-50");
+    expect(classList(retry)).not.toContain("disabled:opacity-50");
   });
 
   it("keeps one row's failure to that row", async () => {
