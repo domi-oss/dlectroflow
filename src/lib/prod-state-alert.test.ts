@@ -162,9 +162,15 @@ exit 1
  */
 const BROKEN_DATE_STUB = `#!/usr/bin/env bash
 set -u
+# Any PARSING form fails: -d (GNU and busybox) and -j -f (BSD). "What time is it
+# now" still works. The first cut of this stub only looked for a '+%s' argument,
+# which every one of those invocations also carries — so it answered a valid epoch
+# for all of them, the age was computed after all, and the two tests that depend
+# on an unparseable date were passing for the wrong reason.
 fmt=""
 for arg in "$@"; do
   case "$arg" in
+    -d | -j | -f) exit 1 ;;
     +*) fmt="$arg" ;;
   esac
 done
@@ -741,7 +747,11 @@ describe("scripts/check-prod-drift.sh reports how long production has been behin
     const run = drift({ bin: { date: BROKEN_DATE_STUB } });
     expect(run.status).toBe(1);
     expect(run.stdout).toContain("2026-08-06T13:12");
-    expect(run.stdout).not.toMatch(/-\d+ hours/);
+    // No age at all, in either direction. The original assertion here only
+    // forbade a NEGATIVE one, which a stub that quietly answered every `date`
+    // invocation satisfied while computing an age anyway.
+    expect(run.stdout).not.toMatch(/hours?\*{0,2} ago/);
+    expect(run.stdout).not.toMatch(/under an hour/);
   });
 
   it("reads a numeric UTC offset as an offset, not as UTC", () => {
@@ -774,6 +784,66 @@ describe("scripts/check-prod-drift.sh reports how long production has been behin
     );
   });
 
+  /** A commit date `minutes` in the past, in the offset form GitLab really sends. */
+  const minutesAgo = (minutes: number) =>
+    new Date(Date.now() - minutes * 60_000)
+      .toISOString()
+      .replace("Z", "+00:00");
+
+  it("alerts on a recent divergence by default, so existing callers are unchanged", () => {
+    // `ops_digest` and `alert_pipeline_failure` both call this script and both
+    // WANT drift reported the instant it exists — the latter runs immediately
+    // after a pipeline failed, where "the deploy may still be in flight" is
+    // exactly the wrong reading. So the grace below is opt-in and off by default.
+    const run = drift({
+      compare: { commits: [{ id: OLD_SHA, committed_date: minutesAgo(3) }] },
+    });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain("🔴");
+  });
+
+  it("holds a divergence younger than DRIFT_GRACE_SECONDS", () => {
+    // The same reasoning as the replica check's rollout arm, and consistency
+    // matters more than either case on its own: an hourly check WILL land inside
+    // a normal deploy, where production is legitimately a commit or two behind
+    // for a few minutes. Alerting there would fire a spurious email every few
+    // days, and a channel that cries wolf gets muted — which is what took the
+    // real alert down in the first place.
+    const run = drift({
+      compare: { commits: [{ id: OLD_SHA, committed_date: minutesAgo(3) }] },
+      env: { DRIFT_GRACE_SECONDS: "1500" },
+    });
+    expect(run.status).toBe(0);
+    expect(run.stdout).not.toContain("🔴");
+    // Not a tick either — nothing was verified in sync, only verified too young
+    // to conclude from.
+    expect(run.stdout).not.toContain("✅");
+    expect(run.stdout).toMatch(/deploy/i);
+  });
+
+  it("alerts once the divergence is older than the grace", () => {
+    const run = drift({
+      compare: { commits: [{ id: OLD_SHA, committed_date: minutesAgo(90) }] },
+      env: { DRIFT_GRACE_SECONDS: "1500" },
+    });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain("🔴");
+  });
+
+  it("alerts rather than holding when the age cannot be established", () => {
+    // The grace can only be applied to an age that is known. With no usable
+    // `date` there is no age, and the safe direction is to alert — a grace that
+    // silently swallows every divergence on an image whose `date` cannot parse
+    // ISO-8601 would be a monitor switched off by its own helper.
+    const run = drift({
+      compare: { commits: [{ id: OLD_SHA, committed_date: minutesAgo(3) }] },
+      env: { DRIFT_GRACE_SECONDS: "1500" },
+      bin: { date: BROKEN_DATE_STUB },
+    });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain("🔴");
+  });
+
   it("prints no stray backslash before a backtick", () => {
     // A `\`` inside a SINGLE-quoted printf format is passed to printf verbatim
     // and renders as a literal backslash — invisible in a shell script, visible
@@ -800,6 +870,8 @@ interface AlertScenario {
   pods?: unknown;
   /** Existing notes on the alert issue; `false` makes the read fail. */
   notes?: unknown | false;
+  /** The oldest missing commit's date, for the deploy-in-flight grace. */
+  committedDate?: string;
   /** HTTP code the notes POST answers with. */
   postCode?: number;
   env?: Record<string, string | undefined>;
@@ -826,7 +898,11 @@ function alert(scenario: AlertScenario = {}): Result {
         match: "/repository/compare",
         body: {
           commits: [
-            { id: OLD_SHA, committed_date: "2026-08-06T13:12:00.000Z" },
+            {
+              id: OLD_SHA,
+              committed_date:
+                scenario.committedDate ?? "2026-08-06T13:12:00.000Z",
+            },
           ],
         },
       },
@@ -866,6 +942,27 @@ function noteWithFingerprint(fingerprint: string) {
 }
 
 describe("scripts/alert-prod-state.sh — the healthy path is silent", () => {
+  it("does not alert on a deploy that is still in flight", () => {
+    // The composite of both grace arms, and the case an hourly schedule meets
+    // most often: a merge landed minutes ago, production has not caught up yet,
+    // and a rollout is under way. Neither half is an incident and the pair must
+    // not add up to one.
+    const run = alert({
+      prodSha: OLD_SHORT,
+      committedDate: new Date(Date.now() - 4 * 60_000)
+        .toISOString()
+        .replace("Z", "+00:00"),
+      deploy: deployment({
+        available: 1,
+        ready: 1,
+        updated: 1,
+        progressing: { status: "True", reason: "ReplicaSetUpdated" },
+      }),
+    });
+    expect(run.status).toBe(0);
+    expect(run.note).toBeNull();
+  });
+
   it("posts nothing and exits 0 when production is current and fully replicated", () => {
     // An alert channel that emits on every healthy run gets muted within a week,
     // and takes the real alert with it.

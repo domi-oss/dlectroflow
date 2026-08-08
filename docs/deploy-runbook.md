@@ -805,6 +805,17 @@ image, and `rollout status` returned success 90 seconds later. So the check does
 | `False` / `ProgressDeadlineExceeded` | stuck | **yes** |
 | `True` / `NewReplicaSetAvailable` | rollout finished, a replica is still gone | **yes** — the `1/2` that does not move |
 
+**A deploy in flight is not drift either, for the same reason.** Production is
+legitimately a commit or two behind for a few minutes after every merge, and an
+hourly check would land inside that window every few days. So `alert_prod_state`
+passes `DRIFT_GRACE_SECONDS=1500` — just over `deploy_production`'s
+`--timeout 20m` — and divergence younger than that is reported as 🔄 rather than
+alerted on. Nothing is lost in the window: a deploy that blows its own timeout
+fails its pipeline, and `alert_pipeline_failure` reports *that* immediately with
+no grace at all. The grace is **off by default** in `check-prod-drift.sh`, so the
+weekly digest and the pipeline-failure alert are unaffected, and it only ever
+applies to an age that could actually be established.
+
 If you want to make that call by hand, the two commands that answer it are pod
 age and image, then the definitive one:
 

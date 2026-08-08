@@ -75,6 +75,14 @@ SELF="${CI_JOB_NAME:-alert_prod_state}"
 # same reason, as alert-pipeline-failure.sh.
 DRIFT_REF="${DRIFT_REF:-main}"
 export DRIFT_REF
+# Just over deploy_production's `--timeout 20m`. On an hourly clock this job
+# would otherwise land inside a normal deploy every few days and post that
+# production is behind — true for four minutes, and the sort of noise that gets a
+# channel muted. A deploy that blows its own timeout fails its pipeline, and
+# `alert_pipeline_failure` reports that immediately without any grace, so nothing
+# is lost in the window. Off by default in the check itself; see its header.
+DRIFT_GRACE_SECONDS="${DRIFT_GRACE_SECONDS:-1500}"
+export DRIFT_GRACE_SECONDS
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 if [ -n "${GL_TOKEN:-}" ]; then

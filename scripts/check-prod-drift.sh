@@ -40,10 +40,35 @@
 #                                    commits endpoint needs neither on a public project
 #   PROD_URL                       — optional; defaults to the prod origin
 #   DRIFT_REF                      — optional; defaults to `main`
+#   DRIFT_GRACE_SECONDS            — optional, DEFAULT 0 (see below)
+#
+# ── DRIFT_GRACE_SECONDS: opt-in, and off by default on purpose (#191) ────────
+# A normal deploy leaves production legitimately a commit or two behind for a few
+# minutes. An HOURLY caller will land inside that window every few days, and an
+# alert that cries wolf gets muted — which is how the real alert went unread in
+# the first place. So a caller on a clock can ask for divergence younger than N
+# seconds to be reported as "a deploy may still be in flight" (exit 0) instead.
+#
+# It defaults to 0 — no grace — because the two existing callers want the opposite.
+# `alert_pipeline_failure` runs immediately after a pipeline failed, where "the
+# deploy may still be in flight" is precisely the wrong reading, and `ops_digest`
+# is weekly, where anything it sees has been true for a long time. Only
+# `alert_prod_state` sets it, to just over deploy_production's `--timeout 20m`,
+# so a deploy that blows its own timeout is reported by the pipeline-failure alert
+# while a deploy that is merely slow is not reported twice.
+#
+# The grace applies ONLY to an age that could be established. With no usable
+# `date` there is no age, and the safe direction is to alert — a grace that
+# silently swallowed every divergence on an image whose `date` cannot parse
+# ISO-8601 would be a monitor switched off by its own helper.
 set -euo pipefail
 
 PROD_URL="${PROD_URL:-https://dlectroflow.dev}"
 DRIFT_REF="${DRIFT_REF:-main}"
+GRACE="${DRIFT_GRACE_SECONDS:-0}"
+case "$GRACE" in
+  '' | *[!0-9]*) GRACE=0 ;;
+esac
 API="${CI_API_V4_URL:-https://gitlab.com/api/v4}/projects/${CI_PROJECT_ID:-}"
 
 # GL_TOKEN when it exists, the job token otherwise. Reading a ref's HEAD needs no
@@ -225,6 +250,7 @@ case "$verdict" in
     # the verdict so the instant survives even when no `date` on the image can
     # turn it into an age — the timestamp alone still answers "is this minutes
     # old or a day old", which is the whole question.
+    age_secs=""
     if [ -n "$since" ]; then
       age_line="- behind since at least \`${since}\` (the oldest commit production is missing)"
       now_epoch="$(date -u +%s 2>/dev/null || true)"
@@ -233,7 +259,8 @@ case "$verdict" in
         '' | *[!0-9]*) ;;
         *)
           if [ -n "$now_epoch" ] && [ -n "$then_epoch" ] && [ "$now_epoch" -ge "$then_epoch" ]; then
-            hours=$(( (now_epoch - then_epoch) / 3600 ))
+            age_secs=$(( now_epoch - then_epoch ))
+            hours=$(( age_secs / 3600 ))
             if [ "$hours" -lt 1 ]; then
               age_line="${age_line} — under an hour"
             elif [ "$hours" -eq 1 ]; then
@@ -246,6 +273,14 @@ case "$verdict" in
       esac
     fi
     status=1
+    # The grace, applied last so it can only ever downgrade a fully-computed
+    # verdict — and only when the age is KNOWN. See the header for why this is
+    # off by default. No tick: nothing was verified in sync, only verified too
+    # young to conclude from, and those are different claims.
+    if [ "$GRACE" -gt 0 ] && [ -n "$age_secs" ] && [ "$age_secs" -lt "$GRACE" ]; then
+      verdict_line="- 🔄 production is behind \`${DRIFT_REF}\` but only by ${age_secs}s, which is inside the ${GRACE}s grace this caller allows — **a deploy is most likely still in flight**, so this is not an alert yet. A deploy that blows its own \`--timeout\` fails its pipeline, and \`alert_pipeline_failure\` reports that immediately; anything still behind after the grace is alerted on by the next run."
+      status=0
+    fi
     ;;
   *)
     verdict_line="- ⚠️ **could not determine whether production is running \`${DRIFT_REF}\`** — this is an unknown, not an all-clear"
