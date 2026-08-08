@@ -357,70 +357,64 @@ describe("the migrations applied to a database that already holds rows (#190)", 
   });
 
   it("converts every seeded focus-sound state to what #180 promised", async () => {
-    {
-      const prisma = new PrismaClient({ datasourceUrl: urlForSchema(schema) });
-      try {
-        const settings = await prisma.settings.findMany({
-          orderBy: { workspaceId: "asc" },
-        });
-        const byWorkspace = new Map(settings.map((s) => [s.workspaceId, s]));
+    const prisma = new PrismaClient({ datasourceUrl: urlForSchema(schema) });
+    try {
+      const settings = await prisma.settings.findMany();
+      const byWorkspace = new Map(settings.map((s) => [s.workspaceId, s]));
 
-        // A stored TRACK becomes that track's category, sound on.
-        expect(byWorkspace.get("seed-ws-track")).toMatchObject({
-          focusSound: FocusSound.On,
-          focusSoundCategories: [FocusSoundCategory.Chillhop],
-        });
+      // A stored TRACK becomes that track's category, sound on.
+      expect(byWorkspace.get("seed-ws-track")).toMatchObject({
+        focusSound: FocusSound.On,
+        focusSoundCategories: [FocusSoundCategory.Chillhop],
+      });
 
-        // A stored CATEGORY wins over the track: more recent, more deliberate.
-        expect(byWorkspace.get("seed-ws-category")).toMatchObject({
-          focusSound: FocusSound.On,
-          focusSoundCategories: [FocusSoundCategory.Jazzhop],
-        });
+      // A stored CATEGORY wins over the track: more recent, more deliberate.
+      expect(byWorkspace.get("seed-ws-category")).toMatchObject({
+        focusSound: FocusSound.On,
+        focusSoundCategories: [FocusSoundCategory.Jazzhop],
+      });
 
-        // The account that chose silence is still silent, and its stray category
-        // did not become a playlist. This is the assertion that would have
-        // failed if the conversion's `focusSound <> 'off'` guard were dropped.
-        expect(byWorkspace.get("seed-ws-silent")).toMatchObject({
-          focusSound: FocusSound.Off,
-          focusSoundCategories: [],
-        });
+      // The account that chose silence is still silent, and its stray category
+      // did not become a playlist. This is the assertion that would have
+      // failed if the conversion's `focusSound <> 'off'` guard were dropped.
+      expect(byWorkspace.get("seed-ws-silent")).toMatchObject({
+        focusSound: FocusSound.Off,
+        focusSoundCategories: [],
+      });
 
-        // The original account never asked for music, so it keeps the value the
-        // column defaulted to when it was added — the new-account default of
-        // `'on'` reaches rows inserted after it and no others.
-        expect(byWorkspace.get("owner")).toMatchObject({
-          focusSound: FocusSound.Off,
-          focusSoundCategories: [],
-        });
+      // The original account never asked for music, so it keeps the value the
+      // column defaulted to when it was added — the new-account default of
+      // `'on'` reaches rows inserted after it and no others.
+      expect(byWorkspace.get("owner")).toMatchObject({
+        focusSound: FocusSound.Off,
+        focusSoundCategories: [],
+      });
 
-        // Both estimate floors were repaired rather than left to fail the CHECK.
-        const steps = await prisma.step.findMany({ orderBy: { order: "asc" } });
-        expect(steps.map((s) => s.estMinutes)).toEqual([1, 15]);
-        const inbox = await prisma.brainDumpItem.findMany({
-          where: { id: "seed-inbox-2" },
-        });
-        expect(inbox[0]?.estMinutes).toBe(1);
+      // Both estimate floors were repaired rather than left to fail the CHECK.
+      const steps = await prisma.step.findMany({ orderBy: { order: "asc" } });
+      expect(steps.map((s) => s.estMinutes)).toEqual([1, 15]);
+      const inbox = await prisma.brainDumpItem.findMany({
+        where: { id: "seed-inbox-2" },
+      });
+      expect(inbox[0]?.estMinutes).toBe(1);
 
-        // The task survived cleanup_orphaned_tasks because an inbox item points
-        // at it; that migration deletes every task none does.
-        expect(await prisma.task.count({ where: { id: "seed-task-1" } })).toBe(
-          1,
-        );
+      // The task survived cleanup_orphaned_tasks because an inbox item points
+      // at it; that migration deletes every task none does.
+      expect(await prisma.task.count({ where: { id: "seed-task-1" } })).toBe(1);
 
-        // owner_uncapped_repair lifted the owner and left the member alone.
-        const users = await prisma.user.findMany({ orderBy: { id: "asc" } });
-        expect(users.map((u) => [u.id, u.aiPolicy, u.llmProvider])).toEqual([
-          ["seed-user-member", "capped", "anthropic"],
-          ["seed-user-owner", "uncapped", null],
-        ]);
+      // owner_uncapped_repair lifted the owner and left the member alone.
+      const users = await prisma.user.findMany({ orderBy: { id: "asc" } });
+      expect(users.map((u) => [u.id, u.aiPolicy, u.llmProvider])).toEqual([
+        ["seed-user-member", "capped", "anthropic"],
+        ["seed-user-owner", "uncapped", null],
+      ]);
 
-        // Both purges removed the orphan and kept the linked row, which is what
-        // let `SET NOT NULL` succeed rather than abort the migration.
-        const google = await prisma.googleAuth.findMany();
-        expect(google.map((g) => g.id)).toEqual(["seed-google-linked"]);
-      } finally {
-        await prisma.$disconnect();
-      }
+      // Both purges removed the orphan and kept the linked row, which is what
+      // let `SET NOT NULL` succeed rather than abort the migration.
+      const google = await prisma.googleAuth.findMany();
+      expect(google.map((g) => g.id)).toEqual(["seed-google-linked"]);
+    } finally {
+      await prisma.$disconnect();
     }
   });
 
