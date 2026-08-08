@@ -34,6 +34,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { blocksGuarding, guardParityGaps } from "./ci-schedule-guards";
 
 const REPO_ROOT = process.cwd();
 const ALERT_SCRIPT = join(REPO_ROOT, "scripts/alert-prod-state.sh");
@@ -929,6 +930,30 @@ describe("scripts/check-prod-drift.sh reports how long production has been behin
     expect(run.stdout).toContain("🔴");
   });
 
+  it("picks the oldest missing commit by INSTANT, not by string order", () => {
+    // Duo review finding, and a sharp one: the selection step used jq's `min`,
+    // which is lexicographic on raw `committed_date` strings that still carry
+    // their own UTC offsets. Lexicographic order on non-normalised offsets is not
+    // chronological order, so the same offset bug this file takes great care over
+    // in the ARITHMETIC was re-introduced in the SELECTION.
+    //
+    // These two disagree: `05:00-04:00` is 09:00Z, `09:27:36+01:00` is 08:27:36Z.
+    // The second is genuinely older; the first sorts first as a string. Choosing
+    // the string minimum understates the drift, which is the direction that makes
+    // an alert reassuring — the worst way for it to be wrong.
+    const run = drift({
+      compare: {
+        commits: [
+          { id: OLD_SHA, committed_date: "2026-08-07T05:00:00.000-04:00" },
+          { id: HEAD_SHA, committed_date: "2026-08-07T09:27:36.000+01:00" },
+        ],
+      },
+    });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain("2026-08-07T09:27:36");
+    expect(run.stdout).not.toContain("2026-08-07T05:00:00");
+  });
+
   it("prints no stray backslash before a backtick", () => {
     // A `\`` inside a SINGLE-quoted printf format is passed to printf verbatim
     // and renders as a literal backslash — invisible in a shell script, visible
@@ -1066,6 +1091,34 @@ describe("scripts/alert-prod-state.sh — the healthy path is silent", () => {
     expect(run.status).toBe(0);
     expect(run.note).toBeNull();
     expect(run.calls.some((c) => c.startsWith("POST"))).toBe(false);
+  });
+
+  it("does not mistake a failed notes read for a first run", () => {
+    // Duo review finding, and it is the sharper half of the "fails open" claim.
+    // A failed notes read leaves `last_fp` empty — indistinguishable from a
+    // genuinely first run — so the healthy path took the "nothing on record, stay
+    // quiet" shortcut and dropped a recovery note on a transient HTTP error.
+    //
+    // Which is worse than the duplicate the design was willing to accept: with no
+    // recovery marker written, the newest fingerprint on the issue stays the OLD
+    // alert, so the next recurrence of the same signature reads as "unchanged
+    // since the last note" and a real new incident is silently suppressed.
+    //
+    // So the quiet shortcut now requires the read to have actually succeeded.
+    const run = alert({ notes: false });
+    expect(run.note?.body).toContain("✅");
+    // And it says why it appeared, so a reader is not told production "recovered"
+    // from something that may never have been broken.
+    expect(run.note?.body?.toLowerCase()).toContain("de-duplication");
+    expect(run.status).toBe(0);
+  });
+
+  it("stays quiet on a healthy run when the read SUCCEEDS and finds nothing", () => {
+    // The counterpart, so the fix above does not simply post every hour: an
+    // empty-but-successful read is a real first run and silence is correct.
+    const run = alert({ notes: [] });
+    expect(run.note).toBeNull();
+    expect(run.status).toBe(0);
   });
 
   it("posts a recovery note when the previous run had alerted", () => {
@@ -1230,6 +1283,70 @@ describe("scripts/alert-prod-state.sh — the alerter cannot fail quietly", () =
     expect(run.stdout + run.stderr).toContain("🔴");
   });
 
+  it("falls back to OPS_DIGEST_ISSUE_IID when ALERT_ISSUE_IID is unset", () => {
+    // Duo review finding, and a fair one: the MR description calls this the
+    // load-bearing default — "the alert lands on the standing ops issue" — and
+    // nothing exercised it, because `drive()` always sets `ALERT_ISSUE_IID`. The
+    // fallback is the reason this job needs no new setup at all, so it is exactly
+    // the line that should not be taken on trust.
+    //
+    // Asserted on the URL rather than on "a note was posted": posting to the
+    // WRONG issue would satisfy the weaker assertion while sending the alert
+    // somewhere nobody is looking, which is the failure this whole MR is about.
+    const FALLBACK_IID = "33";
+    const run = drive(ALERT_SCRIPT, {
+      routes: [
+        {
+          method: "GET",
+          match: "/repository/commits/",
+          body: { id: HEAD_SHA },
+        },
+        {
+          method: "GET",
+          match: "/api/health",
+          body: { status: "ok", sha: OLD_SHORT },
+        },
+        {
+          method: "GET",
+          match: "/repository/compare",
+          body: {
+            commits: [
+              { id: OLD_SHA, committed_date: "2026-08-06T13:12:00.000Z" },
+            ],
+          },
+        },
+        { method: "GET", match: `/issues/${FALLBACK_IID}/notes`, body: [] },
+        {
+          method: "POST",
+          match: `/issues/${FALLBACK_IID}/notes`,
+          body: { id: 1 },
+          code: 201,
+        },
+      ],
+      kubectl: [
+        { match: "deployment", body: deployment() },
+        { match: "pods", body: { items: [] } },
+      ],
+      env: {
+        ALERT_ISSUE_IID: undefined,
+        OPS_DIGEST_ISSUE_IID: FALLBACK_IID,
+      },
+    });
+    expect(run.status).not.toBe(0);
+    expect(run.note?.body).toContain("🔴");
+    expect(
+      run.calls.some((c) =>
+        c.startsWith(
+          `POST ${API}/projects/${PROJECT_ID}/issues/${FALLBACK_IID}/notes`,
+        ),
+      ),
+      `POSTs were: ${run.calls.filter((c) => c.startsWith("POST")).join(", ")}`,
+    ).toBe(true);
+    // And nothing reached the iid the harness normally uses, so the assertion
+    // above cannot be satisfied by the default leaking through.
+    expect(run.calls.join("\n")).not.toContain(`/issues/${ISSUE_IID}/`);
+  });
+
   it("exits non-zero when no alert issue is configured", () => {
     const run = alert({
       prodSha: OLD_SHORT,
@@ -1300,30 +1417,31 @@ describe("the alert_prod_state CI job", () => {
 describe("the schedule-flag guards", () => {
   /**
    * `.gitlab-ci.yml` states the rule: "Each flag variable gets a `when: never`
-   * guard on every OTHER scheduled job… Add a flag, add its guards." Without it,
-   * a monitor schedule running every hour would ALSO rebuild the image, re-run
-   * every scanner and post an ops digest — 24 times a day.
+   * guard on every OTHER scheduled job… Add a flag, add its guards." Without it, a
+   * monitor schedule running every hour would ALSO rebuild the image, re-run every
+   * scanner and post an ops digest — 24 times a day.
    *
-   * Mirrors `security-assessment.test.ts`'s structural assertion rather than
-   * counting, so a future flag added to only some rule blocks fails here.
+   * This used to be asserted with line arithmetic: every `SECURITY_ASSESSMENT`
+   * guard had to have a `PROD_STATE_CHECK` guard exactly two lines below it, plus
+   * `expect(count).toBeGreaterThan(4)`. Duo review flagged it and was right — that
+   * asserts incidental formatting, not intent. Reordering conditions inside a rule
+   * block, or inserting one comment between two guards, failed a test whose
+   * subject was untouched, and the magic 4 described a different job's rule count.
+   *
+   * The parsing now lives in `src/lib/ci-schedule-guards.ts`, which is a pure
+   * module with a colocated test that exercises it on synthetic input — so the
+   * assertion can be shown to catch a missing guard rather than merely passing.
    */
-  const lines = CI_YML.split("\n");
-  const guardIndexes = (flag: string) =>
-    lines
-      .map((line, i) => (line.includes(`$${flag} == "true"'`) ? i : -1))
-      .filter((i) => i !== -1);
-
-  it("guards the same rule blocks SECURITY_ASSESSMENT guards", () => {
-    const isGuard = (i: number) => lines[i + 1]?.trim() === "when: never";
-    const assessment = guardIndexes("SECURITY_ASSESSMENT").filter(isGuard);
-    const monitor = guardIndexes("PROD_STATE_CHECK").filter(isGuard);
-    expect(assessment.length).toBeGreaterThan(4);
-    expect(monitor).toHaveLength(assessment.length);
-    for (const [n, index] of assessment.entries()) {
-      expect(monitor[n], `guard missing near line ${index + 1}`).toBe(
-        index + 2,
-      );
-    }
+  it("guards PROD_STATE_CHECK wherever any other flag is guarded", () => {
+    expect(guardParityGaps(CI_YML)).toEqual([]);
+    // Named separately so this test fails if the flag is dropped entirely, which
+    // "no gaps" alone would be perfectly happy about.
+    const blocks = blocksGuarding(CI_YML, "PROD_STATE_CHECK");
+    expect(
+      blocks,
+      `PROD_STATE_CHECK is guarded in: ${blocks.join(", ")}`,
+    ).toContain("ops_digest");
+    expect(blocks.length).toBeGreaterThan(1);
   });
 
   it("keeps ops_digest off the monitor schedule", () => {

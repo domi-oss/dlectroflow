@@ -46,9 +46,14 @@
 #     previews and exits 0 when `GL_TOKEN` is absent, which is right for a job
 #     that only runs when something else already went red. It is wrong here:
 #     this job's entire purpose is to be the thing that notices;
-#   * de-duplication fails OPEN. If the "have I already said this?" read fails,
-#     it says it again. A duplicate note is a nuisance; a suppressed alert is an
-#     incident.
+#   * de-duplication fails OPEN, on EVERY path. If the "have I already said
+#     this?" read fails, it says it again — including on the healthy path, where a
+#     failed read is indistinguishable from a first run and the shortcut for
+#     "nothing on record, stay quiet" would otherwise swallow a recovery note.
+#     Losing a recovery is worse than a duplicate, because the newest fingerprint
+#     on record stays the old alert and the next recurrence of the same signature
+#     is then suppressed as unchanged. A duplicate note is a nuisance; a
+#     suppressed alert is an incident.
 #
 # ── Exit codes ───────────────────────────────────────────────────────────────
 #   0  healthy — production is on `main` with every replica available
@@ -268,6 +273,12 @@ if [ "$notes_code" = "200" ]; then
     | .[0] // empty' "$WORK/notes.json" 2> /dev/null || true)"
 else
   echo "alert-prod-state: could not read recent notes (HTTP ${notes_code}) — posting without de-duplication rather than risking a suppressed alert." >&2
+  # Said in the NOTE as well as the log, so a reader is not told production
+  # "recovered" from something that may never have been broken. The log is not
+  # where the person who gets the to-do is looking.
+  BODY="${BODY}
+
+_De-duplication was unavailable this run (\`GET …/notes\` → HTTP ${notes_code}), so this note may repeat one you have already seen, and \"recovered\" may mean \"was never broken\". A duplicate is the deliberate trade against a suppressed alert._"
 fi
 
 if [ "$last_fp" = "$FINGERPRINT" ]; then
@@ -278,10 +289,20 @@ if [ "$last_fp" = "$FINGERPRINT" ]; then
   fi
   exit "$exit_code"
 fi
-if [ "$severity" = "healthy" ] && [ -z "$last_fp" ]; then
-  # Healthy with nothing on record: the first run, or an issue whose notes have
-  # rolled past the lookback. Posting "all is well" unprompted is how an alert
-  # channel trains its reader to ignore it.
+# `notes_code = 200` is load-bearing, and its absence was a real bug caught in Duo
+# review on !293. A FAILED read also leaves `last_fp` empty, which is
+# indistinguishable from a genuine first run — so this shortcut used to drop a
+# recovery note on a transient HTTP error.
+#
+# That is worse than the duplicate the design accepts: with no recovery marker
+# written, the newest fingerprint on the issue stays the OLD alert, and the next
+# recurrence of the same signature reads as "unchanged since the last note". A
+# real, new incident would be silently suppressed — the exact failure this whole
+# MR exists to remove, reintroduced one level down.
+if [ "$severity" = "healthy" ] && [ "$notes_code" = "200" ] && [ -z "$last_fp" ]; then
+  # Healthy, and the read SUCCEEDED and found nothing: the first run, or an issue
+  # whose notes have rolled past the lookback. Posting "all is well" unprompted is
+  # how an alert channel trains its reader to ignore it.
   echo "alert-prod-state: production is healthy and this job has said nothing before — staying quiet."
   exit 0
 fi

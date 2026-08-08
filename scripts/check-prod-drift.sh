@@ -190,6 +190,7 @@ fi
 verdict="undetermined"
 behind=""
 since=""
+since_epoch=""
 age_line=""
 cmp_code=""
 if [ -n "$head_sha" ] && [ -n "$prod_sha" ]; then
@@ -205,11 +206,41 @@ if [ -n "$head_sha" ] && [ -n "$prod_sha" ]; then
       || echo 000)"
     if [ "$cmp_code" = "200" ]; then
       behind="$(jq -r '(.commits // []) | length' "$WORK/cmp.json" 2>/dev/null || true)"
-      # `min`, not `.[0]`: the endpoint's ordering is not part of its contract,
-      # and picking the wrong end of the list would understate the drift — the
-      # direction that makes an alert reassuring.
-      since="$(jq -r '[(.commits // [])[] | (.committed_date // .created_at // empty)] | min // empty' \
-        "$WORK/cmp.json" 2>/dev/null || true)"
+      # The oldest commit production is missing, chosen by INSTANT rather than by
+      # string order, and not by `.[0]` — the endpoint's ordering is not part of
+      # its contract, and picking the wrong end understates the drift, which is
+      # the direction that makes an alert reassuring.
+      #
+      # It was `jq … | min`, which is LEXICOGRAPHIC on the raw strings. Duo review
+      # on !293 caught that this re-introduces, in the selection step, exactly the
+      # offset bug `iso_to_epoch` above exists to avoid in the arithmetic step:
+      # the timestamps carry their own offsets, so string order is not
+      # chronological order. `2026-08-07T05:00:00-04:00` sorts first and is an
+      # hour LATER than `2026-08-07T09:27:36+01:00`.
+      jq -r '(.commits // [])[] | (.committed_date // .created_at // empty)' \
+        "$WORK/cmp.json" > "$WORK/dates.txt" 2>/dev/null || : > "$WORK/dates.txt"
+      lex_min="$(sort < "$WORK/dates.txt" | head -1)"
+      unparseable=0
+      while IFS= read -r cand; do
+        [ -n "$cand" ] || continue
+        cand_epoch="$(iso_to_epoch "$cand" || true)"
+        if [ -z "$cand_epoch" ]; then
+          unparseable=1
+          continue
+        fi
+        if [ -z "$since_epoch" ] || [ "$cand_epoch" -lt "$since_epoch" ]; then
+          since_epoch="$cand_epoch"
+          since="$cand"
+        fi
+      done < "$WORK/dates.txt"
+      # If ANY timestamp could not be converted, the minimum above is not provably
+      # the oldest, so the instant is reported without an age rather than with a
+      # number that might understate the drift. Same rule as everywhere else here:
+      # no confident number over an unproven input.
+      if [ "$unparseable" = "1" ] || [ -z "$since" ]; then
+        since="$lex_min"
+        since_epoch=""
+      fi
     fi
   fi
 fi
@@ -254,7 +285,10 @@ case "$verdict" in
     if [ -n "$since" ]; then
       age_line="- behind since at least \`${since}\` (the oldest commit production is missing)"
       now_epoch="$(date -u +%s 2>/dev/null || true)"
-      then_epoch="$(iso_to_epoch "$since" || true)"
+      # Reused from the selection above rather than recomputed: when a timestamp
+      # could not be converted, `since_epoch` is deliberately empty and there must
+      # be no age at all.
+      then_epoch="$since_epoch"
       case "${now_epoch}${then_epoch}" in
         '' | *[!0-9]*) ;;
         *)
