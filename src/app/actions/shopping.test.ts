@@ -27,6 +27,8 @@ const {
   revalidatePathMock,
   currentWorkspaceIdMock,
   getSettingsMock,
+  syncMock,
+  clearMock,
 } = vi.hoisted(() => {
   const prismaMock = {
     shoppingItem: {
@@ -47,6 +49,8 @@ const {
     revalidatePathMock: vi.fn(),
     currentWorkspaceIdMock: vi.fn().mockResolvedValue("ws-1"),
     getSettingsMock: vi.fn().mockResolvedValue({ shoppingList: true }),
+    syncMock: vi.fn().mockResolvedValue(undefined),
+    clearMock: vi.fn().mockResolvedValue(undefined),
   };
 });
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
@@ -57,6 +61,10 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/workspace", () => ({
   currentWorkspaceId: currentWorkspaceIdMock,
   MissingWorkspaceError: class extends Error {},
+}));
+vi.mock("@/lib/shopping-summary", () => ({
+  syncShoppingSummary: syncMock,
+  clearShoppingSummary: clearMock,
 }));
 
 beforeEach(() => {
@@ -127,6 +135,71 @@ describe("the feature gate", () => {
     expect(prismaMock.shoppingItem.create).not.toHaveBeenCalled();
     expect(prismaMock.shoppingItem.updateMany).not.toHaveBeenCalled();
     expect(prismaMock.shoppingItem.deleteMany).not.toHaveBeenCalled();
+    // And nothing syncs the inbox summary either: a refused write must not leave
+    // the inbox advertising a list the feature is not running.
+    expect(syncMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * #199 — the inbox summary's sync, driven from every write.
+ *
+ * `resurface` is the half worth pinning. A dismissed summary comes back only for a
+ * write that can make the list LONGER; ticking an item off, saving it for later,
+ * deleting and renaming leave a dismissal alone, because otherwise dismissing the
+ * line and then making progress on the shopping page would resurrect it as a
+ * reward for the progress.
+ */
+describe("the inbox summary is kept in step with every write", () => {
+  it.each([
+    ["adding an item", true],
+    ["un-ticking an item", true],
+    ["pulling one back up from saved-for-later", true],
+  ])("resurfaces a dismissed summary after %s", async (label, resurface) => {
+    const mod = await load();
+    if (label === "adding an item") await mod.addShoppingItem("Milk");
+    else if (label === "un-ticking an item")
+      await mod.setShoppingItemDone("s1", false);
+    else await mod.setShoppingItemSavedForLater("s1", false);
+    expect(syncMock).toHaveBeenCalledWith("ws-1", { resurface });
+  });
+
+  it.each([
+    ["ticking an item off", "done-true"],
+    ["saving one for later", "saved-true"],
+    ["deleting one", "delete"],
+    ["renaming one", "rename"],
+  ])("leaves a dismissal alone after %s", async (_label, kind) => {
+    const mod = await load();
+    if (kind === "done-true") await mod.setShoppingItemDone("s1", true);
+    else if (kind === "saved-true")
+      await mod.setShoppingItemSavedForLater("s1", true);
+    else if (kind === "delete") await mod.deleteShoppingItem("s1");
+    else await mod.renameShoppingItem("s1", "Bread");
+    expect(syncMock).toHaveBeenCalledWith("ws-1", { resurface: false });
+  });
+
+  it("revalidates the inbox as well as the list, since the summary renders there", async () => {
+    const { addShoppingItem } = await load();
+    await addShoppingItem("Milk");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/shopping");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
+  });
+});
+
+describe("dismissShoppingSummary", () => {
+  it("clears the summary for the resolved workspace and refreshes the inbox", async () => {
+    const { dismissShoppingSummary } = await load();
+    await dismissShoppingSummary();
+    expect(clearMock).toHaveBeenCalledWith("ws-1");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
+  });
+
+  it("does nothing while the feature is off", async () => {
+    getSettingsMock.mockResolvedValue({ shoppingList: false });
+    const { dismissShoppingSummary } = await load();
+    await dismissShoppingSummary();
+    expect(clearMock).not.toHaveBeenCalled();
   });
 });
 

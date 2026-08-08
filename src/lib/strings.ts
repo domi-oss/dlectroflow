@@ -1184,6 +1184,24 @@ export const STRINGS = {
   "shopping.itemOne": { plain: "item", playful: "item" },
   "shopping.itemMany": { plain: "items", playful: "items" },
   "shopping.stillToBuy": { plain: "still to buy", playful: "still to buy" },
+  // #199 — the inbox summary line, composed as
+  // `<count> <shopping.itemOne|itemMany> <shopping.summaryOn>`. Composed rather
+  // than one templated string because this table carries no interpolation, and
+  // reusing the counted noun is what stops the inbox and the /shopping header
+  // disagreeing about what one item is called.
+  "shopping.summaryOn": {
+    plain: "on your shopping list",
+    playful: "🛒 on your shopping list",
+  },
+  "shopping.summaryDismiss": {
+    plain: "Not now",
+    playful: "Not now",
+  },
+  "shopping.summaryDismissHint": {
+    plain: "Back when you add something.",
+    playful: "Back when you add something.",
+  },
+  "shopping.summaryOpen": { plain: "Open the list", playful: "Open the list" },
   // Accessible names. Each one names the ITEM, because "Delete" repeated down a
   // list of twelve rows is unusable in a screen reader's element list.
   "shopping.tickOff": { plain: "Tick off", playful: "Tick off" },

@@ -12,6 +12,7 @@ import { firstResumableStep } from "@/components/inbox/resume-step";
 import { openSessionRemainingSec } from "@/lib/focus-timer-clock";
 import { mergePersistedIntent } from "@/lib/scheduling/intent";
 import type { ScheduleIntent } from "@/lib/scheduling/types";
+import { shoppingSummaryVisible } from "@/lib/shopping-summary";
 import { STATUS_BANNER_TONE } from "@/lib/status-banner-style";
 import { cn } from "@/lib/utils";
 
@@ -87,6 +88,29 @@ export default async function InboxPage({
   // without a query for a caller with no account, so `null` here means exactly
   // one thing: nobody is signed in.
   const google = me ? googleStatus : null;
+
+  // #199 — the shopping-list summary line.
+  //
+  // Two reads, and only when the feature is on: an ordinary workspace pays nothing
+  // for a feature it has not switched on, which is the whole promise of the toggle.
+  // Both are cheap (a primary-key lookup and a counted index scan) and they run
+  // together rather than in series.
+  //
+  // The COUNT is read from the items, not from the summary row — the row stores
+  // whether to show a summary and never how many, so a missed sync can only ever
+  // hide the line, never mis-state it. `shoppingSummaryVisible` folds the four
+  // reasons to show nothing into one nullable answer.
+  const shoppingSummary = settings.shoppingList
+    ? await (async () => {
+        const [row, remaining] = await Promise.all([
+          prisma.shoppingSummary.findUnique({ where: { workspaceId } }),
+          prisma.shoppingItem.count({
+            where: { workspaceId, done: false, savedForLater: false },
+          }),
+        ]);
+        return shoppingSummaryVisible({ row, remaining });
+      })()
+    : null;
 
   const items = rawItems.map(({ task, ...item }) => ({
     ...item,
@@ -245,6 +269,11 @@ export default async function InboxPage({
         resumeStep={firstRun ? null : resumeStep}
         newAccount={newAccount}
         notifyAging={settings.notifyAging}
+        // #199 — suppressed in the first-run preview for the same reason
+        // `initialItems` and `resumeStep` are: that mode shows the inbox as a
+        // brand-new workspace would see it, and a brand-new workspace has no
+        // shopping list.
+        shoppingSummary={firstRun ? null : shoppingSummary}
         // #105 — the same request-time clock used above, handed to the client
         // component so its FIRST render matches this one. Without it InboxView
         // read the wall clock again at hydration time, and any row younger than

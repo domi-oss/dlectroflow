@@ -9,8 +9,35 @@ import {
   normaliseShoppingItemText,
   nextShoppingOrder,
 } from "@/lib/shopping";
+import {
+  clearShoppingSummary,
+  syncShoppingSummary,
+} from "@/lib/shopping-summary";
 
 const SHOPPING_PATH = "/shopping";
+/** The inbox, where the summary line renders (#199). */
+const INBOX_PATH = "/";
+
+/**
+ * #199 — bring the inbox summary into line, then invalidate both surfaces.
+ *
+ * Every write in this file ends here, so there is one place that decides what a
+ * shopping write means for the inbox rather than six. `resurface` says whether
+ * this write could make the list LONGER — see `syncShoppingSummary` for why that,
+ * and not "did the list change", is the rule that brings a dismissed summary back.
+ *
+ * Both paths are revalidated because the feature now renders on two: the list at
+ * /shopping, and the summary line on the inbox. Revalidating only /shopping was
+ * the bug this helper exists to make impossible.
+ */
+async function settleShopping(
+  workspaceId: string,
+  resurface: boolean,
+): Promise<void> {
+  await syncShoppingSummary(workspaceId, { resurface });
+  revalidatePath(SHOPPING_PATH);
+  revalidatePath(INBOX_PATH);
+}
 
 /**
  * #199 — the shopping list's writes.
@@ -141,12 +168,24 @@ export async function addShoppingItem(text: string) {
     }
   }
 
-  // Duo review round 3, !294 — every other no-op path in this action returns before
-  // the revalidation (blank text, gate closed, retries exhausted), and a cap-hit did
-  // not, because the transaction body returns rather than throws. Nothing was
-  // written, so there is nothing for the page to re-render.
-  if (!added) return;
-  revalidatePath(SHOPPING_PATH);
+  // The write that CAN lengthen the list, so `added` says whether it DID (Duo review,
+  // !295 — passing `true` here un-dismissed the summary for a cap-blocked add and for
+  // a give-up after two write conflicts, both of which wrote nothing).
+  //
+  // OUTSIDE the transaction above, deliberately. The summary sync reads the item
+  // count and writes at most one row in another table, so pulling it inside would
+  // widen a SERIALIZABLE transaction's predicate-lock footprint for a row whose
+  // exactness does not matter: `syncShoppingSummary` stores no count, so the worst
+  // a lost sync can do is leave the inbox line absent until the next shopping
+  // write, and the read side derives the number from the items either way. See the
+  // module doc on src/lib/shopping-summary.ts.
+  //
+  // Unlike part 1's tail, this is NOT skipped when nothing was written, and the
+  // difference is that there is now something to do on a no-op: the sync reads the
+  // current count and can itself change state — deleting a summary row that outlived
+  // its list — so the revalidation it triggers is earned rather than wasted. Part 1
+  // had nothing to sync, which is why a cap-hit returned early there (round 3, !294).
+  await settleShopping(workspaceId, added);
 }
 
 /** Edit an entry in place. An empty rename is refused rather than blanking the
@@ -161,7 +200,8 @@ export async function renameShoppingItem(id: string, text: string) {
     where: { id, workspaceId },
     data: { text: trimmed },
   });
-  revalidatePath(SHOPPING_PATH);
+  // A rename cannot change the count, so it is not a reason to un-dismiss.
+  await settleShopping(workspaceId, false);
 }
 
 /**
@@ -176,11 +216,15 @@ export async function renameShoppingItem(id: string, text: string) {
 export async function setShoppingItemDone(id: string, done: boolean) {
   const workspaceId = await shoppingWorkspace();
   if (!workspaceId) return;
+  const ticked = Boolean(done);
   await prisma.shoppingItem.updateMany({
     where: { id, workspaceId },
-    data: { done: Boolean(done) },
+    data: { done: ticked },
   });
-  revalidatePath(SHOPPING_PATH);
+  // Un-ticking puts something back on the list, so it resurfaces a dismissed
+  // summary; ticking off is progress, and resurrecting the line as a reward for
+  // progress is precisely what the `resurface` rule exists to avoid.
+  await settleShopping(workspaceId, !ticked);
 }
 
 /**
@@ -202,11 +246,13 @@ export async function setShoppingItemSavedForLater(
 ) {
   const workspaceId = await shoppingWorkspace();
   if (!workspaceId) return;
+  const saved = Boolean(savedForLater);
   await prisma.shoppingItem.updateMany({
     where: { id, workspaceId },
-    data: { savedForLater: Boolean(savedForLater) },
+    data: { savedForLater: saved },
   });
-  revalidatePath(SHOPPING_PATH);
+  // Pulling an item back up lengthens the to-buy list; moving one down shortens it.
+  await settleShopping(workspaceId, !saved);
 }
 
 /**
@@ -221,5 +267,26 @@ export async function deleteShoppingItem(id: string) {
   const workspaceId = await shoppingWorkspace();
   if (!workspaceId) return;
   await prisma.shoppingItem.deleteMany({ where: { id, workspaceId } });
-  revalidatePath(SHOPPING_PATH);
+  // A delete can only shorten the list. It can also EMPTY it, which is what
+  // removes the summary row altogether — handled inside syncShoppingSummary
+  // rather than here, so "the list is empty" has one definition.
+  await settleShopping(workspaceId, false);
+}
+
+/**
+ * #199 — dismiss the inbox summary line.
+ *
+ * It comes back the next time the list grows (see `syncShoppingSummary`), so this
+ * is a "not now" rather than a delete — which is why the card says so next to the
+ * control. Only the inbox is revalidated: /shopping never renders the summary.
+ *
+ * Behind the same feature gate as every other write here. Without it, a client
+ * could keep writing `clearedAt` to a workspace whose owner has switched the
+ * feature off, which is a row being touched for a feature that is not running.
+ */
+export async function dismissShoppingSummary() {
+  const workspaceId = await shoppingWorkspace();
+  if (!workspaceId) return;
+  await clearShoppingSummary(workspaceId);
+  revalidatePath(INBOX_PATH);
 }
