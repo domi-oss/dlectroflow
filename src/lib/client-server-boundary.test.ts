@@ -253,6 +253,22 @@ describe("findClientDbLeaks", () => {
     expect(leaks[0].via).toEqual(["card.tsx", "helper.ts", "db.ts"]);
   });
 
+  // Duo review, !295 — the entry node itself was never tested, because the leak
+  // check was gated on `via.length > 1`. A `"use client"` file that inlines
+  // `new PrismaClient()` — or `src/lib/db.ts` itself growing the directive — passed
+  // silently, which is the exact thing this guard exists to catch, with zero hops.
+  it("reports a client entry that instantiates the database itself", () => {
+    expect(
+      findClientDbLeaks([
+        m({
+          path: "card.tsx",
+          isClientEntry: true,
+          instantiatesDbClient: true,
+        }),
+      ]),
+    ).toEqual([{ entry: "card.tsx", via: ["card.tsx"] }]);
+  });
+
   it("survives an import cycle rather than recursing forever", () => {
     expect(
       findClientDbLeaks([

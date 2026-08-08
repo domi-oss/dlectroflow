@@ -91,8 +91,13 @@ export default async function InboxPage({
 
   // #199 — the shopping-list summary line.
   //
-  // Two reads, and only when the feature is on: an ordinary workspace pays nothing
-  // for a feature it has not switched on, which is the whole promise of the toggle.
+  // Two reads, and only when the feature is on AND this is not the first-run preview
+  // (Duo review, !295 — the result used to be computed and then thrown away one
+  // branch later). An ordinary workspace pays nothing for a feature it has not
+  // switched on, which is the whole promise of the toggle; and the preview shows the
+  // inbox as a brand-new workspace would see it, so a brand-new workspace's shopping
+  // list is empty by definition and the answer cannot change anything. The same page
+  // short-circuits `workspaceHasHistory()` on `firstRunPreview` for that reason.
   // Both are cheap (a primary-key lookup and a counted index scan) and they run
   // together rather than in series.
   //
@@ -100,17 +105,18 @@ export default async function InboxPage({
   // whether to show a summary and never how many, so a missed sync can only ever
   // hide the line, never mis-state it. `shoppingSummaryVisible` folds the four
   // reasons to show nothing into one nullable answer.
-  const shoppingSummary = settings.shoppingList
-    ? await (async () => {
-        const [row, remaining] = await Promise.all([
-          prisma.shoppingSummary.findUnique({ where: { workspaceId } }),
-          prisma.shoppingItem.count({
-            where: { workspaceId, done: false, savedForLater: false },
-          }),
-        ]);
-        return shoppingSummaryVisible({ row, remaining });
-      })()
-    : null;
+  const shoppingSummary =
+    settings.shoppingList && !settings.firstRunPreview
+      ? await (async () => {
+          const [row, remaining] = await Promise.all([
+            prisma.shoppingSummary.findUnique({ where: { workspaceId } }),
+            prisma.shoppingItem.count({
+              where: { workspaceId, done: false, savedForLater: false },
+            }),
+          ]);
+          return shoppingSummaryVisible({ row, remaining });
+        })()
+      : null;
 
   const items = rawItems.map(({ task, ...item }) => ({
     ...item,
@@ -269,11 +275,11 @@ export default async function InboxPage({
         resumeStep={firstRun ? null : resumeStep}
         newAccount={newAccount}
         notifyAging={settings.notifyAging}
-        // #199 — suppressed in the first-run preview for the same reason
-        // `initialItems` and `resumeStep` are: that mode shows the inbox as a
-        // brand-new workspace would see it, and a brand-new workspace has no
-        // shopping list.
-        shoppingSummary={firstRun ? null : shoppingSummary}
+        // #199 — already null in the first-run preview, because the read above is
+        // gated on it rather than the result being discarded here. ONE gate: two
+        // would be two things that could come to disagree, and the one that skips
+        // the query is the one that is also cheaper.
+        shoppingSummary={shoppingSummary}
         // #105 — the same request-time clock used above, handed to the client
         // component so its FIRST render matches this one. Without it InboxView
         // read the wall clock again at hydration time, and any row younger than

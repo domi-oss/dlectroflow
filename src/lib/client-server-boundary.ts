@@ -232,7 +232,13 @@ export function findClientDbLeaks(
       // the leak test so a server action that legitimately imports the database is
       // never reported.
       if (current.isServerBoundary && via.length > 1) continue;
-      if (current.instantiatesDbClient && via.length > 1) {
+      // NOT gated on `via.length > 1` (Duo review, !295). The entry node itself has
+      // to be checked: a `"use client"` file that inlines `new PrismaClient()`, or
+      // `src/lib/db.ts` growing the directive, is the same bug with zero hops — and
+      // was passing silently, which is exactly what this guard exists to catch. The
+      // server-boundary skip above keeps its guard because a file cannot carry both
+      // directives, so the entry can never be a boundary.
+      if (current.instantiatesDbClient) {
         leaks.push({ entry: entry.path, via });
         break;
       }

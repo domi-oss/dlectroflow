@@ -146,9 +146,10 @@ export async function addShoppingItem(text: string) {
               workspaceId,
             },
           });
-          // Set INSIDE the transaction, after the create: the cap check above
+          // Set INSIDE the transaction and after the create: the cap check above
           // `return`s without throwing, so the loop below would otherwise treat a
-          // blocked add as a success.
+          // blocked add as a success — and the summary would be un-dismissed for an
+          // add that never happened.
           added = true;
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
@@ -168,9 +169,10 @@ export async function addShoppingItem(text: string) {
     }
   }
 
-  // The write that CAN lengthen the list, so `added` says whether it DID (Duo review,
-  // !295 — passing `true` here un-dismissed the summary for a cap-blocked add and for
-  // a give-up after two write conflicts, both of which wrote nothing).
+  // `added`, not `true`: an add is the write that CAN lengthen the list, and this
+  // says whether it DID. A cap-blocked body and a give-up after two write conflicts
+  // both wrote nothing and both leave it false (Duo review, !295 — passing `true`
+  // here un-dismissed the summary for writes that never happened).
   //
   // OUTSIDE the transaction above, deliberately. The summary sync reads the item
   // count and writes at most one row in another table, so pulling it inside would
@@ -180,11 +182,13 @@ export async function addShoppingItem(text: string) {
   // write, and the read side derives the number from the items either way. See the
   // module doc on src/lib/shopping-summary.ts.
   //
-  // Unlike part 1's tail, this is NOT skipped when nothing was written, and the
-  // difference is that there is now something to do on a no-op: the sync reads the
-  // current count and can itself change state — deleting a summary row that outlived
-  // its list — so the revalidation it triggers is earned rather than wasted. Part 1
-  // had nothing to sync, which is why a cap-hit returned early there (round 3, !294).
+  // It runs even when nothing was written, which is correct rather than sloppy:
+  // whatever the list now holds is what the inbox should say about it, and this call
+  // reads that rather than assuming this request changed anything. So it is also
+  // self-healing — a no-op add whose workspace carries a summary row that outlived
+  // its list will delete that row, which is why the revalidation it triggers is
+  // earned here. That is the one place this differs from part 1's tail, where a
+  // cap-hit returns early because there was nothing to sync (round 3, !294).
   await settleShopping(workspaceId, added);
 }
 
@@ -217,14 +221,18 @@ export async function setShoppingItemDone(id: string, done: boolean) {
   const workspaceId = await shoppingWorkspace();
   if (!workspaceId) return;
   const ticked = Boolean(done);
-  await prisma.shoppingItem.updateMany({
+  const { count } = await prisma.shoppingItem.updateMany({
     where: { id, workspaceId },
     data: { done: ticked },
   });
   // Un-ticking puts something back on the list, so it resurfaces a dismissed
   // summary; ticking off is progress, and resurrecting the line as a reward for
   // progress is precisely what the `resurface` rule exists to avoid.
-  await settleShopping(workspaceId, !ticked);
+  //
+  // `count > 0` as well as the direction (Duo review, !295): a stale id, or one
+  // belonging to another workspace, is a 0-row no-op — nothing came back onto the
+  // list, so nothing should come back into the inbox.
+  await settleShopping(workspaceId, !ticked && count > 0);
 }
 
 /**
@@ -247,12 +255,14 @@ export async function setShoppingItemSavedForLater(
   const workspaceId = await shoppingWorkspace();
   if (!workspaceId) return;
   const saved = Boolean(savedForLater);
-  await prisma.shoppingItem.updateMany({
+  const { count } = await prisma.shoppingItem.updateMany({
     where: { id, workspaceId },
     data: { savedForLater: saved },
   });
   // Pulling an item back up lengthens the to-buy list; moving one down shortens it.
-  await settleShopping(workspaceId, !saved);
+  // `count > 0` for the same reason as the tick above: a 0-row no-op lengthened
+  // nothing (Duo review, !295).
+  await settleShopping(workspaceId, !saved && count > 0);
 }
 
 /**

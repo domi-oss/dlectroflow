@@ -431,7 +431,12 @@ describe("Inbox page — the shopping-list summary (#199)", () => {
     expect(summaryProp()).toBe("null");
   });
 
-  it("hands nothing in the first-run preview, which has no shopping list", async () => {
+  it("hands nothing in the first-run preview, and asks nothing either", async () => {
+    // Duo review, !295 — the two queries used to run and have their result thrown
+    // away one branch later. The page already short-circuits `workspaceHasHistory()`
+    // on `firstRunPreview` for exactly this reason: the preview shows the inbox as a
+    // brand-new workspace would see it, and a brand-new workspace has no shopping
+    // list, so the answer cannot change anything.
     settingsOverride.mockReturnValue({
       ...settingsFixture,
       shoppingList: true,
@@ -441,5 +446,7 @@ describe("Inbox page — the shopping-list summary (#199)", () => {
     db.shoppingItem.count.mockResolvedValue(3);
     render(await renderInbox());
     expect(summaryProp()).toBe("null");
+    expect(db.shoppingSummary.findUnique).not.toHaveBeenCalled();
+    expect(db.shoppingItem.count).not.toHaveBeenCalled();
   });
 });

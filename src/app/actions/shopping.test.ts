@@ -179,6 +179,61 @@ describe("the inbox summary is kept in step with every write", () => {
     expect(syncMock).toHaveBeenCalledWith("ws-1", { resurface: false });
   });
 
+  /**
+   * Duo review, !295 — `resurface` was passed on the REQUESTED direction rather than
+   * the ACTUAL outcome, so three writes that changed nothing still un-dismissed the
+   * summary. That directly contradicts the rule the whole design rests on: a
+   * dismissed line comes back only when the list actually got longer.
+   */
+  it("does NOT resurface when a cap-blocked add wrote nothing", async () => {
+    // The transaction body returns without creating when the list is full, and
+    // returning is not throwing — so the retry loop breaks as a "success" and the
+    // old code called settleShopping(true) for an add that never happened.
+    prismaMock.shoppingItem.findMany.mockResolvedValue(
+      Array.from({ length: MAX_SHOPPING_ITEMS }, (_, i) => ({ order: i + 1 })),
+    );
+    const { addShoppingItem } = await load();
+    await addShoppingItem("one too many");
+    expect(prismaMock.shoppingItem.create).not.toHaveBeenCalled();
+    expect(syncMock).toHaveBeenCalledWith("ws-1", { resurface: false });
+  });
+
+  it("does NOT resurface when a give-up wrote nothing", async () => {
+    const conflict = Object.assign(new Error("write conflict"), {
+      code: "P2034",
+    });
+    prismaMock.$transaction.mockRejectedValue(conflict);
+    const { addShoppingItem } = await load();
+    await addShoppingItem("Milk");
+    expect(syncMock).toHaveBeenCalledWith("ws-1", { resurface: false });
+  });
+
+  it("does NOT resurface when un-ticking a stale or foreign id", async () => {
+    // `updateMany` with a workspace filter is a 0-row no-op for a row belonging to
+    // somebody else, or one already deleted. Nothing got longer.
+    prismaMock.shoppingItem.updateMany.mockResolvedValue({ count: 0 });
+    const { setShoppingItemDone } = await load();
+    await setShoppingItemDone("not-mine", false);
+    expect(syncMock).toHaveBeenCalledWith("ws-1", { resurface: false });
+  });
+
+  it("does NOT resurface when pulling back up a stale or foreign id", async () => {
+    prismaMock.shoppingItem.updateMany.mockResolvedValue({ count: 0 });
+    const { setShoppingItemSavedForLater } = await load();
+    await setShoppingItemSavedForLater("not-mine", false);
+    expect(syncMock).toHaveBeenCalledWith("ws-1", { resurface: false });
+  });
+
+  it("still syncs after a no-op, because the list is whatever it is", async () => {
+    // The sync itself is NOT skipped: it reads the current count and answers for
+    // that, so calling it after a write that did nothing is correct — it is only
+    // the RESURFACE flag that must reflect whether anything actually grew.
+    prismaMock.shoppingItem.updateMany.mockResolvedValue({ count: 0 });
+    const { setShoppingItemDone } = await load();
+    await setShoppingItemDone("not-mine", false);
+    expect(syncMock).toHaveBeenCalledTimes(1);
+  });
+
   it("revalidates the inbox as well as the list, since the summary renders there", async () => {
     const { addShoppingItem } = await load();
     await addShoppingItem("Milk");
