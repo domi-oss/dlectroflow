@@ -95,6 +95,7 @@ export async function addShoppingItem(text: string) {
   // amplification the cap exists to prevent. Giving up writes nothing, which is
   // the same outcome as hitting the cap, and the page re-reads from the database
   // on the next render — so nobody is ever shown an item that is not there.
+  let added = false;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       await prisma.$transaction(
@@ -118,6 +119,10 @@ export async function addShoppingItem(text: string) {
               workspaceId,
             },
           });
+          // Set INSIDE the transaction, after the create: the cap check above
+          // `return`s without throwing, so the loop below would otherwise treat a
+          // blocked add as a success.
+          added = true;
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
@@ -130,10 +135,17 @@ export async function addShoppingItem(text: string) {
       // mode the whole capture surface is written to avoid.
       const retryable = (e as { code?: string }).code === "P2034";
       if (!retryable) throw e;
-      if (attempt === 1) return;
+      // A retried attempt starts over, so anything the aborted one set is void.
+      added = false;
+      if (attempt === 1) break;
     }
   }
 
+  // Duo review round 3, !294 — every other no-op path in this action returns before
+  // the revalidation (blank text, gate closed, retries exhausted), and a cap-hit did
+  // not, because the transaction body returns rather than throws. Nothing was
+  // written, so there is nothing for the page to re-render.
+  if (!added) return;
   revalidatePath(SHOPPING_PATH);
 }
 

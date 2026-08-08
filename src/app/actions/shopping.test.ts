@@ -239,6 +239,29 @@ describe("addShoppingItem", () => {
     await expect(addShoppingItem("Milk")).rejects.toThrow(/connection lost/);
   });
 
+  // Duo review round 3, !294 — every other no-op path in this action returns before
+  // `revalidatePath` (blank text, gate closed, retries exhausted). A cap-hit did
+  // not, because the transaction body `return`s without throwing, so the loop
+  // `break`s as a success and fell through to the revalidation.
+  it("does not revalidate when the cap blocked the insert", async () => {
+    prismaMock.shoppingItem.findMany.mockResolvedValue(
+      Array.from({ length: MAX_SHOPPING_ITEMS }, (_, i) => ({ order: i + 1 })),
+    );
+    const { addShoppingItem } = await load();
+    await addShoppingItem("one too many");
+    expect(prismaMock.shoppingItem.create).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it("does not revalidate after giving up on a write conflict", async () => {
+    prismaMock.$transaction.mockRejectedValue(
+      Object.assign(new Error("write conflict"), { code: "P2034" }),
+    );
+    const { addShoppingItem } = await load();
+    await addShoppingItem("Milk");
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
   it("reads the workspace's own rows only", async () => {
     const { addShoppingItem } = await load();
     await addShoppingItem("Milk");

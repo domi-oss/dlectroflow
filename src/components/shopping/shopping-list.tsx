@@ -125,14 +125,10 @@ export function ShoppingList({
           ? t("shopping.errorFull", voice)
           : null;
 
-  const errorMessage =
-    error === "empty"
-      ? t("shopping.errorEmpty", voice)
-      : error === "too-long"
-        ? t("shopping.errorTooLong", voice)
-        : error === "full"
-          ? t("shopping.errorFull", voice)
-          : null;
+  // ONE mapping, shared with the per-row rename refusal (Duo review round 3, !294).
+  // It was two copies of the same three-way switch, which is how a new refusal type
+  // or a reworded message ends up in one and not the other.
+  const errorMessage = refusalMessage(error);
 
   const countLabel = `${remaining} ${t(
     remaining === 1 ? "shopping.itemOne" : "shopping.itemMany",
