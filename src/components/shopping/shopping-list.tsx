@@ -198,14 +198,28 @@ export function ShoppingList({
           {i.text}
         </span>
       )}
-      <button
-        type="button"
-        aria-label={`${t("shopping.rename", voice)} ${i.text}`}
-        onClick={() => setEditingId(i.id)}
-        className={ICON_BUTTON}
-      >
-        {t("shopping.rename", voice)}
-      </button>
+      {/* Hidden while THIS row's editor is open (Duo review round 2, !294). Two
+          controls carrying the identical accessible name "Rename <item>" were on
+          screen at once — the open textbox and this trigger — and the trigger sat in
+          the tab order immediately after the field, so tabbing out of the input
+          landed on a button that re-opens the editor already open.
+
+          Removed rather than `disabled`: a disabled control cannot hold focus, and
+          there is nothing here for a keyboard user to need it for while the field is
+          open. That is the opposite call from the timer's retry button, which uses
+          `aria-disabled` precisely because dropping it would strand focus — here the
+          field it belongs to is right there and already focused. Another row's
+          trigger is untouched. */}
+      {editingId !== i.id && (
+        <button
+          type="button"
+          aria-label={`${t("shopping.rename", voice)} ${i.text}`}
+          onClick={() => setEditingId(i.id)}
+          className={ICON_BUTTON}
+        >
+          {t("shopping.rename", voice)}
+        </button>
+      )}
       <button
         type="button"
         // `<action> <item>`, the same shape as the tick, rename and delete names

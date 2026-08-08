@@ -298,6 +298,47 @@ describe("row controls", () => {
     expect(screen.getByText("Apples")).toBeInTheDocument();
   });
 
+  // Duo review round 2, !294 — while a row is being edited the Rename trigger was
+  // still rendered right after the textbox it opened, so two controls carried the
+  // identical accessible name "Rename Apples" at once and a keyboard user tabbing
+  // out of the field landed on a button that re-opens the editor already open.
+  it("hides the Rename trigger while that row's editor is open", async () => {
+    renderList([item({ id: "a", text: "Apples" })]);
+    expect(
+      screen.getByRole("button", { name: /rename apples/i }),
+    ).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: /rename apples/i }),
+    );
+    // Exactly one control named "Rename Apples" remains, and it is the textbox.
+    expect(screen.queryByRole("button", { name: /rename apples/i })).toBeNull();
+    expect(
+      screen.getByRole("textbox", { name: /rename apples/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("brings the trigger back when the editor closes", async () => {
+    renderList([item({ id: "a", text: "Apples" })]);
+    await userEvent.click(
+      screen.getByRole("button", { name: /rename apples/i }),
+    );
+    await userEvent.keyboard("{Escape}");
+    expect(
+      screen.getByRole("button", { name: /rename apples/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("leaves ANOTHER row's trigger alone while one row is being edited", () => {
+    // The control for the rule above: hiding every trigger would be a different bug.
+    renderList([
+      item({ id: "a", text: "Apples" }),
+      item({ id: "b", text: "Bread", order: 2 }),
+    ]);
+    expect(
+      screen.getByRole("button", { name: /rename bread/i }),
+    ).toBeInTheDocument();
+  });
+
   it("names the item in every control, so a screen-reader list is usable", () => {
     renderList([item({ id: "a", text: "Apples" })]);
     // "Delete" twelve times over is what this is guarding against.
