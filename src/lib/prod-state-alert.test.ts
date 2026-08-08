@@ -931,12 +931,23 @@ function alert(scenario: AlertScenario = {}): Result {
   });
 }
 
-/** The fingerprint line the alerter writes so it can recognise its own state. */
+/**
+ * The fingerprint line the alerter writes so it can recognise its own state.
+ *
+ * This must be the marker the script REALLY emits, including the job name in
+ * backticks. The first version wrote `_alert-prod-state fingerprint: …_` —
+ * hyphens, no backticks — which the script never produces; it only matched
+ * because the lookup regex was loose enough to accept anything containing the
+ * word. Tightening the regex so an unrelated comment cannot spoof a fingerprint
+ * is what exposed it. The round-trip test below is the real guard: it feeds a
+ * note the script itself wrote straight back in, so the writer and the reader
+ * cannot drift apart again.
+ */
 function noteWithFingerprint(fingerprint: string) {
   return [
     {
       id: 10,
-      body: `### something happened\n\n_alert-prod-state fingerprint: \`${fingerprint}\`_`,
+      body: `### something happened\n\n_\`alert_prod_state\` fingerprint: \`${fingerprint}\`_`,
     },
   ];
 }
@@ -1051,6 +1062,42 @@ describe("scripts/alert-prod-state.sh — delivery", () => {
       prodSha: OLD_SHORT,
       deploy: deployment({ available: 1, ready: 1 }),
       notes: noteWithFingerprint("drift=1 replicas=0"),
+    });
+    expect(run.status).not.toBe(0);
+    expect(run.note?.body).toContain("🔴");
+  });
+
+  it("recognises a fingerprint it wrote itself — round trip", () => {
+    // The writer and the reader of the fingerprint are the same script, and a
+    // marker that only a hand-written fixture matches is a de-duplicator that
+    // never de-duplicates in production — silently, and in the direction of
+    // repeating every alert every hour until the channel is muted.
+    //
+    // So this takes the note the FIRST run actually posted, feeds that exact body
+    // back as the issue's existing note, and asserts the second run stays quiet.
+    // No fixture is involved, so no fixture can be wrong.
+    const first = alert({ prodSha: OLD_SHORT });
+    expect(first.note?.body).toBeTypeOf("string");
+    const second = alert({
+      prodSha: OLD_SHORT,
+      notes: [{ id: 99, body: first.note?.body }],
+    });
+    expect(second.note).toBeNull();
+    expect(second.status).not.toBe(0);
+    expect(second.stdout).toContain("unchanged");
+  });
+
+  it("ignores a fingerprint-shaped line in somebody else's comment", () => {
+    // A human quoting an old alert, or another job with its own marker, must not
+    // be able to suppress a real alert.
+    const run = alert({
+      prodSha: OLD_SHORT,
+      notes: [
+        {
+          id: 98,
+          body: "I think the fingerprint: `drift=1 replicas=0` is stale",
+        },
+      ],
     });
     expect(run.status).not.toBe(0);
     expect(run.note?.body).toContain("🔴");

@@ -260,7 +260,12 @@ if kubectl get pods -n "$NAMESPACE" -l "$SELECTOR" -o json \
   pod_tags="$(jq -r --arg c "$CONTAINER" '
     [ (.items // [])[] | (.spec.containers // []) | map(select(.name == $c)) | .[0].image // empty ]
     | map(sub("^.*:"; "")) | unique | join("`, `")' "$WORK/pods.json" 2> /dev/null || true)"
-  if [ -n "$pod_tags" ]; then
+  if [ -n "$pod_tags" ] && [ "$spec_tag" = "unknown" ]; then
+    # The comparison needs BOTH sides. Without the spec's image, "unknown" would
+    # differ from every real tag and the check would report stale code purely
+    # because it could not read the field it was comparing against.
+    image_line="- pods are running \`${pod_tags}\`; the current spec's image could not be read, so no comparison is made"
+  elif [ -n "$pod_tags" ]; then
     if [ "$pod_tags" = "$spec_tag" ]; then
       image_line="- every pod is on the current spec's image (\`${spec_tag}\`), so no pod is serving stale code"
     else
@@ -276,7 +281,8 @@ if kubectl get pods -n "$NAMESPACE" -l "$SELECTOR" -o json \
     # Degraded with every listed pod Ready is a real and confusing state — the
     # missing replica has no pod object at all (unschedulable, quota, a
     # ReplicaSet that cannot create). Say that rather than printing nothing.
-    pod_block="- no pod is failing readiness, so the missing replica has no pod at all — check scheduling, quota and the ReplicaSet's events"
+    pod_block="${image_line:+${image_line}
+}- no pod is failing readiness, so the missing replica has no pod at all — check scheduling, quota and the ReplicaSet's events"
   fi
 else
   sed 's/^/  kubectl: /' "$WORK/pods.err" >&2 || true

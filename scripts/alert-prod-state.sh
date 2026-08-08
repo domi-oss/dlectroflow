@@ -69,6 +69,15 @@ set -euo pipefail
 API="${CI_API_V4_URL:-https://gitlab.com/api/v4}/projects/${CI_PROJECT_ID:-}"
 ISSUE_IID="${ALERT_ISSUE_IID:-${OPS_DIGEST_ISSUE_IID:-}}"
 LOOKBACK="${ALERT_NOTE_LOOKBACK:-20}"
+# Validated because it is interpolated into a URL. A non-numeric value would make
+# a malformed request whose failure the de-duplication read treats as "post
+# anyway" — safe, but silently unpaginated, so it is corrected loudly instead.
+case "$LOOKBACK" in
+  '' | *[!0-9]*)
+    echo "alert-prod-state: ALERT_NOTE_LOOKBACK is not a number — using 20." >&2
+    LOOKBACK=20
+    ;;
+esac
 SELF="${CI_JOB_NAME:-alert_prod_state}"
 # `main`, never the pipeline's own ref: production only ever deploys `main`, so
 # "has production caught up?" is always a question about `main`. Same pin, and
@@ -248,10 +257,14 @@ notes_code="$(curl -s -o "$WORK/notes.json" -w '%{http_code}' --max-time 30 \
 if [ "$notes_code" = "200" ]; then
   # `.[]?` and `// ""` throughout: a system note has no body, and one malformed
   # entry must not cost the whole read.
-  last_fp="$(jq -r '
-    [ .[]? | (.body // "")
-      | select(test("fingerprint: `[^`]*`"))
-      | (match("fingerprint: `([^`]*)`").captures[0].string) ]
+  # The job name is part of the marker, so an unrelated comment that happens to
+  # contain the word "fingerprint" cannot suppress a real alert. `$self` is passed
+  # in rather than interpolated into the program text.
+  last_fp="$(jq -r --arg self "$SELF" '
+    ($self + "` fingerprint: `([^`]*)`") as $re
+    | [ .[]? | (.body // "")
+        | select(test($re))
+        | (match($re).captures[0].string) ]
     | .[0] // empty' "$WORK/notes.json" 2> /dev/null || true)"
 else
   echo "alert-prod-state: could not read recent notes (HTTP ${notes_code}) — posting without de-duplication rather than risking a suppressed alert." >&2
