@@ -338,11 +338,11 @@ describe("InboxView — a capture that fails (#210)", () => {
     );
   }
 
-  function renderInbox() {
+  function renderInbox(initialItems: Item[] = []) {
     render(
       <InboxView
         now={Date.now()}
-        initialItems={[]}
+        initialItems={initialItems}
         settings={settings}
         welcomeVisible={false}
         resumeStep={null}
@@ -555,13 +555,20 @@ describe("InboxView — a capture that fails (#210)", () => {
    * would hand the Retry button back while its own request was still in flight.
    */
   it("scopes the Retry guard to the retry, so an unrelated capture settling cannot unblock it", async () => {
+    let rejectFirst!: (reason: unknown) => void;
     let resolveOther!: () => void;
     vi.mocked(createBrainDumpItem)
-      // the original capture, which fails
-      .mockRejectedValueOnce(new Error("offline"))
+      // the original capture, failed on demand so the field can be typed into
+      // first — that is what makes the second capture a genuinely unrelated
+      // thought rather than one that supersedes the notice
+      .mockReturnValueOnce(
+        new Promise<void>((_, reject) => {
+          rejectFirst = reject;
+        }),
+      )
       // its retry, which never answers
       .mockReturnValueOnce(new Promise<void>(() => {}))
-      // an unrelated capture typed during that retry, resolved on demand
+      // the unrelated capture, resolved on demand
       .mockReturnValueOnce(
         new Promise<void>((resolve) => {
           resolveOther = resolve;
@@ -569,6 +576,11 @@ describe("InboxView — a capture that fails (#210)", () => {
       );
     const input = renderInbox();
     await capture(input, "buy milk");
+    fireEvent.change(input, { target: { value: "call mum" } });
+    await act(async () => {
+      rejectFirst(new Error("offline"));
+      await flushTicks();
+    });
 
     await clickRetry();
     expect(screen.getByRole("button", { name: /try again/i })).toHaveAttribute(
@@ -576,7 +588,8 @@ describe("InboxView — a capture that fails (#210)", () => {
       "true",
     );
 
-    await capture(input, "call mum");
+    fireEvent.keyDown(input, { key: "Enter" });
+    await flush();
     await act(async () => {
       resolveOther();
       await flushTicks();
@@ -594,6 +607,97 @@ describe("InboxView — a capture that fails (#210)", () => {
       ["buy milk"],
       ["call mum"],
     ]);
+  });
+
+  /**
+   * Duo review round 3 — WCAG 2.4.3, on the far side of the press. Keeping the
+   * notice mounted stops focus dropping to `<body>` while the retry runs; a
+   * retry that SUCCEEDS then unmounts the button the user is standing on, which
+   * is the same failure the `aria-disabled` decision was written to avoid, one
+   * step later. The capture input is where they want to be anyway.
+   */
+  it("hands focus back to the capture input when a successful Retry unmounts the notice", async () => {
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    screen.getByRole("button", { name: /try again/i }).focus();
+    await clickRetry();
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(input).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
+  });
+
+  // …but only from the notice's own button. Focus is the user's, and pulling it
+  // out of wherever they have moved to would be a different WCAG problem (3.2.2)
+  // dressed as a fix for this one.
+  it("does not pull focus off whatever the user moved to before the retry landed", async () => {
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    const input = renderInbox([makeItem({ id: "abc", text: "delete me" })]);
+    await capture(input, "buy milk");
+
+    const elsewhere = within(
+      screen.getByText("delete me").closest("li")!,
+    ).getByRole("button", { name: "Delete" });
+    elsewhere.focus();
+    await clickRetry();
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(elsewhere).toHaveFocus();
+  });
+
+  /**
+   * Duo review round 3 — the notice is cleared by the words landing, so editing
+   * the restored text and pressing Enter used to leave a stale alert beside the
+   * fresh "captured ✓", inviting a Retry that would post a near-duplicate.
+   *
+   * The discriminator is whether the words were RESTORED into the field: if they
+   * were, the user has seen them and replaced them, so this capture supersedes
+   * the notice. If they could not be restored the notice is the only copy of
+   * them, and the spec below pins that it survives.
+   */
+  it("clears the notice when the user edits the restored words and captures the edit", async () => {
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    const input = renderInbox();
+    await capture(input, "buy milk");
+    expect(input).toHaveValue("buy milk");
+
+    fireEvent.change(input, { target: { value: "buy oat milk" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await flush();
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(screen.getByText("captured ✓")).toBeInTheDocument();
+    expect(vi.mocked(createBrainDumpItem).mock.calls).toEqual([
+      ["buy milk"],
+      ["buy oat milk"],
+    ]);
+  });
+
+  it("keeps a notice whose words it could NOT restore, even once a later capture succeeds", async () => {
+    let rejectWrite!: (reason: unknown) => void;
+    vi.mocked(createBrainDumpItem).mockReturnValueOnce(
+      new Promise<void>((_, reject) => {
+        rejectWrite = reject;
+      }),
+    );
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    fireEvent.change(input, { target: { value: "call mum" } });
+    await act(async () => {
+      rejectWrite(new Error("offline"));
+      await flushTicks();
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent(/buy milk/);
+
+    // The field never held "buy milk", so this is a different thought and the
+    // notice is still the only copy of the first one.
+    await capture(input, "call mum");
+
+    expect(screen.getByText("captured ✓")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(/buy milk/);
   });
 
   /**

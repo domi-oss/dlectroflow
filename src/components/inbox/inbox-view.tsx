@@ -178,6 +178,18 @@ type CaptureFailure = {
    * per-row to the Schedule controls (#169).
    */
   retrying: boolean;
+  /**
+   * The words went back into the capture field.
+   *
+   * Which decides whether a LATER successful capture supersedes this notice (Duo
+   * review round 3). If they were restored, the user has seen them sitting in the
+   * box and submitted something else from it — an edit, or a different thought
+   * typed over them — so they have moved on and the alert is only noise inviting
+   * a near-duplicate Retry. If they could not be restored (the field already held
+   * the user's next thought) the notice is the ONLY copy of them, and it has to
+   * outlive any number of successful captures.
+   */
+  restored: boolean;
 };
 
 /**
@@ -409,6 +421,24 @@ export function InboxView({
   // #210 — ties the failure message to the notice's control, so the reason is
   // announced with the remedy however the announcement races. See captureNotice.
   const captureErrorId = useId();
+  const retryCtaRef = useRef<HTMLButtonElement | null>(null);
+  /**
+   * #210, Duo review round 3 — hand focus back when the notice unmounts.
+   *
+   * Set only when the notice's own Retry is the focused element at the moment a
+   * retry succeeds, because that is the only case where the unmount takes focus
+   * away from the user (WCAG 2.4.3). A ref rather than state: it is a one-shot
+   * instruction to the effect below, not something anything renders, and putting
+   * it in state would schedule a render just to say "no focus move needed".
+   */
+  const returnFocusToInput = useRef(false);
+  useEffect(() => {
+    if (captureFailure || !returnFocusToInput.current) return;
+    returnFocusToInput.current = false;
+    // In an effect rather than beside the state update: the button is still
+    // mounted then, so focusing the input would be undone by the unmount.
+    inputRef.current?.focus();
+  }, [captureFailure]);
 
   // Per-row inline delete confirm — only one row confirms at a time.
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -916,8 +946,14 @@ export function InboxView({
    * cosmetic: only a retry may clear the input on success, because only a retry
    * knows the text sitting there is the copy IT restored rather than the user's
    * next thought (see the success branch).
+   *
+   * `supersedes` carries the words of a notice this capture replaces — see
+   * `submit()`, which is where the user's intent is legible.
    */
-  const capture = (value: string, { fromRetry = false } = {}) => {
+  const capture = (
+    value: string,
+    { fromRetry = false, supersedes = null as string | null } = {},
+  ) => {
     // Urgent, and deliberately OUTSIDE the transition — see runSchedule (#169):
     // React 19 holds an async transition's own state updates until the action
     // settles, so a guard raised inside one first paints at the moment it stops
@@ -928,19 +964,34 @@ export function InboxView({
     return startTransition(async () => {
       try {
         await withActionTimeout(createBrainDumpItem(value), CAPTURE_TIMEOUT_MS);
-        // Clear the notice only when THESE words are the ones it is holding. A
-        // later capture succeeding says nothing about an earlier one that
-        // failed, and wiping its notice would destroy the only copy of words
-        // that never reached the server.
-        setCaptureFailure((prev) =>
-          prev && prev.value !== value ? prev : null,
-        );
+        // A later capture succeeding says nothing about an earlier one that
+        // failed, so the notice is cleared by only two things: these words
+        // landing at last, or the user having replaced them in the field and
+        // captured that instead. Anything else and the notice may be the only
+        // copy of words that never reached the server.
+        //
+        // Both tests read `prev`, not the closure: by now the notice may hold a
+        // different failure entirely, and clearing THAT would be the data loss
+        // this whole function exists to prevent.
+        setCaptureFailure((prev) => {
+          if (!prev) return null;
+          if (prev.value === value) return null;
+          if (supersedes !== null && prev.value === supersedes) return null;
+          return prev;
+        });
         // Only a retry clears the field, and only when it still holds exactly
         // what we just saved. A fresh Enter has already emptied it
         // synchronously, so anything in there now is the user's NEXT thought —
         // and clearing that would be this bug with the roles reversed.
         if (fromRetry) {
           setText((prev) => (prev.trim() === value ? "" : prev));
+          // The notice is about to unmount. If the user is standing on its Retry
+          // — which they are, they just pressed it — the unmount would drop them
+          // to <body> (WCAG 2.4.3), so the effect above puts them back in the
+          // capture field. Read here, while the button still exists.
+          returnFocusToInput.current =
+            retryCtaRef.current !== null &&
+            retryCtaRef.current === document.activeElement;
         }
         setJustCaptured(true);
         if (captureTimeoutRef.current) clearTimeout(captureTimeoutRef.current);
@@ -956,6 +1007,22 @@ export function InboxView({
         // read both.
         if (captureTimeoutRef.current) clearTimeout(captureTimeoutRef.current);
         setJustCaptured(false);
+        // Restore the words, but ONLY into a field the user has not since typed
+        // into. A ten-second hang is long enough to type the next thought, and
+        // overwriting that would be the same data loss wearing the other hat.
+        // When we can't restore, the notice quotes the words instead, so they
+        // are never only in a variable.
+        //
+        // Read off the DOM node rather than through a functional `setText`
+        // updater, because the answer is needed HERE — `restored` decides
+        // whether a later capture may clear this notice. An updater that also
+        // reported what it decided would have to mutate on the way past, which
+        // is not a pure updater and would run twice under StrictMode. The input
+        // is controlled, so its value is `text` as currently rendered, which is
+        // exactly what the updater would have been handed.
+        const inField = (inputRef.current?.value ?? "").trim();
+        const restored = inField === "";
+        if (restored) setText(value);
         setCaptureFailure({
           value,
           stale: isStaleActionError(error),
@@ -963,13 +1030,8 @@ export function InboxView({
           // A fresh record, so the retry flag starts down: this attempt is over,
           // whatever it was.
           retrying: false,
+          restored,
         });
-        // Restore the words, but ONLY into a field the user has not since typed
-        // into. A ten-second hang is long enough to type the next thought, and
-        // overwriting that would be the same data loss wearing the other hat.
-        // When we can't restore, the notice quotes the words instead, so they
-        // are never only in a variable.
-        setText((prev) => (prev.trim() ? prev : value));
       } finally {
         // Must run on every exit including a throw: a retry flag left up is a
         // Retry button that reads permanently busy. Scoped to `value`, so a
@@ -999,13 +1061,21 @@ export function InboxView({
   const submit = () => {
     const value = text.trim();
     if (!value) return;
+    // Duo review round 3: a notice whose words were put back in THIS field, and
+    // which the user has now submitted something else from, has been seen and
+    // answered — an edited typo, or a different thought typed over them. Leaving
+    // it up puts a stale alert beside a fresh "captured ✓" and invites a Retry
+    // that would post a near-duplicate. The words are carried rather than a
+    // boolean, so a failure that lands between this press and its response
+    // cannot be cleared by it.
+    const supersedes = captureFailure?.restored ? captureFailure.value : null;
     // Cleared synchronously and urgently, which is both the instant-capture
     // feel and the double-submit guard: a second Enter arriving before the
     // write resolves finds an empty field and returns below. Deliberately NOT
     // gated on an in-flight capture — firing three thoughts in a row is the
     // whole point of this control, and they are independent inserts.
     setText("");
-    capture(value);
+    capture(value, { supersedes });
   };
 
   /** #210 — the notice's Retry: re-posts the exact words that did not land. */
@@ -1257,6 +1327,7 @@ export function InboxView({
                 // the retry starts. The press is guarded in the handler instead,
                 // so a double-tap still cannot fire two writes.
                 <button
+                  ref={retryCtaRef}
                   type="button"
                   aria-describedby={captureErrorId}
                   aria-disabled={captureFailure.retrying}
