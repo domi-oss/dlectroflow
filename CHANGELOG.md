@@ -31,6 +31,23 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Added
 
+- **A shopping list, if you want one (#199).** A plain list for the things that are
+  not tasks: no estimate, no steps, nothing that lands in your calendar, and
+  ticking one off does not touch your streak. It lives at its own `/shopping`
+  destination in the menu, with a second **Saved for later** section below the
+  live list — undated on purpose, so nothing there comes back on its own; you pull
+  an item up when you want it again.
+
+  **Off by default**, behind Settings → Shopping list. Nothing is stored until you
+  turn it on, and turning it off again hides the list rather than deleting it, so
+  the items are still there if you change your mind.
+
+  Shopping items are their own kind of thing rather than tasks in disguise, which
+  is what keeps them out of the focus timer, the scheduler and the streak — the
+  code that grants those cannot see them. Entries are capped at 200 characters and
+  a list at 500 items. `/privacy` names the new category of stored content and the
+  effective date moves with it.
+
 - **Pick your playlists and jump to any track, from inside the focus timer
   (#181).** The mini-player gains one expandable panel, collapsed by default and
   opening below the progress bar at a capped height with its own scroll. It holds
@@ -663,6 +680,17 @@ operators upgrading a self-hosted instance don't get surprised.
   - `postgres` majors are capped in the same pass: the version is pinned in three
     places that must move together, and moving it is a dump/restore migration
     rather than an image swap.
+
+### Fixed
+
+- **Your data export was missing a table (#199, found while adding one).** Custom
+  focus playlists (#185) were absent from `export.json` — the export names every
+  table by hand and nothing failed when one was left out, so the whole test suite
+  stayed green while the archive quietly held less than the app did. The export now
+  derives its obligations from the schema: a model that carries user data and is
+  not read by the export fails the build. Nobody had a playlist to lose yet, since
+  the feature has no save path on `main`, but the class of bug is closed rather
+  than the instance.
 
 ## [0.5.0] - 2026-08-01
 

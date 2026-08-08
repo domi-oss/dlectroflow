@@ -133,6 +133,10 @@ export const STRINGS = {
   "nav.focusTimer": { plain: "Focus Timer", playful: "⏱️ Focus Timer" },
   "nav.settings": { plain: "Settings", playful: "⚙️ Settings" },
   "nav.help": { plain: "Help", playful: "🆘 Help" },
+  // #199 — a menu entry rather than a Library tab, because every Library tab is
+  // a bucket of BrainDumpItems (inbox/bucket.ts) and a tab there would say "this is
+  // a kind of task". Only rendered when Settings.shoppingList is on.
+  "nav.shopping": { plain: "Shopping list", playful: "🛒 Shopping list" },
 
   // ── Freshness tiers ────────────────────────────────────────────────────────
   "freshness.recent": { plain: "Recent", playful: "Fresh" },
@@ -1125,6 +1129,93 @@ export const STRINGS = {
   "settings.helpDocs": { plain: "Help & Docs", playful: "🆘 Help & Docs" },
   // Guest sandbox onboarding link → in-app /help docs (#29). → is a functional
   // glyph (allowed in plain); 🆘 is playful-only flavour.
+
+  // ── #199 Shopping list mode ────────────────────────────────────────────────
+  // A list-shaped thing that is NOT a task. The copy leans on that deliberately:
+  // nothing here mentions estimates, steps, scheduling or streaks, because the
+  // feature is outside all four and copy that borrowed their vocabulary would
+  // promise behaviour the page does not have.
+  "shopping.intro": {
+    plain:
+      "A plain list. No estimates, no steps, nothing lands in your calendar, and ticking one off does not touch your streak.",
+    playful:
+      "🛒 Just a list. No estimates, no steps, nothing hits your calendar — and ticking one off won't touch your streak.",
+  },
+  "shopping.addLabel": { plain: "Add to the list", playful: "Add to the list" },
+  "shopping.addPlaceholder": {
+    plain: "e.g. oat milk",
+    playful: "e.g. oat milk 🥛",
+  },
+  "shopping.add": { plain: "Add", playful: "➕ Add" },
+  // The three refusals are separate keys, not one "that didn't work": a capture
+  // field that fails without saying which rule was broken is the failure mode
+  // that makes people stop trusting it.
+  "shopping.errorEmpty": {
+    plain: "Type something first.",
+    playful: "Type something first.",
+  },
+  "shopping.errorTooLong": {
+    plain: "That is too long for one line — 200 characters is the limit.",
+    playful: "Whoa, that's a paragraph — 200 characters is the limit.",
+  },
+  "shopping.errorFull": {
+    plain:
+      "This list is full at 500 items. Tick a few off and delete them to make room.",
+    playful: "This list is full at 500 items. Clear a few to make room. 🧹",
+  },
+  "shopping.sectionActive": { plain: "To buy", playful: "🛒 To buy" },
+  "shopping.sectionSaved": {
+    plain: "Saved for later",
+    playful: "🥫 Saved for later",
+  },
+  "shopping.savedHint": {
+    plain:
+      "Nothing here comes back on its own — pull an item up when you want it again.",
+    playful:
+      "Nothing here comes back on its own — pull it up when you want it again.",
+  },
+  "shopping.empty": {
+    plain: "Nothing on the list yet.",
+    playful: "Nothing on the list yet.",
+  },
+  "shopping.emptySaved": {
+    plain: "Nothing saved for later.",
+    playful: "Nothing saved for later.",
+  },
+  // Counted noun, split so a count reads "1 item" / "3 items". Same shape as
+  // focus.sound.trackOne/trackMany, and #199 part 2's inbox summary reuses these
+  // keys rather than spelling the word again.
+  "shopping.itemOne": { plain: "item", playful: "item" },
+  "shopping.itemMany": { plain: "items", playful: "items" },
+  "shopping.stillToBuy": { plain: "still to buy", playful: "still to buy" },
+  // Accessible names. Each one names the ITEM, because "Delete" repeated down a
+  // list of twelve rows is unusable in a screen reader's element list.
+  "shopping.tickOff": { plain: "Tick off", playful: "Tick off" },
+  "shopping.saveForLater": {
+    plain: "Save for later",
+    playful: "Save for later",
+  },
+  "shopping.moveBackUp": {
+    plain: "Move back to the list",
+    playful: "Move back to the list",
+  },
+  "shopping.delete": { plain: "Delete", playful: "Delete" },
+  "shopping.rename": { plain: "Rename", playful: "Rename" },
+  // Settings section.
+  "shopping.settingsHeading": {
+    plain: "Shopping list",
+    playful: "🛒 Shopping list",
+  },
+  "shopping.settingsToggle": {
+    plain: "Show the shopping list",
+    playful: "Show the shopping list",
+  },
+  "shopping.settingsHint": {
+    plain:
+      "Adds a Shopping list to the menu: a plain list for things that are not tasks. Off by default. Turning it off hides the list without deleting it.",
+    playful:
+      "Adds a 🛒 Shopping list to the menu — a plain list for things that aren't tasks. Off by default, and turning it off hides the list rather than binning it.",
+  },
   "guest.newHere": { plain: "New here?", playful: "New here?" },
   "guest.helpCta": {
     plain: "See the help & docs →",

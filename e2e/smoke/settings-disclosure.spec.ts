@@ -40,6 +40,9 @@ const SECTION_IDS = [
   // #118 Phase C — your own account (the per-user LLM key). Signed-in only, and
   // this suite runs as the owner, so it is on the page.
   "settings-account",
+  // #199 — shopping-list mode's switch. Set once and then left alone, so it sits
+  // at the low-frequency end ahead of Demo and administration (#101's rule).
+  "settings-shopping",
   "settings-demo",
   "settings-people",
 ] as const;

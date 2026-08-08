@@ -10,6 +10,10 @@ const DESTINATIONS = [
   { key: "nav.inbox", href: "/" },
   { key: "nav.focusTimer", href: "/focus" },
   { key: "nav.everything", href: "/library" },
+  // #199 — shopping-list mode, behind Settings.shoppingList. Placed with the other
+  // content destinations rather than at the end: Settings and Help close the menu,
+  // and an entry after them reads as administration.
+  { key: "nav.shopping", href: "/shopping", requires: "shoppingList" },
   { key: "nav.dashboard", href: "/dashboard" },
   { key: "nav.settings", href: "/settings" },
   { key: "nav.help", href: "/help" },
@@ -42,7 +46,23 @@ const DESTINATIONS = [
 const ENTRY =
   "flex min-h-[44px] items-center px-4 py-2 text-sm outline-none hover:bg-muted hover:text-primary focus-visible:bg-muted focus-visible:text-primary focus-visible:inset-ring-2 focus-visible:inset-ring-ring";
 
-export function AppMenu({ voice }: { voice: Voice }) {
+export function AppMenu({
+  voice,
+  /**
+   * #199 — is shopping-list mode on for this workspace?
+   *
+   * Optional and defaulting to FALSE so the menu fails closed: a caller that
+   * predates this prop, or one that forgets it, hides a feature rather than
+   * advertising one nobody asked for. Hiding the entry is presentation only — the
+   * real gate is `notFound()` on `/shopping` and the same check in every
+   * shopping server action, because a hidden link is not a closed door.
+   */
+  shoppingList = false,
+}: {
+  voice: Voice;
+  shoppingList?: boolean;
+}) {
+  const enabled: Record<string, boolean> = { shoppingList };
   const pathname = usePathname();
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -97,7 +117,9 @@ export function AppMenu({ voice }: { voice: Voice }) {
           aria-label="Main"
           className="absolute right-0 top-full z-10 flex min-w-[10rem] flex-col rounded-md border bg-background py-1 shadow-md"
         >
-          {DESTINATIONS.map(({ key, href }) => {
+          {DESTINATIONS.filter(
+            (d) => !("requires" in d) || enabled[d.requires],
+          ).map(({ key, href }) => {
             const active = pathname === href;
             return (
               <Link
