@@ -259,10 +259,10 @@ async function countRows(
   return rows[0]?.n ?? 0;
 }
 
-afterAll(async () => {
+async function dropSchemas(schemas: readonly string[]): Promise<void> {
   const prisma = new PrismaClient();
   try {
-    for (const schema of createdSchemas) {
+    for (const schema of schemas) {
       await prisma.$executeRawUnsafe(
         `DROP SCHEMA IF EXISTS "${assertIdentifier("schema", schema)}" CASCADE`,
       );
@@ -270,6 +270,10 @@ afterAll(async () => {
   } finally {
     await prisma.$disconnect();
   }
+}
+
+afterAll(async () => {
+  await dropSchemas(createdSchemas);
   for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -295,6 +299,12 @@ async function seededDeploy(
 ): Promise<{ measurements: Measurement[]; failure?: RunResult }> {
   // Validates the seed names against the migration list before anything runs.
   planSeededDeploy(names, seeds);
+
+  // A schema left behind by a crashed run is the one failure mode that would go
+  // unnoticed: `migrate deploy` would find its migrations already recorded, skip
+  // them, and the row counts taken between them would describe a database this
+  // run never built. Every scenario therefore starts from nothing.
+  await dropSchemas([schema]);
 
   const tree = stageTree();
   const url = urlForSchema(schema);
@@ -448,6 +458,7 @@ describe("the migrations applied to a database that already holds rows (#190)", 
     const preFix = dropConstraintAfterWrite(original, INCIDENT_CONSTRAINT);
 
     const brokenSchema = scratchSchema("prefix");
+    await dropSchemas([brokenSchema]);
     const tree = stageTree();
     const url = urlForSchema(brokenSchema);
     const seedsByAfter = new Map(seeds.map((s) => [s.after, s]));
