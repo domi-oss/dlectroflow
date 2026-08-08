@@ -216,6 +216,22 @@ function applySeed(tree: string, url: string, seed: SeedFile): void {
   }
 }
 
+/**
+ * A bare SQL identifier. Every schema and table name that reaches a query below
+ * is checked against this first: identifiers cannot be parameterised, so the only
+ * thing standing between a template literal and an injection sink is proof that
+ * the value is an identifier — and "it came from our own code" is the assumption
+ * every such sink was built on.
+ */
+const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+function assertIdentifier(kind: string, value: string): string {
+  if (!IDENTIFIER.test(value)) {
+    throw new Error(`refusing to interpolate ${kind} "${value}" into SQL.`);
+  }
+  return value;
+}
+
 /** Tables that exist in `schema` right now. */
 async function existingTables(
   prisma: PrismaClient,
@@ -233,25 +249,22 @@ async function countRows(
   schema: string,
   table: string,
 ): Promise<number> {
+  // `table` comes from information_schema in this same schema and `schema` from
+  // `scratchSchema`, so neither is user input — and both are still checked,
+  // because an identifier interpolated on the strength of where it came from is
+  // an injection sink waiting for its provenance to change.
   const rows = await prisma.$queryRawUnsafe<{ n: number }[]>(
-    // Identifiers cannot be parameterised. `table` comes from
-    // information_schema in this same schema, never from user input, and is
-    // double-quoted — but it is also validated, because a guard that trusts its
-    // own caller is how an injection sink starts.
-    `SELECT count(*)::int AS n FROM "${schema}"."${table}"`,
+    `SELECT count(*)::int AS n FROM "${assertIdentifier("schema", schema)}"."${assertIdentifier("table", table)}"`,
   );
   return rows[0]?.n ?? 0;
 }
-
-const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 afterAll(async () => {
   const prisma = new PrismaClient();
   try {
     for (const schema of createdSchemas) {
-      if (!IDENTIFIER.test(schema)) continue;
       await prisma.$executeRawUnsafe(
-        `DROP SCHEMA IF EXISTS "${schema}" CASCADE`,
+        `DROP SCHEMA IF EXISTS "${assertIdentifier("schema", schema)}" CASCADE`,
       );
     }
   } finally {
