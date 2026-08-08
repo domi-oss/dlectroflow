@@ -88,6 +88,29 @@ const WRITE_METHODS = new Set([
 /** The client identifier those methods hang off (`prisma.step.update(…)`). */
 const CLIENT = "prisma";
 
+/**
+ * Every identifier that can BE a Prisma client here: the module singleton, plus
+ * the two aliases this codebase gives an interactive-transaction client (`tx`)
+ * and an injected one (`db`, as in `reverseStepCompletionRewards`'s trailing
+ * parameter).
+ *
+ * #198 review round 4 — the walk below deliberately descends into
+ * `prisma.$transaction(async (tx) => …)` callbacks so their writes count, and
+ * then this check threw every one of them away for not being spelled `prisma`.
+ * The effect was that refactoring an action into a transaction, which a
+ * correctness fix routinely does, silently exempted it from the #139 guard
+ * altogether — `uncompleteStep` vanished from the focus.ts census the moment it
+ * became atomic.
+ *
+ * Deliberately a closed list of three rather than "any receiver", so a
+ * write-shaped call on something that is not a client (`cache.step.delete(…)`)
+ * still reports nothing. Kept identical to the receiver list in
+ * `src/lib/__tests__/scoping.harness.test.ts`, which has always accepted all
+ * three: two guards reading the same source and disagreeing about what a client
+ * is called is its own defect.
+ */
+const CLIENTS = new Set([CLIENT, "tx", "db"]);
+
 type FunctionLike =
   ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction;
 
@@ -198,7 +221,8 @@ function declaredFunctions(source: ts.SourceFile): Declared[] {
 
 /**
  * The model written by the thing being invoked, given the expression in
- * callee/tag position: `prisma.<model>.<writeMethod>` → `<model>`, else null.
+ * callee/tag position: `<client>.<model>.<writeMethod>` → `<model>`, else null.
+ * `<client>` is any of `CLIENTS` — see there for why it is not just `prisma`.
  *
  * Takes the callee rather than the whole node so it serves both invocation
  * forms — `prisma.step.update({…})` is a `CallExpression`, while
@@ -212,14 +236,20 @@ function writtenModel(invoked: ts.Expression): string | null {
   if (!ts.isPropertyAccessExpression(callee)) return null;
   if (!WRITE_METHODS.has(callee.name.text)) return null;
 
-  // `prisma.$executeRaw` — no model segment, so name the client itself.
-  if (ts.isIdentifier(callee.expression) && callee.expression.text === CLIENT) {
+  // `prisma.$executeRaw` (or `tx.$executeRaw`) — no model segment, so name the
+  // client itself. Reported as `CLIENT` whichever alias it was written on: the
+  // census cares that the raw escape hatch wrote something, not which handle
+  // reached it.
+  if (
+    ts.isIdentifier(callee.expression) &&
+    CLIENTS.has(callee.expression.text)
+  ) {
     return CLIENT;
   }
   const model = unwrap(callee.expression);
   if (!ts.isPropertyAccessExpression(model)) return null;
   if (!ts.isIdentifier(model.expression)) return null;
-  if (model.expression.text !== CLIENT) return null;
+  if (!CLIENTS.has(model.expression.text)) return null;
   return model.name.text;
 }
 

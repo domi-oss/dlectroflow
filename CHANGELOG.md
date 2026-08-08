@@ -424,6 +424,88 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **The focus timer's Start and Resume no longer fail in silence (#139's shape,
+  found via #198).** Both buttons handled a server that could not be *reached*,
+  and neither handled a server that answered and *declined* — so in those cases
+  the button did nothing at all: no message, no movement, nothing announced. Most
+  reachable right after putting a step back, where the screen briefly still
+  offered "Resume · ~Xm left" for the session that completion had just closed.
+  Pressing it now says so and offers a retry, and that spent offer is **no longer
+  shown in the first place** — once a step has been put back, the screen offers a
+  fresh start, which is the only thing that can actually work. A genuinely paused
+  session is still offered exactly as before.
+
+- **A step completed by accident can now be put back (#198).** There was no way
+  to un-complete a step while its task still had other steps outstanding: the
+  only reopen path in the app worked on a whole inbox item, which an unfinished
+  task never becomes. Finishing the wrong step was therefore permanent. Two
+  places now undo it — **"Actually, I hadn't finished" on the timer's completion
+  screen**, which is where the mistake is actually noticed, and a **"Mark not
+  done"** control on any completed step row. Undoing reopens the parent task and
+  its inbox item if that step was what closed them, tells Google Tasks the task
+  is open again (the first time this app has ever sent that, rather than only
+  ever reporting completions), and **takes back the points that completion
+  awarded** so finishing the step again cannot bank them twice — a loophole that
+  already existed through the inbox's Reopen. Your streak and any badges stay:
+  the focus session really happened, and undoing a step does not un-happen it.
+  On the timer, the undo also cancels the five-second countdown to the next step,
+  so nothing navigates away from the step just rescued. If the step being put back
+  was the one that finished its task, the task-completion points come back too —
+  otherwise finishing that last step again would have paid for the same task twice.
+  **Points for time spent focusing are yours to keep**, on both sides of an undo:
+  you really did focus, and focusing on the step again means running another real
+  session for it. **An undo that fails is an undo you can retry** — it either
+  happens completely or not at all, so a hiccup leaves the step exactly as it was
+  rather than half put-back with the points still banked, and pressing the button
+  again finishes the job. And **using the keyboard, focus lands on the step's own
+  Start button** once the step is back, rather than being dropped nowhere at the
+  moment you have just fixed a mistake.
+
+  **Pressing undo twice takes back one reward, not two.** A double-tap that
+  outruns the button, or the same step open on a phone and a laptop, used to run
+  the undo twice — and because taking a reward back means removing the most
+  recent one, the second pass removed a *different* step's points. The undo now
+  claims the step as it reopens it, so whichever press arrives second finds the
+  work already done and stops, silently and without an error. **And one row's
+  undo no longer greys out another's:** completing, renaming or re-estimating any
+  step used to disable every "Mark not done" button on the page for the length of
+  that request, so a press landing in the gap vanished with nothing to explain
+  it. Each button now waits only on its own step, and while it is waiting it says
+  so out loud rather than just going grey.
+
+  **The button you press keeps the keyboard's focus while it works (#206).** It
+  dims and says why, but it is still the control you are holding. Before, the
+  browser dropped focus to the top of the page the moment the button went
+  inactive, leaving a keyboard or screen-reader user holding nothing — in a list
+  of identical-looking completed rows, while a change they could not observe went
+  through. **And undoing two steps before either finishes now returns focus for
+  both (#206).** The hand-off onto the reopened step's Start button remembered one
+  step at a time, so the second undo erased the first's, and whichever row
+  reopened first was left with focus nowhere: the exact problem the hand-off
+  exists to prevent, on the row that had been waiting longest.
+
+  **Un-completing two steps of the same finished task no longer takes back two
+  task rewards.** The task only reopens once, so only one reopening is paid back —
+  before, the second undo removed some other, already-finished task's reward
+  instead. And **a failed undo on a step row now says so and offers to try
+  again**, the way the timer's has all along: it was the one place this promise
+  was made and not kept, because a failure there left the row looking untouched
+  with nothing said.
+
+- **The focus timer's "Complete step" sat where Pause belongs (#197).** In a
+  running session the controls read *Complete step, then Pause*, with Complete
+  the only filled button in the row — so the leading, most prominent, most
+  colourful slot belonged to the one action that cannot be undone, in the exact
+  position where every media player and timer puts pause. Reached for by muscle
+  memory, it ended the step instead of pausing it: five separate accidental
+  completions by one user before it was reported. **Pause now leads** and carries
+  the filled treatment; Complete follows it, keeping the AA-measured green from
+  #99. There is deliberately no confirmation dialog — that would put a tap
+  between finishing a step and the reward, on every step, forever — so the
+  recovery path is un-completing a step instead (#198). The code's own idea of
+  the primary control (`sessionCtaRef`, where focus lands after a resume) was
+  already on Pause; the row now agrees with it.
+
 - **Signing in from any hostname but the canonical one looped forever (#174).**
   The app answers on more than one hostname, but every OAuth redirect URI is
   built from the single origin `PUBLIC_ORIGIN` names, and the PKCE verifier and
