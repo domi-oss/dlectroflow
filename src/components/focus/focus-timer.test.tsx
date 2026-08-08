@@ -1846,6 +1846,49 @@ describe("FocusTimer — a spent session is not offered again (#198)", () => {
     );
   });
 
+  it("withdraws the 'Keep my paused session' toggle too, not just Resume", async () => {
+    // Review round 14. Withdrawing the Resume offer left a SECOND control behind:
+    // the way back out of the start-fresh disclosure was gated on the raw
+    // `existingSession` prop rather than on the new `resumable` semantics. After an
+    // undo, `resumable` is null because `sessionId !== null` — so pressing "Keep my
+    // paused session" cleared `startingFresh`, `resumable` stayed null anyway, and
+    // NOTHING happened. A control the app knows is dead, which is precisely the
+    // #139 class the rest of this MR removes.
+    const user = userEvent.setup();
+    render(<FocusTimer {...base({ existingSession: paused })} />);
+
+    await user.click(screen.getByRole("button", { name: /resume/i }));
+    await user.click(screen.getByRole("button", { name: /complete step/i }));
+    await user.click(
+      screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+    );
+
+    // Reveal the disclosure the toggle lives in, if it is offered at all.
+    const startFresh = screen.queryByRole("button", { name: /start fresh/i });
+    if (startFresh) await user.click(startFresh);
+
+    expect(
+      screen.queryByRole("button", { name: /keep my paused session/i }),
+    ).toBeNull();
+  });
+
+  it("still offers 'Keep my paused session' when it would actually do something", async () => {
+    // The non-zero control for the case above: on arrival, with no session resumed,
+    // the toggle is real and must survive. Removing a dead control must not cost
+    // the live one — that is how a fix for a dead button becomes a missing button.
+    const user = userEvent.setup();
+    render(<FocusTimer {...base({ existingSession: paused })} />);
+    await user.click(screen.getByRole("button", { name: /start fresh/i }));
+    const keep = screen.getByRole("button", {
+      name: /keep my paused session/i,
+    });
+    expect(keep).toBeInTheDocument();
+    // And pressing it really goes back to the Resume offer, so "present" is not
+    // standing in for "works".
+    await user.click(keep);
+    expect(screen.getByRole("button", { name: /resume/i })).toBeInTheDocument();
+  });
+
   it("the fresh-start route was already safe, and stays safe", async () => {
     // Honest about which mechanism does the work here: `beginFocus` retires any
     // open session on the step, so the prop is just as stale on this route — but

@@ -1139,6 +1139,15 @@ export function FocusTimer({
   // and collapsing them would reopen whichever question it dropped.
   const resumable =
     startingFresh || sessionId !== null ? null : existingSession;
+  // Review round 14 — the toggle back out of the start-fresh disclosure may only
+  // appear when pressing it would actually change something. It was gated on the
+  // raw `existingSession` prop, which survives an undo, while `resumable` does not:
+  // once `sessionId !== null` the session is spent, so clearing `startingFresh`
+  // leaves `resumable` null and the press does NOTHING. A control the app knows is
+  // dead — the #139 class the rest of this MR exists to remove, reintroduced by the
+  // gate two lines up. Derived from the same inputs as `resumable` so the two
+  // cannot drift.
+  const canKeepPaused = Boolean(existingSession) && sessionId === null;
   // Rounded UP to whole minutes, once, and reused by both the CTA and the quiet
   // line — never recomputed differently in two places. No 1m floor: a session
   // paused with nothing left must read the same 0m the ring shows (resuming it
@@ -1780,7 +1789,7 @@ export function FocusTimer({
               {!isSingleTask && taskTotalLine}
               {/* The way back out of the disclosure — the paused session is
                   still there until Start actually retires it. */}
-              {existingSession && (
+              {canKeepPaused && (
                 <button
                   type="button"
                   onClick={() => setStartingFresh(false)}

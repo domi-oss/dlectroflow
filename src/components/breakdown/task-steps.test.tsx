@@ -529,6 +529,49 @@ describe("TaskSteps — a failed un-complete says so, and is retryable (#198, ro
     expect(refresh).toHaveBeenCalled();
   });
 
+  it("cannot be double-submitted: the retry withdraws its own notice", async () => {
+    // Round 14 raised this as "the Try again button has no `disabled`, unlike the
+    // control ten lines above it". Correct about the inconsistency, and the guard is
+    // now there for consistency and defence in depth — but it is worth recording
+    // what ACTUALLY protects this control, because it is not the `disabled` flag.
+    //
+    // `uncomplete` clears this row from `undoFailedIds` on the way in, which
+    // unmounts the whole `role="alert"` the retry lives inside. So the button does
+    // not become disabled — it ceases to exist. `disabled={undoing}` can therefore
+    // never be observed in the disabled state, and asserting that it can would be
+    // asserting a state the component cannot reach.
+    //
+    // The user-visible guarantee is the one pinned here: one press, one call, and
+    // the notice goes away while the retry is in flight rather than sitting there
+    // inviting a second press.
+    const user = userEvent.setup();
+    vi.mocked(uncompleteStep).mockRejectedValueOnce(new Error("db down"));
+    render(
+      <TaskSteps
+        taskId="t1"
+        steps={[{ ...baseStep(), id: "s1", text: "First", done: true }]}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /mark not done: first/i }),
+    );
+    await screen.findByRole("alert");
+    expect(uncompleteStep).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: /try again/i }));
+
+    // The notice — and the retry inside it — is gone, so there is nothing left to
+    // press twice.
+    await waitFor(() =>
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByRole("button", { name: /try again/i }),
+    ).not.toBeInTheDocument();
+    expect(uncompleteStep).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps one row's failure to that row", async () => {
     const user = userEvent.setup();
     vi.mocked(uncompleteStep).mockRejectedValueOnce(new Error("db down"));

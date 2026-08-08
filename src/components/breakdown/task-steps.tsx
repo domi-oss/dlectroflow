@@ -295,10 +295,20 @@ export function TaskSteps({
                   className="mt-2 flex flex-wrap items-center gap-2 text-xs text-red-700 dark:text-red-400"
                 >
                   <span>{t("focus.error.undo", voice)}</span>
+                  {/* Round 14 — carries the same double-submit guard as the
+                      control above it. The server action is idempotent (the
+                      `done: true` precondition inside the write), so a double
+                      press could not corrupt anything; it was an inconsistency
+                      with the protection this file had just added ten lines up,
+                      plus a wasted round trip. `aria-busy` and the spoken reason
+                      are deliberately NOT repeated here: this button sits inside
+                      a `role="alert"` that has already announced itself, and a
+                      second live announcement for one press would talk over it. */}
                   <button
                     type="button"
                     onClick={() => uncomplete(s.id)}
-                    className="focus-visible:ring-ring inline-flex min-h-11 items-center rounded underline underline-offset-4 outline-none focus-visible:ring-2"
+                    disabled={undoing}
+                    className="focus-visible:ring-ring inline-flex min-h-11 items-center rounded underline underline-offset-4 outline-none focus-visible:ring-2 disabled:opacity-50"
                   >
                     {t("focus.error.retry", voice)}
                   </button>
