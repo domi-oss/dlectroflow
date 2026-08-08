@@ -768,11 +768,33 @@ while no pipeline ran at all.
 
 ### The two channels
 
-**1. A red pipeline, and it needs nothing configured.** GitLab notifies the owner
-of a pipeline schedule when its pipeline fails. `alert-prod-state.sh` exits
-non-zero on every outcome that is not "both checks verified healthy" — drifted,
-degraded, undetermined, note rejected, no token, no issue. So whoever owns that
-schedule is who gets told, and there is no webhook to forget.
+**1. A red pipeline, and it needs nothing configured.** A scheduled pipeline runs
+as the schedule's **owner**, and GitLab's "pipeline failed" notification goes to
+that user at notification level Watch, Participating or a Custom level with failed
+pipelines enabled. `alert-prod-state.sh` exits non-zero on every outcome that is
+not "both checks verified healthy" — drifted, degraded, undetermined, note
+rejected, no token, no issue. So whoever owns that schedule is who gets told, and
+there is no webhook to forget.
+
+**Prove that channel once, do not assume it.** It is the only part of this design
+that depends on something outside the repo — a notification level, an email
+address, a spam filter — and the whole point of #191 is that an alert nobody
+receives is indistinguishable from no alert. A monitor trusted on the strength of
+an unread setting is the same bug in a new coat. Five minutes, once:
+
+```
+glab api notification_settings
+glab api "projects/84020916/pipeline_schedules/<id>" | jq '{owner: .owner.username, active}'
+```
+
+The first must report a `level` of `participating`, `watch`, or a `custom` level
+with failed pipelines on; the second must name the person who should be woken up.
+Then force one real failure end to end: set the schedule's `ALERT_ISSUE_IID`
+variable to an iid that does not exist, **Play** the schedule, and confirm three
+things — the job goes red, its log contains the entire note it could not deliver,
+and **an email actually arrives**. Remove the variable afterwards. That exercises
+the delivery path, the loudness guarantee and the fallback channel in one run, and
+it is the only way to know the email is not sitting in a filter.
 
 **2. The note it posts**, which carries the diagnosis. Set `ALERT_MENTION` to a
 single `@handle` (Settings → CI/CD → Variables; **not** a secret, do not mask it)

@@ -198,10 +198,21 @@ if [ -n "${ALERT_MENTION:-}" ]; then
   fi
 fi
 
-case "$severity" in
-  healthy) NEXT_STEPS="Nothing to do. This note exists so the channel closes its own loops — an alerting path that only ever reports bad news gives you no way to tell \"fixed\" from \"stopped running\"." ;;
-  *) NEXT_STEPS="**Recovery** — a failed migration blocks every later one, so start there: \`docs/deploy-runbook.md\` § 19 for the wedged-migration path, § 18 to read this alert, § 14 to go back a revision. Rolling forward on \`${DRIFT_REF}\` deploys with the next green pipeline." ;;
-esac
+# The first instruction has to match the evidence, and it did not. Duo review on
+# !293 caught that this text was identical for EVERY non-healthy severity and
+# opened by blaming a failed migration — including when the state is undetermined
+# because the cluster could not be read, and when the only problem is that a
+# deploy did not happen. Sending somebody to the migrations at 2am because the
+# check has no credentials is a wrong first step, and the note is the product.
+if [ "$severity" = "healthy" ]; then
+  NEXT_STEPS="Nothing to do. This note exists so the channel closes its own loops — an alerting path that only ever reports bad news gives you no way to tell \"fixed\" from \"stopped running\"."
+elif [ "$severity" = "undetermined" ]; then
+  NEXT_STEPS="**Establish the facts first — nothing above is a diagnosis.** One of the two checks could not read what it needed, so this is an unknown rather than a fault, and an unknown is reported because a check nobody can see is indistinguishable from a passing one. Start with this job's log: it carries the \`kubectl\` or \`curl\` error that stdout deliberately withholds. \`docs/deploy-runbook.md\` § 18 covers reading this alert."
+elif [ "$replicas_code" = "1" ]; then
+  NEXT_STEPS="**Recovery** — a wedged migration is the likeliest cause of a replica shortfall here, and it is the one that compounds: it blocks every LATER migration, so each merge from now makes it worse. \`docs/deploy-runbook.md\` § 19 for that path, § 14 to go back a revision, § 18 to read this alert."
+else
+  NEXT_STEPS="**Recovery** — every replica is available, so this is a deploy that did not land rather than a broken one. Check \`deploy_production\` on the most recent \`${DRIFT_REF}\` pipeline: a failure in an earlier stage *skips* it rather than failing it (#147). Rolling forward on \`${DRIFT_REF}\` deploys with the next green pipeline; \`docs/deploy-runbook.md\` § 14 to go back a revision instead, § 18 to read this alert."
+fi
 
 # ── 4. The note ──────────────────────────────────────────────────────────────
 # Heredoc into a file, then read it back — NOT `$(cat <<EOF …)`. bash 3.2 (the

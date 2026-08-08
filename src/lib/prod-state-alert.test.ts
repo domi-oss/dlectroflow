@@ -750,6 +750,35 @@ describe("scripts/check-prod-replicas.sh", () => {
     expect(run.stdout).toContain("end");
   });
 
+  it("rejects a non-numeric REPLICAS_MAX_PROGRESS_DEADLINE instead of trusting it", () => {
+    // Duo review finding: every other operator-settable number in these scripts
+    // is validated with a `case … *[!0-9]*` guard — the k8s `deadline` here,
+    // `LOOKBACK` and `GRACE` in the siblings — and this one was not. Left
+    // unvalidated, `[ "$deadline" -le "$MAX_DEADLINE" ]` is a bash error rather
+    // than a comparison, the quiet arm is skipped, and a healthy rolling deploy
+    // reads as an alert. A typo in a variable should not turn a monitor into a
+    // false-alarm generator.
+    const run = replicas({
+      kubectl: [
+        {
+          match: "deployment",
+          body: deployment({
+            available: 1,
+            ready: 1,
+            updated: 1,
+            progressing: { status: "True", reason: "ReplicaSetUpdated" },
+          }),
+        },
+        { match: "pods", body: { items: [] } },
+      ],
+      env: { REPLICAS_MAX_PROGRESS_DEADLINE: "30m" },
+    });
+    // Falls back to the default, so the rollout is still correctly quiet.
+    expect(run.status).toBe(0);
+    expect(run.stderr).toMatch(/REPLICAS_MAX_PROGRESS_DEADLINE/);
+    expect(run.stdout).not.toContain("🔴");
+  });
+
   it("reads the deployment and namespace from env, defaulting to production", () => {
     const run = replicas();
     expect(run.kubectlCalls.join("\n")).toContain("dlectroflow-prod");
@@ -1273,6 +1302,40 @@ describe("scripts/alert-prod-state.sh — the alerter cannot fail quietly", () =
     expect(run.note?.body).toContain("⚠️");
     expect(run.note?.body).not.toContain("✅");
     expect(run.note?.body?.toLowerCase()).toContain("undetermined");
+  });
+
+  it("does not blame a migration when it could not read anything", () => {
+    // Duo review finding. The recovery text was identical for every non-healthy
+    // severity and opened with "a failed migration blocks every later one, so
+    // start there" — including when the state is UNDETERMINED because the cluster
+    // could not be read or production was unreachable. Sending an on-call
+    // responder to the migrations at 2am when the actual problem is that the check
+    // has no credentials is a wrong first instruction, and the note is the
+    // product.
+    const run = alert({ prodSha: null, deploy: false });
+    expect(run.status).not.toBe(0);
+    expect(run.note?.body).not.toMatch(/failed migration/i);
+    expect(run.note?.body?.toLowerCase()).toMatch(/establish|could not/);
+  });
+
+  it("does not blame a migration for a drift-only alert either", () => {
+    // Same finding, the other arm: production behind `main` with every replica
+    // available is a deploy that did not happen, not a wedged migration.
+    const run = alert({ prodSha: OLD_SHORT });
+    expect(run.status).not.toBe(0);
+    expect(run.note?.body).not.toMatch(/failed migration/i);
+  });
+
+  it("DOES point at the migration path when replicas are the problem", () => {
+    // The counterpart, so the fix does not simply delete the useful guidance:
+    // this is the shape where a wedged migration is the likeliest cause.
+    const run = alert({
+      deploy: deployment({ available: 1, ready: 1 }),
+      pods: podsWithWedgedMigrate("Error: P3009"),
+    });
+    expect(run.status).not.toBe(0);
+    expect(run.note?.body).toMatch(/migration/i);
+    expect(run.note?.body).toContain("§ 19");
   });
 
   it("exits non-zero and prints the whole note when the POST is rejected", () => {

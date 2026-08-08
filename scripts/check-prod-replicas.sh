@@ -107,7 +107,20 @@ MAX_PODS="${REPLICAS_MAX_PODS:-3}"
 # 1800s = 30 minutes. The monitor runs hourly, so a deadline within this bound
 # means at worst one quiet run before the condition flips and the next run
 # alerts. Anything longer and staying quiet is no longer self-limiting.
+#
+# Validated like every other operator-settable number in these scripts (the k8s
+# `deadline` below, `LOOKBACK` and `GRACE` in the siblings). Duo review on !293
+# caught this one skipping it: left unvalidated, `[ "$deadline" -le "$MAX_DEADLINE" ]`
+# is a bash error rather than a comparison, so the quiet arm is skipped and an
+# ordinary rolling deploy reads as an alert. A typo in a variable must not turn a
+# monitor into a false-alarm generator — that is how a channel gets muted.
 MAX_DEADLINE="${REPLICAS_MAX_PROGRESS_DEADLINE:-1800}"
+case "$MAX_DEADLINE" in
+  '' | *[!0-9]*)
+    echo "check-prod-replicas: REPLICAS_MAX_PROGRESS_DEADLINE is not a number of seconds ('${MAX_DEADLINE}') — using 1800." >&2
+    MAX_DEADLINE=1800
+    ;;
+esac
 # 300 characters holds a Prisma P3009 message with its migration name, which is
 # the longest thing worth reading here, without pasting a whole stack trace into
 # somebody's inbox.
