@@ -55,6 +55,16 @@ describe("stripSqlComments", () => {
     const sql = `SELECT 'it''s fine'; -- gone`;
     expect(stripSqlComments(sql)).toBe(`SELECT 'it''s fine'; `);
   });
+
+  // #190 — a `--` inside a PL/pgSQL body is body text, not a comment. Stripping
+  // it deletes the rest of that line of executable SQL, so the statement the
+  // guards then read is not the statement Postgres runs.
+  it("leaves a comment marker inside a dollar-quoted body alone", () => {
+    const sql = `DO $$ BEGIN -- keep me\n DELETE FROM "GoogleAuth"; END $$; -- gone`;
+    expect(stripSqlComments(sql)).toBe(
+      `DO $$ BEGIN -- keep me\n DELETE FROM "GoogleAuth"; END $$; `,
+    );
+  });
 });
 
 describe("splitStatements", () => {
@@ -67,6 +77,29 @@ describe("splitStatements", () => {
   it("does not split on a semicolon inside a string literal", () => {
     expect(splitStatements(`UPDATE t SET c = 'a;b';`)).toEqual([
       `UPDATE t SET c = 'a;b'`,
+    ]);
+  });
+
+  // #190 — two committed migrations wrap their data surgery in a `DO $$ … $$`
+  // block (google_auth_orphan_purge, google_auth_user_id_not_null), and a
+  // PL/pgSQL body is semicolon-separated by definition. Split naively, the one
+  // statement that does the work becomes five fragments, none of which is a
+  // statement any guard here can reason about — and `findLateConstraintDrops`
+  // then reads a DROP that is genuinely late as "no DROP in this file", which
+  // is a false green rather than a missed warning.
+  it("does not split on the semicolons inside a dollar-quoted body", () => {
+    const sql = `DO $$ BEGIN DELETE FROM "GoogleAuth"; END $$;\nUPDATE t SET c = 1;`;
+    expect(splitStatements(sql)).toEqual([
+      `DO $$ BEGIN DELETE FROM "GoogleAuth"; END $$`,
+      `UPDATE t SET c = 1`,
+    ]);
+  });
+
+  it("recognises a tagged dollar quote and is not closed by a bare $$", () => {
+    const sql = `DO $body$ SELECT '$$'; $body$;\nSELECT 2;`;
+    expect(splitStatements(sql)).toEqual([
+      `DO $body$ SELECT '$$'; $body$`,
+      `SELECT 2`,
     ]);
   });
 });

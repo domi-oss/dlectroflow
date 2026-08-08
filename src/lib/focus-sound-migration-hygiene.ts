@@ -73,8 +73,40 @@ export interface MigrationViolation {
 }
 
 /**
+ * A dollar-quote opener — `$$` or `$tag$` — anchored at the start of the slice.
+ *
+ * #190. Inside such a body every other lexical rule is suspended: `;` does not
+ * terminate a statement, `--` is not a comment and `'` does not open a string.
+ * Two committed migrations rely on that (`google_auth_orphan_purge` and
+ * `google_auth_user_id_not_null` both wrap their data surgery in `DO $$ … $$`),
+ * so a lexer that does not know the construct reads their one working statement
+ * as a handful of fragments — and `findLateConstraintDrops` then sees "no DROP
+ * in this file" rather than a late one, which is a false PASS.
+ *
+ * The tag is matched rather than assumed empty because `$$` may legally appear
+ * inside a `$body$`-tagged block, and only the matching tag closes it.
+ * Positional parameters (`$1`) do not match: a tag is empty or starts with a
+ * letter or underscore.
+ */
+const DOLLAR_QUOTE_OPEN = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/;
+
+/**
+ * If a dollar-quoted body opens at `i`, the whole body including both tags;
+ * otherwise `null`. An unterminated body runs to the end of the input, which is
+ * the only reading that cannot silently resume lexing inside PL/pgSQL.
+ */
+function dollarQuotedBodyAt(sql: string, i: number): string | null {
+  if (sql[i] !== "$") return null;
+  const open = DOLLAR_QUOTE_OPEN.exec(sql.slice(i));
+  if (!open) return null;
+  const tag = open[0];
+  const close = sql.indexOf(tag, i + tag.length);
+  return close === -1 ? sql.slice(i) : sql.slice(i, close + tag.length);
+}
+
+/**
  * Remove `--` line comments and `/* … *​/` block comments, leaving string
- * literals untouched.
+ * literals and dollar-quoted bodies untouched.
  *
  * Hand-lexed rather than regexed because both comment markers are legal
  * *inside* a string literal, and a migration that backfills a slug is exactly
@@ -100,6 +132,12 @@ export function stripSqlComments(sql: string): string {
       i += 1;
       continue;
     }
+    const body = dollarQuotedBodyAt(sql, i);
+    if (body !== null) {
+      out += body;
+      i += body.length;
+      continue;
+    }
     if (c === "-" && sql[i + 1] === "-") {
       while (i < sql.length && sql[i] !== "\n") i += 1;
       continue;
@@ -118,31 +156,46 @@ export function stripSqlComments(sql: string): string {
 
 /**
  * Split comment-stripped SQL into statements on the semicolons that terminate
- * one, i.e. those outside a string literal. Blank statements are dropped and
- * whitespace is collapsed, so a statement written across twelve lines matches
- * the same way as one written across one.
+ * one, i.e. those outside a string literal and outside a dollar-quoted body.
+ * Blank statements are dropped and whitespace is collapsed, so a statement
+ * written across twelve lines matches the same way as one written across one.
  */
 export function splitStatements(sql: string): string[] {
   const statements: string[] = [];
   let current = "";
   let inString = false;
-  for (const c of sql) {
+  let i = 0;
+  while (i < sql.length) {
+    const c = sql[i];
     if (inString) {
       current += c;
       if (c === "'") inString = false;
+      i += 1;
       continue;
     }
     if (c === "'") {
       inString = true;
       current += c;
+      i += 1;
+      continue;
+    }
+    // #190 — a `DO $$ … $$` body is semicolon-separated PL/pgSQL, so it has to
+    // be consumed whole or the one statement that does the work becomes several
+    // that are not statements at all.
+    const body = dollarQuotedBodyAt(sql, i);
+    if (body !== null) {
+      current += body;
+      i += body.length;
       continue;
     }
     if (c === ";") {
       statements.push(current);
       current = "";
+      i += 1;
       continue;
     }
     current += c;
+    i += 1;
   }
   statements.push(current);
   return statements
