@@ -443,7 +443,27 @@ describe("the migrations applied to a database that already holds rows (#190)", 
     // here, so the only boundaries that matter are the seed points, and this
     // is the difference between four CLI invocations and thirty-eight.
     const before = upTo.slice(0, -1);
-    for (const phase of planSeededDeploy(before, seeds)) {
+
+    // Only the seeds that belong to this prefix (raised in review). Every seed
+    // committed today happens to sit before the incident migration, but
+    // CONTRIBUTING tells the next author to add a seed named for a migration
+    // before their own — so the first seed added after this point would make
+    // `planSeededDeploy` throw "seed names a migration that does not exist",
+    // and this test would fail with something that has nothing to do with the
+    // regression it exists to pin. That strictness is right for the full run and
+    // wrong here, because here the truncation is deliberate.
+    const beforeSet = new Set(before);
+    const applicable = seeds.filter((s) => beforeSet.has(s.after));
+
+    // …and the filter must not be what makes the demonstration pass. The row
+    // that violates the old constraint comes from exactly one seed; if a rename
+    // ever drops it, this test would deploy a clean database and observe no
+    // 23514, which reads as "the harness is fine".
+    expect(applicable.map((s) => s.after)).toContain(
+      "20260726120000_focus_sound_lofi_library",
+    );
+
+    for (const phase of planSeededDeploy(before, applicable)) {
       for (const name of phase.migrations) stageMigration(tree, name);
       const result = deploy(tree, url);
       expect(

@@ -147,8 +147,55 @@ export function redactStringLiterals(sql: string): string {
   return out;
 }
 
-/** An optionally-quoted identifier, e.g. `"Settings"` or `Settings`. */
+/**
+ * Every pattern that reads a table name out of a statement, built once at module
+ * load rather than per statement.
+ *
+ * `IDENT` is an optionally-quoted identifier (`"Settings"` or `Settings`). It is
+ * interpolated into the sources below, which is why they are assembled with
+ * `new RegExp` — but they are assembled ONCE, from module constants only, so
+ * nothing a caller passes ever reaches a pattern. That matters twice over:
+ * `focus-sound-migration-hygiene.ts` records that a per-call dynamic pattern is a
+ * SAST finding even when every input is a literal, and there are ~700 statements
+ * to classify, each of which would otherwise recompile nine patterns.
+ */
 const IDENT = `"?([A-Za-z_][A-Za-z0-9_]*)"?`;
+
+const ALTER_TABLE = new RegExp(
+  `\\bALTER\\s+TABLE\\s+(?:ONLY\\s+)?${IDENT}`,
+  "i",
+);
+
+/**
+ * `UPDATE <table>`, excluding the two contexts where `UPDATE` is not a statement:
+ * `SELECT … FOR UPDATE OF t` is a row lock, and `ON UPDATE CASCADE` is a
+ * referential action on a foreign key. Seven committed migrations declare the
+ * latter, and without the lookbehind the rule reported a table called `CASCADE`.
+ */
+const UPDATE_TABLE = new RegExp(
+  `(?<!\\b(?:FOR|ON)\\s+)\\bUPDATE\\s+(?:ONLY\\s+)?${IDENT}`,
+  "i",
+);
+
+const DELETE_TABLE = new RegExp(
+  `\\bDELETE\\s+FROM\\s+(?:ONLY\\s+)?${IDENT}`,
+  "i",
+);
+
+const CREATE_UNIQUE_INDEX = new RegExp(
+  `\\bCREATE\\s+UNIQUE\\s+INDEX\\s+(?:CONCURRENTLY\\s+)?(?:IF\\s+NOT\\s+EXISTS\\s+)?"?\\w+"?\\s+ON\\s+(?:ONLY\\s+)?${IDENT}`,
+  "i",
+);
+
+const CREATE_TABLE = new RegExp(
+  `\\bCREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?${IDENT}`,
+  "i",
+);
+
+const INSERT_INTO = new RegExp(
+  `\\bINSERT\\s+INTO\\s+(?:ONLY\\s+)?${IDENT}`,
+  "gi",
+);
 
 /**
  * Words that can follow a shape keyword in the position an identifier would
@@ -176,10 +223,7 @@ const NOT_A_TABLE = new Set([
  * would otherwise slip past every ALTER-based rule below.
  */
 function alteredTable(statement: string): string | null {
-  const m = new RegExp(`\\bALTER\\s+TABLE\\s+(?:ONLY\\s+)?${IDENT}`, "i").exec(
-    statement,
-  );
-  return m ? m[1] : null;
+  return ALTER_TABLE.exec(statement)?.[1] ?? null;
 }
 
 /**
@@ -218,24 +262,12 @@ const RULES: ReadonlyArray<{
   table: (statement: string) => string | null;
 }> = [
   {
-    // The lookbehind excludes the two contexts where `UPDATE` is not a
-    // statement: `SELECT … FOR UPDATE OF t` is a row lock, and `ON UPDATE
-    // CASCADE` is a referential action on a foreign key. Seven committed
-    // migrations declare the latter, and without this the rule reported a table
-    // called `CASCADE`.
     shape: "update",
-    table: (s) =>
-      new RegExp(
-        `(?<!\\b(?:FOR|ON)\\s+)\\bUPDATE\\s+(?:ONLY\\s+)?${IDENT}`,
-        "i",
-      ).exec(s)?.[1] ?? null,
+    table: (s) => UPDATE_TABLE.exec(s)?.[1] ?? null,
   },
   {
     shape: "delete",
-    table: (s) =>
-      new RegExp(`\\bDELETE\\s+FROM\\s+(?:ONLY\\s+)?${IDENT}`, "i").exec(
-        s,
-      )?.[1] ?? null,
+    table: (s) => DELETE_TABLE.exec(s)?.[1] ?? null,
   },
   {
     shape: "set-not-null",
@@ -271,10 +303,7 @@ const RULES: ReadonlyArray<{
     // same hazard plus a NOT NULL, and is caught here too.
     shape: "add-unique-index",
     table: (s) => {
-      const index = new RegExp(
-        `\\bCREATE\\s+UNIQUE\\s+INDEX\\s+(?:CONCURRENTLY\\s+)?(?:IF\\s+NOT\\s+EXISTS\\s+)?"?\\w+"?\\s+ON\\s+(?:ONLY\\s+)?${IDENT}`,
-        "i",
-      ).exec(s);
+      const index = CREATE_UNIQUE_INDEX.exec(s);
       if (index) return index[1];
       return /\bADD\s+(?:CONSTRAINT\s+"?\w+"?\s+)?(?:UNIQUE|PRIMARY\s+KEY)\b/i.test(
         s,
@@ -312,10 +341,7 @@ function tablesCreatedBy(statements: readonly string[]): Set<string> {
     // `CREATE TABLE … AS SELECT` would arrive populated; the repo has none, and
     // treating one as empty would be wrong, so it is excluded explicitly.
     if (/\bAS\s+SELECT\b/i.test(s)) continue;
-    const m = new RegExp(
-      `\\bCREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?${IDENT}`,
-      "i",
-    ).exec(s);
+    const m = CREATE_TABLE.exec(s);
     if (m) created.add(m[1]);
   }
   return created;
@@ -359,9 +385,9 @@ export function findDataDependentStatements(
 export function tablesInsertedBy(sql: string): string[] {
   const tables = new Set<string>();
   for (const statement of readableStatements(sql)) {
-    for (const m of statement.matchAll(
-      new RegExp(`\\bINSERT\\s+INTO\\s+(?:ONLY\\s+)?${IDENT}`, "gi"),
-    )) {
+    // `matchAll` builds its own iterator from the pattern's source and flags, so
+    // sharing a `g`-flagged constant here carries no `lastIndex` between calls.
+    for (const m of statement.matchAll(INSERT_INTO)) {
       tables.add(m[1]);
     }
   }
