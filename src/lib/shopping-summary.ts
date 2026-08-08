@@ -18,11 +18,24 @@ import { t, type Voice } from "@/lib/strings";
  * dismissed. The count is `prisma.shoppingItem.count` at render time, from the
  * same predicate `/shopping` uses for its own header.
  *
- * So a missed sync — a crash between the item write and this one, a future writer
- * that forgets — can only ever produce the row outliving the list, and
- * {@link shoppingSummaryVisible} answers that with NO summary. There is no state
- * of the database in which a number is shown that the list does not have, because
- * there is no second copy of the number.
+ * ## What a missed sync can and cannot do
+ *
+ * The item write and this one are two statements, not one transaction, so a crash
+ * between them — or a future writer that forgets to call
+ * {@link syncShoppingSummary} — leaves them briefly disagreeing. Both directions of
+ * that are stated here rather than left for someone to discover:
+ *
+ *  * **Row outlives the list.** {@link shoppingSummaryVisible} answers with NO
+ *    summary, because the count it derives is zero. The line disappears; nothing
+ *    wrong is displayed.
+ *  * **List outlives the row.** No line is shown until the next shopping write,
+ *    which re-runs this sync and creates it. Self-healing, and the failure is a
+ *    missing nudge rather than a wrong one.
+ *
+ * Neither loses data and neither can display a number the list does not have,
+ * because there is no second copy of the number to go stale. That is the whole
+ * reason a transaction is not reached for here: the residual is a line that is
+ * absent for a while, which is cheaper than wrapping every shopping write in one.
  *
  * ## Why its own table, and not a `BrainDumpItem`
  *

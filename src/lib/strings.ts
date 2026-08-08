@@ -1191,7 +1191,11 @@ export const STRINGS = {
   // disagreeing about what one item is called.
   "shopping.summaryOn": {
     plain: "on your shopping list",
-    playful: "🛒 on your shopping list",
+    // The emoji sits before the NOUN, not at the head of the fragment: the label is
+    // composed as `<count> <item|items> <this>`, so a leading glyph would read
+    // "3 items 🛒 on your shopping list" — an emoji dropped into the middle of a
+    // sentence rather than decorating the thing it depicts.
+    playful: "on your 🛒 shopping list",
   },
   "shopping.summaryDismiss": {
     plain: "Not now",
