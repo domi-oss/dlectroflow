@@ -4,7 +4,11 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { getLLM } from "@/lib/llm";
 import { resolveUtilityModel } from "@/lib/models";
-import { getValidAccessToken, patchGoogleTask } from "@/lib/google";
+import { patchGoogleTask } from "@/lib/google";
+import {
+  actingUserGoogleToken,
+  completeGoogleTaskForTask,
+} from "@/lib/google-task-sync";
 import {
   BadgeKey,
   FocusOutcome,
@@ -18,7 +22,7 @@ import {
   rewardStepDone,
   reverseStepCompletionRewards,
 } from "@/lib/rewards";
-import { currentWorkspaceId, currentUser } from "@/lib/workspace";
+import { currentWorkspaceId } from "@/lib/workspace";
 import { remainingSecForSession } from "@/lib/focus-timer-clock";
 
 /**
@@ -179,7 +183,7 @@ async function closeSession(
 
 /** Mark a task and its linked inbox item(s) completed, and award the task-complete reward+badge. */
 async function markTaskCompleted(workspaceId: string, taskId: string) {
-  await prisma.task.update({
+  const task = await prisma.task.update({
     // Scoped for the same reason as closeSession above: the helper is given a
     // workspaceId, so it must filter on it rather than trust its callers.
     where: { id: taskId, workspaceId },
@@ -191,25 +195,13 @@ async function markTaskCompleted(workspaceId: string, taskId: string) {
   });
   await logReward(workspaceId, RewardType.TaskComplete);
   await awardBadge(workspaceId, BadgeKey.TaskComplete);
-}
-
-/**
- * The ACTING account's Google access token, or null.
- *
- * #118 Phase C — credentials are per user, so the best-effort Google sync a
- * step-completion or a requeue performs uses the credential of whoever is
- * acting. A caller with no account (a guest, or a revoked account) has no
- * credential and gets null, which every call site treats as "skip the sync"
- * rather than as an error — the same shape the missing-token branch already had.
- *
- * Before Phase C these call sites resolved the ONE instance-wide row, so a
- * non-owner completing a step would have patched the OWNER's Google task. Not
- * reachable in practice (only the owner could schedule, so only their steps ever
- * carried a googleTaskId) but it stops being possible at all now.
- */
-async function actingUserGoogleToken(): Promise<string | null> {
-  const me = await currentUser();
-  return me ? getValidAccessToken(me.id) : null;
+  // #195 — a task can carry its OWN Google id, from having been scheduled while
+  // it was still stepless (`scheduleSingleTask`). `ensureFocusStep` then creates
+  // a step the moment it is focused, and that step has no id of its own, so the
+  // step patch above finds nothing and the task-level Google task would stay
+  // open forever. Reuses the update's return value rather than re-reading the
+  // row, and runs last: it is best-effort and must not precede the local writes.
+  await completeGoogleTaskForTask(task);
 }
 
 async function completeGoogleTaskForStep(step: {

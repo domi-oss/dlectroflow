@@ -185,6 +185,150 @@ describe("completeItem", () => {
   });
 });
 
+/**
+ * #195 — a STEPLESS to-do's scheduling unit is the TASK, so `scheduleSingleTask`
+ * stores the Google id on `Task.googleTaskId`. Only the step twin ever patched
+ * `status: "completed"`, so completing such an item in the app left the Google
+ * task open and Reclaim kept the calendar block.
+ *
+ * The guard keys off **`Task.googleTaskId` being set**, NOT off "the task has no
+ * steps". They are different conditions and the id is the correct one: an item
+ * scheduled while stepless keeps its task-level Google task forever, and steps
+ * added afterwards (by a breakdown, or lazily by `ensureFocusStep`) get their
+ * OWN Google tasks from a separate `upsertGoogleTask` call. Keying off the step
+ * count would strand exactly that task-level one, which is the bug this fixes.
+ */
+describe("completeItem — Google Task sync (#195)", () => {
+  it("PATCHes a stepless item's Task.googleTaskId to completed", async () => {
+    const google = await import("@/lib/google");
+    (
+      google.getValidAccessToken as ReturnType<typeof vi.fn>
+    ).mockResolvedValueOnce("tok");
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i1",
+      completedAt: null,
+      task: {
+        id: "t1",
+        steps: [],
+        googleTaskId: "g-task",
+        googleTaskListId: "l1",
+      },
+    });
+    const { completeItem } = await import("./braindump");
+    await completeItem("i1");
+    expect(google.patchGoogleTask).toHaveBeenCalledWith("tok", "l1", "g-task", {
+      status: "completed",
+    });
+  });
+
+  it("still PATCHes when the task HAS steps — the guard is the id, not the step count", async () => {
+    const google = await import("@/lib/google");
+    (
+      google.getValidAccessToken as ReturnType<typeof vi.fn>
+    ).mockResolvedValueOnce("tok");
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i2",
+      completedAt: null,
+      task: {
+        id: "t1",
+        steps: [{ id: "s1", done: false }],
+        googleTaskId: "g-task",
+        googleTaskListId: "l1",
+      },
+    });
+    const { completeItem } = await import("./braindump");
+    await completeItem("i2");
+    expect(google.patchGoogleTask).toHaveBeenCalledWith("tok", "l1", "g-task", {
+      status: "completed",
+    });
+  });
+
+  it("skips silently when the task carries no Google id", async () => {
+    const google = await import("@/lib/google");
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i3",
+      completedAt: null,
+      task: {
+        id: "t1",
+        steps: [],
+        googleTaskId: null,
+        googleTaskListId: null,
+      },
+    });
+    const { completeItem } = await import("./braindump");
+    await completeItem("i3");
+    expect(google.getValidAccessToken).not.toHaveBeenCalled();
+    expect(google.patchGoogleTask).not.toHaveBeenCalled();
+    expect(prismaMock.brainDumpItem.update).toHaveBeenCalled();
+  });
+
+  it("skips silently when the acting account has no Google credential", async () => {
+    const google = await import("@/lib/google");
+    (
+      google.getValidAccessToken as ReturnType<typeof vi.fn>
+    ).mockResolvedValueOnce(null);
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i4",
+      completedAt: null,
+      task: {
+        id: "t1",
+        steps: [],
+        googleTaskId: "g-task",
+        googleTaskListId: "l1",
+      },
+    });
+    const { completeItem } = await import("./braindump");
+    await completeItem("i4");
+    expect(google.patchGoogleTask).not.toHaveBeenCalled();
+    expect(prismaMock.brainDumpItem.update).toHaveBeenCalled();
+  });
+
+  it("a thrown Google error never fails the completion (best-effort contract)", async () => {
+    const google = await import("@/lib/google");
+    (
+      google.getValidAccessToken as ReturnType<typeof vi.fn>
+    ).mockResolvedValueOnce("tok");
+    (google.patchGoogleTask as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("network down"),
+    );
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i5",
+      completedAt: null,
+      task: {
+        id: "t1",
+        steps: [],
+        googleTaskId: "g-task",
+        googleTaskListId: "l1",
+      },
+    });
+    const { completeItem } = await import("./braindump");
+    await expect(completeItem("i5")).resolves.toBeUndefined();
+    const upd = prismaMock.brainDumpItem.update.mock.calls[0][0];
+    expect(upd.data.completedAt).toBeInstanceOf(Date);
+    expect(logReward).toHaveBeenCalledWith("owner", "task_complete");
+  });
+
+  it("a token lookup that throws never fails the completion either", async () => {
+    const google = await import("@/lib/google");
+    (
+      google.getValidAccessToken as ReturnType<typeof vi.fn>
+    ).mockRejectedValueOnce(new Error("refresh failed"));
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i6",
+      completedAt: null,
+      task: {
+        id: "t1",
+        steps: [],
+        googleTaskId: "g-task",
+        googleTaskListId: "l1",
+      },
+    });
+    const { completeItem } = await import("./braindump");
+    await expect(completeItem("i6")).resolves.toBeUndefined();
+    expect(prismaMock.brainDumpItem.update).toHaveBeenCalled();
+  });
+});
+
 describe("reopenItem", () => {
   it("clears completedAt for a single-task item", async () => {
     prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
@@ -753,5 +897,75 @@ describe("completeFocus — Google Task sync (#36: reclaimSynced dropped)", () =
     const { completeFocus } = await import("./focus");
     const res = await completeFocus("sess", { durationMin: 25, addedMin: 0 });
     expect(res.googleSynced).toBe(false);
+  });
+});
+
+/**
+ * #195, second route — `ensureFocusStep` lazily creates a step for a STEPLESS
+ * item the moment it is focused, and that step carries no `googleTaskId`. So
+ * finishing it patches nothing, while the task-level Google task written by
+ * `scheduleSingleTask` is still open. `markTaskCompleted` is where a task stops
+ * being open, so it is where the task-level patch belongs.
+ */
+describe("markTaskCompleted — task-level Google Task sync (#195)", () => {
+  it("completes Task.googleTaskId when the last step finishes", async () => {
+    const google = await import("@/lib/google");
+    (
+      google.getValidAccessToken as ReturnType<typeof vi.fn>
+    ).mockResolvedValueOnce("tok");
+    prismaMock.focusSession.findFirst.mockResolvedValueOnce({ id: "sess" });
+    prismaMock.focusSession.update.mockResolvedValueOnce({
+      step: {
+        id: "s1",
+        taskId: "t1",
+        order: 1,
+        googleTaskId: null,
+        googleTaskListId: null,
+      },
+    });
+    prismaMock.step.findFirst.mockResolvedValueOnce({
+      id: "s1",
+      taskId: "t1",
+      task: { workspaceId: "owner" },
+    });
+    prismaMock.step.count.mockResolvedValueOnce(0);
+    prismaMock.task.update.mockResolvedValueOnce({
+      id: "t1",
+      googleTaskId: "g-task",
+      googleTaskListId: "l1",
+    });
+    const { completeFocus } = await import("./focus");
+    await completeFocus("sess", { durationMin: 25, addedMin: 0 });
+    expect(google.patchGoogleTask).toHaveBeenCalledWith("tok", "l1", "g-task", {
+      status: "completed",
+    });
+  });
+
+  it("does not patch a task that was never scheduled as a stepless unit", async () => {
+    const google = await import("@/lib/google");
+    prismaMock.focusSession.findFirst.mockResolvedValueOnce({ id: "sess" });
+    prismaMock.focusSession.update.mockResolvedValueOnce({
+      step: {
+        id: "s1",
+        taskId: "t1",
+        order: 1,
+        googleTaskId: null,
+        googleTaskListId: null,
+      },
+    });
+    prismaMock.step.findFirst.mockResolvedValueOnce({
+      id: "s1",
+      taskId: "t1",
+      task: { workspaceId: "owner" },
+    });
+    prismaMock.step.count.mockResolvedValueOnce(0);
+    prismaMock.task.update.mockResolvedValueOnce({
+      id: "t1",
+      googleTaskId: null,
+      googleTaskListId: null,
+    });
+    const { completeFocus } = await import("./focus");
+    await completeFocus("sess", { durationMin: 25, addedMin: 0 });
+    expect(google.patchGoogleTask).not.toHaveBeenCalled();
   });
 });
