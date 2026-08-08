@@ -506,6 +506,17 @@ operators upgrading a self-hosted instance don't get surprised.
   the primary control (`sessionCtaRef`, where focus lands after a resume) was
   already on Pause; the row now agrees with it.
 
+- **Completing a to-do with no steps left its Google Task open (#195).** A
+  stepless to-do is pushed to Google Tasks as one task, so the scheduling unit is
+  the to-do itself rather than any step of it — and only steps were ever marked
+  completed on the Google side. Ticking such an item off in the app closed it
+  here and nowhere else: it stayed open in Google Tasks, and Reclaim went on
+  holding the block it had booked for work already finished. Both routes that
+  close a to-do now complete its own Google Task, including the one taken when
+  you finish a stepless item from the focus timer. The sync stays best-effort in
+  the strict sense — an unreachable Google, or a Google account that has been
+  disconnected since the item was scheduled, costs you the sync and never the
+  completion.
 - **Signing in from any hostname but the canonical one looped forever (#174).**
   The app answers on more than one hostname, but every OAuth redirect URI is
   built from the single origin `PUBLIC_ORIGIN` names, and the PKCE verifier and
