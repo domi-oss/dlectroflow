@@ -968,4 +968,122 @@ describe("markTaskCompleted — task-level Google Task sync (#195)", () => {
     await completeFocus("sess", { durationMin: 25, addedMin: 0 });
     expect(google.patchGoogleTask).not.toHaveBeenCalled();
   });
+
+  // Duo review (!288): `googleSynced` is not bookkeeping — the focus timer
+  // prints "· marked complete in Google Tasks ✅" off it. Computing it from the
+  // STEP patch alone told the user "not synced" in precisely the case #195
+  // fixes, because a lazily-stepped stepless item syncs at the task grain.
+  it("reports googleSynced=true when only the TASK-level patch synced", async () => {
+    const google = await import("@/lib/google");
+    (
+      google.getValidAccessToken as ReturnType<typeof vi.fn>
+    ).mockResolvedValueOnce("tok");
+    prismaMock.focusSession.findFirst.mockResolvedValueOnce({ id: "sess" });
+    prismaMock.focusSession.update.mockResolvedValueOnce({
+      step: {
+        id: "s1",
+        taskId: "t1",
+        order: 1,
+        googleTaskId: null,
+        googleTaskListId: null,
+      },
+    });
+    prismaMock.step.findFirst.mockResolvedValueOnce({
+      id: "s1",
+      taskId: "t1",
+      task: { workspaceId: "owner" },
+    });
+    prismaMock.step.count.mockResolvedValueOnce(0);
+    prismaMock.task.update.mockResolvedValueOnce({
+      id: "t1",
+      googleTaskId: "g-task",
+      googleTaskListId: "l1",
+    });
+    (google.patchGoogleTask as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      true,
+    );
+    const { completeFocus } = await import("./focus");
+    const res = await completeFocus("sess", { durationMin: 25, addedMin: 0 });
+    expect(res.googleSynced).toBe(true);
+  });
+
+  it("keeps googleSynced=false when neither grain synced", async () => {
+    prismaMock.focusSession.findFirst.mockResolvedValueOnce({ id: "sess" });
+    prismaMock.focusSession.update.mockResolvedValueOnce({
+      step: {
+        id: "s1",
+        taskId: "t1",
+        order: 1,
+        googleTaskId: null,
+        googleTaskListId: null,
+      },
+    });
+    prismaMock.step.findFirst.mockResolvedValueOnce({
+      id: "s1",
+      taskId: "t1",
+      task: { workspaceId: "owner" },
+    });
+    prismaMock.step.count.mockResolvedValueOnce(0);
+    prismaMock.task.update.mockResolvedValueOnce({
+      id: "t1",
+      googleTaskId: null,
+      googleTaskListId: null,
+    });
+    const { completeFocus } = await import("./focus");
+    const res = await completeFocus("sess", { durationMin: 25, addedMin: 0 });
+    expect(res.googleSynced).toBe(false);
+  });
+});
+
+/**
+ * Duo review (!288) — the best-effort contract has to hold at BOTH grains, or
+ * it is not a contract. `actingUserGoogleToken` is now shared, and it throws
+ * when a token refresh fails; the step twin had no try/catch, so a stale
+ * refresh token would have failed the whole step completion.
+ */
+describe("completeGoogleTaskForStep — best-effort at the step grain (#195)", () => {
+  it("a thrown PATCH still marks the step done", async () => {
+    const google = await import("@/lib/google");
+    (
+      google.getValidAccessToken as ReturnType<typeof vi.fn>
+    ).mockResolvedValueOnce("tok");
+    (google.patchGoogleTask as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("network down"),
+    );
+    prismaMock.step.findFirst.mockResolvedValueOnce({
+      id: "s1",
+      taskId: "t1",
+      done: false,
+      googleTaskId: "g1",
+      googleTaskListId: "l1",
+      task: { id: "t1", steps: [{ id: "s1", done: false }] },
+    });
+    const { completeStep } = await import("./focus");
+    await expect(completeStep("s1")).resolves.toBeUndefined();
+    expect(prismaMock.step.update).toHaveBeenCalledWith({
+      where: { id: "s1" },
+      data: { done: true },
+    });
+  });
+
+  it("a thrown token refresh still marks the step done", async () => {
+    const google = await import("@/lib/google");
+    (
+      google.getValidAccessToken as ReturnType<typeof vi.fn>
+    ).mockRejectedValueOnce(new Error("refresh failed"));
+    prismaMock.step.findFirst.mockResolvedValueOnce({
+      id: "s1",
+      taskId: "t1",
+      done: false,
+      googleTaskId: "g1",
+      googleTaskListId: "l1",
+      task: { id: "t1", steps: [{ id: "s1", done: false }] },
+    });
+    const { completeStep } = await import("./focus");
+    await expect(completeStep("s1")).resolves.toBeUndefined();
+    expect(prismaMock.step.update).toHaveBeenCalledWith({
+      where: { id: "s1" },
+      data: { done: true },
+    });
+  });
 });

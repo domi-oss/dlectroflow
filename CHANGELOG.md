@@ -516,7 +516,17 @@ operators upgrading a self-hosted instance don't get surprised.
   you finish a stepless item from the focus timer. The sync stays best-effort in
   the strict sense — an unreachable Google, or a Google account that has been
   disconnected since the item was scheduled, costs you the sync and never the
-  completion.
+  completion. The timer's "marked complete in Google Tasks ✅" line now counts
+  that case too; it was reading the step's sync alone and so said nothing for
+  the very to-dos this fixes.
+- **Two "best-effort" Google syncs that could still fail the thing they were
+  attached to (#195).** Finishing a step, and requeueing one with a new time
+  estimate, both talked to Google in a step marked best-effort — but a network
+  error or an expired Google sign-in threw out of the whole action. Finishing a
+  step could fail outright; requeueing saved the new estimate and then reported
+  an error, leaving the list showing the old number until the next refresh.
+  Both now do what the label always said: you keep the change, and only the
+  Google side is skipped.
 - **Signing in from any hostname but the canonical one looped forever (#174).**
   The app answers on more than one hostname, but every OAuth redirect URI is
   built from the single origin `PUBLIC_ORIGIN` names, and the PKCE verifier and
