@@ -174,12 +174,24 @@ function dataLiteral(
     }
     if (!ts.isPropertyAssignment(prop)) continue;
     if (prop.name.getText() !== "data") continue;
-    // A spread, a variable or a helper call is NOT evidence of hand-building —
-    // `data: brainDumpItemToTaskData(item, workspaceId)` is the shape we want,
-    // and a guard that guesses at anything else is a guard that gets relaxed.
-    return ts.isObjectLiteralExpression(prop.initializer)
-      ? prop.initializer
-      : null;
+    if (ts.isObjectLiteralExpression(prop.initializer)) return prop.initializer;
+    // `data: payload` — the SAME hoisting evasion the shorthand branch above
+    // closes, in the spelling people actually reach for first. Resolving only the
+    // shorthand left one hazard with two syntaxes and a guard covering the rarer
+    // one (review round on `!281`, against the previous round's fix).
+    //
+    // This narrows the original "a variable is not evidence of hand-building"
+    // rule rather than contradicting it: the concern behind that sentence was
+    // GUESSING, and this does not guess. It resolves the identifier to a
+    // declaration in the call site's own scope and reads the object literally, or
+    // gives up. A helper call, a spread, a parameter or anything from another file
+    // still yields `null` — which the three colocated control tests pin, because
+    // widening what a guard catches is how it acquires false positives and then
+    // gets relaxed.
+    if (ts.isIdentifier(prop.initializer)) {
+      return resolveShorthandData(prop, prop.initializer.text);
+    }
+    return null;
   }
   return null;
 }

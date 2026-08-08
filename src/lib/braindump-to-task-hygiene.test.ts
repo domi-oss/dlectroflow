@@ -200,6 +200,48 @@ describe("findHandBuiltBrainDumpTasks — the parser, on synthetic input", () =>
     ).toEqual([]);
   });
 
+  it("flags the EXPLICIT hoisted form, `data: payload`", () => {
+    // Review round on `!281`, against the previous round's fix. Closing the
+    // `{ data }` shorthand while leaving `data: payload` unresolved left the two
+    // syntaxes for one hazard treated differently — and the explicit one is the more
+    // natural way to write it, so the guard was closed against the rarer spelling.
+    const findings = findHandBuiltBrainDumpTasks(
+      `const payload = {
+         title: item.text,
+         source: TaskSource.BrainDump,
+         status: TaskStatus.Active,
+         workspaceId,
+       };
+       await prisma.task.create({ data: payload });`,
+      "synthetic.ts",
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].line).toBe(7);
+  });
+
+  it("does NOT flag an explicit initialiser that resolves to the helper", () => {
+    // The control that keeps this from becoming a guard someone relaxes: the shape
+    // the helper exists to provide must stay silent through the identifier too.
+    expect(
+      findHandBuiltBrainDumpTasks(
+        `const payload = brainDumpItemToTaskData(item, workspaceId);
+         await tx.task.create({ data: payload });`,
+        "synthetic.ts",
+      ),
+    ).toEqual([]);
+  });
+
+  it("still does NOT flag a direct helper call, the original wanted shape", () => {
+    // Unchanged behaviour, pinned again because this round widened what an
+    // identifier initialiser means and the direct call must not be caught by it.
+    expect(
+      findHandBuiltBrainDumpTasks(
+        `await tx.task.create({ data: brainDumpItemToTaskData(item, workspaceId) });`,
+        "synthetic.ts",
+      ),
+    ).toEqual([]);
+  });
+
   it("does NOT flag a manual task", () => {
     // `createTask` in breakdown.ts. A typed title is not an item, and giving it
     // an item's note would be the opposite bug.
