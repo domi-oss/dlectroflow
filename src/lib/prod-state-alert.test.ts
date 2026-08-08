@@ -1121,6 +1121,19 @@ describe("scripts/alert-prod-state.sh — the healthy path is silent", () => {
     expect(run.status).toBe(0);
   });
 
+  it("does not claim the job keeps failing in a note that says all is well", () => {
+    // The note is the product, and a line that is false on the good days is a
+    // line nobody reads on the bad ones. Caught by rendering a real note against
+    // production rather than by any assertion: the healthy headline said
+    // "recovered" directly above "the job's exit code keeps failing".
+    const healthy = alert({ notes: noteWithFingerprint("drift=1 replicas=0") });
+    expect(healthy.note?.body).toContain("fingerprint: `drift=0 replicas=0`");
+    expect(healthy.note?.body).not.toMatch(/keeps failing/);
+    // Still said where it IS true.
+    const bad = alert({ prodSha: OLD_SHORT });
+    expect(bad.note?.body).toMatch(/keeps failing/);
+  });
+
   it("posts a recovery note when the previous run had alerted", () => {
     // Without this, the fingerprint chain cannot tell a NEW incident from the
     // one already reported: the alerter would still be carrying the old

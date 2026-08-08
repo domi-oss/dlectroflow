@@ -143,7 +143,16 @@ fi
 # production is stuck, and including the replica count would re-fire on every
 # flap. Both are noise, and noise is what gets a channel muted.
 FINGERPRINT="drift=${drift_code} replicas=${replicas_code}"
-FINGERPRINT_LINE="_\`${SELF}\` fingerprint: \`${FINGERPRINT}\`. Silent while unchanged; the job's exit code keeps failing until this clears._"
+# The trailing sentence is per-severity because the note IS the product: on the
+# healthy path "the exit code keeps failing until this clears" is simply false,
+# and a line that is wrong on the good days is a line nobody reads on the bad
+# ones. The `<job> fingerprint: <value>` prefix is fixed, because that is what the
+# next run greps for.
+if [ "$severity" = "healthy" ]; then
+  FINGERPRINT_LINE="_\`${SELF}\` fingerprint: \`${FINGERPRINT}\`. Recorded so a later recurrence is not mistaken for this one and suppressed._"
+else
+  FINGERPRINT_LINE="_\`${SELF}\` fingerprint: \`${FINGERPRINT}\`. Silent while unchanged; the job keeps failing every run until this clears._"
+fi
 
 case "$severity" in
   alert)
