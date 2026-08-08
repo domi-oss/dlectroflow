@@ -627,6 +627,30 @@ describe("Google Tasks URL construction (#79)", () => {
       );
     });
 
+    /**
+     * Duo review (!288) — #195 puts this call inside `completeItem`, which
+     * `bulkBrainDumpAction` runs in a sequential loop over every selected row.
+     * Node's fetch defaults to a 300 s header timeout, so ONE stalled
+     * connection would hold a bulk-complete of twenty to-dos for an hour and
+     * forty minutes, and the caller's try/catch cannot help because nothing
+     * throws. A deadline is what turns "best-effort" from a promise about
+     * errors into a promise about time as well.
+     *
+     * Same `AbortSignal.timeout` shape as `src/lib/auth/providers.ts`, for the
+     * same reason it gives: the response is a few hundred bytes of JSON, so a
+     * server that answers promptly and then trickles the body should hit this
+     * too, and there is no long stream to truncate.
+     */
+    it("sends a deadline, so a stalled Google cannot hold a bulk complete open", async () => {
+      const fetchMock = stubTasksFetch();
+      const { patchGoogleTask } = await import("./google");
+      await patchGoogleTask("tok", "list-9", "gtask-9", {
+        status: "completed",
+      });
+      const init = fetchMock.mock.calls[0][1] as { signal?: AbortSignal };
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+    });
+
     it.each(hostileIds)(
       "a hostile taskId (%j) cannot alter the path or query",
       async (taskId) => {
