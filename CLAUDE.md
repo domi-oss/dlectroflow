@@ -29,7 +29,7 @@ npm run db:migrate     prisma migrate dev
 npm run check:env      env-drift check
 ```
 
-`DATABASE_URL` is read from `.env` (Prisma's convention). `vitest.config.ts` forwards only that one variable into tests — deliberately, so no test can reach a secret it wasn't given.
+`DATABASE_URL` is read from `.env` (Prisma's convention). `config/vitest.config.ts` forwards only that one variable into tests — deliberately, so no test can reach a secret it wasn't given.
 
 ## Architecture
 
@@ -50,7 +50,7 @@ Auth path classification lives in `src/lib/auth/gate.ts` and is enforced by `src
 ## Conventions
 
 - Prettier: `semi`, double quotes, 2 spaces, `trailingComma: "all"`, `printWidth: 80`. These were measured off the existing tree, not copied from defaults.
-- **Comments explain _why_, and cite the issue number.** Config files carry real prose (see `prettier.config.mjs`, `vitest.config.ts`, `src/lib/auth/gate.ts`). Match that density — a non-obvious constant or exclusion without its reasoning will get flagged in review.
+- **Comments explain _why_, and cite the issue number.** Config files carry real prose (see `config/prettier.config.mjs`, `config/vitest.config.ts`, `src/lib/auth/gate.ts`). Match that density — a non-obvious constant or exclusion without its reasoning will get flagged in review.
 - Tests colocate next to the code: `foo.ts` + `foo.test.ts`. `*.integration.test.ts` means it needs real Postgres.
 - Path alias `@/` → `src/`.
 - Conventional commits.

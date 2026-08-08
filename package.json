@@ -11,9 +11,9 @@
     "lint": "eslint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:e2e": "playwright test",
+    "test": "vitest run --config config/vitest.config.ts",
+    "test:watch": "vitest --config config/vitest.config.ts",
+    "test:e2e": "playwright test --config config/playwright.config.ts",
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
@@ -26,6 +26,7 @@
   "engines": {
     "node": ">=20.19.0"
   },
+  "prettier": "./config/prettier.config.mjs",
   "overrides": {
     "postcss": "^8.5.16",
     "sharp": "^0.35.3",

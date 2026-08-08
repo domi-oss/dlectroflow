@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import playwrightConfig from "../../../playwright.config";
+import playwrightConfig from "../../../config/playwright.config";
 import { TOKEN_ENC_KEY } from "../../../e2e/constants";
 import {
   pinTokenEncKey,
