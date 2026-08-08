@@ -99,7 +99,16 @@ export function BreakdownChat({
       const res = await fetch("/api/breakdown", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, currentProposal: proposal, feedback }),
+        // #179 — the task ID, never its note. The server reads `Task.notes`
+        // itself, under the session's own workspace, so what reaches the prompt
+        // is a value the database vouches for rather than one this client
+        // asserted (see `BreakdownRequest.taskId`).
+        body: JSON.stringify({
+          taskId,
+          title,
+          currentProposal: proposal,
+          feedback,
+        }),
       });
       if (!res.body) throw new Error("No response stream.");
       const reader = res.body.getReader();

@@ -14,6 +14,10 @@
  *   2. WORKSPACE ISOLATION. Two populated workspaces, and neither one's counts,
  *      streak, voice or breakdown history bleed into the other's prompt.
  *
+ *   3. THE NOTE (#179). The one free-text column the coach is allowed to read,
+ *      proved end to end: the real column, through the real query, into the
+ *      real prompt — and still nothing of `Step.text` or `BrainDumpItem.text`.
+ *
  * It's an *.integration.test.ts — it needs the real Postgres (CI wires one up;
  * locally it uses your DATABASE_URL schema).
  */
@@ -23,10 +27,14 @@ import { prisma } from "@/lib/db";
 import { BrainDumpStatus, TaskStatus } from "@/lib/constants";
 import { bucketItems, type Item } from "@/components/inbox/bucket";
 import { gatherBreakdownContext } from "./breakdown-context";
-import { buildContextBlock } from "./breakdown";
+import { buildContextBlock, buildUserPrompt } from "./breakdown";
 
 const WS = "test-ws-breakdown-ctx";
 const OTHER = "test-ws-breakdown-ctx-other";
+
+/** The note on the task the #179 tests break down, and its task id. */
+const NOTED = "SEEDED-TASK-NOTE — hand these to the accountant";
+let notedTaskId = "";
 
 const HOUR = 3_600_000;
 
@@ -207,6 +215,20 @@ beforeAll(async () => {
     stepCreatedAt: new Date(Date.now() - 96 * HOUR),
   }); // completed → no bucket; oldest breakdown, so it falls off the last-3
 
+  // #179 — a task carrying a note, with NO steps and NO item of its own, so it
+  // is invisible to the bucket counts and to the breakdown history and cannot
+  // move a single figure the tests above assert on.
+  notedTaskId = (
+    await prisma.task.create({
+      data: {
+        title: "SEEDED-NOTED-TASK-TITLE",
+        workspaceId: WS,
+        status: TaskStatus.Active,
+        notes: NOTED,
+      },
+    })
+  ).id;
+
   await prisma.settings.create({
     data: { id: WS, workspaceId: WS, voice: "playful" },
   });
@@ -319,6 +341,50 @@ describe("gatherBreakdownContext — real reads (#14)", () => {
       medianMinutes: 25,
       maxMinutes: 25,
     });
+  });
+});
+
+describe("gatherBreakdownContext — the current task's note (#179)", () => {
+  it("reads the real column and quotes it into the real prompt, fenced", async () => {
+    // Guard against a vacuous pass: the fixture really did write a task.
+    expect(notedTaskId).not.toBe("");
+
+    const ctx = await gatherBreakdownContext(WS, notedTaskId);
+    expect(ctx.note).toBe(NOTED);
+
+    const prompt = buildUserPrompt(
+      {
+        title: "SEEDED-NOTED-TASK-TITLE",
+        currentProposal: null,
+        feedback: { kind: "propose" },
+      },
+      ctx,
+    );
+    const lines = prompt.split("\n");
+    const openAt = lines.indexOf("--- their note (verbatim) ---");
+    expect(openAt).toBeGreaterThan(0);
+    expect(lines[openAt + 1]).toBe(NOTED);
+    expect(lines[openAt + 2]).toBe("--- end note ---");
+    expect(lines.at(-1)).toMatch(/^Feedback: /);
+  });
+
+  it("still carries no step text, item text or task title, note or not", async () => {
+    const ctx = await gatherBreakdownContext(WS, notedTaskId);
+    const serialised = JSON.stringify(ctx);
+    expect(serialised).toContain("SEEDED-TASK-NOTE");
+    expect(serialised).not.toContain("SEEDED-STEP-TEXT");
+    expect(serialised).not.toContain("SEEDED-ITEM-TEXT");
+    expect(serialised).not.toContain("SEEDED-NOTED-TASK-TITLE");
+    // The app-context block itself is unchanged: still numbers and one enum.
+    expect(buildContextBlock(ctx)).not.toContain("SEEDED-TASK-NOTE");
+  });
+
+  it("reads no note when the caller names no task", async () => {
+    expect((await gatherBreakdownContext(WS)).note).toBeNull();
+  });
+
+  it("reads no note for a task in another workspace", async () => {
+    expect((await gatherBreakdownContext(OTHER, notedTaskId)).note).toBeNull();
   });
 });
 
