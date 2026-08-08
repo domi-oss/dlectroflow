@@ -739,6 +739,75 @@ describe("TaskSteps — focus survives a successful un-complete (#206, round 12)
     ).not.toHaveFocus();
   });
 
+  it("hands off to BOTH rows when two undos are in flight at once", async () => {
+    // Round 15. `undoingIds` is a Set precisely because two rows can be
+    // un-completing at the same time, so the hand-off cannot be a single slot: the
+    // undo that resolves second overwrote the id the first had stored, and the
+    // first row's reopened control then received nothing — round 12's bug,
+    // silently, for that row.
+    //
+    // Sequenced so the two hand-offs are individually observable: s1 resolves
+    // first (storing s1), s2 resolves second (which used to clobber it), then the
+    // server flips s1 alone. At that render the only pending id under the old
+    // single-slot version was s2, whose row is still done, so nothing was focused
+    // and s1's correction ended on <body>.
+    const user = userEvent.setup();
+    // `…Once`, twice: `vi.clearAllMocks()` does not reset implementations, so a
+    // plain `mockImplementation` here would leak an un-resolving undo into every
+    // spec that ran after it.
+    const releases: Array<() => void> = [];
+    const held = () => new Promise<void>((res) => releases.push(res));
+    vi.mocked(uncompleteStep)
+      .mockImplementationOnce(held)
+      .mockImplementationOnce(held);
+    const done1 = { ...baseStep(), id: "s1", text: "First", done: true };
+    const done2 = {
+      ...baseStep(),
+      id: "s2",
+      order: 2,
+      text: "Second",
+      done: true,
+    };
+    const { rerender } = render(
+      <TaskSteps taskId="t1" steps={[done1, done2]} />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /mark not done: first/i }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: /mark not done: second/i }),
+    );
+    expect(uncompleteStep).toHaveBeenCalledTimes(2);
+
+    releases[0]();
+    releases[1]();
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+
+    // First refresh: the server has reopened s1 only.
+    rerender(
+      <TaskSteps taskId="t1" steps={[{ ...done1, done: false }, done2]} />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: /start focus/i })).toHaveFocus(),
+    );
+
+    // Second refresh: s2 follows, and its own hand-off still has to land — the
+    // fix must not drop the remaining id when it drains the first.
+    rerender(
+      <TaskSteps
+        taskId="t1"
+        steps={[
+          { ...done1, done: false },
+          { ...done2, done: false },
+        ]}
+      />,
+    );
+    const links = screen.getAllByRole("link", { name: /focus/i });
+    expect(links).toHaveLength(2);
+    await waitFor(() => expect(links[1]).toHaveFocus());
+  });
+
   it("does not steal focus when a row flips to not-done on its own", async () => {
     // Only an undo THIS component performed earns the hand-off. A step reopened
     // elsewhere — the timer, another tab, a server revalidation — must not yank

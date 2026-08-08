@@ -142,20 +142,37 @@ export function TaskSteps({
   // set-state-in-effect` is right that clearing a flag from inside an effect
   // causes a cascading render, and none of this needs to drive one. The hand-off
   // is a one-shot side effect on the DOM, which is exactly what a ref is for.
-  const justUndidRef = useRef<string | null>(null);
+  //
+  // Round 15 — a Set, not a single slot, mirroring `undoingIds` and
+  // `undoFailedIds` and for the same reason they are keyed: `undoingIds` is a Set
+  // precisely because two rows CAN be un-completing at once, so a one-id slot
+  // meant the undo that resolved second overwrote the id the first had stored,
+  // and the first row's reopened control then received nothing. That is the
+  // round-12 bug again, silently, for that row — the worst version of it, since
+  // the fix looks present.
+  const justUndidRef = useRef<Set<string>>(new Set());
   const ctaRefs = useRef(new Map<string, HTMLAnchorElement | null>());
 
   useEffect(() => {
-    const id = justUndidRef.current;
-    if (!id) return;
-    const row = steps.find((s) => s.id === id);
-    // Still `done` means the refresh has not landed yet — the effect re-runs on
-    // the next `steps` change. A row that vanished entirely has nothing to
-    // receive focus, but the flag still has to be dropped or it would fire at
-    // some unrelated later render.
-    if (row?.done) return;
-    justUndidRef.current = null;
-    if (row) ctaRefs.current.get(id)?.focus();
+    const handoffs = justUndidRef.current;
+    if (handoffs.size === 0) return;
+    for (const id of handoffs) {
+      const row = steps.find((s) => s.id === id);
+      // Still `done` means the refresh has not landed for THIS row yet — leave
+      // its id in place and let the effect re-run on the next `steps` change.
+      // One row lagging must not drain another's pending hand-off, which is
+      // exactly what a shared slot did. A row that vanished entirely has nothing
+      // to receive focus, but its id still has to be dropped or it would fire at
+      // some unrelated later render.
+      if (row?.done) continue;
+      handoffs.delete(id);
+      if (row) ctaRefs.current.get(id)?.focus();
+    }
+    // Deleting the id being visited is defined behaviour for a Set iterator, so
+    // the drain is safe in place. If two rows reopen in the SAME render the last
+    // focus() call wins — unavoidable, one focus per document, and harmless:
+    // both undos were this user's own, and the alternative is dropping one id
+    // permanently rather than losing a race for one commit.
   }, [steps]);
 
   const uncomplete = (stepId: string) => {
@@ -167,8 +184,10 @@ export function TaskSteps({
       try {
         await uncompleteStep(stepId);
         // Recorded BEFORE the refresh, so the effect above is already armed when
-        // the re-render that unmounts this button arrives.
-        justUndidRef.current = stepId;
+        // the re-render that unmounts this button arrives. Added to the set rather
+        // than assigned over it, so a second row undone while this one is still
+        // waiting for its refresh cannot erase this row's hand-off.
+        justUndidRef.current.add(stepId);
         router.refresh();
       } catch {
         // Deliberately not rethrown. The server action is atomic, so a rejection
