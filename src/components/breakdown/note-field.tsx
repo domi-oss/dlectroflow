@@ -296,7 +296,12 @@ export function NoteField({
     // The button and its save indicator travel TOGETHER. The indicator reports
     // on the note, and left behind in the row it would read as the row's own
     // status — "Saved ✓" sitting next to Complete says something else entirely.
-    <span className="inline-flex items-center gap-1">
+    //
+    // `key` because every list-row caller drops this straight into `RowActions`'s
+    // `inline` ARRAY, so React wants one and warned for it (#186). Set here rather
+    // than at four call sites: the element is created here, and a key added by the
+    // consumer is one every future consumer has to remember.
+    <span key="note" className="inline-flex items-center gap-1">
       <button
         ref={triggerRef}
         type="button"

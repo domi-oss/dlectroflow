@@ -254,6 +254,15 @@ export function makeSnapshot(
         estMinutes: 5,
         breakdownRequestedAt: null,
         taskId: null,
+        // #186 added notes + the three schedule columns to BrainDumpItem. This
+        // fixture is the export golden master, so it has to carry every column
+        // the model has — an absent one here means the exporter is never asked
+        // to emit it and a regression ships silently. item-1 leaves them empty
+        // on purpose; item-2 below populates them, so both paths are covered.
+        notes: null,
+        scheduleDueAt: null,
+        schedulePriority: null,
+        scheduleHours: null,
         workspaceId: WORKSPACE_ID,
       },
       {
@@ -270,6 +279,12 @@ export function makeSnapshot(
         estMinutes: null,
         breakdownRequestedAt: null,
         taskId: "task-1",
+        // Populated, so the exporter's handling of a scheduled + noted item is
+        // exercised rather than only its null path.
+        notes: "ring them before 10, they close for lunch",
+        scheduleDueAt: new Date(Date.UTC(2026, 6, 9, 9, 0, 0)),
+        schedulePriority: "high",
+        scheduleHours: "work",
         workspaceId: WORKSPACE_ID,
       },
     ],

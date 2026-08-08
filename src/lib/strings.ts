@@ -661,6 +661,32 @@ export const STRINGS = {
   // ── Capture confirm ────────────────────────────────────────────────────────
   "capture.confirm": { plain: "captured ✓", playful: "captured ✓" },
 
+  // ── The inline note affordance on a brain-dump field (#186) ────────────────
+  //
+  // `capture.*` rather than `note.*` on purpose: `note.trigger` below is #44's
+  // task/step note disclosure, which is a different control on a different
+  // column. These two belong to the brain-dump text field — the capture bar and
+  // the ✎ row editor, which are the same field at two moments.
+  //
+  // ONE fixed word, never "Add" swapped for "Edit". Same argument
+  // `note.trigger` makes: the label must not change width (and shift the row)
+  // the instant a note exists, and "add" is what the person is doing either way
+  // — the button's job is to open a place to write, whether or not braces are
+  // already there. 🗒️ is flavour, so playful only.
+  "capture.addNote": { plain: "Add note", playful: "🗒️ Add note" },
+  // The only thing on screen that says the syntax exists (#179 shipped the
+  // parser with nothing announcing it). It states the POSITION as well as the
+  // punctuation, because "at the end" is the entire rule — a group anywhere else
+  // stays literal, and someone who learns only the braces will meet that
+  // refusal as a bug.
+  //
+  // Safe to write braces here and NOT in JSX text, where `{` opens an
+  // expression: this is a plain string the renderer interpolates.
+  "capture.noteHint": {
+    plain: "Put a note in {curly braces} at the end.",
+    playful: "Tuck a note in {curly braces} at the end.",
+  },
+
   // ── Prompts ────────────────────────────────────────────────────────────────
   "prompt.stillNeeded": {
     plain: "This has been sitting a while — still needed?",

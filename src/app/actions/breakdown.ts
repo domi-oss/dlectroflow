@@ -12,6 +12,7 @@ import {
 import { logReward, awardBadge, touchStreakOnEngagement } from "@/lib/rewards";
 import type { Proposal } from "@/lib/breakdown";
 import { currentWorkspaceId } from "@/lib/workspace";
+import { brainDumpItemToTaskData } from "@/lib/braindump-to-task";
 
 /**
  * Launch a breakdown from a brain-dump item: create (or reuse) its Task and
@@ -25,13 +26,12 @@ export async function startBreakdown(itemId: string): Promise<string | null> {
   if (!item) return null;
   if (item.taskId) return item.taskId;
 
+  // #179 — the ONE conversion, so the note and the schedule intent cross with
+  // the item. This path is the one a breakdown reads from, which makes a dropped
+  // note here a worse failure than elsewhere: the AI would plan the task without
+  // the detail that most often makes the steps sensible.
   const task = await prisma.task.create({
-    data: {
-      title: item.text,
-      source: TaskSource.BrainDump,
-      status: TaskStatus.Active,
-      workspaceId,
-    },
+    data: brainDumpItemToTaskData(item, workspaceId),
   });
   await prisma.brainDumpItem.update({
     where: { id: itemId },

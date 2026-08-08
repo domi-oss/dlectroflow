@@ -61,6 +61,38 @@ describe("ensureFocusStep", () => {
     expect(prismaMock.step.create).not.toHaveBeenCalled();
   });
 
+  it("carries the item's note and schedule intent onto the new task (#179)", async () => {
+    // ▶ Focus is a triage in everything but name: it is the moment a `Task` row
+    // first exists. Before #179 this path built its own object literal, so a note
+    // captured inline (`call the bank {ref 4471}`) was silently dropped by
+    // whichever conversion site nobody had tested — and a dropped note is
+    // indistinguishable from working. `braindump-to-task-hygiene` fails the build
+    // if this stops going through the shared helper; this asserts the VALUE
+    // actually crosses.
+    const dueAt = new Date("2026-08-10T09:00:00.000Z");
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i1",
+      text: "call the bank",
+      notes: "ref 4471",
+      scheduleDueAt: dueAt,
+      schedulePriority: "high",
+      scheduleHours: "work",
+      taskId: null,
+      task: null,
+    });
+    const { ensureFocusStep } = await import("./braindump");
+    await ensureFocusStep("i1");
+    expect(prismaMock.task.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        title: "call the bank",
+        notes: "ref 4471",
+        scheduleDueAt: dueAt,
+        schedulePriority: "high",
+        scheduleHours: "work",
+      }),
+    });
+  });
+
   it("item with no task: creates task + one 10-minute step mirroring the text", async () => {
     prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
       id: "i1",

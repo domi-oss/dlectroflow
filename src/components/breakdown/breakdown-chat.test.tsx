@@ -100,6 +100,22 @@ describe("BreakdownChat — quick-reply intents (regression: were swapped)", () 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(lastFeedbackKind()).toBe("too_big");
   });
+
+  it("names the task it is refining, so the server can read that task's note (#179)", async () => {
+    // The id, never the note itself: what reaches the prompt has to be a value
+    // the DATABASE vouches for, read under the session's own workspace. A
+    // client-supplied note would be unbounded text under the caller's control.
+    const user = userEvent.setup();
+    renderChat();
+    await user.click(screen.getByRole("button", { name: "More steps" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+    const call = fetchMock.mock.calls.at(-1)!;
+    const body = JSON.parse((call[1] as RequestInit).body as string);
+    expect(body.taskId).toBe("task-1");
+    expect(Object.keys(body)).not.toContain("notes");
+    expect(Object.keys(body)).not.toContain("note");
+  });
 });
 
 describe("BreakdownChat — manual step editing", () => {

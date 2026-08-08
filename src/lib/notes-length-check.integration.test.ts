@@ -1,6 +1,7 @@
 /**
- * #44 — behavioural proof that `Task_notes_check` and `Step_notes_check` are
- * enforced by Postgres, not only by `normalizeTaskNote`.
+ * #44 / #186 — behavioural proof that `Task_notes_check`, `Step_notes_check`
+ * and `BrainDumpItem_notes_check` are enforced by Postgres, not only by
+ * `normalizeTaskNote`.
  *
  * `enum-constraint-sync.integration.test.ts` polices that both constraints are
  * APPLIED and pins the bound and the measuring function they declare. This file
@@ -17,10 +18,15 @@
  * user could see it — it fails later, at schedule time, on a surface that has
  * no way to explain itself.
  *
- * BOTH grains are exercised by the same table-driven block rather than one
- * being assumed to follow from the other: they are two separate CHECK
+ * ALL THREE grains are exercised by the same table-driven block rather than any
+ * one being assumed to follow from another: they are three separate CHECK
  * constraints in the DDL, and "the other one must be the same" is exactly the
- * assumption that lets one of them ship missing.
+ * assumption that lets one of them ship missing. #186 added the third,
+ * `BrainDumpItem.notes`, and it is the grain where the bound BITES first —
+ * `#179` splits a capture's trailing `{…}` group into it with no field, no
+ * counter and no `maxLength` in front of the write, so the only thing between a
+ * 40 000-character paste and the column is `normalizeTaskNote` and this
+ * constraint.
  *
  * Needs the real Postgres (CI wires up a service DB and runs
  * `prisma migrate deploy` first; locally it uses your DATABASE_URL schema —
@@ -42,6 +48,10 @@ const WS = "test-44-notes-ws";
 let hostTaskId: string;
 
 async function wipe() {
+  // Items before tasks: `BrainDumpItem.taskId` is `onDelete: SetNull`, so a
+  // leftover item would survive its task and collide with the fixture ids on
+  // the next run rather than failing loudly here.
+  await prisma.brainDumpItem.deleteMany({ where: { workspaceId: WS } });
   await prisma.step.deleteMany({ where: { task: { workspaceId: WS } } });
   await prisma.task.deleteMany({ where: { workspaceId: WS } });
   await prisma.workspace.deleteMany({ where: { id: WS } });
@@ -81,9 +91,30 @@ function insertStep(id: string, notes: string) {
   );
 }
 
+/**
+ * #186 — the untriaged grain. No `taskId`: the whole point of the column is
+ * that an item with no `Task` row can still hold a note, so the fixture must
+ * not quietly give it one.
+ */
+function insertItem(id: string, notes: string) {
+  return prisma.$executeRawUnsafe(
+    `INSERT INTO "BrainDumpItem" ("id", "text", "workspaceId", "notes")
+     VALUES ($1, $2, $3, $4)`,
+    id,
+    "notes constraint fixture",
+    WS,
+    notes,
+  );
+}
+
 const GRAINS = [
   { label: "Task.notes", constraint: "Task_notes_check", insert: insertTask },
   { label: "Step.notes", constraint: "Step_notes_check", insert: insertStep },
+  {
+    label: "BrainDumpItem.notes",
+    constraint: "BrainDumpItem_notes_check",
+    insert: insertItem,
+  },
 ] as const;
 
 describe(`notes columns are bounded at ${TASK_NOTE_MAX_LENGTH} characters by the database (#44)`, () => {
@@ -143,8 +174,12 @@ describe(`notes columns are bounded at ${TASK_NOTE_MAX_LENGTH} characters by the
     const step = await prisma.step.findUnique({
       where: { id: "bound-Step_notes_check" },
     });
+    const item = await prisma.brainDumpItem.findUnique({
+      where: { id: "bound-BrainDumpItem_notes_check" },
+    });
     expect(task?.notes).toHaveLength(TASK_NOTE_MAX_LENGTH);
     expect(step?.notes).toHaveLength(TASK_NOTE_MAX_LENGTH);
+    expect(item?.notes).toHaveLength(TASK_NOTE_MAX_LENGTH);
   });
 
   it("rolls the whole statement back on a rejection, leaving no row", async () => {
@@ -154,9 +189,14 @@ describe(`notes columns are bounded at ${TASK_NOTE_MAX_LENGTH} characters by the
     expect(
       await prisma.step.count({ where: { id: "over-Step_notes_check" } }),
     ).toBe(0);
+    expect(
+      await prisma.brainDumpItem.count({
+        where: { id: "over-BrainDumpItem_notes_check" },
+      }),
+    ).toBe(0);
   });
 
-  it("allows NULL on both — an un-annotated task or step is the common case", async () => {
+  it("allows NULL on all three — an un-annotated row is the common case", async () => {
     const task = await prisma.task.create({
       data: { title: "no note", workspaceId: WS },
     });
@@ -169,7 +209,15 @@ describe(`notes columns are bounded at ${TASK_NOTE_MAX_LENGTH} characters by the
         estMinutes: 10,
       },
     });
+    // #186 — and with no `taskId` either, which is the state the column exists
+    // for: `createBrainDumpItem` omits both, so this is the shape of every row
+    // the Needs-review bucket holds.
+    const item = await prisma.brainDumpItem.create({
+      data: { text: "captured, untriaged, un-annotated", workspaceId: WS },
+    });
     expect(task.notes).toBeNull();
     expect(step.notes).toBeNull();
+    expect(item.notes).toBeNull();
+    expect(item.taskId).toBeNull();
   });
 });

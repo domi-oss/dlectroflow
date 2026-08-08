@@ -205,6 +205,30 @@ const REGISTRY: ReadonlyArray<{
     values: LlmProvider,
     nullable: true,
   },
+  // #186 — the SAME two pseudo-enums, one grain earlier. `BrainDumpItem` got
+  // its own copy of the Schedule menu's intent so an UNTRIAGED item can carry a
+  // deadline: an item with no `Task` row had nowhere to persist one, which is
+  // why the full menu was only ever reachable from a multi-step task.
+  //
+  // Listed as two more rows rather than derived from the `Task` pair above, for
+  // the reason LENGTH_REGISTRY states for `Step_notes_check`: a registry that
+  // generated both grains from one entry would report an agreement it had never
+  // checked. Same `values` import, though — the vocabulary is one vocabulary,
+  // and mirroring it is the whole point.
+  {
+    constraint: "BrainDumpItem_schedulePriority_check",
+    table: "BrainDumpItem",
+    column: "schedulePriority",
+    values: SchedulePriority,
+    nullable: true,
+  },
+  {
+    constraint: "BrainDumpItem_scheduleHours_check",
+    table: "BrainDumpItem",
+    column: "scheduleHours",
+    values: ScheduleHours,
+    nullable: true,
+  },
 ];
 
 // #180 — the schema's CHECK constraints over ARRAY columns.
@@ -335,6 +359,22 @@ const LENGTH_REGISTRY: ReadonlyArray<{
     // both from one row would report agreement it had not checked.
     constraint: "Step_notes_check",
     table: "Step",
+    column: "notes",
+    max: TASK_NOTE_MAX_LENGTH,
+    fn: "char_length",
+    nullable: true,
+  },
+  {
+    // 20260807120000_braindump_item_notes_and_schedule (#186 / #179) — the
+    // third grain, and the earliest one: an UNTRIAGED item can now hold a note,
+    // either typed into the inbox row or split off a capture's trailing `{…}`
+    // group (#179). Same bound and same measuring function as the two above,
+    // because the note is COPIED into `Task.notes` when the item is triaged
+    // (`brainDumpItemToTaskData`), so a wider bound here would be a value the
+    // narrower column then refuses on a routine action.
+    // Behavioural half in src/lib/notes-length-check.integration.test.ts.
+    constraint: "BrainDumpItem_notes_check",
+    table: "BrainDumpItem",
     column: "notes",
     max: TASK_NOTE_MAX_LENGTH,
     fn: "char_length",

@@ -40,6 +40,31 @@ export const runtime = "nodejs";
 // OWASP ASVS V13.2.6 — API abuse prevention.
 const MAX_BODY_CHARS = 10_000;
 
+// #179 — the shape a `Task.id` can have: a cuid, so ASCII word characters and
+// nothing else. The body is untrusted JSON *cast* to `BreakdownRequest`, which
+// buys no runtime guarantee at all, so `taskId` is validated rather than
+// trusted before it reaches a query — see `requestedTaskId` below.
+const TASK_ID_SHAPE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
+ * The task the caller says is being refined, or `null`.
+ *
+ * Two jobs downstream (`gatherBreakdownContext`): excluding this task's own
+ * steps from the history summary, and keying the read of its note. Neither is
+ * load-bearing for correctness, so anything unusable degrades to `null` — the
+ * pre-#179 behaviour — rather than erroring or reaching Prisma as an object it
+ * would throw on.
+ *
+ * This does NOT decide whose task it is: the read is scoped to the session's
+ * own workspace, which is what turns a foreign id into a miss (invariant 1 in
+ * breakdown-context.ts). The length bound is only so an absurd string never
+ * becomes a query parameter.
+ */
+function requestedTaskId(body: BreakdownRequest): string | null {
+  const raw = body.taskId;
+  return typeof raw === "string" && TASK_ID_SHAPE.test(raw) ? raw : null;
+}
+
 // #14 — the coach's SYSTEM prompt. Two rules govern edits here:
 //   1. It must stay FREE of per-request values. BREAKDOWN_APP_CONTEXT is a
 //      hoisted constant precisely so this string is byte-identical for every
@@ -202,7 +227,10 @@ export async function POST(req: Request): Promise<Response> {
   //     same row, no constant.
   //   • gatherBreakdownContext(wsId) is the REQUESTER's own data. Passing
   //     anyone else's workspace here would hand them another person's voice,
-  //     streak and board — the single most important line in this file.
+  //     streak and board — the single most important line in this file. Since
+  //     #179 it also hands over their note, so the second argument is a task id
+  //     the BODY supplied while the first stays the one the SESSION resolved:
+  //     the body can say which task, never whose.
   // Blocked guests never reach the LLM, so they do no context work either; and
   // a context failure degrades to no context rather than failing the request
   // (the breakdown path was DB-light before #14 and must stay resilient).
@@ -217,7 +245,9 @@ export async function POST(req: Request): Promise<Response> {
     user ? getSettings(wsId) : Promise.resolve(null),
     blockedReason
       ? Promise.resolve<BreakdownContext>({})
-      : gatherBreakdownContext(wsId).catch(() => ({}) as BreakdownContext),
+      : gatherBreakdownContext(wsId, requestedTaskId(body)).catch(
+          () => ({}) as BreakdownContext,
+        ),
   ]);
   const model = resolveBreakdownModel({
     tier,

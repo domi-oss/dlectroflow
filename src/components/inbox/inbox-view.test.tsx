@@ -2998,12 +2998,32 @@ describe("InboxView — the task note (#44)", () => {
     ).toBeTruthy();
   });
 
-  it("offers no note on an untriaged item with no Task behind it", () => {
-    // A brain-dump item in Needs review has no `Task` row yet, so there is no
-    // `notes` column to write to. Absent rather than present-and-failing.
+  it("NOW offers a note on an untriaged item — #186 gave it a column", () => {
+    // This assertion used to be its inverse, and #44 was right at the time: a
+    // brain-dump item in Needs review has no `Task` row, so there was no `notes`
+    // column and the control could only render as nothing. #186 added
+    // `BrainDumpItem.notes` and #179 writes it at CAPTURE, which makes this the
+    // bucket where a note is now MOST likely to already exist. Rewritten rather
+    // than deleted, so the reversal reads as a decision with a reason.
     render1(makeItem({ id: "n1", text: "raw thought", taskId: null }));
-    expect(screen.queryByRole("button", { name: /^note for/i })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Note for raw thought" }),
+    ).toBeTruthy();
   });
+
+  // The null-`itemId` branch is deliberately NOT tested from here — a test that
+  // claimed to and did not is what this replaces (review, `!281`). It rendered the
+  // same item as the case above, asserted the control WAS present (the opposite of
+  // its own title), and could not have done otherwise: `InboxView` always passes
+  // `itemId={item.id}` to `TaskNoteRow`, so there is no route through this surface
+  // that reaches a null item id. The branch is only reachable from Library rows.
+  //
+  // Its real coverage lives where the branch is reachable, at the component's own
+  // grain: `task-note.test.tsx` → "still renders nothing when there is no row to
+  // write to at all", which renders `<TaskNoteRow taskId={null} itemId={null}>` and
+  // asserts the render prop receives `{ trigger: null, body: null }` while the
+  // caller's own placeholder still mounts. That is the behaviour that matters, and
+  // asserting it here would have been a second, weaker copy of it.
 });
 
 // ── #183 — the capture input had no accessible name ─────────────────────────
@@ -3173,5 +3193,299 @@ describe("InboxView — row action group target size (#184)", () => {
       screen.getByRole("button", { name: /Break into steps/ }),
     ).toBeInTheDocument();
     expectFullTargets(container);
+  });
+});
+// ── #186 — the "add note" affordance on both brain-dump fields ──────────────
+//
+// #179 shipped the inline note syntax with nothing on screen announcing it, and
+// `{`/`}` are two or three taps deep in a phone's symbol keyboard. The button's
+// own behaviour (where the caret lands, both branches) is covered in
+// `add-note-button.test.tsx`; what is asserted here is that it is MOUNTED on
+// both fields and named after the right one — the capture bar and an open row
+// editor are on screen together, so two buttons called "Add note" would be two
+// controls a screen-reader or voice-control user cannot tell apart.
+describe("InboxView — the inline-note affordance (#186)", () => {
+  const renderInbox = (items: Item[] = []) =>
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={items}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+
+  it("puts a button on the capture bar, named after that field", () => {
+    renderInbox();
+    expect(
+      screen.getByRole("button", { name: "Add note for Brain dump" }),
+    ).toBeTruthy();
+  });
+
+  it("inserts the braces into the capture field", async () => {
+    const user = userEvent.setup();
+    renderInbox();
+    const input = screen.getByRole("textbox", { name: "Brain dump" });
+    await user.type(input, "buy milk");
+    await user.click(
+      screen.getByRole("button", { name: "Add note for Brain dump" }),
+    );
+    await waitFor(() => expect(input).toHaveValue("buy milk {}"));
+  });
+
+  it("teaches the syntax in the capture field's DESCRIPTION", () => {
+    // The hint is the only thing that says the rule is "at the END" — someone
+    // who learns only the braces meets a refusal (`fix the {foo} handler`) and
+    // reads it as a bug. Associated with the field rather than left as orphaned
+    // text, which is the #183 obligation this paragraph already carried.
+    renderInbox();
+    const input = screen.getByRole("textbox", { name: "Brain dump" });
+    const describedBy = input.getAttribute("aria-describedby") as string;
+    expect(document.getElementById(describedBy)?.textContent).toContain(
+      "Put a note in {curly braces} at the end.",
+    );
+  });
+
+  it("puts a button on the ✎ row editor, named after that row", async () => {
+    const user = userEvent.setup();
+    renderInbox([makeItem({ id: "r1", text: "water the plants" })]);
+    const row = screen.getByText("water the plants").closest("li")!;
+    await user.click(
+      within(row).getByRole("button", { name: "Edit water the plants" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Add note for water the plants" }),
+    ).toBeTruthy();
+    // And the capture bar's is still there, under its own name — the two are
+    // distinguishable, which is the whole reason `subject` exists.
+    expect(
+      screen.getByRole("button", { name: "Add note for Brain dump" }),
+    ).toBeTruthy();
+  });
+
+  it("carries the composed string through to renameItem", async () => {
+    const { renameItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    renderInbox([makeItem({ id: "r1", text: "water the plants" })]);
+    const row = screen.getByText("water the plants").closest("li")!;
+    await user.click(
+      within(row).getByRole("button", { name: "Edit water the plants" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Add note for water the plants" }),
+    );
+    const editor = screen.getByRole("textbox", { name: "Edit title" });
+    await waitFor(() => expect(editor).toHaveFocus());
+    await user.keyboard("can under sink{Enter}");
+    expect(renameItem).toHaveBeenCalledWith(
+      "r1",
+      "water the plants {can under sink}",
+    );
+  });
+
+  it("describes the row editor with the same rule, for a screen reader", () => {
+    // The row editor has no room for a visible hint line, and repeating one per
+    // row would be noise on a dense list. A referenced `hidden` node contributes
+    // its text to the description without rendering, which is the dialect
+    // `MOVE_INSTRUCTIONS` already uses on this surface.
+    renderInbox([makeItem({ id: "r1", text: "water the plants" })]);
+    const row = screen.getByText("water the plants").closest("li")!;
+    fireEvent.click(
+      within(row).getByRole("button", { name: "Edit water the plants" }),
+    );
+    const editor = screen.getByRole("textbox", { name: "Edit title" });
+    const describedBy = editor.getAttribute("aria-describedby") as string;
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy)?.textContent).toContain(
+      "Put a note in {curly braces} at the end.",
+    );
+  });
+});
+
+// ── #179 / #186 — the captured note, on the row and in the ✎ editor ─────────
+//
+// A note split off at capture has to be readable, or an inline capture is
+// indistinguishable from text that went missing. And the ✎ field is pre-filled
+// with the RECONSTRUCTION (`text {note}`) rather than the bare text, which is
+// what makes an unchanged save a no-op instead of eroding the text one brace
+// group at a time.
+describe("InboxView — the captured inline note (#179/#186)", () => {
+  const renderInbox = (items: Item[]) =>
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={items}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+
+  it("shows an untriaged row's note without anyone expanding anything", () => {
+    renderInbox([
+      makeItem({
+        id: "r1",
+        text: "water the plants",
+        itemNotes: "can under sink",
+      }),
+    ]);
+    expect(
+      screen.getAllByTestId("note-text").map((n) => n.textContent),
+    ).toContain("can under sink");
+  });
+
+  it("offers the note control on a Needs-review row, named after it", () => {
+    // The absence !270 documented was correct then and is wrong now: #186 gave
+    // `BrainDumpItem` its own `notes` column, so the save can succeed.
+    renderInbox([makeItem({ id: "r1", text: "water the plants" })]);
+    expect(
+      screen.getByRole("button", { name: "Note for water the plants" }),
+    ).toBeTruthy();
+  });
+
+  it("shows a Saved-for-later row's note without opening the row", async () => {
+    // Parked rows are untriaged as well, so a note that vanished because somebody
+    // moved a row to the pantry would be the same defect in a quieter place.
+    //
+    // READING it costs nothing; EDITING it follows the row's own design, where the
+    // action group stays hidden until you engage with the row (a sleeping pantry
+    // row shows only "Review now"). Deliberately not special-cased: a note
+    // trigger permanently visible on a dimmed row would be the only control that
+    // ignored that rule.
+    const user = userEvent.setup();
+    renderInbox([
+      makeItem({
+        id: "v1",
+        text: "book the dentist",
+        itemNotes: "before the 20th",
+        snoozedUntil: new Date(Date.now() + 3_600_000),
+      }),
+    ]);
+    expect(
+      screen.getAllByTestId("note-text").map((n) => n.textContent),
+    ).toContain("before the 20th");
+    // Collapsed: no trigger yet.
+    expect(
+      screen.queryByRole("button", { name: "Note for book the dentist" }),
+    ).toBeNull();
+    await user.click(screen.getByRole("button", { name: "book the dentist" }));
+    expect(
+      screen.getByRole("button", { name: "Note for book the dentist" }),
+    ).toBeTruthy();
+  });
+
+  it("pre-fills the ✎ editor with the RECONSTRUCTION, not the bare text", async () => {
+    const user = userEvent.setup();
+    renderInbox([
+      makeItem({
+        id: "r1",
+        text: "water the plants",
+        itemNotes: "can under sink",
+      }),
+    ]);
+    const row = screen.getByText("water the plants").closest("li")!;
+    await user.click(
+      within(row).getByRole("button", { name: "Edit water the plants" }),
+    );
+    expect(screen.getByRole("textbox", { name: "Edit title" })).toHaveValue(
+      "water the plants {can under sink}",
+    );
+  });
+
+  it("an unchanged save never reaches the server at all", async () => {
+    // Belt as well as braces: `resolveInlineNoteEdit` makes the SAVE a no-op, and
+    // this makes the round trip not happen. Before the reconstruction the field
+    // held `water the plants`, which differed from nothing and so always did.
+    const { renameItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    renderInbox([
+      makeItem({
+        id: "r1",
+        text: "water the plants",
+        itemNotes: "can under sink",
+      }),
+    ]);
+    const row = screen.getByText("water the plants").closest("li")!;
+    await user.click(
+      within(row).getByRole("button", { name: "Edit water the plants" }),
+    );
+    await user.keyboard("{Enter}");
+    expect(renameItem).not.toHaveBeenCalled();
+  });
+
+  it("carries the note back with an edit to the text half", async () => {
+    const { renameItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    renderInbox([
+      makeItem({
+        id: "r1",
+        text: "water the plants",
+        itemNotes: "can under sink",
+      }),
+    ]);
+    const row = screen.getByText("water the plants").closest("li")!;
+    await user.click(
+      within(row).getByRole("button", { name: "Edit water the plants" }),
+    );
+    const editor = screen.getByRole("textbox", { name: "Edit title" });
+    await user.clear(editor);
+    // `{{` is user-event's escape for a literal brace — the syntax under test is
+    // made of the one character its keyboard API reserves.
+    await user.type(editor, "water the office plants {{can under sink}{Enter}");
+    expect(renameItem).toHaveBeenCalledWith(
+      "r1",
+      "water the office plants {can under sink}",
+    );
+  });
+
+  it("the Add-note button lands in the note the row already has", async () => {
+    // Where the two halves meet. The reconstruction puts the existing note in the
+    // field, so `inlineNoteInsertion` finds a trailing group and the caret goes
+    // INSIDE it — appending would promote a new group to note and demote this one
+    // to text.
+    const user = userEvent.setup();
+    renderInbox([
+      makeItem({
+        id: "r1",
+        text: "water the plants",
+        itemNotes: "can under sink",
+      }),
+    ]);
+    const row = screen.getByText("water the plants").closest("li")!;
+    await user.click(
+      within(row).getByRole("button", { name: "Edit water the plants" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Add note for water the plants" }),
+    );
+    const editor = screen.getByRole("textbox", {
+      name: "Edit title",
+    }) as HTMLInputElement;
+    await waitFor(() => expect(editor).toHaveFocus());
+    expect(editor.selectionStart).toBe(
+      "water the plants {can under sink".length,
+    );
+    await user.keyboard(" — rinse it");
+    expect(editor).toHaveValue("water the plants {can under sink — rinse it}");
+  });
+
+  it("leaves a task-backed row reading its TASK note, not the leftover copy", () => {
+    // The grain rule, at the surface. Triage copies the item note onto the task;
+    // showing the item's copy afterwards would resurrect whatever it held when
+    // triage ran, including a note since deleted.
+    renderInbox([
+      makeItem({
+        id: "s1",
+        text: "single item",
+        status: "triaged",
+        taskId: "t1",
+        notes: "live task note",
+        itemNotes: "stale item copy",
+      }),
+    ]);
+    const shown = screen.getAllByTestId("note-text").map((n) => n.textContent);
+    expect(shown).toContain("live task note");
+    expect(shown).not.toContain("stale item copy");
   });
 });
