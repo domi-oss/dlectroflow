@@ -711,6 +711,21 @@ export const STRINGS = {
     playful:
       "The app updated while this was open, so that didn't save. Reload to carry on — your words are still here:",
   },
+  // Duo review round 2 — the one failure whose verdict is genuinely unknown. A
+  // server action cannot be aborted from the client, so a timeout bounds how
+  // long the UI waits, not the write: the insert may still land, and a retry
+  // after it does leaves two identical items. Saying "couldn't save that" here
+  // would be a claim the client cannot support — the same unverifiable
+  // confirmation as the `captured ✓` this issue is about, pointing the other
+  // way. So it says what it knows, names the one thing that resolves the
+  // ambiguity, and lets the user choose: a duplicate is one tap to delete, an
+  // unwritten thought is not recoverable at all.
+  "capture.error.timeout": {
+    plain:
+      "No answer from the server, so this may already have saved. Check your inbox before trying again — your words are still here:",
+    playful:
+      "No answer from the server, so this may already have saved. Check your inbox before trying again — your words are still here:",
+  },
   "capture.error.retry": { plain: "Try again", playful: "Try again" },
   "capture.error.reload": {
     plain: "Reload the page",

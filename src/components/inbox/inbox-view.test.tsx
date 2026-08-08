@@ -506,8 +506,94 @@ describe("InboxView — a capture that fails (#210)", () => {
       await vi.advanceTimersByTimeAsync(CAPTURE_TIMEOUT_MS);
     });
 
-    expect(screen.getByRole("alert")).toHaveTextContent(/couldn't save that/i);
+    expect(screen.getByRole("alert")).toBeInTheDocument();
     expect(input).toHaveValue("buy milk");
+  });
+
+  /**
+   * Duo review round 2: a timeout is the one failure whose verdict is genuinely
+   * unknown. `withActionTimeout` bounds how long the UI waits, not the request —
+   * a server action cannot be aborted from the client — so the write may still
+   * land, and a retry after it does creates a duplicate. "Couldn't save that"
+   * would be a claim the client cannot make, and it is the same class of
+   * unverifiable confirmation as the `captured ✓` this issue is about, just
+   * pointing the other way.
+   */
+  it("says a timed-out capture MAY have saved, rather than asserting it did not", async () => {
+    vi.useFakeTimers();
+    vi.mocked(createBrainDumpItem).mockReturnValueOnce(
+      new Promise<void>(() => {}),
+    );
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CAPTURE_TIMEOUT_MS);
+    });
+
+    const notice = screen.getByRole("alert");
+    expect(notice).toHaveTextContent(/may already have saved/i);
+    expect(notice).toHaveTextContent(/check your inbox/i);
+    expect(notice).not.toHaveTextContent(/couldn't save that/i);
+    // Retry is still offered: a duplicate item is one tap to delete, an
+    // unwritten thought is not recoverable at all, so the choice is the user's
+    // and the notice gives them what they need to make it.
+    expect(
+      screen.getByRole("button", { name: /try again/i }),
+    ).toBeInTheDocument();
+    expect(input).toHaveValue("buy milk");
+  });
+
+  /**
+   * Duo review round 2, and the reason `schedulingIds` is keyed per row rather
+   * than being one boolean (#169): a shared in-flight flag belongs to whichever
+   * request settles last, not to the one it is guarding.
+   *
+   * A capture the user starts while a retry is outstanding is deliberately not
+   * gated (independent inserts, and firing thoughts in a row is the point of the
+   * control) — so it WILL settle inside the retry's window, and a shared flag
+   * would hand the Retry button back while its own request was still in flight.
+   */
+  it("scopes the Retry guard to the retry, so an unrelated capture settling cannot unblock it", async () => {
+    let resolveOther!: () => void;
+    vi.mocked(createBrainDumpItem)
+      // the original capture, which fails
+      .mockRejectedValueOnce(new Error("offline"))
+      // its retry, which never answers
+      .mockReturnValueOnce(new Promise<void>(() => {}))
+      // an unrelated capture typed during that retry, resolved on demand
+      .mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          resolveOther = resolve;
+        }),
+      );
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    await clickRetry();
+    expect(screen.getByRole("button", { name: /try again/i })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+
+    await capture(input, "call mum");
+    await act(async () => {
+      resolveOther();
+      await flushTicks();
+    });
+
+    // "buy milk"'s retry is still outstanding, so Retry must still be blocked —
+    // and a press must not post it a second time.
+    expect(screen.getByRole("button", { name: /try again/i })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    await clickRetry();
+    expect(vi.mocked(createBrainDumpItem).mock.calls).toEqual([
+      ["buy milk"],
+      ["buy milk"],
+      ["call mum"],
+    ]);
   });
 
   /**

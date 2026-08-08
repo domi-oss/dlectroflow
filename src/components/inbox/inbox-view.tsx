@@ -75,6 +75,7 @@ import {
   type BucketId,
 } from "@/components/inbox/bucket";
 import {
+  ActionTimeoutError,
   isStaleActionError,
   withActionTimeout,
 } from "@/lib/server-action-failure";
@@ -93,7 +94,7 @@ import { newAccountLine, type AccountIdentity } from "@/lib/identity";
 import { SubHeader, SEE_ALL } from "@/components/inbox/sub-header";
 import { t } from "@/lib/strings";
 import { useVoice } from "@/components/voice-provider";
-import type { Voice } from "@/lib/strings";
+import type { StringKey, Voice } from "@/lib/strings";
 import {
   notificationPermission,
   requestNotificationPermission,
@@ -149,7 +150,50 @@ type CaptureFailure = {
    * would be offering something that cannot.
    */
   stale: boolean;
+  /**
+   * The write never answered, so **whether it landed is unknown** (Duo review
+   * round 2). `withActionTimeout` bounds how long the UI waits, not the request:
+   * a server action cannot be aborted from the client, so the insert may still
+   * complete, and a retry after it does leaves two identical items.
+   *
+   * Which is why this is a distinct flag rather than folded into the generic
+   * failure. Telling the user "couldn't save that" here would be a claim the
+   * client cannot support — the same unverifiable confirmation as the
+   * `captured ✓` this issue is about, pointing the other way. Retry is still
+   * offered, because a duplicate item is one tap to delete while an unwritten
+   * thought is not recoverable at all; the notice just says which risk they are
+   * taking. The durable answer is an idempotency key on the insert, which needs
+   * a schema change and so is not this fix.
+   */
+  timedOut: boolean;
+  /**
+   * A retry of THESE words is in flight.
+   *
+   * On the failure record rather than in a component-wide `capturing` flag, and
+   * that is the whole point (Duo review round 2). A capture the user types while
+   * a retry is outstanding is deliberately ungated, so it settles inside the
+   * retry's window — and a shared boolean would then be cleared by the wrong
+   * request, handing the Retry button back mid-flight and letting a double press
+   * post the same words twice. Same lesson `schedulingIds` already applies
+   * per-row to the Schedule controls (#169).
+   */
+  retrying: boolean;
 };
+
+/**
+ * #210 — which message a failed capture gets.
+ *
+ * Ordered by how much the user can be told, most-certain first. `stale` and
+ * `timedOut` both override the generic copy because both change what the user
+ * should DO: a stale bundle makes a retry impossible, and a timeout makes the
+ * outcome unknown, so "couldn't save that" would be a claim the client cannot
+ * support. Mirrors `focus-timer.tsx`'s `failureMessageKey`.
+ */
+function captureMessageKey(failure: CaptureFailure): StringKey {
+  if (failure.stale) return "capture.error.stale";
+  if (failure.timedOut) return "capture.error.timeout";
+  return "capture.error.failed";
+}
 
 /** True when a native drag was started by one of our rows rather than by an
  * image, a text selection, or another surface on the page. */
@@ -341,12 +385,15 @@ export function InboxView({
   }, []);
 
   /**
-   * #210 — the capture whose write did not land, and whether one is in flight.
+   * #210 — the capture whose write did not land.
    *
-   * Separate from `refreshing` on purpose. `refreshing` is raised by all ~20
-   * `run()` call sites, so renaming a row would make the capture notice's Retry
-   * read as busy and announce a save that has nothing to do with it — the same
-   * over-broad-flag mistake #169 fixed for the 📅 controls.
+   * Deliberately not `refreshing`, which all ~20 `run()` call sites raise:
+   * renaming a row would otherwise make the capture notice's Retry read as busy
+   * and announce a save that has nothing to do with it — the same over-broad-flag
+   * mistake #169 fixed for the 📅 controls. And deliberately not a
+   * component-wide `capturing` boolean either; the in-flight marker lives on the
+   * record it guards (`CaptureFailure.retrying`), for the reason documented
+   * there.
    *
    * ONE failure slot rather than a queue. The realistic causes (offline, a
    * stale bundle, a dead pod) are sticky, so a second failure lands within a
@@ -359,7 +406,6 @@ export function InboxView({
   const [captureFailure, setCaptureFailure] = useState<CaptureFailure | null>(
     null,
   );
-  const [capturing, setCapturing] = useState(false);
   // #210 — ties the failure message to the notice's control, so the reason is
   // announced with the remedy however the announcement races. See captureNotice.
   const captureErrorId = useId();
@@ -875,8 +921,10 @@ export function InboxView({
     // Urgent, and deliberately OUTSIDE the transition — see runSchedule (#169):
     // React 19 holds an async transition's own state updates until the action
     // settles, so a guard raised inside one first paints at the moment it stops
-    // being true, which is a guard that guards nothing.
-    setCapturing(true);
+    // being true, which is a guard that guards nothing. Discrete events like a
+    // click flush at synchronous priority, so this has landed before the next
+    // press can read it.
+    if (fromRetry) markRetrying(value, true);
     return startTransition(async () => {
       try {
         await withActionTimeout(createBrainDumpItem(value), CAPTURE_TIMEOUT_MS);
@@ -908,7 +956,14 @@ export function InboxView({
         // read both.
         if (captureTimeoutRef.current) clearTimeout(captureTimeoutRef.current);
         setJustCaptured(false);
-        setCaptureFailure({ value, stale: isStaleActionError(error) });
+        setCaptureFailure({
+          value,
+          stale: isStaleActionError(error),
+          timedOut: error instanceof ActionTimeoutError,
+          // A fresh record, so the retry flag starts down: this attempt is over,
+          // whatever it was.
+          retrying: false,
+        });
         // Restore the words, but ONLY into a field the user has not since typed
         // into. A ten-second hang is long enough to type the next thought, and
         // overwriting that would be the same data loss wearing the other hat.
@@ -916,12 +971,30 @@ export function InboxView({
         // are never only in a variable.
         setText((prev) => (prev.trim() ? prev : value));
       } finally {
-        // Must run on every exit including a throw: `capturing` left true is a
-        // Retry button that reads permanently busy.
-        setCapturing(false);
+        // Must run on every exit including a throw: a retry flag left up is a
+        // Retry button that reads permanently busy. Scoped to `value`, so a
+        // capture the user typed during the retry cannot clear it — the race Duo
+        // review round 2 found.
+        if (fromRetry) markRetrying(value, false);
       }
     });
   };
+
+  /**
+   * Raise or drop `retrying` on the failure record for `value`, and only for
+   * that record.
+   *
+   * The functional update is what makes it per-attempt: it reads the CURRENT
+   * failure rather than the one captured in this closure, so an unrelated
+   * capture that displaced the notice in the meantime is left alone instead of
+   * being marked busy on another attempt's behalf.
+   */
+  const markRetrying = (value: string, active: boolean) =>
+    setCaptureFailure((prev) => {
+      if (!prev || prev.value !== value || prev.retrying === active)
+        return prev;
+      return { ...prev, retrying: active };
+    });
 
   const submit = () => {
     const value = text.trim();
@@ -929,15 +1002,15 @@ export function InboxView({
     // Cleared synchronously and urgently, which is both the instant-capture
     // feel and the double-submit guard: a second Enter arriving before the
     // write resolves finds an empty field and returns below. Deliberately NOT
-    // gated on `capturing` — firing three thoughts in a row is the whole point
-    // of this control, and they are independent inserts.
+    // gated on an in-flight capture — firing three thoughts in a row is the
+    // whole point of this control, and they are independent inserts.
     setText("");
     capture(value);
   };
 
   /** #210 — the notice's Retry: re-posts the exact words that did not land. */
   const retryCapture = () => {
-    if (!captureFailure || capturing) return;
+    if (!captureFailure || captureFailure.retrying) return;
     capture(captureFailure.value, { fromRetry: true });
   };
 
@@ -1161,12 +1234,7 @@ export function InboxView({
                 className="mt-0.5 h-4 w-4 shrink-0"
               />
               <span className="break-words">
-                {t(
-                  captureFailure.stale
-                    ? "capture.error.stale"
-                    : "capture.error.failed",
-                  voice,
-                )}{" "}
+                {t(captureMessageKey(captureFailure), voice)}{" "}
                 <strong>&ldquo;{captureFailure.value}&rdquo;</strong>
               </span>
             </p>
@@ -1191,9 +1259,9 @@ export function InboxView({
                 <button
                   type="button"
                   aria-describedby={captureErrorId}
-                  aria-disabled={capturing}
+                  aria-disabled={captureFailure.retrying}
                   onClick={() => {
-                    if (!capturing) retryCapture();
+                    if (!captureFailure.retrying) retryCapture();
                   }}
                   className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium aria-disabled:opacity-50"
                 >
@@ -1201,7 +1269,7 @@ export function InboxView({
                   {t("capture.error.retry", voice)}
                 </button>
               )}
-              {capturing && (
+              {captureFailure.retrying && (
                 <p role="status" className="text-muted-foreground text-xs">
                   {t("capture.error.saving", voice)}
                 </p>
