@@ -444,6 +444,7 @@ export function InboxView({
   // #210 — ties the failure message to the notice's control, so the reason is
   // announced with the remedy however the announcement races. See captureNotice.
   const captureErrorId = useId();
+  const captureSavingId = useId();
   const retryCtaRef = useRef<HTMLButtonElement | null>(null);
   /**
    * #210, Duo review round 3 — hand focus back when the notice unmounts.
@@ -985,8 +986,15 @@ export function InboxView({
     // press can read it.
     if (fromRetry) markRetrying(value, true);
     return startTransition(async () => {
+      // Duo review round 8 — `router.refresh()` used to live inside the `try`,
+      // so a refresh that threw ran the catch and told the user a capture had
+      // failed when the row was already written. That is #210's own lie,
+      // produced by the code fixing #210. The `try` governs the WRITE; anything
+      // after it is a consequence of success and cannot un-write the row.
+      let landed = false;
       try {
         await withActionTimeout(createBrainDumpItem(value), CAPTURE_TIMEOUT_MS);
+        landed = true;
         // A later capture succeeding says nothing about an earlier one that
         // failed, so the notice is cleared by only two things: these words
         // landing at last, or the user having replaced them in the field and
@@ -1030,7 +1038,6 @@ export function InboxView({
           () => setJustCaptured(false),
           CAPTURE_CONFIRM_MS,
         );
-        router.refresh();
       } catch (error) {
         // An earlier capture's "captured ✓" can still be inside its 1.5s
         // window. Leaving it up would put two live regions on screen saying
@@ -1071,6 +1078,10 @@ export function InboxView({
         // review round 2 found.
         if (fromRetry) markRetrying(value, false);
       }
+      // Outside the try/catch on purpose (round 8): the row is written, so a
+      // refresh that throws is a stale list, not a lost capture, and must never
+      // be reported as one.
+      if (landed) router.refresh();
     });
   };
 
@@ -1380,7 +1391,14 @@ export function InboxView({
                 <button
                   ref={retryCtaRef}
                   type="button"
-                  aria-describedby={captureErrorId}
+                  // While a retry runs, the reason AND the wait are both reachable
+                  // from the control (Duo review round 8) — see the note below on
+                  // why the wait is not its own live region.
+                  aria-describedby={
+                    captureFailure.retrying
+                      ? `${captureErrorId} ${captureSavingId}`
+                      : captureErrorId
+                  }
                   aria-disabled={captureFailure.retrying}
                   onClick={() => {
                     if (!captureFailure.retrying) retryCapture();
@@ -1391,8 +1409,19 @@ export function InboxView({
                   {t("capture.error.retry", voice)}
                 </button>
               )}
+              {/* Duo review round 8 — deliberately NOT `role="status"`. That
+                  would be a polite live region nested inside this assertive one,
+                  which is undefined enough in practice that "will it announce"
+                  has no answer. The wait rides the two mechanisms that do have
+                  one: the pressed button's `aria-disabled` state change, which a
+                  screen reader reports because focus is on it, and its
+                  `aria-describedby`, which picks this node up while it shows.
+                  Sighted users see the identical text either way. */}
               {captureFailure.retrying && (
-                <p role="status" className="text-muted-foreground text-xs">
+                <p
+                  id={captureSavingId}
+                  className="text-muted-foreground text-xs"
+                >
                   {t("capture.error.saving", voice)}
                 </p>
               )}

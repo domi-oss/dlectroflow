@@ -774,6 +774,58 @@ describe("InboxView — a capture that fails (#210)", () => {
   });
 
   /**
+   * Duo review round 8 — the `try` must govern the WRITE, not everything after
+   * it. `router.refresh()` sat inside it, so a refresh that threw would run the
+   * catch and tell the user a capture had failed when the row was already
+   * written: #210's lie, produced by the code fixing #210.
+   */
+  it("does not report a capture as failed when only the list refresh threw", async () => {
+    const input = renderInbox();
+    refresh.mockImplementationOnce(() => {
+      throw new Error("refresh blew up");
+    });
+
+    await capture(input, "buy milk");
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByText("captured ✓")).toBeInTheDocument();
+    expect(input).toHaveValue("");
+  });
+
+  /**
+   * Duo review round 8 — nested live regions are the question it raised, and the
+   * answer is not to have one. A `role="status"` inside a `role="alert"` is a
+   * polite region inside an assertive one, which is undefined enough in practice
+   * that "will it announce" cannot be answered.
+   *
+   * So the wait is carried by the two mechanisms that ARE defined: the pressed
+   * button's own `aria-disabled` state change, and its `aria-describedby`, which
+   * picks up the "Saving…" text while it is showing. Sighted users see exactly
+   * the same thing.
+   */
+  it("carries the retry's wait on the button rather than nesting a live region", async () => {
+    vi.mocked(createBrainDumpItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockReturnValueOnce(new Promise<void>(() => {}));
+    const input = renderInbox();
+    await capture(input, "buy milk");
+    await clickRetry();
+
+    const notice = screen.getByRole("alert");
+    expect(within(notice).queryByRole("status")).toBeNull();
+    expect(notice).toHaveTextContent(/saving/i);
+
+    const retry = within(notice).getByRole("button", { name: /try again/i });
+    const ids = retry.getAttribute("aria-describedby")!.trim().split(/\s+/);
+    expect(ids).toHaveLength(2);
+    const described = ids
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
+    expect(described).toMatch(/couldn't save that/i);
+    expect(described).toMatch(/saving/i);
+  });
+
+  /**
    * Duo review round 4 — the superseding rule, reached from the one path the
    * round-3 specs did not walk: a **retry that fails again**.
    *
@@ -827,7 +879,7 @@ describe("InboxView — a capture that fails (#210)", () => {
     // Not a silent discard — #169's other harm. The notice is on screen saying a
     // save for these exact words is in flight, and Retry reads busy.
     const notice = screen.getByRole("alert");
-    expect(within(notice).getByRole("status")).toHaveTextContent(/saving/i);
+    expect(notice).toHaveTextContent(/saving/i);
     expect(
       within(notice).getByRole("button", { name: /try again/i }),
     ).toHaveAttribute("aria-disabled", "true");
