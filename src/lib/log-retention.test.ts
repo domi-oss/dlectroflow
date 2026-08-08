@@ -389,7 +389,13 @@ describe("the ops_digest CI job", () => {
     expect(job).not.toBe("");
   });
 
-  it("still runs only on schedules", () => {
+  it("still runs only on schedules, and on no flagged one", () => {
+    // The digest's last rule is a bare `schedule` catch-all, so each new flag
+    // needs an explicit guard here or the digest rides that flag's schedule.
+    // #191's PROD_STATE_CHECK is HOURLY, so the missing guard would have meant 24
+    // weekly digests a day. `pipeline-failure-alert.test.ts` asserts the same
+    // list — both are kept because each arrived with a different digest section
+    // and neither should be the only place this is pinned.
     const ifs = (job.split(/^ {2}rules:$/m)[1] ?? "")
       .split("\n")
       .filter((line) => line.includes("if:"));
@@ -397,6 +403,7 @@ describe("the ops_digest CI job", () => {
       `    - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'`,
       `    - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'`,
       `    - if: '$CI_PIPELINE_SOURCE == "schedule" && $SECURITY_ASSESSMENT == "true"'`,
+      `    - if: '$CI_PIPELINE_SOURCE == "schedule" && $PROD_STATE_CHECK == "true"'`,
       `    - if: '$CI_PIPELINE_SOURCE == "schedule"'`,
     ]);
   });

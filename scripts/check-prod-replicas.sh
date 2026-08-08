@@ -42,23 +42,43 @@
 # when the read simply failed cries wolf, and reporting 0 is the unproven green
 # this issue exists to kill. A caller that treats 2 as 0 has reintroduced the bug.
 #
-# ── No flap suppression, deliberately ───────────────────────────────────────
-# The obvious refinement — "only alert if it has been degraded for N minutes" —
-# is already provided by Kubernetes and re-implementing it here would need
-# persisted state and a `date` implementation this repo has been burned by twice.
-# With `replicas: 2` and the default RollingUpdate strategy, `maxUnavailable` is
-# 25% of 2 rounded down = 0, so a HEALTHY rollout never drops availableReplicas
-# below desired at all — it surges to 3 and settles back to 2. `available <
-# desired` therefore already means "something is wrong", not "something is
-# happening", and the `Progressing` condition is reported alongside so the reader
-# can tell a stuck rollout from a lost pod.
+# ── `1/2` on its own is NOT this incident, and that is measured ─────────────
+# The tempting rule is "alert whenever available < desired". It was tried and it
+# is wrong. On 2026-08-07, hours after the outage was fixed, `kubectl get deploy`
+# read exactly `1/2` in production and it was an **ordinary mid-rollout
+# transient**: the two pods were 62s and 21s old, the second still in `Init:1/3`,
+# and *both were already on the new image*. `rollout status` returned
+# "successfully rolled out" 90 seconds later. An hourly probe has a real chance
+# of landing inside a rollout, so that rule would cry wolf several times a week —
+# and a muted channel takes the real alert with it.
 #
-# The cost of that choice is one possible false alert if an Autopilot node drain
-# (which the PodDisruptionBudget permits, maxUnavailable: 1) is caught in flight
-# by an hourly check. One false alert a quarter is the right trade against a
-# 24-hour miss — and suppressing "degraded while a rollout is in progress" is
-# precisely how this incident stayed quiet, because the rollout *was* in
-# progress, for a day.
+# The discriminator is **not a timer of our own**, because Kubernetes already
+# runs one. `progressDeadlineSeconds` (600s by default; the chart sets none)
+# flips the `Progressing` condition to `False` with reason
+# `ProgressDeadlineExceeded` when a rollout stops making progress. So:
+#
+#   Progressing=True/ReplicaSetUpdated      a rollout is in flight and has not
+#                                           yet blown its deadline → not an alert
+#   Progressing=False                       stuck → alert, and name the reason
+#   Progressing=True/NewReplicaSetAvailable the rollout FINISHED and a replica is
+#                                           still missing → alert. No deadline
+#                                           will ever flip for this shape, so
+#                                           deferring to one means never alerting
+#
+# That is exactly the "degraded for more than N minutes" #191 asks for, expressed
+# in the one clock that already exists rather than a second one built out of
+# persisted state and a `date` implementation this repo has been bitten by twice.
+# It also still catches the 24-hour incident: `--atomic --timeout 20m` is past
+# the 600s deadline, so `Progressing` read False throughout — and after the
+# atomic rollback the OLD spec's pods failed too, because a wedged migration
+# blocks every image's `migrate deploy`, so it never recovered and never stopped
+# being past the deadline.
+#
+# **The quiet arm checks the property it depends on.** It is only safe because
+# Kubernetes promises to flip the condition within `progressDeadlineSeconds`; if
+# that value is raised past REPLICAS_MAX_PROGRESS_DEADLINE the promise no longer
+# holds, silence stops being self-limiting, and one Helm value would have turned
+# this monitor off without saying so. So a too-long deadline is itself an alert.
 #
 # ── Read-only, and careful with what the cluster says ───────────────────────
 # Every kubectl verb here is `get`. Nothing this script can do changes the
@@ -73,14 +93,21 @@
 # Env (all optional):
 #   REPLICAS_NAMESPACE   the app's namespace
 #   REPLICAS_DEPLOYMENT  the Deployment to read
+#   REPLICAS_CONTAINER   the app container, for the image comparison
 #   REPLICAS_SELECTOR    label selector for its pods
 #   REPLICAS_MAX_PODS    how many not-ready pods to describe in the report
+#   REPLICAS_MAX_PROGRESS_DEADLINE  longest deadline the quiet arm will trust
 set -euo pipefail
 
 NAMESPACE="${REPLICAS_NAMESPACE:-dlectroflow-prod}"
 DEPLOYMENT="${REPLICAS_DEPLOYMENT:-dlectroflow}"
+CONTAINER="${REPLICAS_CONTAINER:-app}"
 SELECTOR="${REPLICAS_SELECTOR:-app.kubernetes.io/name=dlectroflow}"
 MAX_PODS="${REPLICAS_MAX_PODS:-3}"
+# 1800s = 30 minutes. The monitor runs hourly, so a deadline within this bound
+# means at worst one quiet run before the condition flips and the next run
+# alerts. Anything longer and staying quiet is no longer self-limiting.
+MAX_DEADLINE="${REPLICAS_MAX_PROGRESS_DEADLINE:-1800}"
 # 300 characters holds a Prisma P3009 message with its migration name, which is
 # the longest thing worth reading here, without pasting a whole stack trace into
 # somebody's inbox.
@@ -131,22 +158,60 @@ available="$(jq -r '.status.availableReplicas // 0' "$WORK/deploy.json")"
 ready="$(jq -r '.status.readyReplicas // 0' "$WORK/deploy.json")"
 updated="$(jq -r '.status.updatedReplicas // 0' "$WORK/deploy.json")"
 
-cond() {
-  jq -r --arg t "$1" \
-    '(.status.conditions // []) | map(select(.type == $t)) | .[0]
-     | if . == null then "absent" else "\(.status) (\(.reason // "no reason")) since \(.lastTransitionTime // "an unknown time")" end' \
-    "$WORK/deploy.json" 2> /dev/null || echo "unreadable"
-}
-progressing="$(cond Progressing)"
-available_cond="$(cond Available)"
+# `progressDeadlineSeconds` is absent in the common case: the chart sets none, so
+# Kubernetes' documented 600s default applies and nothing writes the field. That
+# default is what the quiet arm below relies on, so it is spelled out here rather
+# than left implicit.
+deadline="$(jq -r '.spec.progressDeadlineSeconds // 600' "$WORK/deploy.json" 2> /dev/null || true)"
+case "$deadline" in
+  '' | *[!0-9]*) deadline=600 ;;
+esac
 
-count_line="- \`deployment/${DEPLOYMENT}\`: **${available}/${desired}** replicas available (${ready} ready, ${updated} on the current spec)"
+spec_image="$(jq -r --arg c "$CONTAINER" \
+  '((.spec.template.spec.containers // []) | map(select(.name == $c)) | .[0].image) // ""' \
+  "$WORK/deploy.json" 2> /dev/null || true)"
+# Tag only. The registry path is already public in .gitlab-ci.yml, but the tag is
+# the whole of the question and a full ref makes the note harder to scan.
+spec_tag="${spec_image##*:}"
+[ -n "$spec_tag" ] || spec_tag="unknown"
+
+cond() {
+  jq -r --arg t "$1" --arg f "$2" \
+    '(.status.conditions // []) | map(select(.type == $t)) | .[0]
+     | if . == null then (if $f == "full" then "absent" else "" end)
+       elif $f == "status" then (.status // "")
+       elif $f == "reason" then (.reason // "")
+       else "\(.status) (\(.reason // "no reason")) since \(.lastTransitionTime // "an unknown time")" end' \
+    "$WORK/deploy.json" 2> /dev/null || echo ""
+}
+progressing="$(cond Progressing full)"
+progressing_status="$(cond Progressing status)"
+progressing_reason="$(cond Progressing reason)"
+available_cond="$(cond Available full)"
+
+count_line="- \`deployment/${DEPLOYMENT}\`: **${available}/${desired}** replicas available (${ready} ready, ${updated} on the current spec, image \`${spec_tag}\`)"
 cond_line="- conditions: \`Progressing\` ${progressing}; \`Available\` ${available_cond}"
 
 if [ "$available" -ge "$desired" ]; then
   printf -- '%s\n%s\n- ✅ production is running every replica it is meant to\n' \
     "$count_line" "$cond_line"
   exit 0
+fi
+
+# ── 1b. Degraded, but is it a rollout in flight? ─────────────────────────────
+# See the header: this arm exists because `1/2` was MEASURED to be an ordinary
+# transient, and it defers to Kubernetes' own progress deadline rather than a
+# second clock. It deliberately does NOT print a tick — nothing here was verified
+# healthy, only verified self-limiting, and those are different claims.
+if [ "$progressing_status" = "True" ] && [ "$progressing_reason" = "ReplicaSetUpdated" ]; then
+  if [ "$deadline" -le "$MAX_DEADLINE" ]; then
+    printf -- '%s\n%s\n- 🔄 a rollout is in progress and has **not** yet exceeded its progress deadline (`progressDeadlineSeconds: %s`), so this is not an alert yet. Kubernetes flips `Progressing` to False within that window if it stops making progress, and the next run of this check alerts on it.\n' \
+      "$count_line" "$cond_line" "$deadline"
+    exit 0
+  fi
+  printf -- '%s\n%s\n- 🔴 **a rollout has been in progress and its progress deadline is too long to wait for** — `progressDeadlineSeconds: %s` exceeds the %ss this check will stay quiet for. Staying silent would depend on a flip that may not come for hours, which is how a monitor gets switched off without saying so.\n' \
+    "$count_line" "$cond_line" "$deadline" "$MAX_DEADLINE"
+  exit 1
 fi
 
 # ── 2. Degraded — say which pods, and what they say about why ────────────────
@@ -187,8 +252,26 @@ if kubectl get pods -n "$NAMESPACE" -l "$SELECTOR" -o json \
       | map("  - pod `\(.name)` (\(.phase))" + (if (.bad | length) == 0 then "" else "\n" + (.bad | map("    - " + .) | join("\n")) end))
       | join("\n")
   ' "$WORK/pods.json" > "$WORK/pods.md" 2> /dev/null || : > "$WORK/pods.md"
+  # The other half of the measured discriminator. During the 2026-08-07
+  # transient BOTH pods were on the new image; during the outage the surviving
+  # pod was the STALE one, and that difference is what a human uses to tell
+  # "still rolling" from "wedged". One line, from two documents already fetched.
+  image_line=""
+  pod_tags="$(jq -r --arg c "$CONTAINER" '
+    [ (.items // [])[] | (.spec.containers // []) | map(select(.name == $c)) | .[0].image // empty ]
+    | map(sub("^.*:"; "")) | unique | join("`, `")' "$WORK/pods.json" 2> /dev/null || true)"
+  if [ -n "$pod_tags" ]; then
+    if [ "$pod_tags" = "$spec_tag" ]; then
+      image_line="- every pod is on the current spec's image (\`${spec_tag}\`), so no pod is serving stale code"
+    else
+      image_line="- ⚠️ pods are running \`${pod_tags}\` while the current spec is \`${spec_tag}\` — at least one pod is on a **different image**, so production may be serving stale code as well as being short of capacity"
+    fi
+  fi
+
   if [ -s "$WORK/pods.md" ]; then
-    pod_block="$(printf -- '- pods that are not ready:\n%s\n' "$(cat "$WORK/pods.md")")"
+    pod_block="$(printf -- '%s- pods that are not ready:\n%s\n' \
+      "${image_line:+${image_line}
+}" "$(cat "$WORK/pods.md")")"
   else
     # Degraded with every listed pod Ready is a real and confusing state — the
     # missing replica has no pod object at all (unschedulable, quota, a

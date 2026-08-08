@@ -169,7 +169,7 @@ fi
 
 case "$severity" in
   healthy) NEXT_STEPS="Nothing to do. This note exists so the channel closes its own loops — an alerting path that only ever reports bad news gives you no way to tell \"fixed\" from \"stopped running\"." ;;
-  *) NEXT_STEPS="**Recovery** — a failed migration blocks every later one, so start there: \`docs/deploy-runbook.md\` § 17 for the wedged-migration path, § 14 to go back a revision. Rolling forward on \`${DRIFT_REF}\` deploys with the next green pipeline." ;;
+  *) NEXT_STEPS="**Recovery** — a failed migration blocks every later one, so start there: \`docs/deploy-runbook.md\` § 19 for the wedged-migration path, § 18 to read this alert, § 14 to go back a revision. Rolling forward on \`${DRIFT_REF}\` deploys with the next green pipeline." ;;
 esac
 
 # ── 4. The note ──────────────────────────────────────────────────────────────

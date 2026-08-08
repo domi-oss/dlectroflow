@@ -325,6 +325,8 @@ function deployment({
   updated = 2 as number | null,
   progressing = { status: "True", reason: "NewReplicaSetAvailable" },
   availableCondition = { status: "True", reason: "MinimumReplicasAvailable" },
+  progressDeadline = 600 as number | null,
+  image = "registry.test/dlectroflow:main-0d47b2f",
 }: {
   desired?: number;
   available?: number | null;
@@ -332,6 +334,8 @@ function deployment({
   updated?: number | null;
   progressing?: { status: string; reason: string } | null;
   availableCondition?: { status: string; reason: string } | null;
+  progressDeadline?: number | null;
+  image?: string;
 } = {}) {
   const conditions: unknown[] = [];
   if (progressing) {
@@ -354,15 +358,30 @@ function deployment({
   if (available !== null) status.availableReplicas = available;
   if (ready !== null) status.readyReplicas = ready;
   if (updated !== null) status.updatedReplicas = updated;
-  return { spec: { replicas: desired }, status };
+  const spec: Record<string, unknown> = {
+    replicas: desired,
+    template: { spec: { containers: [{ name: "app", image }] } },
+  };
+  // Absent is the common real case — the chart sets no progressDeadlineSeconds,
+  // so Kubernetes' 600s default applies and nothing writes the field.
+  if (progressDeadline !== null)
+    spec.progressDeadlineSeconds = progressDeadline;
+  return { spec, status };
 }
 
 /** A pod list containing one pod whose `migrate` initContainer is wedged. */
-function podsWithWedgedMigrate(message: string) {
+function podsWithWedgedMigrate(
+  message: string,
+  image = "registry.test/dlectroflow:main-0d47b2f",
+) {
   return {
     items: [
       {
-        metadata: { name: "dlectroflow-7c9f4b6d8-2xk9p" },
+        metadata: {
+          name: "dlectroflow-7c9f4b6d8-2xk9p",
+          creationTimestamp: "2026-08-06T13:12:00Z",
+        },
+        spec: { containers: [{ name: "app", image }] },
         status: {
           phase: "Pending",
           conditions: [{ type: "Ready", status: "False" }],
@@ -500,6 +519,145 @@ describe("scripts/check-prod-replicas.sh", () => {
     }
   });
 
+  it("stays quiet for a rollout that has not exceeded its progress deadline", () => {
+    // MEASURED false positive, 2026-08-07: `kubectl get deploy` read `1/2` in
+    // production and it was an ordinary transient — the two pods were 62s and
+    // 21s old, the second still in `Init:1/3`, and BOTH were already on the new
+    // image. `rollout status` returned "successfully rolled out" 90 seconds
+    // later. An hourly probe has a real chance of landing inside a rollout, so
+    // alerting on the ready count alone would cry wolf several times a week and
+    // the alert would be muted — taking the real one with it.
+    //
+    // The discriminator is NOT a timer of our own. Kubernetes already runs one:
+    // `progressDeadlineSeconds` (600s by default) flips `Progressing` to False
+    // with reason `ProgressDeadlineExceeded` when a rollout is genuinely stuck.
+    // That IS the "degraded for more than N minutes" #191 asks for, so this arm
+    // defers to it rather than re-implementing it with a clock this repo has
+    // already been burned by twice.
+    const run = replicas({
+      kubectl: [
+        {
+          match: "deployment",
+          body: deployment({
+            available: 1,
+            ready: 1,
+            updated: 1,
+            progressing: { status: "True", reason: "ReplicaSetUpdated" },
+          }),
+        },
+        { match: "pods", body: { items: [] } },
+      ],
+    });
+    expect(run.status).toBe(0);
+    expect(run.stdout).not.toContain("🔴");
+    // Not a tick either: nothing was verified healthy, it was verified
+    // self-limiting. Those are different claims and only one of them is true.
+    expect(run.stdout).not.toContain("✅");
+    expect(run.stdout).toMatch(/rollout/i);
+    expect(run.stdout).toContain("600");
+  });
+
+  it("alerts on a stuck rollout — the deadline is what tells them apart", () => {
+    // The real incident, 24 hours of it. `helm upgrade --atomic --timeout 20m`
+    // kept timing out, and 20m is past the 600s deadline, so `Progressing` read
+    // False the whole time. After the atomic rollback the OLD spec's pods also
+    // failed, because a wedged migration blocks every image's `migrate deploy` —
+    // so it never recovered on its own and never stopped being past the deadline.
+    const run = replicas({
+      kubectl: [
+        {
+          match: "deployment",
+          body: deployment({
+            available: 1,
+            ready: 1,
+            updated: 1,
+            progressing: {
+              status: "False",
+              reason: "ProgressDeadlineExceeded",
+            },
+          }),
+        },
+        { match: "pods", body: { items: [] } },
+      ],
+    });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain("🔴");
+    expect(run.stdout).toContain("ProgressDeadlineExceeded");
+  });
+
+  it("alerts when a pod is lost after the rollout completed", () => {
+    // `Progressing` True with reason `NewReplicaSetAvailable` means the rollout
+    // FINISHED. Degraded after that is not a rollout in flight, it is a replica
+    // that went away and is not coming back on its own — the `1/2` that does not
+    // move. No deadline will ever flip for this shape, so deferring to one would
+    // mean never alerting at all.
+    const run = replicas({
+      kubectl: [
+        {
+          match: "deployment",
+          body: deployment({ available: 1, ready: 1, updated: 2 }),
+        },
+        { match: "pods", body: { items: [] } },
+      ],
+    });
+    expect(run.status).toBe(1);
+  });
+
+  it("alerts on a rolling deployment whose deadline is too long to rely on", () => {
+    // The quiet arm above is only safe because Kubernetes promises to flip the
+    // condition within `progressDeadlineSeconds`. If that value is raised beyond
+    // the alerting cadence, the promise no longer holds and silence stops being
+    // self-limiting — so the property this arm depends on is checked rather than
+    // assumed. Without this, one Helm value could turn the monitor off silently.
+    const run = replicas({
+      kubectl: [
+        {
+          match: "deployment",
+          body: deployment({
+            available: 1,
+            ready: 1,
+            updated: 1,
+            progressing: { status: "True", reason: "ReplicaSetUpdated" },
+            progressDeadline: 86400,
+          }),
+        },
+        { match: "pods", body: { items: [] } },
+      ],
+    });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain("86400");
+  });
+
+  it("reports whether any pod is on a different image than the current spec", () => {
+    // The other half of the measured discriminator: during the transient both
+    // pods were on the NEW image; during the outage the surviving pod was the
+    // STALE one. A human reading the alert needs that line, and it costs nothing
+    // — both images are already in the two documents fetched.
+    const run = replicas({
+      kubectl: [
+        {
+          match: "deployment",
+          body: deployment({
+            available: 1,
+            ready: 1,
+            image: "registry.test/dlectroflow:main-newsha",
+          }),
+        },
+        {
+          match: "pods",
+          body: podsWithWedgedMigrate(
+            "Error: P3009",
+            "registry.test/dlectroflow:main-oldsha",
+          ),
+        },
+      ],
+    });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain("main-newsha");
+    expect(run.stdout).toContain("main-oldsha");
+    expect(run.stdout).toMatch(/different image|stale/i);
+  });
+
   it("reads the deployment and namespace from env, defaulting to production", () => {
     const run = replicas();
     expect(run.kubectlCalls.join("\n")).toContain("dlectroflow-prod");
@@ -584,6 +742,44 @@ describe("scripts/check-prod-drift.sh reports how long production has been behin
     expect(run.status).toBe(1);
     expect(run.stdout).toContain("2026-08-06T13:12");
     expect(run.stdout).not.toMatch(/-\d+ hours/);
+  });
+
+  it("reads a numeric UTC offset as an offset, not as UTC", () => {
+    // MEASURED against the live API while verifying this script: GitLab returns
+    // `committed_date` as `2026-08-07T09:27:36.000+01:00` — a numeric offset, NOT
+    // a `Z` suffix. The first cut stripped everything from the first `.` onward,
+    // which removed the fractional seconds AND the offset together, and then
+    // parsed the remainder as UTC. The age came out exactly one hour too large in
+    // BST, and would be wrong by the offset anywhere else.
+    //
+    // Asserted as an equivalence rather than against a fixed number, so the test
+    // does not need a frozen clock: `09:27:36+01:00` and `08:27:36Z` are the same
+    // instant, so both must produce the same age. A parser that drops the offset
+    // makes them differ by exactly one hour.
+    const hoursFrom = (committed: string) => {
+      const out = drift({
+        compare: { commits: [{ id: OLD_SHA, committed_date: committed }] },
+      }).stdout;
+      const match = out.match(/\*\*(\d+) hours?\*\* ago/);
+      expect(match, `no age in: ${out}`).not.toBeNull();
+      return Number(match?.[1]);
+    };
+    expect(hoursFrom("2026-08-07T09:27:36.000+01:00")).toBe(
+      hoursFrom("2026-08-07T08:27:36.000Z"),
+    );
+    // And a negative offset moves the other way, so the sign is honoured rather
+    // than merely stripped.
+    expect(hoursFrom("2026-08-07T04:27:36.000-04:00")).toBe(
+      hoursFrom("2026-08-07T08:27:36.000Z"),
+    );
+  });
+
+  it("prints no stray backslash before a backtick", () => {
+    // A `\`` inside a SINGLE-quoted printf format is passed to printf verbatim
+    // and renders as a literal backslash — invisible in a shell script, visible
+    // to every reader of the note. Found in check-prod-replicas.sh's rollout arm;
+    // asserted here because the note IS the product and no other check can see it.
+    expect(drift().stdout).not.toContain("\\`");
   });
 
   it("still exits 0 with no duration line when production is in sync", () => {
@@ -912,5 +1108,50 @@ describe("the schedule-flag guards", () => {
     const header = CI_YML.split("variables:")[0];
     expect(header).toMatch(/PROD_STATE_CHECK=true/);
     expect(header).toMatch(/production state/i);
+  });
+});
+
+describe("the runbook sections the alert points at", () => {
+  /**
+   * An alert whose "what to do next" line cites a section that does not exist is
+   * worse than one that cites nothing, because the reader spends their first
+   * minute of an incident looking for it.
+   *
+   * This caught a real error while #191 was being written: the note pointed at
+   * "§ 17 for the wedged-migration path" and § 17 is the container registry. The
+   * migration path was not documented anywhere at all — the recovery had been
+   * performed once and never written down. No cluster, no API and no pipeline was
+   * needed to see that; only reading the diff's own prose against the file it
+   * refers to, which is the cheapest class of bug there is.
+   */
+  const RUNBOOK = readFileSync(
+    join(REPO_ROOT, "docs/deploy-runbook.md"),
+    "utf8",
+  );
+  const script = readFileSync(ALERT_SCRIPT, "utf8");
+
+  it("every § the alert cites is a real heading", () => {
+    const cited = [...script.matchAll(/§ (\d+)/g)].map((m) => Number(m[1]));
+    expect(cited.length).toBeGreaterThan(0);
+    const headings = new Set(
+      [...RUNBOOK.matchAll(/^## (\d+)[.b]/gm)].map((m) => Number(m[1])),
+    );
+    for (const section of cited) {
+      expect(
+        headings.has(section),
+        `alert-prod-state.sh cites § ${section}, which docs/deploy-runbook.md does not have`,
+      ).toBe(true);
+    }
+  });
+
+  it("documents the monitor and the wedged-migration recovery it points at", () => {
+    expect(RUNBOOK).toMatch(/^## 18\. .*monitor/im);
+    expect(RUNBOOK).toMatch(/^## 19\. .*P3009/im);
+    // The setup the operator actually has to perform, in the file they read to
+    // deploy. A schedule that exists only in project settings is invisible.
+    expect(RUNBOOK).toContain("PROD_STATE_CHECK=true");
+    expect(RUNBOOK).toContain("ALERT_MENTION");
+    // The escalation question #191 asked to DECIDE rather than leave to accident.
+    expect(RUNBOOK).toMatch(/waits until morning/i);
   });
 });

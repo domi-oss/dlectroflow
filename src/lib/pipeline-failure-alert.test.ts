@@ -1137,8 +1137,15 @@ describe("the alert_pipeline_failure CI job", () => {
 describe("the ops_digest CI job", () => {
   const job = (CI_YML.split(/^ops_digest:$/m)[1] ?? "").split(/^\S/m)[0];
 
-  it("still runs only on schedules", () => {
+  it("still runs only on schedules, and on no flagged one", () => {
     // Adding the drift backstop must not change when the digest runs.
+    //
+    // The digest's LAST rule is a bare `schedule` catch-all, so every new flag
+    // has to be guarded here explicitly or the digest starts riding that flag's
+    // schedule. #191 added PROD_STATE_CHECK on an HOURLY cron, which without the
+    // guard would have posted 24 weekly digests a day — and the list is written
+    // out in full rather than matched loosely precisely so that a new flag
+    // cannot be added without somebody reading this comment.
     const ifs = (job.split(/^ {2}rules:$/m)[1] ?? "")
       .split("\n")
       .filter((line) => line.includes("if:"));
@@ -1146,6 +1153,7 @@ describe("the ops_digest CI job", () => {
       `    - if: '$CI_PIPELINE_SOURCE == "schedule" && $RENOVATE_RUN == "true"'`,
       `    - if: '$CI_PIPELINE_SOURCE == "schedule" && $REGISTRY_PRUNE == "true"'`,
       `    - if: '$CI_PIPELINE_SOURCE == "schedule" && $SECURITY_ASSESSMENT == "true"'`,
+      `    - if: '$CI_PIPELINE_SOURCE == "schedule" && $PROD_STATE_CHECK == "true"'`,
       `    - if: '$CI_PIPELINE_SOURCE == "schedule"'`,
     ]);
   });

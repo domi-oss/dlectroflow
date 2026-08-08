@@ -76,24 +76,48 @@ SHA_RE='^[0-9a-f]{7,40}$'
 # wrong number — the same discipline as the digest's 7-day window, which already
 # degrades to an honest "no window" label. A negative age is treated as
 # unparseable too: a commit in the future is clock skew, not a duration.
+# **The offset is honoured, not stripped.** Measured against the live API: GitLab
+# returns `committed_date` as `2026-08-07T09:27:36.000+01:00` — a numeric offset,
+# NOT a `Z`. The first cut here removed everything from the first `.` onward,
+# which took the fractional seconds and the offset together and then read the
+# remainder as UTC, making every age wrong by the offset (one hour in BST). So the
+# zone is split off explicitly and applied as arithmetic, rather than handed to a
+# `date` that may or may not understand it — only GNU does.
 iso_to_epoch() {
-  local iso="$1" out=""
-  # Fractional seconds and the zone suffix are stripped once, up front: BSD's
-  # `-f` needs the format to match the input exactly, and GitLab sends
-  # `2026-08-06T13:12:00.000Z`.
-  local plain="${iso%%.*}"
-  plain="${plain%Z}"
-  out="$(date -u -d "${plain}Z" +%s 2> /dev/null || true)"        # GNU
-  if [ -z "$out" ]; then
-    out="$(date -u -j -f '%Y-%m-%dT%H:%M:%S' "$plain" +%s 2> /dev/null || true)" # BSD
+  local iso="$1" naive off="" sign hh mm off_secs=0 utc=""
+  # Fractional seconds ONLY. `${iso%%.*}` is what got this wrong.
+  naive="$(printf '%s' "$iso" | sed 's/\.[0-9]*//')"
+  case "$naive" in
+    *Z) naive="${naive%Z}" ;;
+    *[+-][0-9][0-9]:[0-9][0-9]) off="${naive: -6}"; naive="${naive%??????}" ;;
+    *[+-][0-9][0-9][0-9][0-9]) off="${naive: -5}"; naive="${naive%?????}" ;;
+  esac
+  # The naive datetime is converted AS UTC by all three spellings, and the offset
+  # is subtracted afterwards — `09:27:36+01:00` is `08:27:36Z`.
+  utc="$(date -u -d "${naive}Z" +%s 2> /dev/null || true)"                        # GNU
+  if [ -z "$utc" ]; then
+    utc="$(date -u -j -f '%Y-%m-%dT%H:%M:%S' "$naive" +%s 2> /dev/null || true)"  # BSD
   fi
-  if [ -z "$out" ]; then
-    out="$(date -u -d "${plain/T/ }" +%s 2> /dev/null || true)"   # busybox
+  if [ -z "$utc" ]; then
+    utc="$(date -u -d "${naive/T/ }" +%s 2> /dev/null || true)"                   # busybox
   fi
-  case "$out" in
+  case "$utc" in
     '' | *[!0-9]*) return 1 ;;
   esac
-  printf '%s' "$out"
+  if [ -n "$off" ]; then
+    sign="${off:0:1}"
+    hh="${off:1:2}"
+    mm="${off#???}"
+    mm="${mm#:}"
+    # `10#` is load-bearing: without it bash reads `08` and `09` as octal and
+    # aborts under `set -e` on exactly two offsets a year.
+    case "${hh}${mm}" in
+      '' | *[!0-9]*) return 1 ;;
+    esac
+    off_secs=$(( 10#$hh * 3600 + 10#$mm * 60 ))
+    [ "$sign" = "-" ] && off_secs=$(( 0 - off_secs ))
+  fi
+  printf '%s' "$(( utc - off_secs ))"
 }
 
 WORK="$(mktemp -d)"
