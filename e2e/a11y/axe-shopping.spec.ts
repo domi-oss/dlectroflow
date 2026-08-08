@@ -100,9 +100,11 @@ test.describe("accessibility: shopping-list mode (axe)", () => {
     // 4. Leave no fixture behind: the item would otherwise accumulate one row per
     //    run in the shared database, and the next run's scan would be of a longer
     //    list than the one this file describes.
-    await page
-      .getByRole("button", { name: new RegExp(`Delete ${label}`) })
-      .click();
+    // A plain string, NOT `new RegExp(...)`: Playwright's `name` already does a
+    // substring match, and SAST flags non-literal regex construction as a class
+    // (the finding this line produced on its first pipeline). The accessible name
+    // is `Delete <item text>`, so the string is unambiguous on its own.
+    await page.getByRole("button", { name: `Delete ${label}` }).click();
     await expect(page.getByText(label)).toHaveCount(0);
   });
 });
