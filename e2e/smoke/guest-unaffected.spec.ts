@@ -82,9 +82,14 @@ test("a guest sees NOTHING of the People admin — no card, no heading, no empty
   // POSITIVE CONTROL first. Every assertion below is an absence, and #101 gave
   // absences a second way to be vacuous: "not visible" is also what a COLLAPSED
   // section looks like, and a page that failed to render at all would pass every
-  // one of them. So prove the settings page really is here, with its other eight
+  // one of them. So prove the settings page really is here, with its other
   // sections, before proving this one is not.
-  await expect(page.locator("[data-section-toggle]")).toHaveCount(8);
+  //
+  // 9 since #199 added shopping-list mode's switch, which a guest DOES get — the
+  // list is workspace-scoped like every other taste setting, and a guest sandbox
+  // keeps its own value. 8 before that: SETTINGS_SECTIONS minus People
+  // (owner-only) and minus Account (signed-in only).
+  await expect(page.locator("[data-section-toggle]")).toHaveCount(9);
   await expect(
     page.locator('[data-section-toggle="settings-appearance"]'),
   ).toBeVisible();
