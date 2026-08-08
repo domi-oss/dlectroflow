@@ -1,0 +1,26 @@
+{
+  // #133 — the test configs moved from the repo root into `config/`, and this
+  // file is what keeps in-editor test running working after the move.
+  //
+  // Only Vitest needs a setting, and it is NOT called `vitest.configFile` —
+  // that name does not exist. The Vitest extension (v1.50) reads
+  // `vitest.rootConfig`. Checked against the extension's own
+  // `contributes.configuration`, not from memory, because the wrong key is
+  // accepted silently by VS Code and simply does nothing.
+  // Playwright deliberately has NO entry here, and this is the note that saves
+  // the next person looking for one: the Playwright extension (v1.1.19)
+  // exposes no config-path setting at all — its only settings are `env`,
+  // `reuseBrowser`, `showTrace`, `runGlobalSetupOnEachRun`,
+  // `pickLocatorCopyToClipboard`, `updateSnapshots` and `updateSourceMethod`.
+  // It finds configs by globbing the whole workspace for
+  // `**/*playwright*.config.{ts,js,mts,mjs}`, so `config/playwright.config.ts`
+  // is discovered exactly as a root one was. Nothing to point at it, and
+  // nothing broken by the move.
+  //
+  // The same is true of Vitest's own discovery — its default search glob is
+  // `**/*{vite,vitest}*.config*.{ts,js,mjs,cjs,cts,mts}`, which also reaches
+  // into `config/`. `vitest.rootConfig` above is therefore belt-and-braces:
+  // it names the one intended root config rather than leaving the extension to
+  // pick from whatever the glob turns up.
+  "vitest.rootConfig": "./config/vitest.config.ts"
+}

@@ -350,7 +350,7 @@ describe("e2e webServer boots the artefact that ships (#97)", () => {
   // `next start` did differently, and a guard that tripped over its own
   // rationale would only teach the next person to delete the rationale.
   const playwrightConfig = readFileSync(
-    join(process.cwd(), "playwright.config.ts"),
+    join(process.cwd(), "config", "playwright.config.ts"),
     "utf8",
   )
     .split("\n")

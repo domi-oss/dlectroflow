@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import { config as readDotenvFile } from "dotenv";
+import path from "node:path";
 import {
   SESSION_SECRET,
   STORAGE_STATE,
@@ -7,7 +8,17 @@ import {
   MEMBER_STORAGE_STATE,
   MEMBER_BASE_URL,
   TOKEN_ENC_KEY,
-} from "./e2e/constants";
+} from "../e2e/constants";
+
+// #133 — this file lives in `config/`, not the repo root. Playwright resolves
+// `testDir` and `globalSetup` against THIS FILE's directory, and — the one that
+// bites hardest — so does `webServer.cwd`, which defaults to the config's
+// directory rather than to the project root. Every shell path in the server
+// commands below (`.next/standalone/server.js`, `public`, `.next/static`) is
+// relative to that cwd, so without the explicit `cwd` the suite would try to
+// boot `config/.next/standalone/server.js` and fail the preflight check with a
+// message about a missing build rather than about a misconfigured path.
+const REPO_ROOT = path.resolve(__dirname, "..");
 
 // ── The server under test is the artefact that ships (#97) ───────────────────
 // `next.config.ts` sets `output: "standalone"`, so production runs
@@ -85,11 +96,16 @@ const memberServerCommand = "exec node .next/standalone/server.js";
 // object rather than mutating process.env, and only DATABASE_URL is forwarded —
 // so the API keys and TOKEN_ENC_KEY in a developer's env file cannot reach the
 // server under test and displace the dummies below.
+// Absolute since #133, for the reason config/vitest.config.ts states at the
+// same spot: dotenv resolves a relative path against `process.cwd()`, and a
+// missed env file is silent — it drops DATABASE_URL rather than erroring, which
+// is exactly the two-databases divergence the paragraph above is about.
 const envFileValues: Record<string, string | undefined> = {};
 for (const file of [".env", ".env.local"]) {
   Object.assign(
     envFileValues,
-    readDotenvFile({ path: file, processEnv: {} }).parsed ?? {},
+    readDotenvFile({ path: path.join(REPO_ROOT, file), processEnv: {} })
+      .parsed ?? {},
   );
 }
 const DATABASE_URL = process.env.DATABASE_URL ?? envFileValues.DATABASE_URL;
@@ -208,9 +224,9 @@ const MEMBER_SPECS = /member-[\w-]+\.spec\.ts/;
 const A11Y_SPECS = /[\\/]e2e[\\/]a11y[-\\/].*\.spec\.ts$/;
 
 export default defineConfig({
-  testDir: "./e2e",
+  testDir: path.join(REPO_ROOT, "e2e"),
   testMatch: "**/*.spec.ts",
-  globalSetup: "./e2e/global-setup.ts",
+  globalSetup: path.join(REPO_ROOT, "e2e", "global-setup.ts"),
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
@@ -325,6 +341,8 @@ export default defineConfig({
   webServer: [
     {
       command: standaloneServerCommand,
+      // #133: defaults to the CONFIG's directory, which is `config/` now.
+      cwd: REPO_ROOT,
       url: `${BASE_URL}/api/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 180_000,
@@ -332,6 +350,7 @@ export default defineConfig({
     },
     {
       command: memberServerCommand,
+      cwd: REPO_ROOT,
       url: `${MEMBER_BASE_URL}/api/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 180_000,

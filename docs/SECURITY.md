@@ -109,12 +109,33 @@ Reconciling them cost an afternoon, twice, before the answer was written down:
 | What is on `main` right now? | `project.vulnerabilities(state: [DETECTED, CONFIRMED])` | **Authoritative.** Paginate it — this project already holds 100 records on page one. |
 | What did *this merge request* introduce? | `project.pipeline(iid:).securityReportFindings` | Merge-request pipelines **only**. |
 
-**A pipeline-level query against `main` returns `0` by design.** Once findings
-are ingested into the Vulnerability Report they stop being reported at pipeline
-level. Re-verified 2026-08-06: `main` pipeline iid 1606 reads 0 dependency
-findings on the exact tree (`cca6fdd`) that MR pipeline iid 1611 reads 12 on.
-Getting this backwards once produced a confident "main has zero untriaged
-findings" that was wrong.
+**A pipeline-level query looks empty against `main`, and the cause is a default
+argument — not the surface.** `securityReportFindings` with **no `state:`
+argument returns `DETECTED` only**. A well-triaged `main` has a tiny `DETECTED`
+set, so the query reads 0 or 1 and looks like a surface that reports nothing by
+design. It is not one.
+
+Measured 2026-08-07: it returned **1** on `main` pipeline iid 2005 (`fe5321a`)
+and **1** on iid 2009 (`0d47b2f`). On MR pipeline iid 1981 — unfiltered **1**,
+`state: [DISMISSED]` **29**, all four states **30**. Pass the filter and the
+records are there:
+
+```
+securityReportFindings(first: 200, state: [DETECTED, CONFIRMED, DISMISSED, RESOLVED])
+```
+
+The 2026-08-06 observation this paragraph used to rest on — `main` pipeline iid
+1606 reading 0 dependency findings on the exact tree (`cca6fdd`) that MR
+pipeline iid 1611 reads 12 on — is a real measurement, but the explanation
+attached to it was wrong. Those 12 were triaged records an unfiltered query
+cannot see, not findings that had stopped being reported.
+
+**This paragraph previously said the opposite**, and asserting that a zero was
+expected is worse than saying nothing: it taught the reader not to question one.
+The same claim sat uncorrected in a maintainer's own notes for five days. **Never
+accept a zero from this query without a control** — run it with the state filter,
+or against a pipeline known to hold findings, and watch it come back non-zero
+before believing the zero.
 
 **Every count must carry its age.** `scripts/check-vuln-freshness.sh` emits the
 count together with the query that produced it and the instant that dates it;

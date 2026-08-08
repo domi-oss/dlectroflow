@@ -98,6 +98,11 @@ export default async function FocusLauncherPage() {
     id: task.id,
     title: task.title,
     createdAt: task.createdAt,
+    // #187 — the multi-step lane's deadline. Steps carry none of their own, so
+    // the whole lane reads the parent task's. The query uses `include`, not
+    // `select`, so the column is already on the row and this costs no extra
+    // read. Null is the common case and renders as nothing.
+    dueAt: task.scheduleDueAt,
     steps: task.steps.map((s) => {
       const session = s.focusSessions[0] ?? null;
       const openRemainingSec = openSessionRemainingSec(session, now);
@@ -149,6 +154,16 @@ export default async function FocusLauncherPage() {
     itemId: i.id,
     text: i.text,
     estMinutes: i.estMinutes ?? 5,
+    taskId: i.taskId,
+    // #187 — THE SEAM. `BrainDumpItem` has no deadline column yet; #186 (!281)
+    // adds `scheduleDueAt` to it, at which point this becomes
+    // `i.scheduleDueAt` and nothing else here changes.
+    //
+    // `dueAt` is deliberately REQUIRED on the type rather than optional, so
+    // this line has to exist and be read as a decision. An optional field would
+    // let the single-task lane silently keep rendering no deadline after the
+    // column lands, and nothing would fail.
+    dueAt: null,
   }));
 
   const data = focusLauncherData(tasks, singleTasks);

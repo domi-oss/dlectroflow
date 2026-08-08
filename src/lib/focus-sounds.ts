@@ -350,12 +350,21 @@ export function pickerFocusCategories(
  * is. Comparing the pool's IDENTITY to the catalogue would get the first two and
  * miss the third, because the filter builds a new array; the length is exact,
  * since the pool is always a subset.
+ *
+ * #185 — it takes the custom-playlist half as well, and has to: derived from the
+ * categories alone, ticking a playlist would narrow what plays while "All
+ * tracks" stayed ticked, which is the picker saying one thing and the speakers
+ * doing another.
  */
 export function poolIsWholeCatalogue(
   tracks: readonly FocusTrack[],
   categories: readonly string[] | null | undefined,
+  playlistTrackIds?: readonly string[] | null,
 ): boolean {
-  return resolveFocusPool(tracks, categories).length === tracks.length;
+  return (
+    resolveFocusPool(tracks, categories, playlistTrackIds).length ===
+    tracks.length
+  );
 }
 
 /** One category heading in the player's jump-list, with the tracks under it. */
@@ -437,14 +446,38 @@ const UNCATEGORISED_LABEL = "Other";
  * A category that is merely absent from a selection that also names a live one
  * contributes nothing and does NOT trigger case 3: the live half is still
  * exactly what was asked for.
+ *
+ * ── #185: the second half of the union ──────────────────────────────────────
+ *
+ * `playlistTrackIds` is the flattened selection of the workspace's own named
+ * playlists (`selectedPlaylistTrackIds` in focus-playlists.ts), and it joins the
+ * categories by widening the SAME filter rather than by appending a second list.
+ * That is the same behavioural argument #180 made one level up: appending would
+ * play the categories and then the playlist as two audible blocks, and a track
+ * that is in both would be heard twice in one pass. Filtering keeps one
+ * catalogue-ordered pool in which every track appears exactly once, whichever
+ * half — or both — put it there.
+ *
+ * It also gives "unknown track ids are filtered at resolution time" for free,
+ * which is the promise made in place of a CHECK constraint the column cannot
+ * have: an id no catalogue entry carries matches nothing and therefore
+ * contributes nothing. All three fallbacks above read the two halves together —
+ * "nothing selected" means neither half selected anything, and a playlist whose
+ * every id has left the manifest is case 3, not a silent session.
  */
 export function resolveFocusPool(
   tracks: readonly FocusTrack[],
   categories: readonly string[] | null | undefined,
+  playlistTrackIds?: readonly string[] | null,
 ): readonly FocusTrack[] {
-  if (!categories || categories.length === 0) return tracks;
-  const selected = new Set(categories);
-  const pool = tracks.filter((t) => selected.has(t.category));
+  const noCategories = !categories || categories.length === 0;
+  const noTrackIds = !playlistTrackIds || playlistTrackIds.length === 0;
+  if (noCategories && noTrackIds) return tracks;
+  const selected = new Set(categories ?? []);
+  const selectedIds = new Set(playlistTrackIds ?? []);
+  const pool = tracks.filter(
+    (t) => selected.has(t.category) || selectedIds.has(t.id),
+  );
   return pool.length > 0 ? pool : tracks;
 }
 

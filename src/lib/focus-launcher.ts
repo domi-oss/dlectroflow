@@ -30,6 +30,11 @@ export type FocusTask = {
   title: string;
   /** Task recency key (no `updatedAt` on Task; createdAt is the only clock). */
   createdAt: Date | string;
+  /** #187 — `Task.scheduleDueAt`: when the owner said this has to be done by.
+   *  Null until they have said, which is the common case and renders as
+   *  nothing. Steps have no deadline of their own, so the whole multi-step lane
+   *  reads this one. */
+  dueAt: Date | string | null;
   steps: FocusStep[];
 };
 
@@ -42,6 +47,9 @@ export type FocusableStep = {
   estMinutes: number;
   taskId: string;
   taskTitle: string;
+  /** #187 — the parent task's `scheduleDueAt`, carried through so the row can
+   *  show "due Thu 13 Aug". Null when nobody has set one. */
+  dueAt: Date | string | null;
   /** The next incomplete step is paused (has an open FocusSession). Drives the
    * "paused" badge AND the resumable-first ordering. */
   resumable: boolean;
@@ -86,6 +94,7 @@ export function focusableSteps(tasks: FocusTask[]): FocusableStep[] {
         estMinutes: next.estMinutes,
         taskId: task.id,
         taskTitle: task.title,
+        dueAt: task.dueAt,
         resumable: next.resumable,
         resumeAt: next.resumeAt,
         remainingMin: next.remainingMin,
@@ -119,6 +128,46 @@ export type SingleFocusable = {
   itemId: string;
   text: string;
   estMinutes: number;
+  /**
+   * `BrainDumpItem.taskId` — null while the to-do has never been broken down,
+   * scheduled or focused, because a `Task` is created lazily by whichever of
+   * those happens first (`ensureFocusStep`, `keepAsTask`, `scheduleSingleTask`).
+   *
+   * The row's Schedule control needs it to know whether there is anything to
+   * carry an intent: a to-do with no Task cannot open the #106 menu, and gets
+   * the duration control the inbox gives the same row.
+   */
+  taskId: string | null;
+  /**
+   * #187 — when this to-do has to be done by, or null.
+   *
+   * **This is the seam, and it is one line at the caller** (`/focus/page.tsx`).
+   * `focusLauncherData` has no DB access, so it neither knows nor decides where
+   * a to-do's deadline is stored — it carries what it was handed.
+   *
+   * **What the page passes today, per lane — corrected in review on `!284`,
+   * because this paragraph used to claim more than the code does:**
+   *
+   * - **Multi-step task rows:** `task.scheduleDueAt` (`page.tsx`, the `tasks`
+   *   mapping). Real deadlines flow.
+   * - **Single-task rows:** `null`, **unconditionally**. The mapping does not
+   *   read a linked `Task.scheduleDueAt` and could not — `items` is built as
+   *   `rawItems.map(({ task, ...item }) => …)`, which strips the `task` object
+   *   before `singleTasks` is assembled, so it is not in scope at that line.
+   *
+   * The earlier wording said "the page reads the linked `Task.scheduleDueAt` ...
+   * a to-do with no Task therefore has no deadline to show yet", which reads as
+   * though a single-task row *with* a linked Task already shows one. It does not,
+   * and someone picking this up would have gone looking for a bug that is really
+   * an unimplemented branch. `page.tsx`'s own comment at that line has always
+   * been accurate; only this one drifted.
+   *
+   * #186 (`!281`) gives `BrainDumpItem` its own schedule columns, at which point
+   * that line becomes `i.scheduleDueAt` and nothing below this type changes. The
+   * field is REQUIRED rather than optional precisely so the line has to exist and
+   * be read as a decision.
+   */
+  dueAt: Date | string | null;
 };
 
 /** Everything the /focus launcher renders, derived purely (no React/DB). */

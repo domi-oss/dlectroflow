@@ -90,23 +90,24 @@ model UserAiUsage {
 
 // ── Workspaces (user = one per account; guests = ephemeral) ────────────────
 model Workspace {
-  id        String   @id @default(uuid())
-  kind      String   @default("guest") // user | guest ("owner" = legacy pre-#35 row
+  id         String    @id @default(uuid())
+  kind       String    @default("guest") // user | guest ("owner" = legacy pre-#35 row
   //                                       kept only so the CHECK still validates it)
-  createdAt DateTime @default(now())
-  lastSeenAt DateTime @default(now())
-  expiresAt DateTime? // guest sandbox TTL (null = user workspace / no expiry)
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  expiresAt  DateTime? // guest sandbox TTL (null = user workspace / no expiry)
 
   // 1:1 with the account that owns it. Nullable because guest workspaces have
   // no user; Cascade so deleting an account destroys its content in one step.
-  userId    String?  @unique
-  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String? @unique
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   settings       Settings?
   streak         Streak?
   brainDumpItems BrainDumpItem[]
   tasks          Task[]
   focusSessions  FocusSession[]
+  focusPlaylists FocusPlaylist[]
   dayRollups     DayRollup[]
   rewardEvents   RewardEvent[]
   streakRecords  StreakRecord[]
@@ -118,40 +119,40 @@ model Workspace {
 
 // ── Singleton config (one row per workspace, keyed by workspaceId) ───────
 model Settings {
-  id                    String   @id @default(cuid())
+  id                       String    @id @default(cuid())
   // Feature 1 — aging
-  agingThresholdMinutes Int      @default(240)
-  demoOverrideSeconds   Int? // aging demo override (~10s) to fire live on stage
+  agingThresholdMinutes    Int       @default(240)
+  demoOverrideSeconds      Int? // aging demo override (~10s) to fire live on stage
   // Feature 3 — timer + round-up
-  defaultFromEstimate   Boolean  @default(true)
-  addTimeIncrementMin   Int      @default(5)
-  workdayEndTime        String   @default("17:00") // HH:mm
-  roundupDemoOverride   Boolean  @default(false)
-  roundupEmailEnabled   Boolean  @default(false)
-  roundupEmail          String?
+  defaultFromEstimate      Boolean   @default(true)
+  addTimeIncrementMin      Int       @default(5)
+  workdayEndTime           String    @default("17:00") // HH:mm
+  roundupDemoOverride      Boolean   @default(false)
+  roundupEmailEnabled      Boolean   @default(false)
+  roundupEmail             String?
   // Feature 4 — streaks
-  workingDays           String   @default("1,2,3,4,5") // ISO weekdays, Mon=1..Sun=7
+  workingDays              String    @default("1,2,3,4,5") // ISO weekdays, Mon=1..Sun=7
   // Phase 2 — owner-selected breakdown model (null = env/default)
-  breakdownModel        String?
+  breakdownModel           String?
   // Voice preference: "plain" (default) or "playful"
-  voice                 String   @default("plain")
+  voice                    String    @default("plain")
   // Phase 2 — per-tier freshness thresholds (hours)
-  agingHours            Int      @default(4)
-  overdueHours          Int      @default(8)
-  wayOverdueHours       Int      @default(12)
+  agingHours               Int       @default(4)
+  overdueHours             Int       @default(8)
+  wayOverdueHours          Int       @default(12)
   // Phase 5 — first-run welcome + demo preview
-  welcomeDismissedAt    DateTime?
-  firstRunPreview       Boolean  @default(false)
+  welcomeDismissedAt       DateTime?
+  firstRunPreview          Boolean   @default(false)
   // Phase 6 — per-type notification preferences (client-delivered only)
-  notifyRoundup         Boolean  @default(true)
-  notifyAging           Boolean  @default(true)
-  notifyDailyReview     Boolean  @default(false)
-  dailyReviewNudgeTime  String   @default("17:00") // HH:mm
+  notifyRoundup            Boolean   @default(true)
+  notifyAging              Boolean   @default(true)
+  notifyDailyReview        Boolean   @default(false)
+  dailyReviewNudgeTime     String    @default("17:00") // HH:mm
   // MR ② — Focus timer redesign (appearance + behaviour). focusTimerStyle
   // (nullable → resolve by voice) + focusSound mirror FocusTimerStyle /
   // FocusSound in src/lib/constants.ts + their CHECK constraints
   // (Settings_focusTimerStyle_check / Settings_focusSound_check).
-  focusTimerStyle          String?   // ring | digits | bar | mug (null → voice default)
+  focusTimerStyle          String? // ring | digits | bar | mug (null → voice default)
   focusMinimalMode         Boolean   @default(false)
   focusKeepAwake           Boolean   @default(true)
   focusAlarmEnabled        Boolean   @default(true)
@@ -173,6 +174,20 @@ model Settings {
   // is NOT NULL because `NULL <@ ARRAY[…]` is NULL and a CHECK passes on NULL,
   // so a nullable column would accept a value nothing validated.
   focusSoundCategories     String[]  @default(["ambient-lofi"])
+  // #185 — which of the workspace's OWN named playlists (FocusPlaylist) the
+  // session also draws from. A sibling of focusSoundCategories, deliberately not
+  // a merged "qualified reference" array of `cat:…` / `pl:…` strings: that shape
+  // would have nothing to CHECK, and Settings_focusSoundCategories_check is the
+  // only thing keeping a hand-edited category slug out of the column above.
+  //
+  // No CHECK and no foreign key here, because a scalar list can have neither.
+  // The ids are cuids of rows in the SAME workspace, and two things hold that
+  // together in the absence of one: deleteFocusPlaylist strips the id from every
+  // selection that names it, and the write path filters to playlists the
+  // resolved workspace actually owns — so a foreign id cannot be stored even if
+  // one is posted. An id that survives both (a delete racing a tick) resolves to
+  // no tracks and is ignored, the same way an absent category is.
+  focusPlaylistIds         String[]  @default([])
   // #68 — playlist shuffle for the focus mini-player. A taste setting, so it
   // persists across sessions. Plain Boolean: no pseudo-enum, hence no CHECK
   // constraint to mirror in src/lib/constants.ts. #180 flipped the default to
@@ -188,14 +203,14 @@ model Settings {
   focusTimerTipDismissedAt DateTime?
   // MR ③ — app-wide completion style (Appearance). completeTickColor mirrors
   // CompleteTickColor in src/lib/constants.ts + Settings_completeTickColor_check.
-  completeStrikethrough Boolean  @default(true)
-  completeTickColor     String   @default("green") // green | black
+  completeStrikethrough    Boolean   @default(true)
+  completeTickColor        String    @default("green") // green | black
   // #40 — user-selected UI typeface (a11y). Mirrors Typeface in
   // src/lib/constants.ts + Settings_typeface_check.
-  typeface              String   @default("figtree") // figtree | atkinson | opendyslexic | system
-  updatedAt             DateTime @updatedAt
-  workspaceId           String   @unique
-  workspace             Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  typeface                 String    @default("figtree") // figtree | atkinson | opendyslexic | system
+  updatedAt                DateTime  @updatedAt
+  workspaceId              String    @unique
+  workspace                Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 // ── Google Tasks OAuth (tokens obtained at runtime) ───────────────────────
@@ -300,16 +315,16 @@ model CalendarFeed {
 
 // ── Feature 1 — Brain Dump ────────────────────────────────────────────────
 model BrainDumpItem {
-  id               String    @id @default(cuid())
-  text             String
-  createdAt        DateTime  @default(now())
-  status           String    @default("inbox") // inbox | triaged | archived
-  triagedAt        DateTime?
-  remindedAt       DateTime?
-  snoozedUntil     DateTime?
-  freshenedAt      DateTime?
-  promptDismissedAt DateTime?
-  completedAt      DateTime?
+  id                   String    @id @default(cuid())
+  text                 String
+  createdAt            DateTime  @default(now())
+  status               String    @default("inbox") // inbox | triaged | archived
+  triagedAt            DateTime?
+  remindedAt           DateTime?
+  snoozedUntil         DateTime?
+  freshenedAt          DateTime?
+  promptDismissedAt    DateTime?
+  completedAt          DateTime?
   // Single-task time estimate (minutes). Nullable, and null is MEANINGFUL: it
   // says the user never gave an estimate, and the read side substitutes a
   // display default (5) rather than storing one.
@@ -326,7 +341,7 @@ model BrainDumpItem {
   // only trace in the schema; it is registered alongside the pseudo-enum
   // constraints in src/lib/enum-constraint-sync.integration.test.ts
   // (RANGE_REGISTRY, with nullable: true pinning the NULL allowance).
-  estMinutes       Int?
+  estMinutes           Int?
   // Set when the item is moved into Multi-step without steps yet — it sits in
   // the Multi-step bucket with a "Break into steps now?" call-to-action.
   // Cleared by any move to another bucket.
@@ -350,9 +365,9 @@ model BrainDumpItem {
   // CHECK, so these comments are their only trace in the schema and the
   // constraints are registered in
   // src/lib/enum-constraint-sync.integration.test.ts.
-  scheduleDueAt    DateTime?
-  schedulePriority String?   // critical | high | normal | low
-  scheduleHours    String?   // work | personal
+  scheduleDueAt        DateTime?
+  schedulePriority     String? // critical | high | normal | low
+  scheduleHours        String? // work | personal
   // #186 / #179 — the owner's freeform note on an UNTRIAGED item: typed into
   // the Needs-review row's disclosure, or split off the capture itself when the
   // text ends in a brace group (`water the plants {can under sink}`, #179).
@@ -370,11 +385,11 @@ model BrainDumpItem {
   // Registered in src/lib/enum-constraint-sync.integration.test.ts
   // (LENGTH_REGISTRY); behavioural half in
   // src/lib/notes-length-check.integration.test.ts.
-  notes            String?
-  taskId           String?
-  task             Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  workspaceId      String
-  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  notes                String?
+  taskId               String?
+  task                 Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  workspaceId          String
+  workspace            Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([status])
   @@index([workspaceId])
@@ -390,8 +405,8 @@ model Task {
   parentEmoji      String?
   googleTaskId     String?
   googleTaskListId String?
-  scheduledAt      DateTime?  // when the task was first scheduled (any method)
-  scheduledVia     String?    // "ics" | "google" (method-agnostic marker)
+  scheduledAt      DateTime? // when the task was first scheduled (any method)
+  scheduledVia     String? // "ics" | "google" (method-agnostic marker)
   // #106 — what the owner asked for the last time this task was scheduled
   // through the Schedule menu, so re-opening it prefills instead of asking
   // again. Null until they have said something: `defaultIntentFor()`
@@ -405,8 +420,8 @@ model Task {
   // comments are their only trace in the schema and the constraints are
   // registered in src/lib/enum-constraint-sync.integration.test.ts.
   scheduleDueAt    DateTime?
-  schedulePriority String?    // critical | high | normal | low
-  scheduleHours    String?    // work | personal
+  schedulePriority String? // critical | high | normal | low
+  scheduleHours    String? // work | personal
   // #44 — the owner's freeform note on this task, threaded into the scheduled
   // artifact (ICS VEVENT DESCRIPTION + Google Task notes) alongside the #39
   // focus deep-link. Nullable, and the NULL is load-bearing: "nobody has
@@ -434,12 +449,12 @@ model Task {
 }
 
 model Step {
-  id              String         @id @default(cuid())
-  taskId          String
-  task            Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  text            String
-  order           Int
-  total           Int
+  id               String         @id @default(cuid())
+  taskId           String
+  task             Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  text             String
+  order            Int
+  total            Int
   // #78 — always >= 1 whole minute, enforced in the DB by
   // Step_estMinutes_check (20260727194512_step_est_minutes_check). Prisma
   // can't express a CHECK constraint, so this comment is its only trace in
@@ -449,22 +464,22 @@ model Step {
   // #80 — BrainDumpItem.estMinutes is the nullable counterpart, constrained
   // `IS NULL OR >= 1`. Read the note there before assuming either shape is a
   // copy of the other.
-  estMinutes      Int
-  subtaskEmoji    String?
-  googleTaskId    String? // id of the synced Google Task (Reclaim ingests it downstream)
+  estMinutes       Int
+  subtaskEmoji     String?
+  googleTaskId     String? // id of the synced Google Task (Reclaim ingests it downstream)
   googleTaskListId String?
-  scheduledAt     DateTime?
-  done            Boolean        @default(false)
+  scheduledAt      DateTime?
+  done             Boolean        @default(false)
   // #44 — the per-step twin of `Task.notes`: context for THIS step, threaded
   // into that step's own calendar event / Google Task alongside the task's
   // note. Same 2000-character bound, same migration
   // (20260805120000_task_and_step_notes), enforced by Step_notes_check, which
   // Prisma also cannot express — read the note on `Task.notes` for the
   // reasoning behind the number and the choice of char_length.
-  notes           String?
-  estimateHistory String? // JSON array of prior estMinutes values
-  createdAt       DateTime       @default(now())
-  focusSessions   FocusSession[]
+  notes            String?
+  estimateHistory  String? // JSON array of prior estMinutes values
+  createdAt        DateTime       @default(now())
+  focusSessions    FocusSession[]
 
   @@index([taskId])
 }
@@ -483,18 +498,18 @@ model BreakdownTurn {
 
 // ── Feature 3 — Focus Timer ───────────────────────────────────────────────
 model FocusSession {
-  id            String    @id @default(cuid())
-  stepId        String?
-  step          Step?     @relation(fields: [stepId], references: [id], onDelete: SetNull)
-  taskId        String?
-  plannedMin    Int
-  addedMin      Int       @default(0)
-  startedAt     DateTime  @default(now())
-  endedAt       DateTime?
-  durationMin   Int?
-  outcome       String? // completed | requeued | gaveup
-  workspaceId   String
-  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  id                  String    @id @default(cuid())
+  stepId              String?
+  step                Step?     @relation(fields: [stepId], references: [id], onDelete: SetNull)
+  taskId              String?
+  plannedMin          Int
+  addedMin            Int       @default(0)
+  startedAt           DateTime  @default(now())
+  endedAt             DateTime?
+  durationMin         Int?
+  outcome             String? // completed | requeued | gaveup
+  workspaceId         String
+  workspace           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   // #27 — true pause/resume. `pausedAt` set = the session is currently paused
   // (this, not `endedAt: null` alone, is what "resumable" means now — an
   // open-but-never-paused session is stale/abandoned, not resumable).
@@ -502,16 +517,47 @@ model FocusSession {
   // remaining time = plannedMin*60 - (now|pausedAt - startedAt - accumulatedPausedMs)/1000
   // stays correct across any number of pause/resume cycles. See
   // src/lib/focus-timer-clock.ts `remainingSecForSession`.
-  pausedAt      DateTime?
-  accumulatedPausedMs Int  @default(0)
+  pausedAt            DateTime?
+  accumulatedPausedMs Int       @default(0)
 
   @@index([stepId])
   @@index([workspaceId])
 }
 
+// #185 — a workspace's OWN named focus playlist.
+//
+// `trackIds` is a flat list of catalogue track ids and stores no category
+// reference at all, which is the whole model rather than an implementation
+// detail: adding a category COPIES its tracks in at add time, so a catalogue
+// that later grows can never change what a saved playlist plays.
+//
+// It is deliberately not CHECK-constrained. Track ids are catalogue data that
+// varies per instance — a self-hoster with no FOCUS_CATALOG_ORIGIN has a
+// different set entirely — so a constraint would reject a perfectly good
+// playlist carried over from another install. Unknown ids are filtered at
+// resolution time instead (`resolveFocusPool` in src/lib/focus-sounds.ts), the
+// same treatment an absent category already gets. What IS constrained is size:
+// `FocusPlaylist_name_check` bounds the name, and the action bounds the array
+// (see MAX_FOCUS_PLAYLIST_TRACKS in src/lib/focus-playlists.ts).
+//
+// `@@unique([workspaceId, name])` is the exact-spelling half of the uniqueness
+// rule; the case-insensitive half lives in the action, which is where the whole
+// story is written down.
+model FocusPlaylist {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  trackIds    String[]  @default([])
+  createdAt   DateTime  @default(now())
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+}
+
 model DayRollup {
   id           String    @id @default(cuid())
-  date         String    // YYYY-MM-DD
+  date         String // YYYY-MM-DD
   focusMin     Int       @default(0)
   sessions     Int       @default(0)
   stepsDone    Int       @default(0)
@@ -527,10 +573,10 @@ model DayRollup {
 
 // ── Feature 4 — Rewards & Streaks ─────────────────────────────────────────
 model RewardEvent {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   type        String // step_done | session_finished | inbox_zero | breakdown_confirmed | scheduled
   points      Int
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
   workspaceId String
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
@@ -539,15 +585,15 @@ model RewardEvent {
 }
 
 model Streak {
-  id                String  @id @default(cuid())
-  current           Int     @default(0)
+  id                String    @id @default(cuid())
+  current           Int       @default(0)
   lastActiveWorkday String? // YYYY-MM-DD
-  workspaceId       String  @unique
+  workspaceId       String    @unique
   workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 model StreakRecord {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   length      Int
   startedAt   DateTime
   endedAt     DateTime
@@ -559,18 +605,18 @@ model StreakRecord {
 }
 
 model Badge {
-  id          String   @id @default(cuid())
-  key         String   // first_breakdown | first_schedule | streak_5 | ten_steps_day | beat_best_streak
-  earnedAt    DateTime @default(now())
+  id          String    @id @default(cuid())
+  key         String // first_breakdown | first_schedule | streak_5 | ten_steps_day | beat_best_streak
+  earnedAt    DateTime  @default(now())
   workspaceId String
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
-  @@index([workspaceId])
   @@unique([workspaceId, key])
+  @@index([workspaceId])
 }
 
 model DailySpark {
-  id          String @id @default(cuid())
+  id          String    @id @default(cuid())
   date        String // YYYY-MM-DD
   quote       String
   source      String // ai | fallback
@@ -594,7 +640,7 @@ model GuestAiUsage {
 // One row per (UTC day, ipHash); count of rows for a day = distinct guests
 // that used AI that day. Presence = "this guest used AI today".
 model GuestDailyActivity {
-  day       String   // UTC date YYYY-MM-DD
+  day       String // UTC date YYYY-MM-DD
   ipHash    String
   createdAt DateTime @default(now())
 
