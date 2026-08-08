@@ -1060,6 +1060,18 @@ export function InboxView({
         // exactly what the updater would have been handed.
         const inField = (inputRef.current?.value ?? "").trim();
         if (inField === "") setText(value);
+        // Duo review round 9 — yes, this writes unconditionally while the
+        // success path above declines to clear a record whose attempt is
+        // unsettled, and the asymmetry is deliberate rather than an oversight.
+        // The two are answering different questions: a success may decline the
+        // slot because its own words are safe on the server, whereas a failure
+        // that declines it reports nothing at all. With one slot and two
+        // outstanding failures, whichever record wins leaves the other
+        // unannounced — so the tie is broken toward the news the user has not
+        // heard yet. The words of the displaced one are still in the field; the
+        // cost is a missing notice, not missing text, and
+        // `capture-failure-pile-up` pins both directions. Closing it properly is
+        // #175's queue.
         setCaptureFailure({
           value,
           stale: isStaleActionError(error),

@@ -755,6 +755,53 @@ describe("InboxView — a capture that fails (#210)", () => {
       expect(input).not.toHaveValue("buy milk");
     });
 
+    /**
+     * Duo review round 9 — the same slot, from the other direction, and the
+     * asymmetry it names is real: the SUCCESS path refuses to clear a record
+     * whose own attempt is unsettled, while the catch writes unconditionally. So
+     * an older retry failing late takes the notice from a newer failure.
+     *
+     * Deferred with the rest, not overlooked. The asymmetry cannot be removed by
+     * making the catch match the success path, because the two are answering
+     * different questions: a success may decline the slot (its words are safe on
+     * the server), whereas a failure that declines it reports nothing at all.
+     * Whichever record wins, the other is unannounced. What is verified here is
+     * the part that matters — the loser's WORDS are still in the field, so the
+     * cost is a missing notice rather than missing text.
+     */
+    it("lets a late retry failure take the notice, leaving the newer words in the field", async () => {
+      let rejectRetry!: (reason: unknown) => void;
+      vi.mocked(createBrainDumpItem)
+        .mockRejectedValueOnce(new Error("offline"))
+        .mockReturnValueOnce(
+          new Promise<void>((_, reject) => {
+            rejectRetry = reject;
+          }),
+        )
+        .mockRejectedValueOnce(new Error("offline"));
+      const input = renderInbox();
+      await capture(input, "buy milk");
+      await clickRetry();
+
+      // A newer, unrelated capture fails while that retry is still outstanding.
+      fireEvent.change(input, { target: { value: "call mum" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      await flush();
+      expect(screen.getByRole("alert")).toHaveTextContent("“call mum”");
+      expect(input).toHaveValue("call mum");
+
+      await act(async () => {
+        rejectRetry(new Error("still offline"));
+        await flushTicks();
+      });
+
+      // The older retry took the slot back…
+      expect(screen.getByRole("alert")).toHaveTextContent("“buy milk”");
+      // …but "call mum" is not lost — it is in the field, which is the guarantee
+      // that holds however many fail.
+      expect(input).toHaveValue("call mum");
+    });
+
     it("is never silent about the failure it does hold", async () => {
       const input = renderInbox();
       await twoFailures(input);
