@@ -36,51 +36,85 @@ export default async function InboxPage({
   // is implemented in terms of currentUser(), so this is the same query it made,
   // and chaining the status off it keeps page-load latency flat.
   const mePromise = currentUser();
-  const [rawItems, settings, sp, me, googleStatus] = await Promise.all([
-    prisma.brainDumpItem.findMany({
-      where: { workspaceId, status: { not: BrainDumpStatus.Archived } },
-      orderBy: { createdAt: "desc" },
-      include: {
-        task: {
-          include: {
-            steps: {
-              orderBy: { order: "asc" },
-              // #27 follow-up — fetch ANY open session (paused or actively
-              // running); `resumable` is derived from `pausedAt` below
-              // (an open-but-never-paused session is stale — e.g. a closed
-              // tab mid-countdown — and isn't offered as resumable), and the
-              // full row also feeds the step's effective remaining time
-              // (task-remaining.ts) for the row's total + active-step pills.
-              // Batched by Prisma into one query per relation, so this is
-              // not a per-step N+1.
-              include: {
-                focusSessions: {
-                  where: { endedAt: null },
-                  orderBy: { startedAt: "desc" },
-                  take: 1,
-                  select: {
-                    startedAt: true,
-                    pausedAt: true,
-                    accumulatedPausedMs: true,
-                    plannedMin: true,
+  // #199 — resolved as its own promise so the shopping-summary reads can be chained
+  // off it INSIDE the batch, exactly as `googleStatus` is chained off `mePromise`
+  // below and for the same stated reason: page-load latency stays flat. Chaining
+  // after the whole `Promise.all` would have made those reads wait on
+  // `brainDumpItem.findMany` and its nested task/step/session includes, which they do
+  // not depend on — a real sequential round-trip added to every request for a
+  // workspace with the feature on (Duo review, !295).
+  const settingsPromise = getSettings(workspaceId);
+  const [rawItems, settings, sp, me, googleStatus, shoppingSummary] =
+    await Promise.all([
+      prisma.brainDumpItem.findMany({
+        where: { workspaceId, status: { not: BrainDumpStatus.Archived } },
+        orderBy: { createdAt: "desc" },
+        include: {
+          task: {
+            include: {
+              steps: {
+                orderBy: { order: "asc" },
+                // #27 follow-up — fetch ANY open session (paused or actively
+                // running); `resumable` is derived from `pausedAt` below
+                // (an open-but-never-paused session is stale — e.g. a closed
+                // tab mid-countdown — and isn't offered as resumable), and the
+                // full row also feeds the step's effective remaining time
+                // (task-remaining.ts) for the row's total + active-step pills.
+                // Batched by Prisma into one query per relation, so this is
+                // not a per-step N+1.
+                include: {
+                  focusSessions: {
+                    where: { endedAt: null },
+                    orderBy: { startedAt: "desc" },
+                    take: 1,
+                    select: {
+                      startedAt: true,
+                      pausedAt: true,
+                      accumulatedPausedMs: true,
+                      plannedMin: true,
+                    },
                   },
                 },
               },
             },
           },
         },
-      },
-    }),
-    getSettings(workspaceId),
-    searchParams,
-    mePromise,
-    // Resolved for the ACTING user, in parallel so page-load latency stays flat
-    // (Duo review: this was once a serial round-trip after the Promise.all). A
-    // guest/anonymous caller is passed null, which short-circuits before any
-    // query at all — getAuth() used to be an upsert, so an anonymous page load
-    // MATERIALISED the credential row (#118).
-    mePromise.then((u) => getGoogleStatus(u ? u.id : null)),
-  ]);
+      }),
+      settingsPromise,
+      searchParams,
+      mePromise,
+      // Resolved for the ACTING user, in parallel so page-load latency stays flat
+      // (Duo review: this was once a serial round-trip after the Promise.all). A
+      // guest/anonymous caller is passed null, which short-circuits before any
+      // query at all — getAuth() used to be an upsert, so an anonymous page load
+      // MATERIALISED the credential row (#118).
+      mePromise.then((u) => getGoogleStatus(u ? u.id : null)),
+      // #199 — the shopping-list summary line.
+      //
+      // Two reads, and only when the feature is on AND this is not the first-run
+      // preview (Duo review, !295 — the result used to be computed and then thrown
+      // away one branch later). An ordinary workspace pays nothing for a feature it has
+      // not switched on, which is the whole promise of the toggle; and the preview shows
+      // the inbox as a brand-new workspace would see it, so a brand-new workspace's
+      // shopping list is empty by definition and the answer cannot change anything. The
+      // same page short-circuits `workspaceHasHistory()` on `firstRunPreview` for that
+      // reason.
+      //
+      // The COUNT is read from the items, not from the summary row — the row stores
+      // whether to show a summary and never how many, so a missed sync can only ever
+      // hide the line, never mis-state it. `shoppingSummaryVisible` folds the four
+      // reasons to show nothing into one nullable answer.
+      settingsPromise.then(async (st) => {
+        if (!st.shoppingList || st.firstRunPreview) return null;
+        const [row, remaining] = await Promise.all([
+          prisma.shoppingSummary.findUnique({ where: { workspaceId } }),
+          prisma.shoppingItem.count({
+            where: { workspaceId, done: false, savedForLater: false },
+          }),
+        ]);
+        return shoppingSummaryVisible({ row, remaining });
+      }),
+    ]);
   // #118 Phase C — the ACTING ACCOUNT's own status, resolved once at the server
   // boundary (S1 seam, #34). Was `owner ? googleStatus : null`, which is what
   // made a member's 📅 fall back to .ics even when they had their own
@@ -88,35 +122,6 @@ export default async function InboxPage({
   // without a query for a caller with no account, so `null` here means exactly
   // one thing: nobody is signed in.
   const google = me ? googleStatus : null;
-
-  // #199 — the shopping-list summary line.
-  //
-  // Two reads, and only when the feature is on AND this is not the first-run preview
-  // (Duo review, !295 — the result used to be computed and then thrown away one
-  // branch later). An ordinary workspace pays nothing for a feature it has not
-  // switched on, which is the whole promise of the toggle; and the preview shows the
-  // inbox as a brand-new workspace would see it, so a brand-new workspace's shopping
-  // list is empty by definition and the answer cannot change anything. The same page
-  // short-circuits `workspaceHasHistory()` on `firstRunPreview` for that reason.
-  // Both are cheap (a primary-key lookup and a counted index scan) and they run
-  // together rather than in series.
-  //
-  // The COUNT is read from the items, not from the summary row — the row stores
-  // whether to show a summary and never how many, so a missed sync can only ever
-  // hide the line, never mis-state it. `shoppingSummaryVisible` folds the four
-  // reasons to show nothing into one nullable answer.
-  const shoppingSummary =
-    settings.shoppingList && !settings.firstRunPreview
-      ? await (async () => {
-          const [row, remaining] = await Promise.all([
-            prisma.shoppingSummary.findUnique({ where: { workspaceId } }),
-            prisma.shoppingItem.count({
-              where: { workspaceId, done: false, savedForLater: false },
-            }),
-          ]);
-          return shoppingSummaryVisible({ row, remaining });
-        })()
-      : null;
 
   const items = rawItems.map(({ task, ...item }) => ({
     ...item,

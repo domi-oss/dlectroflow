@@ -1205,7 +1205,6 @@ export const STRINGS = {
     plain: "Back when you add something.",
     playful: "Back when you add something.",
   },
-  "shopping.summaryOpen": { plain: "Open the list", playful: "Open the list" },
   // Accessible names. Each one names the ITEM, because "Delete" repeated down a
   // list of twelve rows is unusable in a screen reader's element list.
   "shopping.tickOff": { plain: "Tick off", playful: "Tick off" },

@@ -52,16 +52,23 @@ export function ShoppingSummaryCard({
   const label = shoppingSummaryLabel(count, voice);
 
   return (
-    <div className="flex items-center gap-2 rounded-lg border px-4 py-2 text-sm">
+    // `flex-wrap`, and the hint is NEVER hidden (Duo review, !295). It used to be
+    // `hidden sm:inline`, which meant the one explanation of what "Not now" does
+    // vanished on exactly the viewports this app is built for — contradicting the
+    // reasoning three lines below it. Wrapping costs a second line on a narrow screen;
+    // hiding costs the reader the only place the behaviour is written down.
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border px-4 py-2 text-sm">
       <Link
         href="/shopping"
         // The count is IN the link's own text, so the accessible name carries it
-        // without a separate aria-label to keep in step.
-        className="focus-visible:ring-ring flex-1 rounded-md outline-none hover:underline focus-visible:ring-2"
+        // without a separate aria-label to keep in step. `basis-full sm:basis-auto`
+        // so the link takes its own line when the row wraps, rather than the hint
+        // and the button being pushed onto one cramped line under it.
+        className="focus-visible:ring-ring basis-full rounded-md outline-none hover:underline focus-visible:ring-2 sm:flex-1 sm:basis-auto"
       >
         {label}
       </Link>
-      <span className="text-muted-foreground hidden text-xs sm:inline">
+      <span className="text-muted-foreground text-xs">
         {t("shopping.summaryDismissHint", voice)}
       </span>
       <button

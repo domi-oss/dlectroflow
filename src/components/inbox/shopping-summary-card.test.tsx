@@ -69,6 +69,17 @@ describe("ShoppingSummaryCard", () => {
     ).toBeInTheDocument();
   });
 
+  // Duo review, !295 — the hint was `hidden sm:inline`, so the one explanation of
+  // what "Not now" does never rendered on the viewports this app is built for, which
+  // contradicted the reasoning in the code right above it. Asserted on the CLASS as
+  // well as on presence, because `getByText` finds an element that CSS is hiding.
+  it("never hides the hint behind a breakpoint", () => {
+    render(<ShoppingSummaryCard count={2} voice="plain" />);
+    const hint = screen.getByText(/back when you add something/i);
+    expect(hint.className).not.toContain("hidden");
+    expect(hint.className).not.toContain("sm:inline");
+  });
+
   it("speaks the playful voice (#86)", () => {
     render(<ShoppingSummaryCard count={2} voice="playful" />);
     expect(screen.getByRole("link", { name: /🛒/ })).toBeInTheDocument();
