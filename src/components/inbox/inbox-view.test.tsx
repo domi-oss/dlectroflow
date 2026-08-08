@@ -804,6 +804,60 @@ describe("InboxView — a capture that fails (#210)", () => {
   });
 
   /**
+   * Duo review round 6 — the same hazard through the remaining door. `supersedes`
+   * is decided when a capture is SUBMITTED; a Retry pressed between that press
+   * and its response makes the outcome unknown again, and the stale decision
+   * would still have cleared the record on arrival.
+   *
+   * So the invariant is enforced where the record is written rather than only
+   * where the decision is taken: **a record whose own attempt is unsettled is
+   * never cleared by anything except that attempt.**
+   */
+  it("does not clear a record mid-retry, even when an earlier submit had marked it superseded", async () => {
+    let resolveOther!: () => void;
+    let rejectRetry!: (reason: unknown) => void;
+    vi.mocked(createBrainDumpItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          resolveOther = resolve;
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise<void>((_, reject) => {
+          rejectRetry = reject;
+        }),
+      );
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    // Typed over the restored words and captured, so this submit decides
+    // `supersedes = "buy milk"` — while its own request is still in flight.
+    fireEvent.change(input, { target: { value: "call mum" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await flush();
+
+    // …and only THEN is Retry pressed, after the decision was taken.
+    await clickRetry();
+    await act(async () => {
+      resolveOther();
+      await flushTicks();
+    });
+
+    const notice = screen.getByRole("alert");
+    expect(notice).toHaveTextContent("“buy milk”");
+    expect(
+      within(notice).getByRole("button", { name: /try again/i }),
+    ).toHaveAttribute("aria-disabled", "true");
+
+    await act(async () => {
+      rejectRetry(new Error("still offline"));
+      await flushTicks();
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("“buy milk”");
+  });
+
+  /**
    * WCAG 2.4.3 — the finding `focus-timer.tsx:1252` documents: a native
    * `disabled` attribute cannot hold focus, so the browser drops the focused
    * element to `<body>` the moment the retry starts. `aria-disabled` plus a

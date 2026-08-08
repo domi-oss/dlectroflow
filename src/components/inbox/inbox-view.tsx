@@ -983,6 +983,14 @@ export function InboxView({
         setCaptureFailure((prev) => {
           if (!prev) return null;
           if (prev.value === value) return null;
+          // Duo review round 6 — the invariant, enforced where the record is
+          // written rather than only where the decision is taken: a record whose
+          // own attempt is UNSETTLED is never cleared by anything but that
+          // attempt. `supersedes` was decided when this capture was submitted,
+          // and a Retry pressed since then has made the outcome unknown again,
+          // so acting on the stale decision would clear a notice out from under
+          // a live request.
+          if (prev.retrying) return prev;
           if (supersedes !== null && prev.value === supersedes) return null;
           return prev;
         });
