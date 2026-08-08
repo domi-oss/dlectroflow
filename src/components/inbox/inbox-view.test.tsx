@@ -11,6 +11,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
+  CAPTURE_TIMEOUT_MS,
   InboxView,
   dragEndToMove,
   DragGhostRow,
@@ -300,6 +301,312 @@ describe("InboxView — capture confirm", () => {
     });
 
     expect(screen.queryByText("captured ✓")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * #210 — the capture bar used to clear the input and render "captured ✓"
+ * unconditionally, before the write had resolved and regardless of whether it
+ * ever did. Capture is the only irreversible loss in the app: every other
+ * action works on an `id` that exists because the server already has the row,
+ * so a failure there can be retried against data that is still present. Here
+ * the words existed nowhere else.
+ *
+ * Every other spec in this file mocks `createBrainDumpItem` as resolving, which
+ * is exactly why this survived — so these drive the mock the other way.
+ */
+describe("InboxView — a capture that fails (#210)", () => {
+  /**
+   * #168's hazard, from the other end: `vi.clearAllMocks()` in the global
+   * beforeEach drops recorded calls but NOT a queued `mockRejectedValueOnce`.
+   * These specs queue one every time, so reset the queue and restore the
+   * module-level default rather than leaving a rejection for whichever spec
+   * runs next.
+   */
+  beforeEach(() => {
+    vi.mocked(createBrainDumpItem).mockReset();
+    vi.mocked(createBrainDumpItem).mockResolvedValue(undefined);
+  });
+
+  /** What Next 16's client throws when the action id is from another build. */
+  function staleActionError() {
+    return Object.assign(
+      new Error(
+        'Server Action "40bef5efc6c80527f80d35d95a902c7e0bc4056eb0" was not found on the server.',
+      ),
+      { name: "UnrecognizedActionError" },
+    );
+  }
+
+  function renderInbox() {
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    return screen.getByPlaceholderText(/Brain dump/i) as HTMLInputElement;
+  }
+
+  /**
+   * `fireEvent` rather than `userEvent`: two of these specs drive fake timers
+   * (the action timeout, the confirm window) and userEvent's own timer plumbing
+   * has to be wired to them separately. The "clears the captured indicator
+   * after ~1.5s" spec above sets the same precedent.
+   */
+  async function capture(input: HTMLInputElement, value: string) {
+    fireEvent.change(input, { target: { value } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    // Flush the microtask queue driving the startTransition/async action.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  it("does not claim 'captured ✓' when the write rejected", async () => {
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    const input = renderInbox();
+
+    await capture(input, "buy milk");
+
+    expect(screen.queryByText("captured ✓")).not.toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /couldn't save that/i,
+    );
+  });
+
+  it("keeps the typed words recoverable in the input", async () => {
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    const input = renderInbox();
+
+    await capture(input, "buy milk");
+
+    expect(input).toHaveValue("buy milk");
+  });
+
+  it("names the words it could not save, so they survive even if the field has moved on", async () => {
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    const input = renderInbox();
+
+    await capture(input, "buy milk");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/buy milk/);
+  });
+
+  it("offers Retry, and Retry re-posts the same words", async () => {
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    await act(async () => {
+      screen.getByRole("button", { name: /try again/i }).click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(vi.mocked(createBrainDumpItem).mock.calls).toEqual([
+      ["buy milk"],
+      ["buy milk"],
+    ]);
+  });
+
+  it("a successful Retry clears both the notice and the text it restored", async () => {
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    await act(async () => {
+      screen.getByRole("button", { name: /try again/i }).click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // The row is on the server now, so leaving the words in the field would
+    // invite a duplicate on the next Enter.
+    expect(input).toHaveValue("");
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(screen.getByText("captured ✓")).toBeInTheDocument();
+  });
+
+  // The restore must never be a second kind of data loss: a slow failure gives
+  // the user time to type their next thought, and overwriting THAT would be the
+  // same bug wearing the other hat.
+  it("does not clobber words typed while the failed capture was still in flight", async () => {
+    let rejectWrite!: (reason: unknown) => void;
+    vi.mocked(createBrainDumpItem).mockReturnValueOnce(
+      new Promise<void>((_, reject) => {
+        rejectWrite = reject;
+      }),
+    );
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    fireEvent.change(input, { target: { value: "call mum" } });
+    await act(async () => {
+      rejectWrite(new Error("offline"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(input).toHaveValue("call mum");
+    // "buy milk" is not lost — the notice is holding it, with a Retry.
+    expect(await screen.findByRole("alert")).toHaveTextContent(/buy milk/);
+  });
+
+  it("a stale deployment offers a reload and no Retry, which could never work", async () => {
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(staleActionError());
+    const input = renderInbox();
+
+    await capture(input, "buy milk");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/app updated/i);
+    expect(screen.getByRole("button", { name: /reload/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
+    // Still recoverable: the reload cannot happen without the user pressing it,
+    // and the words are on screen either way.
+    expect(input).toHaveValue("buy milk");
+  });
+
+  // The third failure mode is silence, not a rejection: a pod rolling
+  // mid-request leaves the write hanging, and an un-timed-out await looks
+  // exactly like the bug from the user's side — cleared field, no confirmation,
+  // no error, no words.
+  it("surfaces a write that never answers, once CAPTURE_TIMEOUT_MS elapses", async () => {
+    vi.useFakeTimers();
+    vi.mocked(createBrainDumpItem).mockReturnValueOnce(
+      new Promise<void>(() => {}),
+    );
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText("captured ✓")).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CAPTURE_TIMEOUT_MS);
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/couldn't save that/i);
+    expect(input).toHaveValue("buy milk");
+  });
+
+  /**
+   * WCAG 2.4.3 — the finding `focus-timer.tsx:1252` documents: a native
+   * `disabled` attribute cannot hold focus, so the browser drops the focused
+   * element to `<body>` the moment the retry starts. `aria-disabled` plus a
+   * guarded handler keeps the press point where it is.
+   */
+  it("marks Retry aria-disabled rather than disabled while it is in flight", async () => {
+    vi.mocked(createBrainDumpItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockReturnValueOnce(new Promise<void>(() => {}));
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    const retry = screen.getByRole("button", { name: /try again/i });
+    retry.focus();
+    await act(async () => {
+      retry.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const after = screen.getByRole("button", { name: /try again/i });
+    expect(after).toHaveAttribute("aria-disabled", "true");
+    expect(after).not.toHaveAttribute("disabled");
+    expect(after).toHaveFocus();
+    expect(after.className).toMatch(/min-h-\[44px\]/);
+  });
+
+  it("does not fire a second write when Retry is pressed mid-flight", async () => {
+    vi.mocked(createBrainDumpItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockReturnValueOnce(new Promise<void>(() => {}));
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    const press = async () => {
+      await act(async () => {
+        screen.getByRole("button", { name: /try again/i }).click();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    };
+    await press();
+    await press();
+
+    // once for the original attempt, once for the retry — not three times
+    expect(vi.mocked(createBrainDumpItem)).toHaveBeenCalledTimes(2);
+  });
+
+  /**
+   * WCAG 3.2.2 On Input, and the deliberate divergence from `focus-timer.tsx`:
+   * there, the pressed control unmounted, so focus HAD to be handed somewhere.
+   * Here the capture input never unmounts and is where the user is still
+   * typing, so moving focus to the notice would interrupt them and fight the
+   * restored text. `role="alert"` announces the failure without taking focus.
+   */
+  it("leaves focus in the capture input rather than taking it to the notice", async () => {
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    const input = renderInbox();
+    input.focus();
+
+    await capture(input, "buy milk");
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(input).toHaveFocus();
+  });
+
+  /**
+   * Two live regions must never contradict each other. A confirmation from an
+   * earlier capture is on screen for 1.5s, so a failure landing inside that
+   * window would render "captured ✓" and "couldn't save that" together — and a
+   * screen reader would hear both.
+   */
+  it("clears a still-showing 'captured ✓' when the next capture fails", async () => {
+    const input = renderInbox();
+    await capture(input, "first thought");
+    expect(screen.getByText("captured ✓")).toBeInTheDocument();
+
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    await capture(input, "second thought");
+
+    expect(screen.queryByText("captured ✓")).not.toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /couldn't save that/i,
+    );
+  });
+
+  it("a11y: the notice reads as an error and its control describes the reason", async () => {
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    const notice = await screen.findByRole("alert");
+    // The state is carried by the text, never by the red alone (WCAG 1.4.1),
+    // and `text-destructive` is the token globals.css documents as AA in both
+    // themes — not a raw palette shade that would drop below 4.5:1 on the
+    // warm-tinted --background (#40).
+    expect(notice.textContent).toMatch(/couldn't save that/i);
+    expect(notice.className).toContain("border-destructive/40");
+    const retry = screen.getByRole("button", { name: /try again/i });
+    const describedBy = retry.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy!)).toHaveTextContent(
+      /couldn't save that/i,
+    );
   });
 });
 
