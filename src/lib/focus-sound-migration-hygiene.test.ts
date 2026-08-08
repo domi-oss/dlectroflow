@@ -107,6 +107,42 @@ describe("splitStatements", () => {
 describe("findFocusSoundViolations — the shapes it must catch", () => {
   const scan = (sql: string) => findFocusSoundViolations([{ name: "m", sql }]);
 
+  // #190 — raised in review of the dollar-quote lexer fix. Neither of these was
+  // caught before it either (splitting on the semicolons inside the body left a
+  // fragment beginning `DO $$ BEGIN UPDATE …`, which an anchored pattern misses
+  // just the same), so this is a pre-existing hole rather than one the lexer
+  // opened — but it is exactly the class of hole this MR exists to close, and
+  // both shapes are one line of SQL away from being written.
+  it("flags an unguarded flip written inside a DO block", () => {
+    expect(
+      scan(
+        `DO $$ BEGIN UPDATE "Settings" SET "focusSound" = 'on'; END $$;`,
+      ).map((v) => v.reason),
+    ).toEqual([expect.stringContaining("without excluding rows")]);
+  });
+
+  it("flags an unguarded flip written behind a CTE", () => {
+    expect(
+      scan(
+        `WITH picked AS (SELECT "id" FROM "Workspace") UPDATE "Settings" SET "focusSound" = 'on' WHERE "workspaceId" IN (SELECT "id" FROM picked);`,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("flags a shuffle rewrite inside a DO block", () => {
+    expect(
+      scan(`DO $$ BEGIN UPDATE "Settings" SET "focusShuffle" = true; END $$;`),
+    ).toHaveLength(1);
+  });
+
+  it("flags an ADD COLUMN default written inside a DO block", () => {
+    expect(
+      scan(
+        `DO $$ BEGIN ALTER TABLE "Settings" ADD COLUMN "focusSound" TEXT NOT NULL DEFAULT 'on'; END $$;`,
+      ),
+    ).toHaveLength(1);
+  });
+
   it("flags an unguarded flip of focusSound to 'on'", () => {
     const found = scan(`UPDATE "Settings" SET "focusSound" = 'on';`);
     expect(found).toHaveLength(1);

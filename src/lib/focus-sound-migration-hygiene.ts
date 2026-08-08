@@ -203,8 +203,28 @@ export function splitStatements(sql: string): string[] {
     .filter((s) => s.length > 0);
 }
 
-/** `UPDATE "Settings" …` — the only table whose focus preferences exist. */
-const SETTINGS_UPDATE = /^UPDATE\s+"?Settings"?\b/i;
+/**
+ * `UPDATE "Settings" …` — the only table whose focus preferences exist.
+ *
+ * Not anchored to the start of the statement (#190). `UPDATE "Settings"` is the
+ * write wherever it appears, and two shapes put it somewhere other than the
+ * first token:
+ *
+ *  - inside a `DO $$ … $$` body, the form two committed migrations already use
+ *    for data surgery. Anchoring missed those before the lexer knew about
+ *    dollar quotes as well as after — the fragment began `DO $$ BEGIN UPDATE …`
+ *    either way — so this is a pre-existing hole, not one the lexer opened.
+ *  - behind a CTE: `WITH picked AS (…) UPDATE "Settings" SET …`, which
+ *    `20260804120000_google_auth_user_id_not_null` shows is a shape this repo
+ *    reaches for.
+ *
+ * The cost of un-anchoring is that a `Settings` UPDATE quoted inside a string
+ * literal now reads as one. Rules 1 and 3 are the same shape of over-match the
+ * `ADD COLUMN` rule below has always been, and the direction is the safe one: a
+ * guard that asks for a `<> 'off'` clause it did not need is an argument, while
+ * a guard that misses the write is the incident.
+ */
+const SETTINGS_UPDATE = /\bUPDATE\s+"?Settings"?\b/i;
 
 /**
  * The DEFAULT an `ADD COLUMN` may carry for each focus-sound column: the value
@@ -231,8 +251,13 @@ const SILENT_ADD_COLUMN_DEFAULTS: ReadonlyMap<
   ["focusShuffle", { allowed: /^false$/i, description: "false" }],
 ]);
 
-/** `ALTER TABLE "Settings" …` — the only table these columns live on. */
-const SETTINGS_ALTER = /^ALTER\s+TABLE\s+"?Settings"?\b/i;
+/**
+ * `ALTER TABLE "Settings" …` — the only table these columns live on. Unanchored
+ * for the same reason as `SETTINGS_UPDATE` above: an `ADD COLUMN` issued from
+ * inside a `DO $$ … $$` body writes its default into every existing row exactly
+ * as one written at the top level does (#190).
+ */
+const SETTINGS_ALTER = /\bALTER\s+TABLE\s+"?Settings"?\b/i;
 
 /**
  * `ADD COLUMN <name> … DEFAULT <expr>`, capturing both.
