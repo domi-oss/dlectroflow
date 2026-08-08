@@ -360,13 +360,36 @@ describe("InboxView — a capture that fails (#210)", () => {
   async function capture(input: HTMLInputElement, value: string) {
     fireEvent.change(input, { target: { value } });
     fireEvent.keyDown(input, { key: "Enter" });
-    // Flush the microtask queue driving the startTransition/async action.
+    await flush();
+  }
+
+  /**
+   * The notice's Retry, on the same flush budget as `capture` above.
+   *
+   * Duo review round 1: the click-then-flush block was inlined four times with
+   * the tick count drifting between two and four, so a spec could have passed
+   * for having flushed enough rather than for the behaviour it names. One helper
+   * with one budget, and it moves in one place if the async hop count changes.
+   */
+  async function clickRetry() {
     await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
+      screen.getByRole("button", { name: /try again/i }).click();
+      await flushTicks();
     });
+  }
+
+  /** Flush the microtask queue driving the startTransition/async action. */
+  async function flush() {
+    await act(async () => {
+      await flushTicks();
+    });
+  }
+
+  async function flushTicks() {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
   }
 
   it("does not claim 'captured ✓' when the write rejected", async () => {
@@ -404,13 +427,7 @@ describe("InboxView — a capture that fails (#210)", () => {
     const input = renderInbox();
     await capture(input, "buy milk");
 
-    await act(async () => {
-      screen.getByRole("button", { name: /try again/i }).click();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    await clickRetry();
 
     expect(vi.mocked(createBrainDumpItem).mock.calls).toEqual([
       ["buy milk"],
@@ -423,13 +440,7 @@ describe("InboxView — a capture that fails (#210)", () => {
     const input = renderInbox();
     await capture(input, "buy milk");
 
-    await act(async () => {
-      screen.getByRole("button", { name: /try again/i }).click();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    await clickRetry();
 
     // The row is on the server now, so leaving the words in the field would
     // invite a duplicate on the next Enter.
@@ -454,10 +465,7 @@ describe("InboxView — a capture that fails (#210)", () => {
     fireEvent.change(input, { target: { value: "call mum" } });
     await act(async () => {
       rejectWrite(new Error("offline"));
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
+      await flushTicks();
     });
 
     expect(input).toHaveValue("call mum");
@@ -515,13 +523,8 @@ describe("InboxView — a capture that fails (#210)", () => {
     const input = renderInbox();
     await capture(input, "buy milk");
 
-    const retry = screen.getByRole("button", { name: /try again/i });
-    retry.focus();
-    await act(async () => {
-      retry.click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    screen.getByRole("button", { name: /try again/i }).focus();
+    await clickRetry();
 
     const after = screen.getByRole("button", { name: /try again/i });
     expect(after).toHaveAttribute("aria-disabled", "true");
@@ -537,15 +540,8 @@ describe("InboxView — a capture that fails (#210)", () => {
     const input = renderInbox();
     await capture(input, "buy milk");
 
-    const press = async () => {
-      await act(async () => {
-        screen.getByRole("button", { name: /try again/i }).click();
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-    };
-    await press();
-    await press();
+    await clickRetry();
+    await clickRetry();
 
     // once for the original attempt, once for the retry — not three times
     expect(vi.mocked(createBrainDumpItem)).toHaveBeenCalledTimes(2);
@@ -595,18 +591,29 @@ describe("InboxView — a capture that fails (#210)", () => {
     await capture(input, "buy milk");
 
     const notice = await screen.findByRole("alert");
-    // The state is carried by the text, never by the red alone (WCAG 1.4.1),
-    // and `text-destructive` is the token globals.css documents as AA in both
-    // themes — not a raw palette shade that would drop below 4.5:1 on the
-    // warm-tinted --background (#40).
-    expect(notice.textContent).toMatch(/couldn't save that/i);
-    expect(notice.className).toContain("border-destructive/40");
     const retry = screen.getByRole("button", { name: /try again/i });
     const describedBy = retry.getAttribute("aria-describedby");
     expect(describedBy).toBeTruthy();
-    expect(document.getElementById(describedBy!)).toHaveTextContent(
-      /couldn't save that/i,
-    );
+    const message = document.getElementById(describedBy!)!;
+
+    // The state is carried by the text, never by the red alone (WCAG 1.4.1),
+    // and the reason is reachable from the control — whichever announcement
+    // wins, the user gets both.
+    expect(notice.textContent).toMatch(/couldn't save that/i);
+    expect(message).toHaveTextContent(/couldn't save that/i);
+
+    // Duo review round 1: this spec's comment claimed `text-destructive` was
+    // under test while only the border was asserted, so a non-AA text colour
+    // would have passed it. Duo's own patch put the assertion on the notice,
+    // which would have failed — the token is on the MESSAGE, and the notice
+    // carries the surface pair. Both are asserted, on the elements that have
+    // them. `text-destructive` on --background/--card is the pairing globals.css
+    // documents as AA in both themes (5.2:1+); a raw palette shade is what
+    // dropped the emerald confirmation below 4.5:1 on the warm-tinted
+    // --background in #40.
+    expect(message.className).toContain("text-destructive");
+    expect(notice.className).toContain("border-destructive/40");
+    expect(notice.className).toContain("bg-destructive/5");
   });
 });
 
