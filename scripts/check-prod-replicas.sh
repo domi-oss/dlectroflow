@@ -221,17 +221,26 @@ fi
 pod_block=""
 if kubectl get pods -n "$NAMESPACE" -l "$SELECTOR" -o json \
   > "$WORK/pods.json" 2> "$WORK/pods.err"; then
-  # `sanitise` is applied to every cluster-supplied string that reaches stdout:
-  #   tr -d  strips backticks (a fence would break out of the code block) and
-  #          control characters including newlines (a message spanning lines
-  #          could otherwise start one with `/`, which GitLab would run as a
-  #          quick action with this job's token);
-  #   cut    bounds the length.
+  # `clean` is applied to EVERY cluster-supplied string that reaches stdout,
+  # because stdout is spliced into a note on an issue in a PUBLIC project. It
+  # removes four classes of character, each for its own reason:
+  #   `      a fence would break out of the code block and take the rest of the
+  #          note's rendering with it;
+  #   <>     a BARE `<tag>` breaks the whole surrounding document's Markdown on
+  #          GitLab — this project has already lost an MR description to it, and
+  #          one `<img …>` inside a Prisma error would make the alert unreadable
+  #          at precisely the wrong moment;
+  #   ctrl   newlines included: a message spanning lines could otherwise start one
+  #          with `/`, which GitLab runs as a quick action with this job's token;
+  #   length bounded, so a stack trace is not pasted into somebody's inbox.
+  # Characters are replaced with a space rather than deleted, so the surrounding
+  # words survive and the message is neutralised rather than lost.
+  #
   # Done in jq rather than shell so a pod name and a 3-line Prisma error survive
   # as single fields — the loop below reads one record per line.
   jq -r --argjson max "$MAX_PODS" --argjson maxmsg "$MAX_MSG" '
     def clean: (. // "") | tostring
-      | gsub("[`[:cntrl:]]"; " ")
+      | gsub("[`<>[:cntrl:]]"; " ")
       | if (. | length) > $maxmsg then (.[:$maxmsg] + "…") else . end;
     [ (.items // [])[]
       | select(

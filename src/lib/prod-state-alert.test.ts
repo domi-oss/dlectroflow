@@ -664,6 +664,31 @@ describe("scripts/check-prod-replicas.sh", () => {
     expect(run.stdout).toMatch(/different image|stale/i);
   });
 
+  it("neutralises angle brackets in a container message", () => {
+    // A BARE `<tag>` breaks the whole surrounding document's Markdown rendering
+    // on GitLab — a gotcha this project has already paid for once in an MR
+    // description. Stripping backticks is not enough: the message is
+    // cluster-supplied text spliced into a note on a public project, and one
+    // `<img …>` in a Prisma error would take the rest of the alert's rendering
+    // with it, which is the note being unreadable at exactly the wrong moment.
+    const run = replicas({
+      kubectl: [
+        { match: "deployment", body: deployment({ available: 1, ready: 1 }) },
+        {
+          match: "pods",
+          body: podsWithWedgedMigrate("boom <img src=x onerror=alert(1)> end"),
+        },
+      ],
+    });
+    expect(run.status).toBe(1);
+    expect(run.stdout).not.toContain("<");
+    expect(run.stdout).not.toContain(">");
+    // The surrounding text still survives, so the message is neutralised rather
+    // than discarded.
+    expect(run.stdout).toContain("boom");
+    expect(run.stdout).toContain("end");
+  });
+
   it("reads the deployment and namespace from env, defaulting to production", () => {
     const run = replicas();
     expect(run.kubectlCalls.join("\n")).toContain("dlectroflow-prod");
