@@ -106,6 +106,49 @@ describe("findHandBuiltBrainDumpTasks — the parser, on synthetic input", () =>
     ).toHaveLength(1);
   });
 
+  it("flags the SHORTHAND form, `create({ data })`", () => {
+    // Review round on `!281`. `ts.isPropertyAssignment` is FALSE for a
+    // `ShorthandPropertyAssignment`, so `{ data }` was skipped entirely and a
+    // hand-built brain-dump task could evade this guard by hoisting one line. For a
+    // check whose whole purpose is to fail the build when a fifth writer stops going
+    // through the helper, an evasion that cheap is the only kind that matters.
+    const findings = findHandBuiltBrainDumpTasks(
+      `const data = {
+         title: item.text,
+         source: TaskSource.BrainDump,
+         status: TaskStatus.Active,
+         workspaceId,
+       };
+       const task = await prisma.task.create({ data });`,
+      "synthetic.ts",
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].reason).toContain("brainDumpItemToTaskData");
+  });
+
+  it("does NOT flag the shorthand form when it resolves to the helper", () => {
+    // The control. Closing the shorthand hole must not start flagging the shape the
+    // helper exists to provide — otherwise the guard gets relaxed, which is how a
+    // compensating control dies.
+    expect(
+      findHandBuiltBrainDumpTasks(
+        `const data = brainDumpItemToTaskData(item, workspaceId);
+         const task = await tx.task.create({ data });`,
+        "synthetic.ts",
+      ),
+    ).toEqual([]);
+  });
+
+  it("does NOT flag a shorthand whose object names no brain-dump source", () => {
+    expect(
+      findHandBuiltBrainDumpTasks(
+        `const data = { title: "manual", status: TaskStatus.Active, workspaceId };
+         const task = await prisma.task.create({ data });`,
+        "synthetic.ts",
+      ),
+    ).toEqual([]);
+  });
+
   it("does NOT flag a manual task", () => {
     // `createTask` in breakdown.ts. A typed title is not an item, and giving it
     // an item's note would be the opposite bug.

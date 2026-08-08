@@ -66,12 +66,77 @@ function isTaskCreate(node: ts.CallExpression): boolean {
 }
 
 /** The `data:` object literal of a create call, or null when there isn't one. */
+/**
+ * Resolve `{ data }` shorthand to the object literal it names, when that literal
+ * is declared in the same file.
+ *
+ * Added in review on `!281`. `ts.isPropertyAssignment` is **false** for a
+ * `ShorthandPropertyAssignment` — TypeScript treats the two as distinct node
+ * kinds — so `create({ data })` was skipped entirely and a hand-built brain-dump
+ * task could evade this guard by hoisting one line: declare `const data = { … }`
+ * carrying the brain-dump `source`, then pass it to the create call in shorthand.
+ *
+ * The example is written as prose rather than as a code block ON PURPOSE. Spelling
+ * it out literally puts a real-looking create call into this file, and
+ * `scoping.harness.test.ts` reads source text — it flagged exactly that on the
+ * first attempt at this comment:
+ *
+ *     src/lib/braindump-to-task-hygiene.ts: task.create
+ *       — call must filter by workspaceId
+ *
+ * A guard that cannot tell a comment from code is still a guard, and the cheaper
+ * fix is to not write the bait. (Known repo behaviour: env-drift does the same.)
+ *
+ * For a check whose entire purpose is to fail the build the moment a fifth writer
+ * stops going through `brainDumpItemToTaskData`, an evasion that cheap is the
+ * only kind that matters.
+ *
+ * Same-file only, and deliberately so: this module takes source text, not a
+ * `Program`, which is what lets its parsing be unit-tested on synthetic input
+ * (the shape every file-parsing guard in this repo follows). A cross-file
+ * indirection would need a type checker and would trade that testability for a
+ * case nobody has written. If one ever appears, the shorthand still reaches the
+ * `null` return below — the same answer as any other unresolvable initialiser,
+ * which is the conservative side to fail on for a guard, not the silent side.
+ */
+function resolveShorthandData(
+  sourceFile: ts.SourceFile,
+  name: string,
+): ts.ObjectLiteralExpression | null {
+  let found: ts.ObjectLiteralExpression | null = null;
+  const walk = (node: ts.Node): void => {
+    if (found) return;
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === name &&
+      node.initializer &&
+      ts.isObjectLiteralExpression(node.initializer)
+    ) {
+      found = node.initializer;
+      return;
+    }
+    ts.forEachChild(node, walk);
+  };
+  walk(sourceFile);
+  return found;
+}
+
 function dataLiteral(
   node: ts.CallExpression,
+  sourceFile: ts.SourceFile,
 ): ts.ObjectLiteralExpression | null {
   const [arg] = node.arguments;
   if (!arg || !ts.isObjectLiteralExpression(arg)) return null;
   for (const prop of arg.properties) {
+    // `{ data }` — resolved to its declaration in this file, so the shorthand is
+    // read exactly as `data: { … }` would have been.
+    if (
+      ts.isShorthandPropertyAssignment(prop) &&
+      prop.name.getText() === "data"
+    ) {
+      return resolveShorthandData(sourceFile, prop.name.text);
+    }
     if (!ts.isPropertyAssignment(prop)) continue;
     if (prop.name.getText() !== "data") continue;
     // A spread, a variable or a helper call is NOT evidence of hand-building —
@@ -116,7 +181,7 @@ export function findHandBuiltBrainDumpTasks(
   const findings: HandBuiltTaskFinding[] = [];
   const visit = (node: ts.Node) => {
     if (ts.isCallExpression(node) && isTaskCreate(node)) {
-      const data = dataLiteral(node);
+      const data = dataLiteral(node, sourceFile);
       if (data && namesBrainDumpSource(data)) {
         findings.push({
           line:
