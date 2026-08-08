@@ -99,32 +99,67 @@ function isTaskCreate(node: ts.CallExpression): boolean {
  * `null` return below — the same answer as any other unresolvable initialiser,
  * which is the conservative side to fail on for a guard, not the silent side.
  */
+/** A node that can hold `const` declarations of its own. */
+function isScopeLike(node: ts.Node): boolean {
+  return (
+    ts.isSourceFile(node) ||
+    ts.isBlock(node) ||
+    ts.isModuleBlock(node) ||
+    ts.isCaseClause(node) ||
+    ts.isDefaultClause(node)
+  );
+}
+
+/** A `data` declared DIRECTLY in this scope — never one inside a nested function. */
+function declaredDirectlyIn(
+  scope: ts.Node,
+  name: string,
+): ts.VariableDeclaration | null {
+  const statements: ts.NodeArray<ts.Statement> | undefined = ts.isSourceFile(
+    scope,
+  )
+    ? scope.statements
+    : ts.isBlock(scope) || ts.isModuleBlock(scope)
+      ? scope.statements
+      : ts.isCaseClause(scope) || ts.isDefaultClause(scope)
+        ? scope.statements
+        : undefined;
+  if (!statements) return null;
+  for (const st of statements) {
+    if (!ts.isVariableStatement(st)) continue;
+    for (const decl of st.declarationList.declarations) {
+      if (ts.isIdentifier(decl.name) && decl.name.text === name) return decl;
+    }
+  }
+  return null;
+}
+
 function resolveShorthandData(
-  sourceFile: ts.SourceFile,
+  call: ts.Node,
   name: string,
 ): ts.ObjectLiteralExpression | null {
-  let found: ts.ObjectLiteralExpression | null = null;
-  const walk = (node: ts.Node): void => {
-    if (found) return;
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.name.text === name &&
-      node.initializer &&
-      ts.isObjectLiteralExpression(node.initializer)
-    ) {
-      found = node.initializer;
-      return;
-    }
-    ts.forEachChild(node, walk);
-  };
-  walk(sourceFile);
-  return found;
+  // Innermost enclosing scope outwards. Scope-aware because the first attempt was
+  // not: it walked the whole file for the FIRST `data` declaration, so a file
+  // holding two of them resolved the wrong one for both call sites — silently
+  // missing the offender in one direction and inventing one in the other. Both
+  // directions are pinned by tests; a false positive is how a compensating control
+  // gets relaxed rather than fixed. (Review round on `!281`.)
+  for (let scope: ts.Node | undefined = call; scope; scope = scope.parent) {
+    if (!isScopeLike(scope)) continue;
+    const decl = declaredDirectlyIn(scope, name);
+    if (!decl) continue;
+    // STOP at the nearest declaration, whatever it holds. Continuing outward past a
+    // `const data = brainDumpItemToTaskData(...)` would let an outer hand-built
+    // object frame a call that is correctly routed through the helper.
+    return decl.initializer && ts.isObjectLiteralExpression(decl.initializer)
+      ? decl.initializer
+      : null;
+  }
+  return null;
 }
 
 function dataLiteral(
   node: ts.CallExpression,
-  sourceFile: ts.SourceFile,
 ): ts.ObjectLiteralExpression | null {
   const [arg] = node.arguments;
   if (!arg || !ts.isObjectLiteralExpression(arg)) return null;
@@ -135,7 +170,7 @@ function dataLiteral(
       ts.isShorthandPropertyAssignment(prop) &&
       prop.name.getText() === "data"
     ) {
-      return resolveShorthandData(sourceFile, prop.name.text);
+      return resolveShorthandData(prop, prop.name.text);
     }
     if (!ts.isPropertyAssignment(prop)) continue;
     if (prop.name.getText() !== "data") continue;
@@ -181,7 +216,7 @@ export function findHandBuiltBrainDumpTasks(
   const findings: HandBuiltTaskFinding[] = [];
   const visit = (node: ts.Node) => {
     if (ts.isCallExpression(node) && isTaskCreate(node)) {
-      const data = dataLiteral(node, sourceFile);
+      const data = dataLiteral(node);
       if (data && namesBrainDumpSource(data)) {
         findings.push({
           line:

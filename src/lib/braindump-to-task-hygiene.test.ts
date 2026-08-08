@@ -149,6 +149,57 @@ describe("findHandBuiltBrainDumpTasks — the parser, on synthetic input", () =>
     ).toEqual([]);
   });
 
+  it("resolves `{ data }` in the CALL SITE's scope, not the first one in the file", () => {
+    // Review round on `!281`, against the shorthand fix from the round before it.
+    // The first version walked the whole file for the first `data` declaration, so a
+    // file holding two `data` locals resolved the wrong one for both call sites —
+    // silently missing the offender, which is the only case this guard exists for.
+    //
+    // Here the CLEAN one is declared first, so a file-order lookup returns it for
+    // both and reports nothing.
+    const findings = findHandBuiltBrainDumpTasks(
+      `async function good(item, workspaceId, tx) {
+         const data = brainDumpItemToTaskData(item, workspaceId);
+         return tx.task.create({ data });
+       }
+       async function bad(item, workspaceId) {
+         const data = {
+           title: item.text,
+           source: TaskSource.BrainDump,
+           status: TaskStatus.Active,
+           workspaceId,
+         };
+         return prisma.task.create({ data });
+       }`,
+      "synthetic.ts",
+    );
+    expect(findings).toHaveLength(1);
+    // And it is the offender that is named, not the innocent call above it —
+    // asserted by LINE, because "one finding" alone would also pass if the guard
+    // had flagged `good` and missed `bad`.
+    expect(findings[0].line).toBe(12);
+  });
+
+  it("does not let an outer hand-built `data` frame an inner helper-routed call", () => {
+    // The mirror image, and the one that would produce a FALSE POSITIVE — which is
+    // how a compensating control gets relaxed rather than fixed.
+    expect(
+      findHandBuiltBrainDumpTasks(
+        `const data = {
+           title: item.text,
+           source: TaskSource.BrainDump,
+           status: TaskStatus.Active,
+           workspaceId,
+         };
+         async function good(item, workspaceId, tx) {
+           const data = brainDumpItemToTaskData(item, workspaceId);
+           return tx.task.create({ data });
+         }`,
+        "synthetic.ts",
+      ),
+    ).toEqual([]);
+  });
+
   it("does NOT flag a manual task", () => {
     // `createTask` in breakdown.ts. A typed title is not an item, and giving it
     // an item's note would be the opposite bug.

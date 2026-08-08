@@ -567,5 +567,12 @@ describe("scheduleSingleTask — the lazily-created Task's note reaches Google (
     // failure was in Google, not in Postgres.
     const payload = upsertGoogleTaskMock.mock.calls[0][3];
     expect(JSON.stringify(payload)).toContain("ask about the crown");
+
+    // Cleaned up, matching the "sends the full intent for a stepless to-do" case
+    // earlier in this file. Review round on `!281`: vitest runs a file's specs
+    // sequentially and `process.env` mutations persist across `it` blocks, so
+    // leaving this set would leak into whatever runs next — a flake planted for
+    // whoever adds the next spec to this block, not for me.
+    delete process.env.PUBLIC_ORIGIN;
   });
 });
