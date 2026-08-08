@@ -11,7 +11,7 @@ import {
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Clock } from "lucide-react";
+import { Clock, RefreshCw, RotateCcw, TriangleAlert } from "lucide-react";
 import { cn, touchTarget } from "@/lib/utils";
 import { COMPLETE_TEXT } from "@/lib/completion-style";
 import { DonePill } from "@/components/completion/done-pill";
@@ -74,6 +74,10 @@ import {
   type Item,
   type BucketId,
 } from "@/components/inbox/bucket";
+import {
+  isStaleActionError,
+  withActionTimeout,
+} from "@/lib/server-action-failure";
 import { itemRemainingMin, activeStepRemainingMin } from "@/lib/task-remaining";
 import { dropPlan } from "@/components/inbox/move-dispatch";
 import { MoveToMenu } from "@/components/inbox/move-to-menu";
@@ -108,6 +112,44 @@ import { formatAgo } from "@/lib/format";
  */
 const DRAG_ITEM_KEY = "inboxItemId";
 const DROP_BUCKET_KEY = "inboxBucketId";
+
+/**
+ * #210 — how long the capture bar is willing to WAIT for `createBrainDumpItem`
+ * before calling it a failure.
+ *
+ * The third failure mode is silence rather than a rejection — a pod rolling
+ * mid-request, a connection that never closes — and from the user's side an
+ * un-timed-out `await` is indistinguishable from the bug this fixes: an emptied
+ * field, no confirmation, no error, no words. `createBrainDumpItem` is one
+ * Prisma insert plus a streak touch, so ten seconds is already pathological;
+ * this matches `focus-timer.tsx`'s `ACTION_TIMEOUT_MS` for the same class of
+ * call. The request itself carries on (a server action cannot be aborted from
+ * the client), so a write that lands late still lands — the next
+ * `router.refresh()` picks it up. Exported so the test advances the real value
+ * rather than a copy of it.
+ */
+export const CAPTURE_TIMEOUT_MS = 10_000;
+
+/** How long "captured ✓" stays on screen after a write resolves. */
+const CAPTURE_CONFIRM_MS = 1500;
+
+/**
+ * #210 — a capture whose write did not land.
+ *
+ * Holds the words, not just a flag: they are the only thing at stake, and the
+ * notice quoting them is what makes them recoverable even in the one case the
+ * input cannot be restored (see `capture` below).
+ */
+type CaptureFailure = {
+  value: string;
+  /**
+   * The browser is running a different deployment than the server. Next
+   * regenerates server-action ids on every build, so a retry re-posts the same
+   * dead id — the ONLY thing that can work is a reload, and offering a retry
+   * would be offering something that cannot.
+   */
+  stale: boolean;
+};
 
 /** True when a native drag was started by one of our rows rather than by an
  * image, a text selection, or another surface on the page. */
@@ -297,6 +339,30 @@ export function InboxView({
       if (captureTimeoutRef.current) clearTimeout(captureTimeoutRef.current);
     };
   }, []);
+
+  /**
+   * #210 — the capture whose write did not land, and whether one is in flight.
+   *
+   * Separate from `refreshing` on purpose. `refreshing` is raised by all ~20
+   * `run()` call sites, so renaming a row would make the capture notice's Retry
+   * read as busy and announce a save that has nothing to do with it — the same
+   * over-broad-flag mistake #169 fixed for the 📅 controls.
+   *
+   * ONE failure slot rather than a queue. The realistic causes (offline, a
+   * stale bundle, a dead pod) are sticky, so a second failure lands within a
+   * second or two of the first with the user looking straight at the notice —
+   * and between the notice and the restored input, two outstanding failures are
+   * both on screen at once. A third would displace the notice's copy, and the
+   * durable answer to "capture survives a pile-up" is a persisted queue, which
+   * is #175's and deliberately not here.
+   */
+  const [captureFailure, setCaptureFailure] = useState<CaptureFailure | null>(
+    null,
+  );
+  const [capturing, setCapturing] = useState(false);
+  // #210 — ties the failure message to the notice's control, so the reason is
+  // announced with the remedy however the announcement races. See captureNotice.
+  const captureErrorId = useId();
 
   // Per-row inline delete confirm — only one row confirms at a time.
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -789,14 +855,90 @@ export function InboxView({
   // orphaned text a screen-reader user only reaches after leaving the input.
   const captureHintId = useId();
 
+  /**
+   * #210 — the one write in the app whose failure is irreversible, so the only
+   * one that cannot go through the generic `run()`.
+   *
+   * Every other inbox action operates on an `id` that exists because the server
+   * already has the row: a rejection there leaves the data intact and the press
+   * repeatable. A capture's words exist nowhere but this component, and the old
+   * code emptied the field and rendered "captured ✓" before the call, outside
+   * any `try`. A rejection destroyed the text and lied about it in the same
+   * breath — with no `error.tsx` anywhere in `src/` to catch the throw either.
+   *
+   * `fromRetry` distinguishes the notice's button from a fresh Enter. It is not
+   * cosmetic: only a retry may clear the input on success, because only a retry
+   * knows the text sitting there is the copy IT restored rather than the user's
+   * next thought (see the success branch).
+   */
+  const capture = (value: string, { fromRetry = false } = {}) => {
+    // Urgent, and deliberately OUTSIDE the transition — see runSchedule (#169):
+    // React 19 holds an async transition's own state updates until the action
+    // settles, so a guard raised inside one first paints at the moment it stops
+    // being true, which is a guard that guards nothing.
+    setCapturing(true);
+    return startTransition(async () => {
+      try {
+        await withActionTimeout(createBrainDumpItem(value), CAPTURE_TIMEOUT_MS);
+        // Clear the notice only when THESE words are the ones it is holding. A
+        // later capture succeeding says nothing about an earlier one that
+        // failed, and wiping its notice would destroy the only copy of words
+        // that never reached the server.
+        setCaptureFailure((prev) =>
+          prev && prev.value !== value ? prev : null,
+        );
+        // Only a retry clears the field, and only when it still holds exactly
+        // what we just saved. A fresh Enter has already emptied it
+        // synchronously, so anything in there now is the user's NEXT thought —
+        // and clearing that would be this bug with the roles reversed.
+        if (fromRetry) {
+          setText((prev) => (prev.trim() === value ? "" : prev));
+        }
+        setJustCaptured(true);
+        if (captureTimeoutRef.current) clearTimeout(captureTimeoutRef.current);
+        captureTimeoutRef.current = setTimeout(
+          () => setJustCaptured(false),
+          CAPTURE_CONFIRM_MS,
+        );
+        router.refresh();
+      } catch (error) {
+        // An earlier capture's "captured ✓" can still be inside its 1.5s
+        // window. Leaving it up would put two live regions on screen saying
+        // opposite things about the same keystroke — and a screen reader would
+        // read both.
+        if (captureTimeoutRef.current) clearTimeout(captureTimeoutRef.current);
+        setJustCaptured(false);
+        setCaptureFailure({ value, stale: isStaleActionError(error) });
+        // Restore the words, but ONLY into a field the user has not since typed
+        // into. A ten-second hang is long enough to type the next thought, and
+        // overwriting that would be the same data loss wearing the other hat.
+        // When we can't restore, the notice quotes the words instead, so they
+        // are never only in a variable.
+        setText((prev) => (prev.trim() ? prev : value));
+      } finally {
+        // Must run on every exit including a throw: `capturing` left true is a
+        // Retry button that reads permanently busy.
+        setCapturing(false);
+      }
+    });
+  };
+
   const submit = () => {
     const value = text.trim();
     if (!value) return;
+    // Cleared synchronously and urgently, which is both the instant-capture
+    // feel and the double-submit guard: a second Enter arriving before the
+    // write resolves finds an empty field and returns below. Deliberately NOT
+    // gated on `capturing` — firing three thoughts in a row is the whole point
+    // of this control, and they are independent inserts.
     setText("");
-    run(() => createBrainDumpItem(value));
-    setJustCaptured(true);
-    if (captureTimeoutRef.current) clearTimeout(captureTimeoutRef.current);
-    captureTimeoutRef.current = setTimeout(() => setJustCaptured(false), 1500);
+    capture(value);
+  };
+
+  /** #210 — the notice's Retry: re-posts the exact words that did not land. */
+  const retryCapture = () => {
+    if (!captureFailure || capturing) return;
+    capture(captureFailure.value, { fromRetry: true });
   };
 
   // Inline delete confirm: first click reveals Delete/Cancel; the action only
@@ -972,6 +1114,100 @@ export function InboxView({
           >
             {t("capture.confirm", voice)}
           </p>
+        )}
+        {/* ── #210: the capture that did not land ────────────────────────────
+            a11y, and three decisions that are not the focus timer's:
+
+            `role="alert"` (assertive), not the confirmation's polite
+            `role="status"`. The two describe opposite outcomes, so the failure
+            path clears a still-showing "captured ✓" before setting this — they
+            cannot contradict each other about the same keystroke. Where they DO
+            legitimately coexist (a later capture succeeding while an earlier
+            failure stands unresolved) they are reporting different captures, and
+            assertive-interrupts-polite is exactly the priority wanted: the words
+            still at risk outrank the ones already safe.
+
+            Focus is NOT moved here. `focus-timer.tsx` hands focus to its
+            notice's primary action because the pressed control unmounts, which
+            would otherwise drop the user to <body> (WCAG 2.4.3). Nothing
+            unmounts here — the capture input is still mounted, still focused,
+            and still where the user is typing — so taking focus would interrupt
+            them mid-sentence and fight the restored text (WCAG 3.2.2). The
+            alert announces without stealing.
+
+            The words are quoted, not merely referred to. In the common case they
+            are also back in the input, but when the user has typed on the notice
+            is the only copy, and a notice that says "your words are safe"
+            without showing them is the same unverifiable promise this issue is
+            about.
+
+            Colour: the failure is carried by the text and the icon, never by the
+            red alone (WCAG 1.4.1). `text-destructive` / `border-destructive/40`
+            / `bg-destructive/5` is the token pairing globals.css documents as AA
+            in both themes (5.2:1+) and the one focus-timer's notice already
+            uses — not a raw palette shade, which is what dropped the emerald
+            confirmation below 4.5:1 on the warm-tinted --background in #40. */}
+        {captureFailure && (
+          <div
+            role="alert"
+            className="border-destructive/40 bg-destructive/5 mt-2 flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-start sm:justify-between"
+          >
+            <p
+              id={captureErrorId}
+              className="text-destructive flex min-w-0 items-start gap-1.5 text-sm font-medium"
+            >
+              <TriangleAlert
+                aria-hidden="true"
+                className="mt-0.5 h-4 w-4 shrink-0"
+              />
+              <span className="break-words">
+                {t(
+                  captureFailure.stale
+                    ? "capture.error.stale"
+                    : "capture.error.failed",
+                  voice,
+                )}{" "}
+                <strong>&ldquo;{captureFailure.value}&rdquo;</strong>
+              </span>
+            </p>
+            <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+              {captureFailure.stale ? (
+                // Retrying re-posts the same action id the running deployment
+                // has already forgotten, so a reload is the ONLY thing on offer.
+                <button
+                  type="button"
+                  aria-describedby={captureErrorId}
+                  onClick={() => window.location.reload()}
+                  className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium"
+                >
+                  <RefreshCw aria-hidden="true" className="h-4 w-4 shrink-0" />
+                  {t("capture.error.reload", voice)}
+                </button>
+              ) : (
+                // `aria-disabled`, not `disabled`: a disabled element cannot
+                // hold focus, so the browser would drop it to <body> the moment
+                // the retry starts. The press is guarded in the handler instead,
+                // so a double-tap still cannot fire two writes.
+                <button
+                  type="button"
+                  aria-describedby={captureErrorId}
+                  aria-disabled={capturing}
+                  onClick={() => {
+                    if (!capturing) retryCapture();
+                  }}
+                  className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium aria-disabled:opacity-50"
+                >
+                  <RotateCcw aria-hidden="true" className="h-4 w-4 shrink-0" />
+                  {t("capture.error.retry", voice)}
+                </button>
+              )}
+              {capturing && (
+                <p role="status" className="text-muted-foreground text-xs">
+                  {t("capture.error.saving", voice)}
+                </p>
+              )}
+            </div>
+          </div>
         )}
       </div>
 
