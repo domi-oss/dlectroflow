@@ -701,6 +701,79 @@ describe("InboxView — a capture that fails (#210)", () => {
   });
 
   /**
+   * capture-failure-pile-up — Duo review round 7, and the correction that came
+   * out of writing these.
+   *
+   * Duo flagged that the single notice slot can drop an earlier failure's only
+   * copy of its words. Real. Writing the specs then falsified the comment that
+   * was defending it: it claimed the notice and the field between them hold two
+   * outstanding failures, and **they do not.** Submitting anything empties the
+   * field, so a second failure both takes the notice AND repopulates the field
+   * with its own words. There is no arrangement in which both survive.
+   *
+   * These pin that boundary rather than leaving it as a claim nothing checks —
+   * which is precisely how the wrong claim survived. It is #175's to close: the
+   * issue scopes "a real offline session" there, and consecutive failures ARE
+   * one. Every fix available inside this issue trades the loss for a different
+   * silence (keeping the older record leaves the newer failure unannounced;
+   * rescuing the older words into the field puts text the user did not just type
+   * where they are looking). A queue needs neither.
+   */
+  describe("two failures outstanding, one notice slot (#210 → #175)", () => {
+    /** Two captures that both fail, the second typed while the first is in flight. */
+    async function twoFailures(input: HTMLInputElement) {
+      let rejectFirst!: (reason: unknown) => void;
+      vi.mocked(createBrainDumpItem)
+        .mockReturnValueOnce(
+          new Promise<void>((_, reject) => {
+            rejectFirst = reject;
+          }),
+        )
+        .mockRejectedValueOnce(new Error("offline"));
+      await capture(input, "buy milk");
+      fireEvent.change(input, { target: { value: "call mum" } });
+      await act(async () => {
+        rejectFirst(new Error("offline"));
+        await flushTicks();
+      });
+      // The field was occupied, so "buy milk" went to the notice only.
+      expect(screen.getByRole("alert")).toHaveTextContent("“buy milk”");
+      expect(input).toHaveValue("call mum");
+
+      fireEvent.keyDown(input, { key: "Enter" });
+      await flush();
+    }
+
+    it("lets the second failure displace the first, whose words were only in the notice", async () => {
+      const input = renderInbox();
+      await twoFailures(input);
+
+      expect(screen.getByRole("alert")).toHaveTextContent("“call mum”");
+      expect(screen.getByRole("alert")).not.toHaveTextContent("buy milk");
+      // The honest statement of the cost, executable rather than asserted in
+      // prose: "buy milk" is now in neither place.
+      expect(input).not.toHaveValue("buy milk");
+    });
+
+    it("is never silent about the failure it does hold", async () => {
+      const input = renderInbox();
+      await twoFailures(input);
+
+      // Whatever it drops, the state it leaves is always the honest one: an
+      // alert naming words that did not save, those words in the field, and a
+      // Retry. Never an empty field and a false confirmation, which is #210.
+      const notice = screen.getByRole("alert");
+      expect(notice).toHaveTextContent(/couldn't save that/i);
+      expect(notice).toHaveTextContent("“call mum”");
+      expect(input).toHaveValue("call mum");
+      expect(
+        within(notice).getByRole("button", { name: /try again/i }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("captured ✓")).not.toBeInTheDocument();
+    });
+  });
+
+  /**
    * Duo review round 4 — the superseding rule, reached from the one path the
    * round-3 specs did not walk: a **retry that fails again**.
    *

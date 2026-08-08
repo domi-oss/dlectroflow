@@ -414,13 +414,29 @@ export function InboxView({
    * record it guards (`CaptureFailure.retrying`), for the reason documented
    * there.
    *
-   * ONE failure slot rather than a queue. The realistic causes (offline, a
-   * stale bundle, a dead pod) are sticky, so a second failure lands within a
-   * second or two of the first with the user looking straight at the notice —
-   * and between the notice and the restored input, two outstanding failures are
-   * both on screen at once. A third would displace the notice's copy, and the
-   * durable answer to "capture survives a pile-up" is a persisted queue, which
-   * is #175's and deliberately not here.
+   * ONE failure slot rather than a queue, and the boundary that buys is sharper
+   * than a first draft of this note claimed (Duo review round 7, then the specs
+   * that were written to defend it and falsified it instead):
+   *
+   * **A second outstanding failure displaces the first, and the first's words are
+   * then in neither place.** The draft said the notice and the field between them
+   * hold two, and they do not — submitting anything empties the field, so the
+   * second failure takes the notice AND repopulates the field with its own words.
+   * There is no arrangement in which both survive.
+   *
+   * Not closed here, and not closed by accident. Every fix available inside this
+   * issue trades the loss for a different silence: keeping the older record
+   * leaves the newer failure unannounced, and rescuing the older words into the
+   * field puts text the user did not just type where they are looking. A
+   * persisted queue needs neither, and #210 scopes "a real offline session" to
+   * #175 — consecutive failures being exactly that. The boundary is recorded on
+   * both issues, and `capture-failure-pile-up` in the spec file pins it as
+   * executable behaviour rather than a comment nothing checks, which is how the
+   * wrong version of this paragraph survived in the first place.
+   *
+   * What is guaranteed at every point, however many fail: the notice names words
+   * that did not save, those words are in the field, and a Retry is offered.
+   * Never an emptied field and a false confirmation, which is the bug itself.
    */
   const [captureFailure, setCaptureFailure] = useState<CaptureFailure | null>(
     null,
