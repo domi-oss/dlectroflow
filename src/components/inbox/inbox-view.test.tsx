@@ -3011,15 +3011,19 @@ describe("InboxView — the task note (#44)", () => {
     ).toBeTruthy();
   });
 
-  it("still offers nothing when the surface has no item id either", () => {
-    // The residual case the null branch is really for: a caller that has not been
-    // taught about the second grain (the Library rows today) keeps its old
-    // behaviour rather than mounting a control against `undefined`.
-    render1(makeItem({ id: "n1", text: "raw thought", taskId: null }));
-    // Sanity: the query above finds a real control, so a zero here would mean
-    // absence rather than a wrong selector.
-    expect(screen.queryByRole("button", { name: /^note for/i })).not.toBeNull();
-  });
+  // The null-`itemId` branch is deliberately NOT tested from here — a test that
+  // claimed to and did not is what this replaces (review, `!281`). It rendered the
+  // same item as the case above, asserted the control WAS present (the opposite of
+  // its own title), and could not have done otherwise: `InboxView` always passes
+  // `itemId={item.id}` to `TaskNoteRow`, so there is no route through this surface
+  // that reaches a null item id. The branch is only reachable from Library rows.
+  //
+  // Its real coverage lives where the branch is reachable, at the component's own
+  // grain: `task-note.test.tsx` → "still renders nothing when there is no row to
+  // write to at all", which renders `<TaskNoteRow taskId={null} itemId={null}>` and
+  // asserts the render prop receives `{ trigger: null, body: null }` while the
+  // caller's own placeholder still mounts. That is the behaviour that matters, and
+  // asserting it here would have been a second, weaker copy of it.
 });
 
 // ── #183 — the capture input had no accessible name ─────────────────────────
