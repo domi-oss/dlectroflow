@@ -12,7 +12,7 @@ import {
 import {
   clearShoppingSummary,
   syncShoppingSummary,
-} from "@/lib/shopping-summary";
+} from "@/lib/shopping-summary-sync";
 
 const SHOPPING_PATH = "/shopping";
 /** The inbox, where the summary line renders (#199). */

@@ -62,7 +62,7 @@ vi.mock("@/lib/workspace", () => ({
   currentWorkspaceId: currentWorkspaceIdMock,
   MissingWorkspaceError: class extends Error {},
 }));
-vi.mock("@/lib/shopping-summary", () => ({
+vi.mock("@/lib/shopping-summary-sync", () => ({
   syncShoppingSummary: syncMock,
   clearShoppingSummary: clearMock,
 }));
