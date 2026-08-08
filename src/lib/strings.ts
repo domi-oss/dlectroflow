@@ -686,6 +686,56 @@ export const STRINGS = {
     plain: "Put a note in {curly braces} at the end.",
     playful: "Tuck a note in {curly braces} at the end.",
   },
+  // ── #210: a capture that did not land ──────────────────────────────────────
+  // Identical across voices, for the same reason the focus.error.* family is:
+  // the playful skin is a delight layer, and "did I just lose that thought?" is
+  // not where delight belongs. Each message says what did not happen AND what is
+  // still true, because that question is the only one the user has.
+  //
+  // Named under `capture.` rather than reusing focus.error.retry / .reload,
+  // whose values are identical today: the `focus.` prefix is a lie in the inbox,
+  // and re-tuning the focus timer's copy must not silently re-word the capture
+  // bar. The duplication is two short button labels; the coupling would be
+  // permanent.
+  //
+  // Both messages END on a colon — the words the write could not save are
+  // rendered, quoted, immediately after, so the notice itself is a copy of them
+  // and they survive even when the input has moved on.
+  "capture.error.failed": {
+    plain: "Couldn't save that just now — your words are still here:",
+    playful: "Couldn't save that just now — your words are still here:",
+  },
+  "capture.error.stale": {
+    plain:
+      "The app updated while this was open, so that didn't save. Reload to carry on — your words are still here:",
+    playful:
+      "The app updated while this was open, so that didn't save. Reload to carry on — your words are still here:",
+  },
+  // Duo review round 2 — the one failure whose verdict is genuinely unknown. A
+  // server action cannot be aborted from the client, so a timeout bounds how
+  // long the UI waits, not the write: the insert may still land, and a retry
+  // after it does leaves two identical items. Saying "couldn't save that" here
+  // would be a claim the client cannot support — the same unverifiable
+  // confirmation as the `captured ✓` this issue is about, pointing the other
+  // way. So it says what it knows, names the one thing that resolves the
+  // ambiguity, and lets the user choose: a duplicate is one tap to delete, an
+  // unwritten thought is not recoverable at all.
+  "capture.error.timeout": {
+    plain:
+      "No answer from the server, so this may already have saved. Check your inbox before trying again — your words are still here:",
+    playful:
+      "No answer from the server, so this may already have saved. Check your inbox before trying again — your words are still here:",
+  },
+  "capture.error.retry": { plain: "Try again", playful: "Try again" },
+  "capture.error.reload": {
+    plain: "Reload the page",
+    playful: "Reload the page",
+  },
+  // Announced from inside the notice while a write is in flight, so the wait is
+  // not silent and Retry can keep focus instead of being `disabled`. "Saving…"
+  // rather than "Trying again…" because the same flag is raised by a FRESH
+  // capture typed while an older failure's notice is still on screen.
+  "capture.error.saving": { plain: "Saving…", playful: "Saving…" },
 
   // ── Prompts ────────────────────────────────────────────────────────────────
   "prompt.stillNeeded": {
