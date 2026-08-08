@@ -713,6 +713,24 @@ describe("scripts/alert-pipeline-failure.sh", () => {
     expect(result.note?.body).not.toContain("/merge");
     expect(result.stderr).toMatch(/ALERT_MENTION/);
   });
+
+  it("refuses a MULTI-LINE ALERT_MENTION whose first line is a valid handle", () => {
+    // Regression, found while writing #191's sibling guard. The check was
+    // `printf '%s' "$ALERT_MENTION" | grep -Eq '^@…$'`, and **grep anchors per
+    // LINE** — so `^@handle$` matched line one and the guard passed, after which
+    // the whole value was interpolated. That put `/close` at the start of its own
+    // line in the note, which is precisely how GitLab recognises a quick action,
+    // executed with this job's `api`-scoped token.
+    //
+    // The case above did not catch it because it was single-line: there, `grep`
+    // and a whole-string match agree. Only a value that is valid on line one and
+    // hostile on line two separates them. Both scripts now use bash's `=~`,
+    // which anchors the whole string.
+    const result = alert({ env: { ALERT_MENTION: "@someone\n/close" } });
+    expect(result.status).toBe(0);
+    expect(result.note?.body).not.toContain("/close");
+    expect(result.stderr).toMatch(/ALERT_MENTION/);
+  });
 });
 
 // ── the weekly digest's drift backstop ───────────────────────────────────────

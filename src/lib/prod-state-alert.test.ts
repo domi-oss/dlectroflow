@@ -309,19 +309,27 @@ function drive(script: string, harness: Harness): Result {
 
 // ── scripts/check-prod-replicas.sh ───────────────────────────────────────────
 
-/** A Deployment status, shaped as the API returns it. */
+/**
+ * A Deployment status, shaped as the API returns it.
+ *
+ * `null` for a replica count means the field is OMITTED, which is what
+ * Kubernetes actually does — it never writes `availableReplicas: 0`. `undefined`
+ * cannot express that: a destructuring default fires on an explicit
+ * `undefined`, so `{ available: undefined }` would silently give back the
+ * healthy default and the test would assert nothing.
+ */
 function deployment({
   desired = 2,
-  available = 2 as number | undefined,
-  ready = 2 as number | undefined,
-  updated = 2 as number | undefined,
+  available = 2 as number | null,
+  ready = 2 as number | null,
+  updated = 2 as number | null,
   progressing = { status: "True", reason: "NewReplicaSetAvailable" },
   availableCondition = { status: "True", reason: "MinimumReplicasAvailable" },
 }: {
   desired?: number;
-  available?: number;
-  ready?: number;
-  updated?: number;
+  available?: number | null;
+  ready?: number | null;
+  updated?: number | null;
   progressing?: { status: string; reason: string } | null;
   availableCondition?: { status: string; reason: string } | null;
 } = {}) {
@@ -343,9 +351,9 @@ function deployment({
   const status: Record<string, unknown> = { conditions };
   // availableReplicas and readyReplicas are ABSENT, not 0, when none are — the
   // check must not read a missing field as a healthy one.
-  if (available !== undefined) status.availableReplicas = available;
-  if (ready !== undefined) status.readyReplicas = ready;
-  if (updated !== undefined) status.updatedReplicas = updated;
+  if (available !== null) status.availableReplicas = available;
+  if (ready !== null) status.readyReplicas = ready;
+  if (updated !== null) status.updatedReplicas = updated;
   return { spec: { replicas: desired }, status };
 }
 
@@ -417,7 +425,7 @@ describe("scripts/check-prod-replicas.sh", () => {
       kubectl: [
         {
           match: "deployment",
-          body: deployment({ available: undefined, ready: undefined }),
+          body: deployment({ available: null, ready: null }),
         },
         { match: "pods", body: { items: [] } },
       ],

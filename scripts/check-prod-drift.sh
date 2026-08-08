@@ -59,6 +59,43 @@ fi
 # Same bound as src/lib/build-info.ts: a short-or-full lower-case SHA-1.
 SHA_RE='^[0-9a-f]{7,40}$'
 
+# ── How long has it been drifted? (#191) ─────────────────────────────────────
+# A failed deploy is an EVENT and is easy to miss. "Production has been behind
+# `main` for 24 hours" is a STATE: it stays true until somebody fixes it, and it
+# is the sentence that actually describes #180. The commit count alone cannot
+# tell a deploy that is still running from one that stopped running yesterday.
+#
+# The instant comes from the oldest commit production is missing, which is a
+# LOWER bound on the drift — production may have fallen behind later than that
+# commit was authored, never earlier.
+#
+# `date` is the hazard, not the arithmetic. Three implementations reach this
+# script: GNU (the digest job installs coreutils), BSD (macOS, where `npm test`
+# drives it) and busybox (alpine). Only GNU accepts `-d <iso8601>`, so each
+# spelling is tried and **failure prints no age at all** rather than a confident
+# wrong number — the same discipline as the digest's 7-day window, which already
+# degrades to an honest "no window" label. A negative age is treated as
+# unparseable too: a commit in the future is clock skew, not a duration.
+iso_to_epoch() {
+  local iso="$1" out=""
+  # Fractional seconds and the zone suffix are stripped once, up front: BSD's
+  # `-f` needs the format to match the input exactly, and GitLab sends
+  # `2026-08-06T13:12:00.000Z`.
+  local plain="${iso%%.*}"
+  plain="${plain%Z}"
+  out="$(date -u -d "${plain}Z" +%s 2> /dev/null || true)"        # GNU
+  if [ -z "$out" ]; then
+    out="$(date -u -j -f '%Y-%m-%dT%H:%M:%S' "$plain" +%s 2> /dev/null || true)" # BSD
+  fi
+  if [ -z "$out" ]; then
+    out="$(date -u -d "${plain/T/ }" +%s 2> /dev/null || true)"   # busybox
+  fi
+  case "$out" in
+    '' | *[!0-9]*) return 1 ;;
+  esac
+  printf '%s' "$out"
+}
+
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -103,6 +140,8 @@ fi
 # ── 3. Verdict ───────────────────────────────────────────────────────────────
 verdict="undetermined"
 behind=""
+since=""
+age_line=""
 cmp_code=""
 if [ -n "$head_sha" ] && [ -n "$prod_sha" ]; then
   # Prefix comparison, not equality: /api/health reports 7 characters, GitLab's
@@ -117,6 +156,11 @@ if [ -n "$head_sha" ] && [ -n "$prod_sha" ]; then
       || echo 000)"
     if [ "$cmp_code" = "200" ]; then
       behind="$(jq -r '(.commits // []) | length' "$WORK/cmp.json" 2>/dev/null || true)"
+      # `min`, not `.[0]`: the endpoint's ordering is not part of its contract,
+      # and picking the wrong end of the list would understate the drift — the
+      # direction that makes an alert reassuring.
+      since="$(jq -r '[(.commits // [])[] | (.committed_date // .created_at // empty)] | min // empty' \
+        "$WORK/cmp.json" 2>/dev/null || true)"
     fi
   fi
 fi
@@ -153,6 +197,30 @@ case "$verdict" in
     else
       verdict_line="- 🔴 **production is ${behind} commits behind \`${DRIFT_REF}\`** — merged but not deployed"
     fi
+    # The duration (#191). Reported as a separate bullet rather than folded into
+    # the verdict so the instant survives even when no `date` on the image can
+    # turn it into an age — the timestamp alone still answers "is this minutes
+    # old or a day old", which is the whole question.
+    if [ -n "$since" ]; then
+      age_line="- behind since at least \`${since}\` (the oldest commit production is missing)"
+      now_epoch="$(date -u +%s 2>/dev/null || true)"
+      then_epoch="$(iso_to_epoch "$since" || true)"
+      case "${now_epoch}${then_epoch}" in
+        '' | *[!0-9]*) ;;
+        *)
+          if [ -n "$now_epoch" ] && [ -n "$then_epoch" ] && [ "$now_epoch" -ge "$then_epoch" ]; then
+            hours=$(( (now_epoch - then_epoch) / 3600 ))
+            if [ "$hours" -lt 1 ]; then
+              age_line="${age_line} — under an hour"
+            elif [ "$hours" -eq 1 ]; then
+              age_line="${age_line} — **1 hour** ago"
+            else
+              age_line="${age_line} — **${hours} hours** ago"
+            fi
+          fi
+          ;;
+      esac
+    fi
     status=1
     ;;
   *)
@@ -161,5 +229,9 @@ case "$verdict" in
     ;;
 esac
 
-printf '%s\n%s\n%s\n' "$head_line" "$prod_line" "$verdict_line"
+if [ -n "$age_line" ]; then
+  printf '%s\n%s\n%s\n%s\n' "$head_line" "$prod_line" "$age_line" "$verdict_line"
+else
+  printf '%s\n%s\n%s\n' "$head_line" "$prod_line" "$verdict_line"
+fi
 exit "$status"
