@@ -1069,16 +1069,33 @@ export function InboxView({
   const submit = () => {
     const value = text.trim();
     if (!value) return;
-    // Duo review round 3: a notice whose words were put back in THIS field, and
+    // Duo review round 5 — the one exception to "never gate a capture". These
+    // exact words are already being resubmitted by the notice's Retry, and they
+    // are in the field only because the notice put them back, so this Enter is
+    // the same request by a second route rather than the independent insert the
+    // ungating exists to protect. Not a silent discard either (#169's other
+    // harm): the notice is on screen announcing a save for these very words, and
+    // its Retry reads busy.
+    if (captureFailure?.retrying && captureFailure.value === value) return;
+    // Duo review round 3: a notice whose words are sitting in THIS field, and
     // which the user has now submitted something else from, has been seen and
     // answered — an edited typo, or a different thought typed over them. Leaving
     // it up puts a stale alert beside a fresh "captured ✓" and invites a Retry
     // that would post a near-duplicate. The words are carried rather than a
     // boolean, so a failure that lands between this press and its response
     // cannot be cleared by it.
-    const supersedes = captureFailure?.wordsInField
-      ? captureFailure.value
-      : null;
+    //
+    // Duo review round 5 — but NOT while its retry is in flight. Superseding
+    // means "the user has seen how this attempt ended and replaced its words",
+    // and mid-flight they have seen no such thing: clearing the notice there
+    // would clear it out from under a request whose outcome nobody knows, and
+    // the eventual failure would look like a notice resurrecting itself from
+    // nothing. Leaving it up is the fix; suppressing the failure would be the
+    // silence this whole issue exists to remove.
+    const supersedes =
+      captureFailure?.wordsInField && !captureFailure.retrying
+        ? captureFailure.value
+        : null;
     // Cleared synchronously and urgently, which is both the instant-capture
     // feel and the double-submit guard: a second Enter arriving before the
     // write resolves finds an empty field and returns below. Deliberately NOT

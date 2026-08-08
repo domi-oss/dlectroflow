@@ -732,6 +732,78 @@ describe("InboxView — a capture that fails (#210)", () => {
   });
 
   /**
+   * Duo review round 5 — `submit()` is deliberately ungated, because firing
+   * thoughts in a row is the point of the control and they are independent
+   * inserts. The exception is the words a Retry is already resubmitting: those
+   * are not an independent insert, they are the same request by a second route,
+   * and the field is holding them precisely because the notice put them back.
+   */
+  it("ignores an Enter that would re-post the words a Retry is already resubmitting", async () => {
+    vi.mocked(createBrainDumpItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockReturnValueOnce(new Promise<void>(() => {}));
+    const input = renderInbox();
+    await capture(input, "buy milk");
+    await clickRetry();
+    expect(input).toHaveValue("buy milk");
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    await flush();
+
+    expect(vi.mocked(createBrainDumpItem)).toHaveBeenCalledTimes(2);
+    // Not a silent discard — #169's other harm. The notice is on screen saying a
+    // save for these exact words is in flight, and Retry reads busy.
+    const notice = screen.getByRole("alert");
+    expect(within(notice).getByRole("status")).toHaveTextContent(/saving/i);
+    expect(
+      within(notice).getByRole("button", { name: /try again/i }),
+    ).toHaveAttribute("aria-disabled", "true");
+    expect(input).toHaveValue("buy milk");
+  });
+
+  /**
+   * Duo review round 5 — superseding means "the user has seen how this attempt
+   * ended and replaced its words". While a retry is still in flight they have
+   * seen no such thing, so clearing the notice would be clearing it out from
+   * under a request whose outcome nobody knows yet — and a later failure would
+   * then look like a notice resurrecting itself from nothing.
+   *
+   * The answer is to leave the notice up, not to suppress the failure. A write
+   * the client knows did not land and says nothing about is the silence this
+   * whole issue exists to remove.
+   */
+  it("does not let a capture supersede a failure whose retry has not answered yet", async () => {
+    let rejectRetry!: (reason: unknown) => void;
+    vi.mocked(createBrainDumpItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockReturnValueOnce(
+        new Promise<void>((_, reject) => {
+          rejectRetry = reject;
+        }),
+      )
+      .mockResolvedValueOnce(undefined);
+    const input = renderInbox();
+    await capture(input, "buy milk");
+    await clickRetry();
+
+    fireEvent.change(input, { target: { value: "buy oat milk" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await flush();
+
+    expect(screen.getByRole("alert")).toHaveTextContent("“buy milk”");
+
+    await act(async () => {
+      rejectRetry(new Error("still offline"));
+      await flushTicks();
+    });
+
+    // It failed, and the notice never left — so this is a report, not a
+    // resurrection. The words go back into the field the other capture emptied.
+    expect(screen.getByRole("alert")).toHaveTextContent("“buy milk”");
+    expect(input).toHaveValue("buy milk");
+  });
+
+  /**
    * WCAG 2.4.3 — the finding `focus-timer.tsx:1252` documents: a native
    * `disabled` attribute cannot hold focus, so the browser drops the focused
    * element to `<body>` the moment the retry starts. `aria-disabled` plus a
