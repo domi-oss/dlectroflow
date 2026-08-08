@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { Prisma } from "@prisma/client";
 import { prisma, getSettings } from "@/lib/db";
 import { currentWorkspaceId } from "@/lib/workspace";
 import {
@@ -70,25 +71,69 @@ export async function addShoppingItem(text: string) {
   const workspaceId = await shoppingWorkspace();
   if (!workspaceId) return;
 
-  // One read serves both the cap and the next `order`. Only the column the order
-  // needs is selected — the cap is `rows.length`, so a `count()` alongside this
-  // would be a second round trip for a number this row set already carries.
-  const existing = await prisma.shoppingItem.findMany({
-    where: { workspaceId },
-    select: { order: true },
-  });
-  // Checked, not clamped: silently dropping the write is what an unbounded table
-  // would deserve, and the list is already 500 rows long, so there is nothing
-  // useful to tell the person beyond "this list is full" — which the page says.
-  if (existing.length >= MAX_SHOPPING_ITEMS) return;
+  // ── Why this is a transaction, at SERIALIZABLE ────────────────────────────
+  //
+  // Duo review, !294, and the finding was right for a reason worth writing down.
+  // The check used to be a plain read followed by a plain insert, and this file
+  // calls the cap "the only thing standing between an authenticated session and
+  // storage exhaustion" — but a read-then-write pair is not that. A client firing
+  // a burst of parallel requests has them all read the same count, all pass the
+  // check, and all insert, so the cap held only against a caller polite enough to
+  // queue its writes. Overshoot was bounded by the burst size, i.e. not bounded.
+  //
+  // At SERIALIZABLE Postgres takes a predicate lock on the count, so a concurrent
+  // transaction that also counted and inserted is ABORTED rather than allowed
+  // past. That makes the pair atomic with respect to another add, which is the
+  // property the cap needs and the only one it needs — the `order` duplication the
+  // read side tolerates is a separate, genuinely cosmetic matter (and one this
+  // isolation level now also happens to prevent on this path; `splitShoppingList`
+  // keeps its tie-break for rows written before this change and for any future
+  // writer).
+  //
+  // ONE retry, deliberately. A retry turns the ordinary two-way race into a
+  // success; an unbounded retry loop under a deliberate burst is the request
+  // amplification the cap exists to prevent. Giving up writes nothing, which is
+  // the same outcome as hitting the cap, and the page re-reads from the database
+  // on the next render — so nobody is ever shown an item that is not there.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await prisma.$transaction(
+        async (tx) => {
+          // One read serves both the cap and the next `order`. Only the column the
+          // order needs is selected — the cap is `rows.length`, so a `count()`
+          // alongside this would be a second round trip for a number this row set
+          // already carries.
+          const existing = await tx.shoppingItem.findMany({
+            where: { workspaceId },
+            select: { order: true },
+          });
+          // Checked, not clamped: the list is already at the cap, so there is
+          // nothing useful to tell the person beyond "this list is full", which the
+          // page says before the action is ever called.
+          if (existing.length >= MAX_SHOPPING_ITEMS) return;
+          await tx.shoppingItem.create({
+            data: {
+              text: trimmed,
+              order: nextShoppingOrder(existing),
+              workspaceId,
+            },
+          });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+      break;
+    } catch (e) {
+      // P2034 is Prisma's "transaction failed due to a write conflict or a
+      // deadlock" — the serialization failure this isolation level exists to
+      // raise. Only that code is absorbed: swallowing every failure would turn a
+      // broken database into an item that silently vanishes, which is the failure
+      // mode the whole capture surface is written to avoid.
+      const retryable = (e as { code?: string }).code === "P2034";
+      if (!retryable) throw e;
+      if (attempt === 1) return;
+    }
+  }
 
-  await prisma.shoppingItem.create({
-    data: {
-      text: trimmed,
-      order: nextShoppingOrder(existing),
-      workspaceId,
-    },
-  });
   revalidatePath(SHOPPING_PATH);
 }
 

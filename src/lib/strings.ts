@@ -1178,10 +1178,6 @@ export const STRINGS = {
     plain: "Nothing on the list yet.",
     playful: "Nothing on the list yet.",
   },
-  "shopping.emptySaved": {
-    plain: "Nothing saved for later.",
-    playful: "Nothing saved for later.",
-  },
   // Counted noun, split so a count reads "1 item" / "3 items". Same shape as
   // focus.sound.trackOne/trackMany, and #199 part 2's inbox summary reuses these
   // keys rather than spelling the word again.

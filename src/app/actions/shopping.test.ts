@@ -36,6 +36,11 @@ const {
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
+    // Duo review, !294 — the cap is now taken inside a SERIALIZABLE transaction, so
+    // this mock has to model the callback form. It hands the same delegate object
+    // through as `tx`, which is what makes the assertions below able to see the
+    // read and the write regardless of which handle they were made on.
+    $transaction: vi.fn(),
   };
   return {
     prismaMock,
@@ -60,6 +65,9 @@ beforeEach(() => {
   getSettingsMock.mockResolvedValue({ shoppingList: true });
   prismaMock.shoppingItem.findMany.mockResolvedValue([]);
   prismaMock.shoppingItem.count.mockResolvedValue(0);
+  prismaMock.$transaction.mockImplementation(
+    async (fn: (tx: typeof prismaMock) => Promise<unknown>) => fn(prismaMock),
+  );
 });
 
 const load = () => import("./shopping");
@@ -167,6 +175,68 @@ describe("addShoppingItem", () => {
     const { addShoppingItem } = await load();
     await addShoppingItem("one too many");
     expect(prismaMock.shoppingItem.create).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Duo review, !294 — the cap had a TOCTOU race, and the finding is right that it
+   * mattered: this file's own doc calls the cap "the only thing standing between an
+   * authenticated session and storage exhaustion", and a raceable check is no such
+   * thing. A burst of parallel requests would all read the same count and all
+   * insert, so the cap held only against a client that queued its writes.
+   *
+   * The read and the insert now happen in ONE transaction at SERIALIZABLE, which is
+   * what makes the pair atomic with respect to another add: Postgres takes a
+   * predicate lock on the count, so a concurrent transaction that also counted and
+   * inserted is aborted rather than allowed past the cap.
+   */
+  it("takes the cap and the insert in one serializable transaction", async () => {
+    const { addShoppingItem } = await load();
+    await addShoppingItem("Milk");
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(prismaMock.$transaction.mock.calls[0][1]).toEqual({
+      isolationLevel: "Serializable",
+    });
+  });
+
+  it("retries once when the serialization check aborts it, then gives up", async () => {
+    // A retry, not a loop: one retry turns the ordinary two-way race into a
+    // success, and an unbounded retry under a deliberate burst is the amplification
+    // the cap exists to prevent. A give-up writes nothing, which is the same
+    // outcome as hitting the cap — and the page re-reads from the database, so the
+    // person is never shown an item that is not there.
+    const serializationFailure = Object.assign(new Error("write conflict"), {
+      code: "P2034",
+    });
+    prismaMock.$transaction
+      .mockRejectedValueOnce(serializationFailure)
+      .mockImplementationOnce(
+        async (fn: (tx: typeof prismaMock) => Promise<unknown>) =>
+          fn(prismaMock),
+      );
+    const { addShoppingItem } = await load();
+    await addShoppingItem("Milk");
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(2);
+    expect(prismaMock.shoppingItem.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up quietly after a second conflict rather than throwing at the UI", async () => {
+    const serializationFailure = Object.assign(new Error("write conflict"), {
+      code: "P2034",
+    });
+    prismaMock.$transaction.mockRejectedValue(serializationFailure);
+    const { addShoppingItem } = await load();
+    await expect(addShoppingItem("Milk")).resolves.toBeUndefined();
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it("still surfaces an error that is NOT a serialization conflict", async () => {
+    // Swallowing every failure would turn a broken database into a silently
+    // vanishing item. Only the one retryable code is absorbed.
+    prismaMock.$transaction.mockRejectedValue(
+      Object.assign(new Error("connection lost"), { code: "P1001" }),
+    );
+    const { addShoppingItem } = await load();
+    await expect(addShoppingItem("Milk")).rejects.toThrow(/connection lost/);
   });
 
   it("reads the workspace's own rows only", async () => {

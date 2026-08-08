@@ -234,6 +234,70 @@ describe("row controls", () => {
     expect(screen.getByText("Apples")).toBeInTheDocument();
   });
 
+  // Duo review, !294 — a rename had no validation and no feedback: an over-long or
+  // blanked value called the action, which returned silently, and the row simply
+  // reverted with no explanation. That is the exact "a silent no-op looks like a
+  // lost item" failure this component's own docblock warns about for the Add flow,
+  // so the two flows now share one validator.
+  it("refuses an over-long rename visibly, and keeps the editor open", async () => {
+    renderList([item({ id: "a", text: "Apples" })]);
+    await userEvent.click(
+      screen.getByRole("button", { name: /rename apples/i }),
+    );
+    const field = screen.getByRole("textbox", { name: /rename apples/i });
+    await userEvent.clear(field);
+    await userEvent.paste("x".repeat(SHOPPING_ITEM_TEXT_MAX_LENGTH + 1));
+    await userEvent.keyboard("{Enter}");
+    expect(renameMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent(/200 characters/i);
+    // Still editing: dropping back to the old text would throw away what they
+    // typed as well as failing silently.
+    expect(
+      screen.getByRole("textbox", { name: /rename apples/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("refuses a blanked rename visibly rather than reverting", async () => {
+    renderList([item({ id: "a", text: "Apples" })]);
+    await userEvent.click(
+      screen.getByRole("button", { name: /rename apples/i }),
+    );
+    const field = screen.getByRole("textbox", { name: /rename apples/i });
+    await userEvent.clear(field);
+    await userEvent.type(field, "   {Enter}");
+    expect(renameMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /type something first/i,
+    );
+  });
+
+  it("clears a rename refusal once the value changes", async () => {
+    renderList([item({ id: "a", text: "Apples" })]);
+    await userEvent.click(
+      screen.getByRole("button", { name: /rename apples/i }),
+    );
+    const field = screen.getByRole("textbox", { name: /rename apples/i });
+    await userEvent.clear(field);
+    await userEvent.type(field, "  {Enter}");
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    await userEvent.type(field, "Braeburns");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("abandons a refused rename on Escape, taking the message with it", async () => {
+    renderList([item({ id: "a", text: "Apples" })]);
+    await userEvent.click(
+      screen.getByRole("button", { name: /rename apples/i }),
+    );
+    const field = screen.getByRole("textbox", { name: /rename apples/i });
+    await userEvent.clear(field);
+    await userEvent.type(field, "  {Enter}");
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText("Apples")).toBeInTheDocument();
+  });
+
   it("names the item in every control, so a screen-reader list is usable", () => {
     renderList([item({ id: "a", text: "Apples" })]);
     // "Delete" twelve times over is what this is guarding against.

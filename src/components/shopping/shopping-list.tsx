@@ -63,8 +63,29 @@ export function ShoppingList({
     null,
   );
   const [editingId, setEditingId] = useState<string | null>(null);
+  /**
+   * Why the rename has its OWN refusal state rather than sharing `error`:
+   * a rename can be refused while the capture field is untouched (and vice versa),
+   * and one shared slot would let a rename's message appear under the Add field —
+   * pointing `aria-describedby` at a message about a different control.
+   *
+   * Duo review, !294: a rename had no validation and no feedback at all. An
+   * over-long or blanked value called the action, which returned silently, and the
+   * row reverted with no explanation — the exact "a silent no-op looks like a lost
+   * item" failure this file's docblock warns about for the Add flow. Both flows now
+   * run through `shoppingItemTextError`.
+   */
+  const [editError, setEditError] = useState<"empty" | "too-long" | null>(null);
   const errorId = useId();
+  const editErrorId = useId();
   const addFieldId = useId();
+
+  /** Close the editor and drop any refusal with it — the message describes a value
+   *  that is no longer on screen. */
+  const stopEditing = () => {
+    setEditingId(null);
+    setEditError(null);
+  };
 
   const run = (fn: () => Promise<unknown>) =>
     startTransition(async () => {
@@ -92,6 +113,17 @@ export function ShoppingList({
     setError(null);
     run(() => addShoppingItem(text));
   };
+
+  const refusalMessage = (
+    refusal: "empty" | "too-long" | "full" | null,
+  ): string | null =>
+    refusal === "empty"
+      ? t("shopping.errorEmpty", voice)
+      : refusal === "too-long"
+        ? t("shopping.errorTooLong", voice)
+        : refusal === "full"
+          ? t("shopping.errorFull", voice)
+          : null;
 
   const errorMessage =
     error === "empty"
@@ -133,11 +165,25 @@ export function ShoppingList({
         <RenameInput
           initial={i.text}
           label={`${t("shopping.rename", voice)} ${i.text}`}
-          onCancel={() => setEditingId(null)}
+          invalid={editError !== null}
+          describedBy={editError !== null ? editErrorId : undefined}
+          onChange={() => setEditError(null)}
+          onCancel={stopEditing}
           onSave={(value) => {
-            setEditingId(null);
-            if (value && value !== i.text)
-              run(() => renameShoppingItem(i.id, value));
+            // Unchanged is not a refusal: it is a no-op, and the editor closes.
+            if (value === i.text) {
+              stopEditing();
+              return;
+            }
+            const refusal = shoppingItemTextError(value);
+            if (refusal) {
+              // Editor stays OPEN. Reverting would throw away what they typed as
+              // well as failing silently, which is worse than either alone.
+              setEditError(refusal);
+              return;
+            }
+            stopEditing();
+            run(() => renameShoppingItem(i.id, value));
           }}
         />
       ) : (
@@ -190,6 +236,17 @@ export function ShoppingList({
       </button>
     </li>
   );
+
+  /** The refusal for a rename in progress, rendered as its own list item so it sits
+   *  under the row it belongs to rather than beside the row's controls. */
+  const renameRefusal = (i: ShoppingItemView) =>
+    editingId === i.id && editError !== null ? (
+      <li key={`${i.id}-refusal`} className="pb-1">
+        <p id={editErrorId} role="alert" className="text-destructive text-sm">
+          {refusalMessage(editError)}
+        </p>
+      </li>
+    ) : null;
 
   return (
     <div className="space-y-6">
@@ -258,7 +315,9 @@ export function ShoppingList({
             {t("shopping.empty", voice)}
           </p>
         ) : (
-          <ul className="mt-1 divide-y">{active.map((i) => row(i, false))}</ul>
+          <ul className="mt-1 divide-y">
+            {active.flatMap((i) => [row(i, false), renameRefusal(i)])}
+          </ul>
         )}
       </section>
 
@@ -275,7 +334,7 @@ export function ShoppingList({
             {t("shopping.savedHint", voice)}
           </p>
           <ul className="mt-1 divide-y">
-            {savedForLater.map((i) => row(i, true))}
+            {savedForLater.flatMap((i) => [row(i, true), renameRefusal(i)])}
           </ul>
         </section>
       )}
@@ -289,11 +348,21 @@ export function ShoppingList({
 function RenameInput({
   initial,
   label,
+  invalid,
+  describedBy,
+  onChange,
   onSave,
   onCancel,
 }: {
   initial: string;
   label: string;
+  /** Set when the last attempt was refused — WCAG 3.3.1 Error Identification. */
+  invalid: boolean;
+  /** The id of the refusal message, so the field points at its own explanation. */
+  describedBy?: string;
+  /** Editing again clears the refusal: a message that outlives the mistake gets
+   *  read as the field's own state. */
+  onChange: () => void;
   onSave: (value: string) => void;
   onCancel: () => void;
 }) {
@@ -303,7 +372,12 @@ function RenameInput({
       autoFocus
       value={value}
       aria-label={label}
-      onChange={(e) => setValue(e.target.value)}
+      aria-invalid={invalid || undefined}
+      aria-describedby={describedBy}
+      onChange={(e) => {
+        setValue(e.target.value);
+        onChange();
+      }}
       onKeyDown={(e) => {
         if (e.key === "Enter") {
           e.preventDefault();
