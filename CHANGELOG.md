@@ -473,6 +473,17 @@ operators upgrading a self-hosted instance don't get surprised.
   it. Each button now waits only on its own step, and while it is waiting it says
   so out loud rather than just going grey.
 
+  **The button you press keeps the keyboard's focus while it works.** It dims and
+  says why, but it is still the control you are holding. Before, the browser
+  dropped focus to the top of the page the moment the button went inactive,
+  leaving a keyboard or screen-reader user holding nothing — in a list of
+  identical-looking completed rows, while a change they could not observe went
+  through. **And undoing two steps before either finishes now returns focus for
+  both.** The hand-off onto the reopened step's Start button remembered one step
+  at a time, so the second undo erased the first's, and whichever row reopened
+  first was left with focus nowhere: the exact problem the hand-off exists to
+  prevent, on the row that had been waiting longest.
+
   **Un-completing two steps of the same finished task no longer takes back two
   task rewards.** The task only reopens once, so only one reopening is paid back —
   before, the second undo removed some other, already-finished task's reward
