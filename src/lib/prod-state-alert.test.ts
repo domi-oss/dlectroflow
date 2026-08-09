@@ -983,6 +983,65 @@ describe("scripts/check-prod-drift.sh reports how long production has been behin
     expect(run.stdout).not.toContain("2026-08-07T05:00:00");
   });
 
+  it("keeps the oldest PARSED instant when only some timestamps can be read", () => {
+    // The MIXED case, which the test above does not reach: one timestamp the
+    // image's `date` cannot convert alongside two it can. The age is suppressed
+    // either way and that part is right — an unreadable timestamp could be older
+    // than anything that was read, so any number computed from the rest would
+    // understate the drift. But the INSTANT was replaced with the plain string
+    // minimum of the RAW dates, which is the very lexicographic hazard
+    // `iso_to_epoch` exists to remove, thrown away one line after it had already
+    // produced the right answer.
+    //
+    // `05:00-04:00` is 09:00Z and sorts first as a string; `09:27:36+01:00` is
+    // 08:27:36Z and is 32 minutes older. Reporting the first says the drift began
+    // later than it provably did — understating it, which is the direction that
+    // makes an alert reassuring and the one #191 exists to prevent.
+    const run = drift({
+      compare: {
+        commits: [
+          { id: OLD_SHA, committed_date: "2026-08-07T05:00:00.000-04:00" },
+          { id: HEAD_SHA, committed_date: "2026-08-07T09:27:36.000+01:00" },
+          { id: "c".repeat(40), committed_date: "not-a-timestamp" },
+        ],
+      },
+    });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain("2026-08-07T09:27:36");
+    expect(run.stdout).not.toContain("2026-08-07T05:00:00");
+    // Still no age, for the reason above.
+    expect(run.stdout).not.toMatch(/hours?\*{0,2} ago/);
+    expect(run.stdout).not.toMatch(/under an hour/);
+    // And the note says which claim it is making: the oldest of the ones that
+    // could be read is not provably the oldest, so the reader is told the drift
+    // may be older rather than being handed a bare instant that looks exact.
+    expect(run.stdout).toMatch(/may be older/i);
+  });
+
+  it("says the instant is unproven when NO timestamp can be read", () => {
+    // The other arm of the same branch. With nothing converted there is no
+    // ordering to be had at all, so the string that sorted first is shown because
+    // it is all there is — but it must not be labelled "the oldest commit
+    // production is missing", which is a chronological claim nothing here
+    // supports once there is more than one candidate.
+    const run = drift({
+      compare: {
+        commits: [
+          { id: OLD_SHA, committed_date: "2026-08-06T13:12:00.000Z" },
+          { id: HEAD_SHA, committed_date: "2026-08-07T09:00:00.000Z" },
+        ],
+      },
+      bin: { date: BROKEN_DATE_STUB },
+    });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain("2026-08-06T13:12");
+    expect(run.stdout).not.toMatch(/hours?\*{0,2} ago/);
+    expect(run.stdout).toMatch(/may be older/i);
+    expect(run.stdout).not.toMatch(
+      /`2026-08-06T13:12[^`]*` \(the oldest commit production is missing\)/,
+    );
+  });
+
   it("prints no stray backslash before a backtick", () => {
     // A `\`` inside a SINGLE-quoted printf format is passed to printf verbatim
     // and renders as a literal backslash — invisible in a shell script, visible

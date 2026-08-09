@@ -191,6 +191,10 @@ verdict="undetermined"
 behind=""
 since=""
 since_epoch=""
+# What `since` is a claim ABOUT — see the selection below. It changes with how
+# many of the timestamps could be converted, so it is chosen where that is known
+# rather than reconstructed in the report.
+since_note="the oldest commit production is missing"
 age_line=""
 cmp_code=""
 if [ -n "$head_sha" ] && [ -n "$prod_sha" ]; then
@@ -237,9 +241,32 @@ if [ -n "$head_sha" ] && [ -n "$prod_sha" ]; then
       # the oldest, so the instant is reported without an age rather than with a
       # number that might understate the drift. Same rule as everywhere else here:
       # no confident number over an unproven input.
-      if [ "$unparseable" = "1" ] || [ -z "$since" ]; then
+      #
+      # The two arms differ, and conflating them was a Duo finding on !293. Both
+      # drop the age; only one has to drop the INSTANT.
+      if [ -z "$since" ]; then
+        # NOTHING converted. There is no ordering to be had, so `lex_min` is shown
+        # because it is the only thing left — not because it is the oldest. With a
+        # single missing commit it is; with several it is whichever string sorted
+        # first, and the note says so rather than implying a chronology.
         since="$lex_min"
         since_epoch=""
+        since_note="one of the commits production is missing — no timestamp here could be read as an instant, so this is not provably the oldest and the drift may be older"
+      elif [ "$unparseable" = "1" ]; then
+        # MIXED: some converted, some did not. The loop above already holds the
+        # chronologically oldest of the ones that DID, which is a real instant
+        # picked by comparison. Falling back to `lex_min` here threw that away for
+        # the plain string minimum of the raw dates — reintroducing, in the very
+        # branch meant to be careful, the ordering bug `iso_to_epoch` exists to
+        # remove: `2026-08-07T05:00:00-04:00` sorts first and is half an hour LATER
+        # than `2026-08-07T09:27:36+01:00`, so the drift would be reported as
+        # younger than it provably is. Understating is the worst direction for this
+        # monitor to be wrong in — #191 exists because a real drift read as fine.
+        #
+        # So the parsed minimum stays and only the age goes: a timestamp that could
+        # not be read may be older still, which is what the caveat tells the reader.
+        since_epoch=""
+        since_note="the oldest commit production is missing **whose timestamp could be read** — at least one could not, so the drift may be older"
       fi
     fi
   fi
@@ -283,7 +310,7 @@ case "$verdict" in
     # old or a day old", which is the whole question.
     age_secs=""
     if [ -n "$since" ]; then
-      age_line="- behind since at least \`${since}\` (the oldest commit production is missing)"
+      age_line="- behind since at least \`${since}\` (${since_note})"
       now_epoch="$(date -u +%s 2>/dev/null || true)"
       # Reused from the selection above rather than recomputed: when a timestamp
       # could not be converted, `since_epoch` is deliberately empty and there must
