@@ -2,29 +2,38 @@ import { getValidAccessToken, patchGoogleTask } from "@/lib/google";
 import { currentUser } from "@/lib/workspace";
 
 /**
- * Best-effort mirroring of a LOCAL state change into Google Tasks, for the
- * units whose Google id lives on the **Task** row rather than on a step.
+ * Best-effort mirroring of a LOCAL state change into Google Tasks.
  *
- * ── Why this is a lib module and not another helper in `focus.ts` ───────────
- * The step-grain helpers live in `focus.ts` and the obvious thing is to put
- * their task-grain twins beside them. That is not possible: `focus.ts` is a
- * `"use server"` file, so anything exported from it becomes a publicly callable
- * server action. A module-private helper there cannot be reached from
- * `braindump.ts`, and exporting one to share it would put a raw "complete this
- * Google task" endpoint on the wire, taking an id straight from the client.
- * Both completion routes (`completeItem` in `braindump.ts`, `markTaskCompleted`
- * in `focus.ts`) need the same patch, so the task grain lives here instead.
- * `completeGoogleTaskForStep` stays in `focus.ts` because it still has only
- * that file's callers; #209 moves it here when `braindump.ts` needs it too.
+ * ── Why this is a lib module and not a helper in `focus.ts` ─────────────────
+ * The obvious home for these is next to the actions that call them. That is not
+ * possible: `focus.ts` is a `"use server"` file, so anything exported from it
+ * becomes a publicly callable server action. A module-private helper there
+ * cannot be reached from `braindump.ts`, and exporting one to share it would put
+ * a raw "patch this Google task" endpoint on the wire, taking an id straight
+ * from the client. Both grains now have callers in both files, so both live
+ * here: `!288` (#195) moved the task grain, and #209 moved the step grain when
+ * `braindump.ts` needed it too, exactly as that MR predicted it would.
  *
- * ── Shaped for the reopen twin that is coming ───────────────────────────────
- * #196 is the mirror of #195 and needs `needsAction` at this same grain, so the
- * patch is factored into `setGoogleTaskStatusForTask` and the exported name
- * stays specific — matching the `completeGoogleTaskForStep` /
- * `reopenGoogleTaskForStep` pair `!286` established, rather than exporting one
- * status-parameterised function whose call sites read `…ForTask(t, "completed")`
- * at the step grain's `completeGoogleTaskForStep(s)`. Adding
- * `reopenGoogleTaskForTask` is then three lines here and nothing anywhere else.
+ * ── Two grains, one shape, and why the names still differ ───────────────────
+ * A `Task` row and a `Step` row both carry `googleTaskId`/`googleTaskListId`,
+ * so the patch is one function and the grain-specific exports are thin. They
+ * stay separate anyway, because a task id and a step id address **different
+ * Google tasks** and a call site has to say which it means — `…ForStep(step)`
+ * and `…ForTask(task)` are not interchangeable even though their bodies are.
+ * The status stays baked into the name rather than passed at the call site, so
+ * that reading `completeGoogleTaskForStep(s)` tells you what happens without
+ * looking up an argument.
+ *
+ * Only the combinations with callers exist. There is no exported task-grain
+ * reopen: the one caller that needs it (`reopenItem`) reopens a task and its
+ * steps together, and gets `reopenGoogleTasksForItem` instead.
+ *
+ * ── The ordering invariant every caller owes this module ────────────────────
+ * Every caller runs its patch AFTER its local writes and **outside any
+ * `$transaction`**. The swallow below is the second line of defence, not the
+ * first: a patch awaited inside a transaction would roll the user's own change
+ * back on a network blip, which is the trap #196 records for the reopen
+ * direction.
  */
 
 /**
@@ -46,14 +55,19 @@ export async function actingUserGoogleToken(): Promise<string | null> {
   return me ? getValidAccessToken(me.id) : null;
 }
 
-/** A task carrying (or not carrying) the ids that address its own Google Task. */
-type TaskGoogleRef = {
+/** A row carrying (or not carrying) the ids that address one Google Task. */
+type GoogleTaskRef = {
   googleTaskId: string | null;
   googleTaskListId: string | null;
 };
 
+/** Whether this row addresses a Google task at all. */
+function isScheduled(ref: GoogleTaskRef | null | undefined): boolean {
+  return Boolean(ref?.googleTaskId && ref?.googleTaskListId);
+}
+
 /**
- * Set a task's OWN Google Task status. Returns whether Google was patched.
+ * Set one Google Task's status. Returns whether Google was patched.
  *
  * ── Best-effort, and that has to be structural ──────────────────────────────
  * A change the user asked for must never fail because Google is unreachable or
@@ -62,25 +76,26 @@ type TaskGoogleRef = {
  * error, and `getValidAccessToken` throws if the refresh round-trip does. A
  * false return means "not synced", never "the local change failed".
  *
- * The swallow is a second line of defence, not the first: every caller invokes
- * this AFTER its local writes and **outside any `$transaction`**, so a Google
- * failure has nothing left to undo. That ordering is the important half — a
- * patch awaited inside a transaction would roll the user's own change back on a
- * network blip, which is the trap #196 records for the reopen direction.
+ * Leaving it to callers is not a theoretical worry — it is what happened.
+ * `reopenGoogleTaskForStep` lived in `focus.ts` with no try/catch and exactly
+ * one caller that wrapped it, so the contract held by coincidence. #196 adds a
+ * second caller, which would have inherited the promise without the protection.
  */
-async function setGoogleTaskStatusForTask(
-  task: TaskGoogleRef,
+async function setGoogleTaskStatus(
+  ref: GoogleTaskRef,
   status: "needsAction" | "completed",
 ): Promise<boolean> {
-  if (!task.googleTaskId || !task.googleTaskListId) return false;
+  if (!ref.googleTaskId || !ref.googleTaskListId) return false;
   try {
     const token = await actingUserGoogleToken();
     if (!token) return false;
     return await patchGoogleTask(
       token,
-      task.googleTaskListId,
-      task.googleTaskId,
-      { status },
+      ref.googleTaskListId,
+      ref.googleTaskId,
+      {
+        status,
+      },
     );
   } catch {
     return false;
@@ -108,7 +123,120 @@ async function setGoogleTaskStatusForTask(
  * are always distinct Google tasks, and when a task closes both of them should.
  */
 export async function completeGoogleTaskForTask(
-  task: TaskGoogleRef,
+  task: GoogleTaskRef,
 ): Promise<boolean> {
-  return setGoogleTaskStatusForTask(task, "completed");
+  return setGoogleTaskStatus(task, "completed");
+}
+
+/** Mark a step's own Google Task completed. Returns whether Google was patched. */
+export async function completeGoogleTaskForStep(
+  stepRef: GoogleTaskRef,
+): Promise<boolean> {
+  return setGoogleTaskStatus(stepRef, "completed");
+}
+
+/**
+ * The reverse patch at the step grain (#198, #196). `needsAction` is the value
+ * `patchGoogleTask` has always accepted and, before `!286`, was never sent —
+ * the app could only ever tell Google a task was finished, never that it wasn't.
+ */
+export async function reopenGoogleTaskForStep(
+  stepRef: GoogleTaskRef,
+): Promise<boolean> {
+  return setGoogleTaskStatus(stepRef, "needsAction");
+}
+
+/**
+ * How many Google Tasks PATCHes one to-do may have in flight at once.
+ *
+ * #209 asked whether the patches run in parallel, and both extremes are wrong.
+ *
+ * **Sequential** costs one round trip per step, and `TASKS_PATCH_TIMEOUT_MS`
+ * (`src/lib/google.ts`) allows each 10 s — so a twenty-step breakdown could hold
+ * a server action open for over three minutes, and `bulkBrainDumpAction` loops
+ * over items on top of that. `!288` bounded the blast radius of one stalled
+ * connection; it did not make the loop fast, and said so.
+ *
+ * **Unbounded** trades that for a burst: every step of a large breakdown opening
+ * a connection at once, against an API this app is rate-limited on. Google
+ * answers the overflow with 429s, and because these patches swallow their own
+ * failures by contract, the user would silently lose syncs rather than wait a
+ * moment for them — the failure mode #209 exists to fix, arriving by a new
+ * route.
+ *
+ * 4 is chosen to keep the common case at one round trip's latency (a to-do with
+ * a handful of steps) while turning a pathological one into a queue instead of a
+ * burst. It is not tuned against a measured quota — there is no per-second
+ * figure published for Tasks that would let it be — so it is deliberately small
+ * enough that the bound is never the interesting variable.
+ */
+export const GOOGLE_SYNC_CONCURRENCY = 4;
+
+/**
+ * Set every ref to `status` with at most {@link GOOGLE_SYNC_CONCURRENCY} in
+ * flight, and report how many Google accepted.
+ *
+ * This is the one place the grain stops mattering: the caller has already
+ * decided which rows it means, and past that point a task's Google task and a
+ * step's are the same kind of thing being moved the same way.
+ *
+ * Refs that address nothing are dropped before the pool rather than inside it,
+ * so a to-do that was never scheduled costs no credential lookup and occupies no
+ * worker. Nothing here rejects: `setGoogleTaskStatus` swallows per patch, which
+ * is what makes "one slow or failing step must not abandon the rest" (#209) a
+ * property of the code rather than of the comment.
+ */
+async function patchPool(
+  refs: readonly GoogleTaskRef[],
+  status: "needsAction" | "completed",
+): Promise<number> {
+  const queue = refs.filter(isScheduled);
+  if (!queue.length) return 0;
+
+  let next = 0;
+  let synced = 0;
+  const worker = async () => {
+    while (next < queue.length) {
+      if (await setGoogleTaskStatus(queue[next++], status)) synced += 1;
+    }
+  };
+  const workers = Math.min(GOOGLE_SYNC_CONCURRENCY, queue.length);
+  await Promise.all(Array.from({ length: workers }, () => worker()));
+  return synced;
+}
+
+/**
+ * Close every Google Task a to-do owns — its own, and one per step (#209).
+ *
+ * Completing a multi-step to-do from the **inbox** closes all its steps in one
+ * `updateMany` and used to patch none of them, so Reclaim kept every block. The
+ * focus timer never had the bug because it finishes steps one at a time and each
+ * completion patched its own.
+ *
+ * Both grains are patched and neither implies the other: a to-do scheduled after
+ * a breakdown has ids on its steps and none on the task, one scheduled while
+ * stepless has the reverse, and one scheduled stepless that later grew steps has
+ * both. Pass only the steps this call actually closed — a step that was already
+ * done was patched when it was done, and re-patching costs a request per step
+ * for no change.
+ */
+export async function completeGoogleTasksForItem(
+  task: GoogleTaskRef | null,
+  steps: readonly GoogleTaskRef[],
+): Promise<number> {
+  return patchPool(task ? [task, ...steps] : steps, "completed");
+}
+
+/**
+ * The reverse, for `reopenItem` (#196) — put every Google Task a reopen just
+ * un-completed back to `needsAction`, so Reclaim re-books the time.
+ *
+ * Pass only the steps that actually went done → not-done, for the same reason
+ * the completion twin takes only the ones it closed.
+ */
+export async function reopenGoogleTasksForItem(
+  task: GoogleTaskRef | null,
+  steps: readonly GoogleTaskRef[],
+): Promise<number> {
+  return patchPool(task ? [task, ...steps] : steps, "needsAction");
 }
