@@ -5,6 +5,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  * split because the pure half is imported by a `"use client"` component: see the
  * doc on `shopping-summary-sync.ts`, and `client-server-boundary.test.ts` for the
  * gate that keeps the split honest.
+ *
+ * `upsert` is MOCKED here, so everything below asserts a payload. That is the right
+ * shape for the branch logic and the wrong one for the `create`/`update` split: a
+ * mocked upsert has neither a row nor an absent row, so "the row exists" and "no row
+ * yet" are the same test twice. Anything that depends on which clause actually ran
+ * belongs in `shopping-summary-sync.integration.test.ts` instead (Duo review, !295).
  */
 
 const { prismaMock } = vi.hoisted(() => ({

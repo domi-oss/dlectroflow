@@ -46,6 +46,33 @@ import { prisma } from "@/lib/db";
  * `deleteMany` rather than `delete` when the list empties, so a concurrent delete
  * of the same row is a 0-row no-op instead of a P2025 throw — the reason
  * `deleteBrainDumpItem` uses it too.
+ *
+ * ## `create` does not consult `resurface`, and that is the right answer
+ *
+ * `resurface` means "un-dismiss a summary that WAS dismissed", so it has nothing
+ * to say about a row that does not exist: an absent row carries no dismissal to
+ * preserve. The `create` clause names only `workspaceId`, leaving `clearedAt`
+ * null, so the row is born SHOWING whichever flag the caller passed.
+ *
+ * That branch is reachable in exactly two states, and showing is right in both:
+ *
+ *  * **The day this ships**, for any workspace that already has `ShoppingItem`
+ *    rows from !294. Its list is non-empty and has never been dismissed, so the
+ *    line belongs in the inbox. Waiting for a *growing* write instead would hide
+ *    the feature from precisely the people who already keep a list — and hide it
+ *    indefinitely, since a list nobody adds to would never earn its line.
+ *  * **A missed sync** — the "list outlives the row" case `shopping-summary.ts`
+ *    promises is self-healing. This clause is what heals it.
+ *
+ * No dismissal can be lost this way, because a row is only ever removed when the
+ * count reaches zero and climbing back above zero takes a growing write, which is
+ * `resurface: true` regardless. Gating `create` on the flag was tried against a
+ * real database and breaks both bullets above, so it is refused rather than
+ * merely unimplemented — `shopping-summary-sync.integration.test.ts` executes
+ * this clause for real, which the colocated unit test cannot: it mocks `upsert`,
+ * so "row exists" and "no row yet" are the same test twice there.
+ *
+ * (Raised by Duo review on !295 and confirmed as intended, not changed.)
  */
 export async function syncShoppingSummary(
   workspaceId: string,
@@ -67,12 +94,16 @@ export async function syncShoppingSummary(
 
   await prisma.shoppingSummary.upsert({
     where: { workspaceId },
+    // Born showing: `clearedAt` is deliberately absent here, whatever `resurface`
+    // says, because a row that does not exist holds no dismissal. The doc above
+    // works through the two states that reach this clause.
     create: { workspaceId },
     // An empty `update` is deliberate and is NOT a no-op call to remove: it is
     // what "the row already exists and this write is not a reason to un-dismiss
-    // it" looks like, and the upsert still has to run because the row may not
-    // exist yet (the first add is `resurface: true`, but so is the first un-tick
-    // of an item on a list whose summary was never created).
+    // it" looks like. The upsert still has to run even in this branch, because
+    // the row may not exist yet — a `resurface: false` write is how a
+    // pre-existing list gets its first summary row, so `create` above is on the
+    // live path here and not only under `resurface: true`.
     update: options.resurface ? { clearedAt: null } : {},
   });
 }

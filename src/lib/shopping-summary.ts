@@ -29,7 +29,9 @@ import { t, type Voice } from "@/lib/strings";
  *    wrong is displayed.
  *  * **List outlives the row.** No line is shown until the next shopping write,
  *    which re-runs this sync and creates it. Self-healing, and the failure is a
- *    missing nudge rather than a wrong one.
+ *    missing nudge rather than a wrong one. Proved rather than promised, against
+ *    a real database, in `shopping-summary-sync.integration.test.ts` — the same
+ *    branch a first deploy over a pre-existing list takes.
  *
  * Neither loses data and neither can display a number the list does not have,
  * because there is no second copy of the number to go stale. That is the whole
