@@ -276,9 +276,9 @@ function topLevelClauses(statement: string): string[] {
 
 /**
  * Where one `ADD COLUMN` ends inside a clause: at the next `ADD COLUMN`, or at
- * the end. Kept alongside the comma split above rather than replaced by it,
- * because the comma is what Postgres requires and not what every hand-written
- * migration in a repo of hand-written migrations actually contains.
+ * the end of the clause. Kept alongside the comma split above rather than
+ * replaced by it — the comma is what Postgres requires, not what every
+ * hand-edited migration in this tree reliably contains.
  */
 const ADD_COLUMN_CLAUSE =
   /\bADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?[\s\S]*?(?=\bADD\s+COLUMN\b|$)/gi;
@@ -330,10 +330,12 @@ const ADD_FOREIGN_KEY = /\bADD\s+(?:CONSTRAINT\s+"?\w+"?\s+)?FOREIGN\s+KEY\b/i;
  *                     ADD CONSTRAINT "b" CHECK (…) NOT VALID;
  *
  * reported nothing at all, though `a` is checked against every existing row.
- * Both orderings of that pair are covered by the colocated test, because the
- * greedy `[^;]*` capture that used to answer this made the FIRST match consume
- * the rest of the statement — so a `NOT VALID` anywhere in it, before or after,
- * was the only clause anyone read.
+ *
+ * The colocated test covers both orderings of that pair, because the old
+ * `([^;]*)` capture was greedy: the FIRST match consumed the rest of the
+ * statement, leaving `matchAll` nothing to iterate, so exactly one clause was
+ * ever examined and a `NOT VALID` anywhere in the statement — in front of the
+ * validated constraint or behind it — decided the answer for all of them.
  */
 function addsAValidatedConstraint(statement: string, adds: RegExp): boolean {
   return topLevelClauses(statement).some(

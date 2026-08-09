@@ -546,12 +546,12 @@ const CHECK_CONSTRAINT_NAME = /^([A-Za-z0-9_]+)_([A-Za-z0-9]+)_check$/;
  * the name does not follow the convention.
  *
  * The ONE reading of `<Table>_<column>_check` in this repo (#190, raised in
- * review of !292). It had two, and they disagreed about the table half: a table
- * called `Focus_Session` was a constraint this file's guard reports on and one
- * that `dropConstraintAfterWrite` refused to reconstruct, so the static half and
- * the seeded half of #190 covered different sets of files — and the difference
- * only shows on the file that needs both. Sharing the reasoning is the same
- * move `isBefore` and `splitInnerStatements` are here for.
+ * review of !292). It had two, and they disagreed about the table half. A
+ * constraint on a table named `Focus_Session` was therefore one this file's
+ * guard reports on and one `dropConstraintAfterWrite` refused to reconstruct:
+ * the static half and the seeded half of #190 covered different sets of files,
+ * and the difference only shows on the file that needs both. Sharing the
+ * reasoning is the same move `isBefore` and `splitInnerStatements` are here for.
  *
  * The table half admits `_` and the column half does not, which is what makes
  * `Focus_Session_mode_check` split as `Focus_Session` + `mode`: the first group
