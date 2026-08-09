@@ -43,23 +43,40 @@ export class RevokedAccountError extends MissingWorkspaceError {
   }
 }
 
-/** A workspace's kind is a fact about the session that produced it, so it is
- *  returned alongside the id rather than re-derived from the id's shape. */
-export type ResolvedWorkspace = {
-  id: string;
-  kind: typeof WorkspaceKind.User | typeof WorkspaceKind.Guest;
-  /**
-   * Whose account this is, for a `kind: "user"` resolution; absent for a guest
-   * sandbox, which belongs to nobody.
-   *
-   * Carried out of the token for the same reason `kind` is (#220): it is a fact
-   * about the session that produced this workspace, and the alternative is
-   * re-deriving it with a second query against the row we are about to write to.
-   * `userId` and `wsId` are signed together, so they cannot be mismatched by a
-   * caller — which is what makes it safe to look an account up by it.
-   */
-  userId?: string;
-};
+/**
+ * A workspace's kind is a fact about the session that produced it, so it is
+ * returned alongside the id rather than re-derived from the id's shape.
+ *
+ * #220 makes it a DISCRIMINATED UNION so `userId` can be non-optional on the
+ * arm that has one. Written as one object with `userId?: string`, narrowing on
+ * `kind === "user"` would leave the id possibly-undefined, and
+ * `findUnique({ where: { id: undefined } })` type-checks happily against
+ * Prisma's `UserWhereUniqueInput` — a status check that quietly throws
+ * "needs at least one argument" instead of reading a status. It would fail
+ * closed, but it would fail closed for the wrong reason and only at runtime.
+ * The union makes the compiler the thing that guarantees it.
+ */
+export type ResolvedWorkspace =
+  | {
+      id: string;
+      kind: typeof WorkspaceKind.User;
+      /**
+       * Whose account this is. Carried out of the token for the same reason
+       * `kind` is: it is a fact about the session that produced this workspace,
+       * and the alternative is re-deriving it with a query against the very row
+       * we are about to write to. `userId` and `wsId` are signed together, so a
+       * caller cannot mismatch them — which is what makes it safe to look an
+       * account up by it.
+       */
+      userId: string;
+    }
+  | {
+      id: string;
+      kind: typeof WorkspaceKind.Guest;
+      /** A guest sandbox belongs to nobody; `never` so the two arms stay
+       *  distinguishable by more than their `kind` string. */
+      userId?: never;
+    };
 
 /** The signed-in account behind the current request, or null. */
 export type CurrentUser = {
@@ -88,10 +105,10 @@ export type CurrentUser = {
  * {@link currentWorkspaceId}, which is already making a round trip and is only
  * reached by callers that go on to read or write account data.
  *
- * That split is why this function is NOT exported beyond this module's own
- * tests, and why `scoping.harness.test.ts` fails if another module starts
- * calling it: reaching past `currentWorkspaceId()` for a workspace id is exactly
- * how a status-blind write path would come back.
+ * That split is why `scoping.harness.test.ts` fails if any module outside this
+ * file CALLS this function. It is exported — the module's own tests need it —
+ * but it is not a public entry point, and reaching past `currentWorkspaceId()`
+ * for a workspace id is exactly how a status-blind write path would come back.
  */
 export async function resolveWorkspace(input: {
   owner?: string;
@@ -261,9 +278,10 @@ export async function currentWorkspaceId(): Promise<string> {
   });
   if (ws.kind === WorkspaceKind.User) {
     const owner = await prisma.user.findUnique({
-      // `ws.userId` comes out of the same signed token as `ws.id`, so the two
-      // cannot be mismatched by a caller. `select` is one column: nothing here
-      // needs the account, only permission to continue.
+      // `ws.userId` is a non-optional `string` on this arm of the union, and it
+      // comes out of the same signed token as `ws.id`, so a caller can neither
+      // omit it nor point it at somebody else. `select` is one column: nothing
+      // here needs the account, only permission to continue.
       where: { id: ws.userId },
       select: { status: true },
     });
@@ -300,8 +318,9 @@ export async function currentWorkspaceId(): Promise<string> {
  * Trading a read on every byte-range request of every seek for that is the wrong
  * side of the deal. Anything that reads or writes account data must go through
  * {@link currentWorkspaceId}, which does check, and `scoping.harness.test.ts`
- * pins this function as the single named exemption so a third caller has to
- * argue for itself.
+ * names this function in `STATUS_BLIND_RESOLVERS` with that reason — so the
+ * exemption is one somebody had to write down, and a fourth resolver appearing
+ * without a status check fails the build rather than joining it quietly.
  *
  * A missing or tampered token is `false`. Anything else rethrows, deliberately:
  * reporting an outage as "not signed in" sends somebody with a perfectly good
