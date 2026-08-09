@@ -16,6 +16,7 @@ import {
   useSaveStatus,
   SaveIndicator,
 } from "@/components/settings/use-save-status";
+import { revertOptimistic } from "@/components/settings/revert-optimistic";
 import { cn } from "@/lib/utils";
 import { CollapsibleSection } from "@/components/nav/collapsible-section";
 
@@ -40,6 +41,20 @@ const TYPEFACE_LABEL: Record<Typeface, StringKey> = {
  * strike resolve from the same CSS custom properties the whole app uses, scoped
  * to the pending choice via completionRootAttrs — so the preview updates
  * instantly, before the server round-trip re-paints the shell.
+ *
+ * ## A failed save both speaks and steps back (#227)
+ *
+ * Audited alongside the two sites #227 names, and it was NOT already correct: it
+ * had the reporting (`persist`'s catch → `markError()`) and not the rollback, so
+ * a refused write left the checkbox and both radiogroups showing a value the
+ * server had declined. Worse here than in the sections with switches alone,
+ * because the two live previews read the same state: the completion sample and
+ * the typeface sample went on demonstrating the refused choice, so the page made
+ * the same false claim three times over.
+ *
+ * The repair goes through `revertOptimistic` rather than `setPrefs(previous)` —
+ * these controls stay live during a save, so attempts can interleave and a slow
+ * failure must not clobber a newer success. That module holds the argument.
  */
 export function AppearanceSection({
   completeStrikethrough,
@@ -58,6 +73,9 @@ export function AppearanceSection({
   });
 
   const persist = (next: AppearancePrefs) => {
+    // Captured before the optimistic write: this render's `prefs` IS the
+    // pre-attempt state, and the rollback needs it to know what to put back.
+    const previous = prefs;
     setPrefs(next); // optimistic: the live preview reflects the pending choice
     startTransition(async () => {
       markSaving();
@@ -66,6 +84,11 @@ export function AppearanceSection({
         markSaved();
         router.refresh();
       } catch {
+        // #227 — say so AND put the control (and its previews) back. The
+        // functional updater reads the state as it stands now, not this
+        // closure's `prefs`, so `revertOptimistic` can tell whether this attempt
+        // still owns what is on screen.
+        setPrefs((current) => revertOptimistic(current, next, previous));
         markError();
       }
     });

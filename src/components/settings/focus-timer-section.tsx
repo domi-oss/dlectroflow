@@ -10,6 +10,7 @@ import {
   useSaveStatus,
   SaveIndicator,
 } from "@/components/settings/use-save-status";
+import { revertOptimistic } from "@/components/settings/revert-optimistic";
 import { TimerStylePreview } from "@/components/focus/timer-style-preview";
 import { CollapsibleSection } from "@/components/nav/collapsible-section";
 
@@ -38,6 +39,23 @@ type Prefs = {
  * plain) so one option is always shown selected, and picking any option persists
  * that explicit value. A failed write surfaces a non-blocking error and leaves
  * the controls editable.
+ *
+ * ## A failed save both speaks and steps back (#227)
+ *
+ * Audited alongside the two sites #227 names, and it was NOT already correct:
+ * `set()` wrote `prefs` optimistically and `persist`'s catch reported the
+ * failure without restoring it, so a refused write left five switches and the
+ * style radiogroup showing values the server had declined — an error message
+ * next to controls still reading the way the user set them.
+ *
+ * `timerStyle` is the part worth spelling out. `null` means "never chosen", and
+ * the UI renders the voice-resolved default for it, so a rollback that lost the
+ * null would quietly promote that default into an explicit stored choice — the
+ * exact write this section has just failed to make. `revertOptimistic` restores
+ * the field's previous value rather than the value it renders as, which is why
+ * the rollback goes through it and not through `setPrefs(previous)`; that also
+ * keeps a slow failure from clobbering a newer success, since nothing here
+ * disables a control during a save.
  */
 export function FocusTimerSection({
   timerStyle,
@@ -61,7 +79,7 @@ export function FocusTimerSection({
     pauseTogether,
   });
 
-  const persist = (next: Prefs) =>
+  const persist = (next: Prefs, previous: Prefs) =>
     startTransition(async () => {
       markSaving();
       try {
@@ -69,6 +87,12 @@ export function FocusTimerSection({
         markSaved();
         router.refresh();
       } catch {
+        // #227 — say so AND put the control back. The functional updater reads
+        // the state as it stands now, not this closure's `prefs`, so
+        // `revertOptimistic` can tell whether this attempt still owns what is on
+        // screen — and it restores a null `timerStyle` as a null, rather than as
+        // the default the UI renders in its place.
+        setPrefs((current) => revertOptimistic(current, next, previous));
         markError();
       }
     });
@@ -76,7 +100,7 @@ export function FocusTimerSection({
   const set = <K extends keyof Prefs>(key: K, value: Prefs[K]) => {
     const next = { ...prefs, [key]: value };
     setPrefs(next);
-    persist(next);
+    persist(next, prefs);
   };
 
   const styleOptions: { value: FocusTimerStyle; label: string }[] = [

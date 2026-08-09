@@ -143,6 +143,36 @@ describe("AgingSection auto-save", () => {
     await user.type(overdueInput, "0"); // still accepts input
     expect(overdueInput).toHaveValue(90);
   });
+
+  /**
+   * #227 audited the four `useSaveStatus` sections for "reports the failure AND
+   * rolls the control back". This one was **already correct**, and the reason is
+   * a decision rather than an omission — so it is pinned here, or the next audit
+   * reads the missing rollback as the bug the other three had.
+   *
+   * These are five free-entry number fields behind a 600 ms debounce. The value
+   * on screen is the user's own in-progress typing, not a toggle's committed
+   * state, so restoring the server's number would DELETE what they are still
+   * editing — a considerably worse outcome than the stale-looking switch #227 is
+   * about, and the failure mode the section's docblock has always named when it
+   * says a failed write leaves every input editable. Reporting is the whole
+   * correct answer for a field the user is holding.
+   */
+  it("keeps what the user typed when the save fails — deliberately no rollback", async () => {
+    vi.mocked(updateAgingSettings).mockRejectedValueOnce(new Error("boom"));
+    const user = userEvent.setup();
+    renderSection();
+
+    const agingInput = screen.getByLabelText("Aging (hours)");
+    await user.clear(agingInput);
+    await user.type(agingInput, "12");
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent(/couldn't save/i),
+    );
+    // 12, not the stored 4: the failure is reported, the typing survives it.
+    expect(agingInput).toHaveValue(12);
+  });
 });
 
 describe("AgingSection — the disclosure (#101)", () => {
