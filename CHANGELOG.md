@@ -459,6 +459,15 @@ operators upgrading a self-hosted instance don't get surprised.
   before retrying, rather than claiming a failure it cannot be sure of — the
   step stays in the plan either way, so nothing is lost.
 
+  Two more things the same control now gets right, because the plan's rows have
+  an identity of their own rather than being told apart by their words. **A
+  step you edit while it is still sending keeps the edit**, and a short note
+  says your inbox has the wording as it read when you pressed, so you know an
+  item arrived that you did not see. And **two steps that happen to say exactly
+  the same thing are two steps**: pressing one no longer makes the other look
+  busy, no longer swallows a press on it, and no longer clears a message about
+  the first one.
+
 - **The focus timer's Start and Resume no longer fail in silence (#139's shape,
   found via #198).** Both buttons handled a server that could not be *reached*,
   and neither handled a server that answered and *declined* — so in those cases

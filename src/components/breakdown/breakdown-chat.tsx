@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { RefreshCw, RotateCcw, TriangleAlert } from "lucide-react";
+import { Info, RefreshCw, RotateCcw, TriangleAlert } from "lucide-react";
 import { confirmBreakdown } from "@/app/actions/breakdown";
 import { createBrainDumpItem } from "@/app/actions/braindump";
 import { pushStepsToGoogleTasks } from "@/app/actions/google-schedule";
@@ -52,22 +52,88 @@ type ChatMsg = { role: "assistant" | "user"; text: string };
 export const EJECT_TIMEOUT_MS = 10_000;
 
 /**
- * #212 — a step whose eject did not land.
+ * #212 (!304 review) — a proposal row, plus the identity `ProposedStep` cannot
+ * carry.
  *
- * Holds the words as well as the flags, so the notice can quote them. In the
- * common case they are also still in their row — which is the whole remedy here
- * — but the user may delete that row while the notice is up, and then this
- * record is the only copy.
+ * The first cut used the row's WORDS as its identity, because a proposed step
+ * genuinely has no id: the rows are an unsaved model proposal and no `Step`
+ * exists until the breakdown is confirmed. Duo's review found the two things
+ * that costs, and both are the same fact seen from different sides — **the
+ * words are not stable and they are not unique**:
+ *
+ *   • Edit a row while its own eject is in the air and its key changes out from
+ *     under the outstanding write. Its control stops reading busy, the guard
+ *     that refuses a double-submit no longer recognises it, and a second press
+ *     inserts the row a second time.
+ *   • Two rows can legitimately say the same thing ("Email the venue" twice, a
+ *     week apart), and then they are ONE row as far as every eject decision is
+ *     concerned: pressing either busies both, the second press is refused
+ *     outright, and one row's success clears the other's failure notice.
+ *
+ * The remedy is the one the words were standing in for: mint an id when the row
+ * enters the editor. It is a CLIENT-side identity and it stays there — see
+ * `toProposal`, which strips it before anything crosses the wire.
  */
-type EjectFailure = {
-  /** The trimmed text that was sent, and the identity of the attempt. */
-  text: string;
+type EditorStep = ProposedStep & { key: string };
+type EditorProposal = { parentEmoji: string; steps: EditorStep[] };
+
+/**
+ * A monotonic counter rather than `crypto.randomUUID()`.
+ *
+ * Uniqueness only has to hold within one browsing session's editor, a counter
+ * is trivially collision-free at that scope, and `randomUUID` is unavailable
+ * outside a secure context — which would make the whole editor depend on HTTPS
+ * for something no user can see. Module-scoped, so two editors mounted at once
+ * still cannot collide.
+ */
+let stepKeySeq = 0;
+const withKey = (step: ProposedStep): EditorStep => ({
+  ...step,
+  key: `step-${++stepKeySeq}`,
+});
+const withKeys = (p: Proposal): EditorProposal => ({
+  ...p,
+  steps: p.steps.map(withKey),
+});
+
+/**
+ * Drop the client-side identity on the way out.
+ *
+ * Not tidiness. `buildUserPrompt` splices the proposal into the model's turn
+ * with `JSON.stringify`, so a key riding along would be spent tokens on every
+ * refinement AND an identifier inside a payload that is deliberately free of
+ * them (see the privacy note on `BreakdownContext`). `confirmBreakdown` maps
+ * the three real fields explicitly and would ignore a fourth, but relying on
+ * that would leave the prompt leak standing.
+ */
+function toProposal(p: EditorProposal): Proposal {
+  return {
+    parentEmoji: p.parentEmoji,
+    steps: p.steps.map(({ text, estMinutes, subtaskEmoji }) => ({
+      text,
+      estMinutes,
+      subtaskEmoji,
+    })),
+  };
+}
+
+/**
+ * #212 — how a settled eject ended, from the row's point of view.
+ *
+ * One enum rather than the pair of booleans this started as, because the fourth
+ * member is not a failure at all and must suppress the others rather than sit
+ * alongside them: `edited` means the write LANDED. Booleans made that
+ * expressible-but-wrong; a union makes it unrepresentable.
+ */
+type EjectOutcome =
+  /** The write rejected for a reason a retry can plausibly fix. */
+  | "failed"
   /**
    * The browser is running a different deployment than the server. Next
    * regenerates server-action ids on every build, so a retry re-posts the same
    * dead id — the ONLY thing that can work is a reload.
    */
-  stale: boolean;
+  | "stale"
   /**
    * The write never answered, so **whether it landed is unknown**. The timeout
    * bounds how long the UI waits, not the request, so the insert may still
@@ -75,47 +141,83 @@ type EjectFailure = {
    * distinct from the generic failure because "couldn't send that" would then be
    * a claim the client cannot support.
    */
-  timedOut: boolean;
+  | "timedOut"
+  /**
+   * The write landed, but the user edited the row while it was in the air, so
+   * the inbox holds the earlier wording and the row holds theirs. Both are kept
+   * — dropping the row would destroy the words they typed while waiting, which
+   * is #212's own data loss with the hands swapped — so all that is left is to
+   * say so.
+   */
+  | "edited";
+
+/**
+ * #212 — the eject the notice above the list is about.
+ *
+ * Holds the words as well as the outcome, so the notice can quote them. In the
+ * common case they are also still in their row — which is the whole remedy here
+ * — but the user may delete that row while the notice is up, and then this
+ * record is the only copy. The `key` is what the notice is ABOUT: a Retry has to
+ * re-target the same row, and a later eject of some other row must not clear it.
+ */
+type EjectNotice = {
+  /** The row this attempt was about — never its text (see `EditorStep`). */
+  key: string;
+  /** The trimmed text that was sent. */
+  text: string;
+  outcome: EjectOutcome;
 };
 
 /**
- * Which message a failed eject gets — ordered by how much the user can be told,
- * most-certain first. Mirrors `captureMessageKey` in `inbox-view.tsx`,
- * `writeFailureKey` in `shopping-list.tsx` and `failureMessageKey` in
- * `focus-timer.tsx`: `stale` and `timedOut` both override the generic copy
- * because both change what the user should DO.
+ * Which message an eject notice gets. Mirrors `captureMessageKey` in
+ * `inbox-view.tsx`, `writeFailureKey` in `shopping-list.tsx` and
+ * `failureMessageKey` in `focus-timer.tsx` — a total map now the outcomes are an
+ * enum, so adding one without its copy is a type error rather than a fall
+ * through to "couldn't send that".
  */
-function ejectMessageKey(failure: EjectFailure): StringKey {
-  if (failure.stale) return "breakdown.eject.stale";
-  if (failure.timedOut) return "breakdown.eject.timeout";
-  return "breakdown.eject.failed";
-}
+const EJECT_MESSAGE: Record<EjectOutcome, StringKey> = {
+  failed: "breakdown.eject.failed",
+  stale: "breakdown.eject.stale",
+  timedOut: "breakdown.eject.timeout",
+  edited: "breakdown.eject.edited",
+};
+
+/** Which row a settled eject is about, and what should happen to it. */
+export type SettledEject =
+  /** The row is still there and still says what was sent — take it away. */
+  | { kind: "remove"; at: number }
+  /** The row is there but says something else now — keep it, and say so. */
+  | { kind: "edited"; at: number }
+  /** No such row: the user deleted it themselves while the write was out. */
+  | { kind: "gone" };
 
 /**
- * #212 — which row a settled eject is about, or `-1` for none.
+ * #212 (!304 review) — what a settled eject should do to the list.
  *
- * Proposed steps have no ids (they are an unsaved model proposal — see the
- * comment on the step list below), so the words ARE the identity and `hint` is
- * only the index the press came from. The hint is checked first, because two
- * rows can legitimately say the same thing and removing the one the user
- * actually pressed is the least surprising answer; it is then re-derived from
- * the text, because a reorder or a delete during the round trip has moved it.
+ * Keyed lookup, never a text match. The text is still compared, but only to
+ * separate "this row is unchanged" from "the user has typed into it since" —
+ * never to FIND the row, because two rows can say the same thing and removing
+ * the wrong one is unrecoverable.
  *
- * Answering `-1` matters as much as the other two: the user may have deleted
- * that row themselves while the write was outstanding, and removing whatever
- * happens to sit at the old index would be exactly the data loss this fix is
- * about, wearing a different hat.
+ * `gone` matters as much as the other two, and is deliberately distinct from
+ * `edited`: deleting the row is exactly what the user asked for, so it passes in
+ * silence, while an edited row is a divergence they cannot see and have to be
+ * told about. The words-only predecessor could not tell those two apart — both
+ * came back `-1` — which is why the divergence was silent.
  *
  * Pure and exported, so it is unit-testable on synthetic steps rather than only
  * through the component — the shape every hygiene module in `src/lib` uses.
  */
-export function ejectedStepIndex(
-  steps: readonly ProposedStep[],
-  text: string,
-  hint: number | null,
-): number {
-  if (hint !== null && steps[hint]?.text.trim() === text) return hint;
-  return steps.findIndex((step) => step.text.trim() === text);
+export function settledEject(
+  steps: readonly Pick<EditorStep, "key" | "text">[],
+  key: string,
+  sentText: string,
+): SettledEject {
+  const at = steps.findIndex((step) => step.key === key);
+  if (at < 0) return { kind: "gone" };
+  return steps[at].text.trim() === sentText
+    ? { kind: "remove", at }
+    : { kind: "edited", at };
 }
 
 type ScheduleState = {
@@ -162,9 +264,12 @@ export function BreakdownChat({
   const accountHintId = useId();
   const [gsched, setGsched] = useState<ScheduleState>({ status: "idle" });
   const [messages, setMessages] = useState<ChatMsg[]>([]);
-  const [proposal, setProposal] = useState<Proposal | null>(
-    initialProposal ??
-      (startManual ? { parentEmoji: "🗂️", steps: [blankStep()] } : null),
+  const [proposal, setProposal] = useState<EditorProposal | null>(() =>
+    initialProposal
+      ? withKeys(initialProposal)
+      : startManual
+        ? { parentEmoji: "🗂️", steps: [withKey(blankStep())] }
+        : null,
   );
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
@@ -176,16 +281,19 @@ export function BreakdownChat({
   const startedRef = useRef(false);
 
   /**
-   * #212 — the ejects whose writes are still outstanding, keyed by the words
-   * they are sending.
+   * #212 — the ejects whose writes are still outstanding, by row key.
    *
    * A Set rather than one boolean, and that is #169's lesson applied here: a
    * list-wide flag would make every row's control read busy because one of them
    * is, and it would be cleared by whichever request settled last rather than by
-   * the one it was guarding. The words are the key because a proposed step has
-   * no id (see `ejectedStepIndex`), and they are also the right key: a second
-   * press of the SAME row is the double-submit to refuse, while a press of a
-   * different row is an independent insert that should go.
+   * the one it was guarding.
+   *
+   * Keyed by the ROW (!304 review), not by the words it is sending. "A second
+   * press of the same row is the double-submit to refuse, a press of a different
+   * row is an independent insert that should go" was always the intent; with the
+   * words as the key it was neither, in both directions at once — an edit
+   * mid-flight let the same row through twice, and two rows saying the same
+   * thing could not both go. See `EditorStep`.
    */
   const [ejecting, setEjecting] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -201,36 +309,51 @@ export function BreakdownChat({
    */
   const ejectsInFlight = useRef<Set<string>>(new Set());
   /**
-   * The eject that did not land. ONE slot, like the capture bar's (#210) — but
+   * The eject the notice is about. ONE slot, like the capture bar's (#210) — but
    * the boundary costs much less here, because a displaced notice loses only the
    * announcement. The words of every failed eject are still in their rows, which
    * is the whole point of not removing them; #210's field could hold one draft
    * and so had to choose which failure kept its text.
    */
-  const [ejectFailure, setEjectFailure] = useState<EjectFailure | null>(null);
+  const [ejectNotice, setEjectNotice] = useState<EjectNotice | null>(null);
   const ejectErrorId = useId();
   const ejectSendingId = useId();
   const retryEjectRef = useRef<HTMLButtonElement | null>(null);
   const addStepRef = useRef<HTMLButtonElement | null>(null);
   /**
-   * Each row's eject control, by index — so focus can be handed to the control
-   * that TAKES THE PLACE of one that unmounts (WCAG 2.4.3). Indices shift down
-   * on removal, which is exactly the wanted behaviour: index `i` after the
-   * removal is the next step's button.
+   * Each row's eject control, **by row key** — so focus can be handed to the
+   * control that TAKES THE PLACE of one that unmounts (WCAG 2.4.3).
+   *
+   * By key rather than by index (!304 review). The index version leaned on
+   * "indices shift down on removal, so index `i` afterwards is the next step's
+   * button", which is true of the list and not of this Map: every row re-runs
+   * its inline ref callback on every render, so with indices as keys a removal
+   * has one row detaching index `i` while another attaches it, and the answer
+   * depends on the order React happens to commit them in. Row keys are stable
+   * for the row's whole life, so a detach and an attach can never name the same
+   * entry unless they are the same row.
    */
-  const ejectButtonRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
-  /** Where focus goes once a successful eject has re-rendered; `-1` = nowhere
-   * left in the list, fall through to "Add a step". */
-  const focusAfterEject = useRef<number | null>(null);
+  const ejectButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  /**
+   * Where focus goes once a successful eject has re-rendered.
+   *
+   * `null` means leave focus alone — the overwhelmingly common case, including
+   * every eject the user did not have focus on. A `successorKey` of `null` is
+   * the other thing: focus SHOULD move, but the list ran out, so it falls
+   * through to "Add a step".
+   */
+  const focusAfterEject = useRef<{ successorKey: string | null } | null>(null);
   useEffect(() => {
-    const at = focusAfterEject.current;
-    if (at === null) return;
+    const target = focusAfterEject.current;
+    if (target === null) return;
     focusAfterEject.current = null;
     // In an effect rather than beside the state update: the old button is still
     // mounted then, so focusing anything would be undone by the unmount.
     const refs = ejectButtonRefs.current;
-    (refs.get(at) ?? refs.get(at - 1) ?? addStepRef.current)?.focus();
-  }, [proposal, ejecting, ejectFailure]);
+    const successor =
+      target.successorKey === null ? null : refs.get(target.successorKey);
+    (successor ?? addStepRef.current)?.focus();
+  }, [proposal, ejecting, ejectNotice]);
   /**
    * The current steps, readable from a callback that started renders ago.
    *
@@ -239,7 +362,7 @@ export function BreakdownChat({
    * reported what it decided would have to mutate on the way past and would then
    * run twice under StrictMode.
    */
-  const latestSteps = useRef<ProposedStep[]>(proposal?.steps ?? []);
+  const latestSteps = useRef<EditorStep[]>(proposal?.steps ?? []);
   useEffect(() => {
     latestSteps.current = proposal?.steps ?? [];
   }, [proposal]);
@@ -268,10 +391,12 @@ export function BreakdownChat({
         // itself, under the session's own workspace, so what reaches the prompt
         // is a value the database vouches for rather than one this client
         // asserted (see `BreakdownRequest.taskId`).
+        // `toProposal`: the editor's row keys are a client-side identity and
+        // this body is spliced into the model's prompt verbatim. See its docs.
         body: JSON.stringify({
           taskId,
           title,
-          currentProposal: proposal,
+          currentProposal: proposal && toProposal(proposal),
           feedback,
         }),
       });
@@ -292,9 +417,12 @@ export function BreakdownChat({
             assistantText += ev.delta;
             setStreamText(assistantText);
           } else if (ev.type === "steps") {
-            setProposal(ev.data);
+            // Fresh keys: a re-proposal is a new list of rows, even where the
+            // words coincide with the ones it replaced. Minted here rather than
+            // inside the updater, which must stay pure — see `latestSteps`.
+            setProposal(withKeys(ev.data));
           } else if (ev.type === "fallback") {
-            setProposal(ev.data);
+            setProposal(withKeys(ev.data));
             setFallbackNote(
               ev.reason === "quota"
                 ? "⚡ You're out of AI breakdowns for now — but here's a solid starter plan you can tweak, and the focus list still works."
@@ -318,7 +446,7 @@ export function BreakdownChat({
     }
   }
 
-  function updateStep(i: number, patch: Partial<Proposal["steps"][number]>) {
+  function updateStep(i: number, patch: Partial<ProposedStep>) {
     setProposal((p) =>
       p
         ? {
@@ -342,14 +470,14 @@ export function BreakdownChat({
     );
   }
 
-  const markEjecting = (text: string, active: boolean) =>
+  const markEjecting = (key: string, active: boolean) =>
     setEjecting((prev) => {
       // Never mutates the previous Set: React bails out of a re-render when the
       // reference is unchanged, which would strand the row's control busy.
-      if (prev.has(text) === active) return prev;
+      if (prev.has(key) === active) return prev;
       const next = new Set(prev);
-      if (active) next.add(text);
-      else next.delete(text);
+      if (active) next.add(key);
+      else next.delete(key);
       return next;
     });
 
@@ -375,12 +503,13 @@ export function BreakdownChat({
    * the user in the editor. The page's actual "go back" is `<BackLink>`.
    */
   const ejectStep = async (
+    key: string,
     text: string,
-    { hint, fromRetry }: { hint: number | null; fromRetry: boolean },
+    { fromRetry }: { fromRetry: boolean },
   ) => {
-    if (ejectsInFlight.current.has(text)) return;
-    ejectsInFlight.current.add(text);
-    markEjecting(text, true);
+    if (ejectsInFlight.current.has(key)) return;
+    ejectsInFlight.current.add(key);
+    markEjecting(key, true);
     try {
       await withActionTimeout(createBrainDumpItem(text), EJECT_TIMEOUT_MS);
       // Read while the pressed control still exists — it is about to unmount
@@ -388,43 +517,59 @@ export function BreakdownChat({
       // that has already gone.
       const pressed = fromRetry
         ? retryEjectRef.current
-        : hint === null
-          ? null
-          : (ejectButtonRefs.current.get(hint) ?? null);
-      if (pressed !== null && pressed === document.activeElement) {
-        focusAfterEject.current = ejectedStepIndex(
-          latestSteps.current,
-          text,
-          hint,
+        : (ejectButtonRefs.current.get(key) ?? null);
+      // Decided ONCE, from the last committed steps, and then used for all
+      // three of focus, removal and the notice. Deriving it twice from two
+      // sources is how they come to disagree; the removal below is by key, so
+      // it stays correct even if the list moved under this in the meantime.
+      const steps = latestSteps.current;
+      const settled = settledEject(steps, key, text);
+      if (settled.kind === "remove") {
+        if (pressed !== null && pressed === document.activeElement) {
+          // The row that will occupy this one's place: the next one down, or
+          // the one above when this was the last. A key, not an index — by the
+          // time the effect runs the indices have all moved.
+          const successor = steps[settled.at + 1] ?? steps[settled.at - 1];
+          focusAfterEject.current = { successorKey: successor?.key ?? null };
+        }
+        // Pure updater, and removing by key: a row the user reordered while
+        // this was in flight is still the same row, and one that merely says
+        // the same words never was.
+        setProposal((p) =>
+          p ? { ...p, steps: p.steps.filter((s) => s.key !== key) } : p,
         );
       }
-      // Pure updater, deciding from the CURRENT steps: a row the user reordered
-      // or deleted while this was in flight must not be mistaken for the one
-      // this attempt was about.
-      setProposal((p) => {
-        if (!p) return p;
-        const at = ejectedStepIndex(p.steps, text, hint);
-        return at < 0 ? p : { ...p, steps: p.steps.filter((_, j) => j !== at) };
+      setEjectNotice((prev) => {
+        // The write landed on words the row no longer says. Neither copy can be
+        // dropped — the inbox item cannot be unsent, and removing the row would
+        // destroy what the user typed while waiting — so the only thing left is
+        // to tell them, or they get an item they never saw arrive.
+        if (settled.kind === "edited") return { key, text, outcome: "edited" };
+        // Otherwise only THIS row clears its own notice. A different eject
+        // succeeding says nothing about this one, and clearing it would drop
+        // the only announcement that anything went wrong — including when the
+        // other row happens to say exactly the same thing (!304 review).
+        return prev?.key === key ? null : prev;
       });
-      // Only these words clear their own notice. A different eject succeeding
-      // says nothing about this one, and clearing it would drop the only
-      // announcement that anything went wrong.
-      setEjectFailure((prev) => (prev?.text === text ? null : prev));
     } catch (error) {
       // The row is deliberately still there. On a timeout that is also the safe
       // direction: the insert may have landed, so the user can end up with the
       // step in the editor AND in the inbox — a duplicate is one tap to delete,
       // a step nobody wrote down is not recoverable at all.
-      setEjectFailure({
+      setEjectNotice({
+        key,
         text,
-        stale: isStaleActionError(error),
-        timedOut: error instanceof ActionTimeoutError,
+        outcome: isStaleActionError(error)
+          ? "stale"
+          : error instanceof ActionTimeoutError
+            ? "timedOut"
+            : "failed",
       });
     } finally {
       // Must run on every exit including a throw: a flag left up is a control
       // that reads permanently busy.
-      ejectsInFlight.current.delete(text);
-      markEjecting(text, false);
+      ejectsInFlight.current.delete(key);
+      markEjecting(key, false);
     }
   };
 
@@ -433,7 +578,9 @@ export function BreakdownChat({
   // action instead — there the row exists on the server, so a failure leaves the
   // data intact and the press repeatable. Here it does not, which is #212.)
   function backToInbox(i: number) {
-    const text = proposal?.steps[i]?.text.trim();
+    const step = proposal?.steps[i];
+    if (!step) return;
+    const text = step.text.trim();
     // A blank row has nothing to send and nothing to lose, so it just goes —
     // same as pressing ✕, which is what the user means by ejecting an empty step.
     if (!text) {
@@ -441,23 +588,28 @@ export function BreakdownChat({
       return;
     }
     // `void`: `ejectStep` reports through state and cannot reject.
-    void ejectStep(text, { hint: i, fromRetry: false });
+    void ejectStep(step.key, text, { fromRetry: false });
   }
 
   const retryEject = () => {
-    if (!ejectFailure || ejecting.has(ejectFailure.text)) return;
-    // No index hint: the notice outlives whatever the list has done since, so
-    // the row is re-found by its words or not at all.
-    void ejectStep(ejectFailure.text, { hint: null, fromRetry: true });
+    if (!ejectNotice || ejectNotice.outcome === "edited") return;
+    if (ejecting.has(ejectNotice.key)) return;
+    // The notice carries the row it was about, so a retry re-targets that row
+    // however the list has been rearranged since — or, if the user deleted it,
+    // lands in the inbox and quietly changes nothing here.
+    void ejectStep(ejectNotice.key, ejectNotice.text, { fromRetry: true });
   };
 
   // Manual "Add a step" — appends a blank, editable row. No Claude call; the
   // list is rebuilt from the controlled state, so numbering stays 0-based.
   function addStep() {
+    // Minted outside the updater, so StrictMode's second pass reuses this row's
+    // key rather than burning a new one and remounting the row.
+    const step = withKey(blankStep());
     setProposal((p) =>
       p
-        ? { ...p, steps: [...p.steps, blankStep()] }
-        : { parentEmoji: "🗂️", steps: [blankStep()] },
+        ? { ...p, steps: [...p.steps, step] }
+        : { parentEmoji: "🗂️", steps: [step] },
     );
   }
 
@@ -471,7 +623,7 @@ export function BreakdownChat({
   function confirm() {
     if (!proposal || proposal.steps.length === 0) return;
     startConfirm(async () => {
-      await confirmBreakdown(taskId, proposal);
+      await confirmBreakdown(taskId, toProposal(proposal));
       setConfirmed(true);
     });
   }
@@ -754,48 +906,81 @@ export function BreakdownChat({
         </div>
       )}
 
-      {/* ── #212: a step that could not be sent to the inbox ─────────────────
+      {/* ── #212: how a step's eject to the inbox ended ──────────────────────
           Above the list rather than inside a row, because the row it is about
           may have been deleted since — and because one notice for the surface
           is the shape `inbox-view.tsx` and `shopping-list.tsx` already use.
 
-          `role="alert"` (assertive), and nothing polite nested inside it: a
-          `role="status"` within an assertive region is undefined enough in
-          practice that "will it announce" has no answer, and reproducing that
-          shape is #218. The in-flight line rides `aria-describedby` off the
-          pressed button instead.
+          Two live-region roles, by outcome, and NEVER nested (which is #218's
+          shape — a `role="status"` inside an assertive region is undefined
+          enough in practice that "will it announce" has no answer). The three
+          failures are `role="alert"`; `edited` is `role="status"`, because
+          nothing failed there — the write landed and the notice is reporting a
+          divergence, so interrupting whatever a screen reader is mid-way
+          through would overstate it. The in-flight line rides
+          `aria-describedby` off the pressed button in both.
 
           Focus is NOT moved here. The user is still in the editor with every
           row where they left it, so taking focus would interrupt them
-          mid-sentence (WCAG 3.2.2). The alert announces without stealing.
+          mid-sentence (WCAG 3.2.2). The notice announces without stealing.
           Focus IS moved when a row unmounts under it — see `focusAfterEject`.
 
-          Colour: the failure is carried by the icon and the words, never by the
-          red alone (WCAG 1.4.1). `text-destructive` / `border-destructive/40` /
+          Colour: the outcome is carried by the icon and the words, never by the
+          hue alone (WCAG 1.4.1). `text-destructive` / `border-destructive/40` /
           `bg-destructive/5` is the token pairing globals.css documents as AA in
-          both themes and the one the other two notices already use. Neither
+          both themes and the one the other two notices already use; `edited`
+          takes `STATUS_BANNER_TONE.warn` — "attention, not alarm", measured AA
+          over its own tint in both themes by #109, and never re-spelled here
+          (see that module's "do not re-hardcode a banner tone"). Neither
           control sets `outline-none`, so the UA focus ring draws and WCAG
           2.4.11 is satisfied without a bespoke indicator. */}
-      {ejectFailure && (
+      {ejectNotice && (
         <div
-          role="alert"
-          className="border-destructive/40 bg-destructive/5 flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-start sm:justify-between"
+          role={ejectNotice.outcome === "edited" ? "status" : "alert"}
+          className={cn(
+            "flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-start sm:justify-between",
+            ejectNotice.outcome === "edited"
+              ? STATUS_BANNER_TONE.warn
+              : "border-destructive/40 bg-destructive/5",
+          )}
         >
           <p
             id={ejectErrorId}
-            className="text-destructive flex min-w-0 items-start gap-1.5 text-sm font-medium"
+            className={cn(
+              "flex min-w-0 items-start gap-1.5 text-sm font-medium",
+              // The warn tone puts its colour on the wrapper, so this inherits
+              // it; the destructive pairing does not, so it says so here.
+              ejectNotice.outcome !== "edited" && "text-destructive",
+            )}
           >
-            <TriangleAlert
-              aria-hidden="true"
-              className="mt-0.5 h-4 w-4 shrink-0"
-            />
+            {ejectNotice.outcome === "edited" ? (
+              <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+            ) : (
+              <TriangleAlert
+                aria-hidden="true"
+                className="mt-0.5 h-4 w-4 shrink-0"
+              />
+            )}
             <span className="break-words">
-              {t(ejectMessageKey(ejectFailure), voice)}{" "}
-              <strong>&ldquo;{ejectFailure.text}&rdquo;</strong>
+              {t(EJECT_MESSAGE[ejectNotice.outcome], voice)}{" "}
+              <strong>&ldquo;{ejectNotice.text}&rdquo;</strong>
             </span>
           </p>
           <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
-            {ejectFailure.stale ? (
+            {ejectNotice.outcome === "edited" ? (
+              // Nothing to retry — the write landed. Without an acknowledgement
+              // this notice has no way to end, because the thing it reports is
+              // already over; the three failures all resolve themselves through
+              // the action they offer.
+              <button
+                type="button"
+                aria-describedby={ejectErrorId}
+                onClick={() => setEjectNotice(null)}
+                className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 text-sm font-medium"
+              >
+                {t("breakdown.eject.dismiss", voice)}
+              </button>
+            ) : ejectNotice.outcome === "stale" ? (
               // Retrying re-posts the same action id the running deployment has
               // already forgotten, so a reload is the ONLY thing on offer.
               <button
@@ -814,11 +999,11 @@ export function BreakdownChat({
                 // While a retry runs, the reason AND the wait are both reachable
                 // from the control.
                 aria-describedby={
-                  ejecting.has(ejectFailure.text)
+                  ejecting.has(ejectNotice.key)
                     ? `${ejectErrorId} ${ejectSendingId}`
                     : ejectErrorId
                 }
-                aria-disabled={ejecting.has(ejectFailure.text)}
+                aria-disabled={ejecting.has(ejectNotice.key)}
                 onClick={retryEject}
                 className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 text-sm font-medium aria-disabled:opacity-50"
               >
@@ -831,7 +1016,7 @@ export function BreakdownChat({
                 which a screen reader reports because focus is on it, and the
                 `aria-describedby` above, which picks this node up while it
                 shows. Sighted users see the identical text either way. */}
-            {ejecting.has(ejectFailure.text) && (
+            {ejecting.has(ejectNotice.key) && (
               <p id={ejectSendingId} className="text-muted-foreground text-xs">
                 {t("breakdown.eject.sending", voice)}
               </p>
@@ -857,7 +1042,12 @@ export function BreakdownChat({
                 re-planned. */}
             {proposal.steps.map((s, i) => (
               <li
-                key={i}
+                // The row's own key, never its index (!304 review). With
+                // indices, ejecting row 0 hands row 0's DOM — and anything
+                // living in it, an open `EmojiPicker`, a caret, an IME
+                // composition — to what was row 1, because React sees one list
+                // that changed its contents rather than one row that left.
+                key={s.key}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={() => {
                   if (dragIndex !== null && dragIndex !== i)
@@ -927,30 +1117,36 @@ export function BreakdownChat({
                         half, and the visible label changes with the accessible
                         name so WCAG 2.5.3 (Label in Name) still holds — #169's
                         harm was a press that produced nothing visible for as
-                        long as the request hung. */}
+                        long as the request hung.
+
+                        Read off the row's key, not its words (!304 review).
+                        Keyed by text, this state belonged to the CHARACTERS: it
+                        fell off the row the moment the user typed into it, and
+                        it was shared by any other row that happened to say the
+                        same thing. */}
                     <button
                       ref={(el) => {
                         // Block body: a concise arrow would RETURN the Map, and
                         // React 19 reads a ref callback's return value as a
                         // cleanup function.
-                        if (el) ejectButtonRefs.current.set(i, el);
-                        else ejectButtonRefs.current.delete(i);
+                        if (el) ejectButtonRefs.current.set(s.key, el);
+                        else ejectButtonRefs.current.delete(s.key);
                       }}
                       type="button"
                       title="Send back to the inbox as its own item to re-break-down"
                       aria-label={
-                        ejecting.has(s.text.trim())
+                        ejecting.has(s.key)
                           ? `Back to inbox — ${t("breakdown.eject.sending", voice)}`
                           : "Back to inbox"
                       }
-                      aria-disabled={ejecting.has(s.text.trim())}
-                      aria-busy={ejecting.has(s.text.trim())}
+                      aria-disabled={ejecting.has(s.key)}
+                      aria-busy={ejecting.has(s.key)}
                       onClick={() => {
-                        if (!ejecting.has(s.text.trim())) backToInbox(i);
+                        if (!ejecting.has(s.key)) backToInbox(i);
                       }}
                       className="text-muted-foreground hover:text-foreground hover:bg-accent rounded border px-1.5 py-0.5 text-xs whitespace-nowrap aria-disabled:opacity-50"
                     >
-                      {ejecting.has(s.text.trim())
+                      {ejecting.has(s.key)
                         ? t("breakdown.eject.sending", voice)
                         : t("action.backToInbox", voice)}
                     </button>

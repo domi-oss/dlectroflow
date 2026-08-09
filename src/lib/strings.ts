@@ -714,11 +714,33 @@ export const STRINGS = {
     playful:
       "No answer from the server, so this may already be in your inbox. Check there before trying again — nothing was lost:",
   },
+  // The one outcome that is not a failure (!304 review, finding 1). The write
+  // landed; the user then edited the row while it was in the air, so their inbox
+  // holds the words as they read at the press and the row in front of them says
+  // something else. Neither copy may be thrown away — dropping the row would
+  // destroy the edit, which is the same data loss as #212 with the hands
+  // swapped — so the only thing left to do is SAY it, or the user gets an item
+  // they never saw arrive and a row they think is still only in the plan.
+  //
+  // Ends on a colon like its siblings, and the words quoted after it are the
+  // ones that were SENT, not the ones now in the row: the row is on screen and
+  // the inbox copy is not, so the invisible one is the one worth repeating.
+  "breakdown.eject.edited": {
+    plain:
+      "This was already sending when you edited it, so your inbox has the earlier wording and the row keeps yours:",
+    playful:
+      "This was already sending when you edited it, so your inbox has the earlier wording and the row keeps yours:",
+  },
   "breakdown.eject.retry": { plain: "Try again", playful: "Try again" },
   "breakdown.eject.reload": {
     plain: "Reload the page",
     playful: "Reload the page",
   },
+  // Only the `edited` notice carries this. The three failures each end in an
+  // action that resolves them (a retry that lands, a reload); that one reports
+  // something already finished, so acknowledging it is the only thing left and
+  // without it the notice would sit there for the rest of the session.
+  "breakdown.eject.dismiss": { plain: "Got it", playful: "Got it" },
   // Two jobs, one word, deliberately: the row control's busy label and the
   // notice's in-flight line. They describe the same outstanding write from two
   // places, so splitting them could only let the two drift apart.
