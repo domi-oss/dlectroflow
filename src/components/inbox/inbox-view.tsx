@@ -877,11 +877,35 @@ export function InboxView({
    * Retry that could only be refused again.
    */
   const [writeFailure, setWriteFailure] = useState<WriteFailure | null>(null);
+  // Declared here rather than beside the drag dispatcher that also reads it: the
+  // notice's `rowGone` test needs it, and that test has to be in scope before the
+  // focus effect below can depend on the remedy it decides.
+  const itemsById = new Map(initialItems.map((i) => [i.id, i]));
+  /**
+   * #225 — a failure aimed at a row the rendered list no longer holds.
+   *
+   * Derived from `initialItems` rather than tracked, because a second copy of a
+   * fact is how the page ends up disagreeing with itself. The inbox page is
+   * dynamic, so its losing a row IS the server saying the row has gone — which is
+   * the one silent decline `run()` can see without the eight actions returning a
+   * result. It changes both the message and whether a control is offered at all.
+   */
+  const writeFailureRowGone =
+    writeFailure !== null && !itemsById.has(writeFailure.target.id);
+  /** `null` when there is no notice; otherwise which control it offers. A
+   *  dependency of the focus effect below, because the control being withdrawn is
+   *  one of the two things that can strand focus on <body>. */
+  const writeRemedy = writeFailure
+    ? writeFailureRemedy(writeFailure, writeFailureRowGone)
+    : null;
   // Ties the failure message to the notice's control, so the reason is announced
   // with the remedy however the announcement races.
   const writeErrorId = useId();
   const writeSavingId = useId();
   const writeCtaRef = useRef<HTMLButtonElement | null>(null);
+  /** The notice's message, and the focus target of last resort — see the effect
+   *  below and `writeFailureRemedy`'s `"none"` arm. */
+  const writeNoticeRef = useRef<HTMLParagraphElement | null>(null);
   /**
    * Which targets have a write outstanding, how many writes have been started,
    * how many are still running, and the newest attempt at each target that
@@ -911,12 +935,25 @@ export function InboxView({
   const takeFocusForWrite = useRef(false);
   const returnFocusAfterWrite = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    if (!writeFailure || !takeFocusForWrite.current) return;
+    if (!writeFailure) return;
+    // Two reasons to move focus here, and the second is not a duplicate of the
+    // first. **Taking** it is the one-shot instruction the failure path leaves.
+    // **Repairing** it is what happens when the control the user was standing on
+    // is withdrawn — the row goes away mid-notice, the Retry is removed because
+    // it could only be refused again, and the browser drops them to <body>
+    // (WCAG 2.4.3). The dependency list is what keeps the second from being
+    // grabby: it re-runs when the remedy changes, not on every render, so
+    // clicking the page background does not pull focus back.
+    if (!takeFocusForWrite.current && document.activeElement !== document.body)
+      return;
     takeFocusForWrite.current = false;
     // In an effect rather than beside the state update: the notice does not exist
-    // yet at that point — it is what this state update renders.
-    writeCtaRef.current?.focus();
-  }, [writeFailure]);
+    // yet at that point — it is what this state update renders. The message is
+    // the fallback target for exactly the withdrawn-control case, which is why it
+    // carries `tabIndex={-1}`: a notice with nothing focusable in it cannot
+    // receive the hand-off at all.
+    (writeCtaRef.current ?? writeNoticeRef.current)?.focus();
+  }, [writeFailure, writeRemedy]);
   useEffect(() => {
     if (writeFailure || !returnFocusAfterWrite.current) return;
     const origin = returnFocusAfterWrite.current;
@@ -1318,20 +1355,6 @@ export function InboxView({
       />
     );
   };
-
-  const itemsById = new Map(initialItems.map((i) => [i.id, i]));
-
-  /**
-   * #225 — a failure aimed at a row the rendered list no longer holds.
-   *
-   * Derived from `initialItems` rather than tracked, because a second copy of a
-   * fact is how the page ends up disagreeing with itself. The inbox page is
-   * dynamic, so its losing a row IS the server saying the row has gone — which is
-   * the one silent decline `run()` can see without the eight actions returning a
-   * result. It changes both the message and whether a control is offered at all.
-   */
-  const writeFailureRowGone =
-    writeFailure !== null && !itemsById.has(writeFailure.target.id);
 
   // #163 — every move outcome, spoken once.
   //
@@ -1995,7 +2018,18 @@ export function InboxView({
           className="border-destructive/40 bg-destructive/5 flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-start sm:justify-between"
         >
           <p
+            ref={writeNoticeRef}
             id={writeErrorId}
+            // Focusable programmatically but not in the tab order: the notice has
+            // to be able to RECEIVE the hand-off even when it offers no control,
+            // and adding a stop for a paragraph nobody can act on would be noise.
+            //
+            // No `outline-none` here, and `a11y-class-hygiene` is why the first
+            // draft had one and this does not: the moment an element can hold
+            // focus, suppressing the UA outline leaves it with no visible focus
+            // indicator at all (WCAG 2.4.7 / 2.4.11). The gate caught it, which
+            // is the whole reason it exists — axe cannot see 2.4.11.
+            tabIndex={-1}
             className="text-destructive flex min-w-0 items-start gap-1.5 text-sm font-medium"
           >
             <TriangleAlert
@@ -2008,10 +2042,9 @@ export function InboxView({
             </span>
           </p>
           {/* No control at all when nothing could work — see writeFailureRemedy. */}
-          {writeFailureRemedy(writeFailure, writeFailureRowGone) !== "none" && (
+          {writeRemedy !== "none" && (
             <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
-              {writeFailureRemedy(writeFailure, writeFailureRowGone) ===
-              "reload" ? (
+              {writeRemedy === "reload" ? (
                 <button
                   ref={writeCtaRef}
                   type="button"
@@ -2047,7 +2080,8 @@ export function InboxView({
                   {t("inbox.errorRetry", voice)}
                 </button>
               )}
-              {/* #218 — deliberately NOT `role="status"`. A polite live region
+              {/* Deliberately NOT `role="status"`, copying !290's capture
+                  notice rather than the shape it replaced. A polite live region
                   nested inside this assertive one is undefined enough in practice
                   that "will it announce" has no answer: the outer region's
                   `aria-live` applies to the whole subtree. The wait rides the two

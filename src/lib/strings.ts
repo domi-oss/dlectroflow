@@ -824,7 +824,7 @@ export const STRINGS = {
   },
   // Shown from inside the notice while a retry is in flight, so the wait is not
   // silent and Retry can keep focus instead of being `disabled`. Deliberately not
-  // its own live region — see the notice in inbox-view.tsx and #218.
+  // its own live region — see the notice in inbox-view.tsx.
   "inbox.errorSaving": { plain: "Saving…", playful: "Saving…" },
 
   // ── Prompts ────────────────────────────────────────────────────────────────

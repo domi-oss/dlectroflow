@@ -335,6 +335,8 @@ describe("InboxView — a row write that does not land (#225)", () => {
     await press(/^delete$/i);
     await press(/^delete$/i); // the inline confirm
     expect(await screen.findByRole("alert")).toBeInTheDocument();
+    // The user is standing on the Retry that is about to be taken away.
+    screen.getByRole("button", { name: RETRY }).focus();
 
     rerender(
       <InboxView
@@ -350,6 +352,14 @@ describe("InboxView — a row write that does not land (#225)", () => {
       /not in your inbox any more/i,
     );
     expect(screen.queryByRole("button", { name: RETRY })).toBeNull();
+    // …and does not leave the user on <body> when it does. Withdrawing the
+    // control the user was standing on is a context change like any other
+    // unmount (WCAG 2.4.3), so the message itself takes the hand-off.
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toContainElement(
+        document.activeElement as HTMLElement,
+      ),
+    );
   });
 });
 
@@ -444,19 +454,21 @@ describe("InboxView — the double-press guard (#225)", () => {
 });
 
 /**
- * #218 — every live region in a tree that has another live region as an
- * ancestor.
+ * Every live region in a tree that has another live region as an ancestor.
  *
  * A polite live region nested inside an assertive one is not reliably handled:
  * the outer region's `aria-live` applies to the whole subtree, so whether the
  * inner text is announced politely, assertively, twice, or not at all is
- * implementation-dependent. The failure has no visual symptom, which is how
- * `focus-timer.tsx` shipped with it and `!290` copied it before catching itself.
+ * implementation-dependent. The failure has no visual symptom, which is how it
+ * reached `main` in the first place and why `!290` had to catch itself copying
+ * the shape.
  *
- * A detector rather than four hand-written `querySelector` assertions, so the
- * guard covers whatever the inbox renders — including the note field, the
- * schedule menu and the step list, which are other people's components mounted
- * inside these rows — instead of only the nodes somebody remembered to look at.
+ * Here as a constraint on the NEW notice this MR adds, not as a fix to anything:
+ * a second notice modelled on the first is exactly how the shape spreads. A
+ * detector rather than a handful of `querySelector` assertions, so it covers
+ * whatever the inbox renders — including the note field, the schedule menu and
+ * the step list, which are other components mounted inside these rows — instead
+ * of only the nodes somebody remembered to look at.
  */
 const LIVE_REGION =
   '[role="status"],[role="alert"],[role="log"],[aria-live]:not([aria-live="off"])';
@@ -467,7 +479,7 @@ function nestedLiveRegions(root: ParentNode): Element[] {
   );
 }
 
-describe("nestedLiveRegions (the #218 detector itself)", () => {
+describe("nestedLiveRegions (the detector itself)", () => {
   /**
    * Built with DOM calls rather than `innerHTML`: the string form is a
    * hard-coded literal and could not carry untrusted input, but it trips the
@@ -516,16 +528,12 @@ describe("nestedLiveRegions (the #218 detector itself)", () => {
   });
 });
 
-describe("InboxView — the write notice's accessibility (#225, #218)", () => {
+describe("InboxView — the write notice's accessibility (#225)", () => {
   /**
-   * The inbox half of #218. The issue's own body names the capture notice as the
-   * REFERENCE implementation rather than a defect site, and that is correct on
-   * `main`: `!290` round 8 already removed the nested `role="status"` there. So
-   * the obligation here is not to grow a fresh instance while adding a second
-   * notice — asserted over the whole rendered tree, in the state that has the
-   * most live regions mounted at once.
-   *
-   * `focus-timer.tsx`, which still has the shape, is fixed in its own change.
+   * `!290` established the correct pattern for the capture notice and this MR
+   * adds a second notice beside it, so the risk worth guarding is the shape
+   * spreading rather than any existing instance. Asserted over the whole
+   * rendered tree, in the state that has the most live regions mounted at once.
    */
   it("mounts no live region inside another, anywhere in the inbox", async () => {
     vi.mocked(completeItem).mockRejectedValueOnce(new Error("offline"));
