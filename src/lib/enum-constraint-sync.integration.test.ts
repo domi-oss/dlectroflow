@@ -29,6 +29,7 @@ import { SchedulePriority, ScheduleHours } from "@/lib/scheduling/types";
 // constant without a matching migration fails the assertion below.
 import { TASK_NOTE_MAX_LENGTH } from "@/lib/task-notes";
 import { FOCUS_PLAYLIST_NAME_MAX_LENGTH } from "@/lib/focus-playlists";
+import { SHOPPING_ITEM_TEXT_MAX_LENGTH } from "@/lib/shopping";
 
 // #38 — keep the DB CHECK constraints (see the
 // 20260719171754_add_status_check_constraints migration) in lockstep with the
@@ -403,6 +404,25 @@ const LENGTH_REGISTRY: ReadonlyArray<{
     table: "FocusPlaylist",
     column: "name",
     max: FOCUS_PLAYLIST_NAME_MAX_LENGTH,
+    fn: "char_length",
+    nullable: false,
+  },
+  {
+    // 20260808120000_shopping_items (#199) — a shopping-list entry.
+    //
+    // `char_length`, never `octet_length`, for the reason the two entries above
+    // give: a byte bound would reject an all-emoji entry a quarter the length of
+    // a Latin one it accepts.
+    //
+    // `nullable: false` — `ShoppingItem.text` is NOT NULL, so the constraint must
+    // carry no `IS NULL` allowance. The lower bound (an entry cannot be
+    // whitespace-only) is a separate clause in the same CHECK and is proved
+    // behaviourally in src/lib/shopping-item-text-check.integration.test.ts,
+    // because this registry pins upper bounds and measuring functions only.
+    constraint: "ShoppingItem_text_check",
+    table: "ShoppingItem",
+    column: "text",
+    max: SHOPPING_ITEM_TEXT_MAX_LENGTH,
     fn: "char_length",
     nullable: false,
   },

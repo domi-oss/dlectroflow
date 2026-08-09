@@ -113,6 +113,7 @@ model Workspace {
   streakRecords  StreakRecord[]
   badges         Badge[]
   dailySparks    DailySpark[]
+  shoppingItems  ShoppingItem[]
 
   @@index([lastSeenAt])
 }
@@ -201,6 +202,13 @@ model Settings {
   // please". Plain Boolean, like focusShuffle: no CHECK constraint to mirror.
   focusPauseTogether       Boolean   @default(false)
   focusTimerTipDismissedAt DateTime?
+  // #199 — shopping-list mode. OFF by default: the whole point of the switch is
+  // that the feature adds no surface for people who don't want it, so an existing
+  // workspace and a brand-new one both start without it. Plain Boolean, like
+  // focusShuffle: no pseudo-enum, hence no CHECK constraint to mirror in
+  // src/lib/constants.ts. Turning it off HIDES the list, it does not delete it —
+  // the rows survive and reappear if it is turned back on.
+  shoppingList             Boolean   @default(false)
   // MR ③ — app-wide completion style (Appearance). completeTickColor mirrors
   // CompleteTickColor in src/lib/constants.ts + Settings_completeTickColor_check.
   completeStrikethrough    Boolean   @default(true)
@@ -624,6 +632,44 @@ model DailySpark {
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, date])
+}
+
+// ── #199 — Shopping list mode ─────────────────────────────────────────────
+// A list-shaped thing that is NOT a task: no estimate, no steps, no calendar
+// block, no streak credit. Its own table specifically so the focus, scheduling
+// and reward machinery cannot see it — `beginFocus`/`completeStep` do no
+// kind-check, so a shopping item stored as a `Step` would be focusable and
+// streak-earning by default and would need an "unless this is shopping" check at
+// every one of those call sites, forever.
+//
+// Behind Settings.shoppingList (off by default), gated server-side on
+// /shopping itself rather than only by hiding the menu entry.
+model ShoppingItem {
+  id   String  @id @default(cuid())
+  text String
+  done Boolean @default(false)
+  // The undated "saved for later" section. ONE boolean, and there is deliberately
+  // no date, no snooze column and no scheduler involvement: nothing here
+  // reappears on its own, it is pulled back up by hand. That is what makes this
+  // list visibly outside the scheduling machinery instead of looking broken.
+  savedForLater Boolean @default(false)
+  // Capture order, same idea as Step.order. Allocated as max+1 by
+  // nextShoppingOrder (src/lib/shopping.ts), so two concurrent adds can duplicate
+  // a value; splitShoppingList breaks the tie on `id` so the rendered order is
+  // stable across reads rather than reshuffling between page loads.
+  order         Int
+  createdAt     DateTime @default(now())
+  // Bounded at 200 CHARACTERS by ShoppingItem_text_check
+  // (20260808120000_shopping_items), which also refuses whitespace-only text.
+  // Prisma can't express a CHECK, so that migration and this comment are its only
+  // trace in the schema; it is registered in
+  // src/lib/enum-constraint-sync.integration.test.ts (LENGTH_REGISTRY) so
+  // dropping it out of band fails the suite. The bound lives in
+  // SHOPPING_ITEM_TEXT_MAX_LENGTH (src/lib/shopping.ts).
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
 }
 
 // ── Phase 2 — guest AI allowance (IP-hash scoped, rolling window) ──────────

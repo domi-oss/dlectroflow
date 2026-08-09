@@ -76,6 +76,12 @@ export function makeSettings(overrides: Partial<Settings> = {}): Settings {
     focusShuffle: false,
     focusPauseTogether: false,
     focusTimerTipDismissedAt: null,
+    // #199 — held at the schema default. Shopping-list mode is off unless asked
+    // for, so "an existing account that never turned it on" is the baseline row,
+    // and `makeSnapshot` below still carries shopping items: the export reproduces
+    // what was STORED, and turning the switch off hides the list rather than
+    // deleting it.
+    shoppingList: false,
     completeStrikethrough: true,
     completeTickColor: "green",
     typeface: "figtree",
@@ -304,6 +310,52 @@ export function makeSnapshot(
         accumulatedPausedMs: 0,
       },
     ],
+    focusPlaylists: [
+      {
+        id: "playlist-1",
+        workspaceId: WORKSPACE_ID,
+        // #185 — a name with a comma and an emoji, for the same reason the task
+        // title has them: this is free text the data subject typed.
+        name: "Deep work, mornings 🎧",
+        trackIds: ["catalog:rain-01.mp3", "bundled-piano"],
+        createdAt: new Date(Date.UTC(2026, 6, 1, 10, 0, 0)),
+      },
+    ],
+    shoppingItems: [
+      {
+        id: "shop-1",
+        workspaceId: WORKSPACE_ID,
+        // #199 — a comma and a quote, because item text is free text typed into a
+        // single-line field and `export.json` is the only tier that must carry it
+        // back verbatim.
+        text: 'oat milk, the "barista" one',
+        done: false,
+        savedForLater: false,
+        order: 1,
+        createdAt: new Date(Date.UTC(2026, 6, 3, 7, 0, 0)),
+      },
+      {
+        id: "shop-2",
+        workspaceId: WORKSPACE_ID,
+        text: "batteries",
+        done: true,
+        savedForLater: false,
+        order: 2,
+        createdAt: new Date(Date.UTC(2026, 6, 3, 7, 1, 0)),
+      },
+      {
+        // The saved-for-later pile IS exported: "I deferred this" is something
+        // the data subject wrote down, so an export that dropped it would be
+        // handing over less than they have.
+        id: "shop-3",
+        workspaceId: WORKSPACE_ID,
+        text: "a bigger frying pan",
+        done: false,
+        savedForLater: true,
+        order: 3,
+        createdAt: new Date(Date.UTC(2026, 6, 3, 7, 2, 0)),
+      },
+    ],
     gamification: {
       streak: {
         id: "streak-1",
@@ -379,6 +431,8 @@ export function makeEmptySnapshot(): ExportSnapshot {
     tasks: [],
     inbox: [],
     focusSessions: [],
+    focusPlaylists: [],
+    shoppingItems: [],
     gamification: {
       streak: null,
       streakRecords: [],

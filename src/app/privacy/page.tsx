@@ -230,6 +230,15 @@ export default function PrivacyPage() {
             scheduling intent you picked.
           </li>
           <li>
+            <strong>Shopping list</strong> — the items you type on it, whether
+            each one is ticked off, and whether you have moved it down to
+            &ldquo;saved for later&rdquo;. Only if you switch shopping-list mode
+            on in Settings: it is off by default, and nothing is stored until
+            you add something. Switching it off again hides the list without
+            deleting it, so the items stay until you delete them or delete your
+            account.
+          </li>
+          <li>
             <strong>Focus sessions</strong> — start and end times, pauses,
             planned and added minutes, and how the session ended.
           </li>

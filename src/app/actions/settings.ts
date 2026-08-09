@@ -155,6 +155,40 @@ export async function dismissWelcome() {
   revalidatePath("/");
 }
 
+/**
+ * #199 — shopping-list mode's on/off switch. Off by default.
+ *
+ * Workspace-scoped, no owner gate — the same shape as every other taste setting
+ * on this page (`updateFirstRunPreview`, `updateFocusShuffle`), and a guest
+ * sandbox gets its own value. A plain Boolean column, so `Boolean()` is the only
+ * validation it needs; the value arrives from a client-callable action, so it is
+ * coerced rather than trusted.
+ *
+ * **It writes only this column.** Turning the switch off HIDES the list, it does
+ * not delete it: the rows outlive the toggle, so a switch pressed by accident is
+ * not destructive and turning it back on restores the list intact. Same reasoning
+ * #180 gives for leaving `focusShuffle` and the playlist selection inert rather
+ * than resetting them.
+ *
+ * `revalidatePath("/", "layout")` as well as `/settings`, and that second
+ * argument is load-bearing: the menu entry is rendered by
+ * `src/app/(app)/layout.tsx`, so invalidating the settings page alone would tick
+ * the checkbox and leave the menu advertising the previous state until the next
+ * full navigation. The layout-scoped invalidation is what makes the switch visible
+ * where it acts.
+ */
+export async function updateShoppingList(enabled: boolean) {
+  const workspaceId = await currentWorkspaceId();
+  const shoppingList = Boolean(enabled);
+  await prisma.settings.upsert({
+    where: { workspaceId },
+    create: { id: workspaceId, workspaceId, shoppingList },
+    update: { shoppingList },
+  });
+  revalidatePath("/settings");
+  revalidatePath("/", "layout");
+}
+
 /** Phase 5 — Demo: First-run preview toggle (auto-saved). Forces the Inbox to
  * render as a brand-new user sees it (welcome + empty), non-destructively. */
 export async function updateFirstRunPreview(enabled: boolean) {

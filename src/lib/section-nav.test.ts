@@ -22,9 +22,10 @@ describe("section registries (#72)", () => {
   it("covers every section that exists on each page today", () => {
     // Guards silent shrinkage: dropping a section from the registry without
     // dropping it from the page would leave an unlisted, unreachable section.
-    // 10 since #118 Phase C added the signed-in-only Account section (9 after
-    // #35 Phase B's owner-only People section).
-    expect(SETTINGS_SECTIONS.length).toBe(10);
+    // 11 since #199 added shopping-list mode's switch (10 after #118 Phase C's
+    // signed-in-only Account section, 9 after #35 Phase B's owner-only People
+    // section).
+    expect(SETTINGS_SECTIONS.length).toBe(11);
     // 7 since #129/#153 added Help's "Your data" section — export and
     // self-deletion are rights a reader arrives looking for, so they are a named
     // section rather than a line inside another one.
