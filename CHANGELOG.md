@@ -50,7 +50,8 @@ operators upgrading a self-hosted instance don't get surprised.
   ticking one off does not touch your streak. It lives at its own `/shopping`
   destination in the menu, with a second **Saved for later** section below the
   live list — undated on purpose, so nothing there comes back on its own; you pull
-  an item up when you want it again.
+  an item up when you want it again, and it arrives back un-ticked, because
+  pulling it up is you saying you want to buy it.
 
   **Off by default**, behind Settings → Shopping list. Nothing is stored until you
   turn it on, and turning it off again hides the list rather than deleting it, so

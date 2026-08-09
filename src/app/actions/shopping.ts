@@ -6,8 +6,10 @@ import { prisma, getSettings } from "@/lib/db";
 import { currentWorkspaceId } from "@/lib/workspace";
 import {
   MAX_SHOPPING_ITEMS,
+  isStillToBuy,
   normaliseShoppingItemText,
   nextShoppingOrder,
+  shoppingSavedForLaterUpdate,
 } from "@/lib/shopping";
 import {
   clearShoppingSummary,
@@ -232,16 +234,54 @@ export async function setShoppingItemDone(id: string, done: boolean) {
   // `count > 0` as well as the direction (Duo review, !295): a stale id, or one
   // belonging to another workspace, is a 0-row no-op — nothing came back onto the
   // list, so nothing should come back into the inbox.
-  await settleShopping(workspaceId, !ticked && count > 0);
+  //
+  // And then the row itself (Duo review round 5, !295). The direction and the
+  // matched-row count together still cannot see the item's OTHER flag: `done` and
+  // `savedForLater` are independent, and the combination is two taps away on
+  // /shopping, because every row in BOTH sections renders a live checkbox. Un-tick
+  // something sitting in the saved-for-later pile and the list has not grown —
+  // `savedForLater` keeps it out of the count either way — so the summary must
+  // stay dismissed. Asking `isStillToBuy` of the row as it now stands is the same
+  // predicate the count filters on, applied to one row rather than restated.
+  await settleShopping(
+    workspaceId,
+    !ticked && count > 0 && (await isOnTheToBuyList(id, workspaceId)),
+  );
+}
+
+/**
+ * Is that row, as it now stands, one of the things still to buy?
+ *
+ * A read AFTER the write, not a read-then-write guard: the write above is already
+ * workspace-scoped, and this only decides whether the inbox line comes back. It is
+ * scoped anyway, so a foreign id answers "no" rather than leaking whether the row
+ * exists — and so the scoping harness can see the filter.
+ *
+ * Racing a concurrent write costs at most a summary line that is absent until the
+ * next shopping write, or present when it need not be; `shopping-summary.ts`
+ * documents why that residual is acceptable and a transaction is not reached for.
+ */
+async function isOnTheToBuyList(
+  id: string,
+  workspaceId: string,
+): Promise<boolean> {
+  const row = await prisma.shoppingItem.findFirst({
+    where: { id, workspaceId },
+    select: { done: true, savedForLater: true },
+  });
+  return row !== null && isStillToBuy(row);
 }
 
 /**
  * Move an item down into the undated saved-for-later pile, or pull it back up.
  *
- * Writes ONLY `savedForLater`. `order` is deliberately untouched, so an item
- * pulled back up returns to its place in capture order instead of jumping to the
- * end of the list; and `done` is untouched because "I already bought this" and "I
- * am not buying this today" are independent facts.
+ * `order` is deliberately untouched in both directions, so an item pulled back up
+ * returns to its place in capture order instead of jumping to the end of the list.
+ * What the two directions write is asymmetric, and {@link shoppingSavedForLaterUpdate}
+ * holds that rule: going down writes `savedForLater` alone, coming back up clears
+ * `done` with it, because "pull this back up" is the gesture for *I want to buy
+ * this* and an item returned to the list still ticked is not on it (Duo review,
+ * !295 — the round trip shipped broken).
  *
  * There is no date and no scheduler here on purpose: nothing in this pile
  * reappears on its own. `BrainDumpItem` uses `snoozedUntil` for the same-named
@@ -257,11 +297,16 @@ export async function setShoppingItemSavedForLater(
   const saved = Boolean(savedForLater);
   const { count } = await prisma.shoppingItem.updateMany({
     where: { id, workspaceId },
-    data: { savedForLater: saved },
+    data: shoppingSavedForLaterUpdate(saved),
   });
   // Pulling an item back up lengthens the to-buy list; moving one down shortens it.
   // `count > 0` for the same reason as the tick above: a 0-row no-op lengthened
   // nothing (Duo review, !295).
+  //
+  // No read-back here, unlike `setShoppingItemDone` — and that asymmetry is the
+  // fix, not an oversight. The un-tick can only see one of the two flags it
+  // depends on; this write sets BOTH, so a matched row is on the to-buy list by
+  // construction and there is nothing left to ask the database.
   await settleShopping(workspaceId, !saved && count > 0);
 }
 

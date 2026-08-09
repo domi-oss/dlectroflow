@@ -33,6 +33,12 @@ const {
   const prismaMock = {
     shoppingItem: {
       findMany: vi.fn().mockResolvedValue([]),
+      // Duo review, !295 — `setShoppingItemDone` reads the row back to see whether
+      // the un-tick actually put it on the to-buy list, so the default here is the
+      // ordinary case: an active, un-ticked row.
+      findFirst: vi
+        .fn()
+        .mockResolvedValue({ done: false, savedForLater: false }),
       count: vi.fn().mockResolvedValue(0),
       create: vi.fn().mockResolvedValue({}),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -72,7 +78,12 @@ beforeEach(() => {
   currentWorkspaceIdMock.mockResolvedValue("ws-1");
   getSettingsMock.mockResolvedValue({ shoppingList: true });
   prismaMock.shoppingItem.findMany.mockResolvedValue([]);
+  prismaMock.shoppingItem.findFirst.mockResolvedValue({
+    done: false,
+    savedForLater: false,
+  });
   prismaMock.shoppingItem.count.mockResolvedValue(0);
+  prismaMock.shoppingItem.updateMany.mockResolvedValue({ count: 1 });
   prismaMock.$transaction.mockImplementation(
     async (fn: (tx: typeof prismaMock) => Promise<unknown>) => fn(prismaMock),
   );
@@ -445,6 +456,62 @@ describe("setShoppingItemDone", () => {
       data: { done: true },
     });
   });
+
+  /**
+   * Duo review, !295 — `resurface` read the tick direction and the matched-row
+   * count, and neither can see the item's OTHER flag. `done` and `savedForLater`
+   * are independent booleans and the combination is reachable in two taps from
+   * `/shopping` (tick a row, then Save for later; or tick a row already in the
+   * pile — every row in both sections renders a live checkbox). Un-ticking such an
+   * item left it excluded from the count by `savedForLater`, so the list did not
+   * grow — and a dismissed summary came back anyway.
+   */
+  it("does NOT resurface when un-ticking an item that is still saved for later", async () => {
+    prismaMock.shoppingItem.findFirst.mockResolvedValue({
+      done: false,
+      savedForLater: true,
+    });
+    const { setShoppingItemDone } = await load();
+    await setShoppingItemDone("s1", false);
+    expect(syncMock).toHaveBeenCalledWith("ws-1", { resurface: false });
+  });
+
+  it("resurfaces when un-ticking an item that is on the active list", async () => {
+    const { setShoppingItemDone } = await load();
+    await setShoppingItemDone("s1", false);
+    expect(syncMock).toHaveBeenCalledWith("ws-1", { resurface: true });
+  });
+
+  it("does NOT resurface when the row is gone by the time it is read back", async () => {
+    // A concurrent delete between the write and the read. Nothing is on the list
+    // to bring an inbox line back for.
+    prismaMock.shoppingItem.findFirst.mockResolvedValue(null);
+    const { setShoppingItemDone } = await load();
+    await setShoppingItemDone("s1", false);
+    expect(syncMock).toHaveBeenCalledWith("ws-1", { resurface: false });
+  });
+
+  it("reads the row back scoped to the workspace, and only the two flags", async () => {
+    const { setShoppingItemDone } = await load();
+    await setShoppingItemDone("s1", false);
+    expect(prismaMock.shoppingItem.findFirst).toHaveBeenCalledWith({
+      where: { id: "s1", workspaceId: "ws-1" },
+      select: { done: true, savedForLater: true },
+    });
+  });
+
+  it("costs no read at all when TICKING, which cannot lengthen the list", async () => {
+    const { setShoppingItemDone } = await load();
+    await setShoppingItemDone("s1", true);
+    expect(prismaMock.shoppingItem.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("costs no read when the write matched no row", async () => {
+    prismaMock.shoppingItem.updateMany.mockResolvedValue({ count: 0 });
+    const { setShoppingItemDone } = await load();
+    await setShoppingItemDone("not-mine", false);
+    expect(prismaMock.shoppingItem.findFirst).not.toHaveBeenCalled();
+  });
 });
 
 describe("setShoppingItemSavedForLater", () => {
@@ -457,15 +524,42 @@ describe("setShoppingItemSavedForLater", () => {
     });
   });
 
-  it("pulls it back up, and does not touch `done` or `order` either way", async () => {
-    // Keeping `order` means an item pulled back up returns to where it was in
-    // capture order rather than jumping to the end of the list.
+  it("keeps `done` when an item goes DOWN into the pile", async () => {
+    // "I already bought this" and "not this trip" stay independent in this
+    // direction — clearing the tick here would resurrect a bought item as unbought.
+    const { setShoppingItemSavedForLater } = await load();
+    await setShoppingItemSavedForLater("s1", true);
+    expect(prismaMock.shoppingItem.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { savedForLater: true } }),
+    );
+  });
+
+  /**
+   * Duo review, !295 — the mirrored half of the `resurface` finding, and the
+   * defect underneath it. This write set `savedForLater` alone, so an item ticked
+   * before it was sent down came back STILL TICKED: it sat in the active section
+   * struck through, and `shoppingRemainingCount` went on excluding it, so the
+   * to-buy count did not move. "Pull it back up" is the gesture for *I want to buy
+   * this*, so the tick goes with it.
+   */
+  it("pulls it back up UN-TICKED, so it lands on the to-buy list", async () => {
+    // `order` is still untouched: the item returns to where it was in capture
+    // order rather than jumping to the end of the list.
     const { setShoppingItemSavedForLater } = await load();
     await setShoppingItemSavedForLater("s1", false);
     expect(prismaMock.shoppingItem.updateMany).toHaveBeenCalledWith({
       where: { id: "s1", workspaceId: "ws-1" },
-      data: { savedForLater: false },
+      data: { savedForLater: false, done: false },
     });
+  });
+
+  it("needs no read-back to know the item is now countable", async () => {
+    // Unlike the un-tick above: this write sets BOTH flags, so the row it matched
+    // is on the to-buy list by construction and there is nothing left to ask.
+    const { setShoppingItemSavedForLater } = await load();
+    await setShoppingItemSavedForLater("s1", false);
+    expect(prismaMock.shoppingItem.findFirst).not.toHaveBeenCalled();
+    expect(syncMock).toHaveBeenCalledWith("ws-1", { resurface: true });
   });
 });
 
