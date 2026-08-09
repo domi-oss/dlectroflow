@@ -47,6 +47,16 @@ import { findEmptyUpsertUpdates } from "@/lib/empty-upsert-hygiene";
  * read a comment as code twice already (`manifest-hygiene` #76, `env-drift`
  * #30), which is what `src/lib/source-text.ts` exists for; a parser gets it free.
  *
+ * ## The three spellings added in review on `!302`
+ *
+ * A `??`/`||`/`&&` fallback to `{}`, which is the ternary above in different
+ * punctuation; a shorthand `create`, which made the pair invisible and took a
+ * literally-empty `update: {}` down with it; and a payload written as a name,
+ * resolved to a same-file `const` or not resolved at all. Each has its positive
+ * case below AND the control that pins where the resolver gives up — a parameter,
+ * a `let`, an import, a destructured name, a mutated object — because a guard
+ * that fabricates is one somebody relaxes rather than fixes.
+ *
  * ## What is deliberately NOT scanned
  *
  * Test files. Four integration tests seed fixtures with an empty-update upsert
@@ -191,6 +201,268 @@ describe("findEmptyUpsertUpdates — the parser, on synthetic input", () => {
         "synthetic.ts",
       ),
     ).toHaveLength(1);
+  });
+
+  it("flags a `??` fallback to empty — the ternary's other spelling", () => {
+    // Raised in review on `!302`. `a ?? {}` IS `a != null ? a : {}`: same
+    // construct, same defect, and the guard was built for the ternary. Every
+    // call that finds `maybeChanges` nullish hands Prisma an empty payload and
+    // takes the read-then-insert path, which is the whole rationale — Prisma
+    // picks its SQL per call, from what it is actually handed.
+    const findings = findEmptyUpsertUpdates(
+      `await prisma.shoppingSummary.upsert({
+         where: { workspaceId },
+         create: { workspaceId },
+         update: maybeChanges ?? {},
+       });`,
+      "synthetic.ts",
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].line).toBe(4);
+  });
+
+  it("flags a `||` fallback to empty", () => {
+    expect(
+      findEmptyUpsertUpdates(
+        `await m.upsert({ where: { id }, create: { id }, update: changes || {} });`,
+        "synthetic.ts",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("flags `&& {}`, where the empty payload is the TRUTHY branch", () => {
+    // `&&` yields its right operand, so this is empty exactly when `resurface`
+    // is true — the mirror image of the `??`/`||` case rather than a new one.
+    expect(
+      findEmptyUpsertUpdates(
+        `await m.upsert({ where: { id }, create: { id }, update: resurface && {} });`,
+        "synthetic.ts",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("flags an empty payload at the end of a `??` chain", () => {
+    expect(
+      findEmptyUpsertUpdates(
+        `await m.upsert({ where: { id }, create: { id }, update: explicit ?? cached ?? {} });`,
+        "synthetic.ts",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("flags a `??` nested inside a conditional branch", () => {
+    expect(
+      findEmptyUpsertUpdates(
+        `await m.upsert({
+           where: { id },
+           create: { id },
+           update: resurface ? { clearedAt: null } : (changes ?? {}),
+         });`,
+        "synthetic.ts",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("does NOT flag a `??` between two payloads that are never empty", () => {
+    // The control for the rule above. A fallback is only the defect when the
+    // thing being fallen back to is empty as written.
+    expect(
+      findEmptyUpsertUpdates(
+        `await m.upsert({
+           where: { id },
+           create: { id },
+           update: patch ?? { touchedAt: new Date() },
+         });`,
+        "synthetic.ts",
+      ),
+    ).toEqual([]);
+  });
+
+  it("sees through `as`, which asserts a type and changes no value", () => {
+    // Plausible in this codebase specifically: an empty payload is the one shape
+    // Prisma's generated input types will not infer usefully, so it is where
+    // somebody reaches for an assertion.
+    expect(
+      findEmptyUpsertUpdates(
+        `await m.upsert({
+           where: { id },
+           create: { id },
+           update: {} as Prisma.CalendarFeedUpdateInput,
+         });`,
+        "synthetic.ts",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("sees through `satisfies` and `!`, for the same reason", () => {
+    expect(
+      findEmptyUpsertUpdates(
+        `await m.upsert({ where: { id }, create: { id }, update: {} satisfies U });
+         await n.upsert({ where: { id }, create: { id }, update: ({} as U)! });`,
+        "synthetic.ts",
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("flags a SHORTHAND `create` beside a literally empty `update`", () => {
+    // Raised in review on `!302`, and the half that needs no resolution at all:
+    // only the PRESENCE of `create` decides the object is a Prisma upsert
+    // argument. `ts.isPropertyAssignment` is false for a shorthand, so the
+    // literal `update: {}` two keys along went unreported — a defect written
+    // out in full, missed on a technicality about the key beside it.
+    const findings = findEmptyUpsertUpdates(
+      `const create = { userId, token };
+       await prisma.calendarFeed.upsert({ where: { userId }, create, update: {} });`,
+      "synthetic.ts",
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].line).toBe(2);
+  });
+
+  it("flags a SHORTHAND `update` bound to an empty literal in scope", () => {
+    // The hoist evasion the guard already claims to defeat, one level deeper:
+    // the object is not hoisted, the PROPERTY is.
+    const findings = findEmptyUpsertUpdates(
+      `const update = {};
+       await prisma.calendarFeed.upsert({
+         where: { userId },
+         create: { userId, token },
+         update,
+       });`,
+      "synthetic.ts",
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].line).toBe(5);
+  });
+
+  it("flags `update: payload` — the same evasion, the commoner spelling", () => {
+    // `!281` settled this on `braindump-to-task-hygiene`: resolving only the
+    // shorthand leaves one hazard with two syntaxes and covers the rarer one.
+    const findings = findEmptyUpsertUpdates(
+      `const payload = {};
+       await m.upsert({ where: { id }, create: { id }, update: payload });`,
+      "synthetic.ts",
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].line).toBe(2);
+  });
+
+  it("resolves the NEAREST binding, not the file's first", () => {
+    // Two `update` declarations in sibling scopes, one empty and one not. A
+    // file-wide "first match" walk gets BOTH call sites wrong — a miss in one
+    // direction and a fabricated finding in the other. That is not hypothetical:
+    // it is the regression the sibling guard shipped and had to fix on `!281`.
+    const findings = findEmptyUpsertUpdates(
+      `export async function a() {
+         const update = { token };
+         await m.upsert({ where: { id }, create: { id }, update });
+       }
+       export async function b() {
+         const update = {};
+         await m.upsert({ where: { id }, create: { id }, update });
+       }`,
+      "synthetic.ts",
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].line).toBe(7);
+  });
+
+  it("does NOT flag a shorthand shadowed by a PARAMETER", () => {
+    // The nearest binding wins even when it cannot be read. Resolving past a
+    // parameter to an unrelated outer literal is how a resolver invents a
+    // finding, and a false positive is what gets a guard relaxed rather than
+    // fixed.
+    expect(
+      findEmptyUpsertUpdates(
+        `const update = {};
+         export async function write(update: Prisma.CalendarFeedUpdateInput) {
+           await m.upsert({ where: { id }, create: { id }, update });
+         }`,
+        "synthetic.ts",
+      ),
+    ).toEqual([]);
+  });
+
+  it("does NOT flag a `let`, which can be filled in before the call", () => {
+    expect(
+      findEmptyUpsertUpdates(
+        `let update = {};
+         if (resurface) update = { clearedAt: null };
+         await m.upsert({ where: { id }, create: { id }, update });`,
+        "synthetic.ts",
+      ),
+    ).toEqual([]);
+  });
+
+  it("does NOT flag a const whose object is MUTATED before the call", () => {
+    // `const` freezes the binding, not the object. A payload assembled key by
+    // key is the legitimate way to write a conditional update, and it is empty
+    // only at runtime — the boundary this guard states rather than guesses past.
+    expect(
+      findEmptyUpsertUpdates(
+        `const update = {};
+         if (resurface) update.clearedAt = null;
+         await m.upsert({ where: { id }, create: { id }, update });`,
+        "synthetic.ts",
+      ),
+    ).toEqual([]);
+  });
+
+  it("does NOT flag an identifier bound to a call, which is not knowably empty", () => {
+    expect(
+      findEmptyUpsertUpdates(
+        `const update = buildPatch(options);
+         await m.upsert({ where: { id }, create: { id }, update });`,
+        "synthetic.ts",
+      ),
+    ).toEqual([]);
+  });
+
+  it("does NOT flag an identifier IMPORTED from another file", () => {
+    // Same-file only, deliberately: reading across files needs a `Program`, and
+    // this module takes source text so its parsing stays unit-testable on
+    // synthetic input. An unreadable binding is a miss, never a guess.
+    expect(
+      findEmptyUpsertUpdates(
+        `import { update } from "./defaults";
+         await m.upsert({ where: { id }, create: { id }, update });`,
+        "synthetic.ts",
+      ),
+    ).toEqual([]);
+  });
+
+  it("does NOT flag a DESTRUCTURED binding", () => {
+    expect(
+      findEmptyUpsertUpdates(
+        `const { update } = args;
+         await m.upsert({ where: { id }, create: { id }, update });`,
+        "synthetic.ts",
+      ),
+    ).toEqual([]);
+  });
+
+  it("does NOT flag a shorthand resolving to a NON-empty literal", () => {
+    expect(
+      findEmptyUpsertUpdates(
+        `const update = { token: mintFeedToken() };
+         await m.upsert({ where: { id }, create: { id }, update });`,
+        "synthetic.ts",
+      ),
+    ).toEqual([]);
+  });
+
+  it("still flags when the same word appears elsewhere as a KEY", () => {
+    // `other.update` and `{ update: … }` spell the same word in positions where
+    // it is a member name rather than the binding, and counting either as a use
+    // of the binding would make the resolver give up on a real offender.
+    const findings = findEmptyUpsertUpdates(
+      `const update = {};
+       log(config.update, { update: true });
+       await m.upsert({ where: { id }, create: { id }, update });`,
+      "synthetic.ts",
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].line).toBe(3);
   });
 
   it("does NOT flag the two-statement split `!295` settled on", () => {
