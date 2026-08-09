@@ -441,6 +441,16 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **Retrying a failed "Mark not done" no longer loses your place (#215).** When a
+  step's undo failed, the row showed the reason with a **Try again** beside it —
+  and pressing that with the keyboard dropped focus to the top of the page. The
+  notice is withdrawn while the retry runs (a message saying the step is still
+  done should not stay up while the attempt that may fix it is in flight), and it
+  took the button being pressed with it. Focus now moves to the row's own **Mark
+  not done** control: the same action, in a place that does not disappear, and one
+  that says out loud that the retry is running. The first failure was never
+  affected — that press leaves you on a control that stays put.
+
 - **The focus timer's Start and Resume no longer fail in silence (#139's shape,
   found via #198).** Both buttons handled a server that could not be *reached*,
   and neither handled a server that answered and *declined* — so in those cases
