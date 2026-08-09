@@ -978,3 +978,238 @@ describe("when the server refuses a write", () => {
     expect(field).toHaveValue("oat milk");
   });
 });
+
+/**
+ * Duo review round 6, !294 — **the notice outliving the thing it is about.**
+ *
+ * The five rounds above built the notice; this one is about when it goes away.
+ * It recognised "the write this record is about has now succeeded" by comparing
+ * the held closure by REFERENCE, and only the notice's own Retry ever hands the
+ * same closure back — every ordinary control builds a fresh one on every render.
+ * So a user who simply pressed Add again, or ticked the box again, could never
+ * match: the banner from the earlier attempt stayed on screen beside the write
+ * that had just landed, and its Retry then re-posted the OLD call with the OLD
+ * arguments. For a rename that silently reverts the newer words; for an add it
+ * stores the item twice.
+ *
+ * A failure belongs to a logical TARGET — this row's text, this row's tick, or,
+ * for the add, the words themselves, because it has no row to name yet. The
+ * closure is still held, but only to re-run; it is no longer an identity.
+ *
+ * The specs come in pairs on purpose: for every "this now clears" there is a
+ * "and this still does not", because a key that is too coarse throws away a
+ * failure the user has not been told about, which is the same family of bug from
+ * the other side.
+ */
+describe("a fresh attempt at the same thing", () => {
+  beforeEach(() => {
+    for (const mock of [addMock, renameMock, doneMock, savedMock, deleteMock]) {
+      mock.mockReset();
+      mock.mockResolvedValue(WROTE);
+    }
+  });
+
+  const tickApples = () =>
+    act(async () => {
+      screen.getByRole("checkbox", { name: /tick off apples/i }).click();
+      await flushTicks();
+    });
+
+  const renameApplesTo = async (value: string) => {
+    await userEvent.click(
+      screen.getByRole("button", { name: /rename apples/i }),
+    );
+    const field = screen.getByRole("textbox", { name: /rename apples/i });
+    await userEvent.clear(field);
+    await userEvent.type(field, `${value}{Enter}`);
+    await flush();
+  };
+
+  it("drops the notice when the same words are added again and land", async () => {
+    addMock.mockRejectedValueOnce(new Error("offline"));
+    renderList();
+    await addViaField("oat milk");
+    expect(await screen.findByRole("alert")).toHaveTextContent(/oat milk/);
+
+    // The ordinary control, NOT the notice's Retry — which is the whole point.
+    await addViaField("oat milk");
+
+    expect(addMock).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    // No Retry left to press means no way to store "oat milk" a second time.
+    expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
+  });
+
+  // The other half of keying an add by its words: two different things to buy
+  // are two different requests, and the first one still has not been saved.
+  it("keeps a failed add up while different words are added", async () => {
+    addMock.mockRejectedValueOnce(new Error("offline"));
+    renderList();
+    await addViaField("oat milk");
+    expect(await screen.findByRole("alert")).toHaveTextContent(/oat milk/);
+
+    await addViaField("bread");
+
+    expect(addMock).toHaveBeenLastCalledWith("bread");
+    expect(screen.getByRole("alert")).toHaveTextContent(/oat milk/);
+    expect(
+      screen.getByRole("button", { name: /try again/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("drops the notice when the same row control is used again and lands", async () => {
+    doneMock.mockRejectedValueOnce(new Error("offline"));
+    renderList([item({ id: "a", text: "Apples" })]);
+
+    await tickApples();
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Apples/);
+
+    await tickApples();
+
+    expect(doneMock).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+
+  /**
+   * The half of the finding that is a correctness bug rather than a display one.
+   *
+   * The first rename fails, the user renames the row again by hand and THAT one
+   * lands. A notice that survives is holding `renameShoppingItem("a",
+   * "Braeburns")`, so its Retry writes the superseded words back over the ones
+   * the user just saved — a silent revert nothing on the page reports.
+   */
+  it("cannot revert a rename the user has since made", async () => {
+    renameMock.mockRejectedValueOnce(new Error("offline"));
+    renderList([item({ id: "a", text: "Apples" })]);
+
+    await renameApplesTo("Braeburns");
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Braeburns/);
+
+    await renameApplesTo("Coxes");
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
+    expect(renameMock).toHaveBeenCalledTimes(2);
+    expect(renameMock).toHaveBeenLastCalledWith("a", "Coxes");
+  });
+
+  // Round 4's rule, kept: a success says nothing about a DIFFERENT write's
+  // failure, and clearing that one would be a silent no-op of its own.
+  it("keeps a failure a different row's success says nothing about", async () => {
+    doneMock.mockRejectedValueOnce(new Error("offline"));
+    renderList([
+      item({ id: "a", text: "Apples" }),
+      item({ id: "b", text: "Bread", order: 2 }),
+    ]);
+
+    await tickApples();
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Apples/);
+
+    await act(async () => {
+      screen.getByRole("checkbox", { name: /tick off bread/i }).click();
+      await flushTicks();
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/Apples/);
+    expect(
+      screen.getByRole("button", { name: /try again/i }),
+    ).toBeInTheDocument();
+  });
+
+  /**
+   * Row AND field, not row alone. Ticking a row off does not save the words a
+   * rename of that row failed to save, so the notice stays and its Retry still
+   * means exactly what it says.
+   */
+  it("keeps a failed rename up when a tick of the same row lands", async () => {
+    renameMock.mockRejectedValueOnce(new Error("offline"));
+    renderList([item({ id: "a", text: "Apples" })]);
+
+    await renameApplesTo("Braeburns");
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Braeburns/);
+
+    await tickApples();
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/Braeburns/);
+    await clickRetry();
+    expect(renameMock).toHaveBeenLastCalledWith("a", "Braeburns");
+  });
+
+  /**
+   * The same target, twice, with the first one losing the race — an impatient
+   * double-submit is the ordinary way to get here.
+   *
+   * The second add lands; the first then gives up. Reporting it would raise a
+   * notice about words that ARE on the server, and the restore would put them
+   * back in the field for the user to send a third time.
+   */
+  it("says nothing for an attempt a later one has already overtaken", async () => {
+    let abandonFirst!: (reason: unknown) => void;
+    addMock.mockReturnValueOnce(
+      new Promise((_, reject) => {
+        abandonFirst = reject;
+      }),
+    );
+    renderList();
+    const field = screen.getByLabelText(/add to the list/i);
+    fireEvent.change(field, { target: { value: "oat milk" } });
+    fireEvent.submit(field.closest("form")!);
+    await flush();
+    fireEvent.change(field, { target: { value: "oat milk" } });
+    fireEvent.submit(field.closest("form")!);
+    await flush();
+
+    await act(async () => {
+      abandonFirst(new Error("offline"));
+      await flushTicks();
+    });
+
+    expect(addMock).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(field).toHaveValue("");
+  });
+
+  /**
+   * Re-issuing against a row that has gone is the same class of bug as re-issuing
+   * stale arguments: the button offers something that cannot work. The server
+   * would answer `missing`, but the page already knows — the row is not in the
+   * `items` it is rendering — so it says so instead of offering the trip.
+   */
+  it("withdraws the Retry once the row it was aimed at has gone", async () => {
+    savedMock.mockRejectedValueOnce(new Error("offline"));
+    const { rerender } = renderList([item({ id: "a", text: "Apples" })]);
+
+    await act(async () => {
+      screen.getByRole("button", { name: /save for later: apples/i }).click();
+      await flushTicks();
+    });
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveTextContent(/couldn't save that/i);
+    expect(
+      screen.getByRole("button", { name: /try again/i }),
+    ).toBeInTheDocument();
+
+    // What a `router.refresh()` after a delete in another tab renders.
+    rerender(<ShoppingList items={[]} voice="plain" />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /not on the list any more/i,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(/Apples/);
+    expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
+  });
+
+  // The add has no row, so it can never be orphaned by one going away.
+  it("leaves the add's own Retry alone when the list empties", async () => {
+    addMock.mockRejectedValueOnce(new Error("offline"));
+    const { rerender } = renderList([item({ id: "a", text: "Apples" })]);
+    await addViaField("oat milk");
+    expect(await screen.findByRole("alert")).toHaveTextContent(/oat milk/);
+
+    rerender(<ShoppingList items={[]} voice="plain" />);
+
+    expect(
+      screen.getByRole("button", { name: /try again/i }),
+    ).toBeInTheDocument();
+  });
+});
