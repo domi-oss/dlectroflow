@@ -788,4 +788,224 @@ describe("workspace-scoping harness", () => {
     // "it delegates" rather than "it never checks anything".
     expect(code).toMatch(/resolveFeed\(/);
   });
+
+  // ── #220 — no status-blind path back to a workspace id ────────────────────
+  //
+  // Everything above polices WHICH ROWS a query may reach, given a workspace.
+  // #220 was a level below that: the workspace id itself was handed out without
+  // asking whether the account behind the session was still allowed to have one.
+  // `resolveWorkspace()` verified the signed token and stopped, and because
+  // effectively every write resolves through it, a frozen account kept writing
+  // — with every query in the tree perfectly workspace-scoped the whole time.
+  // The scoping rules could not have caught it and still cannot; this block is
+  // what does.
+  //
+  // Two rules, and they close the two ways it comes back:
+  //
+  //  1. Every resolver INSIDE `workspace.ts` that turns a session into a
+  //     workspace id checks `UserStatus`, or is named below with a reason.
+  //     A `currentWorkspaceIdFast()` added next year fails this on the day it
+  //     is written.
+  //  2. No module OUTSIDE `workspace.ts` calls the token-level resolvers at
+  //     all. Rule 1 is worth nothing if an action file can reach past the
+  //     helper that does the checking and call `resolveWorkspaceId()` itself.
+
+  const WORKSPACE_MODULE = "src/lib/workspace.ts";
+
+  /** The token-level resolvers, which by design know nothing about `status`. */
+  const TOKEN_LEVEL_RESOLVERS = ["resolveWorkspace", "resolveWorkspaceId"];
+
+  /**
+   * Session→workspace resolvers allowed to skip the status check, each with its
+   * reason. Same shape as REVIEWED_UNSCOPED above: adding an entry is a security
+   * decision and the review conversation is the point.
+   */
+  const STATUS_BLIND_RESOLVERS: Record<string, string> = {
+    resolveWorkspace:
+      "the token-level primitive itself — it performs no database read at all, which is what lets hasSession() stay free; rule 2 below is what keeps it unreachable from outside this module",
+    resolveWorkspaceId:
+      "a one-line unwrap of resolveWorkspace, inheriting both its reason and rule 2's confinement",
+    hasSession:
+      "#61 — answers 'is this a real caller' with no database round trip, for the lo-fi catalogue and audio proxy only. Those read no account data and write nothing, and checking status would put a query on every byte-range request of every seek",
+  };
+
+  /**
+   * Exported async functions in a module, as `{ name, body }`.
+   *
+   * Boundaries are the `export async function` declarations themselves, so a
+   * function's body runs to the start of the next one (or to end of file). Crude
+   * next to a real parser and entirely sufficient here, because the property
+   * being checked is "does this function mention the status check at all" rather
+   * than anything about the shape of the code — and it is exercised against a
+   * fixture below, so it can be shown to bite rather than merely asserted to.
+   */
+  function exportedFunctions(src: string): { name: string; body: string }[] {
+    const re = /export async function (\w+)/g;
+    const starts = [...src.matchAll(re)].map((m) => ({
+      name: m[1],
+      index: m.index,
+    }));
+    return starts.map((s, i) => ({
+      name: s.name,
+      body: src.slice(s.index, starts[i + 1]?.index ?? src.length),
+    }));
+  }
+
+  /**
+   * Resolvers that turn a session into a workspace id without consulting
+   * `UserStatus`.
+   *
+   * "Consults the status" is spelled as a mention of the `UserStatus` constant
+   * rather than of the word `status`: the constant is the single source of truth
+   * for the allowed values (`src/lib/constants.ts`), so a check written any other
+   * way — a bare `"active"` string, a `!== "revoked"` — is a finding in its own
+   * right and should fail here too. Comment lines are stripped first, the idiom
+   * the OWNER_WORKSPACE_ID rule above uses, so prose explaining the design cannot
+   * satisfy a rule about code.
+   */
+  function statusBlindResolvers(src: string): string[] {
+    const code = src
+      .split("\n")
+      .filter(
+        (line) =>
+          !line.trimStart().startsWith("//") &&
+          !line.trimStart().startsWith("*") &&
+          !line.trimStart().startsWith("/*"),
+      )
+      .join("\n");
+    return exportedFunctions(code)
+      .filter((fn) =>
+        TOKEN_LEVEL_RESOLVERS.some((r) => fn.body.includes(`${r}(`)),
+      )
+      .filter((fn) => !fn.body.includes("UserStatus"))
+      .map((fn) => fn.name);
+  }
+
+  it("the workspace resolver lives where this test thinks it does", () => {
+    // Without this, renaming the module turns every rule below into a test that
+    // reads no file and passes forever — the same guard the People block uses.
+    expect(
+      () => readFileSync(WORKSPACE_MODULE, "utf8"),
+      `${WORKSPACE_MODULE} is missing`,
+    ).not.toThrow();
+  });
+
+  it("finds the session resolvers at all", () => {
+    // The anti-vacuous half. If the parser stopped matching — a reformat, a
+    // rename, arrow functions — every rule below would report a clean zero, and
+    // an unproven zero is the failure mode this whole file exists to avoid.
+    const src = readFileSync(WORKSPACE_MODULE, "utf8");
+    const resolvers = exportedFunctions(src).filter((fn) =>
+      TOKEN_LEVEL_RESOLVERS.some((r) => fn.body.includes(`${r}(`)),
+    );
+    // Pinned as an exact set, not a `toContain`: a NEW resolver must fail this
+    // and force a decision — checked, or exempted with a reason — instead of
+    // arriving unpoliced. `resolveWorkspace` is in the list because its own
+    // declaration names it, which is the right answer: it is a session resolver,
+    // and it is exempted below with the reason it performs no database read.
+    expect(resolvers.map((fn) => fn.name).sort()).toEqual([
+      "currentWorkspaceId",
+      "hasSession",
+      "resolveWorkspace",
+      "resolveWorkspaceId",
+    ]);
+  });
+
+  it("flags a resolver that hands out a workspace id without checking status", () => {
+    // The fixture is the proof this rule can fail, and it is #220 itself: a
+    // helper that verifies the token and stops. It passed review once.
+    const bad = `
+      export async function currentWorkspaceIdFast(): Promise<string> {
+        const ws = await resolveWorkspace({ owner: token });
+        return ws.id;
+      }
+    `;
+    expect(statusBlindResolvers(bad)).toEqual(["currentWorkspaceIdFast"]);
+  });
+
+  it("accepts a resolver that does check status", () => {
+    const good = `
+      export async function currentWorkspaceId(): Promise<string> {
+        const ws = await resolveWorkspace({ owner: token });
+        const { ownerStatus } = await touchWorkspace(ws.id, ws.kind);
+        if (ws.kind === WorkspaceKind.User && ownerStatus !== UserStatus.Active) {
+          throw new RevokedAccountError();
+        }
+        return ws.id;
+      }
+    `;
+    expect(statusBlindResolvers(good)).toEqual([]);
+  });
+
+  it("is not satisfied by a comment that merely discusses the status check", () => {
+    // A rule that cannot tell code from prose is a rule any doc comment can
+    // switch off — and #220's whole shape was a doc comment promising a check
+    // the code did not make.
+    const bad = `
+      // UserStatus is checked by currentUser(), so this does not need to.
+      export async function currentWorkspaceIdFast(): Promise<string> {
+        return (await resolveWorkspaceId({ owner: token }));
+      }
+    `;
+    expect(statusBlindResolvers(bad)).toEqual(["currentWorkspaceIdFast"]);
+  });
+
+  it("every STATUS_BLIND_RESOLVERS entry names a real export and states a reason", () => {
+    // An entry for a function that no longer exists is a stale exemption that
+    // reads like considered coverage.
+    const names = exportedFunctions(readFileSync(WORKSPACE_MODULE, "utf8")).map(
+      (fn) => fn.name,
+    );
+    for (const [fn, reason] of Object.entries(STATUS_BLIND_RESOLVERS)) {
+      expect(names, `${fn} is not exported from ${WORKSPACE_MODULE}`).toContain(
+        fn,
+      );
+      expect(reason.length).toBeGreaterThan(40);
+    }
+  });
+
+  it("every session→workspace resolver checks status, or is named with a reason", () => {
+    const offenders = statusBlindResolvers(
+      readFileSync(WORKSPACE_MODULE, "utf8"),
+    ).filter((fn) => !STATUS_BLIND_RESOLVERS[fn]);
+    // A resolver that hands out a workspace id without asking whether the
+    // account may still act is #220 exactly: every query downstream of it is
+    // perfectly scoped, and all of them are writing for a frozen account.
+    expect(offenders).toEqual([]);
+  });
+
+  it("rule 2's comment-stripping is load-bearing, and is exercised for real", () => {
+    // The control for the rule below. `src/app/actions/account.ts` names
+    // `resolveWorkspace()` in prose, to explain why it does NOT call it — so a
+    // rule that could not tell code from prose would flag it, and the rule below
+    // passing is only meaningful because this string is really there.
+    expect(readFileSync("src/app/actions/account.ts", "utf8")).toContain(
+      "resolveWorkspace()",
+    );
+  });
+
+  it("no module outside workspace.ts calls the token-level resolvers", () => {
+    // Rule 1 is worth nothing on its own: an action file that calls
+    // `resolveWorkspaceId()` directly reaches past the helper doing the checking
+    // and is back to #220 with none of the resolvers in workspace.ts changed.
+    const offenders: string[] = [];
+    for (const file of sourceFiles()) {
+      if (file === WORKSPACE_MODULE) continue;
+      const src = readFileSync(file, "utf8");
+      for (const resolver of TOKEN_LEVEL_RESOLVERS) {
+        // Line-level, comments stripped: `src/app/actions/account.ts` names
+        // `resolveWorkspace()` in prose to explain why it does not call it.
+        const hit = src
+          .split("\n")
+          .some(
+            (line) =>
+              !line.trimStart().startsWith("//") &&
+              !line.trimStart().startsWith("*") &&
+              line.includes(`${resolver}(`),
+          );
+        if (hit) offenders.push(`${file}: ${resolver}()`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
 });
