@@ -56,13 +56,42 @@ describe("stripSqlComments", () => {
     expect(stripSqlComments(sql)).toBe(`SELECT 'it''s fine'; `);
   });
 
-  // #190 — a `--` inside a PL/pgSQL body is body text, not a comment. Stripping
-  // it deletes the rest of that line of executable SQL, so the statement the
-  // guards then read is not the statement Postgres runs.
-  it("leaves a comment marker inside a dollar-quoted body alone", () => {
-    const sql = `DO $$ BEGIN -- keep me\n DELETE FROM "GoogleAuth"; END $$; -- gone`;
+  // #190 — PL/pgSQL applies the SAME comment rules as SQL, so a `--` inside a
+  // `DO $$ … $$` body is a comment there too. Verified against Postgres 16: a
+  // `-- RAISE EXCEPTION …` line inside a DO block neither raises nor is a
+  // syntax error, so the body around it is what actually runs.
+  //
+  // An earlier revision of this file preserved the body verbatim on the theory
+  // that `--` was body text. That handed every guard downstream a comment to
+  // read as code, which is the failure this file's own docstring exists to
+  // rule out — in BOTH directions, and both are tested below.
+  it("strips a comment inside a dollar-quoted body, keeping the tags", () => {
+    const sql = `DO $$ BEGIN -- gone\n DELETE FROM "GoogleAuth"; END $$; -- gone`;
     expect(stripSqlComments(sql)).toBe(
-      `DO $$ BEGIN -- keep me\n DELETE FROM "GoogleAuth"; END $$; `,
+      `DO $$ BEGIN \n DELETE FROM "GoogleAuth"; END $$; `,
+    );
+  });
+
+  it("strips a block comment inside a dollar-quoted body", () => {
+    expect(stripSqlComments(`DO $$ BEGIN /* gone */ SELECT 1; END $$;`)).toBe(
+      `DO $$ BEGIN  SELECT 1; END $$;`,
+    );
+  });
+
+  // The inner strip is the same lexer, so a marker quoted inside a PL/pgSQL
+  // string literal survives exactly as it does at the top level. `RAISE NOTICE`
+  // messages in this repo's committed DO blocks are full of prose.
+  it("leaves a comment marker inside a string in a dollar-quoted body alone", () => {
+    const sql = `DO $$ BEGIN RAISE NOTICE 'a -- b'; END $$;`;
+    expect(stripSqlComments(sql)).toBe(sql);
+  });
+
+  // A `$$` written inside what reads as a comment still closes the body: the
+  // OUTER lexer sees a dollar-quoted string and knows nothing of comments, so
+  // this is where Postgres ends it too. Stripping must not extend the body.
+  it("does not let a comment inside a body swallow the closing tag", () => {
+    expect(stripSqlComments(`DO $$ BEGIN -- x $$; SELECT 1;`)).toBe(
+      `DO $$ BEGIN $$; SELECT 1;`,
     );
   });
 });
@@ -216,6 +245,25 @@ describe("findFocusSoundViolations — the shapes it must catch", () => {
   it("cannot be tripped by prose either — a comment alone is not a statement", () => {
     expect(
       scan(`-- UPDATE "Settings" SET "focusSound" = 'on';\nSELECT 1;`),
+    ).toEqual([]);
+  });
+
+  // #190, raised in review — the same two directions, one level down. Once the
+  // patterns stopped being anchored so they could see inside a `DO $$ … $$`
+  // body, a comment written in that body became indistinguishable from a
+  // statement unless the body is comment-stripped too.
+  it("cannot be satisfied by prose inside a DO block", () => {
+    const found = scan(
+      `DO $$ BEGIN\n  -- Only rows where "focusSound" <> 'off' are meant to change.\n  UPDATE "Settings" SET "focusSound" = 'on';\nEND $$;`,
+    );
+    expect(found).toHaveLength(1);
+  });
+
+  it("cannot be tripped by prose inside a DO block", () => {
+    expect(
+      scan(
+        `DO $$ BEGIN\n  -- Never do this: UPDATE "Settings" SET "focusShuffle" = true;\n  RAISE NOTICE 'nothing to do';\nEND $$;`,
+      ),
     ).toEqual([]);
   });
 });
@@ -447,6 +495,56 @@ describe("findLateConstraintDrops — order inside a merged DO block", () => {
     );
     expect(v).toHaveLength(1);
     expect(v[0].reason).toMatch(/still live when the write runs/);
+  });
+
+  // #190, raised in review. A phantom drop quoted ABOVE the write must not
+  // shadow the real one below it.
+  //
+  // Worth naming precisely, because the review that raised this expected a
+  // false PASS here and that direction is in fact unreachable: the map keeps
+  // the LAST drop in the file, so for it to sit before the write every drop
+  // including the real late one would have to sit before the write too. A
+  // comment can therefore only ever ADD a drop this guard reports on — the
+  // false-accusation direction, covered by the test below. The false PASS is
+  // real, but it lands in `findFocusSoundViolations`, where a `<> 'off'`
+  // written in prose satisfies rule 1's guard check.
+  it("does not let a commented-out DROP shadow the real late one", () => {
+    const v = findLateConstraintDrops(
+      file(`
+        DO $$
+        BEGIN
+          -- The constraint goes first:
+          -- ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+          UPDATE "Settings" SET "focusSound" = 'on';
+          ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+        END
+        $$;
+      `),
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].reason).toMatch(/still live when the write runs/);
+  });
+
+  // The reachable direction, and it needs the "last drop wins" tie-break to bite:
+  // a phantom drop quoted BELOW the write overwrites the real one recorded
+  // above it, so a correctly ordered file is accused of the incident. A guard
+  // that cries wolf gets deleted by the next author it blocks, which is how a
+  // false accusation ends up costing the same as a false pass.
+  it("is not tripped into a false accusation by a commented-out drop", () => {
+    expect(
+      findLateConstraintDrops(
+        file(`
+          ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+          DO $$
+          BEGIN
+            UPDATE "Settings" SET "focusSound" = 'on' WHERE "focusSound" <> 'off';
+            -- Until #180 we dropped it here instead:
+            -- ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+          END
+          $$;
+        `),
+      ),
+    ).toEqual([]);
   });
 });
 

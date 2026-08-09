@@ -75,13 +75,21 @@ export interface MigrationViolation {
 /**
  * A dollar-quote opener — `$$` or `$tag$` — anchored at the start of the slice.
  *
- * #190. Inside such a body every other lexical rule is suspended: `;` does not
- * terminate a statement, `--` is not a comment and `'` does not open a string.
- * Two committed migrations rely on that (`google_auth_orphan_purge` and
- * `google_auth_user_id_not_null` both wrap their data surgery in `DO $$ … $$`),
- * so a lexer that does not know the construct reads their one working statement
- * as a handful of fragments — and `findLateConstraintDrops` then sees "no DROP
- * in this file" rather than a late one, which is a false PASS.
+ * #190. To the OUTER lexer the whole body is one opaque token: `;` does not
+ * terminate a statement, `--` does not open a comment and `'` does not open a
+ * string, so only the matching close tag ends it. Two committed migrations rely
+ * on that (`google_auth_orphan_purge` and `google_auth_user_id_not_null` both
+ * wrap their data surgery in `DO $$ … $$`), so a lexer that does not know the
+ * construct reads their one working statement as a handful of fragments — and
+ * `findLateConstraintDrops` then sees "no DROP in this file" rather than a late
+ * one, which is a false PASS.
+ *
+ * Those rules are suspended for the outer lexer only, and reading them as
+ * suspended outright is what `stripSqlComments` got wrong for one commit. The
+ * body of a `DO` block is PL/pgSQL, which applies the same comment and string
+ * rules again from scratch — so where THIS regex ends the body is a question
+ * for the outer lexer, while what counts as a comment inside it is a question
+ * for the inner one. `stripSqlComments` recurses for exactly that reason.
  *
  * The tag is matched rather than assumed empty because `$$` may legally appear
  * inside a `$body$`-tagged block, and only the matching tag closes it.
@@ -90,29 +98,89 @@ export interface MigrationViolation {
  */
 const DOLLAR_QUOTE_OPEN = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/;
 
+/** A dollar-quoted body found in the input, split into its tags and interior. */
+interface DollarQuotedBody {
+  /** The opening tag, `$$` or `$tag$`. The closing tag is the same string. */
+  tag: string;
+  /** Everything between the two tags — PL/pgSQL, lexed by its own rules. */
+  inner: string;
+  /** False when no closing tag was found, i.e. the body ran to end of input. */
+  terminated: boolean;
+  /** How much of the input the body occupies, both tags included. */
+  length: number;
+}
+
 /**
- * If a dollar-quoted body opens at `i`, the whole body including both tags;
- * otherwise `null`. An unterminated body runs to the end of the input, which is
- * the only reading that cannot silently resume lexing inside PL/pgSQL.
+ * If a dollar-quoted body opens at `i`, that body; otherwise `null`. An
+ * unterminated body runs to the end of the input, which is the only reading
+ * that cannot silently resume lexing inside PL/pgSQL.
+ *
+ * The closing tag is found by a plain search, which is what the OUTER lexer
+ * does: it knows nothing of the comments or strings inside, so a `$$` written
+ * in what a reader would call a comment still ends the body — and ends it in
+ * Postgres too.
  */
-function dollarQuotedBodyAt(sql: string, i: number): string | null {
+function dollarQuotedBodyAt(sql: string, i: number): DollarQuotedBody | null {
   if (sql[i] !== "$") return null;
   const open = DOLLAR_QUOTE_OPEN.exec(sql.slice(i));
   if (!open) return null;
   const tag = open[0];
   const close = sql.indexOf(tag, i + tag.length);
-  return close === -1 ? sql.slice(i) : sql.slice(i, close + tag.length);
+  if (close === -1) {
+    return {
+      tag,
+      inner: sql.slice(i + tag.length),
+      terminated: false,
+      length: sql.length - i,
+    };
+  }
+  return {
+    tag,
+    inner: sql.slice(i + tag.length, close),
+    terminated: true,
+    length: close + tag.length - i,
+  };
 }
 
 /**
  * Remove `--` line comments and `/* … *​/` block comments, leaving string
- * literals and dollar-quoted bodies untouched.
+ * literals untouched.
  *
  * Hand-lexed rather than regexed because both comment markers are legal
  * *inside* a string literal, and a migration that backfills a slug is exactly
  * the kind of file that holds one. Postgres escapes a quote inside a literal by
  * doubling it, which falls out of this loop for free: the closing quote ends the
  * string and the very next character re-opens it.
+ *
+ * ── A dollar-quoted body is stripped too, recursively (#190) ─────────────────
+ *
+ * PL/pgSQL applies the SAME comment rules as SQL, so `--` and `/* … *​/` inside a
+ * `DO $$ … $$` body are comments there as well. Verified against Postgres 16: a
+ * `-- RAISE EXCEPTION …` line inside a DO block neither raises nor is a syntax
+ * error. Preserving the body verbatim — as this did briefly while the lexer was
+ * being taught that `;` does not terminate a statement inside one — handed
+ * every guard downstream a comment to read as code, and both directions the
+ * docstring above warns about became reachable one level down:
+ *
+ *  - a comment SATISFYING a guard, the false pass. `-- only rows where
+ *    "focusSound" <> 'off' are meant to change` written above an unguarded
+ *    `UPDATE` inside a DO block supplies rule 1's guard clause and the write
+ *    goes through. That is the 2026-08-07 incident with a comment on top.
+ *  - a comment TRIGGERING one, the false accusation. `-- never do this:
+ *    UPDATE "Settings" SET "focusShuffle" = true;` fails the build.
+ *
+ * Recursion, not a second lexer, because a body may hold another dollar quote
+ * and because the marker-inside-a-string rule has to hold at every depth. It
+ * terminates: `inner` is always at least one tag shorter than the input.
+ *
+ * The tags themselves are re-emitted so `splitStatements` still sees the body
+ * and still refuses to split on the semicolons inside it. Only the interior
+ * changes, and only by losing characters that Postgres also ignores.
+ *
+ * A dollar-quoted string used as DATA rather than code (`SELECT $$a -- b$$`)
+ * is stripped by the same rule, which is a deliberate over-reach in the safe
+ * direction: nothing inside a data literal is ever executed, so removing text
+ * from one can only discard a match that was never a statement.
  */
 export function stripSqlComments(sql: string): string {
   let out = "";
@@ -134,7 +202,10 @@ export function stripSqlComments(sql: string): string {
     }
     const body = dollarQuotedBodyAt(sql, i);
     if (body !== null) {
-      out += body;
+      out +=
+        body.tag +
+        stripSqlComments(body.inner) +
+        (body.terminated ? body.tag : "");
       i += body.length;
       continue;
     }
@@ -181,10 +252,12 @@ export function splitStatements(sql: string): string[] {
     }
     // #190 — a `DO $$ … $$` body is semicolon-separated PL/pgSQL, so it has to
     // be consumed whole or the one statement that does the work becomes several
-    // that are not statements at all.
+    // that are not statements at all. Taken verbatim: `stripSqlComments` has
+    // already removed the body's comments, and nothing else in it is this
+    // function's business.
     const body = dollarQuotedBodyAt(sql, i);
     if (body !== null) {
-      current += body;
+      current += sql.slice(i, i + body.length);
       i += body.length;
       continue;
     }
