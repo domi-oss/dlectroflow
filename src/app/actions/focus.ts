@@ -224,8 +224,14 @@ async function markTaskCompleted(
  * behaviour change for `completeStep`, which patches Google BEFORE its local
  * write — a stale refresh token used to abort the whole action, leaving the
  * step open. Diverging silently from Google is the lesser harm and is the
- * contract every other call site already had; the reverse-direction gap that
- * leaves is #194's.
+ * contract every other call site already had.
+ *
+ * What the swallow leaves behind is a completion Google never heard about that
+ * nothing will ever repair: the app only writes TO Google and never reads back,
+ * so no later action notices the divergence. That INBOUND gap is #194's. It is
+ * deliberately not #196 (Duo review, !288, asked): #196 is still an outbound
+ * patch — the `needsAction` call `reopenItem` never makes — which is also what
+ * "the reverse patch" means on {@link reopenGoogleTaskForStep} below.
  */
 async function completeGoogleTaskForStep(step: {
   googleTaskId: string | null;
