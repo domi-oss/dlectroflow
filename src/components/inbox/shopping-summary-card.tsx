@@ -90,12 +90,12 @@ export function ShoppingSummaryCard({
         // on the capture Retry CTA, and for the same reason: a disabled element
         // cannot hold focus, so the browser drops focus to <body> the instant the
         // press lands and a keyboard user loses their place in the middle of their
-        // own interaction. It is also skipped by most screen readers, which would
-        // silently remove the control from the tab order mid-flight rather than
-        // report that it is busy. `aria-disabled` keeps the button focusable and
-        // announced, and the state change is reported precisely because focus is
-        // still on it; the press itself is refused in the handler below, which is
-        // what actually stops the second write.
+        // own interaction. A disabled element is also skipped by most screen
+        // readers, so the busy state it is meant to convey is the one thing it
+        // cannot convey. `aria-disabled` keeps the button focusable and in the
+        // accessibility tree, and the state change is announced precisely because
+        // focus is still on it; the press itself is refused in the handler below,
+        // which is what actually stops the second write.
         //
         // (`row-actions.tsx` uses real `disabled` for the ▾ menu's items — those
         // live in a popup that is unmounted for the whole pending window, so no
@@ -110,9 +110,11 @@ export function ShoppingSummaryCard({
         }}
         // 44px minimum target (WCAG 2.5.5) and a ring rather than a background
         // swap for the focus indicator (WCAG 2.4.11, which axe cannot see — #117).
-        // `aria-disabled:opacity-50` matches the Retry CTA and every row action;
-        // WCAG 1.4.3 exempts an inactive component, and the handler above makes
-        // this one genuinely inactive for as long as it is dimmed.
+        // The 50% dim is the tree's one busy affordance — `disabled:opacity-50` on
+        // the row actions, `aria-disabled:opacity-50` on the Retry CTA; the variant
+        // differs only because the mechanism does. WCAG 1.4.3 exempts an inactive
+        // component from its contrast minimum, and the handler above makes this one
+        // genuinely inactive for exactly as long as it is dimmed.
         className="text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:ring-ring inline-flex min-h-[44px] items-center rounded-md px-2 text-xs outline-none focus-visible:ring-2 aria-disabled:opacity-50"
       >
         {t("shopping.summaryDismiss", voice)}
