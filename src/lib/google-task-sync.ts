@@ -94,9 +94,14 @@ async function patchOne(
   status: "needsAction" | "completed",
 ): Promise<boolean> {
   try {
-    return await patchGoogleTask(token, ref.googleTaskListId, ref.googleTaskId, {
-      status,
-    });
+    return await patchGoogleTask(
+      token,
+      ref.googleTaskListId,
+      ref.googleTaskId,
+      {
+        status,
+      },
+    );
   } catch {
     return false;
   }
