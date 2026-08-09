@@ -56,6 +56,7 @@ import {
   parseCheckConstraintName,
   splitInnerStatements,
   splitStatements,
+  splitTopLevelCommas,
   stripSqlComments,
   type MigrationFile,
   type SqlPosition,
@@ -234,51 +235,10 @@ function alteredTable(statement: string): string | null {
 }
 
 /**
- * One statement's clauses — the pieces separated by the commas OUTSIDE every
- * parenthesis, which is where one `ALTER TABLE` action ends and the next begins.
- *
- * #190, raised in review of !292, and the third scope this module has had to be
- * taught. Every suppression below (`NOT VALID`, `DEFAULT`) belongs to the clause
- * it is written in, and Postgres lets one `ALTER TABLE` carry any number of
- * actions. Asked of the whole statement, the LAST clause's `NOT VALID` excused
- * every validated constraint in front of it, and an `ALTER COLUMN … SET DEFAULT`
- * next door vouched for an undefaulted new column. Both are the false-negative
- * direction — a table the coverage gate then never asks anyone to seed, which is
- * a migration still only ever tested empty.
- *
- * Depth-tracked rather than a lookahead for the next clause keyword: that would
- * need a list of every word an `ALTER TABLE` action can open with, and a missing
- * entry fails the expensive way, by letting the clause over-run and borrow
- * again. A comma inside parentheses is always a value list (`IN ('off', 'on')`),
- * a column list (`FOREIGN KEY ("a", "b")`) or a type's precision
- * (`numeric(10, 2)`) — never a clause boundary.
- *
- * A stray `)` cannot drive the depth negative, so malformed SQL degrades into
- * MORE clauses rather than one long one. That is the safe direction: a clause
- * cut short can only lose a trailing suppression and over-report.
- */
-function topLevelClauses(statement: string): string[] {
-  const clauses: string[] = [];
-  let depth = 0;
-  let start = 0;
-  for (let i = 0; i < statement.length; i += 1) {
-    const c = statement[i];
-    if (c === "(") depth += 1;
-    else if (c === ")") depth = Math.max(0, depth - 1);
-    else if (c === "," && depth === 0) {
-      clauses.push(statement.slice(start, i));
-      start = i + 1;
-    }
-  }
-  clauses.push(statement.slice(start));
-  return clauses;
-}
-
-/**
  * Where one `ADD COLUMN` ends inside a clause: at the next `ADD COLUMN`, or at
- * the end of the clause. Kept alongside the comma split above rather than
- * replaced by it — the comma is what Postgres requires, not what every
- * hand-edited migration in this tree reliably contains.
+ * the end of the clause. Kept alongside the comma split rather than replaced by
+ * it — the comma is what Postgres requires, not what every hand-edited migration
+ * in this tree reliably contains.
  */
 const ADD_COLUMN_CLAUSE =
   /\bADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?[\s\S]*?(?=\bADD\s+COLUMN\b|$)/gi;
@@ -296,9 +256,15 @@ const ADD_COLUMN_CLAUSE =
  *  - a sibling clause of the same statement: `, ALTER COLUMN "other" SET
  *    DEFAULT …`, or a foreign key's `ON DELETE SET DEFAULT`, which is a
  *    referential action and not a column default at all.
+ *
+ * Postgres lets one `ALTER TABLE` carry any number of actions, and the boundary
+ * between two of them is a comma outside every bracket — `splitTopLevelCommas`,
+ * shared with the `SET`-clause scan in `focus-sound-migration-hygiene.ts` for
+ * the reason `isBefore` and `parseCheckConstraintName` are shared: two copies of
+ * this reasoning have already drifted apart once.
  */
 function addColumnClauses(statement: string): string[] {
-  return topLevelClauses(statement).flatMap((clause) =>
+  return splitTopLevelCommas(statement).flatMap((clause) =>
     [...clause.matchAll(ADD_COLUMN_CLAUSE)].map((m) => m[0]),
   );
 }
@@ -338,7 +304,7 @@ const ADD_FOREIGN_KEY = /\bADD\s+(?:CONSTRAINT\s+"?\w+"?\s+)?FOREIGN\s+KEY\b/i;
  * validated constraint or behind it — decided the answer for all of them.
  */
 function addsAValidatedConstraint(statement: string, adds: RegExp): boolean {
-  return topLevelClauses(statement).some(
+  return splitTopLevelCommas(statement).some(
     (clause) => adds.test(clause) && !NOT_VALID.test(clause),
   );
 }
@@ -671,9 +637,9 @@ function positionsOf(
  *
  *  - The write scan spanned `[\s\S]*?`, so inside a merged `DO $$ … $$` body it
  *    crossed a `;` and paired one statement's `UPDATE "T"` with a later
- *    statement's `SET "c" =`. `COLUMN_WRITE` next door already bounds the same
- *    gap with `[^;]*?` for the same reason; this one did not, and would happily
- *    move a DROP below a write that no statement performs. Detection therefore
+ *    statement's `SET "c" =`. `setClauseOf` next door bounds the same gap at the
+ *    statement for the same reason; this one did not, and would happily move a
+ *    DROP below a write that no statement performs. Detection therefore
  *    runs over a literal-REDACTED copy too, which is what makes `[^;]` safe on
  *    the second gap — the only semicolons a real `UPDATE` holds sit in its
  *    values — and closes the neighbouring hole where a `Settings` UPDATE quoted

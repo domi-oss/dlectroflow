@@ -330,6 +330,93 @@ export function splitInnerStatements(statement: string): string[] {
 }
 
 /**
+ * How many characters the string literal starting at `text[i]` occupies, or 0
+ * when no literal starts there.
+ *
+ * Postgres escapes a quote inside a literal by doubling it, so `'it''s'` is ONE
+ * literal and not two — the same rule `stripSqlComments` and `splitOnSemicolons`
+ * already lex by, factored out here because the two scans below need to skip a
+ * literal wholesale rather than merely notice they are inside one.
+ *
+ * An unterminated literal is read as running to the end of the input. That is
+ * the reading that cannot silently resume lexing inside a value: the alternative
+ * is treating the opening quote as ordinary text, which hands every scan below a
+ * string's contents to read as SQL.
+ */
+function stringLiteralLengthAt(text: string, i: number): number {
+  if (text[i] !== "'") return 0;
+  let j = i + 1;
+  while (j < text.length) {
+    if (text[j] !== "'") j += 1;
+    else if (text[j + 1] === "'")
+      j += 2; // an escaped quote, still inside
+    else return j + 1 - i; // the closing quote
+  }
+  return text.length - i;
+}
+
+/**
+ * The pieces of `text` separated by the commas that are OUTSIDE every bracket
+ * and every string literal — i.e. the commas that end one clause and begin the
+ * next, rather than the ones separating a function's arguments or a value list's
+ * values.
+ *
+ * #190. Shared by both halves of the migration guards, for the reason `isBefore`
+ * and `splitInnerStatements` are shared rather than copied: this reasoning has
+ * already drifted apart once per module that re-derived it. Its two callers ask
+ * the same question of different clauses —
+ *
+ *  - `migration-data-harness.ts` bounds one `ALTER TABLE` action at the next,
+ *    because every suppression there (`NOT VALID`, `DEFAULT`) belongs to the
+ *    clause it is written in, and read wider the LAST clause's `NOT VALID`
+ *    excuses every validated constraint in front of it;
+ *  - `setClauseOf` below bounds one `SET` assignment at the next, because an
+ *    `UPDATE` may write several columns and only the first was ever read.
+ *
+ * Depth-tracked rather than a lookahead for the next clause keyword: that would
+ * need a list of every word a clause can open with, and a missing entry fails
+ * the expensive way, by letting the clause over-run and borrow from its
+ * neighbour. Brackets of both kinds count, because `numeric(10, 2)`,
+ * `FOREIGN KEY ("a", "b")`, `IN ('off', 'on')` and `ARRAY['lofi', 'rain']` are
+ * all one value written with a comma in it — the array form is not theoretical,
+ * `20260806100000_settings_focus_sound_categories` writes one.
+ *
+ * String literals are skipped whole, which is what stops a migration's stored
+ * prose from being read as SQL. These files quote SQL in their data as well as
+ * in their comments, and a literal holding `, "focusSound" = 'on'` would
+ * otherwise open a clause that no statement executes — the false-accusation
+ * direction, which costs the same as a miss because the next author it blocks
+ * deletes the guard.
+ *
+ * A stray `)` cannot drive the depth negative, so malformed SQL degrades into
+ * MORE pieces rather than one long one. That is the safe direction: a clause cut
+ * short can only lose a trailing suppression and over-report.
+ */
+export function splitTopLevelCommas(text: string): string[] {
+  const pieces: string[] = [];
+  let depth = 0;
+  let start = 0;
+  let i = 0;
+  while (i < text.length) {
+    const literal = stringLiteralLengthAt(text, i);
+    if (literal > 0) {
+      i += literal;
+      continue;
+    }
+    const c = text[i];
+    if (c === "(" || c === "[") depth += 1;
+    else if (c === ")" || c === "]") depth = Math.max(0, depth - 1);
+    else if (c === "," && depth === 0) {
+      pieces.push(text.slice(start, i));
+      start = i + 1;
+    }
+    i += 1;
+  }
+  pieces.push(text.slice(start));
+  return pieces;
+}
+
+/**
  * `UPDATE "Settings" …` — the only table whose focus preferences exist.
  *
  * Not anchored to the start of the statement (#190). `UPDATE "Settings"` is the
@@ -398,10 +485,79 @@ const SETTINGS_ALTER = /\bALTER\s+TABLE\s+"?Settings"?\b/i;
 const ADD_COLUMN_WITH_DEFAULT =
   /\bADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?"?(\w+)"?\b[\s\S]*?\bDEFAULT\s+(.+?)\s*$/i;
 
-/** The SET clause of an UPDATE — everything between `SET` and `WHERE`/end. */
-function setClauseOf(statement: string): string {
-  const m = /\bSET\b([\s\S]*?)(?:\bWHERE\b|$)/i.exec(statement);
-  return m ? m[1] : "";
+/** `SET`, as a whole word, at the head of the slice it is tested against. */
+const SET_KEYWORD = /^SET\b/i;
+
+/**
+ * The words that end a SET clause. Everything after one of them belongs to the
+ * statement but is not an assignment: `FROM` opens a join list, `WHERE` chooses
+ * rows, `RETURNING` describes the output. `RETURNING` matters most, because its
+ * comma-separated list of expressions is the one place after a SET clause where
+ * `"column" = value` is legal — and reading one as a write would accuse a
+ * migration of a change it only reports on.
+ */
+const SET_CLAUSE_END = /^(?:WHERE|FROM|RETURNING)\b/i;
+
+/** Longest word `SET_CLAUSE_END` can match, plus one for its trailing boundary. */
+const LONGEST_CLAUSE_END = "RETURNING".length + 1;
+
+/** Characters that continue a word, so a keyword starting here is not one. */
+const WORD_CHARACTER = /[A-Za-z0-9_$"]/;
+
+/**
+ * The SET clause of the `UPDATE` that begins at `from`: the assignments, and
+ * nothing else.
+ *
+ * Scanned rather than matched, because all three bounds are questions about
+ * nesting that a regex cannot ask (#190, raised in review of !292):
+ *
+ *  - it ends at the first `WHERE`/`FROM`/`RETURNING` **at depth zero**. Bounding
+ *    at the first one in the text instead loses every assignment after a
+ *    subquery — `SET "a" = (SELECT … WHERE …), "b" = 2` stops inside the
+ *    parentheses and never sees `"b"`, which is the miss direction a naive fix
+ *    for the multi-column gap walks straight into;
+ *  - it ends at a depth-zero `;`, so inside a merged `DO $$ … $$` body one
+ *    statement's clause cannot run into the next one's. The single-assignment
+ *    scan this replaces got that from `[^;]*?` and a clause split does not get
+ *    it for free: run on, and the first `UPDATE`'s table is credited with a
+ *    later statement's column;
+ *  - string literals are skipped whole, so a `;` or a clause keyword stored as
+ *    data ends nothing.
+ *
+ * Returns `""` when no `SET` is reached before the statement does — which is not
+ * valid SQL for an `UPDATE`, and is therefore reported as "this statement
+ * assigns nothing" rather than by borrowing the next statement's clause.
+ */
+function setClauseOf(statement: string, from = 0): string {
+  let depth = 0;
+  let start = -1;
+  let i = from;
+  while (i < statement.length) {
+    const literal = stringLiteralLengthAt(statement, i);
+    if (literal > 0) {
+      i += literal;
+      continue;
+    }
+    const c = statement[i];
+    if (c === "(" || c === "[") depth += 1;
+    else if (c === ")" || c === "]") depth = Math.max(0, depth - 1);
+    else if (c === ";" && depth === 0) break;
+    else if (depth === 0 && !WORD_CHARACTER.test(statement[i - 1] ?? " ")) {
+      if (start === -1) {
+        if (SET_KEYWORD.test(statement.slice(i, i + "SET".length + 1))) {
+          start = i + "SET".length;
+          i = start;
+          continue;
+        }
+      } else if (
+        SET_CLAUSE_END.test(statement.slice(i, i + LONGEST_CLAUSE_END))
+      ) {
+        break;
+      }
+    }
+    i += 1;
+  }
+  return start === -1 ? "" : statement.slice(start, i);
 }
 
 /**
@@ -563,7 +719,7 @@ const CHECK_CONSTRAINT_NAME = /^([A-Za-z0-9_]+)_([A-Za-z0-9]+)_check$/;
  * case, and the two spellings of this convention only ever agreed on names where
  * case did not vary. A name that differs by case would key the drop map
  * differently from the write scan anyway, so matching it loosely never bought a
- * comparison — it bought a `dropAtByColumn` entry no `COLUMN_WRITE` can find.
+ * comparison — it bought a `dropAtByColumn` entry no write can ever match.
  */
 export function parseCheckConstraintName(
   name: string,
@@ -572,18 +728,75 @@ export function parseCheckConstraintName(
   return m ? { table: m[1], column: m[2] } : null;
 }
 
+/** `UPDATE "<Table>"`, capturing the table. Global: a merged body holds many. */
+const UPDATE_TARGET = /\bUPDATE\s+"([A-Za-z0-9_]+)"/gi;
+
 /**
- * `UPDATE "<Table>" … SET "<column>" =`, capturing both.
+ * `"<column>" =` at the HEAD of one SET assignment, capturing the column.
  *
- * The gap may not cross a `;` (#190). Unbounded, the first `UPDATE` in a merged
- * `DO $$ … $$` body reaches past its own `SET` — an unquoted one, say — into the
- * NEXT statement's, and the guard then checks a table/column pair that no
- * statement writes while the write that was really there goes unexamined. The
- * only semicolons a single real `UPDATE` can hold sit in its values, which come
- * after the `SET` this has already matched.
+ * Anchored, which is what separates the column being written from the columns
+ * being read: `SET "a" = "b"` writes `a` and merely reads `b`, and only the
+ * left-hand side of the assignment is a write. The comparison operators are
+ * excluded for free — `"a" <> 'x'` and `"a" >= 1` put a character between the
+ * name and the `=` that `\s*` does not admit.
+ *
+ * Quoted names only, as this scan has always required: every column in this
+ * schema is written quoted, and the drop map is keyed by the case-sensitive
+ * `<Table>_<column>_check` convention, so an unquoted spelling could not be
+ * matched against it anyway.
  */
-const COLUMN_WRITE =
-  /UPDATE\s+"([A-Za-z0-9_]+)"[^;]*?SET\s+"([A-Za-z0-9]+)"\s*=/gi;
+const ASSIGNED_COLUMN = /^\s*"([A-Za-z0-9]+)"\s*=/;
+
+/** A column an `UPDATE` assigns, and where in the statement that write runs. */
+interface ColumnWrite {
+  table: string;
+  column: string;
+  /**
+   * Offset of the `UPDATE` keyword, not of the assignment. A statement's writes
+   * all land at once, so every column one assigns shares the position the
+   * statement itself runs at — and taking the assignment's own offset would
+   * order two columns of one `SET` against each other, which nothing does.
+   */
+  offset: number;
+}
+
+/**
+ * Every column each `UPDATE` in `statement` assigns.
+ *
+ * EVERY column (#190, raised in review of !292). This read `UPDATE "<Table>" …
+ * SET "<column>" =` as one pattern and then looked for the next `UPDATE`, so in
+ * `SET "typeface" = …, "focusSound" = 'on'` the second assignment onwards was
+ * invisible. A `DROP CONSTRAINT` left below a write to a column assigned second
+ * therefore passed a guard that exists for precisely that shape — the
+ * 2026-08-07 incident with a comma in front of it, and a false negative, which
+ * is the direction that reaches production. No committed migration writes two
+ * columns in one `SET` today, which is why the real-tree scan could not see it;
+ * it is one line of SQL away.
+ *
+ * The clause is split the way `migration-data-harness.ts` splits an `ALTER
+ * TABLE`'s actions — the shared `splitTopLevelCommas` — rather than by widening
+ * the pattern, because a wider pattern reads the `WHERE` clause, a `RETURNING`
+ * expression and any SQL stored in a string literal as writes too.
+ */
+function columnWritesIn(statement: string): ColumnWrite[] {
+  const writes: ColumnWrite[] = [];
+  // `matchAll` builds its own iterator from the pattern's source and flags, so
+  // sharing a `g`-flagged constant carries no `lastIndex` between calls.
+  for (const target of statement.matchAll(UPDATE_TARGET)) {
+    const clause = setClauseOf(statement, target.index + target[0].length);
+    for (const assignment of splitTopLevelCommas(clause)) {
+      const assigned = ASSIGNED_COLUMN.exec(assignment);
+      if (assigned) {
+        writes.push({
+          table: target[1],
+          column: assigned[1],
+          offset: target.index,
+        });
+      }
+    }
+  }
+  return writes;
+}
 
 /**
  * A write that a still-live CHECK constraint would reject (#180 / the 2026-08-07
@@ -632,6 +845,14 @@ const COLUMN_WRITE =
  * merged body holds as many as the author wrote. Reading only the first let a
  * late write hide behind an earlier, innocent one.
  *
+ * And every column each write ASSIGNS, not just the first (#190, raised in
+ * review of !292). One `UPDATE` may set several — `SET "typeface" = …,
+ * "focusSound" = 'on'` — and a scan that stopped at the first assignment let a
+ * late drop on a column written second through, which is the 2026-08-07 shape
+ * with a comma in front of it. `columnWritesIn` below reads the SET clause and
+ * splits it; the miss and the false accusation are both pinned in the colocated
+ * test, because widening a scan is the cheap way to buy the second.
+ *
  * The constraint→column mapping leans on this repo's naming convention,
  * `<Table>_<column>_check`, which every constraint in `prisma/migrations`
  * follows. A constraint named otherwise is skipped rather than guessed at —
@@ -665,9 +886,9 @@ export function findLateConstraintDrops(
     });
 
     statements.forEach((s, statement) => {
-      for (const upd of s.matchAll(COLUMN_WRITE)) {
-        const dropAt = dropAtByColumn.get(`${upd[1]}.${upd[2]}`);
-        const writeAt = { statement, offset: upd.index };
+      for (const write of columnWritesIn(s)) {
+        const dropAt = dropAtByColumn.get(`${write.table}.${write.column}`);
+        const writeAt = { statement, offset: write.offset };
         if (dropAt === undefined || isBefore(dropAt, writeAt)) continue;
         const dropWhere =
           dropAt.statement === statement
@@ -678,8 +899,8 @@ export function findLateConstraintDrops(
           migration: file.name,
           statement: s.replace(/\s+/g, " ").trim().slice(0, 160),
           reason:
-            `writes "${upd[2]}" at statement ${statement + 1} but drops ` +
-            `"${upd[1]}_${upd[2]}_check" ${dropWhere}. The old ` +
+            `writes "${write.column}" at statement ${statement + 1} but drops ` +
+            `"${write.table}_${write.column}_check" ${dropWhere}. The old ` +
             `constraint is still live when the write runs, so any EXISTING row ` +
             `whose new value it forbids fails with SQLSTATE 23514 and rolls the ` +
             `whole migration back. Move the DROP above the write; only the ` +

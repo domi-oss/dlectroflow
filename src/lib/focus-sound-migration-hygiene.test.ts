@@ -6,6 +6,7 @@ import {
   findFocusSoundViolations,
   parseFocusSoundCategoryBackfill,
   splitStatements,
+  splitTopLevelCommas,
   stripSqlComments,
   type MigrationFile,
 } from "@/lib/focus-sound-migration-hygiene";
@@ -602,6 +603,216 @@ describe("findLateConstraintDrops — order inside a merged DO block", () => {
         `),
       ),
     ).toEqual([]);
+  });
+});
+
+/**
+ * #190, raised in review of !292 — one `UPDATE` may assign more than one column,
+ * and only the first of them was ever read.
+ *
+ * `UPDATE "Settings" SET "typeface" = …, "focusSound" = 'on'` is a single
+ * statement writing two columns. The scan matched `SET "<column>" =` once and
+ * then looked for the NEXT `UPDATE`, so the second assignment onwards was
+ * invisible — and a late `DROP CONSTRAINT` on a column written second passed the
+ * guard silently. That is the 2026-08-07 failure mode exactly, wearing a comma:
+ * the write still runs while the old CHECK is live, every existing row it
+ * forbids still fails with SQLSTATE 23514, and the migration still rolls back in
+ * production and nowhere else.
+ *
+ * No committed migration assigns two columns in one `SET` today, which is why
+ * the real-tree test below could not see this. It is a shape one line of SQL
+ * away, and the fix is the depth-tracked comma split
+ * `migration-data-harness.ts` already applies to `ADD COLUMN` and `ADD
+ * CONSTRAINT` — now `splitTopLevelCommas`, shared rather than copied, for the
+ * reason `isBefore` and `splitInnerStatements` are.
+ *
+ * Both directions are pinned. Widening a scan is the cheap way to buy a false
+ * accusation, and this file's own docstrings say why that costs the same as a
+ * miss: the next author it blocks deletes the guard. So the assignments are read
+ * out of the SET CLAUSE — not out of a string literal that happens to quote one,
+ * not out of the `WHERE` that follows it, and not out of the next statement of a
+ * merged `DO $$ … $$` body.
+ */
+describe("findLateConstraintDrops — every column a SET clause assigns", () => {
+  const file = (sql: string) => [{ name: "20260101000000_x", sql }];
+
+  it("flags a late drop on a column assigned SECOND in one SET", () => {
+    const v = findLateConstraintDrops(
+      file(`
+        UPDATE "Settings" SET "typeface" = 'figtree', "focusSound" = 'on';
+        ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+      `),
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].reason).toMatch(/writes "focusSound"/);
+    expect(v[0].reason).toMatch(/still live when the write runs/);
+  });
+
+  // A comma inside a function call is an argument separator, not the end of an
+  // assignment. Splitting on it would cut `COALESCE("typeface"` off from its
+  // second argument and leave `'x'), "focusSound" = 'on'` as the next piece —
+  // which happens to still find the column here, but only by luck, and the
+  // mirror-image shape (the constrained column inside the parentheses) would
+  // read a value expression as a write.
+  it("does not treat a comma inside a function call as a clause boundary", () => {
+    const v = findLateConstraintDrops(
+      file(`
+        UPDATE "Settings"
+           SET "typeface" = COALESCE("typeface", 'figtree'),
+               "focusSound" = 'on';
+        ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+      `),
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].reason).toMatch(/writes "focusSound"/);
+  });
+
+  // A subquery brings its own `WHERE` and its own commas. Bounding the SET
+  // clause at the first `WHERE` in the text would stop inside the parentheses
+  // and lose every assignment after it — the miss direction again, and the one
+  // a naive fix introduces while closing this finding.
+  it("reads past a parenthesised subquery that carries its own WHERE", () => {
+    const v = findLateConstraintDrops(
+      file(`
+        UPDATE "Settings"
+           SET "typeface" = (SELECT "v" FROM "Other" WHERE "id" IN (1, 2)),
+               "focusSound" = 'on'
+         WHERE "focusSound" <> 'off';
+        ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+      `),
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].reason).toMatch(/writes "focusSound"/);
+  });
+
+  // The false-accusation direction. A literal is data, not SQL, and this repo's
+  // migrations carry prose that quotes SQL — `20260804170000` spends forty lines
+  // on `focusSound` values it does not write. A comma inside a literal must not
+  // start a new assignment, or a stored string describing the incident becomes
+  // the incident.
+  it("does not read an assignment out of a string literal", () => {
+    expect(
+      findLateConstraintDrops(
+        file(`
+          UPDATE "Settings" SET "typeface" = 'before #180, "focusSound" = ''on''';
+          ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+        `),
+      ),
+    ).toEqual([]);
+  });
+
+  // `WHERE "focusSound" = 'on'` selects rows; it does not write the column. The
+  // guard already relied on this by reading only the first assignment, so it is
+  // a property the widened scan has to keep rather than one it introduces.
+  it("does not read the WHERE clause as an assignment", () => {
+    expect(
+      findLateConstraintDrops(
+        file(`
+          UPDATE "Settings" SET "typeface" = 'figtree' WHERE "focusSound" = 'on';
+          ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+        `),
+      ),
+    ).toEqual([]);
+  });
+
+  // `RETURNING` takes a comma-separated list of expressions, and `"col" = 'v'`
+  // is a legal one. It is the only place after a SET clause where a top-level
+  // comma is followed by something shaped exactly like an assignment, so it is
+  // what proves the clause is bounded rather than merely split.
+  it("does not read a RETURNING expression as an assignment", () => {
+    expect(
+      findLateConstraintDrops(
+        file(`
+          UPDATE "Settings" SET "typeface" = 'figtree'
+            RETURNING "typeface", "focusSound" = 'on';
+          ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+        `),
+      ),
+    ).toEqual([]);
+  });
+
+  // The `;` bound, which the single-assignment scan got from `[^;]*?` and a
+  // clause split does not get for free. Inside a merged body the first UPDATE's
+  // SET clause must end at its own statement: run on, and `"Other"` is credited
+  // with the NEXT statement's `focusSound` write and accused of a drop that
+  // belongs to a column it never touched.
+  it("ends one statement's SET clause before the next statement", () => {
+    expect(
+      findLateConstraintDrops(
+        file(`
+          DO $$
+          BEGIN
+            UPDATE "Other" SET "x" = 1, "y" = 2;
+            UPDATE "Settings" SET "typeface" = 'figtree', "focusSound" = 'on';
+            ALTER TABLE "Other" DROP CONSTRAINT "Other_focusSound_check";
+          END
+          $$;
+        `),
+      ),
+    ).toEqual([]);
+  });
+
+  // And the same shape with the drop that IS due: two writes in one merged body,
+  // the constrained column assigned second in the second of them.
+  it("flags a second assignment inside a merged DO block", () => {
+    const v = findLateConstraintDrops(
+      file(`
+        DO $$
+        BEGIN
+          UPDATE "Other" SET "x" = 1, "y" = 2;
+          UPDATE "Settings" SET "typeface" = 'figtree', "focusSound" = 'on';
+          ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+        END
+        $$;
+      `),
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].reason).toMatch(/writes "focusSound"/);
+    expect(v[0].reason).toMatch(/same statement/);
+  });
+});
+
+/**
+ * The splitter itself, exercised directly because two modules now share it —
+ * `migration-data-harness.ts` bounds an `ALTER TABLE` action with it and the
+ * SET-clause scan above bounds an assignment with it. A shared helper whose only
+ * coverage is through its callers is one whose contract nobody can read.
+ */
+describe("splitTopLevelCommas", () => {
+  it("splits on the commas outside every parenthesis", () => {
+    expect(splitTopLevelCommas(`a, f(1, 2), g(h(3, 4))`)).toEqual([
+      "a",
+      " f(1, 2)",
+      " g(h(3, 4))",
+    ]);
+  });
+
+  it("ignores a comma inside a string literal, doubled quotes and all", () => {
+    expect(splitTopLevelCommas(`a = 'x, ''y'', z', b = 2`)).toEqual([
+      "a = 'x, ''y'', z'",
+      " b = 2",
+    ]);
+  });
+
+  // An ARRAY literal's commas separate values, not clauses, and this repo
+  // writes one: `20260806100000_settings_focus_sound_categories` backfills
+  // `focusSoundCategories` with `ARRAY[…]`. Counting only round brackets splits
+  // such a default in half and hands the rule after it a fragment.
+  it("ignores a comma inside a square-bracketed array literal", () => {
+    expect(
+      splitTopLevelCommas(
+        `ADD COLUMN "cats" TEXT[] DEFAULT ARRAY['lofi', 'rain'] NOT NULL, ADD COLUMN "n" INT`,
+      ),
+    ).toEqual([
+      `ADD COLUMN "cats" TEXT[] DEFAULT ARRAY['lofi', 'rain'] NOT NULL`,
+      ` ADD COLUMN "n" INT`,
+    ]);
+  });
+
+  // A stray `)` degrades into MORE pieces rather than one long one, which is the
+  // safe direction: a piece cut short can only lose a trailing suppression.
+  it("does not let an unbalanced closing paren drive the depth negative", () => {
+    expect(splitTopLevelCommas(`a), b`)).toEqual(["a)", " b"]);
   });
 });
 
