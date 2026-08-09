@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useId, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { dismissShoppingSummary } from "@/app/actions/shopping";
@@ -39,6 +39,23 @@ import { t, type Voice } from "@/lib/strings";
  * the control. Without it the button reads as a delete, and this card is the only
  * place that behaviour is explained — a control whose effect is temporary and
  * unexplained is one people stop pressing.
+ *
+ * ## A dismiss that fails has to say so
+ *
+ * Duo review, !295. The handler had no `catch`, so a rejected
+ * `dismissShoppingSummary()` cleared `pending`, re-enabled the button and told
+ * the user nothing at all — and they had just been promised, by the hint next to
+ * the control, that the line only returns when the list grows. A silent failure
+ * therefore does not merely go unnoticed: it makes this card's own copy look like
+ * a lie the next time the inbox loads.
+ *
+ * The shape is `runSchedule` / `runScheduleIcs` in `inbox-view.tsx` — clear the
+ * stale message urgently, run the action, surface one message on rejection —
+ * rather than `capture()`'s. `capture()` carries words that exist nowhere but the
+ * browser, so it restores text, quotes it, and tells a stale deployment from a
+ * transient fault because only one of those can be retried. Nothing here is at
+ * risk of being lost, and pressing the control again IS the retry, so all of that
+ * machinery would be answering a question this surface does not ask.
  */
 export function ShoppingSummaryCard({
   count,
@@ -58,6 +75,11 @@ export function ShoppingSummaryCard({
   // `schedulingIds` in `inbox-view.tsx`); this card has ONE action, so the
   // transition's own flag is that per-action state rather than a keyed set.
   const [pending, startTransition] = useTransition();
+  // Whether the LAST attempt was refused, not a count and not the error itself:
+  // there is one message for every way this can fail, because there is one thing
+  // the user can do about any of them (press it again).
+  const [failed, setFailed] = useState(false);
+  const errorId = useId();
   const label = shoppingSummaryLabel(count, voice);
 
   return (
@@ -101,11 +123,35 @@ export function ShoppingSummaryCard({
         // live in a popup that is unmounted for the whole pending window, so no
         // focus can be stranded there. This control is the pressed element.)
         aria-disabled={pending}
+        // Points at the notice only while there is one, so a screen-reader user
+        // arriving at the control after the alert has been announced is still
+        // told why it is here. The same wiring the capture Retry CTA uses.
+        aria-describedby={failed ? errorId : undefined}
         onClick={() => {
           if (pending) return;
+          // Cleared URGENTLY, outside the transition — the #169 reasoning
+          // `runSchedule` states, and the same reasoning as the pending guard
+          // above: React 19 holds an async transition's own state updates until
+          // the action settles, so clearing it inside would leave the previous
+          // failure on screen for the whole of the retry it describes.
+          setFailed(false);
           startTransition(async () => {
-            await dismissShoppingSummary();
-            router.refresh();
+            // `landed`, and the refresh OUTSIDE the try — `capture()`'s round-8
+            // lesson, which is exactly this bug pointing the other way: a
+            // `router.refresh()` inside the `try` would let a failed refresh
+            // report a dismissal that did happen as one that did not.
+            let landed = false;
+            try {
+              await dismissShoppingSummary();
+              landed = true;
+            } catch {
+              // Deliberately no `isStaleActionError` branch: a reload and a retry
+              // both work here, because the row is unchanged and nothing on this
+              // card is unsaved. Offering the reload the capture bar offers would
+              // be the heavier remedy for the lighter problem.
+              setFailed(true);
+            }
+            if (landed) router.refresh();
           });
         }}
         // 44px minimum target (WCAG 2.5.5) and a ring rather than a background
@@ -119,6 +165,25 @@ export function ShoppingSummaryCard({
       >
         {t("shopping.summaryDismiss", voice)}
       </button>
+      {failed && (
+        // `role="alert"` announces without taking focus, which is the right call
+        // for the same reason the capture notice gives: nothing unmounted, the
+        // user is standing on the button they just pressed, and moving focus
+        // would be a change of context they did not request (WCAG 3.2.2).
+        //
+        // `basis-full` so it takes its own line in the wrapping row rather than
+        // squeezing the link and the hint. No size class, so it inherits the
+        // card's `text-sm` rather than shrinking to the hint's `text-xs` — this
+        // is the one thing on the card the reader has to act on.
+        // `text-destructive` is the token globals.css documents as AA in both
+        // themes, the same one `inbox-view.tsx` gives its per-row scheduling
+        // error, and not a raw palette shade — which is what #109 was. The
+        // sentence carries the failure on its own, so nothing here depends on the
+        // colour (WCAG 1.4.1).
+        <p id={errorId} role="alert" className="text-destructive basis-full">
+          {t("shopping.summaryDismissError", voice)}
+        </p>
+      )}
     </div>
   );
 }

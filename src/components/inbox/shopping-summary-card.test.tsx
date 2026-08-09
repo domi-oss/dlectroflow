@@ -156,6 +156,91 @@ describe("ShoppingSummaryCard", () => {
     expect(screen.getByRole("link", { name: /🛒/ })).toBeInTheDocument();
   });
 
+  /**
+   * Duo review, !295 — the handler had no `catch`, so a rejected
+   * `dismissShoppingSummary()` cleared `pending`, re-enabled the button and told
+   * the user nothing. They believe "Not now" worked until the line reappears on
+   * the next load, which is the one outcome this card's copy promises will not
+   * happen without the list growing.
+   *
+   * The shape is `runSchedule`/`runScheduleIcs` in `inbox-view.tsx`, not
+   * `capture()`: nothing here is at risk of being lost, so there is no words-to-
+   * restore machinery and no stale-deployment branch — pressing the control again
+   * IS the retry, and one message is the whole fix.
+   */
+  describe("a dismiss that fails", () => {
+    it("says so, rather than looking like it worked", async () => {
+      dismissMock.mockRejectedValueOnce(new Error("db is down"));
+      render(<ShoppingSummaryCard count={2} voice="plain" />);
+      await userEvent.click(screen.getByRole("button", { name: /not now/i }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        /still here|didn't go through|did not go through/i,
+      );
+    });
+
+    // The dismissal did not happen, so there is nothing new for the server to
+    // render — and a refresh would repaint the card and drop the notice with it.
+    it("does not refresh the inbox", async () => {
+      dismissMock.mockRejectedValueOnce(new Error("db is down"));
+      render(<ShoppingSummaryCard count={2} voice="plain" />);
+      await userEvent.click(screen.getByRole("button", { name: /not now/i }));
+      await screen.findByRole("alert");
+      expect(refreshMock).not.toHaveBeenCalled();
+    });
+
+    // Pressing again is the retry, so the control has to come back — a failure
+    // that left it busy would be the double-press guard turned into a dead end.
+    it("leaves the control pressable again", async () => {
+      dismissMock.mockRejectedValueOnce(new Error("db is down"));
+      render(<ShoppingSummaryCard count={2} voice="plain" />);
+      const button = screen.getByRole("button", { name: /not now/i });
+      await userEvent.click(button);
+      await screen.findByRole("alert");
+      expect(button).toHaveAttribute("aria-disabled", "false");
+
+      await userEvent.click(button);
+      expect(dismissMock).toHaveBeenCalledTimes(2);
+    });
+
+    // Cleared on the next attempt, like `runSchedule` clears a row's error before
+    // trying again: a red line still on screen beside a dismissal that has now
+    // worked is the same lie in the other direction.
+    it("drops the notice once a retry succeeds", async () => {
+      dismissMock.mockRejectedValueOnce(new Error("db is down"));
+      render(<ShoppingSummaryCard count={2} voice="plain" />);
+      const button = screen.getByRole("button", { name: /not now/i });
+      await userEvent.click(button);
+      await screen.findByRole("alert");
+
+      await userEvent.click(button);
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(refreshMock).toHaveBeenCalledTimes(1);
+    });
+
+    // The notice is announced without stealing focus (nothing unmounted, the user
+    // is standing on the button), and the button points at it so a screen reader
+    // reaching the control afterwards is told why it is still there.
+    it("names the notice as the control's description", async () => {
+      dismissMock.mockRejectedValueOnce(new Error("db is down"));
+      render(<ShoppingSummaryCard count={2} voice="plain" />);
+      const button = screen.getByRole("button", { name: /not now/i });
+      await userEvent.click(button);
+      const alert = await screen.findByRole("alert");
+      expect(button).toHaveAttribute("aria-describedby", alert.id);
+      expect(button).toHaveFocus();
+    });
+
+    // No notice until something actually fails — otherwise the assertions above
+    // would pass against a card that always shows one.
+    it("shows nothing of the sort while the dismiss succeeds", async () => {
+      render(<ShoppingSummaryCard count={2} voice="plain" />);
+      const button = screen.getByRole("button", { name: /not now/i });
+      expect(button).not.toHaveAttribute("aria-describedby");
+      await userEvent.click(button);
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+  });
+
   // The card is app-generated, so it must not present itself as a captured item:
   // no tick, no rename, no move-to, no delete. Those all mean something to a
   // BrainDumpItem row and nothing here.

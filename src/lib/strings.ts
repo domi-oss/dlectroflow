@@ -1218,6 +1218,20 @@ export const STRINGS = {
     plain: "Back when the list grows.",
     playful: "Back when the list grows.",
   },
+  // Duo review, !295 — a rejected `dismissShoppingSummary()` used to clear the
+  // pending flag and say nothing, so the user believed "Not now" had worked until
+  // the line turned up again. The sentence has to contradict that belief with the
+  // fact they can check for themselves — the line is still here — rather than the
+  // generic "something went wrong", which leaves them guessing which half failed.
+  //
+  // No emoji in the playful variant, and no joke: this is the copy that lands on
+  // somebody whose press just did not work, and flavour there is paid for by the
+  // one person least able to spare it. Only the contraction differs, which is the
+  // same plain/playful split `shopping.errorTooLong` uses.
+  "shopping.summaryDismissError": {
+    plain: "That did not go through — the line is still here. Try again.",
+    playful: "That didn't go through — the line's still here. Try again.",
+  },
   // Accessible names. Each one names the ITEM, because "Delete" repeated down a
   // list of twelve rows is unusable in a screen reader's element list.
   "shopping.tickOff": { plain: "Tick off", playful: "Tick off" },
