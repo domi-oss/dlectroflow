@@ -19,6 +19,7 @@ import {
   useSaveStatus,
   SaveIndicator,
 } from "@/components/settings/use-save-status";
+import { revertOptimistic } from "@/components/settings/revert-optimistic";
 import { CollapsibleSection } from "@/components/nav/collapsible-section";
 
 type Prefs = {
@@ -35,6 +36,24 @@ type Prefs = {
  * prompts for it (same UX as roundup-card). The toggles here only persist the
  * preference — the actual firing lives in roundup-card / inbox-view / the
  * daily-review nudge.
+ *
+ * ## A failed save both speaks and steps back (#227)
+ *
+ * `persist` already caught and called `markError()`, so this section was half
+ * right — and that half is the one that made it worse than silence. `prefs` was
+ * never restored, so a rejected write left "couldn't save" sitting beside a
+ * switch that still looked on. The user cannot tell which of the two to believe,
+ * and the control looks more authoritative than the message.
+ *
+ * The rollback goes through `revertOptimistic` rather than `setPrefs(previous)`,
+ * because these controls stay live during a save — deliberately; they are cheap
+ * preferences — so attempts can interleave. Restoring the whole snapshot would
+ * both undo fields this attempt never touched and clobber a newer success with
+ * an older failure. See that module for the argument in full.
+ *
+ * An action that never answers is handled a level up, by `useSaveStatus`'s
+ * `stalled` state: it says so and leaves the value alone, because undoing a
+ * write that may still land is the same lie in the other direction.
  */
 export function NotificationsSection({
   notifyRoundup,
@@ -67,7 +86,7 @@ export function NotificationsSection({
     registerServiceWorker();
   }, []);
 
-  const persist = (next: Prefs) =>
+  const persist = (next: Prefs, previous: Prefs) =>
     startTransition(async () => {
       markSaving();
       try {
@@ -75,6 +94,11 @@ export function NotificationsSection({
         markSaved();
         router.refresh();
       } catch {
+        // #227 — say so AND put the control back. The functional updater reads
+        // the state as it stands now, not this closure's `prefs`, so the guard
+        // inside `revertOptimistic` can tell whether this attempt still owns
+        // what is on screen.
+        setPrefs((current) => revertOptimistic(current, next, previous));
         markError();
       }
     });
@@ -87,13 +111,13 @@ export function NotificationsSection({
     if (value && permission === "default") {
       void requestNotificationPermission();
     }
-    persist(next);
+    persist(next, prefs);
   };
 
   const setTime = (value: string) => {
     const next = { ...prefs, dailyReviewNudgeTime: value };
     setPrefs(next);
-    persist(next);
+    persist(next, prefs);
   };
 
   return (
