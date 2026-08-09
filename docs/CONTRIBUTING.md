@@ -306,13 +306,22 @@ assertions went red:
 - **"a committed migration failed against seeded rows"** — your migration does
   not work on data. This is the real thing, not a test problem; the SQLSTATE and
   the failing row are in the output.
-- **"ran with 0 rows in `<table>`"** — the migration's `UPDATE` / `SET NOT NULL` /
-  new CHECK / unique index / type change / foreign key was applied to an empty
-  table, so nothing it does was tested. Add rows in a seed named for a migration
-  **before** yours. Note that a table cleared mid-timeline needs a seed on the far
-  side of the clearing — the check counts rows rather than trusting the corpus,
-  precisely because a `DELETE FROM` in between is invisible to anything that
-  only reads the seed files.
+- **"ran with 0 rows in `<table>`"** — a statement whose behaviour depends on the
+  rows already stored was applied to an empty table, so nothing it does was
+  tested. The failure names the shape it caught (`update`, `set-not-null`,
+  `validate-constraint` and so on); **the authoritative list is the
+  `DataDependentShape` union in `src/lib/migration-data-harness.ts`**, and it is
+  deliberately not copied out here. A prose list of them was wrong within one
+  release — three shapes had been added to the type and not to this bullet, so a
+  contributor whose `DELETE` or `VALIDATE CONSTRAINT` tripped the check could not
+  find their own shape in the docs. Same reasoning as the model count that used
+  to sit in `CLAUDE.md`.
+
+  Fix it by adding rows in a seed named for a migration **before** yours. Note
+  that a table cleared mid-timeline needs a seed on the far side of the clearing
+  — the check counts rows rather than trusting the corpus, precisely because a
+  `DELETE FROM` in between is invisible to anything that only reads the seed
+  files.
 - **"the reconstructed pre-fix migration APPLIED CLEANLY"** — the harness has
   stopped being able to catch the 2026-08-07 defect. Fix that before anything
   else; a gate that cannot be shown to fail is not a gate.
