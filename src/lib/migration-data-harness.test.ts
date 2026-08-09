@@ -12,6 +12,7 @@ import {
 } from "@/lib/migration-data-harness";
 import {
   findLateConstraintDrops,
+  stripSqlComments,
   type MigrationFile,
 } from "@/lib/focus-sound-migration-hygiene";
 
@@ -383,5 +384,75 @@ describe("the committed migrations", () => {
     expect(found.map((f) => f.migration)).toContain(
       "20260806100000_settings_focus_sound_categories",
     );
+  });
+});
+
+/**
+ * #190, raised in review — the seed corpus must not carry a credential literal.
+ *
+ * `20260713170000_clear_oauth_tokens_for_encryption` states the discipline in
+ * its own header: "The token columns are left NULL: this row's job is to exist,
+ * and a fake token string in a public repo is a secret-scanner finding waiting
+ * to happen." The next seed added to that directory named `accessToken` anyway
+ * and gave it a value. That is how a rule written only as a comment fails —
+ * nothing reads it, so the file beside it disagrees and both look deliberate.
+ *
+ * A column not named in an INSERT is NULL, so "do not name it" is the whole
+ * check. Comments are stripped first for the same reason every other guard here
+ * strips them: a column discussed in a seed's header is not one the seed writes.
+ *
+ * This is defence in depth rather than a live finding — secret detection runs on
+ * every MR and passed on the literal that prompted it. The point is that seeds
+ * exist to be copied, the corpus only grows, and the next fake token may not be
+ * so obviously fake.
+ */
+describe("the seed corpus", () => {
+  const SEEDS_DIR = join(process.cwd(), "src/lib/__tests__/migration-seeds");
+
+  /**
+   * Columns whose value is a credential, so a seed must leave them NULL:
+   * `GoogleAuth.accessToken` / `.refreshToken` and `User.llmKeyEnc` are
+   * credentials to a THIRD party, and `CalendarFeed.token` is a bearer
+   * capability — possession of it is the entire authorization.
+   */
+  const CREDENTIAL_COLUMNS = [
+    "accessToken",
+    "refreshToken",
+    "llmKeyEnc",
+    "token",
+  ];
+
+  /** Every column named in an `INSERT INTO "T" (…)` column list. */
+  function insertedColumns(sql: string): string[] {
+    return [
+      ...stripSqlComments(sql).matchAll(
+        /INSERT\s+INTO\s+"?\w+"?\s*\(([^)]*)\)/gi,
+      ),
+    ].flatMap((m) => m[1].split(",").map((c) => c.trim().replace(/"/g, "")));
+  }
+
+  const seeds = readdirSync(SEEDS_DIR)
+    .filter((f) => f.endsWith(".sql"))
+    .sort()
+    .map((f) => ({
+      name: f,
+      columns: insertedColumns(readFileSync(join(SEEDS_DIR, f), "utf8")),
+    }));
+
+  // The non-zero half of "an unproven zero is not a result": a parser that read
+  // nothing would report a clean corpus for every input, forever.
+  it("reads column lists out of the corpus it is checking", () => {
+    expect(seeds.length).toBeGreaterThan(3);
+    expect(seeds.flatMap((s) => s.columns)).toContain("workspaceId");
+  });
+
+  it("names no credential column, so every seeded credential is NULL", () => {
+    expect(
+      seeds.flatMap((s) =>
+        s.columns
+          .filter((c) => CREDENTIAL_COLUMNS.includes(c))
+          .map((c) => `${s.name} writes ${c}`),
+      ),
+    ).toEqual([]);
   });
 });

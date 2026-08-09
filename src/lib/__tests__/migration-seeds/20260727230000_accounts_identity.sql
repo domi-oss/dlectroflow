@@ -40,8 +40,20 @@ INSERT INTO "Workspace" ("id", "kind", "userId")
 VALUES ('seed-ws-user', 'user', 'seed-user-owner');
 
 -- `id` lost its default in this migration, so both rows name one.
-INSERT INTO "GoogleAuth" ("id", "updatedAt", "userId", "accessToken", "scope")
-VALUES ('seed-google-linked', now(), 'seed-user-owner', 'enc:not-a-real-token', 'https://www.googleapis.com/auth/calendar');
+--
+-- The token columns are left NULL, the same discipline as
+-- 20260713170000_clear_oauth_tokens_for_encryption and for the same reason: a
+-- fake token string in a public repo is a secret-scanner finding waiting to
+-- happen. It buys no coverage either. The only later migration that reads a
+-- token is 20260804120000_google_auth_user_id_not_null, which asks whether one
+-- IS NOT NULL purely to log it, and only for the orphan rows it is deleting —
+-- never for this one, which survives precisely because it has a userId.
+--
+-- `scope` stays. It is a published Google constant rather than a credential,
+-- and it is what makes this row read as a live calendar grant instead of a
+-- bare foreign key.
+INSERT INTO "GoogleAuth" ("id", "updatedAt", "userId", "scope")
+VALUES ('seed-google-linked', now(), 'seed-user-owner', 'https://www.googleapis.com/auth/calendar');
 
 INSERT INTO "GoogleAuth" ("id", "updatedAt", "userId")
 VALUES ('seed-google-orphan', now(), NULL);
