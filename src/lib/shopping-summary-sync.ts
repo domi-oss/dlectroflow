@@ -49,7 +49,9 @@ import { prisma } from "@/lib/db";
  *  * **Non-growing write** — `createMany` + `skipDuplicates`, which compiles to
  *    `INSERT … ON CONFLICT DO NOTHING`. Also atomic, and it says exactly what
  *    this branch means: put a row there if there isn't one, and do not touch
- *    `clearedAt` if there is.
+ *    `clearedAt` if there is. Prisma wraps it in `BEGIN`/`COMMIT`, which is not
+ *    the problem the broken version had — that one was unsafe because it READ
+ *    first, and this one has nothing to read.
  *
  * **This was one `upsert` with `update: options.resurface ? {…} : {}` and that
  * was a real defect, not a style point.** Prisma only takes the native path when
@@ -58,8 +60,9 @@ import { prisma } from "@/lib/db";
  * default READ COMMITTED, which is exactly the shape that needs `Serializable`
  * or an advisory lock to be safe. Two non-growing writes racing from the no-row
  * state therefore both saw nothing and both inserted, and the loser got P2002:
- * five trials of four concurrent callers produced 15 raised duplicates, every
- * time. The primary key still refused the second row — the failure was a THROW,
+ * five trials of four concurrent callers raised 15 duplicates, which is every
+ * loser of every trial — the arithmetic ceiling, not a sampling of a rare edge.
+ * The primary key still refused the second row — the failure was a THROW,
  * out of `settleShopping` and out of the server action, failing a rename or a
  * tick whose item write had already committed.
  *
