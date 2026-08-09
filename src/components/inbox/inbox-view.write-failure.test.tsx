@@ -443,14 +443,124 @@ describe("InboxView — the double-press guard (#225)", () => {
   });
 });
 
+/**
+ * #218 — every live region in a tree that has another live region as an
+ * ancestor.
+ *
+ * A polite live region nested inside an assertive one is not reliably handled:
+ * the outer region's `aria-live` applies to the whole subtree, so whether the
+ * inner text is announced politely, assertively, twice, or not at all is
+ * implementation-dependent. The failure has no visual symptom, which is how
+ * `focus-timer.tsx` shipped with it and `!290` copied it before catching itself.
+ *
+ * A detector rather than four hand-written `querySelector` assertions, so the
+ * guard covers whatever the inbox renders — including the note field, the
+ * schedule menu and the step list, which are other people's components mounted
+ * inside these rows — instead of only the nodes somebody remembered to look at.
+ */
+const LIVE_REGION =
+  '[role="status"],[role="alert"],[role="log"],[aria-live]:not([aria-live="off"])';
+
+function nestedLiveRegions(root: ParentNode): Element[] {
+  return [...root.querySelectorAll(LIVE_REGION)].filter(
+    (el) => el.parentElement?.closest(LIVE_REGION) != null,
+  );
+}
+
+describe("nestedLiveRegions (the #218 detector itself)", () => {
+  /**
+   * Built with DOM calls rather than `innerHTML`: the string form is a
+   * hard-coded literal and could not carry untrusted input, but it trips the
+   * scanners' XSS rule anyway, and a finding that has to be dismissed every
+   * pipeline is a worse trade than four extra lines.
+   */
+  function node(
+    tag: string,
+    attrs: Record<string, string>,
+    text?: string,
+  ): HTMLElement {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    if (text !== undefined) el.textContent = text;
+    return el;
+  }
+
+  /**
+   * A guard reporting zero is only worth something if the same query returns
+   * non-zero somewhere. Two shapes, because the attribute form and the role form
+   * are the two ways the repo writes a live region.
+   */
+  it("finds a polite region nested inside an assertive one", () => {
+    const root = document.createElement("div");
+    const outer = node("div", { role: "alert" });
+    outer.append(
+      node("p", {}, "reason"),
+      node("p", { role: "status" }, "trying again"),
+    );
+    root.append(outer);
+
+    expect(nestedLiveRegions(root).map((el) => el.textContent)).toEqual([
+      "trying again",
+    ]);
+  });
+
+  it("finds the aria-live spelling too, and passes genuine siblings", () => {
+    const root = document.createElement("div");
+    const outer = node("div", { "aria-live": "assertive" });
+    outer.append(node("span", { "aria-live": "polite" }, "inner"));
+    root.append(outer, node("div", { role: "status" }, "sibling"));
+
+    expect(nestedLiveRegions(root).map((el) => el.textContent)).toEqual([
+      "inner",
+    ]);
+  });
+});
+
 describe("InboxView — the write notice's accessibility (#225, #218)", () => {
   /**
-   * #218. A polite live region nested inside an assertive one is not reliably
-   * handled: the outer region's `aria-live` applies to the whole subtree, so
-   * whether the inner text is announced politely, assertively, twice or not at
-   * all is implementation-dependent. `focus-timer.tsx` still has the shape and
-   * is fixed elsewhere; this asserts the inbox never grows a second instance.
+   * The inbox half of #218. The issue's own body names the capture notice as the
+   * REFERENCE implementation rather than a defect site, and that is correct on
+   * `main`: `!290` round 8 already removed the nested `role="status"` there. So
+   * the obligation here is not to grow a fresh instance while adding a second
+   * notice — asserted over the whole rendered tree, in the state that has the
+   * most live regions mounted at once.
+   *
+   * `focus-timer.tsx`, which still has the shape, is fixed in its own change.
    */
+  it("mounts no live region inside another, anywhere in the inbox", async () => {
+    vi.mocked(completeItem).mockRejectedValueOnce(new Error("offline"));
+    const { container } = renderInbox([
+      makeItem({ id: "a", text: "water the plants" }),
+      makeItem({
+        id: "b",
+        text: "plan trip",
+        status: "triaged",
+        taskId: "t1",
+        stepsTotal: 2,
+        stepsDone: 1,
+      }),
+      makeItem({ id: "c", text: "old thing", completedAt: new Date() }),
+    ]);
+
+    // The two notices, the "captured ✓" confirmation and the drag/move
+    // announcement region can all be on screen at once; put the write notice up
+    // and check the whole document, since the notice is rendered in place rather
+    // than portalled.
+    await act(async () => {
+      screen.getAllByRole("button", { name: COMPLETE })[0].click();
+      await flushTicks();
+    });
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+
+    // Assert the tree HAS live regions before asserting none of them nest —
+    // otherwise a render that mounted none at all would report the same clean
+    // zero as a render that got it right.
+    expect(
+      container.querySelectorAll(LIVE_REGION).length,
+    ).toBeGreaterThanOrEqual(2);
+    expect(nestedLiveRegions(container).map((el) => el.outerHTML)).toEqual([]);
+  });
+
   it("carries the retry's wait on the button rather than nesting a live region", async () => {
     let settle!: () => void;
     vi.mocked(completeItem)
