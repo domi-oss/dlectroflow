@@ -1,7 +1,8 @@
 "use client";
 
-import { useId, useState, useTransition } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { RefreshCw, RotateCcw, TriangleAlert } from "lucide-react";
 import {
   addShoppingItem,
   deleteShoppingItem,
@@ -17,8 +18,90 @@ import {
   type ShoppingItemView,
 } from "@/lib/shopping";
 import { COMPLETE_TEXT } from "@/lib/completion-style";
-import { t, type Voice } from "@/lib/strings";
+import {
+  ActionTimeoutError,
+  isStaleActionError,
+  withActionTimeout,
+} from "@/lib/server-action-failure";
+import { t, type StringKey, type Voice } from "@/lib/strings";
 import { cn } from "@/lib/utils";
+
+/**
+ * #199, Duo review round 4 (!294) — how long this page is willing to WAIT for a
+ * write before calling it a failure.
+ *
+ * The third failure mode is silence rather than a rejection: a pod rolling
+ * mid-request, a connection that never closes. From the user's side an
+ * un-timed-out `await` is indistinguishable from the silent no-op this whole
+ * notice exists to kill. Every action behind this page is one short Prisma
+ * statement (the add's cap check is a SERIALIZABLE transaction, still short), so
+ * ten seconds is already pathological; it matches `CAPTURE_TIMEOUT_MS` in
+ * `inbox-view.tsx` and `ACTION_TIMEOUT_MS` in `focus-timer.tsx` for the same
+ * class of call. The request itself carries on — a server action cannot be
+ * aborted from the client — so a write that lands late still lands, and the next
+ * `router.refresh()` picks it up. Exported so the test advances the real value
+ * rather than a copy of it.
+ */
+export const SHOPPING_ACTION_TIMEOUT_MS = 10_000;
+
+/**
+ * A write that did not land.
+ *
+ * ONE slot, not a queue: a second failure displaces the first. That boundary is
+ * #210's, argued there at length and deliberately not re-opened here — stacking
+ * is a parked design question, and inventing a second answer to it on this page
+ * would be the divergence this fix exists to avoid.
+ */
+type WriteFailure = {
+  /**
+   * The words the failed write was about — the new text for an add or a rename,
+   * the item's own text for a tick, a save-for-later or a delete. Held here, not
+   * just referenced, so the notice is itself a copy of them: for an add they are
+   * otherwise only in a closure.
+   */
+  subject: string;
+  /**
+   * The browser is running a different deployment than the server. Next
+   * regenerates server-action ids on every build, so a retry re-posts the same
+   * dead id — the only thing that can work is a reload.
+   */
+  stale: boolean;
+  /**
+   * The write never answered, so **whether it landed is unknown**. The timeout
+   * bounds how long the UI waits, not the request, so the write may still
+   * complete. Kept distinct from the generic failure because "couldn't save
+   * that" would then be a claim the client cannot support.
+   */
+  timedOut: boolean;
+  /** A retry of THIS write is in flight. */
+  retrying: boolean;
+  /**
+   * The exact call that failed, so Retry re-runs *that* rather than a rebuilt
+   * guess at it — and so `markRetrying` and the success path can both ask "is the
+   * record on screen the one this attempt owns?" by identity. Stable across
+   * retries, because a retry passes the same closure back in.
+   */
+  fn: () => Promise<unknown>;
+  /**
+   * Set only for the add, the one write with a stake in the capture field:
+   * `submit()` empties it before the round trip, so a failure has to put the
+   * words back and a later success has to make sure they do not linger into a
+   * duplicate.
+   */
+  draftText?: string;
+};
+
+/**
+ * Which of the three messages a failure gets — ordered by how much the user can
+ * be told, most-certain first. `stale` and `timedOut` both override the generic
+ * copy because both change what the user should DO. Mirrors `captureMessageKey`
+ * in `inbox-view.tsx` and `failureMessageKey` in `focus-timer.tsx`.
+ */
+function writeFailureKey(failure: WriteFailure): StringKey {
+  if (failure.stale) return "shopping.errorSaveStale";
+  if (failure.timedOut) return "shopping.errorSaveTimeout";
+  return "shopping.errorSaveFailed";
+}
 
 /**
  * #199 — shopping-list mode.
@@ -48,6 +131,21 @@ import { cn } from "@/lib/utils";
  * Error Identification, 3.3.3 Error Suggestion). A capture field that fails
  * without saying which rule was broken is the failure mode that makes people stop
  * trusting it — and a silent no-op looks exactly like a lost item.
+ *
+ * ## …and a write that does not land is a fourth
+ *
+ * Duo review round 4, !294: the paragraph above was true of the three refusals
+ * this component decides for itself, and false of everything the server decides.
+ * `run()` awaited the action with no `catch`, so a genuine failure in add,
+ * rename, tick, save-for-later or delete produced exactly the silent no-op the
+ * paragraph warns about — and for an add it is worse than a no-op, because
+ * `submit()` empties the field before the round trip.
+ *
+ * The fix is #210's inbox capture notice, applied here rather than reinvented:
+ * the same three-way split from `server-action-failure.ts` (stale bundle /
+ * no answer / everything else), the same `role="alert"` notice quoting the words,
+ * the same `aria-disabled`-not-`disabled` Retry. Two capture surfaces that fail
+ * in two different shapes is a worse outcome than either shape.
  */
 export function ShoppingList({
   items,
@@ -79,19 +177,161 @@ export function ShoppingList({
   const errorId = useId();
   const editErrorId = useId();
   const addFieldId = useId();
+  const failureId = useId();
+  const savingId = useId();
+  const addFieldRef = useRef<HTMLInputElement | null>(null);
+
+  /**
+   * Duo review round 4, !294 — hand focus back when the rename editor closes
+   * (WCAG 2.4.3 Focus Order).
+   *
+   * Closing unmounts the focused `<input>` and remounts the trigger in its place,
+   * and the browser does not connect the two: focus falls to `<body>`, so a
+   * keyboard or screen-reader user loses their place on the page the instant they
+   * finish editing. This file already reasons about focus on the way IN
+   * (`autoFocus`, and hiding the trigger rather than disabling it); this is the
+   * same reasoning applied to the way out.
+   *
+   * A ref map keyed by item id rather than one ref, because the trigger to
+   * return to belongs to a specific row and the rows are a list. Entries are
+   * removed on unmount, so a deleted row cannot pin its button.
+   */
+  const renameTriggers = useRef(new Map<string, HTMLButtonElement>());
+  /**
+   * Which row's trigger is owed focus — set by `stopEditing` alone, which is why
+   * switching straight to another row's editor does not steal focus back, and a
+   * refused rename (editor stays open) does not move it at all. A ref rather than
+   * state: a one-shot instruction to the effect below, not something anything
+   * renders.
+   */
+  const returnFocusToTrigger = useRef<string | null>(null);
+  useEffect(() => {
+    // In an effect rather than beside the state update: the trigger does not
+    // exist yet at that point — it is what replaces the editor being closed.
+    if (editingId !== null) return;
+    const id = returnFocusToTrigger.current;
+    if (id === null) return;
+    returnFocusToTrigger.current = null;
+    renameTriggers.current.get(id)?.focus();
+  }, [editingId]);
 
   /** Close the editor and drop any refusal with it — the message describes a value
-   *  that is no longer on screen. */
-  const stopEditing = () => {
+   *  that is no longer on screen. Takes the row's id because closing owes that
+   *  row's trigger the focus it is about to take. */
+  const stopEditing = (id: string) => {
+    returnFocusToTrigger.current = id;
     setEditingId(null);
     setEditError(null);
   };
 
-  const run = (fn: () => Promise<unknown>) =>
+  const [failure, setFailure] = useState<WriteFailure | null>(null);
+  const retryRef = useRef<HTMLButtonElement | null>(null);
+  /**
+   * The notice's Retry was the focused element when it succeeded, so its unmount
+   * is about to drop focus to `<body>` — the same WCAG 2.4.3 fault as the rename
+   * editor above, in the control that reports it. Focus goes to the capture
+   * field, which is the notice's nearest surviving neighbour and the thing a user
+   * who has just recovered a lost add most likely wants.
+   */
+  const returnFocusToAddField = useRef(false);
+  useEffect(() => {
+    if (failure || !returnFocusToAddField.current) return;
+    returnFocusToAddField.current = false;
+    addFieldRef.current?.focus();
+  }, [failure]);
+
+  /**
+   * Raise or drop `retrying`, and only on the record this attempt owns — a
+   * failure that has since been displaced must not have its flag rewritten by an
+   * older attempt settling. Same lesson `schedulingIds` applies per-row in
+   * `inbox-view.tsx` (#169): a shared in-flight flag belongs to whichever request
+   * settles last, not to the one it is guarding.
+   */
+  const markRetrying = (fn: () => Promise<unknown>, retrying: boolean) =>
+    setFailure((prev) =>
+      prev && prev.fn === fn && prev.retrying !== retrying
+        ? { ...prev, retrying }
+        : prev,
+    );
+
+  /**
+   * Every write on this page goes through here, which is the point: five actions
+   * that can each fail, and one place that says so.
+   */
+  const attempt = (
+    fn: () => Promise<unknown>,
+    subject: string,
+    { fromRetry, draftText }: { fromRetry: boolean; draftText?: string },
+  ) =>
     startTransition(async () => {
-      await fn();
+      let landed = false;
+      try {
+        await withActionTimeout(fn(), SHOPPING_ACTION_TIMEOUT_MS);
+        landed = true;
+      } catch (error) {
+        // Restore the words, but ONLY into a field the user has not since typed
+        // into: a ten-second hang is long enough to type the next item, and
+        // overwriting that would be the same data loss wearing the other hat.
+        // When we cannot restore, the notice quotes them instead, so they are
+        // never only in a variable. A functional updater, so it stays pure under
+        // StrictMode's double invocation.
+        if (draftText !== undefined) {
+          setDraft((current) => (current.trim() === "" ? draftText : current));
+        }
+        setFailure({
+          fn,
+          subject,
+          draftText,
+          stale: isStaleActionError(error),
+          timedOut: error instanceof ActionTimeoutError,
+          // A fresh record, so the retry flag starts down: this attempt is over,
+          // whatever it was.
+          retrying: false,
+        });
+      } finally {
+        // Must run on every exit including a throw: a retry flag left up is a
+        // Retry button that reads permanently busy.
+        if (fromRetry) markRetrying(fn, false);
+      }
+      if (!landed) return;
+      // Read while the button still exists, and gated on `fromRetry` because
+      // that is the only way it can be holding focus.
+      if (fromRetry && retryRef.current === document.activeElement) {
+        returnFocusToAddField.current = true;
+      }
+      // The words are on the server now, so leaving them in the field would
+      // invite a duplicate on the next Enter — but only clear what is still
+      // verbatim theirs, for the same reason the restore above is conditional.
+      if (draftText !== undefined) {
+        setDraft((current) => (current === draftText ? "" : current));
+      }
+      // Only this attempt's own record. A success says nothing about a different
+      // write's failure, and clearing that one would be a silent no-op of its own.
+      setFailure((prev) => (prev?.fn === fn ? null : prev));
+      // Deliberately not in the `catch`'s path: the write did not happen, so
+      // there is nothing new to fetch, and a refresh that itself failed would be
+      // a second unreported error.
       router.refresh();
     });
+
+  const run = (
+    fn: () => Promise<unknown>,
+    subject: string,
+    draftText?: string,
+  ) => attempt(fn, subject, { fromRetry: false, draftText });
+
+  const retryFailedWrite = () => {
+    if (!failure || failure.retrying) return;
+    // Raised OUTSIDE the transition on purpose: React 19 holds an async
+    // transition's own state updates until the action settles, so a busy flag set
+    // inside it would first paint at the moment it stopped being true — a
+    // double-submit guard that guards nothing (#169's lesson, from `runSchedule`).
+    markRetrying(failure.fn, true);
+    attempt(failure.fn, failure.subject, {
+      fromRetry: true,
+      draftText: failure.draftText,
+    });
+  };
 
   const { active, savedForLater } = splitShoppingList(items);
   const remaining = shoppingRemainingCount(items);
@@ -111,7 +351,9 @@ export function ShoppingList({
     const text = draft;
     setDraft("");
     setError(null);
-    run(() => addShoppingItem(text));
+    // The third argument is what makes this the one write with a stake in the
+    // field: it was emptied a line ago, so a failure has to put the words back.
+    run(() => addShoppingItem(text), text, text);
   };
 
   const refusalMessage = (
@@ -151,7 +393,9 @@ export function ShoppingList({
         // twelve times down a list is unusable in a screen reader's element list,
         // which is the same reasoning every button below follows.
         aria-label={`${t("shopping.tickOff", voice)} ${i.text}`}
-        onChange={(e) => run(() => setShoppingItemDone(i.id, e.target.checked))}
+        onChange={(e) =>
+          run(() => setShoppingItemDone(i.id, e.target.checked), i.text)
+        }
         // A checkbox is a 16px control inside a 44px row: the row supplies the
         // target height, and the label wrapping it is not used here because the
         // row also holds three buttons, which a <label> may not contain.
@@ -164,11 +408,11 @@ export function ShoppingList({
           invalid={editError !== null}
           describedBy={editError !== null ? editErrorId : undefined}
           onChange={() => setEditError(null)}
-          onCancel={stopEditing}
+          onCancel={() => stopEditing(i.id)}
           onSave={(value) => {
             // Unchanged is not a refusal: it is a no-op, and the editor closes.
             if (value === i.text) {
-              stopEditing();
+              stopEditing(i.id);
               return;
             }
             const refusal = shoppingItemTextError(value);
@@ -178,8 +422,11 @@ export function ShoppingList({
               setEditError(refusal);
               return;
             }
-            stopEditing();
-            run(() => renameShoppingItem(i.id, value));
+            stopEditing(i.id);
+            // The NEW words are what is at stake, so they are what the notice
+            // quotes if the write does not land — the row still shows the old
+            // text, and quoting that would name the thing that did not change.
+            run(() => renameShoppingItem(i.id, value), value);
           }}
         />
       ) : (
@@ -209,6 +456,13 @@ export function ShoppingList({
       {editingId !== i.id && (
         <button
           type="button"
+          // Registered so closing the editor can hand focus back to it (WCAG
+          // 2.4.3) — see `returnFocusToTrigger`. Cleaned up on unmount so a
+          // deleted row cannot pin its button in the map.
+          ref={(el) => {
+            if (el) renameTriggers.current.set(i.id, el);
+            else renameTriggers.current.delete(i.id);
+          }}
           aria-label={`${t("shopping.rename", voice)} ${i.text}`}
           onClick={() => setEditingId(i.id)}
           className={ICON_BUTTON}
@@ -229,7 +483,9 @@ export function ShoppingList({
             ? t("shopping.moveBackUp", voice)
             : t("shopping.saveForLater", voice)
         }: ${i.text}`}
-        onClick={() => run(() => setShoppingItemSavedForLater(i.id, !saved))}
+        onClick={() =>
+          run(() => setShoppingItemSavedForLater(i.id, !saved), i.text)
+        }
         className={ICON_BUTTON}
       >
         {saved
@@ -239,7 +495,7 @@ export function ShoppingList({
       <button
         type="button"
         aria-label={`${t("shopping.delete", voice)} ${i.text}`}
-        onClick={() => run(() => deleteShoppingItem(i.id))}
+        onClick={() => run(() => deleteShoppingItem(i.id), i.text)}
         className={ICON_BUTTON}
       >
         {t("shopping.delete", voice)}
@@ -277,6 +533,7 @@ export function ShoppingList({
         <div className="flex gap-2">
           <input
             id={addFieldId}
+            ref={addFieldRef}
             value={draft}
             placeholder={t("shopping.addPlaceholder", voice)}
             // Only set when there IS an error: a permanent `aria-invalid="false"`
@@ -308,6 +565,86 @@ export function ShoppingList({
           </p>
         )}
       </form>
+
+      {/* Outside the form, and above the sections, because it reports on any of
+          the five writes rather than on the capture field alone — but next to
+          that field, which is where focus goes when a Retry succeeds.
+
+          Colour: the failure is carried by the icon and the words, never by the
+          red alone (WCAG 1.4.1). `text-destructive` / `border-destructive/40` /
+          `bg-destructive/5` is the token pairing globals.css documents as AA in
+          both themes and the one inbox-view.tsx and focus-timer.tsx already use
+          — not a raw palette shade, which is what dropped a confirmation below
+          4.5:1 in #40. Neither control sets `outline-none`, so the UA focus ring
+          draws and WCAG 2.4.11 is satisfied without a bespoke indicator. */}
+      {failure && (
+        <div
+          role="alert"
+          className="border-destructive/40 bg-destructive/5 flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-start sm:justify-between"
+        >
+          <p
+            id={failureId}
+            className="text-destructive flex min-w-0 items-start gap-1.5 text-sm font-medium"
+          >
+            <TriangleAlert
+              aria-hidden="true"
+              className="mt-0.5 h-4 w-4 shrink-0"
+            />
+            <span className="break-words">
+              {t(writeFailureKey(failure), voice)}{" "}
+              <strong>&ldquo;{failure.subject}&rdquo;</strong>
+            </span>
+          </p>
+          <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+            {failure.stale ? (
+              // Retrying re-posts the same action id the running deployment has
+              // already forgotten, so a reload is the ONLY thing on offer.
+              <button
+                type="button"
+                aria-describedby={failureId}
+                onClick={() => window.location.reload()}
+                className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 text-sm font-medium"
+              >
+                <RefreshCw aria-hidden="true" className="h-4 w-4 shrink-0" />
+                {t("shopping.errorReload", voice)}
+              </button>
+            ) : (
+              // `aria-disabled`, not `disabled`: a disabled element cannot hold
+              // focus, so the browser would drop it to <body> the moment the
+              // retry starts — the same fault this MR is fixing for the rename
+              // editor, in the control that reports it. The press is guarded in
+              // the handler instead, so a double-tap still cannot fire two writes.
+              <button
+                ref={retryRef}
+                type="button"
+                // While a retry runs, the reason AND the wait are both reachable
+                // from the control.
+                aria-describedby={
+                  failure.retrying ? `${failureId} ${savingId}` : failureId
+                }
+                aria-disabled={failure.retrying}
+                onClick={retryFailedWrite}
+                className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 text-sm font-medium aria-disabled:opacity-50"
+              >
+                <RotateCcw aria-hidden="true" className="h-4 w-4 shrink-0" />
+                {t("shopping.errorRetry", voice)}
+              </button>
+            )}
+            {/* Deliberately NOT `role="status"`: a polite live region nested
+                inside this assertive one is undefined enough in practice that
+                "will it announce" has no answer. The wait rides the two
+                mechanisms that do — the pressed button's `aria-disabled` state
+                change, which a screen reader reports because focus is on it, and
+                the `aria-describedby` above, which picks this node up while it
+                shows. */}
+            {failure.retrying && (
+              <p id={savingId} className="text-muted-foreground text-xs">
+                {t("shopping.errorSaving", voice)}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* `region` + an accessible name carrying the count, so the count is
           reachable without hunting for the heading it sits beside. */}
