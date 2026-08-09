@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 
-const { cookiesMock, userFindUniqueMock, workspaceUpsertMock } = vi.hoisted(
-  () => ({
-    cookiesMock: vi.fn(),
-    userFindUniqueMock: vi.fn(),
-    workspaceUpsertMock: vi.fn(),
-  }),
-);
+const {
+  cookiesMock,
+  userFindUniqueMock,
+  workspaceUpsertMock,
+  deleteCookieMock,
+} = vi.hoisted(() => ({
+  cookiesMock: vi.fn(),
+  userFindUniqueMock: vi.fn(),
+  workspaceUpsertMock: vi.fn(),
+  deleteCookieMock: vi.fn(),
+}));
 
 vi.mock("next/headers", () => ({
   cookies: cookiesMock,
@@ -24,24 +28,33 @@ import {
   resolveWorkspaceId,
   resolveWorkspace,
   touchWorkspace,
+  currentWorkspaceId,
   currentUser,
   hasSession,
   isOwnerRequest,
   MissingWorkspaceError,
+  RevokedAccountError,
 } from "./workspace";
 import {
   signUserSession,
   signGuestSession,
   OWNER_COOKIE,
+  GUEST_COOKIE,
 } from "./auth/session";
 
 const SECRET = "test-secret-at-least-32-bytes-long-xxxxx";
 
-/** A cookie jar holding just the signed-in session cookie. */
+/** A cookie jar holding just the signed-in session cookie.
+ *
+ *  `delete` is present because a Server Function's jar has one and #220 uses
+ *  it to sign a frozen account out. A jar without it would describe a shape
+ *  Next.js never hands back — `ReadonlyRequestCookies` types `delete` in both
+ *  phases; only the render phase makes calling it throw. */
 function jarWith(token: string | undefined) {
   return {
     get: (name: string) =>
       name === OWNER_COOKIE && token ? { value: token } : undefined,
+    delete: deleteCookieMock,
   };
 }
 
@@ -170,6 +183,167 @@ describe("touchWorkspace", () => {
       { update: Record<string, unknown> },
     ];
     expect(args.update).not.toHaveProperty("expiresAt");
+  });
+
+  // #220 — the whole cost argument for where the status check lives. If this
+  // select ever goes, the check above it has to become a second query.
+  it("carries the owner's status back on the upsert it was already issuing", async () => {
+    workspaceUpsertMock.mockResolvedValue({ user: { status: "active" } });
+    expect(await touchWorkspace("ws-real", "user")).toEqual({
+      ownerStatus: "active",
+    });
+    const [args] = workspaceUpsertMock.mock.calls[0] as [
+      { select: Record<string, unknown> },
+    ];
+    expect(args.select).toEqual({ user: { select: { status: true } } });
+    expect(workspaceUpsertMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports no owner for a guest sandbox, which has no User row", async () => {
+    workspaceUpsertMock.mockResolvedValue({ user: null });
+    expect(await touchWorkspace("g-1", "guest")).toEqual({ ownerStatus: null });
+  });
+});
+
+// ── #220 — a frozen account with a valid cookie must not be able to write ────
+//
+// `currentUser()` has always re-read `status`, but only six of fifteen action
+// files go through it. Everything else resolves a workspace id here and writes,
+// so this is the gate that decides whether a freeze actually froze anything.
+describe("currentWorkspaceId", () => {
+  /** Present the request as a signed-in account whose row says `status`. */
+  async function signedInWith(status: string | null) {
+    const token = await signUserSession(
+      { kind: "user", userId: "u1", wsId: "ws-u1" },
+      SECRET,
+    );
+    cookiesMock.mockResolvedValue(jarWith(token));
+    workspaceUpsertMock.mockResolvedValue({
+      user: status === null ? null : { status },
+    });
+  }
+
+  it("resolves the workspace of an active account", async () => {
+    await signedInWith("active");
+    expect(await currentWorkspaceId()).toBe("ws-u1");
+  });
+
+  it("refuses a revoked account holding a still-valid cookie", async () => {
+    await signedInWith("revoked");
+    await expect(currentWorkspaceId()).rejects.toBeInstanceOf(
+      RevokedAccountError,
+    );
+  });
+
+  // The subclassing is what carries the refusal into fifteen action files and
+  // /api/export's 401 branch without any of them changing. A sibling class would
+  // have turned each of those into a 500 and each unhandled action into a
+  // different failure — so this is behaviour, not taxonomy.
+  it("refuses in a way every MissingWorkspaceError handler already understands", async () => {
+    await signedInWith("revoked");
+    await expect(currentWorkspaceId()).rejects.toBeInstanceOf(
+      MissingWorkspaceError,
+    );
+  });
+
+  it("checks the status without a second round trip", async () => {
+    await signedInWith("active");
+    await currentWorkspaceId();
+    expect(workspaceUpsertMock).toHaveBeenCalledTimes(1);
+    // The tempting fix was a `prisma.user.findUnique` in `resolveWorkspace`.
+    // This is the assertion that says it is not what shipped.
+    expect(userFindUniqueMock).not.toHaveBeenCalled();
+  });
+
+  it("signs the frozen account out rather than only refusing it", async () => {
+    await signedInWith("revoked");
+    await expect(currentWorkspaceId()).rejects.toThrow();
+    expect(deleteCookieMock).toHaveBeenCalledWith(OWNER_COOKIE);
+  });
+
+  it("still refuses when the jar is read-only, as it is in a page render", async () => {
+    // Next 16 seals the cookie jar during Server Component rendering. Signing
+    // somebody out is best-effort; refusing them is not.
+    await signedInWith("revoked");
+    deleteCookieMock.mockImplementationOnce(() => {
+      throw new Error("Cookies can only be modified in a Server Action");
+    });
+    await expect(currentWorkspaceId()).rejects.toBeInstanceOf(
+      RevokedAccountError,
+    );
+  });
+
+  it("does not clear the cookie of an account that is merely browsing", async () => {
+    await signedInWith("active");
+    await currentWorkspaceId();
+    expect(deleteCookieMock).not.toHaveBeenCalled();
+  });
+
+  // Fail closed, both ways it can go wrong.
+  it("refuses a user workspace with no owner row at all", async () => {
+    // A deleted account whose 30-day cookie is still alive: the cascade took the
+    // workspace, `touchWorkspace` would re-create an ownerless one, and before
+    // #220 that was a workspace the deleted account could write to.
+    await signedInWith(null);
+    await expect(currentWorkspaceId()).rejects.toBeInstanceOf(
+      RevokedAccountError,
+    );
+  });
+
+  it("refuses a status value neither side has heard of", async () => {
+    // The column is a CHECK-constrained String, not a Postgres enum. An
+    // allow-list comparison against `active` is what makes a future third value
+    // deny by default instead of pass by default.
+    await signedInWith("suspended-pending-appeal");
+    await expect(currentWorkspaceId()).rejects.toBeInstanceOf(
+      RevokedAccountError,
+    );
+  });
+
+  it("propagates a database failure instead of reading it as revoked", async () => {
+    // An outage must not become "your account is frozen", and must certainly not
+    // become "carry on". /api/export narrows on MissingWorkspaceError precisely
+    // so this stays a 500 rather than a 401.
+    const token = await signUserSession(
+      { kind: "user", userId: "u1", wsId: "ws-u1" },
+      SECRET,
+    );
+    cookiesMock.mockResolvedValue(jarWith(token));
+    workspaceUpsertMock.mockRejectedValue(new Error("connection refused"));
+    // Both facts asserted about the SAME rejection: calling the function twice
+    // would let a `…Once` mock answer the second call from the default and quietly
+    // test nothing.
+    const err = await currentWorkspaceId().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe("connection refused");
+    expect(err).not.toBeInstanceOf(MissingWorkspaceError);
+  });
+
+  // #220's second requirement: a guest has no User row to have a status, so the
+  // check must not apply to guests at all.
+  it("leaves a guest sandbox resolving exactly as before", async () => {
+    const token = await signGuestSession("g-1", SECRET, 3600);
+    cookiesMock.mockResolvedValue({
+      get: (name: string) =>
+        name === GUEST_COOKIE ? { value: token } : undefined,
+      delete: deleteCookieMock,
+    });
+    workspaceUpsertMock.mockResolvedValue({ user: null });
+    expect(await currentWorkspaceId()).toBe("g-1");
+    expect(deleteCookieMock).not.toHaveBeenCalled();
+  });
+
+  it("does not let a revoked owner's status leak onto a guest sandbox", async () => {
+    // Guests are exempted by the workspace's KIND, not by the absence of a
+    // status — otherwise a stale relation read could start refusing sandboxes.
+    const token = await signGuestSession("g-2", SECRET, 3600);
+    cookiesMock.mockResolvedValue({
+      get: (name: string) =>
+        name === GUEST_COOKIE ? { value: token } : undefined,
+      delete: deleteCookieMock,
+    });
+    workspaceUpsertMock.mockResolvedValue({ user: { status: "revoked" } });
+    expect(await currentWorkspaceId()).toBe("g-2");
   });
 });
 
