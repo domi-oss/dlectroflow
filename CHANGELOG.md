@@ -451,6 +451,15 @@ operators upgrading a self-hosted instance don't get surprised.
   that says out loud that the retry is running. The first failure was never
   affected — that press leaves you on a control that stays put.
 
+- **"Trying again…" on the focus timer's error notice now reliably reaches a
+  screen reader (#218).** It sat inside the notice's own announcement, and a
+  polite region nested inside an urgent one is read twice by some screen readers
+  and not at all by others — so the one message telling you the app had heard you
+  was the one that might go missing. It now arrives as part of the description of
+  the **Try again** button you are still holding, which is defined behaviour
+  everywhere, and it goes away again the moment nothing is in flight. Nothing
+  changes on screen.
+
 - **The focus timer's Start and Resume no longer fail in silence (#139's shape,
   found via #198).** Both buttons handled a server that could not be *reached*,
   and neither handled a server that answered and *declined* — so in those cases

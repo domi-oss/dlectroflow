@@ -368,6 +368,10 @@ export function FocusTimer({
   // #137 — ties the failure message to the notice's primary action, so the
   // reason is announced with the remedy. See failureNotice below.
   const failureMessageId = useId();
+  // #218 — the retry-in-flight line's own id. It exists so the wait can be
+  // reachable from the CTA that is still holding focus, which is what replaced
+  // the nested live region it used to be. See failureNotice below.
+  const retryingMessageId = useId();
   // The setup screen's primary CTA (Resume or Start), focused after a
   // disclosure toggle — see the effect below.
   const setupCtaRef = useRef<HTMLButtonElement | null>(null);
@@ -1217,6 +1221,18 @@ export function FocusTimer({
   // carried by the text, never by the red alone (WCAG 1.4.1);
   // `text-destructive` on --background/--card is the token globals.css
   // documents as AA in both themes (5.2:1+); every control is a ≥44px target.
+  //
+  // #218 — while a retry runs, the description also picks up the wait, so the
+  // reason AND the fact that something is happening are both reachable from the
+  // one control focus is deliberately parked on. Derived once and applied to
+  // BOTH branches of the CTA below rather than written out twice: the stale
+  // branch's Reload does not set `pending` itself, but a stale failure arriving
+  // while a request is already in flight would otherwise be the one path where
+  // the wait is on screen and described by nothing. Retracts on its own when
+  // `pending` clears, so the button cannot go on claiming a retry is running.
+  const ctaDescribedBy = pending
+    ? `${failureMessageId} ${retryingMessageId}`
+    : failureMessageId;
   const failureNotice = failure ? (
     <div
       role="alert"
@@ -1229,8 +1245,21 @@ export function FocusTimer({
         <TriangleAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
         <span>{t(failureMessageKey(failure), voice)}</span>
       </p>
+      {/* #218 — deliberately NOT `role="status"`, which is what this was. A
+          polite live region nested inside the assertive one above has no defined
+          announcement behaviour: `aria-live` on the container applies to its whole
+          subtree, so whether this text is read politely, assertively, twice or
+          not at all is down to the screen reader. Deleting it was not an option
+          either — #137's point stands, the wait must not be silent.
+          It rides the two mechanisms that ARE defined instead, and both are
+          already available precisely because the CTA below is `aria-disabled`
+          rather than `disabled` and therefore still holds focus: that button's
+          own state change, which a screen reader reports because focus is on it,
+          and its `aria-describedby`, which picks this node up while it shows.
+          Sighted users see the identical text in the identical place.
+          Same shape as the capture notice in `inbox-view.tsx` after !290. */}
       {pending && (
-        <p role="status" className="text-muted-foreground text-xs">
+        <p id={retryingMessageId} className="text-muted-foreground text-xs">
           {t("focus.error.retrying", voice)}
         </p>
       )}
@@ -1241,7 +1270,7 @@ export function FocusTimer({
           <button
             ref={failureCtaRef}
             type="button"
-            aria-describedby={failureMessageId}
+            aria-describedby={ctaDescribedBy}
             onClick={() => window.location.reload()}
             className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium"
           >
@@ -1257,7 +1286,7 @@ export function FocusTimer({
           <button
             ref={failureCtaRef}
             type="button"
-            aria-describedby={failureMessageId}
+            aria-describedby={ctaDescribedBy}
             aria-disabled={pending}
             onClick={() => {
               if (!pending) retryFailed();

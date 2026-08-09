@@ -2723,7 +2723,66 @@ describe("FocusTimer — server-action failures (#137, #139)", () => {
       expect(
         screen.getByRole("button", { name: /try again/i }),
       ).toHaveAttribute("aria-disabled", "true");
-      expect(screen.getByRole("status")).toHaveTextContent(/trying again/i);
+      // #218 — the wait is asserted by its text, not by `getByRole("status")`.
+      // That query was pinning the MECHANISM (a nested live region), and the
+      // mechanism was the bug; the behaviour it stood for — the wait is on
+      // screen while the retry runs — is what survives, and the spec below
+      // pins how it now reaches a screen reader.
+      expect(screen.getByRole("alert")).toHaveTextContent(/trying again/i);
+    });
+
+    // #218 — a polite `role="status"` nested inside this assertive `role="alert"`
+    // has no defined announcement behaviour: the outer region's politeness
+    // applies to its whole subtree, so whether the inner text is read politely,
+    // assertively, twice or not at all is down to the screen reader. The wait
+    // still has to reach the user, so it rides the two channels that ARE
+    // defined — the pressed button's own state change and its
+    // `aria-describedby` — exactly as the capture notice does after !290.
+    it("carries the retry's wait on the button rather than nesting a live region", async () => {
+      vi.mocked(proposeNewEstimate)
+        .mockRejectedValueOnce(new Error("nope"))
+        .mockReturnValueOnce(new Promise<number>(() => {}));
+      await askForNewEstimate();
+      await click(/try again/i);
+
+      const notice = screen.getByRole("alert");
+      // Nothing polite anywhere in the assertive region's subtree — neither the
+      // role nor a bare `aria-live`, which would nest just as unreliably.
+      expect(within(notice).queryByRole("status")).toBeNull();
+      expect(notice.querySelector("[role='status']")).toBeNull();
+      expect(notice.querySelector("[aria-live]")).toBeNull();
+
+      // No visual change: the same text, in the same place, for sighted users.
+      const wait = screen.getByText(/trying again/i);
+      expect(notice).toContainElement(wait);
+
+      // …and it is reachable from the control that is deliberately still
+      // holding focus, alongside the reason it is being retried.
+      const retry = screen.getByRole("button", { name: /try again/i });
+      const ids = (retry.getAttribute("aria-describedby") ?? "").split(/\s+/);
+      expect(wait.id).toBeTruthy();
+      expect(ids).toContain(wait.id);
+      const described = ids
+        .map((id) => document.getElementById(id)?.textContent ?? "")
+        .join(" ");
+      expect(described).toMatch(/couldn't get a new estimate/i);
+      expect(described).toMatch(/trying again/i);
+    });
+
+    // The other half of the same contract: a description that never retracts
+    // would have the button claiming a retry is running long after it stopped.
+    it("drops the wait from the button's description once nothing is in flight", async () => {
+      vi.mocked(proposeNewEstimate).mockRejectedValueOnce(new Error("nope"));
+      await askForNewEstimate();
+
+      const retry = screen.getByRole("button", { name: /try again/i });
+      const ids = (retry.getAttribute("aria-describedby") ?? "").split(/\s+/);
+      expect(screen.queryByText(/trying again/i)).toBeNull();
+      const described = ids
+        .map((id) => document.getElementById(id)?.textContent ?? "")
+        .join(" ");
+      expect(described).toMatch(/couldn't get a new estimate/i);
+      expect(described).not.toMatch(/trying again/i);
     });
 
     it("does not fire a second request when Retry is pressed mid-flight", async () => {
