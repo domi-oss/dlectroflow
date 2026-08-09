@@ -679,6 +679,41 @@ describe("setShoppingItemDone", () => {
     });
   });
 
+  /**
+   * The same reasoning one step further: a read-back that FAILS is no more a
+   * reason to disown the write than a read-back that finds nothing.
+   *
+   * This was reachable because the read sat in `settleShopping`'s argument list,
+   * so it was evaluated before the call and outside the best-effort catch inside
+   * it. `updateMany` had already committed, and the action rejected anyway —
+   * exactly the shape `settleShopping` exists to prevent, arriving through the
+   * one door it could not cover.
+   *
+   * `mockRejectedValueOnce`, not `mockRejectedValue`: `vi.clearAllMocks()` in the
+   * outer `beforeEach` drops recorded calls but KEEPS an implementation, so a
+   * sticky rejection would leak into every later spec in this file.
+   */
+  it("still answers ok when the read-back itself fails", async () => {
+    prismaMock.shoppingItem.findFirst.mockRejectedValueOnce(
+      new Error("connection terminated"),
+    );
+    const { setShoppingItemDone } = await load();
+    await expect(setShoppingItemDone("s1", false)).resolves.toEqual({
+      ok: true,
+    });
+  });
+
+  // And it takes the conservative answer, the same one a vanished row gives: a
+  // dismissed summary stays dismissed rather than being resurfaced on a guess.
+  it("leaves a dismissal alone when the read-back fails", async () => {
+    prismaMock.shoppingItem.findFirst.mockRejectedValueOnce(
+      new Error("connection terminated"),
+    );
+    const { setShoppingItemDone } = await load();
+    await setShoppingItemDone("s1", false);
+    expect(syncMock).toHaveBeenCalledWith("ws-1", { resurface: false });
+  });
+
   it("reads the row back scoped to the workspace, and only the two flags", async () => {
     const { setShoppingItemDone } = await load();
     await setShoppingItemDone("s1", false);

@@ -23,7 +23,8 @@ const SHOPPING_PATH = "/shopping";
 const INBOX_PATH = "/";
 
 /**
- * One structured, greppable line when the summary sync gives up.
+ * One structured, greppable line when bookkeeping behind a committed write gives
+ * up.
  *
  * The workspace id and nothing else — enough to find the row, and the same
  * pseudonymous key `logDisconnectFailure` and the purge job already log. The
@@ -33,13 +34,22 @@ const INBOX_PATH = "/";
  * `error`, not `warn`: unlike a declined sign-in this is not a handled outcome
  * anybody chose, and the whole reason it is safe to swallow is that it lands
  * somewhere a grep can find it.
+ *
+ * The tag is a parameter because there are two such failures and they want
+ * telling apart: the sync itself, and the read-back that decides what to tell it
+ * (#199, raised in review of !295). One tag for both would make a grep for either
+ * return the other.
  */
-function logSummarySyncFailure(workspaceId: string, error: unknown): void {
+function logShoppingBookkeepingFailure(
+  tag: "shopping_summary_sync_failed" | "shopping_readback_failed",
+  workspaceId: string,
+  error: unknown,
+): void {
   try {
     const e = error as { message?: unknown } | undefined;
     console.error(
       JSON.stringify({
-        tag: "shopping_summary_sync_failed",
+        tag,
         workspaceId,
         message: typeof e?.message === "string" ? e.message : String(error),
         ts: new Date().toISOString(),
@@ -163,7 +173,11 @@ async function settleShopping(
   try {
     await syncShoppingSummary(workspaceId, { resurface });
   } catch (error) {
-    logSummarySyncFailure(workspaceId, error);
+    logShoppingBookkeepingFailure(
+      "shopping_summary_sync_failed",
+      workspaceId,
+      error,
+    );
   }
   revalidatePath(SHOPPING_PATH);
   revalidatePath(INBOX_PATH);
@@ -455,11 +469,29 @@ async function isOnTheToBuyList(
   id: string,
   workspaceId: string,
 ): Promise<boolean> {
-  const row = await prisma.shoppingItem.findFirst({
-    where: { id, workspaceId },
-    select: { done: true, savedForLater: true },
-  });
-  return row !== null && isStillToBuy(row);
+  // Guarded HERE rather than by the caller, because the caller evaluates this in
+  // `settleShopping`'s argument list — before the call, and therefore outside the
+  // best-effort catch inside it. A rejected read would reject a write that had
+  // already committed, which is the one shape `settleShopping` exists to prevent,
+  // arriving through the single door it could not cover (#199, review of !295).
+  //
+  // `false` is not a guess: it is the same conservative answer a vanished row
+  // gives below. Both mean "no reason to resurface a dismissed summary", and the
+  // next shopping write re-derives the line anyway.
+  try {
+    const row = await prisma.shoppingItem.findFirst({
+      where: { id, workspaceId },
+      select: { done: true, savedForLater: true },
+    });
+    return row !== null && isStillToBuy(row);
+  } catch (error) {
+    logShoppingBookkeepingFailure(
+      "shopping_readback_failed",
+      workspaceId,
+      error,
+    );
+    return false;
+  }
 }
 
 /**
