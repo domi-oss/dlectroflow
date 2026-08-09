@@ -6,15 +6,26 @@ const { prismaMock, txClient, revalidatePathMock, currentWorkspaceIdMock } =
       brainDumpItem: {
         findFirst: vi.fn(),
         update: vi.fn().mockResolvedValue({}),
+        // `{ count: 1 }` — the guarded write matched, which is the normal case.
+        // #196 round 12: `reopenItem`'s un-complete carries a
+        // `completedAt: { not: null }` precondition and gates the `task_complete`
+        // reversal on this count, so `{ count: 0 }` is how a test says "a
+        // concurrent reopen got there first".
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       step: {
         // `{ count: 1 }` — the write matched its row, which is the normal case and
         // the one `uncompleteStep` now branches on (review round 10: its `done`
         // precondition moved INTO the write, so `count: 0` means "another caller
-        // got there first" and is a no-op). `completeItem` and `reopenItem` ignore
-        // the count, so this default is inert for them.
+        // got there first" and is a no-op). `completeItem` ignores the count, so
+        // this default is inert for it.
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        // #196 round 12 — `reopenItem`'s step write returns the ROWS it changed,
+        // not a count, because Google has to be told which steps reopened and the
+        // reward reversal has to be counted off the same list. Defaulted to `[]`
+        // (nothing reopened) so every test that cares states its own, and the
+        // ones that don't cannot accidentally lean on a shared fixture.
+        updateManyAndReturn: vi.fn().mockResolvedValue([]),
         update: vi.fn(),
         findFirst: vi.fn(),
         count: vi.fn(),
@@ -496,20 +507,25 @@ describe("completeItem — step-level Google Task sync (#209)", () => {
 });
 
 describe("reopenItem", () => {
-  it("clears completedAt for a single-task item", async () => {
+  // The shape both writes carry since #196 round 12: the precondition that makes
+  // a losing concurrent reopen a no-op lives IN the write, so it is asserted
+  // here rather than left to the integration test to discover.
+  const STEP_SELECT = { googleTaskId: true, googleTaskListId: true };
+
+  it("clears completedAt for a single-task item, only while it is set", async () => {
     prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
       id: "i1",
       task: null,
     });
     const { reopenItem } = await import("./braindump");
     await reopenItem("i1");
-    expect(prismaMock.brainDumpItem.update).toHaveBeenCalledWith({
-      where: { id: "i1" },
+    expect(prismaMock.brainDumpItem.updateMany).toHaveBeenCalledWith({
+      where: { id: "i1", workspaceId: "owner", completedAt: { not: null } },
       data: { completedAt: null },
     });
   });
 
-  it("reopens a multi-step task: reactivates + resets selected steps", async () => {
+  it("reopens a multi-step task: reactivates + resets the selected steps that were done", async () => {
     prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
       id: "i2",
       task: {
@@ -526,9 +542,14 @@ describe("reopenItem", () => {
       where: { id: "t1" },
       data: { status: "active" },
     });
-    expect(prismaMock.step.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["s2"] } },
+    expect(prismaMock.step.updateManyAndReturn).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["s2"] },
+        done: true,
+        task: { workspaceId: "owner" },
+      },
       data: { done: false },
+      select: STEP_SELECT,
     });
   });
 
@@ -545,9 +566,14 @@ describe("reopenItem", () => {
     });
     const { reopenItem } = await import("./braindump");
     await reopenItem("i3", []);
-    expect(prismaMock.step.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ["a", "b"] } },
+    expect(prismaMock.step.updateManyAndReturn).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["a", "b"] },
+        done: true,
+        task: { workspaceId: "owner" },
+      },
       data: { done: false },
+      select: STEP_SELECT,
     });
   });
 
@@ -564,7 +590,7 @@ describe("reopenItem", () => {
     });
     const { reopenItem } = await import("./braindump");
     await reopenItem("i4", ["missing"]); // covers no real steps → all still done → add last
-    const call = prismaMock.step.updateMany.mock.calls[0][0];
+    const call = prismaMock.step.updateManyAndReturn.mock.calls[0][0];
     expect(call.data).toEqual({ done: false });
     expect(call.where.id.in).toContain("b"); // last step forced not-done
   });
@@ -605,6 +631,22 @@ describe("reopenItem — Google Task sync (#196)", () => {
     };
   }
 
+  /**
+   * What the guarded step write reports back — the rows it actually flipped, and
+   * since round 12 the ONLY thing Google is told about. Stated per test rather
+   * than derived from the snapshot on purpose: the whole defect was two undos
+   * counted off two different sources of truth, so a fixture that quietly kept
+   * them in step would hide the property under test.
+   */
+  function writeReopens(...googleTaskIds: (string | null)[]) {
+    prismaMock.step.updateManyAndReturn.mockResolvedValueOnce(
+      googleTaskIds.map((googleTaskId) => ({
+        googleTaskId,
+        googleTaskListId: googleTaskId ? "l1" : null,
+      })),
+    );
+  }
+
   beforeEach(async () => {
     google_ = await import("@/lib/google");
     (google_.getValidAccessToken as ReturnType<typeof vi.fn>).mockResolvedValue(
@@ -623,6 +665,7 @@ describe("reopenItem — Google Task sync (#196)", () => {
 
   it("patches every reopened step, and the task's own Google Task, to needsAction", async () => {
     prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(completedItem());
+    writeReopens("g1", "g2");
     const { reopenItem } = await import("./braindump");
     await reopenItem("i1");
     expect(patchedIds().sort()).toEqual(["g-task", "g1", "g2"]);
@@ -634,14 +677,24 @@ describe("reopenItem — Google Task sync (#196)", () => {
 
   it("patches only the steps the caller selected", async () => {
     prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(completedItem());
+    writeReopens("g2");
     const { reopenItem } = await import("./braindump");
     await reopenItem("i1", ["s2"]);
     expect(patchedIds().sort()).toEqual(["g-task", "g2"]);
+    // The selection reaches Google via the WRITE's `id in` filter, not via a
+    // second pass over the snapshot — that is the round-12 shape.
+    expect(
+      prismaMock.step.updateManyAndReturn.mock.calls[0][0].where.id.in,
+    ).toEqual(["s2"]);
   });
 
   // A step that was already open is already `needsAction` in Google. Re-patching
   // it costs a request against a rate-limited API and changes nothing — the same
   // rule the completion direction follows for steps already done (#209).
+  //
+  // Round 12 moved the filter from a `.filter(s => s.done)` over the snapshot
+  // into the write's own `done: true`, so the already-open step is absent from
+  // what comes back and Google never hears of it.
   it("does not re-patch a selected step that was already open", async () => {
     prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(
       completedItem({
@@ -666,9 +719,13 @@ describe("reopenItem — Google Task sync (#196)", () => {
         },
       }),
     );
+    writeReopens("g2"); // `done: true` excluded s1 before the update ran
     const { reopenItem } = await import("./braindump");
     await reopenItem("i1", ["s1", "s2"]);
     expect(patchedIds()).toEqual(["g2"]);
+    expect(
+      prismaMock.step.updateManyAndReturn.mock.calls[0][0].where.done,
+    ).toBe(true);
   });
 
   // The ≥1-not-done guard can add a step the caller did not select. If that step
@@ -697,9 +754,31 @@ describe("reopenItem — Google Task sync (#196)", () => {
         },
       }),
     );
+    writeReopens("g2");
     const { reopenItem } = await import("./braindump");
     await reopenItem("i1", ["missing"]); // selects nothing real → last step forced
     expect(patchedIds()).toEqual(["g2"]);
+  });
+
+  /**
+   * Round 12 — the losing side of a double-tap sends nothing.
+   *
+   * Both guarded writes report that they changed nothing, so this call reopened
+   * neither the item nor any step: the winner has already patched Google, and a
+   * second round of PATCHes would buy an identical remote state at the cost of
+   * requests against an API this app is rate-limited against. The credential is
+   * never even resolved, which is the observable form of "nothing was queued".
+   */
+  it("sends nothing to Google when a concurrent reopen already did the work", async () => {
+    prismaMock.brainDumpItem.updateMany.mockResolvedValueOnce({ count: 0 });
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(completedItem());
+    writeReopens(); // the `done: true` precondition matched no rows
+    const { reopenItem } = await import("./braindump");
+    await reopenItem("i1");
+    expect(google_.getValidAccessToken).not.toHaveBeenCalled();
+    expect(google_.patchGoogleTask).not.toHaveBeenCalled();
+    // Still revalidated: this request has to re-render whoever did the write.
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 
   /**
@@ -723,9 +802,10 @@ describe("reopenItem — Google Task sync (#196)", () => {
       new Error("network down"),
     );
     prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(completedItem());
+    writeReopens("g1", "g2");
     const { reopenItem } = await import("./braindump");
     await expect(reopenItem("i1")).resolves.toBeUndefined();
-    expect(prismaMock.step.updateMany).toHaveBeenCalled();
+    expect(prismaMock.step.updateManyAndReturn).toHaveBeenCalled();
     expect(revalidatePathMock).toHaveBeenCalledWith("/");
   });
 
@@ -742,6 +822,7 @@ describe("reopenItem — Google Task sync (#196)", () => {
         ],
       },
     });
+    writeReopens(null); // reopened, but it addresses no Google task
     const { reopenItem } = await import("./braindump");
     await reopenItem("i9");
     expect(google_.getValidAccessToken).not.toHaveBeenCalled();
@@ -778,12 +859,24 @@ describe("reopenItem — reward reversal (#196)", () => {
     };
   }
 
+  /** How many rows the guarded step write reports it flipped done → not-done. */
+  function writeReopened(n: number) {
+    prismaMock.step.updateManyAndReturn.mockResolvedValueOnce(
+      Array.from({ length: n }, () => ({
+        googleTaskId: null,
+        googleTaskListId: null,
+      })),
+    );
+  }
+
   it("takes back one step_done per step it actually un-completed", async () => {
     const rewards = await import("@/lib/rewards");
     prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(reopened());
+    // s3 was already open, so the write's `done: true` never matched it and no
+    // `step_done` was ever banked for it to reverse.
+    writeReopened(2);
     const { reopenItem } = await import("./braindump");
     await reopenItem("i1");
-    // s3 was already open, so no `step_done` was ever banked for it to reverse.
     expect(rewards.reverseItemCompletionRewards).toHaveBeenCalledWith(
       "owner",
       { stepDone: 2, includeTaskComplete: true },
@@ -794,6 +887,7 @@ describe("reopenItem — reward reversal (#196)", () => {
   it("counts only the selected steps", async () => {
     const rewards = await import("@/lib/rewards");
     prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(reopened());
+    writeReopened(1);
     const { reopenItem } = await import("./braindump");
     await reopenItem("i1", ["s1"]);
     expect(rewards.reverseItemCompletionRewards).toHaveBeenCalledWith(
@@ -801,21 +895,67 @@ describe("reopenItem — reward reversal (#196)", () => {
       { stepDone: 1, includeTaskComplete: true },
       txClient,
     );
+    expect(
+      prismaMock.step.updateManyAndReturn.mock.calls[0][0].where.id.in,
+    ).toEqual(["s1"]);
   });
 
-  // The gate is observed state, never an inference: an item that was not
-  // completed never earned a `task_complete`, so reversing one here would take
-  // points from a different, genuinely finished to-do.
+  // The gate is what the write DID, never what the read saw (round 12). An item
+  // that was not completed fails the `completedAt: { not: null }` precondition,
+  // so the write reports `count: 0` — and it never earned a `task_complete`, so
+  // reversing one here would take points from a different, finished to-do.
   it("does NOT reverse task_complete for an item that was not completed", async () => {
     const rewards = await import("@/lib/rewards");
+    prismaMock.brainDumpItem.updateMany.mockResolvedValueOnce({ count: 0 });
     prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(
       reopened({ completedAt: null }),
     );
+    writeReopened(2);
     const { reopenItem } = await import("./braindump");
     await reopenItem("i1");
     expect(rewards.reverseItemCompletionRewards).toHaveBeenCalledWith(
       "owner",
       { stepDone: 2, includeTaskComplete: false },
+      txClient,
+    );
+  });
+
+  /**
+   * Round 12 — the losing side of a double-tap reverses nothing at all.
+   *
+   * Both guarded writes report they changed nothing, which is the only honest
+   * reading of "another caller has already done all of this". Reversing on the
+   * pre-transaction snapshot instead is the defect: `reverseLatestReward` takes
+   * back the newest row of a type in the WORKSPACE, so a second reversal for one
+   * reopen reaches unrelated, already-settled work.
+   */
+  it("reverses nothing when both guarded writes report they changed nothing", async () => {
+    const rewards = await import("@/lib/rewards");
+    prismaMock.brainDumpItem.updateMany.mockResolvedValueOnce({ count: 0 });
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(reopened());
+    writeReopened(0);
+    const { reopenItem } = await import("./braindump");
+    await reopenItem("i1");
+    expect(rewards.reverseItemCompletionRewards).toHaveBeenCalledWith(
+      "owner",
+      { stepDone: 0, includeTaskComplete: false },
+      txClient,
+    );
+  });
+
+  // The two gates are independent, and a partial overlap has to be counted
+  // partially: this caller lost the item but still reopened a step the winner
+  // had not selected.
+  it("reverses the step_done it won without the task_complete it lost", async () => {
+    const rewards = await import("@/lib/rewards");
+    prismaMock.brainDumpItem.updateMany.mockResolvedValueOnce({ count: 0 });
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(reopened());
+    writeReopened(1);
+    const { reopenItem } = await import("./braindump");
+    await reopenItem("i1");
+    expect(rewards.reverseItemCompletionRewards).toHaveBeenCalledWith(
+      "owner",
+      { stepDone: 1, includeTaskComplete: false },
       txClient,
     );
   });
@@ -834,6 +974,8 @@ describe("reopenItem — reward reversal (#196)", () => {
       { stepDone: 0, includeTaskComplete: true },
       txClient,
     );
+    // No task, so no step write to gate on — and nothing to gate.
+    expect(prismaMock.step.updateManyAndReturn).not.toHaveBeenCalled();
   });
 
   /**

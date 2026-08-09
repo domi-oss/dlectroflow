@@ -438,7 +438,10 @@ export async function completeItem(id: string) {
  *    → complete paid twice for one piece of work. The reversal runs INSIDE the
  *    transaction, for the reason `uncompleteStep` records at length: if it
  *    fails, the local writes must fail with it, or the to-do is reopened with
- *    the points still banked and nothing will ever take them.
+ *    the points still banked and nothing will ever take them. It is counted off
+ *    what the writes CHANGED rather than off the read above, so a second
+ *    concurrent reopen reverses nothing instead of reaching into unrelated work
+ *    — the note on the transaction below has the whole argument.
  *
  * Badges stand. They are once-ever achievements, `awardBadge` is idempotent so
  * re-completing cannot earn a second one, and revoking one would make the
@@ -463,48 +466,120 @@ export async function reopenItem(id: string, stepIds?: string[]) {
   const anyNotDone = steps.some((s) => resetIds.has(s.id) || !s.done);
   if (!anyNotDone && steps.length) resetIds.add(steps[steps.length - 1].id);
 
-  // The steps this call actually turns done → not-done. Computed once, out here,
-  // because all three of the undos above are counted off it: the reward reversal
-  // owes one `step_done` each, and Google owes one `needsAction` each. A step in
-  // `resetIds` that was already open earned nothing and is already `needsAction`
-  // on Google's side, so it belongs in neither.
-  const reopening = steps.filter((s) => resetIds.has(s.id) && s.done);
-
-  // Whether this reopen actually un-completes a COMPLETED item is the gate on
-  // the `task_complete` reversal, and it is observed state rather than an
-  // inference: an item that was not completed never earned one, so reversing
-  // would take points from a different, genuinely finished to-do.
-  const wasCompleted = item.completedAt !== null;
-
-  await prisma.$transaction(async (tx) => {
-    await tx.brainDumpItem.update({
-      where: { id },
+  // Both undos are counted off what the writes below actually CHANGED, never off
+  // the read above (review round 12 — the whole-to-do twin of the holes #198
+  // rounds 10 and 11 closed in `uncompleteStep`).
+  //
+  // The read is a `findFirst` outside the transaction and takes no lock, so it
+  // cannot stop two reopens of the same to-do — a double-tap outrunning the
+  // button's own `disabled`, or the same Done row open in two tabs. Both would
+  // see `completedAt` set and the same steps done, and a second pass is NOT
+  // harmlessly idempotent: the local writes are (clearing an already-null
+  // `completedAt`, setting an Active task Active), but `reverseLatestReward`
+  // takes back *the newest row of that type in the WORKSPACE* — `RewardEvent`
+  // holds no link back to the to-do that earned it — so the loser's reversal
+  // reaches unrelated, already-settled work. One reopen, the payout taken twice.
+  //
+  // So the preconditions move INTO the writes, which is the same guarded-bulk
+  // shape `uncompleteStep` and `reverseLatestReward` both adopted: Postgres
+  // re-evaluates an UPDATE's WHERE after the row lock it was waiting on is
+  // released, so the loser matches nothing and reports `count: 0` rather than
+  // quietly overwriting. `count: 0` means "another caller has already done all of
+  // this" — a no-op, not an error, and nothing may be raised at someone who
+  // merely clicked twice.
+  const { uncompleted, reopened } = await prisma.$transaction(async (tx) => {
+    // First write in the transaction on purpose: two concurrent reopens of one
+    // to-do contend on THIS row, so the loser blocks here and re-reads
+    // `completedAt` as null the moment the winner commits. `updateMany` rather
+    // than `update` for the same reason `reverseLatestReward` uses `deleteMany` —
+    // a precondition that matches nothing must report a count, not raise.
+    const { count: uncompleted } = await tx.brainDumpItem.updateMany({
+      where: { id, workspaceId, completedAt: { not: null } },
       data: { completedAt: null },
     });
+
+    // The steps this call actually turns done → not-done, and the only source of
+    // truth for that: the reward reversal owes one `step_done` each, and Google
+    // owes one `needsAction` each. A step in `resetIds` that was already open
+    // earned nothing and is already `needsAction` on Google's side, so the
+    // `done: true` precondition drops it from both — and drops everything when a
+    // concurrent reopen got there first.
+    //
+    // `updateManyAndReturn` rather than `updateMany`, because at this arity the
+    // count is not enough: `uncompleteStep` undoes one named step and can gate on
+    // `count > 0`, whereas a to-do reopens N and Google has to be told WHICH.
+    // Deriving that from the pre-transaction snapshot instead would put the two
+    // undos back on two different sources of truth, which is the shape of this
+    // whole defect.
+    //
+    // Scoped by `task.workspaceId` as well as by id, the same way
+    // `uncompleteStep`'s step write is: a bulk operation carries the scope in its
+    // own arguments rather than inheriting it from a read further up. `Step`
+    // declares no `workspaceId` of its own, so `scoping.harness.test.ts` does not
+    // enrol it and this is belt and braces — but the row ids came from a
+    // workspace-scoped read and are re-proved against it here, which costs one
+    // join and removes a whole class of "the read was right, the write drifted".
+    //
+    // `updateManyAndReturn` was absent from that harness's op list until this
+    // call went in; it is the codebase's first, and the list has been corrected
+    // rather than left to the next caller to discover.
+    let reopened: {
+      googleTaskId: string | null;
+      googleTaskListId: string | null;
+    }[] = [];
     if (item.task) {
+      // Deliberately NOT gated. Setting an Active task Active is idempotent, and
+      // the loser of the race wants the task open just as much as the winner did
+      // — while a task some other path had already reactivated could still be
+      // carrying a completed inbox item. The defect being fixed is a miscounted
+      // reward, not this write.
       await tx.task.update({
         where: { id: item.task.id },
         data: { status: TaskStatus.Active },
       });
       if (resetIds.size) {
-        await tx.step.updateMany({
-          where: { id: { in: [...resetIds] } },
+        reopened = await tx.step.updateManyAndReturn({
+          where: {
+            id: { in: [...resetIds] },
+            done: true,
+            task: { workspaceId },
+          },
           data: { done: false },
+          select: { googleTaskId: true, googleTaskListId: true },
         });
       }
     }
+
     // On `tx`, not `prisma`: a reversal that committed independently would
     // survive the rollback, which is the bug wearing the fix's clothes.
+    //
+    // `uncompleted > 0` — did THIS call un-complete the item — replaces the
+    // `item.completedAt !== null` snapshot as the gate on `task_complete`, for
+    // the reason round 11 gives one level down: the snapshot means "it looked
+    // completed when I read it", which both callers see and only one of them
+    // earns. An item that was not completed never banked a `task_complete`, so
+    // reversing one would take points from a different, genuinely finished to-do.
     await reverseItemCompletionRewards(
       workspaceId,
-      { stepDone: reopening.length, includeTaskComplete: wasCompleted },
+      { stepDone: reopened.length, includeTaskComplete: uncompleted > 0 },
       tx,
     );
+    return { uncompleted, reopened };
   });
 
   // After the transaction and outside it — see (2) above. Best-effort per patch,
   // so one unreachable step does not abandon the others or the reopen.
-  await reopenGoogleTasksForItem(item.task, reopening);
+  //
+  // Told only what this call changed, at both grains. The task's own Google task
+  // pairs with the item's `completedAt` (`completeItem` sets the two together),
+  // so a caller that un-completed nothing passes `null` and a caller that
+  // reopened no steps passes nothing — `patchPool` drops an empty queue before it
+  // costs a credential lookup. That is the same saving `uncompleteStep` makes
+  // with `if (applied)`: the winner has already sent the PATCH, and a second one
+  // is a redundant round trip to an API this app is rate-limited against.
+  // `revalidatePath` below is NOT skipped — each request still has to refresh its
+  // own render, whoever did the write.
+  await reopenGoogleTasksForItem(uncompleted > 0 ? item.task : null, reopened);
 
   revalidatePath(INBOX_PATH);
   revalidatePath("/dashboard");
