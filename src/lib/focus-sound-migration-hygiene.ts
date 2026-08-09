@@ -445,14 +445,20 @@ export function parseFocusSoundCategoryBackfill(
  * #190 — the second half stopped being redundant when `splitStatements` learned
  * to keep a `DO $$ … $$` body whole, because everything in such a body shares
  * one statement index while still running in written order.
+ *
+ * Exported with `isBefore` below because `dropConstraintAfterWrite` in
+ * `migration-data-harness.ts` asks the same question about the same two
+ * statements, and it asked it with a bare index comparison until review of
+ * !292 caught the two answers disagreeing (#190). Two orderings of one
+ * migration is a defect whichever of them is wrong, so there is now one.
  */
-interface SqlPosition {
+export interface SqlPosition {
   statement: number;
   offset: number;
 }
 
 /** Whether `a` runs before `b`. Statement first, then offset within it. */
-function isBefore(a: SqlPosition, b: SqlPosition): boolean {
+export function isBefore(a: SqlPosition, b: SqlPosition): boolean {
   return a.statement === b.statement
     ? a.offset < b.offset
     : a.statement < b.statement;

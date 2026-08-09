@@ -52,9 +52,11 @@
  */
 
 import {
+  isBefore,
   splitStatements,
   stripSqlComments,
   type MigrationFile,
+  type SqlPosition,
 } from "./focus-sound-migration-hygiene";
 
 /**
@@ -495,6 +497,27 @@ export function planSeededDeploy(
 const CHECK_CONSTRAINT_NAME = /^([A-Za-z0-9]+)_([A-Za-z0-9]+)_check$/;
 
 /**
+ * Every match of `pattern` across `statements`, as running-order positions.
+ *
+ * Every match, not the first: a merged `DO $$ … $$` body is one statement that
+ * may hold several writes, and reading only the first let a late one hide
+ * behind an earlier, innocent one — the same reason `findLateConstraintDrops`
+ * takes them all (#190).
+ */
+function positionsOf(
+  statements: readonly string[],
+  pattern: RegExp,
+): SqlPosition[] {
+  const found: SqlPosition[] = [];
+  statements.forEach((s, statement) => {
+    for (const m of s.matchAll(pattern)) {
+      found.push({ statement, offset: m.index });
+    }
+  });
+  return found;
+}
+
+/**
  * The same migration with `constraint`'s `DROP` moved below the last statement
  * that writes the column it guards — i.e. the statement order of the migration
  * that took production down on 2026-08-07.
@@ -507,9 +530,35 @@ const CHECK_CONSTRAINT_NAME = /^([A-Za-z0-9]+)_([A-Za-z0-9]+)_check$/;
  * into a test of a 160-line fixture nothing else reads.
  *
  * It throws in every case where the result would not be the intended shape —
- * unparseable name, no such DROP, no matching write, or a DROP that is already
- * late — because a silent no-op here would turn "the harness caught it" into
- * "the harness was handed a working file".
+ * unparseable name, no such DROP, more than one DROP, no matching write, a DROP
+ * already late, or a DROP the move cannot reach — because a silent no-op here
+ * would turn "the harness caught it" into "the harness was handed a working
+ * file". Nothing downstream can tell those apart: the integration test reads
+ * whatever comes back as "the 2026-08-07 migration, reconstructed", so an
+ * unchanged file makes it deploy the FIXED migration and pass.
+ *
+ * ── The two ways it used to no-op, both found reviewing !292 (#190) ──────────
+ *
+ *  - The write scan spanned `[\s\S]*?`, so inside a merged `DO $$ … $$` body it
+ *    crossed a `;` and paired one statement's `UPDATE "T"` with a later
+ *    statement's `SET "c" =`. `COLUMN_WRITE` next door already bounds the same
+ *    gap with `[^;]*?` for the same reason; this one did not, and would happily
+ *    move a DROP below a write that no statement performs. Detection therefore
+ *    runs over a literal-REDACTED copy too, which is what makes `[^;]` safe on
+ *    the second gap — the only semicolons a real `UPDATE` holds sit in its
+ *    values — and closes the neighbouring hole where a `Settings` UPDATE quoted
+ *    inside an `INSERT`'s string literal read as a write.
+ *
+ *  - The order check compared statement INDICES while `findLateConstraintDrops`
+ *    had been upgraded to `(statement, offset)`. A drop and a write merged into
+ *    one `DO` block share an index, so `dropAt > writeAt` was false whichever
+ *    way round they ran: the already-broken shape escaped its guard, and the
+ *    correctly-ordered one was "reordered" by splicing a statement out and back
+ *    into its own slot. Both returned the input, silently. The comparison is
+ *    now the shared `isBefore`, imported rather than re-implemented so the two
+ *    functions cannot drift apart a second time — and when the two do share a
+ *    statement the answer is an error, because moving whole statements cannot
+ *    reorder a PL/pgSQL body from the outside.
  *
  * Comments do not survive: the return value is the statement sequence, joined,
  * which is precisely the property under test.
@@ -526,37 +575,62 @@ export function dropConstraintAfterWrite(
   }
   const [, table, column] = named;
   const statements = splitStatements(stripSqlComments(sql));
+  // Detection reads a literal-redacted copy; the RESULT is rebuilt from the
+  // originals, because what this function returns has to be a runnable
+  // migration. Redaction only ever shortens a literal, so it cannot reorder
+  // anything — two offsets taken from the same probe stay comparable.
+  const probes = statements.map(redactStringLiterals);
 
-  const dropAt = statements.findIndex((s) =>
-    new RegExp(`\\bDROP\\s+CONSTRAINT\\s+"?${constraint}"?`, "i").test(s),
+  // Interpolated, but only from `constraint`, `table` and `column`, all three
+  // already through `CHECK_CONSTRAINT_NAME` — an anchored pattern that admits
+  // nothing but `[A-Za-z0-9_]`, so no regex metacharacter can reach either
+  // source.
+  const drops = positionsOf(
+    probes,
+    new RegExp(
+      `\\bDROP\\s+CONSTRAINT\\s+(?:IF\\s+EXISTS\\s+)?"?${constraint}"?`,
+      "gi",
+    ),
   );
-  if (dropAt === -1) {
+  if (drops.length === 0) {
     throw new Error(`no statement drops "${constraint}".`);
   }
+  if (drops.length > 1) {
+    throw new Error(
+      `"${constraint}" is dropped ${drops.length} times, and moving one drop would leave the others where they are — the file that came back would fail on a duplicate constraint name rather than on 23514.`,
+    );
+  }
+  const [dropAt] = drops;
 
-  const writes = new RegExp(
-    `\\bUPDATE\\s+"?${table}"?\\b[\\s\\S]*?\\bSET\\b[\\s\\S]*?"?${column}"?\\s*=`,
-    "i",
+  const writes = positionsOf(
+    probes,
+    new RegExp(
+      `\\bUPDATE\\s+"?${table}"?\\b[^;]*?\\bSET\\b[^;]*?"?${column}"?\\s*=`,
+      "gi",
+    ),
   );
-  let writeAt = -1;
-  statements.forEach((s, i) => {
-    if (writes.test(s)) writeAt = i;
-  });
-  if (writeAt === -1) {
+  // The LAST write: the drop has to land below every one of them.
+  const writeAt = writes.at(-1);
+  if (writeAt === undefined) {
     throw new Error(
       `no statement writes "${table}"."${column}", so there is nothing for the drop of "${constraint}" to be late for.`,
     );
   }
-  if (dropAt > writeAt) {
+  if (!isBefore(dropAt, writeAt)) {
     throw new Error(
       `"${constraint}" is already dropped after the write to "${table}"."${column}" — this migration is the broken shape, not the fixed one.`,
     );
   }
+  if (dropAt.statement === writeAt.statement) {
+    throw new Error(
+      `the drop of "${constraint}" and the write to "${table}"."${column}" are in the same statement (statement ${dropAt.statement + 1}, a DO $$ … $$ body runs top to bottom), so moving whole statements cannot put the drop below the write. Reorder the body itself, or split it into separate statements.`,
+    );
+  }
 
   const reordered = [...statements];
-  const [drop] = reordered.splice(dropAt, 1);
-  // `writeAt` shifted down by one when the earlier DROP was removed, so
-  // `writeAt` is now the index the DROP has to land after.
-  reordered.splice(writeAt, 0, drop);
+  const [drop] = reordered.splice(dropAt.statement, 1);
+  // The write's index shifted down by one when the earlier DROP was removed, so
+  // it is now the index the DROP has to land after.
+  reordered.splice(writeAt.statement, 0, drop);
   return reordered.map((s) => `${s};`).join("\n\n");
 }

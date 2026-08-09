@@ -361,6 +361,100 @@ ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
     );
   });
 
+  // #190, raised in review of this MR. Everything below is a shape where the
+  // instrument used to answer "done" while having moved nothing — the one
+  // failure this function must not have, because the integration test reads its
+  // output as "the 2026-08-07 migration, reconstructed" and a silent no-op turns
+  // that into "the FIXED migration, run again" while the suite stays green.
+  describe("shapes where a statement move cannot produce the broken order", () => {
+    it("does not pair a table with a column a LATER statement writes", () => {
+      // Nothing here writes Settings.focusSound: the write-detection gap has to
+      // cross a `;` to reach the column, and the two halves belong to different
+      // statements of one merged body.
+      const crossed = `
+ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+DO $$
+BEGIN
+  UPDATE "Settings" SET "theme" = 'dark';
+  UPDATE "Preference" SET "focusSound" = 'on';
+END
+$$;
+`;
+      expect(() =>
+        dropConstraintAfterWrite(crossed, "Settings_focusSound_check"),
+      ).toThrow(/no statement writes/i);
+    });
+
+    it("does not read a write quoted inside a string literal as a write", () => {
+      const quoted = `
+ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+INSERT INTO "AuditLog" ("message") VALUES ('UPDATE "Settings" SET "focusSound" = x');
+`;
+      expect(() =>
+        dropConstraintAfterWrite(quoted, "Settings_focusSound_check"),
+      ).toThrow(/no statement writes/i);
+    });
+
+    it("throws when the drop and the write share one DO block", () => {
+      // Correctly ordered, but both halves live in one statement — so moving
+      // whole statements around cannot put the drop below the write, and the
+      // old index-only comparison read "same index" as "nothing to do".
+      const merged = `
+DO $$
+BEGIN
+  ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+  UPDATE "Settings" SET "focusSound" = 'on';
+END
+$$;
+`;
+      expect(() =>
+        dropConstraintAfterWrite(merged, "Settings_focusSound_check"),
+      ).toThrow(/same statement/i);
+    });
+
+    it("throws when the drop is ALREADY late inside one DO block", () => {
+      const mergedAndLate = `
+DO $$
+BEGIN
+  UPDATE "Settings" SET "focusSound" = 'on';
+  ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+END
+$$;
+`;
+      expect(() =>
+        dropConstraintAfterWrite(mergedAndLate, "Settings_focusSound_check"),
+      ).toThrow(/already/i);
+    });
+
+    it("throws when the constraint is dropped more than once", () => {
+      // Moving one of two drops leaves the other where it was, so the file that
+      // comes back fails on a duplicate constraint name rather than on 23514.
+      const droppedTwice = `
+ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+ALTER TABLE "Settings" ADD CONSTRAINT "Settings_focusSound_check" CHECK ("focusSound" IN ('off'));
+ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+UPDATE "Settings" SET "focusSound" = 'on';
+`;
+      expect(() =>
+        dropConstraintAfterWrite(droppedTwice, "Settings_focusSound_check"),
+      ).toThrow(/dropped 2 times/i);
+    });
+  });
+
+  it("counts a DROP CONSTRAINT IF EXISTS as the drop to move", () => {
+    const ifExists = `
+ALTER TABLE "Settings" DROP CONSTRAINT IF EXISTS "Settings_focusSound_check";
+UPDATE "Settings" SET "focusSound" = 'on';
+`;
+    const broken = dropConstraintAfterWrite(
+      ifExists,
+      "Settings_focusSound_check",
+    );
+    expect(broken.indexOf(`DROP CONSTRAINT IF EXISTS`)).toBeGreaterThan(
+      broken.indexOf(`SET "focusSound" = 'on'`),
+    );
+  });
+
   it("throws on a constraint name the <Table>_<column>_check convention cannot parse", () => {
     expect(() => dropConstraintAfterWrite(sql, "weird_name")).toThrow(
       /weird_name/,
