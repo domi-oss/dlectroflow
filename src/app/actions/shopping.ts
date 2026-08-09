@@ -21,6 +21,37 @@ const SHOPPING_PATH = "/shopping";
 const INBOX_PATH = "/";
 
 /**
+ * One structured, greppable line when the summary sync gives up.
+ *
+ * The workspace id and nothing else — enough to find the row, and the same
+ * pseudonymous key `logDisconnectFailure` and the purge job already log. The
+ * item text is not in here: it is the user's own words and the log is not the
+ * place for them.
+ *
+ * `error`, not `warn`: unlike a declined sign-in this is not a handled outcome
+ * anybody chose, and the whole reason it is safe to swallow is that it lands
+ * somewhere a grep can find it.
+ */
+function logSummarySyncFailure(workspaceId: string, error: unknown): void {
+  try {
+    const e = error as { message?: unknown } | undefined;
+    console.error(
+      JSON.stringify({
+        tag: "shopping_summary_sync_failed",
+        workspaceId,
+        message: typeof e?.message === "string" ? e.message : String(error),
+        ts: new Date().toISOString(),
+      }),
+    );
+  } catch {
+    // Observability must never take the request down with it — the same guard
+    // `recordLLMFailure` and `recordAuthFailure` carry, and it matters more here
+    // because this catch block exists precisely to keep a committed write from
+    // being reported as failed.
+  }
+}
+
+/**
  * #199 — bring the inbox summary into line, then invalidate both surfaces.
  *
  * Every write in this file ends here, so there is one place that decides what a
@@ -31,12 +62,60 @@ const INBOX_PATH = "/";
  * Both paths are revalidated because the feature now renders on two: the list at
  * /shopping, and the summary line on the inbox. Revalidating only /shopping was
  * the bug this helper exists to make impossible.
+ *
+ * ## The sync is BEST-EFFORT, and that is a data-integrity decision
+ *
+ * Duo review, !295. Every caller reaches this line with its primary write already
+ * committed, so a `syncShoppingSummary` that threw rejected the whole server
+ * action for a row that is in the database. `addShoppingItem` is not idempotent:
+ * a client that reads a rejection as "that did not happen" and retries captures
+ * the item TWICE — and !294 has just given the capture surfaces a Retry, so the
+ * two changes compose into exactly that duplicate.
+ *
+ * The two halves are not symmetrical, which is what decides this:
+ *
+ *  * A **failed sync** is recoverable and self-healing. The row stores no count,
+ *    so there is no stale number to correct; the next shopping write re-derives
+ *    it, including a write that changes nothing (see `addShoppingItem`'s tail),
+ *    and the read side counts the items directly either way. The whole cost is
+ *    an inbox line absent, or present, until then — the residual
+ *    `shopping-summary.ts` already documents as acceptable.
+ *  * A **duplicated item** is not recoverable. It needs the person to notice and
+ *    delete it.
+ *
+ * So the bookkeeping is not allowed to report the primary write as failed. This
+ * is the call `awardFirstSchedule` makes for the same reason
+ * (`src/lib/scheduling/award.ts`): "scheduling has already committed and must
+ * not be retried", rewards logged rather than thrown.
+ *
+ * **Not folded into the write's transaction instead.** All-or-nothing is the
+ * other coherent answer and it is the wrong one here: four of the five writes
+ * are a single statement with no transaction to join, and `addShoppingItem`'s
+ * comment already gives the reason its SERIALIZABLE block ends before this call.
+ * More to the point, an atomic pairing would let a fault in the summary table
+ * REFUSE a shopping write — trading a self-healing cosmetic residual for a lost
+ * one, which is the trade backwards.
+ *
+ * **Swallowed is not invisible.** The failure gets one greppable line, so
+ * "the summary sync is failing for everybody" is a thing somebody can find out.
+ *
+ * The revalidations run either way, deliberately: the item write landed, so
+ * skipping them would turn one absent inbox line into a /shopping page that does
+ * not show the item just added.
+ *
+ * `dismissShoppingSummary` does NOT come through here, and must not — its
+ * `clearShoppingSummary` IS the write it was called to make, with no primary
+ * result standing behind it, so it keeps rejecting and the card says so.
  */
 async function settleShopping(
   workspaceId: string,
   resurface: boolean,
 ): Promise<void> {
-  await syncShoppingSummary(workspaceId, { resurface });
+  try {
+    await syncShoppingSummary(workspaceId, { resurface });
+  } catch (error) {
+    logSummarySyncFailure(workspaceId, error);
+  }
   revalidatePath(SHOPPING_PATH);
   revalidatePath(INBOX_PATH);
 }

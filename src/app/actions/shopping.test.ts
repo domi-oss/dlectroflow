@@ -16,7 +16,7 @@
  *     it" and "we deliberately did not" are indistinguishable without a test.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   MAX_SHOPPING_ITEMS,
   SHOPPING_ITEM_TEXT_MAX_LENGTH,
@@ -250,6 +250,109 @@ describe("the inbox summary is kept in step with every write", () => {
     await addShoppingItem("Milk");
     expect(revalidatePathMock).toHaveBeenCalledWith("/shopping");
     expect(revalidatePathMock).toHaveBeenCalledWith("/");
+  });
+});
+
+/**
+ * Duo review, !295 — **a bookkeeping failure must not be reported as a failed
+ * write.**
+ *
+ * `settleShopping` runs AFTER the primary write has committed, on every one of
+ * the five writes in this file. When it threw, the whole server action rejected
+ * for a row that is already in the database — and `addShoppingItem` is not
+ * idempotent, so a client that treats a rejection as "that did not happen" and
+ * retries captures the item TWICE. !294 hardened exactly that surface into an
+ * error notice with a Retry button, so the two changes compose into a duplicate.
+ *
+ * The summary row is the recoverable half: it stores no count, the next shopping
+ * write re-derives it, and the read side counts the items either way. So the
+ * sync is best-effort — the same call `awardFirstSchedule` makes for rewards
+ * after a calendar push has committed (`src/lib/scheduling/award.ts`).
+ *
+ * Swallowed is not the same as invisible. The failure gets one structured,
+ * greppable line, the way `recordAuthFailure` and `logDisconnectFailure` do —
+ * an error nobody can ever see would just move the defect into the logs.
+ */
+describe("a summary sync that fails cannot fail the primary write", () => {
+  const writes: Array<
+    [string, (m: Awaited<ReturnType<typeof load>>) => Promise<void>]
+  > = [
+    ["addShoppingItem", (m) => m.addShoppingItem("Milk")],
+    ["renameShoppingItem", (m) => m.renameShoppingItem("s1", "Bread")],
+    ["setShoppingItemDone", (m) => m.setShoppingItemDone("s1", true)],
+    [
+      "setShoppingItemSavedForLater",
+      (m) => m.setShoppingItemSavedForLater("s1", true),
+    ],
+    ["deleteShoppingItem", (m) => m.deleteShoppingItem("s1")],
+  ];
+
+  // `Once`, never a sticky `mockRejectedValue`: the outer `beforeEach` calls
+  // `vi.clearAllMocks()`, which clears recorded calls but NOT implementations —
+  // a sticky rejection would leak into every test declared after this block.
+  const BOOM = "summary table is on fire";
+  let errorLog: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => errorLog.mockRestore());
+
+  it.each(writes)("%s resolves anyway", async (_name, run) => {
+    syncMock.mockRejectedValueOnce(new Error(BOOM));
+    await expect(run(await load())).resolves.toBeUndefined();
+  });
+
+  it("the item the user asked for is still written", async () => {
+    syncMock.mockRejectedValueOnce(new Error(BOOM));
+    const { addShoppingItem } = await load();
+    await addShoppingItem("Milk");
+    expect(prismaMock.shoppingItem.create).toHaveBeenCalledTimes(1);
+  });
+
+  // The write landed, so /shopping is stale until something invalidates it.
+  // Letting the sync's failure skip the revalidation would turn one absent inbox
+  // line into a shopping page that does not show the item just added.
+  it("still revalidates both surfaces", async () => {
+    syncMock.mockRejectedValueOnce(new Error(BOOM));
+    const { addShoppingItem } = await load();
+    await addShoppingItem("Milk");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/shopping");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
+  });
+
+  it("says so in the log, with a greppable tag and the workspace", async () => {
+    syncMock.mockRejectedValueOnce(new Error(BOOM));
+    const { addShoppingItem } = await load();
+    await addShoppingItem("Milk");
+    expect(errorLog).toHaveBeenCalledTimes(1);
+    const line = JSON.parse(String(errorLog.mock.calls[0][0])) as {
+      tag: string;
+      workspaceId: string;
+      message: string;
+    };
+    expect(line.tag).toBe("shopping_summary_sync_failed");
+    expect(line.workspaceId).toBe("ws-1");
+    expect(line.message).toContain(BOOM);
+  });
+
+  // The control: a healthy sync logs nothing, so the line above means something.
+  it("logs nothing when the sync succeeds", async () => {
+    const { addShoppingItem } = await load();
+    await addShoppingItem("Milk");
+    expect(errorLog).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The other half of the rule, and the reason this is not "catch everything".
+   * `clearShoppingSummary` IS the write `dismissShoppingSummary` was called to
+   * make — there is no primary result standing behind it — so it must keep
+   * rejecting, and the card surfaces that (Duo review, !295, the sibling
+   * finding). Swallowing it here would leave the user told nothing at all.
+   */
+  it("but dismissShoppingSummary still rejects, because that IS the write", async () => {
+    clearMock.mockRejectedValueOnce(new Error(BOOM));
+    const { dismissShoppingSummary } = await load();
+    await expect(dismissShoppingSummary()).rejects.toThrow(BOOM);
   });
 });
 
