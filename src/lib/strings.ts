@@ -1163,6 +1163,81 @@ export const STRINGS = {
       "This list is full at 500 items. Tick a few off and delete them to make room.",
     playful: "This list is full at 500 items. Clear a few to make room. 🧹",
   },
+  // ── A write that did not land ──────────────────────────────────────────────
+  // Distinct from the three refusals above, which are decided on the client
+  // before anything is sent. These three are the server's silence, split the same
+  // three ways `capture.error.*` splits it (#210) because each one changes what
+  // the user should DO: a stale bundle makes a retry impossible, a timeout makes
+  // the outcome unknown, and only the generic case can honestly say nothing
+  // happened.
+  //
+  // Named under `shopping.` rather than reusing `capture.error.*`, whose values
+  // are close but not identical. That module's own comment makes the argument for
+  // both of us: the prefix has to name the surface, or re-tuning one surface's
+  // copy silently re-words another's. The duplication is a few short strings; the
+  // coupling would be permanent.
+  //
+  // All three END on a colon — the words the write could not save are rendered,
+  // quoted, immediately after, so the notice is itself a copy of them.
+  "shopping.errorSaveFailed": {
+    plain: "Couldn't save that just now:",
+    playful: "Couldn't save that just now:",
+  },
+  "shopping.errorSaveStale": {
+    plain:
+      "The app updated while this was open, so that didn't save. Reload to carry on:",
+    playful:
+      "The app updated while this was open, so that didn't save. Reload to carry on:",
+  },
+  // The one failure whose verdict is genuinely unknown. A server action cannot be
+  // aborted from the client, so the timeout bounds how long the UI waits, not the
+  // write — it may still land, and "couldn't save that" would be a claim the
+  // client cannot support. Says what it knows, names the thing that resolves the
+  // ambiguity, and leaves the choice with the user: a duplicate line is one tap to
+  // delete, an item that never landed is discovered at the checkout.
+  "shopping.errorSaveTimeout": {
+    plain:
+      "No answer from the server, so this may already have saved. Check the list before trying again:",
+    playful:
+      "No answer from the server, so this may already have saved. Check the list before trying again:",
+  },
+  // ── A write the server DECLINED ────────────────────────────────────────────
+  // Duo review round 5, !294. A third category again, and the reason it needs
+  // its own words rather than "couldn't save that just now" is that nothing
+  // failed: the server answered, promptly and correctly, and said no. Copy that
+  // blames the connection would send the user to look in the wrong place, and
+  // the Retry it implies would re-post a call that is refused by definition.
+  //
+  // Only the two the page has no words for are here. "This list is full" and the
+  // two text rules are already `shopping.errorFull` / `errorEmpty` / `errorTooLong`
+  // above, said by the capture field about itself — a server-side full is the
+  // same sentence arriving a round trip later, not a new one.
+  "shopping.errorSaveGone": {
+    plain: "That item is not on the list any more, so nothing changed:",
+    playful: "That item is not on the list any more, so nothing changed:",
+  },
+  // The feature switched off in another tab or window. A retry posts into an
+  // action that refuses it for the same reason; only a reload shows the user
+  // where they actually are, which is why this reads like the stale-bundle copy.
+  "shopping.errorSaveOff": {
+    plain:
+      "Shopping list mode is switched off, so that didn't save. Reload to carry on:",
+    playful:
+      "Shopping list mode is switched off, so that didn't save. Reload to carry on:",
+  },
+  // Appended to a capture-field refusal, before the words it could not keep.
+  // Needed only when the field has moved on: the restore never overwrites text
+  // the user has typed since, so on the rare occasion it declines, this is where
+  // the words survive instead of nowhere.
+  "shopping.errorUnsaved": { plain: "Not saved:", playful: "Not saved:" },
+  "shopping.errorRetry": { plain: "Try again", playful: "Try again" },
+  "shopping.errorReload": {
+    plain: "Reload the page",
+    playful: "Reload the page",
+  },
+  // Announced from inside the notice while a retry is in flight, so the wait is
+  // not silent and Retry can keep focus instead of being `disabled`.
+  "shopping.errorSaving": { plain: "Saving…", playful: "Saving…" },
   "shopping.sectionActive": { plain: "To buy", playful: "🛒 To buy" },
   "shopping.sectionSaved": {
     plain: "Saved for later",

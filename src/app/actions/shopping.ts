@@ -9,7 +9,9 @@ import {
   isStillToBuy,
   normaliseShoppingItemText,
   nextShoppingOrder,
+  shoppingItemTextError,
   shoppingSavedForLaterUpdate,
+  type ShoppingWriteResult,
 } from "@/lib/shopping";
 import {
   clearShoppingSummary,
@@ -52,7 +54,8 @@ function logSummarySyncFailure(workspaceId: string, error: unknown): void {
 }
 
 /**
- * #199 — bring the inbox summary into line, then invalidate both surfaces.
+ * #199 — bring the inbox summary into line, invalidate both surfaces, and hand
+ * the write's own answer back untouched.
  *
  * Every write in this file ends here, so there is one place that decides what a
  * shopping write means for the inbox rather than six. `resurface` says whether
@@ -103,6 +106,51 @@ function logSummarySyncFailure(workspaceId: string, error: unknown): void {
  * skipping them would turn one absent inbox line into a /shopping page that does
  * not show the item just added.
  *
+ * ## `result` passes THROUGH, which is where !294 and !295 meet
+ *
+ * The two halves of #199 rewrote every write in this file at once. !294 gave
+ * them all a {@link ShoppingWriteResult}, so the page can tell a real write from
+ * a silent decline; !295 made this sync best-effort. The rule where they meet is
+ * that **a failed sync can never change the answer** — the row is committed, so
+ * the caller must be told it is committed.
+ *
+ * Taking the result as an argument and returning it is what makes that
+ * structural rather than remembered. There is no branch in here that can see the
+ * sync's outcome, so none can rewrite `result`; and a caller cannot accidentally
+ * settle without returning its answer, because the answer is what this returns.
+ *
+ * The converse is the same mechanism read the other way, and it matters as much:
+ * a genuine refusal stays a refusal. `result` is decided from the write itself
+ * before this is called, so a *healthy* sync cannot promote a `missing` or a
+ * `full` into an `ok` either.
+ *
+ * ## Refusals reach here too, provided the write reached the database
+ *
+ * This is the one place the two halves genuinely disagreed. !294 round 3 had a
+ * cap-hit — and, later, every `missing` — return before `revalidatePath`, on the
+ * grounds that nothing was written so there was nothing to re-render. That
+ * reasoning does not survive !295, and !294's own client is the evidence:
+ * `declineWrite` in `shopping-list.tsx` calls `router.refresh()` on exactly
+ * `full` and `missing`, because "the server knows something the rendered items
+ * do not". Those are the two paths where the page is MOST stale, not the least.
+ *
+ * The sync is not a no-op on them either. It re-derives from the list as it now
+ * stands rather than from what this request intended, so it is what removes a
+ * summary row that outlived its list — the self-heal `shopping-summary.ts`
+ * promises. A cap-hit on a list whose items have all been ticked off leaves a
+ * stale inbox line, and this is what clears it.
+ *
+ * So the line is drawn at the database, not at the refusal: `settleShopping`
+ * runs iff the action resolved a workspace and issued its write. The refusals
+ * that return before it — blank or over-long text, and the feature switched
+ * off — never got that far. The text ones have no workspace resolved yet (a
+ * blank submit is the commonest input on a capture field and should cost no
+ * query at all), and the gate one must not touch the summary at all, or a
+ * workspace with the feature OFF would be left with an inbox line advertising it.
+ *
+ * None of this touches `resurface`, which stays exactly what it was: did the
+ * list actually get LONGER. A refused write never did.
+ *
  * `dismissShoppingSummary` does NOT come through here, and must not — its
  * `clearShoppingSummary` IS the write it was called to make, with no primary
  * result standing behind it, so it keeps rejecting and the card says so.
@@ -110,7 +158,8 @@ function logSummarySyncFailure(workspaceId: string, error: unknown): void {
 async function settleShopping(
   workspaceId: string,
   resurface: boolean,
-): Promise<void> {
+  result: ShoppingWriteResult,
+): Promise<ShoppingWriteResult> {
   try {
     await syncShoppingSummary(workspaceId, { resurface });
   } catch (error) {
@@ -118,6 +167,7 @@ async function settleShopping(
   }
   revalidatePath(SHOPPING_PATH);
   revalidatePath(INBOX_PATH);
+  return result;
 }
 
 /**
@@ -156,6 +206,28 @@ async function settleShopping(
  * its own table that is implemented by writing no reward code at all rather than
  * by subtracting one. `shopping.test.ts` pins it, because "deliberately absent"
  * and "forgotten" look identical in a diff.
+ *
+ * ## Every write says whether it wrote
+ *
+ * Duo review round 5, !294. All five of these used to resolve to `undefined`
+ * whether they wrote or not, which left the page one signal — "it did not
+ * throw" — to cover both. That is not theoretical: the cap check below `return`s
+ * from inside its transaction, so a blocked add resolved exactly like a stored
+ * one and the page cleared the typed words for both.
+ *
+ * They now answer {@link ShoppingWriteResult}, and a refusal carries its reason,
+ * because the right response differs per reason: at the cap a retry can never
+ * work, after a write conflict it is the only thing that can. The vocabulary is
+ * `ShoppingWriteRefusal` in `@/lib/shopping`, shared with the client so the two
+ * cannot drift.
+ *
+ * Note what a workspace-scoped filter makes of this. `updateMany` matching no
+ * rows still means "the row is not yours to change", exactly as the paragraph
+ * above says — the answer is `missing` either way, which tells the caller nothing
+ * about whether a row with that id exists elsewhere.
+ *
+ * That answer is threaded through {@link settleShopping} rather than returned
+ * around it, so the inbox bookkeeping cannot rewrite what the write reported.
  */
 async function shoppingWorkspace(): Promise<string | null> {
   const workspaceId = await currentWorkspaceId();
@@ -171,13 +243,20 @@ async function shoppingWorkspace(): Promise<string | null> {
  * the field can say which rule was broken instead of the add appearing to do
  * nothing.
  */
-export async function addShoppingItem(text: string) {
+export async function addShoppingItem(
+  text: string,
+): Promise<ShoppingWriteResult> {
   const trimmed = normaliseShoppingItemText(text);
   // Before resolving the workspace: a blank submit is the commonest input on a
   // capture field and it should cost no query at all.
-  if (trimmed === null) return;
+  if (trimmed === null) {
+    // Which rule broke, not just "no". `shoppingItemTextError` is the same
+    // predicate the normaliser applies, so it cannot answer null here; the
+    // fallback exists only because the two calls are opaque to the compiler.
+    return { ok: false, refused: shoppingItemTextError(text) ?? "empty" };
+  }
   const workspaceId = await shoppingWorkspace();
-  if (!workspaceId) return;
+  if (!workspaceId) return { ok: false, refused: "unavailable" };
 
   // ── Why this is a transaction, at SERIALIZABLE ────────────────────────────
   //
@@ -204,6 +283,10 @@ export async function addShoppingItem(text: string) {
   // the same outcome as hitting the cap, and the page re-reads from the database
   // on the next render — so nobody is ever shown an item that is not there.
   let added = false;
+  // Tracked apart from `added`, because "the list is full" and "we lost the race
+  // twice" are the two ways this loop writes nothing and the caller's only
+  // sensible responses to them are opposites (Duo review round 5, !294).
+  let full = false;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       await prisma.$transaction(
@@ -217,9 +300,13 @@ export async function addShoppingItem(text: string) {
             select: { order: true },
           });
           // Checked, not clamped: the list is already at the cap, so there is
-          // nothing useful to tell the person beyond "this list is full", which the
-          // page says before the action is ever called.
-          if (existing.length >= MAX_SHOPPING_ITEMS) return;
+          // nothing useful to tell the person beyond "this list is full" — which
+          // the page usually says before the action is ever called, and which it
+          // can only say afterwards because of the flag set here.
+          if (existing.length >= MAX_SHOPPING_ITEMS) {
+            full = true;
+            return;
+          }
           await tx.shoppingItem.create({
             data: {
               text: trimmed,
@@ -227,10 +314,10 @@ export async function addShoppingItem(text: string) {
               workspaceId,
             },
           });
-          // Set INSIDE the transaction and after the create: the cap check above
+          // Set INSIDE the transaction, after the create: the cap check above
           // `return`s without throwing, so the loop below would otherwise treat a
-          // blocked add as a success — and the summary would be un-dismissed for an
-          // add that never happened.
+          // blocked add as a success — and the summary would be un-dismissed for
+          // an add that never happened.
           added = true;
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
@@ -246,6 +333,7 @@ export async function addShoppingItem(text: string) {
       if (!retryable) throw e;
       // A retried attempt starts over, so anything the aborted one set is void.
       added = false;
+      full = false;
       if (attempt === 1) break;
     }
   }
@@ -253,7 +341,8 @@ export async function addShoppingItem(text: string) {
   // `added`, not `true`: an add is the write that CAN lengthen the list, and this
   // says whether it DID. A cap-blocked body and a give-up after two write conflicts
   // both wrote nothing and both leave it false (Duo review, !295 — passing `true`
-  // here un-dismissed the summary for writes that never happened).
+  // here un-dismissed the summary for writes that never happened), which is why the
+  // same flag is handed to all three tails below.
   //
   // OUTSIDE the transaction above, deliberately. The summary sync reads the item
   // count and writes at most one row in another table, so pulling it inside would
@@ -263,30 +352,45 @@ export async function addShoppingItem(text: string) {
   // write, and the read side derives the number from the items either way. See the
   // module doc on src/lib/shopping-summary.ts.
   //
-  // It runs even when nothing was written, which is correct rather than sloppy:
-  // whatever the list now holds is what the inbox should say about it, and this call
-  // reads that rather than assuming this request changed anything. So it is also
-  // self-healing — a no-op add whose workspace carries a summary row that outlived
-  // its list will delete that row, which is why the revalidation it triggers is
-  // earned here. That is the one place this differs from part 1's tail, where a
-  // cap-hit returns early because there was nothing to sync (round 3, !294).
-  await settleShopping(workspaceId, added);
+  // It settles even when nothing was written, which is correct rather than sloppy:
+  // whatever the list now holds is what the inbox should say about it, and the sync
+  // reads that rather than assuming this request changed anything. So a cap-hit is
+  // also self-healing — a full list whose items have all been ticked off carries a
+  // summary row that no longer belongs, and this is the call that deletes it. The
+  // reasoning is in `settleShopping`, under "Refusals reach here too".
+  if (full) {
+    return settleShopping(workspaceId, added, { ok: false, refused: "full" });
+  }
+  if (!added) {
+    return settleShopping(workspaceId, added, {
+      ok: false,
+      refused: "conflict",
+    });
+  }
+  return settleShopping(workspaceId, added, { ok: true });
 }
 
 /** Edit an entry in place. An empty rename is refused rather than blanking the
  *  row — the row's text is the only thing distinguishing it from its neighbours,
  *  and `ShoppingItem_text_check` would refuse it at the database anyway. */
-export async function renameShoppingItem(id: string, text: string) {
+export async function renameShoppingItem(
+  id: string,
+  text: string,
+): Promise<ShoppingWriteResult> {
   const trimmed = normaliseShoppingItemText(text);
-  if (trimmed === null) return;
+  if (trimmed === null) {
+    return { ok: false, refused: shoppingItemTextError(text) ?? "empty" };
+  }
   const workspaceId = await shoppingWorkspace();
-  if (!workspaceId) return;
-  await prisma.shoppingItem.updateMany({
+  if (!workspaceId) return { ok: false, refused: "unavailable" };
+  const { count } = await prisma.shoppingItem.updateMany({
     where: { id, workspaceId },
     data: { text: trimmed },
   });
+  const result: ShoppingWriteResult =
+    count === 0 ? { ok: false, refused: "missing" } : { ok: true };
   // A rename cannot change the count, so it is not a reason to un-dismiss.
-  await settleShopping(workspaceId, false);
+  return settleShopping(workspaceId, false, result);
 }
 
 /**
@@ -298,21 +402,27 @@ export async function renameShoppingItem(id: string, text: string) {
  * the value arrives from a client-callable action, so it is coerced rather than
  * trusted.
  */
-export async function setShoppingItemDone(id: string, done: boolean) {
+export async function setShoppingItemDone(
+  id: string,
+  done: boolean,
+): Promise<ShoppingWriteResult> {
   const workspaceId = await shoppingWorkspace();
-  if (!workspaceId) return;
+  if (!workspaceId) return { ok: false, refused: "unavailable" };
   const ticked = Boolean(done);
   const { count } = await prisma.shoppingItem.updateMany({
     where: { id, workspaceId },
     data: { done: ticked },
   });
+  const result: ShoppingWriteResult =
+    count === 0 ? { ok: false, refused: "missing" } : { ok: true };
   // Un-ticking puts something back on the list, so it resurfaces a dismissed
   // summary; ticking off is progress, and resurrecting the line as a reward for
   // progress is precisely what the `resurface` rule exists to avoid.
   //
   // `count > 0` as well as the direction (Duo review, !295): a stale id, or one
   // belonging to another workspace, is a 0-row no-op — nothing came back onto the
-  // list, so nothing should come back into the inbox.
+  // list, so nothing should come back into the inbox. It is the same `count` the
+  // `missing` above is read from, which is why the two cannot disagree.
   //
   // And then the row itself (Duo review round 5, !295). The direction and the
   // matched-row count together still cannot see the item's OTHER flag: `done` and
@@ -322,9 +432,10 @@ export async function setShoppingItemDone(id: string, done: boolean) {
   // `savedForLater` keeps it out of the count either way — so the summary must
   // stay dismissed. Asking `isStillToBuy` of the row as it now stands is the same
   // predicate the count filters on, applied to one row rather than restated.
-  await settleShopping(
+  return settleShopping(
     workspaceId,
     !ticked && count > 0 && (await isOnTheToBuyList(id, workspaceId)),
+    result,
   );
 }
 
@@ -370,14 +481,16 @@ async function isOnTheToBuyList(
 export async function setShoppingItemSavedForLater(
   id: string,
   savedForLater: boolean,
-) {
+): Promise<ShoppingWriteResult> {
   const workspaceId = await shoppingWorkspace();
-  if (!workspaceId) return;
+  if (!workspaceId) return { ok: false, refused: "unavailable" };
   const saved = Boolean(savedForLater);
   const { count } = await prisma.shoppingItem.updateMany({
     where: { id, workspaceId },
     data: shoppingSavedForLaterUpdate(saved),
   });
+  const result: ShoppingWriteResult =
+    count === 0 ? { ok: false, refused: "missing" } : { ok: true };
   // Pulling an item back up lengthens the to-buy list; moving one down shortens it.
   // `count > 0` for the same reason as the tick above: a 0-row no-op lengthened
   // nothing (Duo review, !295).
@@ -386,7 +499,7 @@ export async function setShoppingItemSavedForLater(
   // fix, not an oversight. The un-tick can only see one of the two flags it
   // depends on; this write sets BOTH, so a matched row is on the to-buy list by
   // construction and there is nothing left to ask the database.
-  await settleShopping(workspaceId, !saved && count > 0);
+  return settleShopping(workspaceId, !saved && count > 0, result);
 }
 
 /**
@@ -396,15 +509,26 @@ export async function setShoppingItemSavedForLater(
  * references a `ShoppingItem` — no task, no step, no focus session, no calendar
  * artefact — so there is no orphan to clean up. That is a consequence of the
  * model decision rather than a coincidence, and it is why this file is short.
+ *
+ * **The one sibling where a zero-row match is not a refusal** (Duo review round
+ * 5, !294). Its three neighbours all answer `missing` when `count` is 0, because
+ * a rename or a tick asks for a row to be changed and there is no row. A delete
+ * asks for an OUTCOME, and the outcome already holds — telling the user "that
+ * item is not on the list any more" about an item they just asked to remove
+ * would name a problem they do not have, and offer a retry that can only refuse
+ * again. The settle still runs unconditionally, because in that case the row the
+ * page is showing is exactly the thing that is wrong.
  */
-export async function deleteShoppingItem(id: string) {
+export async function deleteShoppingItem(
+  id: string,
+): Promise<ShoppingWriteResult> {
   const workspaceId = await shoppingWorkspace();
-  if (!workspaceId) return;
+  if (!workspaceId) return { ok: false, refused: "unavailable" };
   await prisma.shoppingItem.deleteMany({ where: { id, workspaceId } });
   // A delete can only shorten the list. It can also EMPTY it, which is what
   // removes the summary row altogether — handled inside syncShoppingSummary
   // rather than here, so "the list is empty" has one definition.
-  await settleShopping(workspaceId, false);
+  return settleShopping(workspaceId, false, { ok: true });
 }
 
 /**
@@ -417,6 +541,13 @@ export async function deleteShoppingItem(id: string) {
  * Behind the same feature gate as every other write here. Without it, a client
  * could keep writing `clearedAt` to a workspace whose owner has switched the
  * feature off, which is a row being touched for a feature that is not running.
+ *
+ * **Deliberately not a {@link ShoppingWriteResult}, and deliberately still able
+ * to reject.** Its `clearShoppingSummary` IS the write the user asked for, with
+ * no primary result standing behind it, so there is nothing here for a failure
+ * to be reported *instead of* — the reason `settleShopping`'s catch exists does
+ * not apply, and swallowing the failure would leave the person told nothing at
+ * all. `shopping-summary-card.tsx` renders the rejection.
  */
 export async function dismissShoppingSummary() {
   const workspaceId = await shoppingWorkspace();
