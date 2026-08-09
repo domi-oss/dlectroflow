@@ -213,11 +213,57 @@ export async function reverseStepCompletionRewards(
   opts: { includeTaskComplete: boolean },
   db: Prisma.TransactionClient = prisma,
 ): Promise<{ stepDone: boolean; taskComplete: boolean }> {
-  const stepDone = await reverseLatestReward(
+  const { stepDone, taskComplete } = await reverseItemCompletionRewards(
     workspaceId,
-    RewardType.StepDone,
+    { stepDone: 1, includeTaskComplete: opts.includeTaskComplete },
     db,
   );
+  return { stepDone: stepDone > 0, taskComplete };
+}
+
+/**
+ * The same reversal at whole-to-do arity, for `reopenItem` (#196).
+ *
+ * ── Why the step count is a parameter ───────────────────────────────────────
+ *
+ * `uncompleteStep` undoes exactly one step, so
+ * {@link reverseStepCompletionRewards} takes back exactly one `step_done`.
+ * Reopening a to-do from the inbox Done view undoes as many as the user
+ * selected, and `completeItem` banked one per step it closed — so a five-step
+ * reopen owes five, and reopening then re-completing paid for the same work
+ * twice. That defect was live in production and is what #196 records as its
+ * second half.
+ *
+ * The two counts move **independently**, which is why this is not a loop around
+ * the singular version: a stepless to-do earns a `task_complete` and no
+ * `step_done` at all, and calling the singular one anyway would take back the
+ * newest `step_done` in the WORKSPACE — a row belonging to unrelated work. Same
+ * class of error as the `session_finished` inference round 3 removed above.
+ *
+ * ── Sequential, deliberately ────────────────────────────────────────────────
+ *
+ * Each reversal reads "the newest row of this type" and then deletes it, so
+ * running them concurrently would have every read return the same row and only
+ * one delete land — reporting N reversals for one. The loop also stops the
+ * moment the workspace runs out: once there is no `step_done` left there will
+ * not be one on the next pass either, and each extra request is a wasted round
+ * trip inside the caller's open transaction.
+ *
+ * `stepDone` in the result is a COUNT, not a flag, so a caller can be tested on
+ * having asked for the right number.
+ */
+export async function reverseItemCompletionRewards(
+  workspaceId: string,
+  opts: { stepDone: number; includeTaskComplete: boolean },
+  db: Prisma.TransactionClient = prisma,
+): Promise<{ stepDone: number; taskComplete: boolean }> {
+  let stepDone = 0;
+  while (stepDone < opts.stepDone) {
+    if (!(await reverseLatestReward(workspaceId, RewardType.StepDone, db))) {
+      break; // nothing left in this workspace to take back
+    }
+    stepDone += 1;
+  }
   const taskComplete = opts.includeTaskComplete
     ? await reverseLatestReward(workspaceId, RewardType.TaskComplete, db)
     : false;
