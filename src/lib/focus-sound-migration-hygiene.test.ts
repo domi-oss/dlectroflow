@@ -277,6 +277,52 @@ describe("findFocusSoundViolations — the shapes it must catch", () => {
       ),
     ).toEqual([]);
   });
+
+  // #190, raised in review of this MR. Teaching `splitStatements` that a
+  // `DO $$ … $$` body is ONE statement is right for `findLateConstraintDrops`,
+  // which needs the running order — but these three rules are per-statement
+  // questions, and asking them of a whole body lets one statement of it answer
+  // for another. Both directions of the docstring's warning came back, one
+  // level down, and this time the false-pass direction is the 2026-08-07
+  // incident itself.
+  describe("one statement of a DO block may not answer for another", () => {
+    it("cannot be guarded by a <> 'off' that belongs to a different statement", () => {
+      const found = scan(
+        `DO $$ BEGIN
+           UPDATE "Settings" SET "focusSound" = 'on';
+           UPDATE "Settings" SET "theme" = 'dark' WHERE "focusSound" <> 'off';
+         END $$;`,
+      );
+      expect(found.map((v) => v.reason)).toEqual([
+        expect.stringContaining("without excluding rows"),
+      ]);
+    });
+
+    it("still sees a flip that an earlier statement's WHERE would cut short", () => {
+      const found = scan(
+        `DO $$ BEGIN
+           UPDATE "Settings" SET "theme" = 'dark' WHERE "id" > 0;
+           UPDATE "Settings" SET "focusSound" = 'on';
+         END $$;`,
+      );
+      expect(found.map((v) => v.reason)).toEqual([
+        expect.stringContaining("without excluding rows"),
+      ]);
+    });
+
+    it("does not read a neighbouring SET DEFAULT as part of an ADD COLUMN", () => {
+      // Both halves are sanctioned: `'off'` is the only default `focusSound` may
+      // arrive with, and `ALTER COLUMN … SET DEFAULT` is #180's own mechanism.
+      expect(
+        scan(
+          `DO $$ BEGIN
+             ALTER TABLE "Settings" ADD COLUMN "focusSound" TEXT DEFAULT 'off';
+             ALTER TABLE "Settings" ALTER COLUMN "focusShuffle" SET DEFAULT true;
+           END $$;`,
+        ),
+      ).toEqual([]);
+    });
+  });
 });
 
 describe("the real prisma/migrations", () => {

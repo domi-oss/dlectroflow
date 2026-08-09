@@ -138,6 +138,47 @@ describe("findDataDependentStatements — the shapes whose outcome depends on ro
     ).toEqual(["delete:GoogleAuth"]);
   });
 
+  // #190, raised in review of this MR. Once `splitStatements` keeps a
+  // `DO $$ … $$` body whole, every rule that SUPPRESSES a finding on the
+  // strength of a keyword elsewhere in the statement can be switched off by a
+  // keyword belonging to a different statement of the same body. That direction
+  // is the expensive one: a suppressed finding is a table nobody seeds, which
+  // is a migration still only ever tested empty — the whole of #190.
+  describe("a suppression may not be borrowed from a neighbouring statement", () => {
+    it("does not let a later statement's DEFAULT vouch for an undefaulted column", () => {
+      expect(
+        shapesOf(
+          `DO $$ BEGIN
+             ALTER TABLE "Task" ADD COLUMN "slug" TEXT NOT NULL;
+             ALTER TABLE "Note" ALTER COLUMN "body" SET DEFAULT 'x';
+           END $$;`,
+        ),
+      ).toContain("add-not-null-column-without-default:Task");
+    });
+
+    it("does not let one CHECK's NOT VALID excuse another CHECK in the same body", () => {
+      expect(
+        shapesOf(
+          `DO $$ BEGIN
+             ALTER TABLE "Task" ADD CONSTRAINT "Task_a_check" CHECK ("a" > 0) NOT VALID;
+             ALTER TABLE "Task" ADD CONSTRAINT "Task_b_check" CHECK ("b" > 0);
+           END $$;`,
+        ),
+      ).toContain("add-check-constraint:Task");
+    });
+
+    it("does not let one foreign key's NOT VALID excuse another in the same body", () => {
+      expect(
+        shapesOf(
+          `DO $$ BEGIN
+             ALTER TABLE "Task" ADD CONSTRAINT "Task_a_fkey" FOREIGN KEY ("a") REFERENCES "Note"("id") NOT VALID;
+             ALTER TABLE "Task" ADD CONSTRAINT "Task_b_fkey" FOREIGN KEY ("b") REFERENCES "Note"("id");
+           END $$;`,
+        ),
+      ).toContain("add-foreign-key:Task");
+    });
+  });
+
   describe("what it must NOT flag", () => {
     it("ignores a table created by the same migration — it provably starts empty", () => {
       expect(

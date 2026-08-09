@@ -226,12 +226,16 @@ export function stripSqlComments(sql: string): string {
 }
 
 /**
- * Split comment-stripped SQL into statements on the semicolons that terminate
- * one, i.e. those outside a string literal and outside a dollar-quoted body.
- * Blank statements are dropped and whitespace is collapsed, so a statement
- * written across twelve lines matches the same way as one written across one.
+ * Split on the semicolons that separate one piece of SQL from the next, i.e.
+ * those outside a string literal — and, when `dollarQuotedBodiesAreOpaque`, the
+ * ones inside a `DO $$ … $$` body as well. Blank pieces are dropped and
+ * whitespace is collapsed, so SQL written across twelve lines matches the same
+ * way as SQL written across one.
  */
-export function splitStatements(sql: string): string[] {
+function splitOnSemicolons(
+  sql: string,
+  dollarQuotedBodiesAreOpaque: boolean,
+): string[] {
   const statements: string[] = [];
   let current = "";
   let inString = false;
@@ -255,11 +259,13 @@ export function splitStatements(sql: string): string[] {
     // that are not statements at all. Taken verbatim: `stripSqlComments` has
     // already removed the body's comments, and nothing else in it is this
     // function's business.
-    const body = dollarQuotedBodyAt(sql, i);
-    if (body !== null) {
-      current += sql.slice(i, i + body.length);
-      i += body.length;
-      continue;
+    if (dollarQuotedBodiesAreOpaque) {
+      const body = dollarQuotedBodyAt(sql, i);
+      if (body !== null) {
+        current += sql.slice(i, i + body.length);
+        i += body.length;
+        continue;
+      }
     }
     if (c === ";") {
       statements.push(current);
@@ -274,6 +280,45 @@ export function splitStatements(sql: string): string[] {
   return statements
     .map((s) => s.replace(/\s+/g, " ").trim())
     .filter((s) => s.length > 0);
+}
+
+/**
+ * Split comment-stripped SQL into statements on the semicolons that terminate
+ * one, i.e. those outside a string literal and outside a dollar-quoted body.
+ */
+export function splitStatements(sql: string): string[] {
+  return splitOnSemicolons(sql, true);
+}
+
+/**
+ * One statement broken into the pieces that RUN one after another inside it:
+ * for anything but a `DO $$ … $$` block that is the statement itself, and for
+ * such a block it is the PL/pgSQL statements the body holds.
+ *
+ * #190, raised in review. `splitStatements` keeping a body whole is right for
+ * `findLateConstraintDrops`, which has to know what runs before what — but the
+ * three rules in `findFocusSoundViolations` are per-statement questions, and
+ * asking one of a whole body lets any statement in it answer for its
+ * neighbours. Both directions of the warning at the top of this file came back
+ * one level down, and the false-pass direction is the 2026-08-07 incident
+ * itself:
+ *
+ *  - `UPDATE "Settings" SET "focusSound" = 'on'; UPDATE "Settings" SET "theme"
+ *    = 'dark' WHERE "focusSound" <> 'off';` in one body. Rule 1 read the guard
+ *    off the SECOND statement and let the first through — an unguarded flip
+ *    passing the guard written to stop it.
+ *  - the mirror image, `setClauseOf` stopping at an EARLIER statement's `WHERE`
+ *    and never reaching the flip at all.
+ *  - and `ADD COLUMN … DEFAULT 'off'; ALTER COLUMN … SET DEFAULT true;`, where
+ *    rule 2's DEFAULT capture ran to the end of the body and read a sanctioned
+ *    pair as a violation — the false accusation that gets a guard deleted.
+ *
+ * Dollar-quote tags are not treated as opaque here precisely because we are
+ * already inside one; string literals still are, so a `;` in a value does not
+ * split anything.
+ */
+function splitInnerStatements(statement: string): string[] {
+  return splitOnSemicolons(statement, false);
 }
 
 /**
@@ -360,7 +405,8 @@ export function findFocusSoundViolations(
 ): MigrationViolation[] {
   const violations: MigrationViolation[] = [];
   for (const file of files) {
-    for (const statement of splitStatements(stripSqlComments(file.sql))) {
+    const outer = splitStatements(stripSqlComments(file.sql));
+    for (const statement of outer.flatMap(splitInnerStatements)) {
       const add = (reason: string) =>
         violations.push({ migration: file.name, statement, reason });
 
@@ -426,7 +472,8 @@ export function parseFocusSoundCategoryBackfill(
   sql: string,
 ): Record<string, string> {
   const map: Record<string, string> = {};
-  for (const statement of splitStatements(stripSqlComments(sql))) {
+  const outer = splitStatements(stripSqlComments(sql));
+  for (const statement of outer.flatMap(splitInnerStatements)) {
     if (!SETTINGS_UPDATE.test(statement)) continue;
     if (!/"?focusSoundCategories"?\s*=/i.test(setClauseOf(statement))) continue;
     if (!/\bCASE\b/i.test(statement)) continue;

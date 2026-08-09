@@ -234,11 +234,19 @@ function alteredTable(statement: string): string | null {
  * Postgres allows several in one `ALTER TABLE`, and only the clause a column
  * belongs to says whether that column has a DEFAULT — reading the whole
  * statement would let one defaulted column vouch for an undefaulted sibling.
+ *
+ * The clause also stops at a `;` (#190, raised in review of !292). A statement
+ * here may be a whole `DO $$ … $$` body, and an unbounded clause ran from an
+ * `ADD COLUMN … NOT NULL` in one of its statements into a `SET DEFAULT` in the
+ * next — which reads as "this column has a default" and drops the finding. That
+ * is the false-negative direction, the one this module exists to avoid: the
+ * statements are literal-redacted before they get here, so the only semicolons
+ * left are real statement boundaries.
  */
 function addColumnClauses(statement: string): string[] {
   return [
     ...statement.matchAll(
-      /\bADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?[\s\S]*?(?=(?:,\s*)?\bADD\s+COLUMN\b|$)/gi,
+      /\bADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?[^;]*?(?=(?:,\s*)?\bADD\s+COLUMN\b|;|$)/gi,
     ),
   ].map((m) => m[0]);
 }
@@ -250,6 +258,34 @@ function addColumnClauses(statement: string): string[] {
  * skipping it here loses no coverage.
  */
 const NOT_VALID = /\bNOT\s+VALID\b/i;
+
+/**
+ * The two `ADD CONSTRAINT` shapes Postgres verifies against stored rows, each
+ * capturing the rest of ITS OWN statement so the `NOT VALID` that excuses it
+ * can only be its own.
+ *
+ * #190, raised in review of !292. Testing the whole statement for `NOT VALID`
+ * was correct while a statement was always one statement; once a `DO $$ … $$`
+ * body arrives whole, one clause's `NOT VALID` silenced every other constraint
+ * added in the same body — a table nobody then seeds, which is a migration
+ * still only ever tested empty.
+ */
+const ADD_CHECK = /\bADD\s+(?:CONSTRAINT\s+"?\w+"?\s+)?CHECK\b([^;]*)/gi;
+const ADD_FOREIGN_KEY =
+  /\bADD\s+(?:CONSTRAINT\s+"?\w+"?\s+)?FOREIGN\s+KEY\b([^;]*)/gi;
+
+/**
+ * Whether `statement` adds at least one constraint of this shape that Postgres
+ * will check against rows that already exist — i.e. one not marked `NOT VALID`.
+ */
+function addsAValidatedConstraint(statement: string, clauses: RegExp): boolean {
+  // `matchAll` builds its own iterator from the pattern's source and flags, so
+  // sharing a `g`-flagged constant carries no `lastIndex` between calls.
+  for (const clause of statement.matchAll(clauses)) {
+    if (!NOT_VALID.test(clause[1])) return true;
+  }
+  return false;
+}
 
 /**
  * Every rule, each answering "does this statement's outcome depend on rows that
@@ -281,10 +317,7 @@ const RULES: ReadonlyArray<{
   {
     shape: "add-check-constraint",
     table: (s) =>
-      /\bADD\s+(?:CONSTRAINT\s+"?\w+"?\s+)?CHECK\b/i.test(s) &&
-      !NOT_VALID.test(s)
-        ? alteredTable(s)
-        : null,
+      addsAValidatedConstraint(s, ADD_CHECK) ? alteredTable(s) : null,
   },
   {
     shape: "validate-constraint",
@@ -294,10 +327,7 @@ const RULES: ReadonlyArray<{
   {
     shape: "add-foreign-key",
     table: (s) =>
-      /\bADD\s+(?:CONSTRAINT\s+"?\w+"?\s+)?FOREIGN\s+KEY\b/i.test(s) &&
-      !NOT_VALID.test(s)
-        ? alteredTable(s)
-        : null,
+      addsAValidatedConstraint(s, ADD_FOREIGN_KEY) ? alteredTable(s) : null,
   },
   {
     // Both spellings of "these values must now be distinct": a unique index and
