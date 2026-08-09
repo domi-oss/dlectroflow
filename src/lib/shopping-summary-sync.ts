@@ -36,25 +36,54 @@ import { prisma } from "@/lib/db";
  * inferred here from a stored previous count. Storing a previous count is the one
  * thing this design refuses to do.
  *
- * ## Why `upsert` on the primary key
+ * ## Two statements, because ONE of them cannot be an `upsert`
  *
- * `workspaceId` IS the primary key, so two concurrent adds cannot create two
- * summary rows: the loser's insert collides and becomes an update. A
- * `findFirst`-then-`create` would need `Serializable` or an advisory lock to say
- * the same thing, and would still be one row per race in between.
+ * `workspaceId` IS the primary key, so the write is naturally a single
+ * `INSERT … ON CONFLICT` in both directions and neither can produce a second
+ * summary row. Which conflict action differs, and so does how you have to ask
+ * Prisma for it:
+ *
+ *  * **Growing write** — `upsert` with a non-empty `update`, which Prisma 6.19
+ *    compiles to native `INSERT … ON CONFLICT ("workspaceId") DO UPDATE SET
+ *    "clearedAt" = $1`. Atomic; the loser's insert becomes the update.
+ *  * **Non-growing write** — `createMany` + `skipDuplicates`, which compiles to
+ *    `INSERT … ON CONFLICT DO NOTHING`. Also atomic, and it says exactly what
+ *    this branch means: put a row there if there isn't one, and do not touch
+ *    `clearedAt` if there is.
+ *
+ * **This was one `upsert` with `update: options.resurface ? {…} : {}` and that
+ * was a real defect, not a style point.** Prisma only takes the native path when
+ * the `update` payload is non-empty; with `{}` it silently falls back to
+ * `BEGIN; SELECT; INSERT; COMMIT` — the `findFirst`-then-`create` shape, at the
+ * default READ COMMITTED, which is exactly the shape that needs `Serializable`
+ * or an advisory lock to be safe. Two non-growing writes racing from the no-row
+ * state therefore both saw nothing and both inserted, and the loser got P2002:
+ * five trials of four concurrent callers produced 15 raised duplicates, every
+ * time. The primary key still refused the second row — the failure was a THROW,
+ * out of `settleShopping` and out of the server action, failing a rename or a
+ * tick whose item write had already committed.
+ *
+ * Not merely caught, either: `log: ["error"]` in `src/lib/db.ts` prints a failed
+ * query before any `catch` can reach it, so a recovered duplicate still looks
+ * like an incident in production logs. #156 and #158 are that lesson, and
+ * `skipDuplicates` is the shape they settled on.
+ *
+ * The window is narrow — it needs a non-empty list with no summary row, which is
+ * the first-deploy and missed-sync state described below — but that is the
+ * busiest possible moment for it, since every pre-existing list is in it at once.
  *
  * `deleteMany` rather than `delete` when the list empties, so a concurrent delete
  * of the same row is a 0-row no-op instead of a P2025 throw — the reason
  * `deleteBrainDumpItem` uses it too.
  *
- * ## `create` does not consult `resurface`, and that is the right answer
+ * ## Creating a row does not consult `resurface`, and that is the right answer
  *
  * `resurface` means "un-dismiss a summary that WAS dismissed", so it has nothing
  * to say about a row that does not exist: an absent row carries no dismissal to
- * preserve. The `create` clause names only `workspaceId`, leaving `clearedAt`
- * null, so the row is born SHOWING whichever flag the caller passed.
+ * preserve. Neither branch names `clearedAt` when it inserts, so a newly created
+ * row is born SHOWING whichever flag the caller passed.
  *
- * That branch is reachable in exactly two states, and showing is right in both:
+ * That path is reachable in exactly two states, and showing is right in both:
  *
  *  * **The day this ships**, for any workspace that already has `ShoppingItem`
  *    rows from !294. Its list is non-empty and has never been dismissed, so the
@@ -62,17 +91,19 @@ import { prisma } from "@/lib/db";
  *    the feature from precisely the people who already keep a list — and hide it
  *    indefinitely, since a list nobody adds to would never earn its line.
  *  * **A missed sync** — the "list outlives the row" case `shopping-summary.ts`
- *    promises is self-healing. This clause is what heals it.
+ *    promises is self-healing. This is what heals it.
  *
  * No dismissal can be lost this way, because a row is only ever removed when the
  * count reaches zero and climbing back above zero takes a growing write, which is
- * `resurface: true` regardless. Gating `create` on the flag was tried against a
+ * `resurface: true` regardless. Gating the insert on the flag was tried against a
  * real database and breaks both bullets above, so it is refused rather than
  * merely unimplemented — `shopping-summary-sync.integration.test.ts` executes
- * this clause for real, which the colocated unit test cannot: it mocks `upsert`,
- * so "row exists" and "no row yet" are the same test twice there.
+ * these statements for real, which the colocated unit test cannot: it mocks the
+ * delegate, so "row exists" and "no row yet" are the same test twice there.
  *
- * (Raised by Duo review on !295 and confirmed as intended, not changed.)
+ * (Duo review on !295 asked whether the create path honours `resurface`. It does
+ * not and should not, per the above — but checking that against a real database
+ * is what exposed the P2002 race, so the question was worth its round.)
  */
 export async function syncShoppingSummary(
   workspaceId: string,
@@ -92,19 +123,25 @@ export async function syncShoppingSummary(
     return;
   }
 
-  await prisma.shoppingSummary.upsert({
-    where: { workspaceId },
-    // Born showing: `clearedAt` is deliberately absent here, whatever `resurface`
-    // says, because a row that does not exist holds no dismissal. The doc above
-    // works through the two states that reach this clause.
-    create: { workspaceId },
-    // An empty `update` is deliberate and is NOT a no-op call to remove: it is
-    // what "the row already exists and this write is not a reason to un-dismiss
-    // it" looks like. The upsert still has to run even in this branch, because
-    // the row may not exist yet — a `resurface: false` write is how a
-    // pre-existing list gets its first summary row, so `create` above is on the
-    // live path here and not only under `resurface: true`.
-    update: options.resurface ? { clearedAt: null } : {},
+  if (options.resurface) {
+    // ON CONFLICT DO UPDATE. `create` leaves `clearedAt` out on purpose — a row
+    // that does not exist holds no dismissal, so there is nothing to clear.
+    await prisma.shoppingSummary.upsert({
+      where: { workspaceId },
+      create: { workspaceId },
+      update: { clearedAt: null },
+    });
+    return;
+  }
+
+  // ON CONFLICT DO NOTHING — "make sure there is a row, and leave any dismissal
+  // exactly as it was". Deliberately NOT an `upsert` with an empty `update`,
+  // which reads as the same thing and is not: see the doc above for the P2002
+  // race that spelling loses. `count: 0` is the ordinary answer here and needs
+  // no branch, because "somebody else already has a row" is success.
+  await prisma.shoppingSummary.createMany({
+    data: { workspaceId },
+    skipDuplicates: true,
   });
 }
 

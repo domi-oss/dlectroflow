@@ -1,27 +1,29 @@
 /**
- * #199 — what `syncShoppingSummary`'s `upsert` actually does to a real row.
+ * #199 — what `syncShoppingSummary` actually does to a real row when there is not
+ * one yet.
  *
- * The colocated unit test (`shopping-summary-sync.test.ts`) mocks
- * `prisma.shoppingSummary.upsert`, so it can only assert the PAYLOAD. That is the
- * right shape for the branch logic, but it means the `create` clause has never
- * been executed: a mocked upsert has neither a row nor an absent row, so
- * "existing row" and "no row yet" are the same test twice.
+ * The colocated unit test mocks the delegate, so it asserts PAYLOADS. That is the
+ * right shape for the branch logic and it is blind in two directions at once: a
+ * mocked write has neither a row nor an absent row, so "existing row" and "no row
+ * yet" are the same test twice, and a payload assertion cannot see what SQL Prisma
+ * compiles it into. **The insert-a-row path had therefore never been executed
+ * anywhere in the suite** — and it is reachable in production in exactly two
+ * states, both of them described on `syncShoppingSummary` itself: the day this
+ * ships over a list that already has `ShoppingItem` rows from !294, and a missed
+ * sync afterwards.
  *
- * The gap matters because the two clauses disagree on purpose. `update` consults
- * `resurface`; `create` does not mention `clearedAt` at all. **The first write
- * against a list whose summary row does not exist yet therefore takes a branch no
- * test had ever run** — and that state is reachable in exactly one way in
- * production: the day this ships, for every workspace that already has
- * `ShoppingItem` rows from !294.
+ * Same shape as the migration failure of 2026-08-07 — a data path only ever
+ * exercised against tables in one state — so it is pinned here rather than
+ * reasoned about. Both blind spots paid off immediately: the file was written to
+ * confirm that `create` ignoring `resurface` is intended (it is), and the run
+ * turned up a P2002 race in the branch that had looked fine, because
+ * `upsert` with an EMPTY `update` silently stops being an atomic
+ * `INSERT … ON CONFLICT` and becomes a read-then-insert.
  *
- * That is the same shape as the migration incident of 2026-08-07 (a data path
- * only ever exercised against tables in one state), so it is pinned here against
- * real Postgres rather than reasoned about.
- *
- * Assertions go through {@link shoppingSummaryVisible} rather than reading
- * `clearedAt`, because the question under test is "does the inbox show the line",
- * not "which value is in the column" — a test that asserted the column would keep
- * passing if the reader's meaning of it ever flipped.
+ * Assertions about visibility go through {@link shoppingSummaryVisible} rather
+ * than reading `clearedAt`, because the question under test is "does the inbox
+ * show the line", not "which value is in the column" — a test asserting the column
+ * would keep passing if the reader's meaning of it ever flipped.
  *
  * Needs the real Postgres (CI wires up a service DB and runs
  * `prisma migrate deploy` first; locally it uses your DATABASE_URL schema —
@@ -31,6 +33,7 @@
 
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
+import { prismaErrorsDuring } from "@/lib/__tests__/prisma-error-log";
 import { WorkspaceKind } from "@/lib/constants";
 import { shoppingSummaryVisible } from "@/lib/shopping-summary";
 import {
@@ -158,12 +161,11 @@ describe("the first sync for a workspace that has no summary row yet (#199)", ()
     ).toBe(0);
   });
 
-  it("cannot create two rows when writes race from the no-row state", async () => {
-    // The doc's claim for keying the upsert on the PRIMARY KEY: the loser's
-    // insert collides and becomes an update instead of a second row. Both
-    // `update` shapes are in the race, because the `resurface: false` one is
-    // EMPTY and an empty update is the payload most likely to be handled by a
-    // different code path inside Prisma.
+  it("cannot create two rows when a growing write is in the race", async () => {
+    // The mixed race. This one passes on the `upsert`-for-everything version
+    // too, and saying so matters: it is the test that MISSED the defect below,
+    // because a `resurface: true` caller wins often enough to put the row there
+    // before the non-growing callers look for it.
     await Promise.all([
       syncShoppingSummary(WS, { resurface: true }),
       syncShoppingSummary(WS, { resurface: false }),
@@ -173,10 +175,58 @@ describe("the first sync for a workspace that has no summary row yet (#199)", ()
 
     expect(
       await prisma.shoppingSummary.count({ where: { workspaceId: WS } }),
-      "the upsert raced itself into more than one summary row",
+      "the sync raced itself into more than one summary row",
     ).toBe(1);
     // From a clean no-row start the answer does not depend on who won: neither
-    // clause dismisses anything.
+    // path dismisses anything.
     expect(await inboxLine()).toEqual({ count: 2 });
+  });
+
+  it("does not raise when only NON-GROWING writes race from the no-row state", async () => {
+    // The case the mixed race above cannot see, and the one the rollout window
+    // actually produces: a pre-existing list, no summary row, and two ticks or a
+    // tick and a rename landing together. Every caller is `resurface: false`, so
+    // nobody creates the row early and they all reach the create path at once.
+    //
+    // Asserted the way #158 asserts this class — a duplicate must not be RAISED,
+    // not merely caught. `log: ["error"]` in `src/lib/db.ts` prints a failed
+    // query before any `catch` can see it, so a P2002 here is indistinguishable
+    // in production logs from a real incident even if the code recovers.
+    //
+    // Five trials of four, for the reason `handled-p2002.integration.test.ts`
+    // gives: one trial is a single coin flip.
+    const TRIALS = 5;
+    const CONCURRENCY = 4;
+    const rejections: string[] = [];
+
+    const logged = await prismaErrorsDuring(async () => {
+      for (let trial = 0; trial < TRIALS; trial++) {
+        await prisma.shoppingSummary.deleteMany({ where: { workspaceId: WS } });
+
+        const settled = await Promise.allSettled(
+          Array.from({ length: CONCURRENCY }, () =>
+            syncShoppingSummary(WS, { resurface: false }),
+          ),
+        );
+        for (const outcome of settled) {
+          if (outcome.status === "rejected") {
+            rejections.push(String(outcome.reason?.code ?? outcome.reason));
+          }
+        }
+
+        expect(
+          await prisma.shoppingSummary.count({ where: { workspaceId: WS } }),
+          "the race left the workspace without exactly one summary row",
+        ).toBe(1);
+      }
+    });
+
+    // The user-visible stake: the item write has already committed by the time
+    // the sync runs, so a throw here fails a rename or a tick that actually
+    // succeeded.
+    expect(rejections, "a non-growing shopping write lost the race").toEqual(
+      [],
+    );
+    expect(logged, "Prisma printed an error for a duplicate").toEqual([]);
   });
 });

@@ -6,11 +6,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  * doc on `shopping-summary-sync.ts`, and `client-server-boundary.test.ts` for the
  * gate that keeps the split honest.
  *
- * `upsert` is MOCKED here, so everything below asserts a payload. That is the right
- * shape for the branch logic and the wrong one for the `create`/`update` split: a
- * mocked upsert has neither a row nor an absent row, so "the row exists" and "no row
- * yet" are the same test twice. Anything that depends on which clause actually ran
- * belongs in `shopping-summary-sync.integration.test.ts` instead (Duo review, !295).
+ * The delegate is MOCKED here, so everything below asserts a payload — which
+ * branch was taken and with what arguments. That is the right shape for the branch
+ * logic and the wrong one for anything about a ROW: a mocked write has neither a
+ * row nor an absent row, so "the row exists" and "no row yet" are the same test
+ * twice, and a payload assertion cannot see what SQL Prisma compiles it to.
+ *
+ * Both of those blind spots hid a real P2002 race behind assertions that passed
+ * (Duo review, !295). Anything that depends on a row, on concurrency, or on the
+ * emitted statement belongs in `shopping-summary-sync.integration.test.ts`.
  */
 
 const { prismaMock } = vi.hoisted(() => ({
@@ -18,6 +22,7 @@ const { prismaMock } = vi.hoisted(() => ({
     shoppingItem: { count: vi.fn() },
     shoppingSummary: {
       upsert: vi.fn().mockResolvedValue({}),
+      createMany: vi.fn().mockResolvedValue({ count: 1 }),
       deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
   },
@@ -40,7 +45,10 @@ describe("syncShoppingSummary", () => {
     });
   });
 
-  it("creates the row when the list becomes non-empty", async () => {
+  // A growing write is the only one that may touch `clearedAt`, and it is an
+  // upsert precisely because a NON-EMPTY `update` is what makes Prisma compile it
+  // to native ON CONFLICT DO UPDATE.
+  it("un-dismisses the row when the write can lengthen the list", async () => {
     const { syncShoppingSummary } = await load();
     await syncShoppingSummary("ws-1", { resurface: true });
     expect(prismaMock.shoppingSummary.upsert).toHaveBeenCalledWith({
@@ -48,20 +56,23 @@ describe("syncShoppingSummary", () => {
       create: { workspaceId: "ws-1" },
       update: { clearedAt: null },
     });
+    expect(prismaMock.shoppingSummary.createMany).not.toHaveBeenCalled();
   });
 
-  // The upsert is keyed on the PRIMARY KEY, which is the whole concurrency story:
-  // two adds racing cannot create two summary rows, because the loser's insert
-  // collides and becomes an update. A findFirst-then-create would need
-  // Serializable or an advisory lock to say the same thing.
+  // The other branch is a different STATEMENT, not a different payload, and
+  // `skipDuplicates` is the load-bearing flag: it is what makes Prisma emit
+  // INSERT ... ON CONFLICT DO NOTHING, so two of these racing from the no-row
+  // state cannot raise P2002. Written as `upsert` with `update: {}` it raised one
+  // 15 times out of 20 — see `shopping-summary-sync.integration.test.ts`, which
+  // is where that can actually be proved. This assertion only guards the shape.
   it("leaves a dismissal alone for a write that cannot increase the count", async () => {
     const { syncShoppingSummary } = await load();
     await syncShoppingSummary("ws-1", { resurface: false });
-    expect(prismaMock.shoppingSummary.upsert).toHaveBeenCalledWith({
-      where: { workspaceId: "ws-1" },
-      create: { workspaceId: "ws-1" },
-      update: {},
+    expect(prismaMock.shoppingSummary.createMany).toHaveBeenCalledWith({
+      data: { workspaceId: "ws-1" },
+      skipDuplicates: true,
     });
+    expect(prismaMock.shoppingSummary.upsert).not.toHaveBeenCalled();
   });
 
   it("removes the row when the list empties", async () => {
