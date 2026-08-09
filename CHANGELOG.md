@@ -441,6 +441,18 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **Creating your calendar feed in two tabs at once no longer errors (#223).**
+  Pressing "create my feed" twice at the same moment — two tabs, a double-click
+  that outran the button — failed one of them outright, after you had already
+  been told to expect a URL. Nothing was ever lost or leaked when it happened,
+  and nobody ended up with a broken subscription; the write that came second was
+  simply refused instead of being recognised as the same request. Both presses
+  now finish, and **both hand back the same URL**, so there is no way to end up
+  pasting a feed address into your calendar that nothing answers. The daily
+  encouragement line had the identical fault and is fixed with it: two requests
+  landing together on the first visit of the day could leave one of them with no
+  quote on the dashboard until the next reload.
+
 - **The focus timer's Start and Resume no longer fail in silence (#139's shape,
   found via #198).** Both buttons handled a server that could not be *reached*,
   and neither handled a server that answered and *declined* — so in those cases
