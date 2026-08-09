@@ -676,6 +676,54 @@ export const STRINGS = {
   // ── Breakdown confirm ──────────────────────────────────────────────────────
   "breakdown.looksRight": { plain: "Looks right", playful: "👍 Looks right" },
 
+  // ── #212: a step that could not be sent back to the inbox ──────────────────
+  // Identical across voices, for the same reason `capture.error.*` and
+  // `shopping.errorSave*` are: the playful skin is a delight layer, and "did I
+  // just lose that step?" is not where delight belongs.
+  //
+  // Named under `breakdown.eject.` rather than reusing `capture.error.*`, whose
+  // values are close but not the same sentence. That family's own comment makes
+  // the argument for this one: the prefix has to name the surface, or re-tuning
+  // one surface's copy silently re-words another's. Two of the three differ here
+  // anyway — a capture that fails is about words in a field, an eject that fails
+  // is about a row in a list that is still on screen.
+  //
+  // All three END on a colon: the words are rendered, quoted, immediately after,
+  // so the notice is itself a copy of them and survives the user then deleting
+  // the row. And all three say "nothing was lost" rather than naming where the
+  // words are, because that stays true whether or not the row is still there.
+  "breakdown.eject.failed": {
+    plain: "Couldn't send that to your inbox just now — nothing was lost:",
+    playful: "Couldn't send that to your inbox just now — nothing was lost:",
+  },
+  "breakdown.eject.stale": {
+    plain:
+      "The app updated while this was open, so that didn't send. Reload to carry on — nothing was lost:",
+    playful:
+      "The app updated while this was open, so that didn't send. Reload to carry on — nothing was lost:",
+  },
+  // The one failure whose verdict is genuinely unknown. A server action cannot
+  // be aborted from the client, so the timeout bounds how long the UI waits, not
+  // the write — the insert may still land, and a retry after it does leaves two
+  // identical inbox items. "Couldn't send that" would be a claim the client
+  // cannot support, so this says what it knows and names the one thing that
+  // resolves the ambiguity.
+  "breakdown.eject.timeout": {
+    plain:
+      "No answer from the server, so this may already be in your inbox. Check there before trying again — nothing was lost:",
+    playful:
+      "No answer from the server, so this may already be in your inbox. Check there before trying again — nothing was lost:",
+  },
+  "breakdown.eject.retry": { plain: "Try again", playful: "Try again" },
+  "breakdown.eject.reload": {
+    plain: "Reload the page",
+    playful: "Reload the page",
+  },
+  // Two jobs, one word, deliberately: the row control's busy label and the
+  // notice's in-flight line. They describe the same outstanding write from two
+  // places, so splitting them could only let the two drift apart.
+  "breakdown.eject.sending": { plain: "Sending…", playful: "Sending…" },
+
   // ── Schedule status banner (ground truth, Phase 4) ─────────────────────────
   // Reflects the PERSISTED task.scheduledAt marker — never optimistic UI. ⚠️/✅
   // are functional glyphs (allowed in plain); 🔌 is playful-only flavour.

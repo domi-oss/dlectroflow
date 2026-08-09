@@ -441,6 +441,24 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **"Back to inbox" in the step editor can no longer lose a step (#212).** The
+  control takes one step out of the plan you are editing and puts it in your
+  inbox as its own thing to break down later. It used to take the row away
+  first and send the words afterwards, without waiting to hear whether they
+  arrived — so if the connection dropped, or the app had updated in another tab
+  since you opened this one, the step was gone from the screen and had never
+  reached the inbox. Nothing said so, and because a plan is not saved until you
+  press "Looks right", that row was the only copy.
+
+  **The row now stays until the inbox has the words.** While it is sending, the
+  control says so; if it cannot send, the row is still there, still editable,
+  and a message above the list says what happened and offers to try again. If
+  the app updated while the page was open it offers a reload instead, because
+  that is the only thing that can work. And if the server simply never answers,
+  it says the step **may** already be in your inbox and asks you to check
+  before retrying, rather than claiming a failure it cannot be sure of — the
+  step stays in the plan either way, so nothing is lost.
+
 - **The focus timer's Start and Resume no longer fail in silence (#139's shape,
   found via #198).** Both buttons handled a server that could not be *reached*,
   and neither handled a server that answered and *declined* — so in those cases
