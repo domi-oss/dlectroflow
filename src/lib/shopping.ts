@@ -54,6 +54,50 @@ export const MAX_SHOPPING_ITEMS = 500;
 export type ShoppingItemTextError = "empty" | "too-long";
 
 /**
+ * Why a write did not happen — Duo review round 5, !294.
+ *
+ * Every action in `src/app/actions/shopping.ts` used to resolve to `undefined`
+ * whether it wrote or not, so "it did not throw" was the client's only signal
+ * and it covered both. `addShoppingItem`'s cap check makes that concrete: it
+ * `return`s from inside the transaction, so a blocked add and a stored one were
+ * the same answer and the page cleared the typed words for both.
+ *
+ * NAMED rather than a bare boolean, because a `false` collapses refusals whose
+ * only sensible responses are opposites — retrying at the cap can never work,
+ * retrying after a write conflict is exactly the right thing. What the client
+ * does with each is `writeFailureRemedy` in `shopping-list.tsx`.
+ *
+ * This EXTENDS {@link ShoppingItemTextError} rather than restating it: the two
+ * text rules are already the surface's vocabulary, the capture field already has
+ * words for them, and a parallel enum would be a second answer to a question
+ * this module already answers.
+ */
+export type ShoppingWriteRefusal =
+  | ShoppingItemTextError
+  /** The list is at {@link MAX_SHOPPING_ITEMS}. Nothing can be added until
+   *  something is removed, so this is not something to try again. */
+  | "full"
+  /** No row matched the id in this workspace — deleted in another tab, or never
+   *  the caller's to touch. Re-posting matches nothing again, every time. */
+  | "missing"
+  /** `Settings.shoppingList` is off, so the feature is not running. Only a
+   *  reload shows the user where they actually are. */
+  | "unavailable"
+  /** The serializable add lost its race twice and gave up. The list has room and
+   *  the request is fine, so this is the one refusal a retry answers. */
+  | "conflict";
+
+/**
+ * What every shopping write answers.
+ *
+ * A discriminated union rather than `{ added: boolean }`: `ok` is the only thing
+ * the happy path has to carry, and pinning the reason to the `false` arm means a
+ * caller cannot read a refusal without also having the reason to hand.
+ */
+export type ShoppingWriteResult =
+  { ok: true } | { ok: false; refused: ShoppingWriteRefusal };
+
+/**
  * The shape every surface here needs of a stored item. Deliberately not the
  * Prisma row: `createdAt` and `workspaceId` are nobody's business up here, and
  * taking a structural type keeps this module testable without a database.

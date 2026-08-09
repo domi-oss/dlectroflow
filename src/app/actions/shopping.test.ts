@@ -65,6 +65,11 @@ beforeEach(() => {
   getSettingsMock.mockResolvedValue({ shoppingList: true });
   prismaMock.shoppingItem.findMany.mockResolvedValue([]);
   prismaMock.shoppingItem.count.mockResolvedValue(0);
+  // `clearAllMocks` drops recorded calls but keeps a `mockResolvedValue`, and the
+  // row-count specs below set these to 0 — put the matched-a-row default back so
+  // a later spec does not inherit "nothing matched".
+  prismaMock.shoppingItem.updateMany.mockResolvedValue({ count: 1 });
+  prismaMock.shoppingItem.deleteMany.mockResolvedValue({ count: 1 });
   prismaMock.$transaction.mockImplementation(
     async (fn: (tx: typeof prismaMock) => Promise<unknown>) => fn(prismaMock),
   );
@@ -72,58 +77,44 @@ beforeEach(() => {
 
 const load = () => import("./shopping");
 
+/**
+ * One typical call per exported write, so a table-driven spec can drive all five
+ * without repeating the cast five times.
+ *
+ * The cast is `never` because `it.each` erases the module type through its own
+ * tuple inference; the shapes below are the real signatures, and `tsc` still
+ * checks the actions themselves at their definitions.
+ */
+const call = (m: never) => {
+  const mod = m as never as {
+    addShoppingItem: (t: string) => Promise<unknown>;
+    renameShoppingItem: (i: string, t: string) => Promise<unknown>;
+    setShoppingItemDone: (i: string, d: boolean) => Promise<unknown>;
+    setShoppingItemSavedForLater: (i: string, s: boolean) => Promise<unknown>;
+    deleteShoppingItem: (i: string) => Promise<unknown>;
+  };
+  return {
+    add: () => mod.addShoppingItem("Milk"),
+    rename: () => mod.renameShoppingItem("s1", "Milk"),
+    done: () => mod.setShoppingItemDone("s1", true),
+    saved: () => mod.setShoppingItemSavedForLater("s1", true),
+    remove: () => mod.deleteShoppingItem("s1"),
+  };
+};
+
 describe("the feature gate", () => {
   // Every exported write, driven through the same off switch: a new action that
   // forgets the gate shows up here rather than in production.
   it.each([
-    [
-      "addShoppingItem",
-      (m: never) =>
-        (
-          m as never as { addShoppingItem: (t: string) => Promise<unknown> }
-        ).addShoppingItem("Milk"),
-    ],
-    [
-      "renameShoppingItem",
-      (m: never) =>
-        (
-          m as never as {
-            renameShoppingItem: (i: string, t: string) => Promise<unknown>;
-          }
-        ).renameShoppingItem("s1", "Milk"),
-    ],
-    [
-      "setShoppingItemDone",
-      (m: never) =>
-        (
-          m as never as {
-            setShoppingItemDone: (i: string, d: boolean) => Promise<unknown>;
-          }
-        ).setShoppingItemDone("s1", true),
-    ],
-    [
-      "setShoppingItemSavedForLater",
-      (m: never) =>
-        (
-          m as never as {
-            setShoppingItemSavedForLater: (
-              i: string,
-              s: boolean,
-            ) => Promise<unknown>;
-          }
-        ).setShoppingItemSavedForLater("s1", true),
-    ],
-    [
-      "deleteShoppingItem",
-      (m: never) =>
-        (
-          m as never as { deleteShoppingItem: (i: string) => Promise<unknown> }
-        ).deleteShoppingItem("s1"),
-    ],
-  ])("%s writes nothing while the toggle is off", async (_name, call) => {
+    ["addShoppingItem", (m: never) => call(m).add()],
+    ["renameShoppingItem", (m: never) => call(m).rename()],
+    ["setShoppingItemDone", (m: never) => call(m).done()],
+    ["setShoppingItemSavedForLater", (m: never) => call(m).saved()],
+    ["deleteShoppingItem", (m: never) => call(m).remove()],
+  ])("%s writes nothing while the toggle is off", async (_name, invoke) => {
     getSettingsMock.mockResolvedValue({ shoppingList: false });
     const mod = (await load()) as never;
-    await call(mod);
+    await invoke(mod);
     expect(prismaMock.shoppingItem.create).not.toHaveBeenCalled();
     expect(prismaMock.shoppingItem.updateMany).not.toHaveBeenCalled();
     expect(prismaMock.shoppingItem.deleteMany).not.toHaveBeenCalled();
@@ -219,13 +210,16 @@ describe("addShoppingItem", () => {
     expect(prismaMock.shoppingItem.create).toHaveBeenCalledTimes(1);
   });
 
-  it("gives up quietly after a second conflict rather than throwing at the UI", async () => {
+  // Gives up without throwing AT the UI — but not without telling it, which is
+  // what "what a write answers" below pins. A rejection here would surface as an
+  // unhandled error for a case the cap already treats as ordinary.
+  it("gives up after a second conflict rather than throwing at the UI", async () => {
     const serializationFailure = Object.assign(new Error("write conflict"), {
       code: "P2034",
     });
     prismaMock.$transaction.mockRejectedValue(serializationFailure);
     const { addShoppingItem } = await load();
-    await expect(addShoppingItem("Milk")).resolves.toBeUndefined();
+    await expect(addShoppingItem("Milk")).resolves.not.toThrow();
     expect(prismaMock.$transaction).toHaveBeenCalledTimes(2);
   });
 
@@ -348,6 +342,135 @@ describe("deleteShoppingItem", () => {
     expect(prismaMock.shoppingItem.deleteMany).toHaveBeenCalledWith({
       where: { id: "s1", workspaceId: "ws-1" },
     });
+    expect(revalidatePathMock).toHaveBeenCalledWith("/shopping");
+  });
+});
+
+/**
+ * Duo review round 5, !294 — **what the caller is told.**
+ *
+ * Every action here used to resolve to `undefined` whether it wrote or not, so a
+ * client had exactly one signal — "it did not throw" — to cover both. That is not
+ * a cosmetic gap: `addShoppingItem`'s cap check `return`s from inside the
+ * transaction, so a blocked add and a stored one were the same answer, and the
+ * page cleared the typed words for both.
+ *
+ * Each action now answers `{ ok: true }` or `{ ok: false, refused }`, and the
+ * refusal is NAMED because a bare `false` collapses "this list is full" (retrying
+ * cannot help, and the page has words for it already) with "two write conflicts
+ * in a row" (retrying is exactly the right thing). The vocabulary is
+ * `ShoppingWriteRefusal` in `@/lib/shopping`, which extends the
+ * `ShoppingItemTextError` the surface already had rather than starting a second
+ * one.
+ */
+describe("what a write answers", () => {
+  it("says ok when the item was created", async () => {
+    const { addShoppingItem } = await load();
+    await expect(addShoppingItem("Milk")).resolves.toEqual({ ok: true });
+  });
+
+  // The finding: this path and the one above were indistinguishable.
+  it("names the cap instead of answering like a success", async () => {
+    prismaMock.shoppingItem.findMany.mockResolvedValue(
+      Array.from({ length: MAX_SHOPPING_ITEMS }, (_, i) => ({ order: i + 1 })),
+    );
+    const { addShoppingItem } = await load();
+    await expect(addShoppingItem("one too many")).resolves.toEqual({
+      ok: false,
+      refused: "full",
+    });
+  });
+
+  // A give-up is NOT a cap hit: the list has room, the write simply lost twice,
+  // and a retry is the one thing that could work. Collapsing the two into one
+  // `false` would offer a retry at 500 items and withhold it here.
+  it("tells a give-up apart from a cap hit", async () => {
+    prismaMock.$transaction.mockRejectedValue(
+      Object.assign(new Error("write conflict"), { code: "P2034" }),
+    );
+    const { addShoppingItem } = await load();
+    await expect(addShoppingItem("Milk")).resolves.toEqual({
+      ok: false,
+      refused: "conflict",
+    });
+  });
+
+  it.each([
+    ["whitespace only", "   \n ", "empty"],
+    [
+      "over the bound",
+      "x".repeat(SHOPPING_ITEM_TEXT_MAX_LENGTH + 1),
+      "too-long",
+    ],
+  ])("names which text rule broke — %s", async (_label, text, refused) => {
+    const { addShoppingItem } = await load();
+    await expect(addShoppingItem(text)).resolves.toEqual({
+      ok: false,
+      refused,
+    });
+  });
+
+  // The switch is a real reason a write does nothing, and one the page cannot
+  // predict: another tab can turn it off between render and submit.
+  it.each([
+    ["addShoppingItem", (m: never) => call(m).add()],
+    ["renameShoppingItem", (m: never) => call(m).rename()],
+    ["setShoppingItemDone", (m: never) => call(m).done()],
+    ["setShoppingItemSavedForLater", (m: never) => call(m).saved()],
+    ["deleteShoppingItem", (m: never) => call(m).remove()],
+  ])(
+    "%s says the feature is unavailable while the toggle is off",
+    async (_name, invoke) => {
+      getSettingsMock.mockResolvedValue({ shoppingList: false });
+      const mod = (await load()) as never;
+      await expect(invoke(mod)).resolves.toEqual({
+        ok: false,
+        refused: "unavailable",
+      });
+    },
+  );
+
+  // `updateMany` matching nothing is the siblings' version of the same fault: it
+  // resolves, it reports `{ count: 0 }`, and the row the user acted on is gone.
+  it.each([
+    ["renameShoppingItem", (m: never) => call(m).rename()],
+    ["setShoppingItemDone", (m: never) => call(m).done()],
+    ["setShoppingItemSavedForLater", (m: never) => call(m).saved()],
+  ])(
+    "%s says the row is missing when nothing matched",
+    async (_name, invoke) => {
+      prismaMock.shoppingItem.updateMany.mockResolvedValue({ count: 0 });
+      const mod = (await load()) as never;
+      await expect(invoke(mod)).resolves.toEqual({
+        ok: false,
+        refused: "missing",
+      });
+      expect(revalidatePathMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["renameShoppingItem", (m: never) => call(m).rename()],
+    ["setShoppingItemDone", (m: never) => call(m).done()],
+    ["setShoppingItemSavedForLater", (m: never) => call(m).saved()],
+    ["deleteShoppingItem", (m: never) => call(m).remove()],
+  ])("%s says ok when a row did match", async (_name, invoke) => {
+    const mod = (await load()) as never;
+    await expect(invoke(mod)).resolves.toEqual({ ok: true });
+  });
+
+  /**
+   * The one sibling where a zero-row match is NOT a refusal.
+   *
+   * "Delete this" asks for an outcome, not for a row to be touched, and the
+   * outcome already holds — reporting a failure would name a problem the user
+   * does not have and offer a retry that can only fail. The revalidation still
+   * runs, because the row the page is showing is the thing that is wrong.
+   */
+  it("treats deleting an already-gone row as done, not as a refusal", async () => {
+    prismaMock.shoppingItem.deleteMany.mockResolvedValue({ count: 0 });
+    const { deleteShoppingItem } = await load();
+    await expect(deleteShoppingItem("s1")).resolves.toEqual({ ok: true });
     expect(revalidatePathMock).toHaveBeenCalledWith("/shopping");
   });
 });

@@ -16,6 +16,8 @@ import {
   shoppingRemainingCount,
   splitShoppingList,
   type ShoppingItemView,
+  type ShoppingWriteRefusal,
+  type ShoppingWriteResult,
 } from "@/lib/shopping";
 import { COMPLETE_TEXT } from "@/lib/completion-style";
 import {
@@ -43,6 +45,18 @@ import { cn } from "@/lib/utils";
  * rather than a copy of it.
  */
 export const SHOPPING_ACTION_TIMEOUT_MS = 10_000;
+
+/**
+ * The three refusals the capture field says about itself, and the only ones it
+ * has words for. Server-side and client-side arrivals of the same three are the
+ * same message — see `declineWrite`.
+ */
+type FieldRefusal = "empty" | "too-long" | "full";
+
+const isFieldRefusal = (
+  refusal: ShoppingWriteRefusal,
+): refusal is FieldRefusal =>
+  refusal === "empty" || refusal === "too-long" || refusal === "full";
 
 /**
  * A write that did not land.
@@ -73,6 +87,20 @@ type WriteFailure = {
    * that" would then be a claim the client cannot support.
    */
   timedOut: boolean;
+  /**
+   * The server answered, and the answer was no — Duo review round 5, !294.
+   *
+   * A THIRD way a write fails to land, and the one nothing here could see:
+   * `stale` and `timedOut` are both silence, this one is a reply. It sits beside
+   * them rather than in a state of its own because everything downstream — the
+   * one slot, the quoted words, the retry-by-identity — is the same; only the
+   * message and which control to offer differ, and both are decided from here.
+   *
+   * `undefined` covers two cases that behave identically: a transport failure,
+   * and an answer that was not a result at all (an action from another build can
+   * resolve to nothing). Both get the generic copy and a Retry.
+   */
+  refused?: ShoppingWriteRefusal;
   /** A retry of THIS write is in flight. */
   retrying: boolean;
   /**
@@ -81,7 +109,7 @@ type WriteFailure = {
    * record on screen the one this attempt owns?" by identity. Stable across
    * retries, because a retry passes the same closure back in.
    */
-  fn: () => Promise<unknown>;
+  fn: () => Promise<ShoppingWriteResult>;
   /**
    * Set only for the add, the one write with a stake in the capture field:
    * `submit()` empties it before the round trip, so a failure has to put the
@@ -100,7 +128,37 @@ type WriteFailure = {
 function writeFailureKey(failure: WriteFailure): StringKey {
   if (failure.stale) return "shopping.errorSaveStale";
   if (failure.timedOut) return "shopping.errorSaveTimeout";
+  // A refusal is not a breakage, and saying "couldn't save that just now" about
+  // one would send the user to look at their connection. Only the two the
+  // capture field has no words for reach this: the other three are said by the
+  // field, about itself (see `declineWrite`), and `conflict` genuinely is
+  // "couldn't save that just now", so it falls through on purpose.
+  if (failure.refused === "unavailable") return "shopping.errorSaveOff";
+  if (failure.refused === "missing") return "shopping.errorSaveGone";
   return "shopping.errorSaveFailed";
+}
+
+/**
+ * What, if anything, the notice can offer that could actually work.
+ *
+ * Was a binary `stale ? reload : retry`, which was right while every failure was
+ * silence. A refusal is a reasoned answer, so re-posting the identical call is
+ * refused for the identical reason — offering a Retry there is a button whose
+ * only possible outcome is the message already on screen (Duo review round 5,
+ * !294).
+ */
+function writeFailureRemedy(
+  failure: WriteFailure,
+): "reload" | "retry" | "none" {
+  // Retrying re-posts an action id the running deployment has forgotten.
+  if (failure.stale) return "reload";
+  // The feature was switched off elsewhere, so this page is no longer live; a
+  // reload is what shows the user where they now are.
+  if (failure.refused === "unavailable") return "reload";
+  // The row is gone. Matching it again matches nothing again, every time — and
+  // the refresh that accompanies this refusal has already taken it off screen.
+  if (failure.refused === "missing") return "none";
+  return "retry";
 }
 
 /**
@@ -146,6 +204,29 @@ function writeFailureKey(failure: WriteFailure): StringKey {
  * no answer / everything else), the same `role="alert"` notice quoting the words,
  * the same `aria-disabled`-not-`disabled` Retry. Two capture surfaces that fail
  * in two different shapes is a worse outcome than either shape.
+ *
+ * ## …and a write the server DECLINED is a fifth
+ *
+ * Duo review round 5, !294, and it is a different mechanism from the paragraph
+ * above rather than more of it. Nothing throws: `addShoppingItem`'s cap check
+ * `return`s from inside its transaction, so a blocked add resolved exactly like a
+ * stored one. `attempt()` read "did not throw" as "landed", cleared the draft and
+ * refreshed — and the typed words were gone with no message anywhere.
+ *
+ * The client's own pre-check cannot close it. `items.length >= MAX_SHOPPING_ITEMS`
+ * in `submit()` reads the last server-rendered prop, which is a round trip behind
+ * the moment a second submission or another tab is involved; that is the point of
+ * a cap enforced on the server. So the pre-check stays as the fast local answer
+ * and the server's refusal is now the authoritative one.
+ *
+ * **Each refusal is said by whichever of this page's two voices already says it.**
+ * Empty, too long and full are the capture field's own three refusals, so a
+ * server-side one of those is the same message on the same control, decided a
+ * round trip later (WCAG 3.3.1 — the error is identified on the thing it is
+ * about). Everything the field has no words for — the row has gone, the feature
+ * was switched off, the write lost its race twice — goes to the notice. What is
+ * NOT done is a third vocabulary: no new component, no second notice, no
+ * "declined" state living apart from `WriteFailure`.
  */
 export function ShoppingList({
   items,
@@ -157,9 +238,19 @@ export function ShoppingList({
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [draft, setDraft] = useState("");
-  const [error, setError] = useState<"empty" | "too-long" | "full" | null>(
-    null,
-  );
+  const [error, setError] = useState<FieldRefusal | null>(null);
+  /**
+   * The words of an add the SERVER refused, held so the refusal message can quote
+   * them — but only on the occasion they are nowhere else.
+   *
+   * `submit()` empties the field before the round trip, and the restore below
+   * declines to overwrite anything the user has typed since. When it declines,
+   * this is the words' only remaining copy; when it does not, `draft` holds them
+   * and quoting them again would be the message repeating the field back at it.
+   * Which of the two happened is read off `draft` at render, so nothing has to
+   * track the outcome of a state update.
+   */
+  const [refusedWords, setRefusedWords] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   /**
    * Why the rename has its OWN refusal state rather than sharing `error`:
@@ -254,7 +345,10 @@ export function ShoppingList({
    * `inbox-view.tsx` (#169): a shared in-flight flag belongs to whichever request
    * settles last, not to the one it is guarding.
    */
-  const markRetrying = (fn: () => Promise<unknown>, retrying: boolean) =>
+  const markRetrying = (
+    fn: () => Promise<ShoppingWriteResult>,
+    retrying: boolean,
+  ) =>
     setFailure((prev) =>
       prev && prev.fn === fn && prev.retrying !== retrying
         ? { ...prev, retrying }
@@ -262,29 +356,86 @@ export function ShoppingList({
     );
 
   /**
+   * Put the words back where the user left them — but never over the top of
+   * something they have typed since.
+   *
+   * A ten-second hang is long enough to start the next item, and overwriting that
+   * is the same data loss wearing the other hat. A functional updater, so it
+   * stays pure under StrictMode's double invocation. Shared by the failure path
+   * and the refusal path because it is the same promise to the user, and two
+   * copies of it is how one of them stops being kept.
+   */
+  const restoreDraft = (draftText: string | undefined) => {
+    if (draftText === undefined) return;
+    setDraft((current) => (current.trim() === "" ? draftText : current));
+  };
+
+  /**
+   * The server answered, and the answer was no — Duo review round 5, !294.
+   *
+   * Neither of the two outcomes `attempt` already had. The write did not land, so
+   * it cannot be treated as a success; but nothing failed either, so the failure
+   * notice's "couldn't save that just now" would point at the connection, and its
+   * Retry would re-post a call that is refused for the same reason every time.
+   */
+  const declineWrite = (
+    refused: ShoppingWriteRefusal | undefined,
+    fn: () => Promise<ShoppingWriteResult>,
+    subject: string,
+    draftText: string | undefined,
+  ) => {
+    restoreDraft(draftText);
+    if (
+      draftText !== undefined &&
+      refused !== undefined &&
+      isFieldRefusal(refused)
+    ) {
+      // The capture field already says all three of these, on the control they
+      // are about (WCAG 3.3.1). Reaching for the notice instead would be a
+      // second way to say something this page has words for — and the notice's
+      // Retry would offer to re-post into a list that is still full.
+      setError(refused);
+      setRefusedWords(draftText);
+      // A refusal answers the question a leftover notice from THIS call was
+      // asking, so leaving it up would have the page contradict itself.
+      setFailure((prev) => (prev?.fn === fn ? null : prev));
+    } else {
+      setFailure({
+        fn,
+        subject,
+        draftText,
+        refused,
+        stale: false,
+        timedOut: false,
+        retrying: false,
+      });
+    }
+    // These two mean the server knows something the rendered `items` do not: the
+    // list is full, or the row has gone. Re-reading is what corrects the page —
+    // and, for the cap, what un-stales the pre-check that let the call through.
+    // Deliberately not for the others: nothing changed for them to fetch.
+    if (refused === "full" || refused === "missing") router.refresh();
+  };
+
+  /**
    * Every write on this page goes through here, which is the point: five actions
    * that can each fail, and one place that says so.
    */
   const attempt = (
-    fn: () => Promise<unknown>,
+    fn: () => Promise<ShoppingWriteResult>,
     subject: string,
     { fromRetry, draftText }: { fromRetry: boolean; draftText?: string },
   ) =>
     startTransition(async () => {
-      let landed = false;
+      let answered = false;
+      let result: ShoppingWriteResult | undefined;
       try {
-        await withActionTimeout(fn(), SHOPPING_ACTION_TIMEOUT_MS);
-        landed = true;
+        result = await withActionTimeout(fn(), SHOPPING_ACTION_TIMEOUT_MS);
+        answered = true;
       } catch (error) {
-        // Restore the words, but ONLY into a field the user has not since typed
-        // into: a ten-second hang is long enough to type the next item, and
-        // overwriting that would be the same data loss wearing the other hat.
-        // When we cannot restore, the notice quotes them instead, so they are
-        // never only in a variable. A functional updater, so it stays pure under
-        // StrictMode's double invocation.
-        if (draftText !== undefined) {
-          setDraft((current) => (current.trim() === "" ? draftText : current));
-        }
+        // When we cannot restore, the notice quotes the words instead, so they
+        // are never only in a variable.
+        restoreDraft(draftText);
         setFailure({
           fn,
           subject,
@@ -300,7 +451,15 @@ export function ShoppingList({
         // Retry button that reads permanently busy.
         if (fromRetry) markRetrying(fn, false);
       }
-      if (!landed) return;
+      if (!answered) return;
+      // `result?.ok`, not `result.ok`: an action from another build can resolve
+      // to something that is not a result at all, and taking an unrecognised
+      // answer for a success is precisely the bug this round removes. An
+      // unnameable refusal gets the generic copy and a Retry.
+      if (!result?.ok) {
+        declineWrite(result?.refused, fn, subject, draftText);
+        return;
+      }
       // Read while the button still exists, and gated on `fromRetry` because
       // that is the only way it can be holding focus.
       if (fromRetry && retryRef.current === document.activeElement) {
@@ -322,7 +481,7 @@ export function ShoppingList({
     });
 
   const run = (
-    fn: () => Promise<unknown>,
+    fn: () => Promise<ShoppingWriteResult>,
     subject: string,
     draftText?: string,
   ) => attempt(fn, subject, { fromRetry: false, draftText });
@@ -343,29 +502,39 @@ export function ShoppingList({
   const { active, savedForLater } = splitShoppingList(items);
   const remaining = shoppingRemainingCount(items);
 
+  /** Both refusal slots move together: the words only ever accompany a message,
+   *  and a stale pair is how a message ends up quoting the wrong item. */
+  const showRefusal = (refusal: FieldRefusal | null) => {
+    setError(refusal);
+    setRefusedWords(null);
+  };
+
   const submit = () => {
-    // The cap is checked first: at 500 rows "type something first" would be a
-    // true but useless answer to why nothing happened.
+    // A fast local answer, NOT the authority. `items` is the last server-rendered
+    // prop, so this is a round trip behind as soon as a second submission or
+    // another tab is involved — which is why the server refuses too, and why a
+    // refusal coming back is an ordinary outcome rather than a contradiction
+    // (Duo review round 5, !294). The cap is checked before the text, because at
+    // 500 rows "type something first" would be a true but useless answer to why
+    // nothing happened.
     if (items.length >= MAX_SHOPPING_ITEMS) {
-      setError("full");
+      showRefusal("full");
       return;
     }
     const refusal = shoppingItemTextError(draft);
     if (refusal) {
-      setError(refusal);
+      showRefusal(refusal);
       return;
     }
     const text = draft;
     setDraft("");
-    setError(null);
+    showRefusal(null);
     // The third argument is what makes this the one write with a stake in the
     // field: it was emptied a line ago, so a failure has to put the words back.
     run(() => addShoppingItem(text), text, text);
   };
 
-  const refusalMessage = (
-    refusal: "empty" | "too-long" | "full" | null,
-  ): string | null =>
+  const refusalMessage = (refusal: FieldRefusal | null): string | null =>
     refusal === "empty"
       ? t("shopping.errorEmpty", voice)
       : refusal === "too-long"
@@ -561,7 +730,7 @@ export function ShoppingList({
               setDraft(e.target.value);
               // Clearing on the next keystroke rather than on submit: a message
               // that outlives the mistake gets read as the field's own state.
-              if (error !== null) setError(null);
+              if (error !== null) showRefusal(null);
             }}
             className="border-input bg-background focus-visible:ring-ring min-w-0 flex-1 rounded-md border px-2 py-2 text-sm outline-none focus-visible:ring-2"
           />
@@ -579,6 +748,21 @@ export function ShoppingList({
           // text is announced inconsistently across screen readers.
           <p id={errorId} role="alert" className="text-destructive text-sm">
             {errorMessage}
+            {/* Only when the words are nowhere else. `submit()` emptied the
+                field and the restore declined because the user had typed
+                something new, so this message is the last copy of them — the
+                same job the failure notice's quote does, done by whichever of
+                the two is on screen. Compared against `draft` rather than
+                tracked, so it cannot disagree with what the field is showing. */}
+            {refusedWords !== null && draft !== refusedWords && (
+              <>
+                {" "}
+                {t("shopping.errorUnsaved", voice)}{" "}
+                <strong className="break-words">
+                  &ldquo;{refusedWords}&rdquo;
+                </strong>
+              </>
+            )}
           </p>
         )}
       </form>
@@ -612,54 +796,61 @@ export function ShoppingList({
               <strong>&ldquo;{failure.subject}&rdquo;</strong>
             </span>
           </p>
-          <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
-            {failure.stale ? (
-              // Retrying re-posts the same action id the running deployment has
-              // already forgotten, so a reload is the ONLY thing on offer.
-              <button
-                type="button"
-                aria-describedby={failureId}
-                onClick={() => window.location.reload()}
-                className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 text-sm font-medium"
-              >
-                <RefreshCw aria-hidden="true" className="h-4 w-4 shrink-0" />
-                {t("shopping.errorReload", voice)}
-              </button>
-            ) : (
-              // `aria-disabled`, not `disabled`: a disabled element cannot hold
-              // focus, so the browser would drop it to <body> the moment the
-              // retry starts — the same fault this MR is fixing for the rename
-              // editor, in the control that reports it. The press is guarded in
-              // the handler instead, so a double-tap still cannot fire two writes.
-              <button
-                ref={retryRef}
-                type="button"
-                // While a retry runs, the reason AND the wait are both reachable
-                // from the control.
-                aria-describedby={
-                  failure.retrying ? `${failureId} ${savingId}` : failureId
-                }
-                aria-disabled={failure.retrying}
-                onClick={retryFailedWrite}
-                className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 text-sm font-medium aria-disabled:opacity-50"
-              >
-                <RotateCcw aria-hidden="true" className="h-4 w-4 shrink-0" />
-                {t("shopping.errorRetry", voice)}
-              </button>
-            )}
-            {/* Deliberately NOT `role="status"`: a polite live region nested
+          {/* No control at all when nothing could work — a refusal naming a row
+              that is gone is answered by the refresh that came with it, and a
+              button whose only possible outcome is the message already on screen
+              is worse than none (Duo review round 5, !294). */}
+          {writeFailureRemedy(failure) !== "none" && (
+            <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+              {writeFailureRemedy(failure) === "reload" ? (
+                // Retrying re-posts the same action id the running deployment has
+                // already forgotten — or, for a switched-off feature, walks into
+                // the same refusal. Either way a reload is the ONLY thing on offer.
+                <button
+                  type="button"
+                  aria-describedby={failureId}
+                  onClick={() => window.location.reload()}
+                  className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 text-sm font-medium"
+                >
+                  <RefreshCw aria-hidden="true" className="h-4 w-4 shrink-0" />
+                  {t("shopping.errorReload", voice)}
+                </button>
+              ) : (
+                // `aria-disabled`, not `disabled`: a disabled element cannot hold
+                // focus, so the browser would drop it to <body> the moment the
+                // retry starts — the same fault this MR is fixing for the rename
+                // editor, in the control that reports it. The press is guarded in
+                // the handler instead, so a double-tap still cannot fire two writes.
+                <button
+                  ref={retryRef}
+                  type="button"
+                  // While a retry runs, the reason AND the wait are both reachable
+                  // from the control.
+                  aria-describedby={
+                    failure.retrying ? `${failureId} ${savingId}` : failureId
+                  }
+                  aria-disabled={failure.retrying}
+                  onClick={retryFailedWrite}
+                  className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 text-sm font-medium aria-disabled:opacity-50"
+                >
+                  <RotateCcw aria-hidden="true" className="h-4 w-4 shrink-0" />
+                  {t("shopping.errorRetry", voice)}
+                </button>
+              )}
+              {/* Deliberately NOT `role="status"`: a polite live region nested
                 inside this assertive one is undefined enough in practice that
                 "will it announce" has no answer. The wait rides the two
                 mechanisms that do — the pressed button's `aria-disabled` state
                 change, which a screen reader reports because focus is on it, and
                 the `aria-describedby` above, which picks this node up while it
                 shows. */}
-            {failure.retrying && (
-              <p id={savingId} className="text-muted-foreground text-xs">
-                {t("shopping.errorSaving", voice)}
-              </p>
-            )}
-          </div>
+              {failure.retrying && (
+                <p id={savingId} className="text-muted-foreground text-xs">
+                  {t("shopping.errorSaving", voice)}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
 

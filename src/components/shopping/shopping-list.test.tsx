@@ -28,13 +28,21 @@ import {
  * would put a shopping item into machinery the model deliberately keeps it out of.
  */
 
+/**
+ * Duo review round 5, !294 — the actions answer `{ ok: true }` now, not
+ * `undefined`. That IS the fix under test: "it resolved" and "it wrote" used to
+ * be the same signal, so a mock resolving to nothing would keep asserting the
+ * behaviour the round removed.
+ */
+const WROTE = { ok: true } as const;
+
 const { addMock, renameMock, doneMock, savedMock, deleteMock, refreshMock } =
   vi.hoisted(() => ({
-    addMock: vi.fn().mockResolvedValue(undefined),
-    renameMock: vi.fn().mockResolvedValue(undefined),
-    doneMock: vi.fn().mockResolvedValue(undefined),
-    savedMock: vi.fn().mockResolvedValue(undefined),
-    deleteMock: vi.fn().mockResolvedValue(undefined),
+    addMock: vi.fn().mockResolvedValue({ ok: true }),
+    renameMock: vi.fn().mockResolvedValue({ ok: true }),
+    doneMock: vi.fn().mockResolvedValue({ ok: true }),
+    savedMock: vi.fn().mockResolvedValue({ ok: true }),
+    deleteMock: vi.fn().mockResolvedValue({ ok: true }),
     refreshMock: vi.fn(),
   }));
 
@@ -65,6 +73,37 @@ afterEach(cleanup);
 
 const renderList = (items: Parameters<typeof ShoppingList>[0]["items"] = []) =>
   render(<ShoppingList items={items} voice="plain" />);
+
+/**
+ * `fireEvent` rather than `userEvent`: some specs below drive fake timers, and
+ * userEvent's own timer plumbing has to be wired to them separately. Same
+ * precedent, and the same flush budget, as `inbox-view.test.tsx`.
+ *
+ * Module scope rather than inside one `describe`, because the two blocks that
+ * need them — a write that failed and a write the server refused — are siblings,
+ * and two copies of a flush budget is how they drift apart.
+ */
+const flushTicks = async () => {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+};
+const flush = () => act(async () => flushTicks());
+
+const addViaField = async (value: string) => {
+  const field = screen.getByLabelText(/add to the list/i);
+  fireEvent.change(field, { target: { value } });
+  fireEvent.submit(field.closest("form")!);
+  await flush();
+  return field;
+};
+
+const clickRetry = () =>
+  act(async () => {
+    screen.getByRole("button", { name: /try again/i }).click();
+    await flushTicks();
+  });
 
 describe("capturing", () => {
   it("adds the typed text and clears the field", async () => {
@@ -537,7 +576,7 @@ describe("when a write fails", () => {
   beforeEach(() => {
     for (const mock of [addMock, renameMock, doneMock, savedMock, deleteMock]) {
       mock.mockReset();
-      mock.mockResolvedValue(undefined);
+      mock.mockResolvedValue(WROTE);
     }
   });
   afterEach(() => vi.useRealTimers());
@@ -550,33 +589,6 @@ describe("when a write fails", () => {
       ),
       { name: "UnrecognizedActionError" },
     );
-
-  /**
-   * `fireEvent` rather than `userEvent`: two specs below drive fake timers, and
-   * userEvent's own timer plumbing has to be wired to them separately. Same
-   * precedent, and the same flush budget, as `inbox-view.test.tsx`.
-   */
-  const addViaField = async (value: string) => {
-    const field = screen.getByLabelText(/add to the list/i);
-    fireEvent.change(field, { target: { value } });
-    fireEvent.submit(field.closest("form")!);
-    await flush();
-    return field;
-  };
-
-  const flushTicks = async () => {
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-  };
-  const flush = () => act(async () => flushTicks());
-
-  const clickRetry = () =>
-    act(async () => {
-      screen.getByRole("button", { name: /try again/i }).click();
-      await flushTicks();
-    });
 
   it("says the add failed instead of losing it silently", async () => {
     addMock.mockRejectedValueOnce(new Error("offline"));
@@ -716,9 +728,9 @@ describe("when a write fails", () => {
   // WCAG 2.4.3 fault as the rename editor above, in the control that reports it.
   it("keeps the Retry focusable while its write is in flight, and guards the press", async () => {
     addMock.mockRejectedValueOnce(new Error("offline"));
-    let resolveRetry!: () => void;
+    let resolveRetry!: (result: typeof WROTE) => void;
     addMock.mockReturnValueOnce(
-      new Promise<void>((resolve) => {
+      new Promise<typeof WROTE>((resolve) => {
         resolveRetry = resolve;
       }),
     );
@@ -738,7 +750,7 @@ describe("when a write fails", () => {
     expect(addMock).toHaveBeenCalledTimes(2);
 
     await act(async () => {
-      resolveRetry();
+      resolveRetry(WROTE);
       await flushTicks();
     });
   });
@@ -756,5 +768,213 @@ describe("when a write fails", () => {
 
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
     expect(screen.getByLabelText(/add to the list/i)).toHaveFocus();
+  });
+});
+
+/**
+ * Duo review round 5, !294 — **the write the server declined.**
+ *
+ * A third outcome, and the one nothing on this page could see. `attempt()` read
+ * "the action did not throw" as "the write landed", but `addShoppingItem`'s cap
+ * check `return`s from inside its transaction, so a blocked add resolved exactly
+ * like a stored one: the draft was cleared, `router.refresh()` ran, and the typed
+ * words were gone with no message at all.
+ *
+ * The client's own pre-check cannot close this — it reads the last
+ * server-rendered `items` prop, which is behind by a round trip the moment a
+ * second submission or another tab is involved. So the page has to be told, and
+ * these specs are about being told: what is said, where it is said, and whether
+ * the control offered could actually work.
+ */
+describe("when the server refuses a write", () => {
+  beforeEach(() => {
+    for (const mock of [addMock, renameMock, doneMock, savedMock, deleteMock]) {
+      mock.mockReset();
+      mock.mockResolvedValue(WROTE);
+    }
+  });
+
+  const refused = (reason: string) => ({ ok: false, refused: reason });
+
+  it("keeps the typed words and says the list is full", async () => {
+    addMock.mockResolvedValueOnce(refused("full"));
+    renderList();
+    const field = await addViaField("oat milk");
+
+    expect(field).toHaveValue("oat milk");
+    expect(screen.getByRole("alert")).toHaveTextContent(/full at 500 items/i);
+  });
+
+  /**
+   * The race the finding describes, driven rather than asserted about.
+   *
+   * The list is rendered ONE short of the cap, so the client's own pre-check
+   * passes and the call goes out. The first add lands and takes the last slot;
+   * the second is submitted before `router.refresh()` has re-rendered `items`,
+   * so the pre-check passes on a count that is now wrong and the server is the
+   * only thing left that can refuse it.
+   */
+  it("survives a pre-check that was stale by one write", async () => {
+    const nearlyFull = Array.from({ length: MAX_SHOPPING_ITEMS - 1 }, (_, i) =>
+      item({ id: `s${i}`, text: `thing ${i}`, order: i + 1 }),
+    );
+    addMock.mockResolvedValueOnce(WROTE).mockResolvedValueOnce(refused("full"));
+    renderList(nearlyFull);
+
+    await addViaField("oat milk");
+    const field = await addViaField("bread");
+
+    expect(addMock).toHaveBeenNthCalledWith(1, "oat milk");
+    expect(addMock).toHaveBeenNthCalledWith(2, "bread");
+    // The second one is the one that did not land, and it is the one still on
+    // screen — in the field, ready to be re-sent once there is room.
+    expect(field).toHaveValue("bread");
+    expect(screen.getByRole("alert")).toHaveTextContent(/full at 500 items/i);
+  });
+
+  // A refusal is not a breakage, so the notice's "couldn't save that just now"
+  // and its Retry — which would post the same refused call again — must stay away.
+  it("does not dress a refusal up as a failure", async () => {
+    addMock.mockResolvedValueOnce(refused("full"));
+    renderList();
+    await addViaField("oat milk");
+
+    expect(screen.queryByText(/couldn't save that/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
+  });
+
+  // The server knows something the page does not: `items` is behind. The same
+  // fetch that corrects the list is what un-staleps the pre-check.
+  it("re-reads the list, because the count it refused on is the true one", async () => {
+    addMock.mockResolvedValueOnce(refused("full"));
+    renderList();
+    await addViaField("oat milk");
+    expect(refreshMock).toHaveBeenCalled();
+  });
+
+  /**
+   * The restore has the same rule as the failure path — it never overwrites a
+   * field the user has since typed into — which leaves one gap the failure path
+   * closes with the notice: words that could not go back must still be on
+   * screen somewhere. They go into the refusal message, which is the one place
+   * already saying why they did not save.
+   */
+  it("quotes the words when the field has moved on without them", async () => {
+    let answer!: (result: unknown) => void;
+    addMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+    );
+    renderList();
+    const field = screen.getByLabelText(/add to the list/i);
+    fireEvent.change(field, { target: { value: "oat milk" } });
+    fireEvent.submit(field.closest("form")!);
+    await flush();
+    fireEvent.change(field, { target: { value: "bread" } });
+    await act(async () => {
+      answer(refused("full"));
+      await flushTicks();
+    });
+
+    expect(field).toHaveValue("bread");
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(/full at 500 items/i);
+    expect(alert).toHaveTextContent(/oat milk/);
+  });
+
+  // Every row control goes through the same `run()`, and `updateMany` matching
+  // no rows is the siblings' version of the identical fault.
+  it.each([
+    ["tick", () => doneMock, /tick off apples/i, "checkbox" as const],
+    ["delete", () => deleteMock, /delete apples/i, "button" as const],
+    [
+      "save for later",
+      () => savedMock,
+      /save for later: apples/i,
+      "button" as const,
+    ],
+  ])(
+    "says so when a %s hits a row that is gone",
+    async (_l, mock, name, role) => {
+      mock().mockResolvedValueOnce(refused("missing"));
+      renderList([item({ id: "a", text: "Apples" })]);
+
+      await act(async () => {
+        screen.getByRole(role, { name }).click();
+        await flushTicks();
+      });
+
+      const notice = await screen.findByRole("alert");
+      expect(notice).toHaveTextContent(/not on the list any more/i);
+      expect(notice).toHaveTextContent(/Apples/);
+      // Re-posting matches zero rows again, every time.
+      expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
+      // The row on screen is the thing that is wrong, so the list is re-read.
+      expect(refreshMock).toHaveBeenCalled();
+    },
+  );
+
+  it("surfaces a rename onto a row that is gone, naming the new words", async () => {
+    renameMock.mockResolvedValueOnce(refused("missing"));
+    renderList([item({ id: "a", text: "Apples" })]);
+    await userEvent.click(
+      screen.getByRole("button", { name: /rename apples/i }),
+    );
+    const field = screen.getByRole("textbox", { name: /rename apples/i });
+    await userEvent.clear(field);
+    await userEvent.type(field, "Braeburns{Enter}");
+
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveTextContent(/not on the list any more/i);
+    expect(notice).toHaveTextContent(/Braeburns/);
+  });
+
+  // Shopping-list mode switched off in another tab. A retry re-posts into an
+  // action that will refuse it again; only a reload shows where the user is.
+  it("offers a reload, not a retry, when the feature was switched off", async () => {
+    addMock.mockResolvedValueOnce(refused("unavailable"));
+    renderList();
+    await addViaField("oat milk");
+
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveTextContent(/switched off/i);
+    expect(notice).toHaveTextContent(/oat milk/);
+    expect(screen.getByRole("button", { name: /reload/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
+  });
+
+  // Two write conflicts in a row: the list has room and nothing is wrong with
+  // the request, so this is the one refusal a retry is the right answer to.
+  it("offers a retry when the write simply lost twice", async () => {
+    addMock.mockResolvedValueOnce(refused("conflict"));
+    renderList();
+    await addViaField("oat milk");
+
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveTextContent(/couldn't save that/i);
+    expect(notice).toHaveTextContent(/oat milk/);
+
+    addMock.mockResolvedValueOnce(WROTE);
+    await clickRetry();
+    expect(addMock).toHaveBeenCalledTimes(2);
+    expect(addMock).toHaveBeenLastCalledWith("oat milk");
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+
+  /**
+   * An action from another build can resolve to something that is not a result
+   * at all. Believing it is the exact bug this round removes, so an
+   * unrecognised answer is reported rather than taken for a success.
+   */
+  it("does not take an unrecognised answer for a success", async () => {
+    addMock.mockResolvedValueOnce(undefined);
+    renderList();
+    const field = await addViaField("oat milk");
+
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveTextContent(/couldn't save that/i);
+    expect(notice).toHaveTextContent(/oat milk/);
+    expect(field).toHaveValue("oat milk");
   });
 });

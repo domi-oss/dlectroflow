@@ -8,6 +8,8 @@ import {
   MAX_SHOPPING_ITEMS,
   normaliseShoppingItemText,
   nextShoppingOrder,
+  shoppingItemTextError,
+  type ShoppingWriteResult,
 } from "@/lib/shopping";
 
 const SHOPPING_PATH = "/shopping";
@@ -48,6 +50,25 @@ const SHOPPING_PATH = "/shopping";
  * its own table that is implemented by writing no reward code at all rather than
  * by subtracting one. `shopping.test.ts` pins it, because "deliberately absent"
  * and "forgotten" look identical in a diff.
+ *
+ * ## Every write says whether it wrote
+ *
+ * Duo review round 5, !294. All five of these used to resolve to `undefined`
+ * whether they wrote or not, which left the page one signal — "it did not
+ * throw" — to cover both. That is not theoretical: the cap check below `return`s
+ * from inside its transaction, so a blocked add resolved exactly like a stored
+ * one and the page cleared the typed words for both.
+ *
+ * They now answer {@link ShoppingWriteResult}, and a refusal carries its reason,
+ * because the right response differs per reason: at the cap a retry can never
+ * work, after a write conflict it is the only thing that can. The vocabulary is
+ * `ShoppingWriteRefusal` in `@/lib/shopping`, shared with the client so the two
+ * cannot drift.
+ *
+ * Note what a workspace-scoped filter makes of this. `updateMany` matching no
+ * rows still means "the row is not yours to change", exactly as the paragraph
+ * above says — the answer is `missing` either way, which tells the caller nothing
+ * about whether a row with that id exists elsewhere.
  */
 async function shoppingWorkspace(): Promise<string | null> {
   const workspaceId = await currentWorkspaceId();
@@ -63,13 +84,20 @@ async function shoppingWorkspace(): Promise<string | null> {
  * the field can say which rule was broken instead of the add appearing to do
  * nothing.
  */
-export async function addShoppingItem(text: string) {
+export async function addShoppingItem(
+  text: string,
+): Promise<ShoppingWriteResult> {
   const trimmed = normaliseShoppingItemText(text);
   // Before resolving the workspace: a blank submit is the commonest input on a
   // capture field and it should cost no query at all.
-  if (trimmed === null) return;
+  if (trimmed === null) {
+    // Which rule broke, not just "no". `shoppingItemTextError` is the same
+    // predicate the normaliser applies, so it cannot answer null here; the
+    // fallback exists only because the two calls are opaque to the compiler.
+    return { ok: false, refused: shoppingItemTextError(text) ?? "empty" };
+  }
   const workspaceId = await shoppingWorkspace();
-  if (!workspaceId) return;
+  if (!workspaceId) return { ok: false, refused: "unavailable" };
 
   // ── Why this is a transaction, at SERIALIZABLE ────────────────────────────
   //
@@ -96,6 +124,10 @@ export async function addShoppingItem(text: string) {
   // the same outcome as hitting the cap, and the page re-reads from the database
   // on the next render — so nobody is ever shown an item that is not there.
   let added = false;
+  // Tracked apart from `added`, because "the list is full" and "we lost the race
+  // twice" are the two ways this loop writes nothing and the caller's only
+  // sensible responses to them are opposites (Duo review round 5, !294).
+  let full = false;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       await prisma.$transaction(
@@ -109,9 +141,13 @@ export async function addShoppingItem(text: string) {
             select: { order: true },
           });
           // Checked, not clamped: the list is already at the cap, so there is
-          // nothing useful to tell the person beyond "this list is full", which the
-          // page says before the action is ever called.
-          if (existing.length >= MAX_SHOPPING_ITEMS) return;
+          // nothing useful to tell the person beyond "this list is full" — which
+          // the page usually says before the action is ever called, and which it
+          // can only say afterwards because of the flag set here.
+          if (existing.length >= MAX_SHOPPING_ITEMS) {
+            full = true;
+            return;
+          }
           await tx.shoppingItem.create({
             data: {
               text: trimmed,
@@ -137,6 +173,7 @@ export async function addShoppingItem(text: string) {
       if (!retryable) throw e;
       // A retried attempt starts over, so anything the aborted one set is void.
       added = false;
+      full = false;
       if (attempt === 1) break;
     }
   }
@@ -145,23 +182,32 @@ export async function addShoppingItem(text: string) {
   // the revalidation (blank text, gate closed, retries exhausted), and a cap-hit did
   // not, because the transaction body returns rather than throws. Nothing was
   // written, so there is nothing for the page to re-render.
-  if (!added) return;
+  if (full) return { ok: false, refused: "full" };
+  if (!added) return { ok: false, refused: "conflict" };
   revalidatePath(SHOPPING_PATH);
+  return { ok: true };
 }
 
 /** Edit an entry in place. An empty rename is refused rather than blanking the
  *  row — the row's text is the only thing distinguishing it from its neighbours,
  *  and `ShoppingItem_text_check` would refuse it at the database anyway. */
-export async function renameShoppingItem(id: string, text: string) {
+export async function renameShoppingItem(
+  id: string,
+  text: string,
+): Promise<ShoppingWriteResult> {
   const trimmed = normaliseShoppingItemText(text);
-  if (trimmed === null) return;
+  if (trimmed === null) {
+    return { ok: false, refused: shoppingItemTextError(text) ?? "empty" };
+  }
   const workspaceId = await shoppingWorkspace();
-  if (!workspaceId) return;
-  await prisma.shoppingItem.updateMany({
+  if (!workspaceId) return { ok: false, refused: "unavailable" };
+  const { count } = await prisma.shoppingItem.updateMany({
     where: { id, workspaceId },
     data: { text: trimmed },
   });
+  if (count === 0) return { ok: false, refused: "missing" };
   revalidatePath(SHOPPING_PATH);
+  return { ok: true };
 }
 
 /**
@@ -173,14 +219,19 @@ export async function renameShoppingItem(id: string, text: string) {
  * the value arrives from a client-callable action, so it is coerced rather than
  * trusted.
  */
-export async function setShoppingItemDone(id: string, done: boolean) {
+export async function setShoppingItemDone(
+  id: string,
+  done: boolean,
+): Promise<ShoppingWriteResult> {
   const workspaceId = await shoppingWorkspace();
-  if (!workspaceId) return;
-  await prisma.shoppingItem.updateMany({
+  if (!workspaceId) return { ok: false, refused: "unavailable" };
+  const { count } = await prisma.shoppingItem.updateMany({
     where: { id, workspaceId },
     data: { done: Boolean(done) },
   });
+  if (count === 0) return { ok: false, refused: "missing" };
   revalidatePath(SHOPPING_PATH);
+  return { ok: true };
 }
 
 /**
@@ -199,14 +250,16 @@ export async function setShoppingItemDone(id: string, done: boolean) {
 export async function setShoppingItemSavedForLater(
   id: string,
   savedForLater: boolean,
-) {
+): Promise<ShoppingWriteResult> {
   const workspaceId = await shoppingWorkspace();
-  if (!workspaceId) return;
-  await prisma.shoppingItem.updateMany({
+  if (!workspaceId) return { ok: false, refused: "unavailable" };
+  const { count } = await prisma.shoppingItem.updateMany({
     where: { id, workspaceId },
     data: { savedForLater: Boolean(savedForLater) },
   });
+  if (count === 0) return { ok: false, refused: "missing" };
   revalidatePath(SHOPPING_PATH);
+  return { ok: true };
 }
 
 /**
@@ -216,10 +269,22 @@ export async function setShoppingItemSavedForLater(
  * references a `ShoppingItem` — no task, no step, no focus session, no calendar
  * artefact — so there is no orphan to clean up. That is a consequence of the
  * model decision rather than a coincidence, and it is why this file is short.
+ *
+ * **The one sibling where a zero-row match is not a refusal** (Duo review round
+ * 5, !294). Its three neighbours all answer `missing` when `count` is 0, because
+ * a rename or a tick asks for a row to be changed and there is no row. A delete
+ * asks for an OUTCOME, and the outcome already holds — telling the user "that
+ * item is not on the list any more" about an item they just asked to remove
+ * would name a problem they do not have, and offer a retry that can only refuse
+ * again. The revalidation still runs unconditionally, because in that case the
+ * row the page is showing is exactly the thing that is wrong.
  */
-export async function deleteShoppingItem(id: string) {
+export async function deleteShoppingItem(
+  id: string,
+): Promise<ShoppingWriteResult> {
   const workspaceId = await shoppingWorkspace();
-  if (!workspaceId) return;
+  if (!workspaceId) return { ok: false, refused: "unavailable" };
   await prisma.shoppingItem.deleteMany({ where: { id, workspaceId } });
   revalidatePath(SHOPPING_PATH);
+  return { ok: true };
 }

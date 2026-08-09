@@ -1201,6 +1201,35 @@ export const STRINGS = {
     playful:
       "No answer from the server, so this may already have saved. Check the list before trying again:",
   },
+  // ── A write the server DECLINED ────────────────────────────────────────────
+  // Duo review round 5, !294. A third category again, and the reason it needs
+  // its own words rather than "couldn't save that just now" is that nothing
+  // failed: the server answered, promptly and correctly, and said no. Copy that
+  // blames the connection would send the user to look in the wrong place, and
+  // the Retry it implies would re-post a call that is refused by definition.
+  //
+  // Only the two the page has no words for are here. "This list is full" and the
+  // two text rules are already `shopping.errorFull` / `errorEmpty` / `errorTooLong`
+  // above, said by the capture field about itself — a server-side full is the
+  // same sentence arriving a round trip later, not a new one.
+  "shopping.errorSaveGone": {
+    plain: "That item is not on the list any more, so nothing changed:",
+    playful: "That item is not on the list any more, so nothing changed:",
+  },
+  // The feature switched off in another tab or window. A retry posts into an
+  // action that refuses it for the same reason; only a reload shows the user
+  // where they actually are, which is why this reads like the stale-bundle copy.
+  "shopping.errorSaveOff": {
+    plain:
+      "Shopping list mode is switched off, so that didn't save. Reload to carry on:",
+    playful:
+      "Shopping list mode is switched off, so that didn't save. Reload to carry on:",
+  },
+  // Appended to a capture-field refusal, before the words it could not keep.
+  // Needed only when the field has moved on: the restore never overwrites text
+  // the user has typed since, so on the rare occasion it declines, this is where
+  // the words survive instead of nowhere.
+  "shopping.errorUnsaved": { plain: "Not saved:", playful: "Not saved:" },
   "shopping.errorRetry": { plain: "Try again", playful: "Try again" },
   "shopping.errorReload": {
     plain: "Reload the page",
