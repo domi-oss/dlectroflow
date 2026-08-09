@@ -328,6 +328,128 @@ describe("findLateConstraintDrops — synthetic", () => {
   });
 });
 
+/**
+ * #190, raised in review of the dollar-quote lexer fix — the knock-on it has on
+ * a guard this diff never edits.
+ *
+ * `splitStatements` now keeps a `DO $$ … $$` body whole, so a drop and a write
+ * that both live inside one block land at the SAME statement index. An ordering
+ * check written as `dropIndex < writeIndex` reads "same" as "too late", which
+ * would make the correctly-ordered shape unconditionally fail and the shapes
+ * hiding behind a first match unconditionally pass. Both directions are pinned
+ * here: the false accusation, because a guard that cries wolf is the one that
+ * gets deleted, and the miss, because that is the 2026-08-07 incident again.
+ */
+describe("findLateConstraintDrops — order inside a merged DO block", () => {
+  const file = (sql: string) => [{ name: "20260101000000_x", sql }];
+
+  it("passes a drop that precedes the write inside the same DO block", () => {
+    expect(
+      findLateConstraintDrops(
+        file(`
+          DO $$
+          BEGIN
+            ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+            UPDATE "Settings" SET "focusSound" = 'on' WHERE "focusSound" <> 'off';
+          END
+          $$;
+        `),
+      ),
+    ).toEqual([]);
+  });
+
+  it("flags a write that precedes the drop inside the same DO block", () => {
+    const v = findLateConstraintDrops(
+      file(`
+        DO $$
+        BEGIN
+          UPDATE "Settings" SET "focusSound" = 'on';
+          ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+        END
+        $$;
+      `),
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].reason).toMatch(/still live when the write runs/);
+    // The two are one statement now, so "at statement 1 … at statement 1" would
+    // send the reader hunting for a second statement that does not exist.
+    expect(v[0].reason).toMatch(/same statement/);
+  });
+
+  // One statement used to hold at most one write, so reading only the first was
+  // free. A merged body holds several, and the late one hid behind an innocent
+  // earlier one.
+  it("reads every write in a merged block, not just the first", () => {
+    const v = findLateConstraintDrops(
+      file(`
+        DO $$
+        BEGIN
+          UPDATE "Settings" SET "typeface" = 'figtree';
+          UPDATE "Settings" SET "focusSound" = 'on';
+          ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+        END
+        $$;
+      `),
+    );
+    expect(v.map((x) => x.reason)).toEqual([
+      expect.stringContaining('writes "focusSound"'),
+    ]);
+  });
+
+  // Same for drops: the block's first drop is not necessarily the one that
+  // covers the column being written.
+  it("reads every drop in a merged block, not just the first", () => {
+    const v = findLateConstraintDrops(
+      file(`
+        DO $$
+        BEGIN
+          ALTER TABLE "Settings" DROP CONSTRAINT "Settings_typeface_check";
+          UPDATE "Settings" SET "focusSound" = 'on';
+          ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+        END
+        $$;
+      `),
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].reason).toMatch(/Settings_focusSound_check/);
+  });
+
+  // The gap between `UPDATE "T"` and `SET "c" =` may not cross a statement
+  // boundary. Unbounded, the first UPDATE in a merged body swallows the next
+  // one's SET clause and the guard scans a table/column pair that was never
+  // written — here `"Other".focusSound`, which has no constraint, so the real
+  // late write disappears entirely.
+  it("does not pair one write's table with a later write's column", () => {
+    const v = findLateConstraintDrops(
+      file(`
+        DO $$
+        BEGIN
+          UPDATE "Other" SET typeface = 'figtree';
+          UPDATE "Settings" SET "focusSound" = 'on';
+          ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+        END
+        $$;
+      `),
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].reason).toMatch(/writes "focusSound"/);
+  });
+
+  // `DROP CONSTRAINT IF EXISTS` is the same drop. Missing it does not merely
+  // lose a warning: an unrecognised drop reads as "this column has no CHECK in
+  // this file", which is the passing branch.
+  it("counts a DROP CONSTRAINT IF EXISTS as a drop", () => {
+    const v = findLateConstraintDrops(
+      file(`
+        UPDATE "Settings" SET "focusSound" = 'on';
+        ALTER TABLE "Settings" DROP CONSTRAINT IF EXISTS "Settings_focusSound_check";
+      `),
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].reason).toMatch(/still live when the write runs/);
+  });
+});
+
 describe("findLateConstraintDrops — the committed migrations", () => {
   it("no migration writes to a column whose CHECK it drops too late", () => {
     const violations = findLateConstraintDrops(readMigrations());

@@ -367,6 +367,52 @@ export function parseFocusSoundCategoryBackfill(
 }
 
 /**
+ * Where something sits in a migration: which statement, and where inside it.
+ *
+ * #190 — the second half stopped being redundant when `splitStatements` learned
+ * to keep a `DO $$ … $$` body whole, because everything in such a body shares
+ * one statement index while still running in written order.
+ */
+interface SqlPosition {
+  statement: number;
+  offset: number;
+}
+
+/** Whether `a` runs before `b`. Statement first, then offset within it. */
+function isBefore(a: SqlPosition, b: SqlPosition): boolean {
+  return a.statement === b.statement
+    ? a.offset < b.offset
+    : a.statement < b.statement;
+}
+
+/**
+ * `DROP CONSTRAINT "<Table>_<column>_check"`, capturing both halves of the name.
+ *
+ * `IF EXISTS` is accepted because it is the same drop, and missing it does not
+ * cost a warning — it costs the whole check. An unrecognised drop leaves the
+ * column absent from the map, which is the branch that means "no CHECK on this
+ * column in this file" and returns clean (#190).
+ *
+ * Global, and every match is read: a merged `DO $$ … $$` body is one statement
+ * that may drop several constraints.
+ */
+const DROP_CHECK_CONSTRAINT =
+  /DROP\s+CONSTRAINT\s+(?:IF\s+EXISTS\s+)?"([A-Za-z0-9_]+)_([A-Za-z0-9]+)_check"/gi;
+
+/**
+ * `UPDATE "<Table>" … SET "<column>" =`, capturing both.
+ *
+ * The gap may not cross a `;` (#190). Unbounded, the first `UPDATE` in a merged
+ * `DO $$ … $$` body reaches past its own `SET` — an unquoted one, say — into the
+ * NEXT statement's, and the guard then checks a table/column pair that no
+ * statement writes while the write that was really there goes unexamined. The
+ * only semicolons a single real `UPDATE` can hold sit in its values, which come
+ * after the `SET` this has already matched.
+ */
+const COLUMN_WRITE =
+  /UPDATE\s+"([A-Za-z0-9_]+)"[^;]*?SET\s+"([A-Za-z0-9]+)"\s*=/gi;
+
+/**
  * A write that a still-live CHECK constraint would reject (#180 / the 2026-08-07
  * production incident).
  *
@@ -392,6 +438,27 @@ export function parseFocusSoundCategoryBackfill(
  * column is written and that column's CHECK constraint is dropped later in the
  * same file, the drop is too late.
  *
+ * ── Order is a position, not a statement index (#190) ────────────────────────
+ *
+ * Once `splitStatements` keeps a `DO $$ … $$` body whole, a drop and a write
+ * that both live inside one block share a statement index, and an index
+ * comparison can only read "same index" as "not earlier" — so the correctly
+ * ordered shape could never pass, for any input. That matters more than a
+ * missing warning would: this repo already uses `DO $$ … $$` for data surgery
+ * (`google_auth_orphan_purge`, `google_auth_user_id_not_null`), so the first
+ * author to drop-then-write inside one would meet a guard that cannot be
+ * satisfied, and the fix a blocked author reaches for is deleting the guard.
+ *
+ * So the comparison is `(statement, offset within the statement)`, which reads
+ * a PL/pgSQL body the way Postgres runs it — top to bottom. For every statement
+ * outside such a block the two orderings agree, because the offsets only ever
+ * break a tie the statement indices already lost.
+ *
+ * For the same reason both scans take EVERY match in a statement rather than
+ * the first: one statement used to hold at most one write and one drop, and a
+ * merged body holds as many as the author wrote. Reading only the first let a
+ * late write hide behind an earlier, innocent one.
+ *
  * The constraint→column mapping leans on this repo's naming convention,
  * `<Table>_<column>_check`, which every constraint in `prisma/migrations`
  * follows. A constraint named otherwise is skipped rather than guessed at —
@@ -406,32 +473,38 @@ export function findLateConstraintDrops(
   for (const file of files) {
     const statements = splitStatements(stripSqlComments(file.sql));
 
-    // Where each column's CHECK constraint is dropped, by statement index.
-    const dropIndexByColumn = new Map<string, number>();
-    statements.forEach((s, i) => {
-      const m =
-        /DROP\s+CONSTRAINT\s+"([A-Za-z0-9_]+)_([A-Za-z0-9]+)_check"/i.exec(s);
-      if (m) dropIndexByColumn.set(`${m[1]}.${m[2]}`, i);
+    // Where each column's CHECK constraint is dropped. The LAST drop wins, as
+    // it always has: a second drop of the same constraint name in one file
+    // means something re-added it in between, so the constraint is live again.
+    const dropAtByColumn = new Map<string, SqlPosition>();
+    statements.forEach((s, statement) => {
+      for (const m of s.matchAll(DROP_CHECK_CONSTRAINT)) {
+        dropAtByColumn.set(`${m[1]}.${m[2]}`, { statement, offset: m.index });
+      }
     });
 
-    statements.forEach((s, i) => {
-      const upd =
-        /UPDATE\s+"([A-Za-z0-9_]+)"[\s\S]*?SET\s+"([A-Za-z0-9]+)"\s*=/i.exec(s);
-      if (!upd) return;
-      const key = `${upd[1]}.${upd[2]}`;
-      const dropAt = dropIndexByColumn.get(key);
-      if (dropAt === undefined || dropAt < i) return;
-      violations.push({
-        migration: file.name,
-        statement: s.replace(/\s+/g, " ").trim().slice(0, 160),
-        reason:
-          `writes "${upd[2]}" at statement ${i + 1} but drops ` +
-          `"${upd[1]}_${upd[2]}_check" at statement ${dropAt + 1}. The old ` +
-          `constraint is still live when the write runs, so any EXISTING row ` +
-          `whose new value it forbids fails with SQLSTATE 23514 and rolls the ` +
-          `whole migration back. Move the DROP above the write; only the ` +
-          `replacement ADD belongs after it.`,
-      });
+    statements.forEach((s, statement) => {
+      for (const upd of s.matchAll(COLUMN_WRITE)) {
+        const dropAt = dropAtByColumn.get(`${upd[1]}.${upd[2]}`);
+        const writeAt = { statement, offset: upd.index };
+        if (dropAt === undefined || isBefore(dropAt, writeAt)) continue;
+        const dropWhere =
+          dropAt.statement === statement
+            ? "later in that same statement (a DO $$ … $$ body runs top to " +
+              "bottom, so a drop below the write is still below it)"
+            : `at statement ${dropAt.statement + 1}`;
+        violations.push({
+          migration: file.name,
+          statement: s.replace(/\s+/g, " ").trim().slice(0, 160),
+          reason:
+            `writes "${upd[2]}" at statement ${statement + 1} but drops ` +
+            `"${upd[1]}_${upd[2]}_check" ${dropWhere}. The old ` +
+            `constraint is still live when the write runs, so any EXISTING row ` +
+            `whose new value it forbids fails with SQLSTATE 23514 and rolls the ` +
+            `whole migration back. Move the DROP above the write; only the ` +
+            `replacement ADD belongs after it.`,
+        });
+      }
     });
   }
 
