@@ -95,13 +95,14 @@ export const PURGE_GRACE_DAYS = 30;
  *
  *  - `currentUser()` selects `status` alongside `role` — pages, role checks and
  *    the identity in the header.
- *  - `currentWorkspaceId()` refuses a workspace whose owner is not active, with
- *    the status carried back on the `touchWorkspace` upsert it was issuing
- *    anyway, so the write path gained no round trip. It also clears the session
- *    cookie where the framework allows it, so the person is signed out rather
- *    than meeting silent failures. Both are in src/lib/workspace.ts, and
- *    `scoping.harness.test.ts` is what stops a third resolver appearing without
- *    the check.
+ *  - `currentWorkspaceId()` refuses a workspace whose owner is not active,
+ *    reading the status by the id the session token signed, before it stamps
+ *    `lastSeenAt` — so a frozen account leaves no activity behind on its way to
+ *    being refused. It also clears the session cookie where the framework allows
+ *    it, so the person is signed out rather than meeting silent failures. Guests
+ *    are skipped on the workspace's kind and pay nothing. Both helpers are in
+ *    src/lib/workspace.ts, and `scoping.harness.test.ts` is what stops a third
+ *    resolver appearing without the check.
  *
  * No data is touched: this schedules, it does not destroy. `deleteAccount` above
  * is the only thing in `src/` that destroys.

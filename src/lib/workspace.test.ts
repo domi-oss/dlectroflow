@@ -145,9 +145,13 @@ describe("resolveWorkspace", () => {
       { kind: "user", userId: "u1", wsId: "ws-real" },
       SECRET,
     );
+    // #220 adds `userId` to the user branch: it is a fact about the session, the
+    // same as `kind`, and it is what `currentWorkspaceId` reads the status by
+    // instead of querying the workspace it is about to write to.
     expect(await resolveWorkspace({ owner })).toEqual({
       id: "ws-real",
       kind: "user",
+      userId: "u1",
     });
     const guest = await signGuestSession("g-9", SECRET, 3600);
     expect(await resolveWorkspace({ guest })).toEqual({
@@ -185,23 +189,19 @@ describe("touchWorkspace", () => {
     expect(args.update).not.toHaveProperty("expiresAt");
   });
 
-  // #220 — the whole cost argument for where the status check lives. If this
-  // select ever goes, the check above it has to become a second query.
-  it("carries the owner's status back on the upsert it was already issuing", async () => {
-    workspaceUpsertMock.mockResolvedValue({ user: { status: "active" } });
-    expect(await touchWorkspace("ws-real", "user")).toEqual({
-      ownerStatus: "active",
-    });
+  // #220 — the compensating control for a regression this repo has now shipped
+  // once. A `select` or `include` here disqualifies Prisma's single-statement
+  // upsert; the read-then-write it falls back to loses the race that a fresh
+  // guest sandbox's first navigation runs on every page load, and every loser
+  // raises P2002. `touch-workspace-race.integration.test.ts` proves the failure
+  // against a real database; this one names the cause, in the file somebody
+  // editing this function is actually looking at.
+  it("stays a shape Prisma can compile to one atomic statement", async () => {
+    await touchWorkspace("ws-real", "user");
     const [args] = workspaceUpsertMock.mock.calls[0] as [
-      { select: Record<string, unknown> },
+      Record<string, unknown>,
     ];
-    expect(args.select).toEqual({ user: { select: { status: true } } });
-    expect(workspaceUpsertMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("reports no owner for a guest sandbox, which has no User row", async () => {
-    workspaceUpsertMock.mockResolvedValue({ user: null });
-    expect(await touchWorkspace("g-1", "guest")).toEqual({ ownerStatus: null });
+    expect(Object.keys(args).sort()).toEqual(["create", "update", "where"]);
   });
 });
 
@@ -211,16 +211,15 @@ describe("touchWorkspace", () => {
 // files go through it. Everything else resolves a workspace id here and writes,
 // so this is the gate that decides whether a freeze actually froze anything.
 describe("currentWorkspaceId", () => {
-  /** Present the request as a signed-in account whose row says `status`. */
+  /** Present the request as a signed-in account whose row says `status`, or
+   *  `null` for an account whose row is gone entirely. */
   async function signedInWith(status: string | null) {
     const token = await signUserSession(
       { kind: "user", userId: "u1", wsId: "ws-u1" },
       SECRET,
     );
     cookiesMock.mockResolvedValue(jarWith(token));
-    workspaceUpsertMock.mockResolvedValue({
-      user: status === null ? null : { status },
-    });
+    userFindUniqueMock.mockResolvedValue(status === null ? null : { status });
   }
 
   it("resolves the workspace of an active account", async () => {
@@ -246,13 +245,24 @@ describe("currentWorkspaceId", () => {
     );
   });
 
-  it("checks the status without a second round trip", async () => {
+  it("reads the status once, by the id the token signed, selecting one column", async () => {
     await signedInWith("active");
     await currentWorkspaceId();
-    expect(workspaceUpsertMock).toHaveBeenCalledTimes(1);
-    // The tempting fix was a `prisma.user.findUnique` in `resolveWorkspace`.
-    // This is the assertion that says it is not what shipped.
-    expect(userFindUniqueMock).not.toHaveBeenCalled();
+    expect(userFindUniqueMock).toHaveBeenCalledTimes(1);
+    expect(userFindUniqueMock.mock.calls[0][0]).toEqual({
+      where: { id: "u1" },
+      select: { status: true },
+    });
+  });
+
+  it("refuses BEFORE stamping lastSeenAt", async () => {
+    // A frozen account must not leave activity behind on its way to being
+    // refused, and a DELETED account's live cookie must not make
+    // `touchWorkspace` re-create the workspace the cascade just removed. Both
+    // follow from the order, so the order is asserted rather than assumed.
+    await signedInWith("revoked");
+    await expect(currentWorkspaceId()).rejects.toThrow();
+    expect(workspaceUpsertMock).not.toHaveBeenCalled();
   });
 
   it("signs the frozen account out rather than only refusing it", async () => {
@@ -280,7 +290,7 @@ describe("currentWorkspaceId", () => {
   });
 
   // Fail closed, both ways it can go wrong.
-  it("refuses a user workspace with no owner row at all", async () => {
+  it("refuses a session whose account row is gone entirely", async () => {
     // A deleted account whose 30-day cookie is still alive: the cascade took the
     // workspace, `touchWorkspace` would re-create an ownerless one, and before
     // #220 that was a workspace the deleted account could write to.
@@ -309,7 +319,7 @@ describe("currentWorkspaceId", () => {
       SECRET,
     );
     cookiesMock.mockResolvedValue(jarWith(token));
-    workspaceUpsertMock.mockRejectedValue(new Error("connection refused"));
+    userFindUniqueMock.mockRejectedValue(new Error("connection refused"));
     // Both facts asserted about the SAME rejection: calling the function twice
     // would let a `…Once` mock answer the second call from the default and quietly
     // test nothing.
@@ -320,29 +330,33 @@ describe("currentWorkspaceId", () => {
   });
 
   // #220's second requirement: a guest has no User row to have a status, so the
-  // check must not apply to guests at all.
-  it("leaves a guest sandbox resolving exactly as before", async () => {
+  // check must not apply to guests at all — and must not charge them for it.
+  it("leaves a guest sandbox resolving exactly as before, at the same cost", async () => {
     const token = await signGuestSession("g-1", SECRET, 3600);
     cookiesMock.mockResolvedValue({
       get: (name: string) =>
         name === GUEST_COOKIE ? { value: token } : undefined,
       delete: deleteCookieMock,
     });
-    workspaceUpsertMock.mockResolvedValue({ user: null });
     expect(await currentWorkspaceId()).toBe("g-1");
     expect(deleteCookieMock).not.toHaveBeenCalled();
+    // The extra round trip a signed-in request now pays must not reach the path
+    // that serves an anonymous visitor: the guest branch is still one upsert and
+    // nothing else, which is what the kind-based skip is for.
+    expect(userFindUniqueMock).not.toHaveBeenCalled();
+    expect(workspaceUpsertMock).toHaveBeenCalledTimes(1);
   });
 
-  it("does not let a revoked owner's status leak onto a guest sandbox", async () => {
-    // Guests are exempted by the workspace's KIND, not by the absence of a
-    // status — otherwise a stale relation read could start refusing sandboxes.
+  it("does not let a revoked account's status reach a guest sandbox", async () => {
+    // Guests are skipped on the workspace's KIND, before any query — so even a
+    // user row sitting in the mock cannot refuse a sandbox.
     const token = await signGuestSession("g-2", SECRET, 3600);
     cookiesMock.mockResolvedValue({
       get: (name: string) =>
         name === GUEST_COOKIE ? { value: token } : undefined,
       delete: deleteCookieMock,
     });
-    workspaceUpsertMock.mockResolvedValue({ user: { status: "revoked" } });
+    userFindUniqueMock.mockResolvedValue({ status: "revoked" });
     expect(await currentWorkspaceId()).toBe("g-2");
   });
 });

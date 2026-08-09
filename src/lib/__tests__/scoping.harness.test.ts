@@ -852,19 +852,19 @@ describe("workspace-scoping harness", () => {
   }
 
   /**
-   * Resolvers that turn a session into a workspace id without consulting
-   * `UserStatus`.
+   * The source with comment lines removed — the idiom the OWNER_WORKSPACE_ID
+   * rule above uses.
    *
-   * "Consults the status" is spelled as a mention of the `UserStatus` constant
-   * rather than of the word `status`: the constant is the single source of truth
-   * for the allowed values (`src/lib/constants.ts`), so a check written any other
-   * way — a bare `"active"` string, a `!== "revoked"` — is a finding in its own
-   * right and should fail here too. Comment lines are stripped first, the idiom
-   * the OWNER_WORKSPACE_ID rule above uses, so prose explaining the design cannot
-   * satisfy a rule about code.
+   * Every rule below reads THIS rather than the raw file, and they must all read
+   * the same thing. Writing the guard against raw source and the rule against
+   * stripped source is not a harmless inconsistency: a doc comment that merely
+   * names `resolveWorkspace()` then drags a neighbouring function into the
+   * guard's set and not the rule's, and the two disagree about what is even
+   * being policed. That happened while #220 was being written, which is why the
+   * stripping is a shared function instead of two copies.
    */
-  function statusBlindResolvers(src: string): string[] {
-    const code = src
+  function strippedCode(src: string): string {
+    return src
       .split("\n")
       .filter(
         (line) =>
@@ -873,10 +873,28 @@ describe("workspace-scoping harness", () => {
           !line.trimStart().startsWith("/*"),
       )
       .join("\n");
-    return exportedFunctions(code)
-      .filter((fn) =>
-        TOKEN_LEVEL_RESOLVERS.some((r) => fn.body.includes(`${r}(`)),
-      )
+  }
+
+  /** Exported functions that turn a session into a workspace id. */
+  function sessionResolvers(src: string): { name: string; body: string }[] {
+    return exportedFunctions(strippedCode(src)).filter((fn) =>
+      TOKEN_LEVEL_RESOLVERS.some((r) => fn.body.includes(`${r}(`)),
+    );
+  }
+
+  /**
+   * Resolvers that turn a session into a workspace id without consulting
+   * `UserStatus`.
+   *
+   * "Consults the status" is spelled as a mention of the `UserStatus` constant
+   * rather than of the word `status`: the constant is the single source of truth
+   * for the allowed values (`src/lib/constants.ts`), so a check written any other
+   * way — a bare `"active"` string, a `!== "revoked"` — is a finding in its own
+   * right and should fail here too. Comments are stripped first, so prose
+   * explaining the design cannot satisfy a rule about code.
+   */
+  function statusBlindResolvers(src: string): string[] {
+    return sessionResolvers(src)
       .filter((fn) => !fn.body.includes("UserStatus"))
       .map((fn) => fn.name);
   }
@@ -894,10 +912,7 @@ describe("workspace-scoping harness", () => {
     // The anti-vacuous half. If the parser stopped matching — a reformat, a
     // rename, arrow functions — every rule below would report a clean zero, and
     // an unproven zero is the failure mode this whole file exists to avoid.
-    const src = readFileSync(WORKSPACE_MODULE, "utf8");
-    const resolvers = exportedFunctions(src).filter((fn) =>
-      TOKEN_LEVEL_RESOLVERS.some((r) => fn.body.includes(`${r}(`)),
-    );
+    const resolvers = sessionResolvers(readFileSync(WORKSPACE_MODULE, "utf8"));
     // Pinned as an exact set, not a `toContain`: a NEW resolver must fail this
     // and force a decision — checked, or exempted with a reason — instead of
     // arriving unpoliced. `resolveWorkspace` is in the list because its own

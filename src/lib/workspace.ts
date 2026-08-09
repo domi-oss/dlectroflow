@@ -48,6 +48,17 @@ export class RevokedAccountError extends MissingWorkspaceError {
 export type ResolvedWorkspace = {
   id: string;
   kind: typeof WorkspaceKind.User | typeof WorkspaceKind.Guest;
+  /**
+   * Whose account this is, for a `kind: "user"` resolution; absent for a guest
+   * sandbox, which belongs to nobody.
+   *
+   * Carried out of the token for the same reason `kind` is (#220): it is a fact
+   * about the session that produced this workspace, and the alternative is
+   * re-deriving it with a second query against the row we are about to write to.
+   * `userId` and `wsId` are signed together, so they cannot be mismatched by a
+   * caller — which is what makes it safe to look an account up by it.
+   */
+  userId?: string;
 };
 
 /** The signed-in account behind the current request, or null. */
@@ -70,10 +81,12 @@ export type CurrentUser = {
  *
  * **Token-level only, by design (#220).** This answers "what is signed here",
  * not "may this account act" — it performs no database read at all, and the
- * account's `status` is therefore invisible to it. The status check lives one
- * level up, in {@link currentWorkspaceId}, where a database round trip already
- * happens and can carry it for free; see the comment there for why it is not
- * here.
+ * account's `status` is therefore invisible to it. Keeping it that way is the
+ * point: `hasSession()` (#61) is built on this function precisely because it
+ * touches no database, and a status check here would put a query on every
+ * byte-range request of every audio seek. The check lives one level up, in
+ * {@link currentWorkspaceId}, which is already making a round trip and is only
+ * reached by callers that go on to read or write account data.
  *
  * That split is why this function is NOT exported beyond this module's own
  * tests, and why `scoping.harness.test.ts` fails if another module starts
@@ -91,7 +104,9 @@ export async function resolveWorkspace(input: {
     // #35 Phase A: the signed-in account's OWN workspace, carried in the signed
     // token. Pre-accounts this returned the constant OWNER_WORKSPACE_ID, which
     // is exactly the binary this phase removes.
-    if (p?.kind === "user") return { id: p.wsId, kind: WorkspaceKind.User };
+    if (p?.kind === "user") {
+      return { id: p.wsId, kind: WorkspaceKind.User, userId: p.userId };
+    }
   }
   if (input.guest) {
     const p = await verifySession(input.guest, sessionSecret);
@@ -112,67 +127,46 @@ export async function resolveWorkspaceId(input: {
   return (await resolveWorkspace(input)).id;
 }
 
-/** What {@link touchWorkspace} learned about the workspace on the way past. */
-export type TouchedWorkspace = {
-  /**
-   * `User.status` of the account that owns this workspace, or null when no
-   * account does — which is the normal, correct answer for a guest sandbox.
-   *
-   * A string rather than the `UserStatus` union: it comes back from Postgres,
-   * where the column is a CHECK-constrained String (see `prisma/schema.prisma`
-   * and `enum-constraint-sync`). Narrowing it here would be asserting a fact
-   * about the database rather than reading one, and the caller compares it for
-   * equality with `UserStatus.Active` anyway — which fails closed against a
-   * value neither side has heard of.
-   */
-  ownerStatus: string | null;
-};
-
 /**
- * Record activity on a workspace, creating it if this is the first sighting,
- * and report the status of the account that owns it.
+ * Record activity on a workspace, creating it if this is the first sighting.
  *
  * `kind` is passed in rather than inferred from the id: a workspace's kind is a
  * database fact, and with per-user workspaces there is no longer any id shape to
  * infer it from. Getting it wrong on a user workspace would stamp an
  * `expiresAt` and let the guest-retention purge sweep a real account's data.
  *
- * ## Why the status rides along here (#220)
+ * ## Do not add a `select` or an `include` to this upsert (#220)
  *
- * The obvious fix for #220 was a `prisma.user.findUnique` in
- * `resolveWorkspace`'s user branch. That branch does no database work at all, so
- * it would have added a whole round trip to every authenticated request — and it
- * would have added one to `hasSession()` too, whose entire reason to exist (#61)
- * is that it does none.
+ * It has to stay a shape Prisma can compile to a single
+ * `INSERT ... ON CONFLICT DO UPDATE`, because it races itself constantly: a
+ * fresh guest sandbox's first navigation fires the shell, the page and its data
+ * reads concurrently, all touching a workspace id that does not exist yet.
+ * Atomicity is the only thing making that safe.
  *
- * This upsert, by contrast, ALREADY runs on every `currentWorkspaceId()` call.
- * Selecting the owner's status through the 1:1 `Workspace.user` relation is one
- * more column on a query that was being issued regardless: **zero extra round
- * trips**, and the status can never belong to a different request than the
- * workspace id being handed out, which two separate queries could allow.
+ * #220's first attempt read the owner's `status` here through a nested relation
+ * select, on the reasoning that a column on a query already being issued is
+ * free. It is not. A relation select disqualifies the native upsert, Prisma
+ * falls back to read-then-write, and the race returns — every loser raising
+ * P2002. It passed every sequential test in the suite and took down every guest
+ * page the moment requests overlapped, which is why
+ * `touch-workspace-race.integration.test.ts` now overlaps them on purpose.
  *
- * The relation is followed rather than `User` being read by the token's
- * `userId`, and that is strictly stronger: it proves the workspace this request
- * is about to write to is actually owned by an active account. A user token
- * pointing at a workspace with no owner row — a deleted account whose 30-day
- * cookie is still alive — reports null and is refused by the caller, where
- * before it silently got a workspace.
+ * So the status check lives in {@link currentWorkspaceId} as its own query. It
+ * genuinely costs a round trip; the alternative cost an atomic write.
  */
 export async function touchWorkspace(
   id: string,
   kind: ResolvedWorkspace["kind"],
-): Promise<TouchedWorkspace> {
+): Promise<void> {
   const expiresAt =
     kind === WorkspaceKind.Guest
       ? new Date(Date.now() + guestSandboxTtlHours() * 3600_000)
       : null;
-  const ws = await prisma.workspace.upsert({
+  await prisma.workspace.upsert({
     where: { id },
     create: { id, kind, lastSeenAt: new Date(), expiresAt },
     update: { kind, lastSeenAt: new Date() }, // don't extend TTL on touch
-    select: { user: { select: { status: true } } },
   });
-  return { ownerStatus: ws.user?.status ?? null };
 }
 
 /**
@@ -230,17 +224,32 @@ function clearOwnerSession(jar: Awaited<ReturnType<typeof cookies>>): void {
  * tree was already at 5 of 16 by the time the fix was written. Measure it with
  * `grep -l 'currentUser(' src/app/actions/*.ts` if the ratio ever matters again.)
  *
- * **Guests are untouched.** A guest sandbox has no `User` row to have a status,
- * so `ownerStatus` is null and the check does not apply to it. The condition is
- * written as "a user workspace whose owner is not active" rather than "the owner
- * is not active" precisely so that stays true by construction.
+ * **Guests pay nothing.** The check is skipped on the kind of the resolved
+ * workspace, before any query is issued — a guest sandbox has no account to have
+ * a status, so it makes exactly the one round trip it always did. Branching on
+ * the KIND rather than on a null status is also what keeps that true by
+ * construction rather than by coincidence.
  *
- * **It fails closed.** If the status read itself fails, the upsert rejects and
+ * **A signed-in request pays one extra round trip, and that is the honest
+ * price.** It was meant to be free: the first attempt at #220 read the status
+ * through a relation select on `touchWorkspace`'s existing upsert. That
+ * disqualifies Prisma's single-statement upsert, and the read-then-write it
+ * falls back to reintroduced a P2002 race that took down every guest page —
+ * see the comment on `touchWorkspace`. A query that costs an atomic write is not
+ * a free query. What the placement DOES still buy is `hasSession()` (#61) and
+ * `resolveWorkspace()` staying free, which is the reason the check is not one
+ * level down where the issue first proposed it.
+ *
+ * **The order matters.** The status is read BEFORE the touch, so a frozen
+ * account does not stamp `lastSeenAt` on the way to being refused, and a deleted
+ * account's live cookie does not cause `touchWorkspace` to re-create the
+ * ownerless workspace the cascade just removed.
+ *
+ * **It fails closed.** If the status read itself fails, the query rejects and
  * that rejection propagates — there is no catch here and none is wanted. A
  * database outage must not read as "carry on"; `/api/export` already
  * distinguishes the two and answers 500 rather than 401 for exactly this case.
- * The same applies to a user workspace with no owner row at all: null is not
- * `active`, so it is refused.
+ * A missing row is refused for the same reason: `undefined` is not `active`.
  */
 export async function currentWorkspaceId(): Promise<string> {
   const jar = await cookies();
@@ -250,11 +259,20 @@ export async function currentWorkspaceId(): Promise<string> {
     guest: jar.get(GUEST_COOKIE)?.value,
     header: hdrs.get(GUEST_WS_HEADER) ?? undefined,
   });
-  const { ownerStatus } = await touchWorkspace(ws.id, ws.kind);
-  if (ws.kind === WorkspaceKind.User && ownerStatus !== UserStatus.Active) {
-    clearOwnerSession(jar);
-    throw new RevokedAccountError();
+  if (ws.kind === WorkspaceKind.User) {
+    const owner = await prisma.user.findUnique({
+      // `ws.userId` comes out of the same signed token as `ws.id`, so the two
+      // cannot be mismatched by a caller. `select` is one column: nothing here
+      // needs the account, only permission to continue.
+      where: { id: ws.userId },
+      select: { status: true },
+    });
+    if (owner?.status !== UserStatus.Active) {
+      clearOwnerSession(jar);
+      throw new RevokedAccountError();
+    }
   }
+  await touchWorkspace(ws.id, ws.kind);
   return ws.id;
 }
 

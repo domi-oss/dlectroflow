@@ -651,6 +651,22 @@ operators upgrading a self-hosted instance don't get surprised.
     text findings across 9 files, 2 focus findings, 4 unmeasured banner tones.
 ### Security
 
+- **Freezing an account now actually stops it writing (#220).** Revoking somebody
+  set their status and showed them as **Revoked** in the People panel, but did
+  nothing to the browser cookie they were already holding — and the write path
+  never read the status, so they could keep capturing, editing and deleting for
+  the thirty days that cookie had left. Sign-in was blocked and pages treated
+  them as signed out; only the writes were not. A frozen account is now refused
+  on its very next request, whatever it tries, and is signed out rather than left
+  to hit silent failures. The same check closes the matching hole for an account
+  that has been **deleted** while its cookie was still alive.
+
+  Guest sandboxes are unaffected — they have no account to freeze, and the check
+  is skipped before any query is made, so an anonymous visitor's page load is
+  unchanged. A signed-in request now makes one extra database read. Self-hosters
+  running more than one account should take this one; on a single-account
+  instance there is nobody to freeze.
+
 - **`.ics` text values now escape every line terminator, not just `\n` (#154).**
   `esc()` in `src/lib/ics.ts` handled `\`, `;`, `,` and LF but not **CR**. RFC
   5545 §3.3.11 permits no control character but HTAB, and a literal CR inside a
