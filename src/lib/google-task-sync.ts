@@ -61,19 +61,26 @@ type GoogleTaskRef = {
   googleTaskListId: string | null;
 };
 
-/** Whether this row addresses a Google task at all. */
-function isScheduled(ref: GoogleTaskRef | null | undefined): boolean {
-  return Boolean(ref?.googleTaskId && ref?.googleTaskListId);
+/** The same row, once both halves of its address are known to be present. */
+type ScheduledRef = { googleTaskId: string; googleTaskListId: string };
+
+/**
+ * Whether this row addresses a Google task at all.
+ *
+ * Both halves are required: a list id with no task id (or the reverse) cannot
+ * address anything, and a half-written pair must skip rather than build a URL
+ * out of `undefined`.
+ */
+function isScheduled(ref: GoogleTaskRef): ref is ScheduledRef {
+  return Boolean(ref.googleTaskId && ref.googleTaskListId);
 }
 
 /**
- * Set one Google Task's status. Returns whether Google was patched.
+ * PATCH one already-addressable Google Task with an already-resolved token.
  *
  * ── Best-effort, and that has to be structural ──────────────────────────────
- * A change the user asked for must never fail because Google is unreachable or
- * a refresh token has gone stale, so *every* failure is swallowed here rather
- * than left to each caller to remember: `patchGoogleTask` throws on a network
- * error, and `getValidAccessToken` throws if the refresh round-trip does. A
+ * A change the user asked for must never fail because Google is unreachable, so
+ * the failure is swallowed here rather than left to each caller to remember. A
  * false return means "not synced", never "the local change failed".
  *
  * Leaving it to callers is not a theoretical worry — it is what happened.
@@ -81,22 +88,36 @@ function isScheduled(ref: GoogleTaskRef | null | undefined): boolean {
  * one caller that wrapped it, so the contract held by coincidence. #196 adds a
  * second caller, which would have inherited the promise without the protection.
  */
+async function patchOne(
+  token: string,
+  ref: ScheduledRef,
+  status: "needsAction" | "completed",
+): Promise<boolean> {
+  try {
+    return await patchGoogleTask(token, ref.googleTaskListId, ref.googleTaskId, {
+      status,
+    });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Set one Google Task's status. Returns whether Google was patched.
+ *
+ * The credential lookup is inside the try for the same reason as the PATCH:
+ * `getValidAccessToken` throws if the refresh round-trip does, and a stale
+ * refresh token is not a reason to lose a completion.
+ */
 async function setGoogleTaskStatus(
   ref: GoogleTaskRef,
   status: "needsAction" | "completed",
 ): Promise<boolean> {
-  if (!ref.googleTaskId || !ref.googleTaskListId) return false;
+  if (!isScheduled(ref)) return false;
   try {
     const token = await actingUserGoogleToken();
     if (!token) return false;
-    return await patchGoogleTask(
-      token,
-      ref.googleTaskListId,
-      ref.googleTaskId,
-      {
-        status,
-      },
-    );
+    return await patchOne(token, ref, status);
   } catch {
     return false;
   }
@@ -182,9 +203,25 @@ export const GOOGLE_SYNC_CONCURRENCY = 4;
  *
  * Refs that address nothing are dropped before the pool rather than inside it,
  * so a to-do that was never scheduled costs no credential lookup and occupies no
- * worker. Nothing here rejects: `setGoogleTaskStatus` swallows per patch, which
- * is what makes "one slow or failing step must not abandon the rest" (#209) a
- * property of the code rather than of the comment.
+ * worker. Nothing here rejects: `patchOne` swallows per patch, which is what
+ * makes "one slow or failing step must not abandon the rest" (#209) a property
+ * of the code rather than of the comment.
+ *
+ * ── The credential is resolved ONCE, not per patch ──────────────────────────
+ * #209 noted that `actingUserGoogleToken()` resolves per call. Left that way it
+ * would be a decrypt and a database read per step, and worse than wasteful:
+ * `getValidAccessToken` refreshes a token that is within a minute of expiring,
+ * so a pool of N workers hitting an expiring credential fires N concurrent
+ * refresh round-trips, each writing the row. Resolving before the fan-out makes
+ * that one refresh, and the token cannot expire underneath the pool — the
+ * refresh window is a minute and the whole fan-out is bounded by
+ * `TASKS_PATCH_TIMEOUT_MS` per patch.
+ *
+ * It is resolved once per **to-do**, not once per bulk operation:
+ * `bulkBrainDumpAction` calls `completeItem` in a loop, so ten selected rows
+ * still cost ten lookups. Collapsing that needs `completeItem` split into its
+ * local write and its sync so the loop can gather the syncs, which is a change
+ * to the action's shape rather than to this module (#209).
  */
 async function patchPool(
   refs: readonly GoogleTaskRef[],
@@ -193,11 +230,20 @@ async function patchPool(
   const queue = refs.filter(isScheduled);
   if (!queue.length) return 0;
 
+  let token: string | null = null;
+  try {
+    token = await actingUserGoogleToken();
+  } catch {
+    return 0; // a failed refresh costs the sync, never the local change
+  }
+  if (!token) return 0;
+  const credential = token;
+
   let next = 0;
   let synced = 0;
   const worker = async () => {
     while (next < queue.length) {
-      if (await setGoogleTaskStatus(queue[next++], status)) synced += 1;
+      if (await patchOne(credential, queue[next++], status)) synced += 1;
     }
   };
   const workers = Math.min(GOOGLE_SYNC_CONCURRENCY, queue.length);

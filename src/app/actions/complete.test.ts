@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { prismaMock, txClient, revalidatePathMock, currentWorkspaceIdMock } =
   vi.hoisted(() => {
@@ -326,6 +326,165 @@ describe("completeItem — Google Task sync (#195)", () => {
     const { completeItem } = await import("./braindump");
     await expect(completeItem("i6")).resolves.toBeUndefined();
     expect(prismaMock.brainDumpItem.update).toHaveBeenCalled();
+  });
+});
+
+/**
+ * #209 — the STEP half of the same gap, and a different code path from #195's.
+ *
+ * `completeItem` closes every step in one `updateMany`, so the per-step patch
+ * `completeStep` performs never happens. In Google Tasks all of them stayed
+ * open and Reclaim kept every block. Completing the same steps one at a time
+ * through the focus timer always worked, which is why this survived #195.
+ */
+describe("completeItem — step-level Google Task sync (#209)", () => {
+  /** A multi-step to-do, every step scheduled, the task itself not. */
+  function multiStepItem(steps: Record<string, unknown>[]) {
+    return {
+      id: "i1",
+      completedAt: null,
+      task: {
+        id: "t1",
+        googleTaskId: null,
+        googleTaskListId: null,
+        steps,
+      },
+    };
+  }
+
+  let google_: typeof import("@/lib/google");
+
+  function patchedIds() {
+    return (google_.patchGoogleTask as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c) => c[2],
+    );
+  }
+
+  // `vi.clearAllMocks()` in the outer `beforeEach` clears CALLS but not
+  // implementations, so a `mockResolvedValue` set here would leak into every
+  // later test in the file. Both are restored to the module mock's defaults
+  // afterwards, which is what the rest of this file is written against.
+  beforeEach(async () => {
+    google_ = await import("@/lib/google");
+    (google_.getValidAccessToken as ReturnType<typeof vi.fn>).mockResolvedValue(
+      "tok",
+    );
+  });
+
+  afterEach(() => {
+    (google_.getValidAccessToken as ReturnType<typeof vi.fn>).mockResolvedValue(
+      null,
+    );
+    (google_.patchGoogleTask as ReturnType<typeof vi.fn>).mockResolvedValue(
+      undefined,
+    );
+  });
+
+  it("completes every step's own Google Task", async () => {
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(
+      multiStepItem([
+        { id: "s1", done: false, googleTaskId: "g1", googleTaskListId: "l1" },
+        { id: "s2", done: false, googleTaskId: "g2", googleTaskListId: "l1" },
+      ]),
+    );
+    const { completeItem } = await import("./braindump");
+    await completeItem("i1");
+    for (const g of ["g1", "g2"]) {
+      expect(google_.patchGoogleTask).toHaveBeenCalledWith("tok", "l1", g, {
+        status: "completed",
+      });
+    }
+  });
+
+  // "Skip steps that were already done before this call — they were patched
+  // when they were completed, and re-patching costs a request per step for no
+  // change" (#209). The count is the assertion: a request that changes nothing
+  // is still a request against a rate-limited API.
+  it("skips steps that were already done before this call", async () => {
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(
+      multiStepItem([
+        { id: "s1", done: true, googleTaskId: "g1", googleTaskListId: "l1" },
+        { id: "s2", done: false, googleTaskId: "g2", googleTaskListId: "l1" },
+      ]),
+    );
+    const { completeItem } = await import("./braindump");
+    await completeItem("i1");
+    expect(patchedIds()).toEqual(["g2"]);
+  });
+
+  // Both grains, and neither implies the other: a to-do scheduled while stepless
+  // that was later broken down carries an id on the task AND on its steps.
+  it("completes the task's own Google Task alongside its steps", async () => {
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i2",
+      completedAt: null,
+      task: {
+        id: "t1",
+        googleTaskId: "g-task",
+        googleTaskListId: "l1",
+        steps: [
+          { id: "s1", done: false, googleTaskId: "g1", googleTaskListId: "l1" },
+        ],
+      },
+    });
+    const { completeItem } = await import("./braindump");
+    await completeItem("i2");
+    expect(patchedIds().sort()).toEqual(["g-task", "g1"]);
+  });
+
+  it("does not reach for a credential when nothing is scheduled", async () => {
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(
+      multiStepItem([
+        { id: "s1", done: false, googleTaskId: null, googleTaskListId: null },
+      ]),
+    );
+    const { completeItem } = await import("./braindump");
+    await completeItem("i1");
+    expect(google_.getValidAccessToken).not.toHaveBeenCalled();
+    expect(google_.patchGoogleTask).not.toHaveBeenCalled();
+  });
+
+  // "One slow or failing step must not abandon the rest" (#209), and none of
+  // them may cost the user the completion they asked for.
+  it("one failing step neither fails the completion nor abandons the others", async () => {
+    (google_.patchGoogleTask as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("network down"),
+    );
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(
+      multiStepItem([
+        { id: "s1", done: false, googleTaskId: "g1", googleTaskListId: "l1" },
+        { id: "s2", done: false, googleTaskId: "g2", googleTaskListId: "l1" },
+        { id: "s3", done: false, googleTaskId: "g3", googleTaskListId: "l1" },
+      ]),
+    );
+    const { completeItem } = await import("./braindump");
+    await expect(completeItem("i1")).resolves.toBeUndefined();
+    expect(patchedIds().sort()).toEqual(["g1", "g2", "g3"]);
+    expect(prismaMock.brainDumpItem.update).toHaveBeenCalled();
+  });
+
+  // The ordering invariant `!288` pinned in the lib module's doc: the local
+  // writes land first, so an unreachable Google can never cost the completion.
+  it("patches only after the local writes have landed", async () => {
+    const order: string[] = [];
+    prismaMock.brainDumpItem.update.mockImplementationOnce(async () => {
+      order.push("local");
+      return {};
+    });
+    (
+      google_.patchGoogleTask as ReturnType<typeof vi.fn>
+    ).mockImplementationOnce(async () => {
+      order.push("google");
+      return true;
+    });
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(
+      multiStepItem([
+        { id: "s1", done: false, googleTaskId: "g1", googleTaskListId: "l1" },
+      ]),
+    );
+    const { completeItem } = await import("./braindump");
+    await completeItem("i1");
+    expect(order).toEqual(["local", "google"]);
   });
 });
 

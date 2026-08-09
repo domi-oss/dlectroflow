@@ -225,6 +225,36 @@ describe("completeGoogleTasksForItem (#209)", () => {
     ).resolves.toBe(2);
     expect(patchGoogleTask).toHaveBeenCalledTimes(3);
   });
+
+  it("swallows a thrown credential lookup and patches nothing", async () => {
+    getValidAccessToken.mockRejectedValueOnce(new Error("refresh failed"));
+    await expect(
+      completeGoogleTasksForItem(SCHEDULED, [step(1)]),
+    ).resolves.toBe(0);
+    expect(patchGoogleTask).not.toHaveBeenCalled();
+  });
+
+  it("skips the whole fan-out when the acting account has no credential", async () => {
+    getValidAccessToken.mockResolvedValueOnce(null);
+    await expect(
+      completeGoogleTasksForItem(SCHEDULED, [step(1)]),
+    ).resolves.toBe(0);
+    expect(patchGoogleTask).not.toHaveBeenCalled();
+  });
+
+  /**
+   * `getValidAccessToken` refreshes a credential inside its last minute of
+   * validity, so resolving per patch would fire one refresh per step —
+   * concurrent round trips all rewriting the same row. One lookup feeds the
+   * whole fan-out.
+   */
+  it("resolves the credential once for the whole to-do, not once per patch", async () => {
+    await expect(
+      completeGoogleTasksForItem(SCHEDULED, [step(1), step(2), step(3)]),
+    ).resolves.toBe(4);
+    expect(patchGoogleTask).toHaveBeenCalledTimes(4);
+    expect(getValidAccessToken).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("reopenGoogleTasksForItem (#196)", () => {

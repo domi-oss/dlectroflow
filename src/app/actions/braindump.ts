@@ -23,7 +23,7 @@ import {
 } from "@/lib/braindump-note-syntax";
 import { brainDumpItemToTaskData, liveNote } from "@/lib/braindump-to-task";
 import { normalizeTaskNote } from "@/lib/task-notes";
-import { completeGoogleTaskForTask } from "@/lib/google-task-sync";
+import { completeGoogleTasksForItem } from "@/lib/google-task-sync";
 
 const INBOX_PATH = "/";
 const LIBRARY_PATH = "/library";
@@ -367,8 +367,13 @@ export async function completeItem(id: string) {
   });
   if (!item || item.completedAt) return;
 
+  // The steps this call is about to close. Read before the write, and reused
+  // after it as the set whose Google Tasks to patch (#209) — a step that was
+  // already done was patched when it was done, and re-patching costs a request
+  // per step for no change.
+  const closing = item.task?.steps.filter((s) => !s.done) ?? [];
+
   if (item.task) {
-    const notDone = item.task.steps.filter((s) => !s.done);
     await prisma.step.updateMany({
       where: { taskId: item.task.id },
       data: { done: true },
@@ -377,7 +382,7 @@ export async function completeItem(id: string) {
       where: { id: item.task.id },
       data: { status: TaskStatus.Done },
     });
-    for (const _step of notDone)
+    for (const _step of closing)
       await logReward(workspaceId, RewardType.StepDone);
     await maybeAwardTenStepsDay(workspaceId);
   }
@@ -391,13 +396,19 @@ export async function completeItem(id: string) {
   await awardBadge(workspaceId, BadgeKey.TaskComplete);
   await maybeAwardInboxZero(workspaceId);
 
-  // #195 — a stepless to-do is scheduled as ONE Google Task stored on the task
-  // row, so this is the only place that can close it. Deliberately keyed on the
-  // id rather than on `steps.length === 0`: a task scheduled while stepless
-  // keeps that Google task even after a breakdown gives it steps of its own.
-  // Runs after the local writes and swallows its own failures, so an unreachable
-  // Google can never cost the user the completion they asked for.
-  if (item.task) await completeGoogleTaskForTask(item.task);
+  // #195 + #209 — close every Google Task this to-do owns, at both grains.
+  //
+  // The task row carries an id when the to-do was scheduled while it was still
+  // stepless, and each step carries its own when it was scheduled after a
+  // breakdown; a to-do can have both, and they are always different Google
+  // tasks. #195 fixed the task grain here and #209 the step grain: `updateMany`
+  // above closes every step in one write, so the per-step patch `completeStep`
+  // performs never happened and Reclaim went on holding every block.
+  //
+  // Runs after the local writes and outside any transaction, and swallows its
+  // own failures per patch, so neither an unreachable Google nor one slow step
+  // can cost the user the completion they asked for.
+  if (item.task) await completeGoogleTasksForItem(item.task, closing);
 
   revalidatePath(INBOX_PATH);
   revalidatePath("/dashboard");
