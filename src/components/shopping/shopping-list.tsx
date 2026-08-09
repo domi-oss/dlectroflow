@@ -444,11 +444,16 @@ export function ShoppingList({
   const landedAt = useRef(new Map<string, number>());
 
   /**
-   * Raise or drop `retrying`, and only on the record this attempt owns — a
-   * failure that has since been displaced must not have its flag rewritten by an
-   * older attempt settling. Same lesson `schedulingIds` applies per-row in
-   * `inbox-view.tsx` (#169): a shared in-flight flag belongs to whichever request
-   * settles last, not to the one it is guarding.
+   * Raise or drop `retrying`, and only on a record about this attempt's own
+   * target — a failure that has since been displaced by one about something else
+   * must not have its flag rewritten by an older attempt settling. Same lesson
+   * `schedulingIds` applies per-row in `inbox-view.tsx` (#169): a shared
+   * in-flight flag belongs to whichever request settles last, not to the one it
+   * is guarding.
+   *
+   * No sequence test, unlike `clearFailureFor`: a record for this target can
+   * only be showing `retrying` because THIS retry raised it, since a fresh
+   * record always starts with the flag down.
    */
   const markRetrying = (target: WriteTarget, retrying: boolean) =>
     setFailure((prev) =>
