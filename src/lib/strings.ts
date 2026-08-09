@@ -1201,9 +1201,22 @@ export const STRINGS = {
     plain: "Not now",
     playful: "Not now",
   },
+  // "the list grows", not "you add something" (Duo review, !295). Adding is one
+  // of the THREE writes `syncShoppingSummary` resurfaces a dismissed summary on —
+  // the others are un-ticking an item and pulling one back up from saved-for-later
+  // — and this hint is the only place the app explains what "Not now" does. Naming
+  // one trigger made the other two look like a bug: un-tick something, watch the
+  // line return, and the app has contradicted the last thing it told you about
+  // that control. "Grows" is the rule itself, in fewer words than listing them,
+  // and it is already how `shopping-summary-sync.ts` and `dismissShoppingSummary`
+  // both state it — the string was the one place that disagreed.
+  //
+  // Identical across voices, like `summaryDismiss` above: this is the sentence
+  // that keeps a temporary control from reading as a delete, and the one place
+  // where flavour would be paid for in comprehension.
   "shopping.summaryDismissHint": {
-    plain: "Back when you add something.",
-    playful: "Back when you add something.",
+    plain: "Back when the list grows.",
+    playful: "Back when the list grows.",
   },
   // Accessible names. Each one names the ITEM, because "Delete" repeated down a
   // list of twelve rows is unusable in a screen reader's element list.

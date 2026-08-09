@@ -53,9 +53,7 @@ describe("ShoppingSummaryCard", () => {
     // The hint is part of the contract, not decoration: without it "Not now" reads
     // as a delete, and the row is the only place the returning behaviour is
     // explained.
-    expect(
-      screen.getByText(/back when you add something/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/back when the list grows/i)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /not now/i }));
     expect(dismissMock).toHaveBeenCalledTimes(1);
   });
@@ -75,7 +73,7 @@ describe("ShoppingSummaryCard", () => {
   // well as on presence, because `getByText` finds an element that CSS is hiding.
   it("never hides the hint behind a breakpoint", () => {
     render(<ShoppingSummaryCard count={2} voice="plain" />);
-    const hint = screen.getByText(/back when you add something/i);
+    const hint = screen.getByText(/back when the list grows/i);
     expect(hint.className).not.toContain("hidden");
     expect(hint.className).not.toContain("sm:inline");
   });
@@ -132,6 +130,26 @@ describe("ShoppingSummaryCard", () => {
 
     await act(async () => settle());
   });
+
+  // Duo review, !295 — the hint used to say the line comes back "when you add
+  // something", which is ONE of the three writes `syncShoppingSummary` resurfaces
+  // on: adding an item, un-ticking one, and pulling one back up from
+  // saved-for-later. This card is the only place the codebase explains what "Not
+  // now" does, so a user who un-ticks something and sees the line return had been
+  // told, here, that it would not.
+  //
+  // Asserted for EVERY voice: a hint that is honest in `plain` and wrong in
+  // `playful` is a contradiction only some users can see, which is worse than one
+  // everybody can.
+  it.each(["plain", "playful"] as const)(
+    "promises the rule rather than one of its triggers (%s voice)",
+    (voice) => {
+      render(<ShoppingSummaryCard count={2} voice={voice} />);
+      const hint = screen.getByText(/back when the list grows/i);
+      expect(hint).toBeInTheDocument();
+      expect(hint.textContent).not.toMatch(/\badd\b/i);
+    },
+  );
 
   it("speaks the playful voice (#86)", () => {
     render(<ShoppingSummaryCard count={2} voice="playful" />);
