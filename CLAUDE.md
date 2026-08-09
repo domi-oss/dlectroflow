@@ -37,7 +37,12 @@ npm run check:env      env-drift check
 - `src/app/actions/` — server actions, one file per action, colocated tests.
 - `src/lib/` — all domain logic, flat, colocated `*.test.ts`. Subfolders only where a cluster earns one: `auth/`, `llm/`, `crypto/`, `scheduling/`, `nav/`.
 - `src/components/` — grouped by feature (`inbox/`, `focus/`, `library/`, `settings/`…); `ui/` is shadcn primitives.
-- `prisma/schema.prisma` — 19 models. `Workspace` is the tenancy root.
+- `prisma/schema.prisma` — `Workspace` is the tenancy root. A model that declares
+  `workspaceId` is enrolled automatically in the scoping harness
+  (`src/lib/__tests__/scoping.harness.test.ts`) and the export coverage guard
+  (`src/lib/export/__tests__/model-coverage.test.ts`), both of which read
+  `Prisma.dmmf` at runtime. (The count used to be written here and was wrong by
+  the time anybody read it — `grep -c '^model ' prisma/schema.prisma`.)
 - `docker/` — both Dockerfiles, the Caddyfile and both Compose files. Paths inside the compose files resolve against `docker/`, so `.env.prod` and `backups/` are referenced as `../`; the image build context stays the repo root.
 - Community files (`CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`) live in `docs/`, not the root and not `.gitlab/` — `.gitlab/**` is in the CI `.code_changes` list, so putting them there would cost every typo fix a full pipeline. Renovate's config is `.gitlab/renovate.json`.
 

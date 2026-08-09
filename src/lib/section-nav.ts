@@ -57,6 +57,17 @@ export const SETTINGS_SECTIONS = [
   // #118 Phase C — your own account: the per-user LLM key. After Integrations
   // (both are "things you connect") and before administration, which stays last.
   { id: "settings-account", heading: { key: "settings.accountHeading" } },
+  // #199 — shopping-list mode's on/off switch. Its own section rather than a
+  // checkbox borrowed from another one: it is a FEATURE switch that adds a
+  // destination to the menu, and the nearest existing homes are all about
+  // something else (Appearance is theme/typeface/completion style, Notifications
+  // is per-type delivery, Aging is thresholds). A switch filed under a heading
+  // that does not describe it is a switch nobody finds.
+  //
+  // Placed at the low-frequency end, ahead of Demo and administration: it is set
+  // once and then left alone, which is the ordering rule #101 states (frequency
+  // of use descending, administration last).
+  { id: "settings-shopping", heading: { key: "shopping.settingsHeading" } },
   { id: "settings-demo", heading: { text: "Demo" } },
   { id: "settings-people", heading: { text: "People" } },
 ] as const satisfies readonly SectionDef[];

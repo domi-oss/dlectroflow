@@ -133,6 +133,10 @@ export const STRINGS = {
   "nav.focusTimer": { plain: "Focus Timer", playful: "⏱️ Focus Timer" },
   "nav.settings": { plain: "Settings", playful: "⚙️ Settings" },
   "nav.help": { plain: "Help", playful: "🆘 Help" },
+  // #199 — a menu entry rather than a Library tab, because every Library tab is
+  // a bucket of BrainDumpItems (inbox/bucket.ts) and a tab there would say "this is
+  // a kind of task". Only rendered when Settings.shoppingList is on.
+  "nav.shopping": { plain: "Shopping list", playful: "🛒 Shopping list" },
 
   // ── Freshness tiers ────────────────────────────────────────────────────────
   "freshness.recent": { plain: "Recent", playful: "Fresh" },
@@ -1125,6 +1129,164 @@ export const STRINGS = {
   "settings.helpDocs": { plain: "Help & Docs", playful: "🆘 Help & Docs" },
   // Guest sandbox onboarding link → in-app /help docs (#29). → is a functional
   // glyph (allowed in plain); 🆘 is playful-only flavour.
+
+  // ── #199 Shopping list mode ────────────────────────────────────────────────
+  // A list-shaped thing that is NOT a task. The copy leans on that deliberately:
+  // nothing here mentions estimates, steps, scheduling or streaks, because the
+  // feature is outside all four and copy that borrowed their vocabulary would
+  // promise behaviour the page does not have.
+  "shopping.intro": {
+    plain:
+      "A plain list. No estimates, no steps, nothing lands in your calendar, and ticking one off does not touch your streak.",
+    playful:
+      "🛒 Just a list. No estimates, no steps, nothing hits your calendar — and ticking one off won't touch your streak.",
+  },
+  "shopping.addLabel": { plain: "Add to the list", playful: "Add to the list" },
+  "shopping.addPlaceholder": {
+    plain: "e.g. oat milk",
+    playful: "e.g. oat milk 🥛",
+  },
+  "shopping.add": { plain: "Add", playful: "➕ Add" },
+  // The three refusals are separate keys, not one "that didn't work": a capture
+  // field that fails without saying which rule was broken is the failure mode
+  // that makes people stop trusting it.
+  "shopping.errorEmpty": {
+    plain: "Type something first.",
+    playful: "Type something first.",
+  },
+  "shopping.errorTooLong": {
+    plain: "That is too long for one line — 200 characters is the limit.",
+    playful: "Whoa, that's a paragraph — 200 characters is the limit.",
+  },
+  "shopping.errorFull": {
+    plain:
+      "This list is full at 500 items. Tick a few off and delete them to make room.",
+    playful: "This list is full at 500 items. Clear a few to make room. 🧹",
+  },
+  // ── A write that did not land ──────────────────────────────────────────────
+  // Distinct from the three refusals above, which are decided on the client
+  // before anything is sent. These three are the server's silence, split the same
+  // three ways `capture.error.*` splits it (#210) because each one changes what
+  // the user should DO: a stale bundle makes a retry impossible, a timeout makes
+  // the outcome unknown, and only the generic case can honestly say nothing
+  // happened.
+  //
+  // Named under `shopping.` rather than reusing `capture.error.*`, whose values
+  // are close but not identical. That module's own comment makes the argument for
+  // both of us: the prefix has to name the surface, or re-tuning one surface's
+  // copy silently re-words another's. The duplication is a few short strings; the
+  // coupling would be permanent.
+  //
+  // All three END on a colon — the words the write could not save are rendered,
+  // quoted, immediately after, so the notice is itself a copy of them.
+  "shopping.errorSaveFailed": {
+    plain: "Couldn't save that just now:",
+    playful: "Couldn't save that just now:",
+  },
+  "shopping.errorSaveStale": {
+    plain:
+      "The app updated while this was open, so that didn't save. Reload to carry on:",
+    playful:
+      "The app updated while this was open, so that didn't save. Reload to carry on:",
+  },
+  // The one failure whose verdict is genuinely unknown. A server action cannot be
+  // aborted from the client, so the timeout bounds how long the UI waits, not the
+  // write — it may still land, and "couldn't save that" would be a claim the
+  // client cannot support. Says what it knows, names the thing that resolves the
+  // ambiguity, and leaves the choice with the user: a duplicate line is one tap to
+  // delete, an item that never landed is discovered at the checkout.
+  "shopping.errorSaveTimeout": {
+    plain:
+      "No answer from the server, so this may already have saved. Check the list before trying again:",
+    playful:
+      "No answer from the server, so this may already have saved. Check the list before trying again:",
+  },
+  // ── A write the server DECLINED ────────────────────────────────────────────
+  // Duo review round 5, !294. A third category again, and the reason it needs
+  // its own words rather than "couldn't save that just now" is that nothing
+  // failed: the server answered, promptly and correctly, and said no. Copy that
+  // blames the connection would send the user to look in the wrong place, and
+  // the Retry it implies would re-post a call that is refused by definition.
+  //
+  // Only the two the page has no words for are here. "This list is full" and the
+  // two text rules are already `shopping.errorFull` / `errorEmpty` / `errorTooLong`
+  // above, said by the capture field about itself — a server-side full is the
+  // same sentence arriving a round trip later, not a new one.
+  "shopping.errorSaveGone": {
+    plain: "That item is not on the list any more, so nothing changed:",
+    playful: "That item is not on the list any more, so nothing changed:",
+  },
+  // The feature switched off in another tab or window. A retry posts into an
+  // action that refuses it for the same reason; only a reload shows the user
+  // where they actually are, which is why this reads like the stale-bundle copy.
+  "shopping.errorSaveOff": {
+    plain:
+      "Shopping list mode is switched off, so that didn't save. Reload to carry on:",
+    playful:
+      "Shopping list mode is switched off, so that didn't save. Reload to carry on:",
+  },
+  // Appended to a capture-field refusal, before the words it could not keep.
+  // Needed only when the field has moved on: the restore never overwrites text
+  // the user has typed since, so on the rare occasion it declines, this is where
+  // the words survive instead of nowhere.
+  "shopping.errorUnsaved": { plain: "Not saved:", playful: "Not saved:" },
+  "shopping.errorRetry": { plain: "Try again", playful: "Try again" },
+  "shopping.errorReload": {
+    plain: "Reload the page",
+    playful: "Reload the page",
+  },
+  // Announced from inside the notice while a retry is in flight, so the wait is
+  // not silent and Retry can keep focus instead of being `disabled`.
+  "shopping.errorSaving": { plain: "Saving…", playful: "Saving…" },
+  "shopping.sectionActive": { plain: "To buy", playful: "🛒 To buy" },
+  "shopping.sectionSaved": {
+    plain: "Saved for later",
+    playful: "🥫 Saved for later",
+  },
+  "shopping.savedHint": {
+    plain:
+      "Nothing here comes back on its own — pull an item up when you want it again.",
+    playful:
+      "Nothing here comes back on its own — pull it up when you want it again.",
+  },
+  "shopping.empty": {
+    plain: "Nothing on the list yet.",
+    playful: "Nothing on the list yet.",
+  },
+  // Counted noun, split so a count reads "1 item" / "3 items". Same shape as
+  // focus.sound.trackOne/trackMany, and #199 part 2's inbox summary reuses these
+  // keys rather than spelling the word again.
+  "shopping.itemOne": { plain: "item", playful: "item" },
+  "shopping.itemMany": { plain: "items", playful: "items" },
+  "shopping.stillToBuy": { plain: "still to buy", playful: "still to buy" },
+  // Accessible names. Each one names the ITEM, because "Delete" repeated down a
+  // list of twelve rows is unusable in a screen reader's element list.
+  "shopping.tickOff": { plain: "Tick off", playful: "Tick off" },
+  "shopping.saveForLater": {
+    plain: "Save for later",
+    playful: "Save for later",
+  },
+  "shopping.moveBackUp": {
+    plain: "Move back to the list",
+    playful: "Move back to the list",
+  },
+  "shopping.delete": { plain: "Delete", playful: "Delete" },
+  "shopping.rename": { plain: "Rename", playful: "Rename" },
+  // Settings section.
+  "shopping.settingsHeading": {
+    plain: "Shopping list",
+    playful: "🛒 Shopping list",
+  },
+  "shopping.settingsToggle": {
+    plain: "Show the shopping list",
+    playful: "Show the shopping list",
+  },
+  "shopping.settingsHint": {
+    plain:
+      "Adds a Shopping list to the menu: a plain list for things that are not tasks. Off by default. Turning it off hides the list without deleting it.",
+    playful:
+      "Adds a 🛒 Shopping list to the menu — a plain list for things that aren't tasks. Off by default, and turning it off hides the list rather than binning it.",
+  },
   "guest.newHere": { plain: "New here?", playful: "New here?" },
   "guest.helpCta": {
     plain: "See the help & docs →",

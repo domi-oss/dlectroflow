@@ -105,7 +105,12 @@ export default async function AppLayout({
                 this cluster is three controls in both states, not five in one of
                 them — the bar measured wider than a 390px viewport before. */}
             <AuthActions identity={identity} />
-            <AppMenu voice={voice} />
+            {/* #199 — the shopping-list entry, off unless this workspace asked
+                for it. `settings` is already read here for the voice, so the
+                menu costs no extra query. Hiding the link is presentation: the
+                gate that matters is `notFound()` on /shopping plus the same
+                check in every shopping server action. */}
+            <AppMenu voice={voice} shoppingList={settings.shoppingList} />
           </div>
         </div>
       </header>

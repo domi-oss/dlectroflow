@@ -103,6 +103,8 @@ export function exportJson(snapshot: ExportSnapshot): string {
     tasks: snapshot.tasks.map(jsonTask),
     inbox: snapshot.inbox,
     focusSessions: snapshot.focusSessions,
+    focusPlaylists: snapshot.focusPlaylists,
+    shoppingItems: snapshot.shoppingItems,
     gamification: snapshot.gamification,
   };
   // Two-space indent: a person will open this file too, and a single-line

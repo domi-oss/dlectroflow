@@ -64,6 +64,19 @@ export const SOURCE_REPO_URL =
  * direction: the text cannot move without someone deciding about this date.
  *
  *
+ * Bumped for #199: /privacy names a NEW CATEGORY OF STORED CONTENT — a shopping
+ * list, its items, their ticked state and whether each has been moved to "saved
+ * for later". A new kind of personal data being stored is an Art. 13(1)(c)
+ * disclosure and would move this date on its own; the retention sentence that
+ * comes with it ("switching the feature off hides the list without deleting it")
+ * is a second one, because a reader could otherwise reasonably infer that turning
+ * a feature off disposes of what it held.
+ *
+ * The feature is off by default and stores nothing until it is turned on, which is
+ * stated on the page rather than left to be inferred — "we might store this" and
+ * "we store this only if you ask us to" are different disclosures.
+ *
+ *
  * Two changes share this date, to two different documents — #164 to the Terms
  * and #154 to the Privacy Policy. Both are recorded, because a reader asking
  * why the date moved is owed both answers, and because the fingerprint gate
@@ -137,7 +150,7 @@ export const SOURCE_REPO_URL =
  * Previously bumped for #126: freezing or deleting an account also revokes the
  * Google grant, which changed what the app does with somebody's Google account.
  */
-export const LEGAL_EFFECTIVE_DATE = "2026-08-05";
+export const LEGAL_EFFECTIVE_DATE = "2026-08-08";
 
 /** Where the hosted instance and its backups physically sit. */
 export const HOSTING_REGION = "London, United Kingdom (GCP europe-west2)";

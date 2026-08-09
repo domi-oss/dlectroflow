@@ -64,6 +64,46 @@ describe("AppMenu", () => {
     ]);
   });
 
+  // #199 — the shopping-list entry is behind Settings.shoppingList, and the
+  // default is OFF. The prop is optional and defaults to false so a caller that
+  // predates it fails CLOSED: forgetting to pass it hides a feature rather than
+  // revealing one nobody asked for.
+  it("omits the shopping list by default", async () => {
+    render(<AppMenu voice="plain" />);
+    await userEvent.click(screen.getByRole("button", { name: /menu/i }));
+    expect(
+      screen.queryByRole("link", { name: /Shopping list/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("omits the shopping list when the toggle is off", async () => {
+    render(<AppMenu voice="plain" shoppingList={false} />);
+    await userEvent.click(screen.getByRole("button", { name: /menu/i }));
+    expect(
+      screen.queryByRole("link", { name: /Shopping list/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("adds the shopping list after Library when the toggle is on", async () => {
+    render(<AppMenu voice="plain" shoppingList />);
+    await userEvent.click(screen.getByRole("button", { name: /menu/i }));
+    expect(screen.getByRole("link", { name: /Shopping list/ })).toHaveAttribute(
+      "href",
+      "/shopping",
+    );
+    // Placed with the other content destinations rather than at the end: Settings
+    // and Help close the menu, and an entry after them reads as administration.
+    expect(screen.getAllByRole("link").map((el) => el.textContent)).toEqual([
+      "Inbox",
+      "Focus Timer",
+      "Library",
+      "Shopping list",
+      "Activity",
+      "Settings",
+      "Help",
+    ]);
+  });
+
   // #23 safety net: the menu must close itself on navigation (it used to be an
   // effect syncing state off `pathname`; it is now derived from it). Without
   // this the popover would stay open over the page you just navigated to.
