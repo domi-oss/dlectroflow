@@ -295,6 +295,37 @@ describe("row controls", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  /**
+   * Found while fixing the two round-4 findings, and the same fault one level
+   * down from the one round 3 fixed: `editError` is a single slot shared by every
+   * row, so opening a DIFFERENT row's editor while a refusal was showing carried
+   * that refusal across — the new field rendered `aria-invalid="true"` and pointed
+   * `aria-describedby` at a message about the row above it. Which is verbatim what
+   * the comment on `editError` says the state exists to prevent, so the file
+   * contradicted itself.
+   */
+  it("does not carry one row's refusal into another row's editor", async () => {
+    renderList([
+      item({ id: "a", text: "Apples" }),
+      item({ id: "b", text: "Bread", order: 2 }),
+    ]);
+    await userEvent.click(
+      screen.getByRole("button", { name: /rename apples/i }),
+    );
+    const fieldA = screen.getByRole("textbox", { name: /rename apples/i });
+    await userEvent.clear(fieldA);
+    await userEvent.type(fieldA, "  {Enter}");
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /rename bread/i }),
+    );
+    const fieldB = screen.getByRole("textbox", { name: /rename bread/i });
+    expect(fieldB).not.toHaveAttribute("aria-invalid", "true");
+    expect(fieldB).not.toHaveAttribute("aria-describedby");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("abandons a refused rename on Escape, taking the message with it", async () => {
     renderList([item({ id: "a", text: "Apples" })]);
     await userEvent.click(

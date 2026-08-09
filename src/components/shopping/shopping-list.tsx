@@ -172,6 +172,13 @@ export function ShoppingList({
    * row reverted with no explanation — the exact "a silent no-op looks like a lost
    * item" failure this file's docblock warns about for the Add flow. Both flows now
    * run through `shoppingItemTextError`.
+   *
+   * It is still ONE slot across all the rows, which is fine only because exactly
+   * one editor is ever open. Opening another row's editor therefore clears it (see
+   * the trigger's `onClick`): without that, the same "a message about a different
+   * control" fault this comment describes reappeared one level down, between two
+   * rows instead of between the row and the Add field. Found while fixing the
+   * round-4 findings — the paragraph above was already the argument against it.
    */
   const [editError, setEditError] = useState<"empty" | "too-long" | null>(null);
   const errorId = useId();
@@ -464,7 +471,17 @@ export function ShoppingList({
             else renameTriggers.current.delete(i.id);
           }}
           aria-label={`${t("shopping.rename", voice)} ${i.text}`}
-          onClick={() => setEditingId(i.id)}
+          // The refusal goes with the editor being left behind. `editError` is
+          // ONE slot shared by every row, so opening this editor while another
+          // row's refusal was showing used to carry it across — the new field
+          // came up `aria-invalid` and pointed `aria-describedby` at a message
+          // about the row above it (WCAG 3.3.1). That is verbatim the fault the
+          // comment on `editError` says the state exists to prevent, one level
+          // down: found while fixing Duo review round 4, !294.
+          onClick={() => {
+            setEditingId(i.id);
+            setEditError(null);
+          }}
           className={ICON_BUTTON}
         >
           {t("shopping.rename", voice)}
