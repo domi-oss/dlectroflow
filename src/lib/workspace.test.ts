@@ -207,7 +207,7 @@ describe("touchWorkspace", () => {
 
 // ── #220 — a frozen account with a valid cookie must not be able to write ────
 //
-// `currentUser()` has always re-read `status`, but only six of fifteen action
+// `currentUser()` has always re-read `status`, but only a minority of the action
 // files go through it. Everything else resolves a workspace id here and writes,
 // so this is the gate that decides whether a freeze actually froze anything.
 describe("currentWorkspaceId", () => {
@@ -235,7 +235,7 @@ describe("currentWorkspaceId", () => {
     );
   });
 
-  // The subclassing is what carries the refusal into fifteen action files and
+  // The subclassing is what carries the refusal into every action file and
   // /api/export's 401 branch without any of them changing. A sibling class would
   // have turned each of those into a 500 and each unhandled action into a
   // different failure — so this is behaviour, not taxonomy.

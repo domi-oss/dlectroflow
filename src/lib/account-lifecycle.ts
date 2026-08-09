@@ -85,11 +85,11 @@ export const PURGE_GRACE_DAYS = 30;
  * The freeze takes effect on the NEXT REQUEST rather than at the next sign-in,
  * and #220 is the issue that made that true rather than merely written down.
  * This comment used to name `currentUser()` as the whole mechanism. It was
- * accurate about pages and roles and wrong about every write: only six of the
- * fifteen action files go through `currentUser()`, and the rest resolve a
- * workspace id and write — `currentWorkspaceId()`, which read the signed token
- * and never looked at `status`. So a frozen account kept writing for the 30 days
- * its cookie had left, while `people-panel.tsx` rendered it as "Revoked".
+ * accurate about pages and roles and wrong about every write: only a minority of
+ * the action files go through `currentUser()`, and the rest resolve a workspace
+ * id and write — `currentWorkspaceId()`, which read the signed token and never
+ * looked at `status`. So a frozen account kept writing for the 30 days its
+ * cookie had left, while `people-panel.tsx` rendered it as "Revoked".
  *
  * Both halves re-read it now, and each pays for its own read:
  *

@@ -25,8 +25,8 @@ export class MissingWorkspaceError extends Error {
  * load-bearing decision in this fix. Every handler that already narrows on
  * MissingWorkspaceError treats it as "no usable session and no workspace to
  * scope to", which is exactly the right answer here — `/api/export` answers 401
- * instead of 500, `hasSession()` would report false, and each of the fifteen
- * action files inherits the refusal without a line changed. More to the point it
+ * instead of 500, `hasSession()` would report false, and every action file
+ * inherits the refusal without a line changed. More to the point it
  * fails closed for code that does not exist yet: a future handler written
  * knowing only about MissingWorkspaceError cannot accidentally let a frozen
  * account through, because there is no narrower branch for it to miss.
@@ -191,8 +191,9 @@ export async function touchWorkspace(
  *  - In a **Server Component render** it cannot: "Setting cookies is not
  *    supported during Server Component rendering"
  *    (`node_modules/next/dist/docs/01-app/03-api-reference/04-functions/cookies.md`),
- *    and Next enforces it by sealing the jar so `.delete` throws. Ten pages and
- *    the app shell resolve their workspace this way.
+ *    and Next enforces it by sealing the jar so `.delete` throws. Every page
+ *    under `src/app/(app)/` and the shell layout resolve their workspace this
+ *    way, so this is not a corner.
  *
  * Hence best-effort, and hence the bare catch — which cannot weaken anything,
  * because the refusal it accompanies is thrown by the CALLER, outside this
@@ -217,12 +218,17 @@ function clearOwnerSession(jar: Awaited<ReturnType<typeof cookies>>): void {
  * The workspace every write in this app scopes itself to — and the one place
  * that decides a frozen account may not have one (#220).
  *
- * `currentUser()` has always re-read `status`, but only six of fifteen action
- * files go through it; the rest resolve a workspace id and write. So a revoked
- * account holding a valid cookie kept writing while `people-panel.tsx` rendered
- * it as "Revoked". Enforcing it HERE, on the single helper the write path
- * already shares, is what makes the badge true without asking fifteen files to
- * remember — and what stops the sixteenth from forgetting.
+ * `currentUser()` has always re-read `status`, but only a minority of the action
+ * files go through it; the rest resolve a workspace id and write, and
+ * `braindump.ts` alone does so from nearly every function it exports. So a
+ * revoked account holding a valid cookie kept writing while `people-panel.tsx`
+ * rendered it as "Revoked". Enforcing it HERE, on the single helper the write
+ * path already shares, is what makes the badge true without asking every action
+ * file to remember — and what stops the next one from forgetting.
+ *
+ * (No count, deliberately: #220 was filed quoting "6 of 15 action files" and the
+ * tree was already at 5 of 16 by the time the fix was written. Measure it with
+ * `grep -l 'currentUser(' src/app/actions/*.ts` if the ratio ever matters again.)
  *
  * **Guests are untouched.** A guest sandbox has no `User` row to have a status,
  * so `ownerStatus` is null and the check does not apply to it. The condition is
