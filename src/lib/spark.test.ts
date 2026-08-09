@@ -13,6 +13,11 @@ const { generateMock, prismaMock } = vi.hoisted(() => ({
   prismaMock: {
     dailySpark: {
       findUnique: vi.fn(),
+      // #223 — `getTodaySpark` writes through `createManyAndReturn` +
+      // `skipDuplicates` now, not `upsert`. `refreshTodaySpark` still upserts,
+      // legitimately: its update payload is non-empty, so Prisma compiles it to
+      // a real `INSERT … ON CONFLICT DO UPDATE`.
+      createManyAndReturn: vi.fn(),
       upsert: vi.fn(),
     },
   },
@@ -33,20 +38,23 @@ vi.mock("@/lib/models", () => ({
 }));
 vi.mock("@/lib/llm", () => ({ getLLM: () => ({ generate: generateMock }) }));
 
+type SparkRow = {
+  quote: string;
+  source: string;
+  date: string;
+  workspaceId: string;
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   prismaMock.dailySpark.findUnique.mockResolvedValue(null);
+  // The winning caller: `ON CONFLICT DO NOTHING` inserted, so the row it wrote
+  // comes back.
+  prismaMock.dailySpark.createManyAndReturn.mockImplementation(
+    ({ data }: { data: SparkRow }) => Promise.resolve([data]),
+  );
   prismaMock.dailySpark.upsert.mockImplementation(
-    ({
-      create,
-    }: {
-      create: {
-        quote: string;
-        source: string;
-        date: string;
-        workspaceId: string;
-      };
-    }) => Promise.resolve(create),
+    ({ create }: { create: SparkRow }) => Promise.resolve(create),
   );
 });
 
@@ -82,5 +90,44 @@ describe("spark.ts › getTodaySpark", () => {
     expect(generateMock).not.toHaveBeenCalled();
     expect(result.source).toBe(SparkSource.Fallback);
     expect(result.quote).toBeTruthy();
+  });
+
+  it("losing the insert race returns the WINNER's row, not the quote it generated", async () => {
+    // #223 — `createManyAndReturn` + `skipDuplicates` answers a loser with an
+    // empty array, so the read-back is the only thing that delivers "keep the
+    // first". Returning the locally-generated quote instead would show two
+    // requests on the same day two different sparks, one of which is in no
+    // table. The real race is proved against Postgres in
+    // spark.integration.test.ts; this pins the branch itself, which a
+    // concurrency test cannot force deterministically.
+    generateMock.mockResolvedValue({ text: "mine", toolCall: undefined });
+    prismaMock.dailySpark.createManyAndReturn.mockResolvedValueOnce([]);
+    prismaMock.dailySpark.findUnique
+      // The leading cache read: still nothing when this caller looked.
+      .mockResolvedValueOnce(null)
+      // The read-back, after the insert was skipped.
+      .mockResolvedValueOnce({ quote: "theirs", source: SparkSource.AI });
+    const { getTodaySpark } = await import("@/lib/spark");
+
+    expect(await getTodaySpark("owner")).toEqual({
+      quote: "theirs",
+      source: SparkSource.AI,
+    });
+  });
+
+  it("falls back to its own quote if the winning row is gone by the read-back", async () => {
+    // The workspace was purged mid-request (guest TTL, account deletion). A
+    // dashboard is not worth throwing away over a cache miss on a quote, so the
+    // line already in hand is served — uncached, which is the correct answer for
+    // a workspace that no longer exists.
+    generateMock.mockResolvedValue({ text: "mine", toolCall: undefined });
+    prismaMock.dailySpark.createManyAndReturn.mockResolvedValueOnce([]);
+    prismaMock.dailySpark.findUnique.mockResolvedValue(null);
+    const { getTodaySpark } = await import("@/lib/spark");
+
+    expect(await getTodaySpark("owner")).toEqual({
+      quote: "mine",
+      source: SparkSource.AI,
+    });
   });
 });
