@@ -676,8 +676,11 @@ export function ShoppingList({
     const text = draft;
     setDraft("");
     showRefusal(null);
-    // The third argument is what makes this the one write with a stake in the
-    // field: it was emptied a line ago, so a failure has to put the words back.
+    // The `draftText` argument is what makes this the one write with a stake in
+    // the field: it was emptied a line ago, so a failure has to put the words
+    // back. It repeats `text` because the two mean different things — the words
+    // the notice quotes, and the words the field is owed back — and only the add
+    // has both.
     run(() => addShoppingItem(text), { kind: "add", text }, text, text);
   };
 
