@@ -36,7 +36,9 @@ operators upgrading a self-hosted instance don't get surprised.
   list"* and takes you straight there. **Not now** clears it, and it comes back the
   next time the list grows — adding an item, un-ticking one, or pulling one back up
   out of Saved for later. Ticking things off does not bring it back: that is
-  progress, not a new reason to be reminded.
+  progress, not a new reason to be reminded. If a **Not now** does not reach the
+  server it says so and leaves the line where it is, rather than disappearing and
+  turning up again later as though the button had never worked.
 
   The count is worked out from the list itself every time the inbox renders, and
   nothing anywhere stores a copy of it — so the number cannot drift away from the
