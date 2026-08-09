@@ -9,6 +9,7 @@ import {
   awardBadge,
   touchStreakOnCompletion,
   touchStreakOnEngagement,
+  reverseItemCompletionRewards,
 } from "@/lib/rewards";
 import {
   BrainDumpStatus,
@@ -23,7 +24,10 @@ import {
 } from "@/lib/braindump-note-syntax";
 import { brainDumpItemToTaskData, liveNote } from "@/lib/braindump-to-task";
 import { normalizeTaskNote } from "@/lib/task-notes";
-import { completeGoogleTasksForItem } from "@/lib/google-task-sync";
+import {
+  completeGoogleTasksForItem,
+  reopenGoogleTasksForItem,
+} from "@/lib/google-task-sync";
 
 const INBOX_PATH = "/";
 const LIBRARY_PATH = "/library";
@@ -415,6 +419,32 @@ export async function completeItem(id: string) {
   if (item.task) revalidatePath(`/tasks/${item.task.id}`);
 }
 
+/**
+ * Un-complete a to-do from the inbox Done view, whole or step by step.
+ *
+ * Three things have to be undone, not one, and #196 is the record of the two
+ * that were missing.
+ *
+ * 1. **The local state** — `completedAt`, the task's status, and the selected
+ *    steps. This is what the action always did.
+ * 2. **Google Tasks** — every task this reopen just un-completed goes back to
+ *    `needsAction`, so Reclaim re-books the time. Without it the two sides
+ *    diverged permanently: nothing else in the app ever sends `needsAction` for
+ *    these rows, and nothing reads Google back to notice (that inbound half is
+ *    #194's). This runs AFTER the transaction and outside it, so an unreachable
+ *    Google can never roll back a reopen the user asked for.
+ * 3. **The points** — `completeItem` banks one `step_done` per step it closes
+ *    plus a `task_complete`, and taking none of it back meant complete → reopen
+ *    → complete paid twice for one piece of work. The reversal runs INSIDE the
+ *    transaction, for the reason `uncompleteStep` records at length: if it
+ *    fails, the local writes must fail with it, or the to-do is reopened with
+ *    the points still banked and nothing will ever take them.
+ *
+ * Badges stand. They are once-ever achievements, `awardBadge` is idempotent so
+ * re-completing cannot earn a second one, and revoking one would make the
+ * collection lie about the past — the rule `reverseItemCompletionRewards`
+ * already carries, applied here rather than left unstated.
+ */
 export async function reopenItem(id: string, stepIds?: string[]) {
   const workspaceId = await currentWorkspaceId();
   const item = await prisma.brainDumpItem.findFirst({
@@ -423,25 +453,39 @@ export async function reopenItem(id: string, stepIds?: string[]) {
   });
   if (!item) return;
 
+  const steps = item.task?.steps ?? [];
+  const resetIds = new Set(
+    stepIds && stepIds.length
+      ? steps.filter((s) => stepIds.includes(s.id)).map((s) => s.id)
+      : steps.map((s) => s.id),
+  );
+  // Guarantee ≥1 not-done step so the task re-enters To-do.
+  const anyNotDone = steps.some((s) => resetIds.has(s.id) || !s.done);
+  if (!anyNotDone && steps.length) resetIds.add(steps[steps.length - 1].id);
+
+  // The steps this call actually turns done → not-done. Computed once, out here,
+  // because all three of the undos above are counted off it: the reward reversal
+  // owes one `step_done` each, and Google owes one `needsAction` each. A step in
+  // `resetIds` that was already open earned nothing and is already `needsAction`
+  // on Google's side, so it belongs in neither.
+  const reopening = steps.filter((s) => resetIds.has(s.id) && s.done);
+
+  // Whether this reopen actually un-completes a COMPLETED item is the gate on
+  // the `task_complete` reversal, and it is observed state rather than an
+  // inference: an item that was not completed never earned one, so reversing
+  // would take points from a different, genuinely finished to-do.
+  const wasCompleted = item.completedAt !== null;
+
   await prisma.$transaction(async (tx) => {
     await tx.brainDumpItem.update({
       where: { id },
       data: { completedAt: null },
     });
     if (item.task) {
-      const steps = item.task.steps;
       await tx.task.update({
         where: { id: item.task.id },
         data: { status: TaskStatus.Active },
       });
-      const resetIds = new Set(
-        stepIds && stepIds.length
-          ? steps.filter((s) => stepIds.includes(s.id)).map((s) => s.id)
-          : steps.map((s) => s.id),
-      );
-      // Guarantee ≥1 not-done step so the task re-enters To-do.
-      const anyNotDone = steps.some((s) => resetIds.has(s.id) || !s.done);
-      if (!anyNotDone && steps.length) resetIds.add(steps[steps.length - 1].id);
       if (resetIds.size) {
         await tx.step.updateMany({
           where: { id: { in: [...resetIds] } },
@@ -449,7 +493,18 @@ export async function reopenItem(id: string, stepIds?: string[]) {
         });
       }
     }
+    // On `tx`, not `prisma`: a reversal that committed independently would
+    // survive the rollback, which is the bug wearing the fix's clothes.
+    await reverseItemCompletionRewards(
+      workspaceId,
+      { stepDone: reopening.length, includeTaskComplete: wasCompleted },
+      tx,
+    );
   });
+
+  // After the transaction and outside it — see (2) above. Best-effort per patch,
+  // so one unreachable step does not abandon the others or the reopen.
+  await reopenGoogleTasksForItem(item.task, reopening);
 
   revalidatePath(INBOX_PATH);
   revalidatePath("/dashboard");

@@ -33,6 +33,9 @@ const { prismaMock, txClient, revalidatePathMock, currentWorkspaceIdMock } =
       badge: {
         findUnique: vi.fn().mockResolvedValue(null),
         createMany: vi.fn().mockResolvedValue({ count: 1 }),
+        // Mocked only so a regression that starts revoking badges on a reopen
+        // has something to be caught by — #196 decided they stand.
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       focusSession: { findFirst: vi.fn(), update: vi.fn() },
       streak: {},
@@ -85,6 +88,10 @@ vi.mock("@/lib/rewards", () => ({
   reverseStepCompletionRewards: vi
     .fn()
     .mockResolvedValue({ stepDone: true, taskComplete: false }),
+  // #196 — the same rule at whole-to-do arity, for `reopenItem`.
+  reverseItemCompletionRewards: vi
+    .fn()
+    .mockResolvedValue({ stepDone: 1, taskComplete: false }),
   touchStreakOnCompletion: vi.fn().mockResolvedValue(null),
   maybeAwardInboxZero: vi.fn().mockResolvedValue(undefined),
   maybeAwardTenStepsDay: vi.fn().mockResolvedValue(undefined),
@@ -560,6 +567,308 @@ describe("reopenItem", () => {
     const call = prismaMock.step.updateMany.mock.calls[0][0];
     expect(call.data).toEqual({ done: false });
     expect(call.where.id.in).toContain("b"); // last step forced not-done
+  });
+});
+
+/**
+ * #196 — the reverse direction. `reopenItem` cleared `completedAt`, set the task
+ * Active and flipped steps back to `done: false`, and never told Google
+ * anything. In the app the work was open again; in Google Tasks every task was
+ * still `completed`, no later action ever un-completed them, and Reclaim never
+ * re-booked the time. `needsAction` is a value `patchGoogleTask` has always
+ * accepted and this path had never sent.
+ */
+describe("reopenItem — Google Task sync (#196)", () => {
+  let google_: typeof import("@/lib/google");
+
+  function patchedIds() {
+    return (google_.patchGoogleTask as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c) => c[2],
+    );
+  }
+
+  /** A completed multi-step to-do, scheduled at both grains. */
+  function completedItem(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "i1",
+      completedAt: new Date(),
+      task: {
+        id: "t1",
+        googleTaskId: "g-task",
+        googleTaskListId: "l1",
+        steps: [
+          { id: "s1", done: true, googleTaskId: "g1", googleTaskListId: "l1" },
+          { id: "s2", done: true, googleTaskId: "g2", googleTaskListId: "l1" },
+        ],
+      },
+      ...overrides,
+    };
+  }
+
+  beforeEach(async () => {
+    google_ = await import("@/lib/google");
+    (google_.getValidAccessToken as ReturnType<typeof vi.fn>).mockResolvedValue(
+      "tok",
+    );
+  });
+
+  afterEach(() => {
+    (google_.getValidAccessToken as ReturnType<typeof vi.fn>).mockResolvedValue(
+      null,
+    );
+    (google_.patchGoogleTask as ReturnType<typeof vi.fn>).mockResolvedValue(
+      undefined,
+    );
+  });
+
+  it("patches every reopened step, and the task's own Google Task, to needsAction", async () => {
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(completedItem());
+    const { reopenItem } = await import("./braindump");
+    await reopenItem("i1");
+    expect(patchedIds().sort()).toEqual(["g-task", "g1", "g2"]);
+    for (const call of (google_.patchGoogleTask as ReturnType<typeof vi.fn>)
+      .mock.calls) {
+      expect(call[3]).toEqual({ status: "needsAction" });
+    }
+  });
+
+  it("patches only the steps the caller selected", async () => {
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(completedItem());
+    const { reopenItem } = await import("./braindump");
+    await reopenItem("i1", ["s2"]);
+    expect(patchedIds().sort()).toEqual(["g-task", "g2"]);
+  });
+
+  // A step that was already open is already `needsAction` in Google. Re-patching
+  // it costs a request against a rate-limited API and changes nothing — the same
+  // rule the completion direction follows for steps already done (#209).
+  it("does not re-patch a selected step that was already open", async () => {
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(
+      completedItem({
+        task: {
+          id: "t1",
+          googleTaskId: null,
+          googleTaskListId: null,
+          steps: [
+            {
+              id: "s1",
+              done: false,
+              googleTaskId: "g1",
+              googleTaskListId: "l1",
+            },
+            {
+              id: "s2",
+              done: true,
+              googleTaskId: "g2",
+              googleTaskListId: "l1",
+            },
+          ],
+        },
+      }),
+    );
+    const { reopenItem } = await import("./braindump");
+    await reopenItem("i1", ["s1", "s2"]);
+    expect(patchedIds()).toEqual(["g2"]);
+  });
+
+  // The ≥1-not-done guard can add a step the caller did not select. If that step
+  // was done, it is genuinely being reopened and Google has to hear about it.
+  it("patches the step the ≥1-not-done guard forces open", async () => {
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(
+      completedItem({
+        task: {
+          id: "t1",
+          googleTaskId: null,
+          googleTaskListId: null,
+          steps: [
+            {
+              id: "s1",
+              done: true,
+              googleTaskId: "g1",
+              googleTaskListId: "l1",
+            },
+            {
+              id: "s2",
+              done: true,
+              googleTaskId: "g2",
+              googleTaskListId: "l1",
+            },
+          ],
+        },
+      }),
+    );
+    const { reopenItem } = await import("./braindump");
+    await reopenItem("i1", ["missing"]); // selects nothing real → last step forced
+    expect(patchedIds()).toEqual(["g2"]);
+  });
+
+  /**
+   * The ordering `!288` pinned in the lib module's doc, and the one #196's
+   * checklist calls out: the patch runs AFTER the `$transaction` and outside it.
+   * A patch awaited inside would roll a reopen the user asked for back on a
+   * network blip — and a transaction that aborts must leave Google untouched,
+   * because there is no longer any local change for it to mirror.
+   */
+  it("never patches when the transaction aborts", async () => {
+    prismaMock.$transaction.mockRejectedValueOnce(new Error("deadlock"));
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(completedItem());
+    const { reopenItem } = await import("./braindump");
+    await expect(reopenItem("i1")).rejects.toThrow("deadlock");
+    expect(google_.patchGoogleTask).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it("a thrown Google patch never fails the reopen", async () => {
+    (google_.patchGoogleTask as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("network down"),
+    );
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(completedItem());
+    const { reopenItem } = await import("./braindump");
+    await expect(reopenItem("i1")).resolves.toBeUndefined();
+    expect(prismaMock.step.updateMany).toHaveBeenCalled();
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
+  });
+
+  it("skips the sync entirely for a to-do that was never scheduled", async () => {
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i9",
+      completedAt: new Date(),
+      task: {
+        id: "t1",
+        googleTaskId: null,
+        googleTaskListId: null,
+        steps: [
+          { id: "s1", done: true, googleTaskId: null, googleTaskListId: null },
+        ],
+      },
+    });
+    const { reopenItem } = await import("./braindump");
+    await reopenItem("i9");
+    expect(google_.getValidAccessToken).not.toHaveBeenCalled();
+    expect(google_.patchGoogleTask).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * #196, second defect — `reopenItem` re-awards points.
+ *
+ * `completeItem` logs one `step_done` per step it closes plus a
+ * `task_complete`, and reopening took none of it back, so complete → reopen →
+ * complete has always banked every one of them twice for one piece of work. It
+ * is the same farm `!286` closed for `uncompleteStep` (#198), one route along,
+ * and the rule is the one `reverseStepCompletionRewards` already documents: a
+ * reward comes back when the same work could otherwise be paid for twice.
+ */
+describe("reopenItem — reward reversal (#196)", () => {
+  function reopened(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "i1",
+      completedAt: new Date(),
+      task: {
+        id: "t1",
+        googleTaskId: null,
+        googleTaskListId: null,
+        steps: [
+          { id: "s1", done: true },
+          { id: "s2", done: true },
+          { id: "s3", done: false },
+        ],
+      },
+      ...overrides,
+    };
+  }
+
+  it("takes back one step_done per step it actually un-completed", async () => {
+    const rewards = await import("@/lib/rewards");
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(reopened());
+    const { reopenItem } = await import("./braindump");
+    await reopenItem("i1");
+    // s3 was already open, so no `step_done` was ever banked for it to reverse.
+    expect(rewards.reverseItemCompletionRewards).toHaveBeenCalledWith(
+      "owner",
+      { stepDone: 2, includeTaskComplete: true },
+      txClient,
+    );
+  });
+
+  it("counts only the selected steps", async () => {
+    const rewards = await import("@/lib/rewards");
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(reopened());
+    const { reopenItem } = await import("./braindump");
+    await reopenItem("i1", ["s1"]);
+    expect(rewards.reverseItemCompletionRewards).toHaveBeenCalledWith(
+      "owner",
+      { stepDone: 1, includeTaskComplete: true },
+      txClient,
+    );
+  });
+
+  // The gate is observed state, never an inference: an item that was not
+  // completed never earned a `task_complete`, so reversing one here would take
+  // points from a different, genuinely finished to-do.
+  it("does NOT reverse task_complete for an item that was not completed", async () => {
+    const rewards = await import("@/lib/rewards");
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(
+      reopened({ completedAt: null }),
+    );
+    const { reopenItem } = await import("./braindump");
+    await reopenItem("i1");
+    expect(rewards.reverseItemCompletionRewards).toHaveBeenCalledWith(
+      "owner",
+      { stepDone: 2, includeTaskComplete: false },
+      txClient,
+    );
+  });
+
+  it("reverses task_complete alone for a stepless to-do", async () => {
+    const rewards = await import("@/lib/rewards");
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i2",
+      completedAt: new Date(),
+      task: null,
+    });
+    const { reopenItem } = await import("./braindump");
+    await reopenItem("i2");
+    expect(rewards.reverseItemCompletionRewards).toHaveBeenCalledWith(
+      "owner",
+      { stepDone: 0, includeTaskComplete: true },
+      txClient,
+    );
+  });
+
+  /**
+   * Atomicity, for the reason review round 4 established on `uncompleteStep`: a
+   * reversal that fails must roll the local writes back with it, or the to-do is
+   * reopened with the points still banked and nothing will ever take them.
+   */
+  it("runs the reversal inside the reopen's own transaction", async () => {
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(reopened());
+    const { reopenItem } = await import("./braindump");
+    await reopenItem("i1");
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(typeof prismaMock.$transaction.mock.calls[0][0]).toBe("function");
+  });
+
+  it("a failing reversal aborts the reopen rather than committing half of one", async () => {
+    const rewards = await import("@/lib/rewards");
+    (
+      rewards.reverseItemCompletionRewards as ReturnType<typeof vi.fn>
+    ).mockRejectedValueOnce(new Error("P1001"));
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(reopened());
+    const { reopenItem } = await import("./braindump");
+    await expect(reopenItem("i1")).rejects.toThrow("P1001");
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  // Badges are NOT reversed, and that is a decision rather than an oversight
+  // (#196's checklist asked for it in writing): they are once-ever achievements,
+  // `awardBadge` is idempotent so re-completing cannot earn a second one, and
+  // revoking one would make the collection lie about the past.
+  it("never revokes the TaskComplete badge", async () => {
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce(reopened());
+    const { reopenItem } = await import("./braindump");
+    await reopenItem("i1");
+    expect(prismaMock.badge.deleteMany).not.toHaveBeenCalled();
   });
 });
 
