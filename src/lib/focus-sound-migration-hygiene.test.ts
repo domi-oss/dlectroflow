@@ -94,6 +94,17 @@ describe("stripSqlComments", () => {
       `DO $$ BEGIN $$; SELECT 1;`,
     );
   });
+
+  // An unterminated body runs to the end of the input — the only reading that
+  // cannot silently resume lexing inside PL/pgSQL. Its comments are still
+  // comments, and no closing tag may be invented on the way out: emitting one
+  // would hand `splitStatements` a body that looks closed and let it split on
+  // semicolons that terminate nothing.
+  it("strips inside an unterminated body without inventing a closing tag", () => {
+    expect(
+      stripSqlComments(`SELECT 1; DO $$ BEGIN -- x\n  DELETE FROM "T";`),
+    ).toBe(`SELECT 1; DO $$ BEGIN \n  DELETE FROM "T";`);
+  });
 });
 
 describe("splitStatements", () => {
