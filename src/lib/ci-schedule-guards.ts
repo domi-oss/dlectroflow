@@ -83,6 +83,55 @@ export function topLevelBlocks(yml: string): CiBlock[] {
 }
 
 /**
+ * `line` with a YAML inline comment removed, quote state respected (#191).
+ *
+ * Needed because the one file this parser exists to read is the file where an
+ * inline comment is idiomatic: `.gitlab-ci.yml` is listed in `.prettierignore`,
+ * and the reason recorded there is that it "relies on hand-aligned inline
+ * comments". It carries 41. So no formatter will ever normalise one away, and
+ * annotating a guard is an edit no reviewer would question.
+ *
+ * Stripping happens before any matching, which closes both directions at once —
+ * and both were silent:
+ *
+ *     when: never # why           a real guard read as NO guard. Worse than it
+ *                                 sounds: `guardParityGaps` skips blocks that
+ *                                 guard nothing, so the block leaves the check
+ *                                 altogether and passes while asserting nothing.
+ *     if: '…'  # was $FLAG_A …    a flag read out of prose, which then enters
+ *                                 `allGuardedFlags` and reports every properly
+ *                                 guarded block as missing a flag that does not
+ *                                 exist.
+ *
+ * YAML's comment rule is narrower than shell's: an unquoted `#` opens a comment
+ * only at the start of a line or after whitespace. `a#b` is the scalar `a#b`,
+ * and a `/ #191/` regex inside a quoted `if:` is data, not a comment — hence
+ * tracking quotes rather than cutting at the first `#`.
+ *
+ * Local rather than in `src/lib/source-text.ts` on purpose: that module's own
+ * doc records what earns a move there — a SECOND caller — and explains that
+ * relocating early buys coupling with no reason for it. This has one caller.
+ */
+function stripYamlComment(line: string): string {
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quote !== null) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === "#" && (i === 0 || /\s/.test(line[i - 1]))) {
+      return line.slice(0, i);
+    }
+  }
+  return line;
+}
+
+/**
  * The schedule flags that a block suppresses itself on — that is, the flags
  * appearing in an `if:` whose rule entry carries `when: never`.
  *
@@ -94,9 +143,14 @@ export function topLevelBlocks(yml: string): CiBlock[] {
  * and comments are skipped — so a comment between an `if:` and its `when:` does
  * not silently turn a guard into a non-guard. Anything else terminates the
  * search, because in YAML the `when:` belongs to the `if:` it follows.
+ *
+ * A comment appended to a line is handled by the same principle rather than as
+ * a separate case, since handling one position and not the other was an accident
+ * of implementation: `stripYamlComment` runs over every line first, so prose can
+ * neither hide a guard nor invent one wherever it sits.
  */
 export function guardedFlags(blockText: string): Set<string> {
-  const lines = blockText.split("\n");
+  const lines = blockText.split("\n").map(stripYamlComment);
   const flags = new Set<string>();
 
   lines.forEach((line, index) => {
@@ -107,8 +161,12 @@ export function guardedFlags(blockText: string): Set<string> {
     if (!match) return;
     for (let j = index + 1; j < lines.length; j++) {
       const next = lines[j].trim();
-      if (next === "" || next.startsWith("#")) continue;
-      if (next === "when: never") flags.add(match[1]);
+      // A comment-only line has already been stripped to nothing, so it arrives
+      // here as "" — the same tolerance the explicit `#` check used to give.
+      if (next === "") continue;
+      // Tolerant of the spacing because this file is the one Prettier is told
+      // to skip; `when:never` is not a mapping, so the space is still required.
+      if (/^when:\s+never$/.test(next)) flags.add(match[1]);
       break;
     }
   });

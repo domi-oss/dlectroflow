@@ -67,6 +67,21 @@ describe("topLevelBlocks", () => {
     );
   });
 
+  it("still names a top-level key that carries a trailing comment", () => {
+    // Checked as part of #191's review of the trailing-comment hole in
+    // `guardedFlags`: this sibling matcher does NOT share it, because the key
+    // regex is a prefix test and the name is cut at the first colon. Pinned so
+    // that stays true rather than being re-derived by the next reader.
+    const yml = `ops_digest: # weekly, and the one block a missed guard is visible in
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $FLAG_A == "true"'
+      when: never
+`;
+    const blocks = topLevelBlocks(yml);
+    expect(blocks.map((b) => b.name)).toEqual(["ops_digest"]);
+    expect(guardedFlags(blocks[0].text)).toEqual(new Set(["FLAG_A"]));
+  });
+
   it("keeps an indented anchor's body with the anchor", () => {
     const yml = `.anchor_rules:
   rules:
@@ -100,6 +115,72 @@ describe("guardedFlags", () => {
     - if: '$CI_PIPELINE_SOURCE == "schedule" && $FLAG_A == "true"'
       # explaining why this one is suppressed
 
+      when: never
+`;
+    expect(guardedFlags(yml)).toEqual(new Set(["FLAG_A"]));
+  });
+
+  it("recognises a guard whose when: never carries a trailing comment", () => {
+    // #191 review. The sibling case above was already handled; this one was not,
+    // and the asymmetry was an accident of implementation rather than a decision.
+    // It matters more than it looks: `.gitlab-ci.yml` is listed in
+    // `.prettierignore` *because* it "relies on hand-aligned inline comments",
+    // and carries 41 of them — so the one file this parser exists to read is the
+    // file where an inline comment is idiomatic and will never be normalised
+    // away. Annotating a guard is an edit no reviewer would question.
+    const yml = `job:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $FLAG_A == "true"'
+      when: never # the digest must not ride #191's hourly schedule
+`;
+    expect(guardedFlags(yml)).toEqual(new Set(["FLAG_A"]));
+  });
+
+  it("tolerates extra spacing between when: and never", () => {
+    // Same brittleness as the trailing comment, same line. Worth pinning here
+    // rather than trusting the formatter, because `.gitlab-ci.yml` is exactly
+    // the file Prettier is told to skip — its spacing is hand-maintained.
+    const yml = `job:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $FLAG_A == "true"'
+      when:   never
+`;
+    expect(guardedFlags(yml)).toEqual(new Set(["FLAG_A"]));
+  });
+
+  it("does not read a flag out of a trailing comment on the if: line", () => {
+    // The same blindness pointing the other way, and the more dangerous
+    // direction: a phantom flag enters `allGuardedFlags`, so every genuinely
+    // guarded block is then reported as missing a guard for a flag that does
+    // not exist. The failure is loud but the message is a lie.
+    const yml = `job:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"' # was $FLAG_A == "true" until #191
+      when: never
+`;
+    expect(guardedFlags(yml)).toEqual(new Set());
+  });
+
+  it("does not read a commented-out rule as a live guard", () => {
+    // A comment that quotes the rule it replaced is the house style here, and
+    // this repo has been bitten twice by a scanner reading prose as code — which
+    // is why `src/lib/source-text.ts` exists at all.
+    const yml = `job:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $FLAG_A == "true"'
+      # if: '$FLAG_B == "true"' was dropped when this stopped being nightly
+      when: never
+`;
+    expect(guardedFlags(yml)).toEqual(new Set(["FLAG_A"]));
+  });
+
+  it("treats a # inside a quoted scalar as data, not a comment", () => {
+    // Why the stripper tracks quote state instead of cutting at the first `#`:
+    // a rule matching a commit title against an issue reference is legitimate
+    // YAML, and cutting there would silently drop the guard it introduces.
+    const yml = `job:
+  rules:
+    - if: '$CI_COMMIT_TITLE =~ / #191/ && $FLAG_A == "true"'
       when: never
 `;
     expect(guardedFlags(yml)).toEqual(new Set(["FLAG_A"]));
@@ -173,6 +254,56 @@ describe("guardParityGaps", () => {
     expect(guardParityGaps(missing)).toEqual([
       { block: "job_one", missing: "FLAG_B" },
     ]);
+  });
+
+  it("does not invent a gap when a guard carries an inline comment", () => {
+    // The end-to-end cost of the trailing-comment hole (#191 review), in the
+    // shape a contributor would actually produce: one guard annotated, the
+    // others left alone. Before the fix this reported job_one as missing FLAG_A
+    // — a failure naming a guard that is right there in the file.
+    const annotated = BALANCED.replace(
+      `    - if: '$CI_PIPELINE_SOURCE == "schedule" && $FLAG_A == "true"'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $FLAG_B == "true"'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+`,
+      `    - if: '$CI_PIPELINE_SOURCE == "schedule" && $FLAG_A == "true"'
+      when: never # flag A owns its own job
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $FLAG_B == "true"'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+`,
+    );
+    expect(annotated).not.toBe(BALANCED);
+    expect(guardParityGaps(annotated)).toEqual([]);
+  });
+
+  it("does not drop a wholly-annotated block out of the parity check", () => {
+    // The silent half, and the reason this outranks its severity label: a block
+    // whose every guard carries a comment guards nothing as far as the parser is
+    // concerned, and `guardParityGaps` skips blocks that guard nothing. So the
+    // block leaves the check entirely — passing while asserting nothing, instead
+    // of failing.
+    const annotated = BALANCED.replace(
+      `job_two:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $FLAG_A == "true"'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $FLAG_B == "true"'
+      when: never
+`,
+      `job_two:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $FLAG_A == "true"'
+      when: never # not this job's schedule
+    - if: '$CI_PIPELINE_SOURCE == "schedule" && $FLAG_B == "true"'
+      when: never # nor this one
+`,
+    );
+    expect(annotated).not.toBe(BALANCED);
+    expect(blocksGuarding(annotated, "FLAG_A")).toContain("job_two");
+    expect(blocksGuarding(annotated, "FLAG_B")).toContain("job_two");
   });
 
   it("derives the flag set from the file rather than a hard-coded list", () => {
