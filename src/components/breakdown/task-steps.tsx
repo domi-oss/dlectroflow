@@ -174,9 +174,19 @@ export function TaskSteps({
   // just asked for. And it is the better landing spot for the announcement too:
   // that button carries `aria-busy` and appends the busy reason to its accessible
   // name while `undoing`, so a screen-reader user who lands on it hears that the
-  // retry is running — the same "make the wait reachable from the focused control
-  // rather than shouting it from a nested live region" that #218 settles for the
-  // timer's notice.
+  // retry is running.
+  //
+  // That last point is why #218's live region has NO counterpart here, and the
+  // difference is worth being precise about (Duo round 16 on `!303` raised it).
+  // #218 is about text that changes while the user stands still: focus is held
+  // on the timer's Retry across the whole attempt, and neither a description nor
+  // an accessible name is re-read under held focus, so the wait there needs a
+  // live region to reach anyone. Here focus MOVES — onto a control whose
+  // accessible name already ends in the busy reason at the moment it lands, and
+  // a name is read on arrival by every screen reader. Adding a live region on
+  // top would say it a second time. Pinned by "hands focus to the row's own undo
+  // when Retry withdraws the notice", which asserts the busy name and the focus
+  // together.
   //
   // The timer is NOT inconsistent with this: it keeps its notice mounted because
   // its notice is page-level and has nowhere else to send focus, whereas every row
