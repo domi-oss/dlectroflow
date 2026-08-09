@@ -3,6 +3,7 @@ import {
   splitInlineNote,
   inlineNoteSource,
   inlineNoteInsertion,
+  inlineNoteTyping,
   resolveInlineNoteEdit,
   type InlineNoteSplit,
 } from "@/lib/braindump-note-syntax";
@@ -822,6 +823,110 @@ describe("inlineNoteInsertion (#186)", () => {
       const { value, caret } = inlineNoteInsertion(raw);
       expect(value[caret]).toBe("}");
       expect(value.slice(caret)).toBe("}");
+    }
+  });
+});
+
+describe("inlineNoteTyping (#201)", () => {
+  /** The shape the handler wants back: a value and a collapsed caret, or
+   *  `null` meaning "leave the keystroke alone". */
+  const type = (value: string, key: string, start: number, end = start) =>
+    inlineNoteTyping({ value, key, start, end });
+
+  describe("typing `{` closes the pair", () => {
+    it("inserts both braces and leaves the caret between them", () => {
+      expect(type("water the plants ", "{", 17)).toEqual({
+        value: "water the plants {}",
+        caret: 18,
+      });
+    });
+
+    it("inserts mid-string too — the caret decides, not the end of the field", () => {
+      expect(type("ab", "{", 1)).toEqual({ value: "a{}b", caret: 2 });
+    });
+
+    it("wraps a selection rather than replacing it", () => {
+      // Replacing would destroy what the user had selected, which is the one
+      // outcome an auto-close must never produce.
+      expect(type("water the plants", "{", 6, 16)).toEqual({
+        value: "water {the plants}",
+        caret: 17,
+      });
+    });
+  });
+
+  /**
+   * #179 Decision 1: only the LAST group is the note, so silently creating a
+   * second one reassigns which text becomes the note. The same constraint
+   * `inlineNoteInsertion` respects for the button — and the reason the two live
+   * in one module.
+   */
+  describe("refuses when the field already ends in a brace group", () => {
+    it("declines a collapsed caret", () => {
+      expect(type("fix {foo}", "{", 9)).toBeNull();
+    });
+
+    it("declines trailing whitespace after the group too", () => {
+      // The rule is end-anchored on the TRIMMED string, which is what the parser
+      // reads, so a trailing space must not smuggle a second group past it.
+      expect(type("fix {foo}  ", "{", 11)).toBeNull();
+    });
+
+    it("declines a selection, for the same reason", () => {
+      expect(type("fix {foo}", "{", 0, 3)).toBeNull();
+    });
+
+    it("declines inside the group as well — the braces are already there", () => {
+      expect(type("fix {foo}", "{", 6)).toBeNull();
+    });
+
+    it("still fires when the trailing `}` has no opener", () => {
+      // Unbalanced braces are literal (see the module header), so there is no
+      // group to protect and nothing to reassign.
+      expect(type("count the brace}", "{", 16)).toEqual({
+        value: "count the brace}{}",
+        caret: 17,
+      });
+    });
+  });
+
+  describe("typing `}` types over the one that is already there", () => {
+    it("steps past it instead of producing `}}`", () => {
+      expect(type("buy milk {}", "}", 10)).toEqual({
+        value: "buy milk {}",
+        caret: 11,
+      });
+    });
+
+    it("leaves a `}` typed anywhere else to the browser", () => {
+      expect(type("buy milk {oat", "}", 13)).toBeNull();
+    });
+
+    it("does not step over with a selection open — that is a replacement", () => {
+      expect(type("buy milk {ab}", "}", 10, 12)).toBeNull();
+    });
+  });
+
+  describe("backspacing the opening brace takes its partner", () => {
+    it("removes both when the caret is between them", () => {
+      expect(type("buy milk {}", "Backspace", 10)).toEqual({
+        value: "buy milk ",
+        caret: 9,
+      });
+    });
+
+    it("leaves an ordinary backspace alone", () => {
+      expect(type("buy milk {oat}", "Backspace", 13)).toBeNull();
+    });
+
+    it("leaves a backspace over a selection alone", () => {
+      expect(type("buy milk {}", "Backspace", 9, 11)).toBeNull();
+    });
+  });
+
+  it("ignores every other key", () => {
+    for (const key of ["a", "Enter", "Escape", "ArrowLeft", "[", "Delete"]) {
+      expect(type("buy milk", key, 8)).toBeNull();
     }
   });
 });

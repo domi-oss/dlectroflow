@@ -221,6 +221,123 @@ export function inlineNoteInsertion(raw: string): InlineNoteInsertion {
   return { value: composed, caret: composed.length - 1 };
 }
 
+/** What a keystroke should do to the field, or `null` for "leave it alone". */
+export type InlineNoteTyping = InlineNoteInsertion;
+
+/** Every key {@link inlineNoteTyping} has an opinion about. */
+type BraceKey = "{" | "}" | "Backspace";
+
+/**
+ * Auto-close the note braces as they are typed (#201).
+ *
+ * The keyboard half of {@link inlineNoteInsertion}'s button, in the same module
+ * for the same reason: the two affordances have to agree about a field that may
+ * already contain a trailing group, and building them apart would mean two
+ * answers to the question this file exists to answer once. On a phone `{` and
+ * `}` are two or three taps deep in the symbol layer, which is real friction on
+ * the one control that has to be faster than the thought it captures — and it is
+ * paid on every note, by the people who use the feature most.
+ *
+ * Pure: it is handed the field's value, the selection and the key, and returns
+ * the value and caret the field should end up with. The DOM work (reading the
+ * selection, calling `preventDefault`, placing the caret after React commits)
+ * belongs to the caller, which is what makes every branch below testable without
+ * a browser.
+ *
+ * ## The three rules
+ *
+ * **`{` inserts `{}` and puts the caret between them** — or, with a selection,
+ * wraps it. Wrapping rather than replacing is not a nicety: replacing would
+ * destroy text the user had deliberately selected, which is the one outcome an
+ * auto-close must never produce.
+ *
+ * **`}` types over a `}` already under the caret** rather than producing `}}`.
+ * That is the standard editor behaviour, and its absence is the single thing
+ * that makes an auto-close feel broken. Deliberately keyed on "the next
+ * character is a `}`" rather than on "we inserted this one": tracking provenance
+ * needs a marker that every external value change invalidates — a rename
+ * pre-fill, an undo, an autocorrect rewrite — and the observable behaviour of
+ * the simple rule is the one every editor ships.
+ *
+ * **Backspace between `{` and `}` removes both**, so the pair the auto-close
+ * created is undone by the keystroke that would have undone the `{` alone.
+ *
+ * ## …and the refusal, which is the important one
+ *
+ * **No auto-close when the trimmed value already ends in a brace group.** Under
+ * #179 Decision 1 only the LAST group is the note, so silently creating a second
+ * one reassigns which text becomes the note — `fix {foo}` typed into
+ * `fix {foo} {}` demotes `foo` to text without saying so. `inlineNoteInsertion`
+ * refuses the same case by reusing the existing group; here there is no group to
+ * reuse (the caret is wherever the user put it), so the `{` is simply left to be
+ * typed literally, which the parser is happy with.
+ *
+ * ## Undo, stated rather than left to be discovered
+ *
+ * Cmd/Ctrl+Z does NOT treat the auto-inserted `}` as part of the same edit, and
+ * cannot be made to from here. The only API that writes to the browser's undo
+ * stack is `document.execCommand("insertText")`, which this repo deliberately
+ * never calls — `note-field.tsx` documents WebKit's line-ending deviation in it
+ * — and a controlled React input's value is already outside the native undo
+ * stack for the same reason the "add note" button is. The Backspace rule above
+ * is the targeted reversal for the one edit this feature introduces; general
+ * undo behaviour is unchanged, not improved and not made worse.
+ *
+ * ## Why the caller may bind this to `keydown`
+ *
+ * The usual objection to `keydown` for text entry is that predictive text, swipe
+ * input and autocorrect rewrite the field without producing one — which is true,
+ * and does not reach this function: **no IME, swipe path or autocorrect emits a
+ * bare `{`**. It arrives only from an explicit key press or a symbol-keyboard
+ * tap, and both report `key: "{"`. The caller still has to skip a composition in
+ * progress, because a `{` typed while an IME is composing belongs to the IME.
+ */
+export function inlineNoteTyping({
+  value,
+  key,
+  start,
+  end,
+}: {
+  value: string;
+  key: string;
+  /** `selectionStart`. */
+  start: number;
+  /** `selectionEnd`; equal to `start` for a collapsed caret. */
+  end: number;
+}): InlineNoteTyping | null {
+  if (key !== "{" && key !== "}" && key !== "Backspace") return null;
+  const braceKey: BraceKey = key;
+
+  if (braceKey === "{") {
+    // The refusal, checked before anything is composed. `trimEnd` because the
+    // parser reads the trimmed string, so a trailing space must not smuggle a
+    // second group past a rule that would otherwise have refused it.
+    if (trailingGroupRange(value.trimEnd()) !== null) return null;
+    const selected = value.slice(start, end);
+    const composed = `${value.slice(0, start)}{${selected}}${value.slice(end)}`;
+    // Just inside the closing brace, so the next keystroke extends the note
+    // rather than escaping it. For a collapsed caret that is `start + 1`; for a
+    // wrap it is the far end of what was selected.
+    return { value: composed, caret: start + 1 + selected.length };
+  }
+
+  if (braceKey === "}") {
+    // A selection means the `}` is a replacement, which is an ordinary edit.
+    if (start !== end) return null;
+    if (value[start] !== "}") return null;
+    return { value, caret: start + 1 };
+  }
+
+  // Backspace. Only the exact `{|}` shape the auto-close creates; anything else
+  // is an ordinary deletion and must behave like one.
+  if (start !== end) return null;
+  if (value[start - 1] !== "{" || value[start] !== "}") return null;
+  return {
+    value: `${value.slice(0, start - 1)}${value.slice(start + 1)}`,
+    caret: start - 1,
+  };
+}
+
 /**
  * The single string an edit input should hold for a stored item: its text with
  * its note put back between braces, exactly as a capture would have received it.

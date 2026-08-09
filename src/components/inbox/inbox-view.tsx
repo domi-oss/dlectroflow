@@ -7,6 +7,7 @@ import {
   useState,
   useSyncExternalStore,
   useTransition,
+  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
@@ -65,7 +66,10 @@ import type { GoogleConnStatus, ScheduleIntent } from "@/lib/scheduling/types";
 import { StatusPill } from "@/components/inbox/status-pill";
 import { TaskSteps } from "@/components/breakdown/task-steps";
 import { TaskNoteRow } from "@/components/breakdown/task-note";
-import { inlineNoteSource } from "@/lib/braindump-note-syntax";
+import {
+  inlineNoteSource,
+  inlineNoteTyping,
+} from "@/lib/braindump-note-syntax";
 import { liveNote } from "@/lib/braindump-to-task";
 import {
   bucketItems,
@@ -370,6 +374,64 @@ function writeFailureRemedy(
   // row the list no longer holds makes each of them a no-op again, every time.
   if (rowGone) return "none";
   return "retry";
+}
+
+/**
+ * #201 — bind {@link inlineNoteTyping} to a controlled input's `keydown`.
+ *
+ * The rule itself is pure and lives next to the parser; this is the DOM half —
+ * reading the live selection, suppressing the browser's own insertion, and
+ * putting the caret back once React has committed.
+ *
+ * ## Which fields get it, and which deliberately do not
+ *
+ * The two that already carry an `AddNoteButton`: the capture bar and the ✎ row
+ * title editor. Those are exactly the fields whose value `splitInlineNote` reads,
+ * so they are the fields where a brace MEANS something — and a `{` that
+ * auto-closes in one and not the other would be the inconsistency, not the
+ * coverage. Everything else on the page (the note textarea itself, the step
+ * editor, the estimate input) is plain text to the parser, and auto-closing a
+ * brace there would be a surprise with no payoff.
+ *
+ * ## `keydown`, and why the usual objection does not apply
+ *
+ * Predictive text, swipe input and autocorrect rewrite a field without emitting
+ * a `keydown`, which is the standard argument for `beforeinput`. It does not
+ * reach this handler: **no IME, swipe path or autocorrect produces a bare `{`**.
+ * It arrives from an explicit key press or a symbol-keyboard tap, and both report
+ * `key: "{"`. A composition in progress is still skipped, because a `{` typed
+ * mid-composition belongs to the IME.
+ */
+function handleNoteBraceKey(
+  e: ReactKeyboardEvent<HTMLInputElement>,
+  setValue: (next: string) => void,
+): void {
+  if (e.nativeEvent.isComposing) return;
+  // Cmd/Ctrl chords are shortcuts rather than text entry — the browser's own
+  // undo among them. AltGr is NOT excluded: on several European layouts it is
+  // how `{` is produced at all, and it reports as ctrl and alt together.
+  if (e.metaKey || (e.ctrlKey && !e.altKey)) return;
+  // A modified Backspace is a word or line delete, which must stay one.
+  if (e.key === "Backspace" && (e.altKey || e.ctrlKey)) return;
+
+  // Read now: React resets `currentTarget` once the handler returns, and the
+  // caret has to be placed from a microtask.
+  const el = e.currentTarget;
+  const next = inlineNoteTyping({
+    value: el.value,
+    key: e.key,
+    start: el.selectionStart ?? el.value.length,
+    end: el.selectionEnd ?? el.value.length,
+  });
+  if (next === null) return;
+
+  e.preventDefault();
+  setValue(next.value);
+  // AFTER React has committed the new value. Setting the range now would aim at
+  // the OLD string, and the browser clamps a range past the current length — on
+  // an appended `{}` that parks the caret outside the braces. Same dialect
+  // `AddNoteButton` uses, for the same reason.
+  queueMicrotask(() => el.setSelectionRange(next.caret, next.caret));
 }
 
 /** True when a native drag was started by one of our rows rather than by an
@@ -1740,7 +1802,11 @@ export function InboxView({
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 submit();
+                return;
               }
+              // #201 — after Enter, so a capture is never intercepted, and
+              // before nothing else: every other key falls through untouched.
+              handleNoteBraceKey(e, setText);
             }}
             placeholder="Brain dump anything… (Enter to save)"
             // #183 — the app's most-used control had NO accessible name: a
@@ -3172,8 +3238,17 @@ function EditTitleInput({
           if (e.key === "Enter") {
             e.preventDefault();
             onSave(value.trim());
+            return;
           }
-          if (e.key === "Escape") onCancel();
+          if (e.key === "Escape") {
+            onCancel();
+            return;
+          }
+          // #201 — the same auto-close as the capture bar. This field holds the
+          // reconstruction (`text {note}`), which already ends in a group, so
+          // the rule's refusal is what it meets most of the time — and that is
+          // the correct outcome, not a gap.
+          handleNoteBraceKey(e, setValue);
         }}
         className="border-input bg-background focus-visible:ring-ring min-w-0 flex-1 rounded-md border px-2 py-1 text-sm outline-none focus-visible:ring-2"
       />
