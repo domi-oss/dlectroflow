@@ -470,6 +470,15 @@ operators upgrading a self-hosted instance don't get surprised.
   be earned twice, and taking one back would make the collection lie about the
   past.
 
+  **Reopening the same to-do twice takes the points back once.** A double-tap
+  that outruns the button, or the same Done row open on a phone and a laptop,
+  used to run the reopen twice — and because taking a point back means removing
+  the most recent one, the second pass reached into a different, already-finished
+  piece of work and took its points instead. Each reopen now claims the to-do and
+  its steps as it puts them back, so whichever press arrives second finds the work
+  already done and stops: silently, without an error, and without a second round
+  of updates to Google.
+
 - **The focus timer's Start and Resume no longer fail in silence (#139's shape,
   found via #198).** Both buttons handled a server that could not be *reached*,
   and neither handled a server that answered and *declined* — so in those cases
