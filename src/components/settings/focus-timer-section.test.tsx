@@ -288,6 +288,31 @@ describe("FocusTimerSection: when a save fails", () => {
     expect(minimal()).toBeChecked();
   });
 
+  /**
+   * #227 review — the rollback target is what the server last **confirmed**,
+   * not the prop this section was first rendered with.
+   *
+   * Minimal mode starts off. Turning it on lands, so the database holds `true`.
+   * Turning it off again is then refused, and the switch has to go back on.
+   * Restoring the initial prop would leave it off — indistinguishable from no
+   * rollback at all, next to a message saying the change did not save.
+   */
+  it("undoes to the value the last successful save stored", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimerSection {...base} />);
+
+    await user.click(minimal()); // off → on, lands
+    await waitFor(() => expect(minimal()).toBeChecked());
+
+    vi.mocked(updateFocusTimerSettings).mockRejectedValueOnce(
+      new Error("offline"),
+    );
+    await user.click(minimal()); // on → off, refused
+
+    await screen.findByRole("alert");
+    await waitFor(() => expect(minimal()).toBeChecked());
+  });
+
   it("says nothing and keeps the new value when the save works", async () => {
     const user = userEvent.setup();
     render(<FocusTimerSection {...base} />);

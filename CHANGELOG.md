@@ -453,6 +453,13 @@ operators upgrading a self-hosted instance don't get surprised.
   the server still has it, and a save that fails while you are changing something
   else undoes only the one that failed.
 
+  Flipping the *same* control several times in quick succession is handled too.
+  Each save is tracked as its own attempt rather than by the value it wrote, so a
+  slow failure can no longer undo a later change that did save — even when the
+  two happen to land on the same setting. And a control that steps back steps
+  back to the last value the server actually accepted, rather than to whatever it
+  was showing when the page loaded.
+
   Two things deliberately unchanged. The **aging thresholds** are typed-in
   numbers rather than switches, so a failed save reports itself and leaves your
   typing exactly where it is — putting the stored number back would delete what

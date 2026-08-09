@@ -224,6 +224,79 @@ describe("NotificationsSection: when a toggle's write fails", () => {
     expect(roundup()).toBeChecked();
   });
 
+  /**
+   * #227 review — the same race, but with the stale attempt's value coming
+   * back round. Value equality cannot tell these two apart; attempt identity
+   * can.
+   *
+   * Round-up starts on. Attempt 1 turns it off and hangs. Attempt 2 turns it
+   * back on and lands. Attempt 3 turns it off again and lands, so the server
+   * holds `false` — the very value attempt 1 wrote. When attempt 1 finally
+   * rejects, a guard that asks "is the switch still showing what I wrote?"
+   * says yes and turns round-up back ON, over a value the server accepted.
+   * Nothing re-seeds this section's state after `router.refresh()`, so the
+   * switch would then disagree with the database until a full page load.
+   */
+  it("declines to undo a value a newer save re-wrote to the same thing", async () => {
+    let rejectFirst!: (reason: Error) => void;
+    vi.mocked(updateNotificationSettings)
+      .mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            rejectFirst = reject;
+          }),
+      )
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined);
+
+    const user = userEvent.setup();
+    render(<NotificationsSection {...base} />);
+
+    await user.click(roundup()); // → false, hangs
+    expect(roundup()).not.toBeChecked();
+
+    await user.click(roundup()); // → true, lands
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    expect(roundup()).toBeChecked();
+
+    await user.click(roundup()); // → false, lands. Server now holds `false`.
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+    expect(roundup()).not.toBeChecked();
+
+    rejectFirst(new Error("offline"));
+
+    await screen.findByRole("alert");
+    // Still off: attempt 1 stopped owning this switch two saves ago.
+    expect(roundup()).not.toBeChecked();
+  });
+
+  /**
+   * #227 review — the rollback target has to be what the server last
+   * **confirmed**, not what the page was first rendered with.
+   *
+   * Round-up starts on. Turning it off lands, so the database now holds `false`.
+   * Turning it back on is then refused, and the only correct place to put the
+   * switch is `false`. Restoring the initial prop would put it back on — which
+   * is indistinguishable from no rollback at all, and leaves the switch showing
+   * exactly the value the server just declined.
+   */
+  it("undoes to the value the last successful save stored", async () => {
+    const user = userEvent.setup();
+    render(<NotificationsSection {...base} />);
+
+    await user.click(roundup()); // on → off, lands
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    expect(roundup()).not.toBeChecked();
+
+    vi.mocked(updateNotificationSettings).mockRejectedValueOnce(
+      new Error("offline"),
+    );
+    await user.click(roundup()); // off → on, refused
+
+    await screen.findByRole("alert");
+    await waitFor(() => expect(roundup()).not.toBeChecked());
+  });
+
   it("says nothing at all when the save works", async () => {
     const user = userEvent.setup();
     render(<NotificationsSection {...base} />);

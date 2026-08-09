@@ -252,6 +252,35 @@ describe("AppearanceSection: when a save fails", () => {
     expect(screen.getByLabelText("Black")).toBeChecked();
   });
 
+  /**
+   * #227 review — the rollback target is what the server last **confirmed**,
+   * not the prop this section was first rendered with.
+   *
+   * Black lands, so the database holds `black`. Picking Green back is then
+   * refused, and the radio has to return to Black. Restoring the initial prop
+   * would leave Green selected — the very choice the server declined — and the
+   * preview would go on demonstrating it.
+   */
+  it("undoes to the value the last successful save stored", async () => {
+    const user = userEvent.setup();
+    render(<AppearanceSection {...base} />);
+
+    await user.click(screen.getByLabelText("Black")); // lands
+    await waitFor(() => expect(screen.getByLabelText("Black")).toBeChecked());
+
+    vi.mocked(updateAppearanceSettings).mockRejectedValueOnce(
+      new Error("offline"),
+    );
+    await user.click(screen.getByLabelText("Green")); // refused
+
+    await screen.findByRole("alert");
+    await waitFor(() => expect(screen.getByLabelText("Black")).toBeChecked());
+    expect(screen.getByTestId("completion-preview")).toHaveAttribute(
+      "data-tick",
+      "black",
+    );
+  });
+
   it("says nothing and keeps the new value when the save works", async () => {
     const user = userEvent.setup();
     render(<AppearanceSection {...base} />);

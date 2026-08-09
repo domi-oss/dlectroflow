@@ -16,7 +16,7 @@ import {
   useSaveStatus,
   SaveIndicator,
 } from "@/components/settings/use-save-status";
-import { revertOptimistic } from "@/components/settings/revert-optimistic";
+import { useOptimisticOwnership } from "@/components/settings/revert-optimistic";
 import { cn } from "@/lib/utils";
 import { CollapsibleSection } from "@/components/nav/collapsible-section";
 
@@ -52,9 +52,12 @@ const TYPEFACE_LABEL: Record<Typeface, StringKey> = {
  * the typeface sample went on demonstrating the refused choice, so the page made
  * the same false claim three times over.
  *
- * The repair goes through `revertOptimistic` rather than `setPrefs(previous)` —
- * these controls stay live during a save, so attempts can interleave and a slow
- * failure must not clobber a newer success. That module holds the argument.
+ * The repair goes through the `revert-optimistic` ledger rather than
+ * `setPrefs(previous)` — these controls stay live during a save, so attempts
+ * can interleave and a slow failure must not clobber a newer success. Which
+ * attempt owns a field is decided by its token rather than by the value on
+ * screen, since re-picking an earlier option restores that value by
+ * coincidence. That module holds the argument.
  */
 export function AppearanceSection({
   completeStrikethrough,
@@ -66,6 +69,7 @@ export function AppearanceSection({
   const router = useRouter();
   const [, startTransition] = useTransition();
   const { status, markSaving, markSaved, markError } = useSaveStatus();
+  const ownership = useOptimisticOwnership<AppearancePrefs>();
   const [prefs, setPrefs] = useState<AppearancePrefs>({
     completeStrikethrough,
     completeTickColor,
@@ -77,18 +81,24 @@ export function AppearanceSection({
     // pre-attempt state, and the rollback needs it to know what to put back.
     const previous = prefs;
     setPrefs(next); // optimistic: the live preview reflects the pending choice
+    // Same synchronous turn as the write it describes, so attempts are ordered
+    // the way the user made the changes.
+    const attempt = ownership.claim(next, previous);
     startTransition(async () => {
       markSaving();
       try {
         await updateAppearanceSettings(next);
+        // What the server now holds, so a later failure undoes to this rather
+        // than to some earlier attempt's unconfirmed guess.
+        attempt.confirm();
         markSaved();
         router.refresh();
       } catch {
         // #227 — say so AND put the control (and its previews) back. The
         // functional updater reads the state as it stands now, not this
-        // closure's `prefs`, so `revertOptimistic` can tell whether this attempt
-        // still owns what is on screen.
-        setPrefs((current) => revertOptimistic(current, next, previous));
+        // closure's `prefs`, and the attempt restores only the fields it still
+        // owns.
+        setPrefs((current) => attempt.revert(current));
         markError();
       }
     });
