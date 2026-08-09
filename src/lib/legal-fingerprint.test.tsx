@@ -86,7 +86,15 @@ function fingerprint(node: React.ReactElement): string {
  * putting it there would invite it into a page.
  */
 const PUBLISHED = {
-  // Two changes share LEGAL_EFFECTIVE_DATE and they touch DIFFERENT documents,
+  // 2026-08-08, #199 — /privacy only. The stored-data list gains a shopping-list
+  // entry: a new CATEGORY of stored content (Art. 13(1)(c)) plus the retention
+  // sentence that comes with it, since a reader could otherwise infer that
+  // switching the feature off disposes of what it held. `terms` is untouched and
+  // its hash below is unchanged, which is the evidence the two documents are
+  // genuinely disjoint here.
+  //
+  // ── the 2026-08-05 state this replaced, kept because the reasoning is reusable ──
+  // Two changes shared LEGAL_EFFECTIVE_DATE and they touched DIFFERENT documents,
   // so exactly one hash moves per document rather than both moving:
   //
   //   privacy — #154, the calendar subscription feed. A new recipient (whichever
@@ -110,7 +118,7 @@ const PUBLISHED = {
   // stop shipping under yesterday's date. It is also the second time a #154
   // privacy claim has needed correcting before merge, which is the argument for
   // the drift row `docs/legal.md` now carries for it.
-  privacy: "bef88667e65a9c2989ac60abd1034a58119e9e82f66850e7aa7675a879248d8e",
+  privacy: "164dc0d1436e1792993e09a1605d4c8d1152ed700a84bb7769451bbec9ca8ad1",
   terms: "836ef685761ab3db05397e7a4753da743e25836b9d9b4ab7c61a61920bdbfe9b",
 } as const;
 

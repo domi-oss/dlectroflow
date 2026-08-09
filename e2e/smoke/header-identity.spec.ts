@@ -260,11 +260,13 @@ test.describe("#100 header identity — member", () => {
     await page.goto("/settings");
     await waitForShell(page);
 
-    // Positive control: the page really rendered (the owner gets ten sections,
-    // a member nine — People is owner-only; #118 Phase C added Account, which a
+    // Positive control: the page really rendered (the owner gets eleven sections,
+    // a member ten — People is owner-only; #118 Phase C added Account, which a
     // member DOES get, and #118 also made Integrations per-user so a member now
     // gets the real panel rather than the 🔒 shell).
-    await expect(page.locator("[data-section-toggle]")).toHaveCount(9);
+    // 10 since #199 added shopping-list mode's switch, which a member gets like
+    // any other taste setting (9 before it).
+    await expect(page.locator("[data-section-toggle]")).toHaveCount(10);
     await expect(page.locator("#settings-people")).toHaveCount(0);
     await expect(page.locator("#settings-account")).toHaveCount(1);
     expect(await page.locator("body").innerText()).not.toContain(OWNER_HANDLE);

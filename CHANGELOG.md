@@ -67,6 +67,23 @@ operators upgrading a self-hosted instance don't get surprised.
   progress rather than alerted on, because a channel that fires on every normal
   deploy gets muted, which is what took the original alert down.
 
+- **A shopping list, if you want one (#199).** A plain list for the things that are
+  not tasks: no estimate, no steps, nothing that lands in your calendar, and
+  ticking one off does not touch your streak. It lives at its own `/shopping`
+  destination in the menu, with a second **Saved for later** section below the
+  live list — undated on purpose, so nothing there comes back on its own; you pull
+  an item up when you want it again.
+
+  **Off by default**, behind Settings → Shopping list. Nothing is stored until you
+  turn it on, and turning it off again hides the list rather than deleting it, so
+  the items are still there if you change your mind.
+
+  Shopping items are their own kind of thing rather than tasks in disguise, which
+  is what keeps them out of the focus timer, the scheduler and the streak — the
+  code that grants those cannot see them. Entries are capped at 200 characters and
+  a list at 500 items. `/privacy` names the new category of stored content and the
+  effective date moves with it.
+
 - **Pick your playlists and jump to any track, from inside the focus timer
   (#181).** The mini-player gains one expandable panel, collapsed by default and
   opening below the progress bar at a capped height with its own scroll. It holds
@@ -542,6 +559,27 @@ operators upgrading a self-hosted instance don't get surprised.
   the primary control (`sessionCtaRef`, where focus lands after a resume) was
   already on Pause; the row now agrees with it.
 
+- **Completing a to-do with no steps left its Google Task open (#195).** A
+  stepless to-do is pushed to Google Tasks as one task, so the scheduling unit is
+  the to-do itself rather than any step of it — and only steps were ever marked
+  completed on the Google side. Ticking such an item off in the app closed it
+  here and nowhere else: it stayed open in Google Tasks, and Reclaim went on
+  holding the block it had booked for work already finished. Both routes that
+  close a to-do now complete its own Google Task, including the one taken when
+  you finish a stepless item from the focus timer. The sync stays best-effort in
+  the strict sense — an unreachable Google, or a Google account that has been
+  disconnected since the item was scheduled, costs you the sync and never the
+  completion. The timer's "marked complete in Google Tasks ✅" line now counts
+  that case too; it was reading the step's sync alone and so said nothing for
+  the very to-dos this fixes.
+- **Two "best-effort" Google syncs that could still fail the thing they were
+  attached to (#195).** Finishing a step, and requeueing one with a new time
+  estimate, both talked to Google in a step marked best-effort — but a network
+  error or an expired Google sign-in threw out of the whole action. Finishing a
+  step could fail outright; requeueing saved the new estimate and then reported
+  an error, leaving the list showing the old number until the next refresh.
+  Both now do what the label always said: you keep the change, and only the
+  Google side is skipped.
 - **Signing in from any hostname but the canonical one looped forever (#174).**
   The app answers on more than one hostname, but every OAuth redirect URI is
   built from the single origin `PUBLIC_ORIGIN` names, and the PKCE verifier and
@@ -710,6 +748,17 @@ operators upgrading a self-hosted instance don't get surprised.
   - `postgres` majors are capped in the same pass: the version is pinned in three
     places that must move together, and moving it is a dump/restore migration
     rather than an image swap.
+
+### Fixed
+
+- **Your data export was missing a table (#199, found while adding one).** Custom
+  focus playlists (#185) were absent from `export.json` — the export names every
+  table by hand and nothing failed when one was left out, so the whole test suite
+  stayed green while the archive quietly held less than the app did. The export now
+  derives its obligations from the schema: a model that carries user data and is
+  not read by the export fails the build. Nobody had a playlist to lose yet, since
+  the feature has no save path on `main`, but the class of bug is closed rather
+  than the instance.
 
 ## [0.5.0] - 2026-08-01
 

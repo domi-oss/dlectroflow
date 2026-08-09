@@ -113,6 +113,36 @@ describe("export.json — the round-trippable tier", () => {
     expect(parsed.gamification.streakRecords).toHaveLength(1);
   });
 
+  // #185, wired in review of #199 — the table reached `main` absent from the
+  // export and every test stayed green. `__tests__/model-coverage.test.ts` is the
+  // structural half; this is the value half.
+  it("carries the workspace's own focus playlists", () => {
+    expect(parsed.focusPlaylists).toHaveLength(1);
+    expect(parsed.focusPlaylists[0].name).toBe("Deep work, mornings 🎧");
+    expect(parsed.focusPlaylists[0].trackIds).toEqual([
+      "catalog:rain-01.mp3",
+      "bundled-piano",
+    ]);
+  });
+
+  // #199 — the WHOLE shopping list, including the ticked and saved-for-later
+  // rows: both are things the data subject wrote down, and this is the tier whose
+  // job is to lose nothing.
+  it("carries the shopping list, ticked and saved-for-later rows included", () => {
+    expect(parsed.shoppingItems).toHaveLength(3);
+    expect(parsed.shoppingItems[0].text).toBe('oat milk, the "barista" one');
+    expect(parsed.shoppingItems.map((i: { done: boolean }) => i.done)).toEqual([
+      false,
+      true,
+      false,
+    ]);
+    expect(
+      parsed.shoppingItems.map(
+        (i: { savedForLater: boolean }) => i.savedForLater,
+      ),
+    ).toEqual([false, false, true]);
+  });
+
   it("writes every timestamp as ISO-8601 with an explicit offset", () => {
     const offsets =
       /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}(Z|[+-]\d{2}:\d{2})$/;
@@ -169,6 +199,8 @@ describe("export.json — the round-trippable tier", () => {
     expect(empty.tasks).toEqual([]);
     expect(empty.inbox).toEqual([]);
     expect(empty.settings).toBeNull();
+    expect(empty.focusPlaylists).toEqual([]);
+    expect(empty.shoppingItems).toEqual([]);
     expect(empty.gamification.streak).toBeNull();
     expect(empty.gamification.badges).toEqual([]);
   });

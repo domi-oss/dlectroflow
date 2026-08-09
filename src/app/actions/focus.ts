@@ -4,7 +4,11 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { getLLM } from "@/lib/llm";
 import { resolveUtilityModel } from "@/lib/models";
-import { getValidAccessToken, patchGoogleTask } from "@/lib/google";
+import { patchGoogleTask } from "@/lib/google";
+import {
+  actingUserGoogleToken,
+  completeGoogleTaskForTask,
+} from "@/lib/google-task-sync";
 import {
   BadgeKey,
   FocusOutcome,
@@ -18,7 +22,7 @@ import {
   rewardStepDone,
   reverseStepCompletionRewards,
 } from "@/lib/rewards";
-import { currentWorkspaceId, currentUser } from "@/lib/workspace";
+import { currentWorkspaceId } from "@/lib/workspace";
 import { remainingSecForSession } from "@/lib/focus-timer-clock";
 
 /**
@@ -177,9 +181,17 @@ async function closeSession(
   });
 }
 
-/** Mark a task and its linked inbox item(s) completed, and award the task-complete reward+badge. */
-async function markTaskCompleted(workspaceId: string, taskId: string) {
-  await prisma.task.update({
+/**
+ * Mark a task and its linked inbox item(s) completed, and award the
+ * task-complete reward+badge. Returns whether the task's OWN Google Task was
+ * patched — `completeFocus` folds that into the `googleSynced` it reports, so
+ * the return value is UI-visible rather than bookkeeping (see the call site).
+ */
+async function markTaskCompleted(
+  workspaceId: string,
+  taskId: string,
+): Promise<boolean> {
+  const task = await prisma.task.update({
     // Scoped for the same reason as closeSession above: the helper is given a
     // workspaceId, so it must filter on it rather than trust its callers.
     where: { id: taskId, workspaceId },
@@ -191,37 +203,53 @@ async function markTaskCompleted(workspaceId: string, taskId: string) {
   });
   await logReward(workspaceId, RewardType.TaskComplete);
   await awardBadge(workspaceId, BadgeKey.TaskComplete);
+  // #195 — a task can carry its OWN Google id, from having been scheduled while
+  // it was still stepless (`scheduleSingleTask`). `ensureFocusStep` then creates
+  // a step the moment it is focused, and that step has no id of its own, so the
+  // step patch above finds nothing and the task-level Google task would stay
+  // open forever. Reuses the update's return value rather than re-reading the
+  // row, and runs last: it is best-effort and must not precede the local writes.
+  return completeGoogleTaskForTask(task);
 }
 
 /**
- * The ACTING account's Google access token, or null.
+ * The step-grain twin of `completeGoogleTaskForTask`. Stays here rather than
+ * moving to `@/lib/google-task-sync` because it still has only this file's
+ * callers; #209 moves it when `braindump.ts` needs it too.
  *
- * #118 Phase C — credentials are per user, so the best-effort Google sync a
- * step-completion or a requeue performs uses the credential of whoever is
- * acting. A caller with no account (a guest, or a revoked account) has no
- * credential and gets null, which every call site treats as "skip the sync"
- * rather than as an error — the same shape the missing-token branch already had.
+ * The try/catch is the same contract, and it is needed for the same reason
+ * (Duo review, !288): `patchGoogleTask` throws on a network error and the
+ * shared `actingUserGoogleToken` throws when a token refresh fails, and neither
+ * is a reason to lose a step completion the user asked for. It is a real
+ * behaviour change for `completeStep`, which patches Google BEFORE its local
+ * write — a stale refresh token used to abort the whole action, leaving the
+ * step open. Diverging silently from Google is the lesser harm and is the
+ * contract every other call site already had.
  *
- * Before Phase C these call sites resolved the ONE instance-wide row, so a
- * non-owner completing a step would have patched the OWNER's Google task. Not
- * reachable in practice (only the owner could schedule, so only their steps ever
- * carried a googleTaskId) but it stops being possible at all now.
+ * What the swallow leaves behind is a completion Google never heard about that
+ * nothing will ever repair: the app only writes TO Google and never reads back,
+ * so no later action notices the divergence. That INBOUND gap is #194's. It is
+ * deliberately not #196 (Duo review, !288, asked): #196 is still an outbound
+ * patch — the `needsAction` call `reopenItem` never makes — which is also what
+ * "the reverse patch" means on {@link reopenGoogleTaskForStep} below.
  */
-async function actingUserGoogleToken(): Promise<string | null> {
-  const me = await currentUser();
-  return me ? getValidAccessToken(me.id) : null;
-}
-
 async function completeGoogleTaskForStep(step: {
   googleTaskId: string | null;
   googleTaskListId: string | null;
 }): Promise<boolean> {
   if (!step.googleTaskId || !step.googleTaskListId) return false;
-  const token = await actingUserGoogleToken();
-  if (!token) return false;
-  return patchGoogleTask(token, step.googleTaskListId, step.googleTaskId, {
-    status: "completed",
-  });
+  try {
+    const token = await actingUserGoogleToken();
+    if (!token) return false;
+    return await patchGoogleTask(
+      token,
+      step.googleTaskListId,
+      step.googleTaskId,
+      { status: "completed" },
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -520,7 +548,7 @@ export async function completeFocus(
       freshStart: false,
     };
 
-  const googleSynced = await completeGoogleTaskForStep(step);
+  let googleSynced = await completeGoogleTaskForStep(step);
 
   // Guard step ownership before update
   const stepCheck = await prisma.step.findFirst({
@@ -548,7 +576,13 @@ export async function completeFocus(
     where: { taskId: step.taskId, done: false, task: { workspaceId } },
   });
   if (openCount === 0) {
-    await markTaskCompleted(workspaceId, step.taskId);
+    // Duo review (!288): OR, not overwrite. `googleSynced` drives a
+    // user-visible "marked complete in Google Tasks ✅" line, and the two
+    // grains are independent — a broken-down task syncs at the step, a stepless
+    // one that `ensureFocusStep` gave a step syncs only here. Reading either
+    // one alone reports "not synced" for a completion that did reach Google.
+    googleSynced =
+      (await markTaskCompleted(workspaceId, step.taskId)) || googleSynced;
   }
 
   // #139 — `/` unconditionally. This used to sit inside the branch above, so
@@ -636,19 +670,29 @@ export async function requeueFocus(
     data: { estMinutes: newEst, estimateHistory: JSON.stringify(history) },
   });
 
-  // Best-effort: update the Google Task's duration syntax so Reclaim reschedules.
+  // Best-effort: update the Google Task's duration syntax so Reclaim
+  // reschedules. The try/catch is what makes that comment true — until !288 a
+  // network error or a failed token refresh threw straight out of the action,
+  // so the user got an error for an estimate that HAD been saved, and the
+  // revalidation trio below never ran, leaving `/` rendering the old number.
+  // That is #139's exact failure mode arriving by another route.
   if (step.googleTaskId && step.googleTaskListId) {
-    const token = await actingUserGoogleToken();
-    if (token) {
-      const task = await prisma.task.findFirst({
-        where: { id: step.taskId, workspaceId },
-      });
-      const emoji = task?.parentEmoji ? `${task.parentEmoji} ` : "";
-      const sub = step.subtaskEmoji ? `${step.subtaskEmoji} ` : "";
-      const title = `${emoji}${task?.title ?? ""}: ${step.order} of ${step.total} ${sub}${step.text} (duration:${newEst}m)`;
-      await patchGoogleTask(token, step.googleTaskListId, step.googleTaskId, {
-        title,
-      });
+    try {
+      const token = await actingUserGoogleToken();
+      if (token) {
+        const task = await prisma.task.findFirst({
+          where: { id: step.taskId, workspaceId },
+        });
+        const emoji = task?.parentEmoji ? `${task.parentEmoji} ` : "";
+        const sub = step.subtaskEmoji ? `${step.subtaskEmoji} ` : "";
+        const title = `${emoji}${task?.title ?? ""}: ${step.order} of ${step.total} ${sub}${step.text} (duration:${newEst}m)`;
+        await patchGoogleTask(token, step.googleTaskListId, step.googleTaskId, {
+          title,
+        });
+      }
+    } catch {
+      // The estimate is saved and the requeue stands; only the Google title
+      // drifts, which the next schedule or requeue rewrites anyway.
     }
   }
 
