@@ -667,6 +667,13 @@ operators upgrading a self-hosted instance don't get surprised.
   running more than one account should take this one; on a single-account
   instance there is nobody to freeze.
 
+  Signing the frozen account out is best-effort, because Next seals the cookie
+  jar during a page render and there is nothing to be done about that — but only
+  that one refusal is expected, and anything else now prints
+  `session_clear_failed` rather than being absorbed alongside it. Refusing the
+  request never depended on the sign-out landing, so this changes what an
+  operator can see, not what the gate allows.
+
 - **`.ics` text values now escape every line terminator, not just `\n` (#154).**
   `esc()` in `src/lib/ics.ts` handled `\`, `;`, `,` and LF but not **CR**. RFC
   5545 §3.3.11 permits no control character but HTAB, and a literal CR inside a

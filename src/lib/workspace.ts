@@ -206,10 +206,15 @@ export async function touchWorkspace(
  *    under `src/app/(app)/` and the shell layout resolve their workspace this
  *    way, so this is not a corner.
  *
- * Hence best-effort, and hence the bare catch — which cannot weaken anything,
- * because the refusal it accompanies is thrown by the CALLER, outside this
- * try, and does not consult the result. Failing to sign somebody out is a worse
- * experience; it is not a weaker gate.
+ * Hence best-effort — which cannot weaken anything, because the refusal it
+ * accompanies is thrown by the CALLER, outside this try, and does not consult
+ * the result. Failing to sign somebody out is a worse experience; it is not a
+ * weaker gate.
+ *
+ * The catch is NOT bare, though it was until !305's review. Only the sealed jar
+ * is expected here; anything else is a fault, and a fault absorbed by a catch
+ * written for a different reason is one nobody ever hears about. See
+ * {@link reportUnexpectedClearFailure}.
  *
  * Bouncing a frozen person to /login with an explanation is the missing other
  * half, and it belongs at the gate rather than here — `src/proxy.ts` is the only
@@ -220,8 +225,79 @@ export async function touchWorkspace(
 function clearOwnerSession(jar: Awaited<ReturnType<typeof cookies>>): void {
   try {
     jar.delete(OWNER_COOKIE);
+  } catch (err) {
+    reportUnexpectedClearFailure(err);
+  }
+}
+
+/**
+ * The opening clause of the message Next raises from a sealed cookie jar
+ * (`ReadonlyRequestCookiesError`, in
+ * `node_modules/next/dist/server/web/spec-extension/adapters/request-cookies.js`),
+ * which is what both of Next 16's read-only throw sites construct.
+ *
+ * **Matching on English text is the least bad discriminator here, and the
+ * alternatives were measured rather than assumed (!305 review).** Next exports
+ * that class from no public entry point, so recognising it by type would take a
+ * deep import of `next/dist/…` — and that would then be wrong rather than
+ * merely ugly, because `app-page.runtime.prod.js` carries its own bundled copy
+ * of the class: the identity a deep import binds is not the identity a page
+ * render throws, so the check would read false on the one path it exists for.
+ * Nothing else on the error survives either. Its constructor never assigns
+ * `name`, so `err.name` is the generic `"Error"`, and the production bundle
+ * minifies the class declaration itself down to a single letter, which takes
+ * `err.constructor.name` with it. The message is the only part that reaches the
+ * shipped runtime intact.
+ *
+ * Anchored on the opening clause and not the whole sentence because the
+ * documentation URL after it moves between releases; a literal substring rather
+ * than a pattern because there is no variation left to express, and this repo
+ * builds no regex it does not need (see `log-retention.ts`).
+ *
+ * If a future Next rewords it, this stops matching and a frozen account's page
+ * render logs one line per render saying so. That is the right direction to
+ * fail — loud and traceable to this constant, rather than back to silently
+ * discarding real faults.
+ */
+const SEALED_JAR_MESSAGE = "Cookies can only be modified";
+
+/**
+ * One structured, greppable line when the sign-out fails for a reason that is
+ * NOT the sealed jar — the shape `google_disconnect_failed` and `llm_failure`
+ * use, including the try/catch around the emission itself.
+ *
+ * `error` rather than `warn`: #158 is about handled outcomes printing as
+ * faults, and every handled outcome here returns silently one line above. What
+ * reaches `console.error` is by construction the residue — a throw from
+ * `.delete` that nothing in this codebase anticipated — which is the same
+ * category as `tokens_not_cleared`, the sibling best-effort clean-up in
+ * `google.ts` that logs at error for exactly this reason.
+ *
+ * No account id, unlike that sibling. There it names a credential row an
+ * operator has to go and delete by hand; here nothing persisted and there is no
+ * per-account clean-up to point at, so the id would be identifying data logged
+ * for no operational use.
+ *
+ * The classification sits INSIDE the try with the emission, not above it:
+ * reading `err.message` is itself a property access on an object this code did
+ * not construct, and an observability step must not become the response —
+ * least of all on the path that is refusing a frozen account.
+ */
+function reportUnexpectedClearFailure(err: unknown): void {
+  try {
+    if (err instanceof Error && err.message.includes(SEALED_JAR_MESSAGE)) {
+      // Server Component render: the jar is read-only and this is expected.
+      return;
+    }
+    console.error(
+      JSON.stringify({
+        tag: "session_clear_failed",
+        message: err instanceof Error ? err.message : String(err),
+        ts: new Date().toISOString(),
+      }),
+    );
   } catch {
-    // Server Component render: the jar is read-only and this is expected.
+    // Observability must never take the request down with it.
   }
 }
 

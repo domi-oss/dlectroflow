@@ -44,6 +44,21 @@ import {
 
 const SECRET = "test-secret-at-least-32-bytes-long-xxxxx";
 
+/**
+ * What Next 16 actually throws when `.delete` is called on a sealed jar —
+ * copied verbatim from `ReadonlyRequestCookiesError` in
+ * `node_modules/next/dist/server/web/spec-extension/adapters/request-cookies.js`,
+ * documentation tail and all.
+ *
+ * Verbatim on purpose (!305 review). `clearOwnerSession` tells the expected
+ * failure from a real one by reading this message, so a test that throws a
+ * paraphrase of it proves only that the paraphrase matches. The real string is
+ * the input the production code will actually be handed.
+ */
+const SEALED_JAR_MESSAGE =
+  "Cookies can only be modified in a Server Action or Route Handler. " +
+  "Read more: https://nextjs.org/docs/app/api-reference/functions/cookies#options";
+
 /** A cookie jar holding just the signed-in session cookie.
  *
  *  `delete` is present because a Server Function's jar has one and #220 uses
@@ -276,11 +291,98 @@ describe("currentWorkspaceId", () => {
     // somebody out is best-effort; refusing them is not.
     await signedInWith("revoked");
     deleteCookieMock.mockImplementationOnce(() => {
-      throw new Error("Cookies can only be modified in a Server Action");
+      throw new Error(SEALED_JAR_MESSAGE);
     });
     await expect(currentWorkspaceId()).rejects.toBeInstanceOf(
       RevokedAccountError,
     );
+  });
+
+  // ── Telling the expected sign-out failure from a real one (!305 review) ────
+  //
+  // The catch used to absorb every throw and label all of them as the sealed
+  // jar. That is right for the one case it was written for and wrong for every
+  // other: a genuine bug in the delete would look identical to the thing that
+  // happens on every single page render, so nothing would ever surface it.
+  describe("when signing the frozen account out fails", () => {
+    /** Refuse the delete the way Next does, or the way a bug would. */
+    async function frozenWithFailingDelete(thrown: unknown) {
+      await signedInWith("revoked");
+      deleteCookieMock.mockImplementationOnce(() => {
+        throw thrown;
+      });
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+      const refusal = await currentWorkspaceId().catch((e: unknown) => e);
+      const lines = [...errSpy.mock.calls, ...warnSpy.mock.calls].map((c) =>
+        String(c[0]),
+      );
+      const quiet =
+        errSpy.mock.calls.length +
+          warnSpy.mock.calls.length +
+          infoSpy.mock.calls.length ===
+        0;
+      errSpy.mockRestore();
+      warnSpy.mockRestore();
+      infoSpy.mockRestore();
+      return { refusal, lines, quiet };
+    }
+
+    it("stays silent for the sealed jar, which every page render produces", async () => {
+      // The expected case is not a fault and must not print like one — a line
+      // per render of every page a frozen account opens is noise that would
+      // bury the case below.
+      const { refusal, quiet } = await frozenWithFailingDelete(
+        new Error(SEALED_JAR_MESSAGE),
+      );
+      expect(quiet).toBe(true);
+      expect(refusal).toBeInstanceOf(RevokedAccountError);
+    });
+
+    it("surfaces an unrelated failure as one structured line", async () => {
+      const { refusal, lines } = await frozenWithFailingDelete(
+        new Error("the cookie store went away"),
+      );
+      expect(lines).toHaveLength(1);
+      expect(JSON.parse(lines[0])).toMatchObject({
+        tag: "session_clear_failed",
+        message: "the cookie store went away",
+      });
+      // Greppable and datable, like every other structured line in the tree.
+      expect(JSON.parse(lines[0]).ts).toEqual(expect.any(String));
+      // Still a refusal: the gate is thrown by the caller and never consulted
+      // the sign-out, so making the failure visible must not make it weaker.
+      expect(refusal).toBeInstanceOf(RevokedAccountError);
+    });
+
+    it("surfaces a thrown non-Error rather than reading it as the sealed jar", async () => {
+      // `throw "…"` and `throw { code }` both reach a catch as `unknown`. An
+      // `instanceof Error` test that only knows how to recognise the expected
+      // case must treat everything it cannot inspect as unexpected, or the
+      // silent-swallow comes back through the one input that dodges the check.
+      const { refusal, lines } = await frozenWithFailingDelete({
+        code: "ERR_UNKNOWN",
+      });
+      expect(lines).toHaveLength(1);
+      expect(JSON.parse(lines[0]).tag).toBe("session_clear_failed");
+      expect(refusal).toBeInstanceOf(RevokedAccountError);
+    });
+
+    it("never lets the logging itself take the request down", async () => {
+      // The invariant every other structured line in this repo states: an
+      // observability failure must not become the response. Here it would be
+      // the worst kind of regression, because the request it would replace is
+      // the one refusing a frozen account.
+      const hostile = new Error("unreadable");
+      Object.defineProperty(hostile, "message", {
+        get() {
+          throw new Error("message is not readable");
+        },
+      });
+      const { refusal } = await frozenWithFailingDelete(hostile);
+      expect(refusal).toBeInstanceOf(RevokedAccountError);
+    });
   });
 
   it("does not clear the cookie of an account that is merely browsing", async () => {
