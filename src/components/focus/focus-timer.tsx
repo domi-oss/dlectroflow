@@ -1252,7 +1252,7 @@ export function FocusTimer({
           not at all is down to the screen reader. Deleting it was not an option
           either — #137's point stands, the wait must not be silent.
           It rides the two mechanisms that ARE defined instead, and both are
-          already available precisely because the CTA below is `aria-disabled`
+          already available precisely because the Retry below is `aria-disabled`
           rather than `disabled` and therefore still holds focus: that button's
           own state change, which a screen reader reports because focus is on it,
           and its `aria-describedby`, which picks this node up while it shows.

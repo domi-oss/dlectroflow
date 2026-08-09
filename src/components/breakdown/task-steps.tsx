@@ -183,8 +183,9 @@ export function TaskSteps({
   // here owns a permanent control for the identical action.
   //
   // A Set, and keyed, for exactly the reason round 15 gives for `justUndidRef`:
-  // every other per-row record in this file is keyed, and a single slot is how the
-  // hand-off silently served the wrong row. Refs, not state — the hand-off is a
+  // every other per-row record in this file is keyed, and a single slot is what
+  // let the second row's hand-off overwrite the first's, leaving the row that had
+  // been waiting longest with nothing. Refs, not state — the hand-off is a
   // one-shot DOM side effect and must not drive a render.
   const retryHandoffRef = useRef<Set<string>>(new Set());
   const undoRefs = useRef(new Map<string, HTMLButtonElement | null>());
@@ -197,7 +198,8 @@ export function TaskSteps({
     // run after arming is always the render in which the Retry has gone. Draining
     // unconditionally is deliberate: an id whose row has since disappeared
     // resolves to no element and no-ops, rather than staying armed to fire at some
-    // unrelated later render.
+    // unrelated later render. Deleting the id being visited is defined behaviour
+    // for a Set iterator, the same as in the effect below.
     for (const id of handoffs) {
       handoffs.delete(id);
       undoRefs.current.get(id)?.focus();
