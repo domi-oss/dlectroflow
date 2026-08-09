@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ShoppingSummaryCard } from "@/components/inbox/shopping-summary-card";
 
@@ -78,6 +78,59 @@ describe("ShoppingSummaryCard", () => {
     const hint = screen.getByText(/back when you add something/i);
     expect(hint.className).not.toContain("hidden");
     expect(hint.className).not.toContain("sm:inline");
+  });
+
+  // Duo review, !295 — the pending flag from `useTransition` was discarded, so
+  // nothing guarded the control while the dismiss was in flight and a fast double
+  // press fired `dismissShoppingSummary()` and `router.refresh()` twice.
+  //
+  // The action is held open with a deferred promise rather than left to resolve on
+  // its own, because the bug only exists inside that window: let the first press
+  // settle and the second is a legitimate press of a control that is idle again,
+  // and the test would pass against the unguarded component.
+  it("fires one dismiss when the control is double-pressed", async () => {
+    let settle!: () => void;
+    dismissMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          settle = resolve;
+        }),
+    );
+    render(<ShoppingSummaryCard count={2} voice="plain" />);
+    const button = screen.getByRole("button", { name: /not now/i });
+
+    await userEvent.click(button);
+    await userEvent.click(button);
+
+    expect(dismissMock).toHaveBeenCalledTimes(1);
+    // Still true after the refused second press: the first is still in flight.
+    expect(button).toHaveAttribute("aria-disabled", "true");
+
+    await act(async () => settle());
+    expect(refreshMock).toHaveBeenCalledTimes(1);
+  });
+
+  // `aria-disabled`, not `disabled` — the same call `inbox-view.tsx` makes on the
+  // capture Retry CTA, and for the same reason: a `disabled` element cannot hold
+  // focus, so the browser drops it to <body> the instant the press lands and a
+  // keyboard user loses their place mid-interaction. The press is refused in the
+  // handler instead, which is what the double-press test above proves.
+  it("keeps the control focusable while the dismiss is in flight", async () => {
+    let settle!: () => void;
+    dismissMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          settle = resolve;
+        }),
+    );
+    render(<ShoppingSummaryCard count={2} voice="plain" />);
+    const button = screen.getByRole("button", { name: /not now/i });
+
+    await userEvent.click(button);
+    expect(button).not.toHaveAttribute("disabled");
+    expect(button).toHaveFocus();
+
+    await act(async () => settle());
   });
 
   it("speaks the playful voice (#86)", () => {
