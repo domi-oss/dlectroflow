@@ -417,7 +417,12 @@ export function findSeedGaps(
   for (const file of files) {
     for (const found of findDataDependentStatements([file])) {
       if (populated.has(found.table)) continue;
-      const key = `${found.migration} ${found.table}`;
+      // NUL separates the two halves because neither a migration directory
+      // name nor a table name can contain one, so no pair of distinct keys
+      // can collide. Written as an escape, not a literal: a raw NUL in the
+      // source makes `grep`, `git grep` and `file` treat this module as a
+      // binary and silently skip it.
+      const key = `${found.migration}\u0000${found.table}`;
       const gap = gaps.get(key);
       if (gap) {
         if (!gap.shapes.includes(found.shape)) gap.shapes.push(found.shape);
