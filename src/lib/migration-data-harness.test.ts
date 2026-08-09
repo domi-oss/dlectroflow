@@ -177,6 +177,145 @@ describe("findDataDependentStatements — the shapes whose outcome depends on ro
         ),
       ).toContain("add-foreign-key:Task");
     });
+
+    // …and the statement each rule is asked about has to be the statement that
+    // RUNS, or the table half goes wrong instead of the shape half: every
+    // ALTER-based rule reads its table from the FIRST `ALTER TABLE` it can see.
+    it("attributes each statement of a DO block to its own table", () => {
+      expect(
+        shapesOf(
+          `DO $$ BEGIN
+             UPDATE "Task" SET "a" = 'x';
+             UPDATE "Note" SET "b" = 'y';
+           END $$;`,
+        ),
+      ).toEqual(["update:Task", "update:Note"]);
+    });
+
+    // The residual case once a body is split: ONE statement can still write two
+    // tables, through a data-modifying CTE —
+    // `20260804120000_google_auth_user_id_not_null` already uses that shape.
+    // Reading only the first match reports the CTE's table and says nothing
+    // about the one the outer statement writes.
+    it("names both tables a data-modifying CTE deletes from", () => {
+      expect(
+        shapesOf(
+          `WITH removed AS (DELETE FROM "Task" WHERE "done" RETURNING "id")
+           DELETE FROM "Step" WHERE "taskId" IN (SELECT "id" FROM removed);`,
+        ),
+      ).toEqual(["delete:Task", "delete:Step"]);
+    });
+
+    it("names both tables a data-modifying CTE updates", () => {
+      expect(
+        shapesOf(
+          `WITH bumped AS (UPDATE "Task" SET "order" = 1 RETURNING "id")
+           UPDATE "Step" SET "order" = 1 WHERE "taskId" IN (SELECT "id" FROM bumped);`,
+        ),
+      ).toEqual(["update:Task", "update:Step"]);
+    });
+
+    it("does not blame the first ALTER TABLE of a body for a later one's column", () => {
+      expect(
+        shapesOf(
+          `DO $$ BEGIN
+             ALTER TABLE "Task" ADD COLUMN "slug" TEXT;
+             ALTER TABLE "Note" ALTER COLUMN "body" SET NOT NULL;
+           END $$;`,
+        ),
+      ).toEqual(["set-not-null:Note"]);
+    });
+  });
+
+  // #190, raised in review of !292 — the same borrowing one level further down.
+  // Postgres lets a single `ALTER TABLE` carry any number of comma-separated
+  // actions, and `NOT VALID` belongs to the clause it is written in, not to the
+  // statement. `addColumnClauses` has been bounded at its next clause since the
+  // first round of this review; the two `ADD CONSTRAINT` matchers were bounded
+  // only at `;`, so the LAST clause's `NOT VALID` answered for every clause in
+  // front of it — a validated constraint reported as needing no rows, which is
+  // the false-negative direction this module exists to close.
+  describe("a suppression may not be borrowed from a neighbouring clause", () => {
+    it("does not let a later clause's NOT VALID excuse an earlier CHECK", () => {
+      expect(
+        shapesOf(
+          `ALTER TABLE "Task"
+             ADD CONSTRAINT "Task_a_check" CHECK ("a" > 0),
+             ADD CONSTRAINT "Task_b_check" CHECK ("b" > 0) NOT VALID;`,
+        ),
+      ).toEqual(["add-check-constraint:Task"]);
+    });
+
+    it("does not let an earlier clause's NOT VALID excuse a later CHECK", () => {
+      expect(
+        shapesOf(
+          `ALTER TABLE "Task"
+             ADD CONSTRAINT "Task_a_check" CHECK ("a" > 0) NOT VALID,
+             ADD CONSTRAINT "Task_b_check" CHECK ("b" > 0);`,
+        ),
+      ).toEqual(["add-check-constraint:Task"]);
+    });
+
+    it("does not let a later clause's NOT VALID excuse an earlier foreign key", () => {
+      expect(
+        shapesOf(
+          `ALTER TABLE "Task"
+             ADD CONSTRAINT "Task_a_fkey" FOREIGN KEY ("a") REFERENCES "Note"("id"),
+             ADD CONSTRAINT "Task_b_fkey" FOREIGN KEY ("b") REFERENCES "Note"("id") NOT VALID;`,
+        ),
+      ).toEqual(["add-foreign-key:Task"]);
+    });
+
+    it("does not let a sibling ALTER COLUMN's SET DEFAULT vouch for a new column", () => {
+      expect(
+        shapesOf(
+          `ALTER TABLE "Task" ADD COLUMN "slug" TEXT NOT NULL, ALTER COLUMN "body" SET DEFAULT 'x';`,
+        ),
+      ).toEqual(["add-not-null-column-without-default:Task"]);
+    });
+
+    // `ON DELETE SET DEFAULT` is a referential action, not a column default —
+    // the same trap `NOT_A_TABLE` exists for, one keyword over.
+    it("does not read a foreign key's ON DELETE SET DEFAULT as a column default", () => {
+      expect(
+        shapesOf(
+          `ALTER TABLE "Task" ADD COLUMN "noteId" TEXT NOT NULL, ADD CONSTRAINT "Task_noteId_fkey" FOREIGN KEY ("noteId") REFERENCES "Note"("id") ON DELETE SET DEFAULT;`,
+        ),
+      ).toEqual([
+        "add-foreign-key:Task",
+        "add-not-null-column-without-default:Task",
+      ]);
+    });
+
+    // The over-correction guards. A clause boundary is a comma OUTSIDE every
+    // parenthesis; splitting on any comma would cut a value list or a type's
+    // precision in half and strand the `NOT VALID` that follows it, which is
+    // the false-positive direction — cheap, but still wrong.
+    it("still honours a NOT VALID that follows a parenthesised value list", () => {
+      expect(
+        shapesOf(
+          `ALTER TABLE "Settings" ADD CONSTRAINT "Settings_focusSound_check" CHECK ("focusSound" IN ('off', 'on')) NOT VALID;`,
+        ),
+      ).toEqual([]);
+    });
+
+    it("does not treat a type's precision comma as a clause boundary", () => {
+      expect(
+        shapesOf(
+          `ALTER TABLE "Task" ADD COLUMN "cost" numeric(10, 2) NOT NULL DEFAULT 0;`,
+        ),
+      ).toEqual([]);
+    });
+
+    it("still ignores an ALTER TABLE whose every clause is NOT VALID", () => {
+      expect(
+        shapesOf(
+          `ALTER TABLE "Task"
+             ADD CONSTRAINT "Task_a_check" CHECK ("a" > 0) NOT VALID,
+             ADD CONSTRAINT "Task_b_check" CHECK ("b" > 0) NOT VALID;`,
+        ),
+      ).toEqual([]);
+    });
   });
 
   describe("what it must NOT flag", () => {
@@ -499,6 +638,27 @@ UPDATE "Settings" SET "focusSound" = 'on';
   it("throws on a constraint name the <Table>_<column>_check convention cannot parse", () => {
     expect(() => dropConstraintAfterWrite(sql, "weird_name")).toThrow(
       /weird_name/,
+    );
+  });
+
+  // #190, raised in review of !292. Two regexes claim to spell the same
+  // convention and disagreed about its table half: !285's `DROP_CHECK_CONSTRAINT`
+  // allows an underscore there, this module's `CHECK_CONSTRAINT_NAME` did not.
+  // The disagreement is only visible where it costs something — a name the
+  // static guard reads and reports on, and the instrument then refuses to
+  // reconstruct, so the two halves of #190 disagree about which files are in
+  // scope and the demonstration cannot be built for the file that needs it.
+  it("parses every constraint name !285's static guard parses, underscore and all", () => {
+    const underscored = `
+ALTER TABLE "Focus_Session" DROP CONSTRAINT "Focus_Session_mode_check";
+UPDATE "Focus_Session" SET "mode" = 'deep';
+`;
+    const broken = dropConstraintAfterWrite(
+      underscored,
+      "Focus_Session_mode_check",
+    );
+    expect(findLateConstraintDrops([{ name: "m", sql: broken }])).toHaveLength(
+      1,
     );
   });
 });

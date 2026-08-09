@@ -316,8 +316,16 @@ export function splitStatements(sql: string): string[] {
  * Dollar-quote tags are not treated as opaque here precisely because we are
  * already inside one; string literals still are, so a `;` in a value does not
  * split anything.
+ *
+ * Exported because `migration-data-harness.ts` asks per-statement questions of
+ * the same input and had the same hole (#190, raised in review of !292): every
+ * rule there reads its table from the FIRST `ALTER TABLE` in what it is given,
+ * so a body holding two of them attributed the second one's constraint to the
+ * first one's table — a false accusation against one table and, worse, silence
+ * about the other. One splitter rather than two, for the reason `isBefore` is
+ * shared: two copies of this reasoning have already drifted apart once.
  */
-function splitInnerStatements(statement: string): string[] {
+export function splitInnerStatements(statement: string): string[] {
   return splitOnSemicolons(statement, false);
 }
 
@@ -512,18 +520,57 @@ export function isBefore(a: SqlPosition, b: SqlPosition): boolean {
 }
 
 /**
- * `DROP CONSTRAINT "<Table>_<column>_check"`, capturing both halves of the name.
+ * `DROP CONSTRAINT "<name>"`, capturing the name for `parseCheckConstraintName`
+ * to accept or reject.
  *
  * `IF EXISTS` is accepted because it is the same drop, and missing it does not
  * cost a warning — it costs the whole check. An unrecognised drop leaves the
  * column absent from the map, which is the branch that means "no CHECK on this
  * column in this file" and returns clean (#190).
  *
+ * It matches ANY constraint name and lets the parser below decide, rather than
+ * spelling the convention inline (#190, raised in review of !292). Spelled in
+ * two places it was spelled two ways: this one admitted an underscore in the
+ * table half and `migration-data-harness.ts`'s did not.
+ *
  * Global, and every match is read: a merged `DO $$ … $$` body is one statement
  * that may drop several constraints.
  */
-const DROP_CHECK_CONSTRAINT =
-  /DROP\s+CONSTRAINT\s+(?:IF\s+EXISTS\s+)?"([A-Za-z0-9_]+)_([A-Za-z0-9]+)_check"/gi;
+const DROP_CONSTRAINT = /DROP\s+CONSTRAINT\s+(?:IF\s+EXISTS\s+)?"([^"]+)"/gi;
+
+/** `<Table>_<column>_check` — this repo's check-constraint naming convention. */
+const CHECK_CONSTRAINT_NAME = /^([A-Za-z0-9_]+)_([A-Za-z0-9]+)_check$/;
+
+/**
+ * The table and column a check constraint's name says it guards, or `null` if
+ * the name does not follow the convention.
+ *
+ * The ONE reading of `<Table>_<column>_check` in this repo (#190, raised in
+ * review of !292). It had two, and they disagreed about the table half: a table
+ * called `Focus_Session` was a constraint this file's guard reports on and one
+ * that `dropConstraintAfterWrite` refused to reconstruct, so the static half and
+ * the seeded half of #190 covered different sets of files — and the difference
+ * only shows on the file that needs both. Sharing the reasoning is the same
+ * move `isBefore` and `splitInnerStatements` are here for.
+ *
+ * The table half admits `_` and the column half does not, which is what makes
+ * `Focus_Session_mode_check` split as `Focus_Session` + `mode`: the first group
+ * is greedy, so the column is whatever sits between the last `_` and `_check`.
+ * Prisma spells every column in this schema camelCase, so nothing legitimate is
+ * lost to that.
+ *
+ * Case-sensitive, deliberately: Postgres writes the suffix it generates in lower
+ * case, and the two spellings of this convention only ever agreed on names where
+ * case did not vary. A name that differs by case would key the drop map
+ * differently from the write scan anyway, so matching it loosely never bought a
+ * comparison — it bought a `dropAtByColumn` entry no `COLUMN_WRITE` can find.
+ */
+export function parseCheckConstraintName(
+  name: string,
+): { table: string; column: string } | null {
+  const m = CHECK_CONSTRAINT_NAME.exec(name);
+  return m ? { table: m[1], column: m[2] } : null;
+}
 
 /**
  * `UPDATE "<Table>" … SET "<column>" =`, capturing both.
@@ -604,8 +651,16 @@ export function findLateConstraintDrops(
     // means something re-added it in between, so the constraint is live again.
     const dropAtByColumn = new Map<string, SqlPosition>();
     statements.forEach((s, statement) => {
-      for (const m of s.matchAll(DROP_CHECK_CONSTRAINT)) {
-        dropAtByColumn.set(`${m[1]}.${m[2]}`, { statement, offset: m.index });
+      for (const m of s.matchAll(DROP_CONSTRAINT)) {
+        // A constraint named otherwise is skipped rather than guessed at, which
+        // is the "no CHECK on this column in this file" branch — see the
+        // docstring below on why a false accusation is the worse error here.
+        const named = parseCheckConstraintName(m[1]);
+        if (!named) continue;
+        dropAtByColumn.set(`${named.table}.${named.column}`, {
+          statement,
+          offset: m.index,
+        });
       }
     });
 

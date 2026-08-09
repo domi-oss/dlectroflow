@@ -53,6 +53,8 @@
 
 import {
   isBefore,
+  parseCheckConstraintName,
+  splitInnerStatements,
   splitStatements,
   stripSqlComments,
   type MigrationFile,
@@ -173,15 +175,18 @@ const ALTER_TABLE = new RegExp(
  * `SELECT … FOR UPDATE OF t` is a row lock, and `ON UPDATE CASCADE` is a
  * referential action on a foreign key. Seven committed migrations declare the
  * latter, and without the lookbehind the rule reported a table called `CASCADE`.
+ *
+ * Global, because one statement can hold two writes: see the note on `RULES`.
  */
 const UPDATE_TABLE = new RegExp(
   `(?<!\\b(?:FOR|ON)\\s+)\\bUPDATE\\s+(?:ONLY\\s+)?${IDENT}`,
-  "i",
+  "gi",
 );
 
+/** `DELETE FROM <table>`. Global for the same reason as `UPDATE_TABLE`. */
 const DELETE_TABLE = new RegExp(
   `\\bDELETE\\s+FROM\\s+(?:ONLY\\s+)?${IDENT}`,
-  "i",
+  "gi",
 );
 
 const CREATE_UNIQUE_INDEX = new RegExp(
@@ -229,26 +234,73 @@ function alteredTable(statement: string): string | null {
 }
 
 /**
- * `ADD COLUMN` clauses of one statement, as `[name, rest-of-clause]`.
+ * One statement's clauses — the pieces separated by the commas OUTSIDE every
+ * parenthesis, which is where one `ALTER TABLE` action ends and the next begins.
  *
- * Postgres allows several in one `ALTER TABLE`, and only the clause a column
- * belongs to says whether that column has a DEFAULT — reading the whole
- * statement would let one defaulted column vouch for an undefaulted sibling.
+ * #190, raised in review of !292, and the third scope this module has had to be
+ * taught. Every suppression below (`NOT VALID`, `DEFAULT`) belongs to the clause
+ * it is written in, and Postgres lets one `ALTER TABLE` carry any number of
+ * actions. Asked of the whole statement, the LAST clause's `NOT VALID` excused
+ * every validated constraint in front of it, and an `ALTER COLUMN … SET DEFAULT`
+ * next door vouched for an undefaulted new column. Both are the false-negative
+ * direction — a table the coverage gate then never asks anyone to seed, which is
+ * a migration still only ever tested empty.
  *
- * The clause also stops at a `;` (#190, raised in review of !292). A statement
- * here may be a whole `DO $$ … $$` body, and an unbounded clause ran from an
- * `ADD COLUMN … NOT NULL` in one of its statements into a `SET DEFAULT` in the
- * next — which reads as "this column has a default" and drops the finding. That
- * is the false-negative direction, the one this module exists to avoid: the
- * statements are literal-redacted before they get here, so the only semicolons
- * left are real statement boundaries.
+ * Depth-tracked rather than a lookahead for the next clause keyword: that would
+ * need a list of every word an `ALTER TABLE` action can open with, and a missing
+ * entry fails the expensive way, by letting the clause over-run and borrow
+ * again. A comma inside parentheses is always a value list (`IN ('off', 'on')`),
+ * a column list (`FOREIGN KEY ("a", "b")`) or a type's precision
+ * (`numeric(10, 2)`) — never a clause boundary.
+ *
+ * A stray `)` cannot drive the depth negative, so malformed SQL degrades into
+ * MORE clauses rather than one long one. That is the safe direction: a clause
+ * cut short can only lose a trailing suppression and over-report.
+ */
+function topLevelClauses(statement: string): string[] {
+  const clauses: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < statement.length; i += 1) {
+    const c = statement[i];
+    if (c === "(") depth += 1;
+    else if (c === ")") depth = Math.max(0, depth - 1);
+    else if (c === "," && depth === 0) {
+      clauses.push(statement.slice(start, i));
+      start = i + 1;
+    }
+  }
+  clauses.push(statement.slice(start));
+  return clauses;
+}
+
+/**
+ * Where one `ADD COLUMN` ends inside a clause: at the next `ADD COLUMN`, or at
+ * the end. Kept alongside the comma split above rather than replaced by it,
+ * because the comma is what Postgres requires and not what every hand-written
+ * migration in a repo of hand-written migrations actually contains.
+ */
+const ADD_COLUMN_CLAUSE =
+  /\bADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?[\s\S]*?(?=\bADD\s+COLUMN\b|$)/gi;
+
+/**
+ * The `ADD COLUMN` clauses of one statement, each bounded at its own end.
+ *
+ * Only the clause a column belongs to says whether that column has a DEFAULT.
+ * Read wider, the finding disappears, and three different neighbours have been
+ * caught supplying the DEFAULT (#190, raised in review of !292):
+ *
+ *  - a defaulted sibling `ADD COLUMN` in the same `ALTER TABLE`;
+ *  - a `SET DEFAULT` in the NEXT statement of a merged `DO $$ … $$` body — now
+ *    unreachable, because `readableStatements` splits those before this runs;
+ *  - a sibling clause of the same statement: `, ALTER COLUMN "other" SET
+ *    DEFAULT …`, or a foreign key's `ON DELETE SET DEFAULT`, which is a
+ *    referential action and not a column default at all.
  */
 function addColumnClauses(statement: string): string[] {
-  return [
-    ...statement.matchAll(
-      /\bADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?[^;]*?(?=(?:,\s*)?\bADD\s+COLUMN\b|;|$)/gi,
-    ),
-  ].map((m) => m[0]);
+  return topLevelClauses(statement).flatMap((clause) =>
+    [...clause.matchAll(ADD_COLUMN_CLAUSE)].map((m) => m[0]),
+  );
 }
 
 /**
@@ -259,110 +311,144 @@ function addColumnClauses(statement: string): string[] {
  */
 const NOT_VALID = /\bNOT\s+VALID\b/i;
 
-/**
- * The two `ADD CONSTRAINT` shapes Postgres verifies against stored rows, each
- * capturing the rest of ITS OWN statement so the `NOT VALID` that excuses it
- * can only be its own.
- *
- * #190, raised in review of !292. Testing the whole statement for `NOT VALID`
- * was correct while a statement was always one statement; once a `DO $$ … $$`
- * body arrives whole, one clause's `NOT VALID` silenced every other constraint
- * added in the same body — a table nobody then seeds, which is a migration
- * still only ever tested empty.
- */
-const ADD_CHECK = /\bADD\s+(?:CONSTRAINT\s+"?\w+"?\s+)?CHECK\b([^;]*)/gi;
-const ADD_FOREIGN_KEY =
-  /\bADD\s+(?:CONSTRAINT\s+"?\w+"?\s+)?FOREIGN\s+KEY\b([^;]*)/gi;
+/** The two `ADD CONSTRAINT` shapes Postgres verifies against stored rows. */
+const ADD_CHECK = /\bADD\s+(?:CONSTRAINT\s+"?\w+"?\s+)?CHECK\b/i;
+const ADD_FOREIGN_KEY = /\bADD\s+(?:CONSTRAINT\s+"?\w+"?\s+)?FOREIGN\s+KEY\b/i;
 
 /**
  * Whether `statement` adds at least one constraint of this shape that Postgres
  * will check against rows that already exist — i.e. one not marked `NOT VALID`.
+ *
+ * Asked once per CLAUSE, so the `NOT VALID` that excuses a constraint can only
+ * be the one written on that constraint. #190, raised in review of !292, twice:
+ * first when a whole `DO $$ … $$` body reached here as one statement and one
+ * clause's `NOT VALID` silenced every constraint in the body, and again when
+ * bounding at `;` turned out to stop at the statement rather than at the clause
+ * — so
+ *
+ *     ALTER TABLE "T" ADD CONSTRAINT "a" CHECK (…),
+ *                     ADD CONSTRAINT "b" CHECK (…) NOT VALID;
+ *
+ * reported nothing at all, though `a` is checked against every existing row.
+ * Both orderings of that pair are covered by the colocated test, because the
+ * greedy `[^;]*` capture that used to answer this made the FIRST match consume
+ * the rest of the statement — so a `NOT VALID` anywhere in it, before or after,
+ * was the only clause anyone read.
  */
-function addsAValidatedConstraint(statement: string, clauses: RegExp): boolean {
+function addsAValidatedConstraint(statement: string, adds: RegExp): boolean {
+  return topLevelClauses(statement).some(
+    (clause) => adds.test(clause) && !NOT_VALID.test(clause),
+  );
+}
+
+/**
+ * One rule's answer, as a list. `null` and "no table" are the same thing, and a
+ * rule that can only ever name one table says so by going through this.
+ */
+function one(table: string | null): string[] {
+  return table === null ? [] : [table];
+}
+
+/**
+ * Every table a `g`-flagged table pattern names in `statement`, in order and
+ * deduplicated — a statement that writes one table twice is still one table to
+ * seed, and reporting it twice would put a duplicate line in a coverage report
+ * an author is meant to work through.
+ */
+function every(pattern: RegExp, statement: string): string[] {
   // `matchAll` builds its own iterator from the pattern's source and flags, so
   // sharing a `g`-flagged constant carries no `lastIndex` between calls.
-  for (const clause of statement.matchAll(clauses)) {
-    if (!NOT_VALID.test(clause[1])) return true;
-  }
-  return false;
+  return [...new Set([...statement.matchAll(pattern)].map((m) => m[1]))];
 }
 
 /**
  * Every rule, each answering "does this statement's outcome depend on rows that
- * already exist?" and, if so, on which table.
+ * already exist?" and, if so, on which tables.
  *
  * Order is irrelevant: a statement may match several (`ALTER TABLE … ADD
  * COLUMN … NOT NULL, ADD CONSTRAINT … CHECK`) and every match is reported,
  * because they are separate hazards with separate fixes.
+ *
+ * TABLES rather than a table (#190, raised in review of !292). Seven of the nine
+ * rules can only name one, because they read the target of the single `ALTER
+ * TABLE` or `CREATE … INDEX` that a statement is — but `UPDATE` and `DELETE` can
+ * appear twice in one statement, through a data-modifying CTE:
+ *
+ *     WITH removed AS (DELETE FROM "A" … RETURNING "id")
+ *     DELETE FROM "B" WHERE … IN (SELECT "id" FROM removed);
+ *
+ * `20260804120000_google_auth_user_id_not_null` already writes in that shape.
+ * Reading the first match only, the coverage gate demanded a seed for `A` and
+ * never mentioned `B` — one statement, one hazard reported and one hidden.
  */
 const RULES: ReadonlyArray<{
   shape: DataDependentShape;
-  table: (statement: string) => string | null;
+  tables: (statement: string) => string[];
 }> = [
   {
     shape: "update",
-    table: (s) => UPDATE_TABLE.exec(s)?.[1] ?? null,
+    tables: (s) => every(UPDATE_TABLE, s),
   },
   {
     shape: "delete",
-    table: (s) => DELETE_TABLE.exec(s)?.[1] ?? null,
+    tables: (s) => every(DELETE_TABLE, s),
   },
   {
     shape: "set-not-null",
-    table: (s) =>
+    tables: (s) =>
       /\bALTER\s+(?:COLUMN\s+)?"?\w+"?\s+SET\s+NOT\s+NULL\b/i.test(s)
-        ? alteredTable(s)
-        : null,
+        ? one(alteredTable(s))
+        : [],
   },
   {
     shape: "add-check-constraint",
-    table: (s) =>
-      addsAValidatedConstraint(s, ADD_CHECK) ? alteredTable(s) : null,
+    tables: (s) =>
+      addsAValidatedConstraint(s, ADD_CHECK) ? one(alteredTable(s)) : [],
   },
   {
     shape: "validate-constraint",
-    table: (s) =>
-      /\bVALIDATE\s+CONSTRAINT\b/i.test(s) ? alteredTable(s) : null,
+    tables: (s) =>
+      /\bVALIDATE\s+CONSTRAINT\b/i.test(s) ? one(alteredTable(s)) : [],
   },
   {
     shape: "add-foreign-key",
-    table: (s) =>
-      addsAValidatedConstraint(s, ADD_FOREIGN_KEY) ? alteredTable(s) : null,
+    tables: (s) =>
+      addsAValidatedConstraint(s, ADD_FOREIGN_KEY) ? one(alteredTable(s)) : [],
   },
   {
     // Both spellings of "these values must now be distinct": a unique index and
     // a UNIQUE table constraint. A PRIMARY KEY added to an existing table is the
     // same hazard plus a NOT NULL, and is caught here too.
     shape: "add-unique-index",
-    table: (s) => {
+    tables: (s) => {
       const index = CREATE_UNIQUE_INDEX.exec(s);
-      if (index) return index[1];
+      if (index) return [index[1]];
       return /\bADD\s+(?:CONSTRAINT\s+"?\w+"?\s+)?(?:UNIQUE|PRIMARY\s+KEY)\b/i.test(
         s,
       )
-        ? alteredTable(s)
-        : null;
+        ? one(alteredTable(s))
+        : [];
     },
   },
   {
     shape: "narrow-column-type",
-    table: (s) =>
+    tables: (s) =>
       /\bALTER\s+(?:COLUMN\s+)?"?\w+"?\s+(?:SET\s+DATA\s+)?TYPE\b/i.test(s)
-        ? alteredTable(s)
-        : null,
+        ? one(alteredTable(s))
+        : [],
   },
   {
     // No DEFAULT means Postgres has to write NULL into every existing row and
     // then reject it. On an empty table it is a one-line schema change; on a
     // populated one it cannot succeed at all.
     shape: "add-not-null-column-without-default",
-    table: (s) =>
+    tables: (s) =>
       addColumnClauses(s).some(
         (clause) =>
           /\bNOT\s+NULL\b/i.test(clause) && !/\bDEFAULT\b/i.test(clause),
       )
-        ? alteredTable(s)
-        : null,
+        ? one(alteredTable(s))
+        : [],
   },
 ];
 
@@ -379,9 +465,23 @@ function tablesCreatedBy(statements: readonly string[]): Set<string> {
   return created;
 }
 
-/** Statements, comment-stripped, literal-redacted and whitespace-collapsed. */
+/**
+ * Statements, comment-stripped, literal-redacted, whitespace-collapsed — and
+ * split down to the pieces that actually RUN one after another.
+ *
+ * The inner split is what makes every rule below a question about one statement
+ * (#190, raised in review of !292). `splitStatements` keeps a `DO $$ … $$` body
+ * whole, which `findLateConstraintDrops` needs and nothing here does: each rule
+ * reads its table from the FIRST `ALTER TABLE` it can see, so a body holding two
+ * of them blamed the first table for the second one's constraint and said
+ * nothing at all about the second — a false accusation and a missing seed from
+ * one statement. `findFocusSoundViolations` reached the same conclusion one
+ * module over, which is why `splitInnerStatements` is shared rather than copied.
+ */
 function readableStatements(sql: string): string[] {
-  return splitStatements(redactStringLiterals(stripSqlComments(sql)));
+  return splitStatements(redactStringLiterals(stripSqlComments(sql))).flatMap(
+    splitInnerStatements,
+  );
 }
 
 /**
@@ -398,15 +498,16 @@ export function findDataDependentStatements(
     const createdHere = tablesCreatedBy(statements);
     for (const statement of statements) {
       for (const rule of RULES) {
-        const table = rule.table(statement);
-        if (!table || NOT_A_TABLE.has(table.toLowerCase())) continue;
-        if (createdHere.has(table)) continue;
-        found.push({
-          migration: file.name,
-          statement: statement.slice(0, 160),
-          shape: rule.shape,
-          table,
-        });
+        for (const table of rule.tables(statement)) {
+          if (NOT_A_TABLE.has(table.toLowerCase())) continue;
+          if (createdHere.has(table)) continue;
+          found.push({
+            migration: file.name,
+            statement: statement.slice(0, 160),
+            shape: rule.shape,
+            table,
+          });
+        }
       }
     }
   }
@@ -523,9 +624,6 @@ export function planSeededDeploy(
   return phases;
 }
 
-/** `<Table>_<column>_check` — the constraint naming convention of this repo. */
-const CHECK_CONSTRAINT_NAME = /^([A-Za-z0-9]+)_([A-Za-z0-9]+)_check$/;
-
 /**
  * Every match of `pattern` across `statements`, as running-order positions.
  *
@@ -597,13 +695,17 @@ export function dropConstraintAfterWrite(
   sql: string,
   constraint: string,
 ): string {
-  const named = CHECK_CONSTRAINT_NAME.exec(constraint);
+  // The same reading of the convention `findLateConstraintDrops` uses (#190,
+  // raised in review of !292). Two spellings of it disagreed about the table
+  // half, so a constraint on a table with an underscore in its name was one the
+  // static guard reports on and this instrument refused to reconstruct.
+  const named = parseCheckConstraintName(constraint);
   if (!named) {
     throw new Error(
       `"${constraint}" does not follow the <Table>_<column>_check convention, so the column it guards cannot be derived.`,
     );
   }
-  const [, table, column] = named;
+  const { table, column } = named;
   const statements = splitStatements(stripSqlComments(sql));
   // Detection reads a literal-redacted copy; the RESULT is rebuilt from the
   // originals, because what this function returns has to be a runnable
@@ -612,7 +714,7 @@ export function dropConstraintAfterWrite(
   const probes = statements.map(redactStringLiterals);
 
   // Interpolated, but only from `constraint`, `table` and `column`, all three
-  // already through `CHECK_CONSTRAINT_NAME` — an anchored pattern that admits
+  // already through `parseCheckConstraintName` — an anchored pattern that admits
   // nothing but `[A-Za-z0-9_]`, so no regex metacharacter can reach either
   // source.
   const drops = positionsOf(
