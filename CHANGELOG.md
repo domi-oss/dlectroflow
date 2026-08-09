@@ -441,6 +441,27 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **A Settings switch no longer stays flipped on a change that did not save
+  (#227).** Four sections could leave a control showing a value the server had
+  refused. **First-run preview** was the quietest: it said nothing at all, so the
+  checkbox simply looked switched while the setting was not. **Notifications**,
+  **Appearance** and **Focus timer** were arguably worse — they showed "couldn't
+  save" next to a control that still read the way you had just set it, leaving
+  you to guess which of the two to believe. Appearance made the same false claim
+  three times, because its completion and typeface samples previewed the refused
+  choice too. All four now say the save failed **and** put the control back where
+  the server still has it, and a save that fails while you are changing something
+  else undoes only the one that failed.
+
+  Two things deliberately unchanged. The **aging thresholds** are typed-in
+  numbers rather than switches, so a failed save reports itself and leaves your
+  typing exactly where it is — putting the stored number back would delete what
+  you were in the middle of writing. And a save that gets **no answer at all** —
+  a dropped connection, a server restarting mid-request — now says *"No answer
+  yet — this may not have saved"* instead of showing the saving dots forever, and
+  leaves your value alone: the app cannot tell a hung save from a slow one, so
+  undoing it might undo something that did land.
+
 - **The focus timer's Start and Resume no longer fail in silence (#139's shape,
   found via #198).** Both buttons handled a server that could not be *reached*,
   and neither handled a server that answered and *declined* — so in those cases
