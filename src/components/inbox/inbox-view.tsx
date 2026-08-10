@@ -1390,80 +1390,120 @@ export function InboxView({
             uses — not a raw palette shade, which is what dropped the emerald
             confirmation below 4.5:1 on the warm-tinted --background in #40. */}
         {captureFailure && (
-          <div
-            role="alert"
-            className="border-destructive/40 bg-destructive/5 mt-2 flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-start sm:justify-between"
-          >
-            <p
-              id={captureErrorId}
-              className="text-destructive flex min-w-0 items-start gap-1.5 text-sm font-medium"
+          <>
+            <div
+              role="alert"
+              className="border-destructive/40 bg-destructive/5 mt-2 flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-start sm:justify-between"
             >
-              <TriangleAlert
-                aria-hidden="true"
-                className="mt-0.5 h-4 w-4 shrink-0"
-              />
-              <span className="break-words">
-                {t(captureMessageKey(captureFailure), voice)}{" "}
-                <strong>&ldquo;{captureFailure.value}&rdquo;</strong>
-              </span>
-            </p>
-            <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
-              {captureFailure.stale ? (
-                // Retrying re-posts the same action id the running deployment
-                // has already forgotten, so a reload is the ONLY thing on offer.
-                <button
-                  type="button"
-                  aria-describedby={captureErrorId}
-                  onClick={() => window.location.reload()}
-                  className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium"
-                >
-                  <RefreshCw aria-hidden="true" className="h-4 w-4 shrink-0" />
-                  {t("capture.error.reload", voice)}
-                </button>
-              ) : (
-                // `aria-disabled`, not `disabled`: a disabled element cannot
-                // hold focus, so the browser would drop it to <body> the moment
-                // the retry starts. The press is guarded in the handler instead,
-                // so a double-tap still cannot fire two writes.
-                <button
-                  ref={retryCtaRef}
-                  type="button"
-                  // While a retry runs, the reason AND the wait are both reachable
-                  // from the control (Duo review round 8) — see the note below on
-                  // why the wait is not its own live region.
-                  aria-describedby={
-                    captureFailure.retrying
-                      ? `${captureErrorId} ${captureSavingId}`
-                      : captureErrorId
-                  }
-                  aria-disabled={captureFailure.retrying}
-                  onClick={() => {
-                    if (!captureFailure.retrying) retryCapture();
-                  }}
-                  className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium aria-disabled:opacity-50"
-                >
-                  <RotateCcw aria-hidden="true" className="h-4 w-4 shrink-0" />
-                  {t("capture.error.retry", voice)}
-                </button>
-              )}
-              {/* Duo review round 8 — deliberately NOT `role="status"`. That
-                  would be a polite live region nested inside this assertive one,
-                  which is undefined enough in practice that "will it announce"
-                  has no answer. The wait rides the two mechanisms that do have
-                  one: the pressed button's `aria-disabled` state change, which a
-                  screen reader reports because focus is on it, and its
-                  `aria-describedby`, which picks this node up while it shows.
-                  Sighted users see the identical text either way. */}
-              {captureFailure.retrying && (
-                <p
-                  id={captureSavingId}
-                  className="text-muted-foreground text-xs"
-                >
-                  {t("capture.error.saving", voice)}
-                </p>
-              )}
+              <p
+                id={captureErrorId}
+                className="text-destructive flex min-w-0 items-start gap-1.5 text-sm font-medium"
+              >
+                <TriangleAlert
+                  aria-hidden="true"
+                  className="mt-0.5 h-4 w-4 shrink-0"
+                />
+                <span className="break-words">
+                  {t(captureMessageKey(captureFailure), voice)}{" "}
+                  <strong>&ldquo;{captureFailure.value}&rdquo;</strong>
+                </span>
+              </p>
+              <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+                {captureFailure.stale ? (
+                  // Retrying re-posts the same action id the running deployment
+                  // has already forgotten, so a reload is the ONLY thing on offer.
+                  <button
+                    type="button"
+                    aria-describedby={captureErrorId}
+                    onClick={() => window.location.reload()}
+                    className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium"
+                  >
+                    <RefreshCw
+                      aria-hidden="true"
+                      className="h-4 w-4 shrink-0"
+                    />
+                    {t("capture.error.reload", voice)}
+                  </button>
+                ) : (
+                  // `aria-disabled`, not `disabled`: a disabled element cannot
+                  // hold focus, so the browser would drop it to <body> the moment
+                  // the retry starts. The press is guarded in the handler instead,
+                  // so a double-tap still cannot fire two writes.
+                  <button
+                    ref={retryCtaRef}
+                    type="button"
+                    // While a retry runs, the reason AND the wait are both
+                    // reachable from the control (Duo review round 8). This is
+                    // the channel for focus LANDING here with a write already in
+                    // flight; the press itself is announced by the live region
+                    // below, because a description is not re-read under held
+                    // focus (Duo round 16 on `!303`).
+                    aria-describedby={
+                      captureFailure.retrying
+                        ? `${captureErrorId} ${captureSavingId}`
+                        : captureErrorId
+                    }
+                    aria-disabled={captureFailure.retrying}
+                    onClick={() => {
+                      if (!captureFailure.retrying) retryCapture();
+                    }}
+                    className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium aria-disabled:opacity-50"
+                  >
+                    <RotateCcw
+                      aria-hidden="true"
+                      className="h-4 w-4 shrink-0"
+                    />
+                    {t("capture.error.retry", voice)}
+                  </button>
+                )}
+                {/* Duo review round 8 — deliberately NOT `role="status"`. That
+                    would be a polite live region nested inside this assertive
+                    one, which is undefined enough in practice that "will it
+                    announce" has no answer. This is the SIGHTED copy only, and
+                    `aria-hidden` keeps it that way: the announcement is the
+                    sibling region below, and one sentence in two places is how
+                    it gets said twice. Hiding it also stops the insertion from
+                    mutating this `role="alert"` — an alert is assertive and
+                    atomic, so a visible child appearing inside it mid-retry
+                    re-reads the whole notice over the polite announcement.
+                    Nothing changes on screen. */}
+                {captureFailure.retrying && (
+                  <p
+                    data-testid="capture-saving-visible"
+                    aria-hidden="true"
+                    className="text-muted-foreground text-xs"
+                  >
+                    {t("capture.error.saving", voice)}
+                  </p>
+                )}
+              </div>
             </div>
-          </div>
+            {/* Duo round 16 on `!303` — where the wait is actually ANNOUNCED,
+                and a SIBLING of the alert rather than a descendant, because a
+                polite region nested inside an assertive one inherits the
+                container's politeness across its whole subtree.
+                `aria-describedby` cannot do this alone: a description is read
+                when focus LANDS on a control, and Retry is pressed on a control
+                that already holds focus and keeps it by design, so the value
+                gaining this id mid-flight is not something a screen reader goes
+                back to re-read. A live region is the one channel defined for
+                content that changes while the user is stationary.
+                Mounted with the notice and EMPTY until there is something to
+                say — the move announcer at the foot of this file documents why:
+                a region that arrives together with its first message is silent.
+                Kept identical to the timer's notice in `focus-timer.tsx`, which
+                these two have already drifted apart on once. */}
+            <p
+              id={captureSavingId}
+              data-testid="capture-saving-announcer"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              className="sr-only"
+            >
+              {captureFailure.retrying && t("capture.error.saving", voice)}
+            </p>
+          </>
         )}
       </div>
 
