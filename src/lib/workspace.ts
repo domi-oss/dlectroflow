@@ -25,11 +25,21 @@ export class MissingWorkspaceError extends Error {
  * load-bearing decision in this fix. Every handler that already narrows on
  * MissingWorkspaceError treats it as "no usable session and no workspace to
  * scope to", which is exactly the right answer here — `/api/export` answers 401
- * instead of 500, `hasSession()` would report false, and every action file
- * inherits the refusal without a line changed. More to the point it
- * fails closed for code that does not exist yet: a future handler written
- * knowing only about MissingWorkspaceError cannot accidentally let a frozen
- * account through, because there is no narrower branch for it to miss.
+ * instead of 500, and every action file inherits the refusal without a line
+ * changed. More to the point it fails closed for code that does not exist yet:
+ * a future handler written knowing only about MissingWorkspaceError cannot
+ * accidentally let a frozen account through, because there is no narrower
+ * branch for it to miss.
+ *
+ * **The inheritance only reaches code this error can actually reach, and
+ * {@link hasSession} is not that code (!305 review).** It resolves through
+ * {@link resolveWorkspace}, which issues no query and so never learns the
+ * status; the sole `throw` below is inside {@link currentWorkspaceId}, which
+ * `hasSession` does not call. A frozen account's still-valid token therefore
+ * keeps it `true`, and that is the intended answer — see that function, where
+ * the trade is argued and what it opens is enumerated. It is written down HERE
+ * too because "subclass of MissingWorkspaceError" reads like it covers every
+ * refusal path in the app, and this one path it does not.
  *
  * The message stays deliberately uninformative for the same reason
  * `/api/export`'s 401 says "Not signed in": whoever holds the cookie already

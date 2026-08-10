@@ -651,6 +651,57 @@ describe("hasSession", () => {
     expect(await hasSession()).toBe(false);
   });
 
+  // ── A revoked account still has a session (!305 review) ──────────────────
+  //
+  // RevokedAccountError's doc comment used to claim the opposite, reasoning
+  // from the subclassing: because it extends MissingWorkspaceError, every
+  // handler that narrows on that type inherits the refusal — and `hasSession()`
+  // was listed as one of them. It is not, and cannot be. It is built on the
+  // status-blind `resolveWorkspace()`, so the error it would have to catch is
+  // never thrown on its path at all; the only `throw new RevokedAccountError()`
+  // in the tree is inside `currentWorkspaceId()`.
+  //
+  // The behaviour was right and only the prose was wrong, which is precisely
+  // the shape #220 itself shipped in — a doc comment promising something the
+  // code did not do. So it is pinned here rather than left to the next reader
+  // to re-derive.
+  describe("a revoked account holding a still-valid token", () => {
+    async function signedInRevoked() {
+      const token = await signUserSession(
+        { kind: "user", userId: "u-1", wsId: "ws-1" },
+        SECRET,
+      );
+      cookiesMock.mockResolvedValue(jarWith(token));
+      // Armed so that a status read, if one happened, would refuse.
+      userFindUniqueMock.mockResolvedValue({ status: "revoked" });
+    }
+
+    it("is still a session, because status is not this function's question", async () => {
+      await signedInRevoked();
+      expect(await hasSession()).toBe(true);
+    });
+
+    it("does not read the status to say so", async () => {
+      // The boolean alone would pass just as happily against a version that
+      // read the status and ignored it — which is the version that costs a
+      // query on every byte-range request of every seek, and the whole reason
+      // #61 has a second helper. What is being pinned is the absent query.
+      await signedInRevoked();
+      await hasSession();
+      expect(userFindUniqueMock).not.toHaveBeenCalled();
+      expect(workspaceUpsertMock).not.toHaveBeenCalled();
+    });
+
+    it("is refused by currentWorkspaceId on the very same mocks", async () => {
+      // The control. Without it, "hasSession() returned true" could mean the
+      // fixture never made the account look revoked in the first place.
+      await signedInRevoked();
+      await expect(currentWorkspaceId()).rejects.toBeInstanceOf(
+        RevokedAccountError,
+      );
+    });
+  });
+
   it("lets a non-session failure through instead of reporting anonymous", async () => {
     // A misconfigured AUTH_SESSION_SECRET must not read as "not signed in" —
     // that sends somebody with a perfectly good cookie to re-authenticate over
