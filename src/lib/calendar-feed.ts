@@ -166,7 +166,7 @@ export async function getOwnFeed(userId: string): Promise<OwnFeed | null> {
  * saying so — and it was **wrong** (#223). Prisma 6.19 only compiles an upsert to
  * a native `INSERT … ON CONFLICT` when the update payload is NON-EMPTY; with an
  * empty one it degrades to `BEGIN; SELECT; INSERT; COMMIT`, which is the same
- * read-then-insert the leading `findUnique` already was. Measured at 15 of 20
+ * read-then-insert the leading `findUnique` already was. Measured at 12 of 20
  * racing callers raising P2002, out of an action that has no branch for it.
  *
  * `createManyAndReturn` + `skipDuplicates` is the only Prisma API that compiles

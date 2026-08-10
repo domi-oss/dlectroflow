@@ -71,7 +71,7 @@ export type Spark = { quote: string; source: string };
  * Prisma 6.19 compiles an upsert to a native `INSERT … ON CONFLICT` **only when
  * the update payload is non-empty**; with an empty one it degrades to
  * `BEGIN; SELECT; INSERT; COMMIT`, the same read-then-insert as the lines above
- * it. Measured at 15 of 20 racing callers raising P2002 — out of the dashboard
+ * it. Measured at 12 of 20 racing callers raising P2002 — out of the dashboard
  * render, so the quote card fails for one of two concurrent requests.
  *
  * `createManyAndReturn` + `skipDuplicates` is the only Prisma API that compiles
