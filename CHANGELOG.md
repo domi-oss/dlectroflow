@@ -637,6 +637,23 @@ operators upgrading a self-hosted instance don't get surprised.
   the primary control (`sessionCtaRef`, where focus lands after a resume) was
   already on Pause; the row now agrees with it.
 
+- **Migrations are tested against a database that already holds rows (#190).**
+  `prisma migrate deploy` on an empty schema proves a migration parses and
+  nothing more, and every gate this project had did exactly that — which is why
+  the 2026-08-07 defect could not fail anywhere except production: its data steps
+  were `UPDATE`s, and zero rows updated means no constraint is ever evaluated.
+  `npm test` now applies the real migrations, one at a time, to a scratch schema
+  seeded with synthetic rows at the schema version each was written against, then
+  asserts what the conversions actually did to them. It counts the rows in every
+  table a migration is about to touch, so "this migration met data" is a measured
+  number rather than a claim about the seed files — the first thing that found was
+  a table emptied mid-timeline whose later migrations were still running empty.
+  The harness is **demonstrated to fail**: it reconstructs the pre-fix statement
+  order of `20260806100000` and requires SQLSTATE 23514 and the P3009 that
+  followed, so a gate that has quietly stopped being able to catch that defect
+  fails the suite rather than passing it. Nothing an operator runs changes; the
+  migrations themselves are untouched.
+
 - **Completing a to-do with no steps left its Google Task open (#195).** A
   stepless to-do is pushed to Google Tasks as one task, so the scheduling unit is
   the to-do itself rather than any step of it — and only steps were ever marked
