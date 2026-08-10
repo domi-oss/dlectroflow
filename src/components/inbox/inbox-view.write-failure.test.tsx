@@ -1159,6 +1159,95 @@ describe("InboxView — a failed rename (#225)", () => {
   });
 
   /**
+   * !306's Duo review, and the mirror of the guard that was already here: the
+   * sequence number stopped a late SUCCESS clearing a fresher failure, but
+   * nothing stopped a late FAILURE overwriting one.
+   *
+   * The spec above is what makes this reachable rather than theoretical —
+   * `writeGuardKey` keys a rename on its words as well as its row, so two edits
+   * of one row to DIFFERENT text are two in-flight writes at the same
+   * `{ id, field: "text" }` target and can settle in either order. When the
+   * older one settles last, the user is shown the wrong words and the wrong
+   * reason, and Retry re-posts an edit they have already superseded.
+   */
+  it("an OLDER failure settling late does not replace the fresher notice on screen", async () => {
+    let failFirst!: () => void;
+    let failSecond!: () => void;
+    vi.mocked(renameItem)
+      .mockReturnValueOnce(
+        new Promise<undefined>((_resolve, reject) => {
+          failFirst = () => reject(new Error("offline"));
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise<undefined>((_resolve, reject) => {
+          failSecond = () => reject(new Error("offline"));
+        }),
+      );
+    renderInbox([makeItem({ text: "old title" })]);
+
+    await editTitle("old title", "first edit");
+    await editTitle("old title", "second edit");
+
+    // The NEWER attempt fails first, so its words are what the notice is about.
+    await act(async () => {
+      failSecond();
+      await flushTicks();
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent(/second edit/);
+
+    // The older, slower one loses the race and settles into a notice that has
+    // already moved on.
+    await act(async () => {
+      failFirst();
+      await flushTicks();
+    });
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(/second edit/);
+    expect(alert).not.toHaveTextContent(/first edit/);
+  });
+
+  /**
+   * The same defect with the two failures settling in ONE tick, which is what
+   * going offline actually looks like: both requests give up together.
+   *
+   * Kept as its own spec because it is the one that says WHERE the guard has to
+   * live. Testing the notice's own record inside `setWriteFailure` passes the
+   * spec above and fails this one — `displayedFailure` is a mirror kept in an
+   * effect, so when both failures land before React commits it still reads
+   * `null` and the older attempt sails through. The claim has to be staked
+   * synchronously, which is why it is `writeSettledAt` and not the record.
+   */
+  it("holds even when both failures settle before the notice has rendered", async () => {
+    let failFirst!: () => void;
+    let failSecond!: () => void;
+    vi.mocked(renameItem)
+      .mockReturnValueOnce(
+        new Promise<undefined>((_resolve, reject) => {
+          failFirst = () => reject(new Error("offline"));
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise<undefined>((_resolve, reject) => {
+          failSecond = () => reject(new Error("offline"));
+        }),
+      );
+    renderInbox([makeItem({ text: "old title" })]);
+
+    await editTitle("old title", "first edit");
+    await editTitle("old title", "second edit");
+
+    await act(async () => {
+      failSecond();
+      failFirst();
+      await flushTicks();
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/second edit/);
+  });
+
+  /**
    * The other side of the same line, so the fix above cannot be read as "renames
    * are simply unguarded". Identical words really are the double-press the guard
    * is for, and re-submitting them while the first is in flight asks for

@@ -352,13 +352,15 @@ const sameWriteTarget = (a: WriteTarget, b: WriteTarget): boolean =>
  * finished (`next/dist/client/components/app-router-instance.js`). The two
  * renames therefore reach the server in submission order and the row is left
  * holding the last words the user typed, which is what they asked for. The
- * `seq` machinery already handles the rest: whichever attempt lands last owns
- * the notice, so an earlier failure is cleared by the later edit that
- * superseded it.
+ * `seq` machinery already handles the rest: the NEWEST attempt to settle owns
+ * the notice whichever way it went, so an earlier failure is cleared by the
+ * later edit that superseded it and — !306's Duo review, since letting the
+ * second rename through is what put two writes at one target in the first place
+ * — an earlier failure cannot overwrite the later edit's notice either.
  *
  * Deliberately separate from {@link writeTargetKey}, which stays keyed by target
- * alone — `writeLandedAt`'s "has a newer write at this row landed?" question is
- * about the row, not about the words.
+ * alone — `writeSettledAt`'s "has a newer write at this row settled?" question
+ * is about the row, not about the words.
  */
 const writeGuardKey = (target: WriteTarget, subject: string): string =>
   target.field === "text"
@@ -1041,23 +1043,26 @@ export function InboxView({
   /**
    * Which targets have a write outstanding, how many writes have been started,
    * how many are still running, and the newest attempt at each target that
-   * LANDED.
+   * SETTLED — landed or failed, both, because the question it answers is "has
+   * this target moved on since my attempt started?" and either answer means yes.
    *
    * Refs, not state: nothing renders any of them, and a counter that triggered a
    * render would re-run the very effects below that move focus. That is the one
    * deliberate difference from `schedulingIds`, which is state precisely because
    * `row-actions.tsx` renders it as `pending`.
    *
-   * `landedAt` exists because two writes at the same target where the older one
+   * `settledAt` exists because two writes at the same target where the older one
    * loses the race would otherwise end with a notice about a write that
-   * succeeded. It is emptied whenever nothing is outstanding, because at that
-   * instant nothing can read it — otherwise a long session accumulates one entry
-   * per row ever touched.
+   * succeeded — and, once it was told about failures too (!306, Duo review),
+   * with the older of two failures overwriting the newer one's notice. It is
+   * emptied whenever nothing is outstanding, because at that instant nothing can
+   * read it — otherwise a long session accumulates one entry per row ever
+   * touched.
    */
   const inFlight = useRef(new Set<string>());
   const writeAttempts = useRef(0);
   const writesOutstanding = useRef(0);
-  const writeLandedAt = useRef(new Map<string, number>());
+  const writeSettledAt = useRef(new Map<string, number>());
   /**
    * What the notice on screen is currently about, readable from the async write
    * paths. Their closure holds the `writeFailure` from the press that started
@@ -1189,9 +1194,22 @@ export function InboxView({
     return startTransition(async () => {
       const seq = (writeAttempts.current += 1);
       writesOutstanding.current += 1;
-      /** A newer write at this same target has already landed, so whatever this
-       *  one has to say about it is out of date. */
-      const overtaken = () => (writeLandedAt.current.get(key) ?? 0) > seq;
+      /** A newer write at this same target has already settled — landed OR
+       *  failed — so whatever this one has to say about it is out of date. */
+      const overtaken = () => (writeSettledAt.current.get(key) ?? 0) > seq;
+      /**
+       * This attempt is now the newest one to have settled at this target.
+       *
+       * `max`, because an attempt that started earlier can still settle later —
+       * and on the failure path below `overtaken()` has already established that
+       * nothing newer is recorded, so the `max` is a statement of the invariant
+       * rather than a live comparison.
+       */
+      const markSettled = () =>
+        writeSettledAt.current.set(
+          key,
+          Math.max(writeSettledAt.current.get(key) ?? 0, seq),
+        );
       try {
         let landed = false;
         try {
@@ -1199,6 +1217,22 @@ export function InboxView({
           landed = true;
         } catch (error) {
           if (overtaken()) return;
+          // !306, Duo review — the failure path has to claim the target just as
+          // the success path does, and this line is the whole fix. `overtaken`
+          // used to be told about landings only, so it stopped a stale SUCCESS
+          // clearing a fresher failure notice while letting a stale FAILURE
+          // overwrite one: two edits of one row to different words are two
+          // writes in flight at the same target (see `writeGuardKey`), and when
+          // the older lost the race the user was left reading the wrong words
+          // and the wrong reason, with Retry armed to re-post an edit they had
+          // already superseded. Claiming it HERE rather than testing the notice
+          // in `setWriteFailure` is what makes the guard hold when both failures
+          // settle before React commits: `displayedFailure` is a mirror kept in
+          // an effect and has not caught up yet at that point, whereas this map
+          // is written synchronously. It also drops the attempt whole, so
+          // `takeFocusForWrite` below is never raised for a record that is not
+          // going to be shown.
+          markSettled();
           // Only take focus when the user has not moved it since the press. They
           // may have gone to the capture field during a ten-second hang, and
           // interrupting them mid-sentence is #210's argument for why the capture
@@ -1224,11 +1258,7 @@ export function InboxView({
           });
         }
         if (!landed) return;
-        // `max`, because an attempt that started earlier can still land later.
-        writeLandedAt.current.set(
-          key,
-          Math.max(writeLandedAt.current.get(key) ?? 0, seq),
-        );
+        markSettled();
         // Read while the notice still exists: its unmount is about to drop focus
         // to <body> if the user is standing on it, which they are if they pressed
         // Retry. Two conditions, and the second is !306's review finding — the
@@ -1266,7 +1296,7 @@ export function InboxView({
         inFlight.current.delete(guardKey);
         if (fromRetry) markWriteRetrying(target, false);
         writesOutstanding.current -= 1;
-        if (writesOutstanding.current === 0) writeLandedAt.current.clear();
+        if (writesOutstanding.current === 0) writeSettledAt.current.clear();
       }
     });
   };
