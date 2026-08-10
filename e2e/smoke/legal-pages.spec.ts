@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { LEGAL_CONTACT_EMAIL } from "../../src/lib/legal";
 
 // #123 — the legal pages, end to end, as a complete stranger sees them.
@@ -77,15 +77,34 @@ test.describe("legal pages are public", () => {
 });
 
 test.describe("legal pages are reachable from the app", () => {
-  // Google requires the policy to be LINKED from the app, not merely to exist.
-  // The footer is that link, so it is worth clicking rather than trusting.
+  /**
+   * #200 — every footer link now opens a new tab, so a click no longer
+   * navigates the page it was clicked from. These specs follow the popup
+   * instead, which keeps them testing the thing that matters (Google requires
+   * the policy to be LINKED from the app, not merely to exist) rather than the
+   * navigation mechanism that happens to deliver it.
+   *
+   * The full accessible name is used deliberately. Playwright's `name` is a
+   * substring match, so the bare label would still pass with the WCAG 3.2.5
+   * "opens in a new tab" announcement silently gone — and that announcement is
+   * the whole reason a new tab is acceptable here.
+   */
+  const openFromFooter = async (page: Page, label: string) => {
+    const [popup] = await Promise.all([
+      page.waitForEvent("popup"),
+      page.getByRole("link", { name: `${label} (opens in a new tab)` }).click(),
+    ]);
+    await popup.waitForLoadState();
+    return popup;
+  };
+
   test("the footer link on the app shell reaches the privacy policy", async ({
     page,
   }) => {
     await page.goto("/");
-    await page.getByRole("link", { name: "Privacy" }).click();
+    const popup = await openFromFooter(page, "Privacy");
     await expect(
-      page.getByRole("heading", { level: 1, name: "Privacy Policy" }),
+      popup.getByRole("heading", { level: 1, name: "Privacy Policy" }),
     ).toBeVisible();
   });
 
@@ -93,22 +112,26 @@ test.describe("legal pages are reachable from the app", () => {
     page,
   }) => {
     await page.goto("/login");
-    await page.getByRole("link", { name: "Terms" }).click();
+    const popup = await openFromFooter(page, "Terms");
     await expect(
-      page.getByRole("heading", { level: 1, name: "Terms of Service" }),
+      popup.getByRole("heading", { level: 1, name: "Terms of Service" }),
     ).toBeVisible();
   });
 
   test("each legal page links to the other", async ({ page }) => {
     await page.goto("/privacy");
-    await page.getByRole("link", { name: "Terms" }).click();
+    const terms = await openFromFooter(page, "Terms");
     await expect(
-      page.getByRole("heading", { level: 1, name: "Terms of Service" }),
+      terms.getByRole("heading", { level: 1, name: "Terms of Service" }),
     ).toBeVisible();
 
-    await page.getByRole("link", { name: "Privacy" }).first().click();
+    // From the new tab's own footer. No `.first()` any more: the qualified name
+    // no longer collides with this page's several body links to the Privacy
+    // Policy, so the locator is unambiguous on its own terms rather than by
+    // picking whichever matched first.
+    const privacy = await openFromFooter(terms, "Privacy");
     await expect(
-      page.getByRole("heading", { level: 1, name: "Privacy Policy" }),
+      privacy.getByRole("heading", { level: 1, name: "Privacy Policy" }),
     ).toBeVisible();
   });
 });

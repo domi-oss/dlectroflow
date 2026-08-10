@@ -78,12 +78,19 @@ describe("Terms of Service page: structure", () => {
     }
   });
 
-  it("renders the shared legal footer", () => {
+  // Full accessible name, not "Privacy" (#200) — see the matching spec in
+  // src/app/privacy/page.test.tsx. Matching the visible half alone would pass
+  // with the new-tab announcement missing, and the announcement is the reason
+  // it is in the name at all. It also disambiguates the footer link from this
+  // page's several body links to the Privacy Policy.
+  it("renders the shared legal footer, announcing the new tab", () => {
     render(<TermsPage />);
-    expect(screen.getByRole("link", { name: "Privacy" })).toHaveAttribute(
-      "href",
-      "/privacy",
-    );
+    const privacy = screen.getByRole("link", {
+      name: "Privacy (opens in a new tab)",
+    });
+    expect(privacy).toHaveAttribute("href", "/privacy");
+    expect(privacy).toHaveAttribute("target", "_blank");
+    expect(privacy).toHaveAttribute("rel", "noopener noreferrer");
   });
 
   it("cross-links to the Privacy Policy from the body, not just the footer", () => {

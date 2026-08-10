@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { SOURCE_REPO_URL } from "@/lib/legal";
 
@@ -25,10 +24,13 @@ import { SOURCE_REPO_URL } from "@/lib/legal";
  * Not a client component: no state, no effects, so it renders directly inside
  * the Server-Component layouts.
  */
+// No `external` flag any more (#200): it existed to choose between `next/link`
+// and a plain anchor, and all three now open in a new tab, where `next/link` has
+// nothing to offer. A field nothing reads is a field that goes stale.
 const LINKS = [
-  { href: "/privacy", label: "Privacy", external: false },
-  { href: "/terms", label: "Terms", external: false },
-  { href: SOURCE_REPO_URL, label: "Source", external: true },
+  { href: "/privacy", label: "Privacy" },
+  { href: "/terms", label: "Terms" },
+  { href: SOURCE_REPO_URL, label: "Source" },
 ] as const;
 
 // One shared link style. Mirrors src/components/nav/back-link.tsx so a footer
