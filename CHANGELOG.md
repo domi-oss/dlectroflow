@@ -510,6 +510,33 @@ operators upgrading a self-hosted instance don't get surprised.
   why it is waiting rather than just greying out, stays reachable by keyboard so
   the reason can be read, and goes through the moment the wait is over — however
   it ended.
+- **A Settings switch no longer stays flipped on a change that did not save
+  (#227).** Four sections could leave a control showing a value the server had
+  refused. **First-run preview** was the quietest: it said nothing at all, so the
+  checkbox simply looked switched while the setting was not. **Notifications**,
+  **Appearance** and **Focus timer** were arguably worse — they showed "couldn't
+  save" next to a control that still read the way you had just set it, leaving
+  you to guess which of the two to believe. Appearance made the same false claim
+  three times, because its completion and typeface samples previewed the refused
+  choice too. All four now say the save failed **and** put the control back where
+  the server still has it, and a save that fails while you are changing something
+  else undoes only the one that failed.
+
+  Flipping the *same* control several times in quick succession is handled too.
+  Each save is tracked as its own attempt rather than by the value it wrote, so a
+  slow failure can no longer undo a later change that did save — even when the
+  two happen to land on the same setting. And a control that steps back steps
+  back to the last value the server actually accepted, rather than to whatever it
+  was showing when the page loaded.
+
+  Two things deliberately unchanged. The **aging thresholds** are typed-in
+  numbers rather than switches, so a failed save reports itself and leaves your
+  typing exactly where it is — putting the stored number back would delete what
+  you were in the middle of writing. And a save that gets **no answer at all** —
+  a dropped connection, a server restarting mid-request — now says *"No answer
+  yet — this may not have saved"* instead of showing the saving dots forever, and
+  leaves your value alone: the app cannot tell a hung save from a slow one, so
+  undoing it might undo something that did land.
 
 - **Creating your calendar feed in two tabs at once no longer errors (#223).**
   Pressing "create my feed" twice at the same moment — two tabs, a double-click

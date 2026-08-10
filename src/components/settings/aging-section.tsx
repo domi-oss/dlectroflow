@@ -24,6 +24,23 @@ import {
  * whole group (they share a single server action), and a failed write surfaces a
  * non-blocking error while leaving every input editable.
  *
+ * ## Why a failed write is NOT rolled back here (#227)
+ *
+ * #227 audited the four `useSaveStatus` sections for both halves — report the
+ * failure *and* restore the control — and added the rollback to
+ * `NotificationsSection`, `AppearanceSection` and `FocusTimerSection`. This
+ * section was already correct, and deliberately so rather than by omission,
+ * which is why it is written down: these are five free-entry number fields
+ * behind a 600 ms debounce, so the value on screen is the user's own in-progress
+ * typing rather than a toggle's committed state. Putting the server's number
+ * back would DELETE what they are still editing — a worse outcome than the
+ * stale-looking switch #227 is about, and precisely the failure the paragraph
+ * above rules out when it says the inputs stay editable. For a field the user is
+ * holding, reporting is the whole correct answer.
+ *
+ * Pinned by a spec in `aging-section.test.tsx` so the next audit does not read
+ * the missing rollback as the bug the other three had.
+ *
  * "Demo override (seconds)" lives here rather than in the Demo section on
  * purpose: it is the same `updateAgingSettings` payload and the same debounce as
  * the four thresholds it overrides, so moving it would split one save across two

@@ -989,6 +989,20 @@ export const STRINGS = {
     plain: "Couldn't save — still editable, try again.",
     playful: "Couldn't save — still editable, try again.",
   },
+  // #227 — the write never answered, so whether it landed is UNKNOWN. Says
+  // exactly that and nothing stronger: "couldn't save" would be a claim the
+  // client has no evidence for (a server action cannot be aborted, so the write
+  // may still complete), and the control is deliberately left showing the value
+  // the user chose rather than rolled back, because undoing a write that may
+  // have succeeded is the same lie pointing the other way.
+  //
+  // Identical across voices for the reason "settings.saveError" is: the playful
+  // skin is a delight layer, and "did I just lose that?" is not where delight
+  // belongs.
+  "settings.saveStalled": {
+    plain: "No answer yet — this may not have saved.",
+    playful: "No answer yet — this may not have saved.",
+  },
 
   // ── Phase 6 — Notifications settings ───────────────────────────────────────
   "notify.heading": { plain: "Notifications", playful: "🔔 Notifications" },
