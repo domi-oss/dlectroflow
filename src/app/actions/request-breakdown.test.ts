@@ -19,10 +19,21 @@ const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
         findFirst: vi.fn(),
         update: vi.fn().mockResolvedValue({}),
         updateMany: vi.fn().mockResolvedValue({}),
+        // #225 — `keepAsTask`'s guarded triage stamp. Returns the row AS
+        // UPDATED, which is where it reads back whether the item already has a
+        // Task; `[]` would mean the row is gone.
+        updateManyAndReturn: vi.fn().mockResolvedValue([{ taskId: null }]),
       },
       task: {
         create: vi.fn().mockResolvedValue({ id: "t1" }),
       },
+      // Pass-through: the callback gets the same delegates, so shape assertions
+      // read the same mocks whether the write is inside a transaction or not.
+      // What a mock cannot show is the row lock the guard actually depends on —
+      // that is `keep-as-task.integration.test.ts`, against real Postgres.
+      $transaction: vi.fn(<T>(fn: (tx: unknown) => Promise<T>) =>
+        fn(prismaMock),
+      ),
     };
     return {
       prismaMock,
@@ -119,15 +130,16 @@ describe("breakdownRequestedAt is cleared by every move out of Multi-step", () =
     ).toBeNull();
   });
 
+  // #225 — the stamp moved into the guarded write, so the clear is asserted
+  // where it now lives. `update` here only links the new Task to the item.
   it("keepAsTask (→ Single-task with a task) clears it", async () => {
-    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
-      id: "i1",
-      text: "x",
-    });
+    prismaMock.brainDumpItem.updateManyAndReturn.mockResolvedValueOnce([
+      { taskId: null, text: "x", notes: null },
+    ]);
     const { keepAsTask } = await import("./braindump");
     await keepAsTask("i1");
     expect(
-      prismaMock.brainDumpItem.update.mock.calls[0][0].data
+      prismaMock.brainDumpItem.updateManyAndReturn.mock.calls[0][0].data
         .breakdownRequestedAt,
     ).toBeNull();
   });

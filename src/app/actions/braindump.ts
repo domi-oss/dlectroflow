@@ -293,33 +293,109 @@ export async function dismissPrompt(id: string) {
 
 /**
  * "Keep as task" — promote an inbox item into a Task without breaking it down.
- * (Step 5 will add the conversational-breakdown launch.)
+ *
+ * ## At most one Task per item, however many times this is called (#225)
+ *
+ * This used to be `findFirst`-then-`task.create` with no precondition on the
+ * create — the only one of the four brain-dump→task writers without one
+ * (`startBreakdown` and `ensureFocusStep` both return the item's existing
+ * `taskId` before creating). A second call therefore built a second `Task` and
+ * repointed the item at it, leaving the first reachable from no inbox row while
+ * the focus lanes, the ICS feed and the data export all still counted it — and
+ * taking its steps out of reach with it.
+ *
+ * Three ways to reach that, none of them exotic:
+ *
+ * 1. **Retry after a timeout** (!306, Duo review round 13). `inbox-view.tsx`
+ *    bounds how long the UI waits at `INBOX_ACTION_TIMEOUT_MS`, not how long the
+ *    request runs — a server action cannot be aborted from the client. The
+ *    notice says so honestly ("this may already have gone through") and offers a
+ *    Retry, and the client's `inFlight` guard has already been released by then,
+ *    so taking that Retry sends a second `keepAsTask` at a row whose first one
+ *    may have landed. The client guard is per-press and cannot see this; nothing
+ *    but the write itself can.
+ * 2. **▶ Focus first.** `ensureFocusStep` gives an item a Task without triaging
+ *    it, so "Add to-do" afterwards met a row that already had one.
+ * 3. **Re-triage.** `moveToReview` un-triages an item and deliberately keeps its
+ *    Task, "so re-triaging reuses the same breakdown" — which is precisely what
+ *    a second create stopped it from doing.
+ *
+ * So the precondition moves INTO the write, the same guarded shape `reopenItem`,
+ * `uncompleteStep` and `reverseLatestReward` use: the triage stamp is the first
+ * write in the transaction and takes the row lock, and `updateManyAndReturn`
+ * hands back the row AS UPDATED. A second caller blocks on that lock, and
+ * Postgres re-evaluates a blocked `UPDATE` against the committed version, so the
+ * `taskId` it reads back is the winner's. Zero rows means the row is gone or
+ * belongs to somebody else — a no-op, not an error to raise at someone who
+ * pressed a button twice.
+ *
+ * The link write has to be inside the same transaction rather than after it:
+ * autocommit would release the lock the moment the stamp landed, and the second
+ * caller would read `taskId` as NULL because the first has not created its Task
+ * yet. That window is the whole defect.
+ *
+ * Guarded on `taskId`, NOT on `status`. `triageBrainDumpItem` and
+ * `requestBreakdown` both set `Triaged` without creating a Task, so a
+ * status-shaped guard would refuse the one press that still owes those items a
+ * Task. What must not happen twice is the CREATE; re-stamping the triage columns
+ * is idempotent by value and is what the caller asked for either way.
+ *
+ * The item is read through the guarded write instead of ahead of it, so the
+ * columns `brainDumpItemToTaskData` copies come from the same locked row version
+ * the decision was made on rather than from a snapshot a concurrent rename could
+ * already have superseded.
  */
 export async function keepAsTask(id: string) {
   const workspaceId = await currentWorkspaceId();
-  const item = await prisma.brainDumpItem.findFirst({
-    where: { id, workspaceId },
+
+  const taskId = await prisma.$transaction(async (tx) => {
+    const [item] = await tx.brainDumpItem.updateManyAndReturn({
+      where: { id, workspaceId },
+      data: {
+        status: BrainDumpStatus.Triaged,
+        triagedAt: new Date(),
+        breakdownRequestedAt: null,
+      },
+      // Exactly `BrainDumpItemForTask` plus the guard column. A `select` rather
+      // than the whole row because the conversion helper is typed structurally
+      // for this, and naming the five columns is what makes a sixth one being
+      // added to the conversion a compile error here rather than a silent drop.
+      select: {
+        taskId: true,
+        text: true,
+        notes: true,
+        scheduleDueAt: true,
+        schedulePriority: true,
+        scheduleHours: true,
+      },
+    });
+    // The row is gone, or is not this workspace's. Same no-op the `findFirst`
+    // guard used to give, now decided by the write's own `where` — so the scope
+    // travels with the operation instead of being inherited from a read above it.
+    if (!item) return null;
+    // Somebody already gave this item a Task: the winner of a race, an earlier
+    // call this one is a retry of, or ▶ Focus. Adopt it. Returning it rather
+    // than `null` keeps the action honestly idempotent — two calls answer with
+    // the same task id, which is what every caller of the first one assumed.
+    if (item.taskId) return item.taskId;
+    // #179 — the ONE conversion, so the item's note and its three schedule-intent
+    // columns cross with it. Triage is a routine action and must not silently drop
+    // content somebody typed; `braindump-to-task-hygiene` fails the build if a
+    // writer stops going through here.
+    const task = await tx.task.create({
+      data: brainDumpItemToTaskData(item, workspaceId),
+    });
+    await tx.brainDumpItem.update({
+      where: { id },
+      data: { taskId: task.id },
+    });
+    return task.id;
   });
-  if (!item) return;
-  // #179 — the ONE conversion, so the item's note and its three schedule-intent
-  // columns cross with it. Triage is a routine action and must not silently drop
-  // content somebody typed; `braindump-to-task-hygiene` fails the build if a
-  // writer stops going through here.
-  const task = await prisma.task.create({
-    data: brainDumpItemToTaskData(item, workspaceId),
-  });
-  await prisma.brainDumpItem.update({
-    where: { id },
-    data: {
-      status: BrainDumpStatus.Triaged,
-      triagedAt: new Date(),
-      taskId: task.id,
-      breakdownRequestedAt: null,
-    },
-  });
+
+  if (taskId === null) return;
   await maybeAwardInboxZero(workspaceId);
   revalidatePath(INBOX_PATH);
-  return task.id;
+  return taskId;
 }
 
 /**
