@@ -183,13 +183,30 @@ export function splitShoppingList(items: readonly ShoppingItemView[]): {
 }
 
 /**
- * How many things are still to buy.
+ * Is this one item still to buy?
  *
  * **Ticked items and saved-for-later items are both excluded**, and the reading
  * is "things I still need to buy": a ticked item is in the basket, and a
- * saved-for-later item has been explicitly deferred out of this trip. Anything
- * that counted the deferred pile would make the number go UP when the user tidied
- * their list, which is the opposite of what the gesture means.
+ * saved-for-later item has been explicitly deferred out of this trip.
+ *
+ * Exported so the write side can ask it of a SINGLE row (Duo review, !295).
+ * `setShoppingItemDone` has to know whether the row it just un-ticked is now on
+ * the to-buy list before it may un-dismiss the inbox summary, and the answer
+ * depends on the item's other flag — so it needs the predicate, not the count.
+ * Spelling `!done && !savedForLater` a third time there is exactly how two
+ * surfaces come to disagree about what the number means.
+ */
+export function isStillToBuy(
+  item: Pick<ShoppingItemView, "done" | "savedForLater">,
+): boolean {
+  return !item.done && !item.savedForLater;
+}
+
+/**
+ * How many things are still to buy.
+ *
+ * Anything that counted the deferred pile would make the number go UP when the
+ * user tidied their list, which is the opposite of what the gesture means.
  *
  * One definition, used by every surface that shows a count, so two of them can
  * never disagree about what the number means.
@@ -197,7 +214,41 @@ export function splitShoppingList(items: readonly ShoppingItemView[]): {
 export function shoppingRemainingCount(
   items: readonly Pick<ShoppingItemView, "done" | "savedForLater">[],
 ): number {
-  return items.filter((i) => !i.done && !i.savedForLater).length;
+  return items.filter(isStillToBuy).length;
+}
+
+/**
+ * The fields a "Save for later" / "Move back up" write sets — **asymmetric on
+ * purpose**.
+ *
+ * Going DOWN into the pile writes `savedForLater` alone: "I already bought this"
+ * and "I am not buying this today" are independent facts, and clearing the tick
+ * there would resurrect a bought item as unbought.
+ *
+ * Coming back UP also clears `done`, and that is the fix for the round trip this
+ * feature shipped broken (Duo review, !295). `done` and `savedForLater` are
+ * independent booleans, so an item ticked before it was sent down came back
+ * carrying the tick: it landed in the active section struck through, and
+ * {@link isStillToBuy} went on excluding it, so the "still to buy" count did not
+ * move and neither did the inbox summary. Pulling an item back up is the gesture
+ * for *I want to buy this*, so it is not honoured by returning an item to a list
+ * that does not count it.
+ *
+ * `order` is deliberately absent from both, so an item pulled back up returns to
+ * its place in capture order instead of jumping to the end.
+ *
+ * Pure, and here rather than in the action, so the round trip can be asserted
+ * against {@link shoppingRemainingCount} and {@link splitShoppingList} on
+ * synthetic rows — the two halves of the rule cannot drift if one test composes
+ * them.
+ */
+export function shoppingSavedForLaterUpdate(savedForLater: boolean): {
+  savedForLater: boolean;
+  done?: boolean;
+} {
+  return savedForLater
+    ? { savedForLater: true }
+    : { savedForLater: false, done: false };
 }
 
 /**

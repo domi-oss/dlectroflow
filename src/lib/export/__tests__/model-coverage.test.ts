@@ -45,11 +45,12 @@ import { Prisma } from "@prisma/client";
  *
  * ── The deliberate exclusion, named rather than left implicit ───────────────
  *
- * There is currently no scoped model that must stay OUT of the export, and if one
- * is added it belongs in {@link DELIBERATELY_EXCLUDED} with the reason — an
- * exclusion argued in review, not a way to quiet the test. An empty allowlist is
- * the honest state today and the assertion below proves the mechanism can still
- * see a real omission, so an empty list is not a green that means nothing.
+ * A scoped model that must stay OUT of the export belongs in
+ * {@link DELIBERATELY_EXCLUDED} with the reason — an exclusion argued in review,
+ * not a way to quiet the test. There is exactly one today (#199's summary row) and
+ * `json.test.ts` asserts its absence from the rendered archive as well, because an
+ * entry here says "we meant to leave it out" and only that assertion says "it is
+ * actually out".
  */
 
 const EXPORT_DIR = join(process.cwd(), "src/lib/export");
@@ -60,7 +61,19 @@ const EXPORT_DIR = join(process.cwd(), "src/lib/export");
  * `revalidation-hygiene.test.ts` and `REVIEWED_DYNAMIC_HOSTS` in
  * `fetch-host-hygiene.test.ts`: an entry is a decision, not a suppression.
  */
-const DELIBERATELY_EXCLUDED: Record<string, string> = {};
+const DELIBERATELY_EXCLUDED: Record<string, string> = {
+  shoppingSummary:
+    "#199 — app-generated bookkeeping for the inbox's shopping-list line, not " +
+    "content the user typed. It holds one nullable timestamp saying whether the " +
+    "line is currently dismissed, and NO count and no text (the count is derived " +
+    "from ShoppingItem at render time), so there is nothing in it that the " +
+    "exported ShoppingItem rows do not already carry — an importer can recreate " +
+    "it from those rows alone. Excluding it is therefore not withholding personal " +
+    "data, which is the only reason an exclusion could be wrong here; the actual " +
+    "shopping list IS exported in full, ticked and saved-for-later rows included. " +
+    "json.test.ts asserts the absence, so this entry cannot become a claim that " +
+    "quietly stops being true.",
+};
 
 /** Prisma model names camelCased as the client exposes them — the same
  *  derivation `scoping.harness.test.ts` uses, so both guards agree on what
