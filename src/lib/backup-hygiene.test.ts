@@ -499,8 +499,18 @@ describe("Compose backup stack hygiene (#162)", () => {
     // The control for the assertion above: `PGPASSWORD: …` lives under
     // `environment:` and must not read as the service's own setting, or an env
     // var named read_only would satisfy a hardening check.
-    expect(service("backup").directives).toContain(
-      "image: postgres:16@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20",
+    //
+    // Matched by SHAPE, not by the digest's value. The literal used to be
+    // pinned here, and it made this spec fail on **every** Renovate digest bump
+    // — a red pipeline on an image that had already passed 231 Playwright tests
+    // and all four scanners, reporting a stale fixture as though the bump were
+    // broken. The digest is incidental to what this spec checks, which is that
+    // `image:` parses as a directive while `PGPASSWORD:` does not; pinning it
+    // asserted a fact about the registry in a test about a YAML parser.
+    expect(service("backup").directives).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^image: postgres:16@sha256:[0-9a-f]{64}$/),
+      ]),
     );
     expect(service("backup").directives.join("\n")).not.toMatch(/PGPASSWORD/);
     expect(service("backup").directives.join("\n")).not.toMatch(/POSTGRES_DB/);
