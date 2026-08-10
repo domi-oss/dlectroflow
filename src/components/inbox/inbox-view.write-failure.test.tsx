@@ -179,6 +179,29 @@ async function press(name: RegExp) {
   });
 }
 
+/**
+ * Open a row's ✎ editor and submit `next` through it.
+ *
+ * `rowText` is the title the ROW still shows, which is not necessarily the last
+ * thing submitted: the list only changes when `router.refresh()` brings new
+ * `initialItems`, and a write still in flight has not refreshed anything. That
+ * gap is the whole setting for the mid-flight specs below.
+ */
+async function editTitle(rowText: string, next: string) {
+  await act(async () => {
+    screen
+      .getByRole("button", { name: new RegExp(`^edit ${rowText}$`, "i") })
+      .click();
+    await flushTicks();
+  });
+  const editor = screen.getByRole("textbox", { name: /^edit title$/i });
+  fireEvent.change(editor, { target: { value: next } });
+  await act(async () => {
+    fireEvent.keyDown(editor, { key: "Enter" });
+    await flushTicks();
+  });
+}
+
 const COMPLETE = /complete/i;
 const RETRY = /try again/i;
 
@@ -937,5 +960,74 @@ describe("InboxView — a failed rename (#225)", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/new title/);
+  });
+
+  /**
+   * !306's Duo review, and the sharpest form of this issue's own bug: the
+   * double-press guard was DROPPING a second, different edit while the editor
+   * closed as though it had saved. A silent write failure wearing a success is
+   * the exact class #225 exists to remove, and it does not become acceptable
+   * for arriving from the new guard rather than from a missing one.
+   *
+   * `renameItem` is the one write on this board that carries words, so two
+   * submissions against one row are two DIFFERENT requests — not the "you are
+   * asking for something that is already happening" the guard is written for.
+   */
+  it("a second edit submitted while the first is still in flight is not dropped behind a closed editor", async () => {
+    let settle!: () => void;
+    vi.mocked(renameItem).mockReturnValueOnce(
+      new Promise<undefined>((resolve) => {
+        settle = () => resolve(undefined);
+      }),
+    );
+    renderInbox([makeItem({ text: "old title" })]);
+
+    await editTitle("old title", "first edit");
+    await editTitle("old title", "second edit");
+
+    // Applied, in submission order. Next serialises server actions through the
+    // app router's action queue, so the words the user typed last are the words
+    // the row is left holding.
+    expect(vi.mocked(renameItem).mock.calls).toEqual([
+      ["item-1", "first edit"],
+      ["item-1", "second edit"],
+    ]);
+    // The other half of the assertion, and the reason the spec is named for a
+    // closed editor: the editor is gone, so "applied" is the ONLY outcome that
+    // is not silent. Had the write been refused instead, this is where the
+    // refusal would have to be visible.
+    expect(screen.queryByRole("textbox", { name: /^edit title$/i })).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    await act(async () => {
+      settle();
+      await flushTicks();
+    });
+  });
+
+  /**
+   * The other side of the same line, so the fix above cannot be read as "renames
+   * are simply unguarded". Identical words really are the double-press the guard
+   * is for, and re-submitting them while the first is in flight asks for
+   * something that is already happening.
+   */
+  it("still absorbs a resubmission of the SAME words — that is a double-press", async () => {
+    let settle!: () => void;
+    vi.mocked(renameItem).mockReturnValueOnce(
+      new Promise<undefined>((resolve) => {
+        settle = () => resolve(undefined);
+      }),
+    );
+    renderInbox([makeItem({ text: "old title" })]);
+
+    await editTitle("old title", "same edit");
+    await editTitle("old title", "same edit");
+
+    expect(vi.mocked(renameItem).mock.calls).toEqual([["item-1", "same edit"]]);
+
+    await act(async () => {
+      settle();
+      await flushTicks();
+    });
   });
 });

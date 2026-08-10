@@ -259,6 +259,47 @@ function captureMessageKey(failure: CaptureFailure): StringKey {
  * same column in opposite directions, so serialising them is correct rather than
  * incidental, and the guard below is what stops a double-press of Complete
  * becoming two writes.
+ *
+ * ## `"move"` reaches three of these actions again, and that is accepted
+ *
+ * A drop and a row button can address the SAME action under two different
+ * labels: dragging to Done is `"move"` and runs `completeItem`, while the row's
+ * own tick is `"done"` and runs it too. `snoozeBrainDumpItem` (drop on Snoozed
+ * vs. the row's Snooze) and `reopenItem` (a drop's `reopenFirst` vs. the row's
+ * Undo) overlap the same way. Different keys, so the guard lets both through —
+ * raised on !306 and accepted rather than fixed, for three reasons that have to
+ * hold together:
+ *
+ * 1. **They cannot actually overlap from one client.** Next serialises server
+ *    actions — see {@link writeGuardKey} for the mechanism — so the second call
+ *    is dispatched only once the first has finished. It then meets that action's
+ *    own early return (`if (!item || item.completedAt) return`), and the other
+ *    two write absolute values rather than accumulating, so the repeat is a
+ *    no-op rather than a second effect.
+ * 2. **A shared key would break something that works.** Collapsing `"move"` into
+ *    the field its `plan` happens to pick is what the note on `moveItemToBucket`
+ *    argues against: a failed drop onto Done has to be retried as that drop,
+ *    reopen included, not as a bare `completeItem` that would drop half of it.
+ * 3. **The residual race is not the client's to hold.** Genuine concurrency here
+ *    needs two router instances — two tabs, or two devices — which no in-memory
+ *    guard can span, so a guard widened to cover it would buy nothing and read
+ *    as though it had. That is why the defence lives in the actions, and
+ *    `reopenItem` says so in as many words ("the same Done row open in two
+ *    tabs"): see its reversal counted off what the writes CHANGED,
+ *    `touchStreakOnCompletion`'s interactive-transaction row lock (proved
+ *    against a real database in `rewards.integration.test.ts`) and
+ *    `awardBadge`'s `ON CONFLICT DO NOTHING`.
+ *
+ *    What that leaves is `completeItem`'s two unguarded `logReward` calls, which
+ *    two truly simultaneous completions of one to-do could bank twice. It is
+ *    real, it is server-side, it predates this MR, and it is reachable without
+ *    going near a `WriteField` at all — so it is neither this guard's to fix nor
+ *    #225's, and it is recorded here rather than left for the next reader to
+ *    rediscover from the same comment.
+ *
+ * The contrast with `"text"` is the whole point, and it is not that a rename is
+ * more dangerous: it is that these three are the same request twice, and two
+ * renames are two different requests.
  */
 type WriteField =
   /** `renameItem` — and, through it, the inline note (#179). */
@@ -284,6 +325,45 @@ const writeTargetKey = ({ id, field }: WriteTarget): string => `${id}:${field}`;
 
 const sameWriteTarget = (a: WriteTarget, b: WriteTarget): boolean =>
   a.id === b.id && a.field === b.field;
+
+/**
+ * #225 (!306, Duo review) — what the double-press guard absorbs on, which is
+ * NOT always the target.
+ *
+ * The guard's premise, argued in full beside `inFlight` below, is that "the
+ * identical write to the identical target is already running, so pressing again
+ * asks for something that is already happening". That holds for seven of the
+ * eight fields because their target IS the whole request: `completeItem(id)`
+ * closes the row whichever control asked, so a second press really is the same
+ * ask and absorbing it is right.
+ *
+ * `"text"` is the one field that carries words. `renameItem(id, value)` means
+ * two submissions of the ✎ editor against one row are two DIFFERENT requests,
+ * and the guard was dropping the second while the editor closed as though it
+ * had saved — a silent write failure wearing a success, which is the class this
+ * issue exists to remove rather than to add to. So a rename is guarded on the
+ * words as well as the row: the same words twice are still a double-press and
+ * still absorbed, different words are a new request and go.
+ *
+ * Letting the second one through is safe rather than a race. Next serialises
+ * server actions: `callServer` dispatches every one into the app router's action
+ * queue, and `dispatchAction` appends to the queue whenever something is already
+ * pending, so `runRemainingActions` starts it only once the previous action has
+ * finished (`next/dist/client/components/app-router-instance.js`). The two
+ * renames therefore reach the server in submission order and the row is left
+ * holding the last words the user typed, which is what they asked for. The
+ * `seq` machinery already handles the rest: whichever attempt lands last owns
+ * the notice, so an earlier failure is cleared by the later edit that
+ * superseded it.
+ *
+ * Deliberately separate from {@link writeTargetKey}, which stays keyed by target
+ * alone — `writeLandedAt`'s "has a newer write at this row landed?" question is
+ * about the row, not about the words.
+ */
+const writeGuardKey = (target: WriteTarget, subject: string): string =>
+  target.field === "text"
+    ? `${writeTargetKey(target)}:${subject}`
+    : writeTargetKey(target);
 
 /**
  * #225 — a row write that did not land.
@@ -873,7 +953,9 @@ export function InboxView({
    * A failed write is indistinguishable from a press that did not register, so
    * the natural response is to press again — which, unguarded, fires the write a
    * second time. `inFlight` keys that per logical target, the same lesson
-   * `schedulingIds` applies per row to the 📅 controls (#169).
+   * `schedulingIds` applies per row to the 📅 controls (#169). The one exception
+   * is a rename, whose words are part of what makes it a repeat — see
+   * {@link writeGuardKey}, which is what the entries below are actually keyed by.
    *
    * The second press is absorbed rather than discarded, and the distinction
    * matters because #169's other harm is a press that vanishes with no
@@ -1070,13 +1152,16 @@ export function InboxView({
     { fromRetry, origin }: { fromRetry: boolean; origin: HTMLElement | null },
   ) => {
     const key = writeTargetKey(target);
+    // @see writeGuardKey — the same target for everything except a rename, which
+    // is guarded on its words too because they are what makes it a new request.
+    const guardKey = writeGuardKey(target, subject);
     // Both of these are URGENT and deliberately outside the transition — see
     // runSchedule (#169): React 19 holds an async transition's own state updates
     // until the action settles, so a guard raised inside one would first paint at
     // the moment it stopped being true. A ref needs no paint at all, which is why
     // the guard is one; the retry flag is state and so must be raised here.
-    if (inFlight.current.has(key)) return;
-    inFlight.current.add(key);
+    if (inFlight.current.has(guardKey)) return;
+    inFlight.current.add(guardKey);
     if (fromRetry) markWriteRetrying(target, true);
     return startTransition(async () => {
       const seq = (writeAttempts.current += 1);
@@ -1155,7 +1240,7 @@ export function InboxView({
         // Must run on every exit including a throw: a target left in `inFlight`
         // is a control that silently does nothing for the rest of the session,
         // and a retry flag left up is a Retry button that reads permanently busy.
-        inFlight.current.delete(key);
+        inFlight.current.delete(guardKey);
         if (fromRetry) markWriteRetrying(target, false);
         writesOutstanding.current -= 1;
         if (writesOutstanding.current === 0) writeLandedAt.current.clear();
