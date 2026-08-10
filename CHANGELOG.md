@@ -458,6 +458,58 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **"Back to inbox" in the step editor can no longer lose a step (#212).** The
+  control takes one step out of the plan you are editing and puts it in your
+  inbox as its own thing to break down later. It used to take the row away
+  first and send the words afterwards, without waiting to hear whether they
+  arrived — so if the connection dropped, or the app had updated in another tab
+  since you opened this one, the step was gone from the screen and had never
+  reached the inbox. Nothing said so, and because a plan is not saved until you
+  press "Looks right", that row was the only copy.
+
+  **The row now stays until the inbox has the words.** While it is sending, the
+  control says so; if it cannot send, the row is still there, still editable,
+  and a message above the list says what happened and offers to try again. If
+  the app updated while the page was open it offers a reload instead, because
+  that is the only thing that can work. And if the server simply never answers,
+  it says the step **may** already be in your inbox and asks you to check
+  before retrying, rather than claiming a failure it cannot be sure of — the
+  step stays in the plan either way, so nothing is lost.
+
+  Two more things the same control now gets right, because the plan's rows have
+  an identity of their own rather than being told apart by their words. **A
+  step you edit while it is still sending keeps the edit**, and a short note
+  says your inbox has the wording as it read when you pressed, so you know an
+  item arrived that you did not see. And **two steps that happen to say exactly
+  the same thing are two steps**: pressing one no longer makes the other look
+  busy, no longer swallows a press on it, and no longer clears a message about
+  the first one.
+
+  **Keyboard focus never lands nowhere.** Every control in this flow that
+  vanishes when you press it now hands you on to a specific, still-present one:
+  ejecting a step moves you to the row that takes its place, dismissing the
+  "your inbox has the earlier wording" note puts you on that row's own control,
+  and trying again after you have deleted the row leaves you on "Add a step".
+  Each of those used to drop you at the top of the page, which for anyone
+  navigating by keyboard or screen reader means starting the tab sequence over.
+
+  Finally, **a step can no longer be in the plan and the inbox at the same
+  time, whichever way round you press.** A plan is saved with every row it still
+  shows, and a row on its way to the inbox is deliberately one of them until the
+  inbox has it — so pressing "Looks right" in that moment used to put the same
+  step in both places at once, with nothing said and no way for the app to
+  notice afterwards. Asking for a different plan did the same thing more quietly
+  still: the request shows the AI the plan as it stands, ejected row included,
+  and then replaces the plan with the answer — which hands that row straight
+  back, seconds after you watched it leave.
+
+  So "Looks right", "More steps", "Fewer steps", the feedback box's Send and the
+  error banner's Try again all wait for a step that is still being sent — and,
+  the other way round, **"Back to inbox" and its own Try again wait while the
+  plan is being saved or a new one is being asked for.** Every one of them says
+  why it is waiting rather than just greying out, stays reachable by keyboard so
+  the reason can be read, and goes through the moment the wait is over — however
+  it ended.
 - **A Settings switch no longer stays flipped on a change that did not save
   (#227).** Four sections could leave a control showing a value the server had
   refused. **First-run preview** was the quietest: it said nothing at all, so the
@@ -497,6 +549,7 @@ operators upgrading a self-hosted instance don't get surprised.
   encouragement line had the identical fault and is fixed with it: two requests
   landing together on the first visit of the day could leave one of them with no
   quote on the dashboard until the next reload.
+
 - **Retrying a failed "Mark not done" no longer loses your place (#215).** When a
   step's undo failed, the row showed the reason with a **Try again** beside it —
   and pressing that with the keyboard dropped focus to the top of the page. The
@@ -636,6 +689,23 @@ operators upgrading a self-hosted instance don't get surprised.
   recovery path is un-completing a step instead (#198). The code's own idea of
   the primary control (`sessionCtaRef`, where focus lands after a resume) was
   already on Pause; the row now agrees with it.
+
+- **Migrations are tested against a database that already holds rows (#190).**
+  `prisma migrate deploy` on an empty schema proves a migration parses and
+  nothing more, and every gate this project had did exactly that — which is why
+  the 2026-08-07 defect could not fail anywhere except production: its data steps
+  were `UPDATE`s, and zero rows updated means no constraint is ever evaluated.
+  `npm test` now applies the real migrations, one at a time, to a scratch schema
+  seeded with synthetic rows at the schema version each was written against, then
+  asserts what the conversions actually did to them. It counts the rows in every
+  table a migration is about to touch, so "this migration met data" is a measured
+  number rather than a claim about the seed files — the first thing that found was
+  a table emptied mid-timeline whose later migrations were still running empty.
+  The harness is **demonstrated to fail**: it reconstructs the pre-fix statement
+  order of `20260806100000` and requires SQLSTATE 23514 and the P3009 that
+  followed, so a gate that has quietly stopped being able to catch that defect
+  fails the suite rather than passing it. Nothing an operator runs changes; the
+  migrations themselves are untouched.
 
 - **Completing a to-do with no steps left its Google Task open (#195).** A
   stepless to-do is pushed to Google Tasks as one task, so the scheduling unit is

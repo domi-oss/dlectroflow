@@ -675,6 +675,143 @@ export const STRINGS = {
 
   // ── Breakdown confirm ──────────────────────────────────────────────────────
   "breakdown.looksRight": { plain: "Looks right", playful: "👍 Looks right" },
+  // #212 (!304 review) — the counted noun in the held line below, split rather
+  // than templated because this table carries no interpolation (#86). Same shape
+  // as `shopping.itemOne`/`itemMany` and `focus.sound.trackOne`/`trackMany`, and
+  // composed at the call site as `<count> <this> <breakdown.ejectHeld>`.
+  //
+  // The first cut hardcoded "One step", and the twins specs on this same branch
+  // are what make that wrong rather than merely imprecise: the gate is
+  // `ejecting.size > 0`, two rows can legitimately be mid-eject at once, and a
+  // line saying "one" while the user is looking at two controls reading
+  // "Sending…" is the app contradicting itself about the thing it is asking them
+  // to wait for.
+  "breakdown.stepOne": { plain: "step", playful: "step" },
+  "breakdown.stepMany": { plain: "steps", playful: "steps" },
+  // #212 (!304 review) — why neither "Looks right" nor the re-plan controls are
+  // taking the press while a row is still on its way to the inbox.
+  //
+  // One string for both, because it is one fact and both refusals lift on the
+  // same event. Saving the plan persists every row that has text, and an
+  // ejecting row is deliberately still one of them until its write lands, so
+  // confirming across the gap puts one step in two places. Asking for a new plan
+  // is that same gap wearing a longer coat: the request shows the model the plan
+  // as it stands — the ejecting row included — and then replaces the plan with
+  // the answer, which hands that row straight back.
+  //
+  // A TAIL, not a whole sentence: the count and its noun are composed in front
+  // of it. Worded so neither a verb nor a pronoun has to agree with the count —
+  // "1 step still being sent…" and "2 steps still being sent…" are both
+  // grammatical, which is what a table with no interpolation can actually
+  // deliver.
+  //
+  // Identical across voices for the reason the `breakdown.eject.*` family gives:
+  // this is the app declining an action to protect the user's data, and a joke
+  // about it would read as the app being cute about something it will not do.
+  // Says what is happening and that it is brief, never "disabled" — the controls
+  // are not broken and the wait is one round trip.
+  "breakdown.ejectHeld": {
+    plain:
+      "still being sent to your inbox — saving the plan and asking for a new one both wait, so the same step cannot end up in both places.",
+    playful:
+      "still being sent to your inbox — saving the plan and asking for a new one both wait, so the same step cannot end up in both places.",
+  },
+  // #212 (!304 review) — the same fact from the other side: why "Back to inbox"
+  // and the notice's Retry are not taking the press while the plan itself is in
+  // flight.
+  //
+  // Its own key rather than a re-use of the tail above, because the two are not
+  // the same sentence and only look alike: that one is a TAIL with a count
+  // composed in front of it, this one is whole. There is no count to compose —
+  // there is one plan, and only ever one operation on it at a time.
+  //
+  // One string for the confirm and the re-plan together, for the reason its
+  // sibling gives: it is one fact, both refusals lift on the same event, and the
+  // harm is identical. Saving the plan writes every row that has text, so a step
+  // whose words are on their way to the inbox lands in both; asking for a new
+  // plan shows the model the row and then replaces the plan with an answer that
+  // hands it straight back, moments after the eject took it away.
+  //
+  // Identical across voices, and never the word "disabled", for the reasons the
+  // `breakdown.eject.*` family and `breakdown.ejectHeld` give: the app is
+  // declining an action to protect the user's data, the control is not broken,
+  // and the wait is one round trip.
+  "breakdown.planHeld": {
+    plain:
+      "Saving the plan, or asking for a new one — sending a step back to your inbox waits for that to finish, so the same step cannot end up in both places.",
+    playful:
+      "Saving the plan, or asking for a new one — sending a step back to your inbox waits for that to finish, so the same step cannot end up in both places.",
+  },
+
+  // ── #212: a step that could not be sent back to the inbox ──────────────────
+  // Identical across voices, for the same reason `capture.error.*` and
+  // `shopping.errorSave*` are: the playful skin is a delight layer, and "did I
+  // just lose that step?" is not where delight belongs.
+  //
+  // Named under `breakdown.eject.` rather than reusing `capture.error.*`, whose
+  // values are close but not the same sentence. That family's own comment makes
+  // the argument for this one: the prefix has to name the surface, or re-tuning
+  // one surface's copy silently re-words another's. Two of the three differ here
+  // anyway — a capture that fails is about words in a field, an eject that fails
+  // is about a row in a list that is still on screen.
+  //
+  // All three END on a colon: the words are rendered, quoted, immediately after,
+  // so the notice is itself a copy of them and survives the user then deleting
+  // the row. And all three say "nothing was lost" rather than naming where the
+  // words are, because that stays true whether or not the row is still there.
+  "breakdown.eject.failed": {
+    plain: "Couldn't send that to your inbox just now — nothing was lost:",
+    playful: "Couldn't send that to your inbox just now — nothing was lost:",
+  },
+  "breakdown.eject.stale": {
+    plain:
+      "The app updated while this was open, so that didn't send. Reload to carry on — nothing was lost:",
+    playful:
+      "The app updated while this was open, so that didn't send. Reload to carry on — nothing was lost:",
+  },
+  // The one failure whose verdict is genuinely unknown. A server action cannot
+  // be aborted from the client, so the timeout bounds how long the UI waits, not
+  // the write — the insert may still land, and a retry after it does leaves two
+  // identical inbox items. "Couldn't send that" would be a claim the client
+  // cannot support, so this says what it knows and names the one thing that
+  // resolves the ambiguity.
+  "breakdown.eject.timeout": {
+    plain:
+      "No answer from the server, so this may already be in your inbox. Check there before trying again — nothing was lost:",
+    playful:
+      "No answer from the server, so this may already be in your inbox. Check there before trying again — nothing was lost:",
+  },
+  // The one outcome that is not a failure (!304 review, finding 1). The write
+  // landed; the user then edited the row while it was in the air, so their inbox
+  // holds the words as they read at the press and the row in front of them says
+  // something else. Neither copy may be thrown away — dropping the row would
+  // destroy the edit, which is the same data loss as #212 with the hands
+  // swapped — so the only thing left to do is SAY it, or the user gets an item
+  // they never saw arrive and a row they think is still only in the plan.
+  //
+  // Ends on a colon like its siblings, and the words quoted after it are the
+  // ones that were SENT, not the ones now in the row: the row is on screen and
+  // the inbox copy is not, so the invisible one is the one worth repeating.
+  "breakdown.eject.edited": {
+    plain:
+      "This was already sending when you edited it, so your inbox has the earlier wording and the row keeps yours:",
+    playful:
+      "This was already sending when you edited it, so your inbox has the earlier wording and the row keeps yours:",
+  },
+  "breakdown.eject.retry": { plain: "Try again", playful: "Try again" },
+  "breakdown.eject.reload": {
+    plain: "Reload the page",
+    playful: "Reload the page",
+  },
+  // Only the `edited` notice carries this. The three failures each end in an
+  // action that resolves them (a retry that lands, a reload); that one reports
+  // something already finished, so acknowledging it is the only thing left and
+  // without it the notice would sit there for the rest of the session.
+  "breakdown.eject.dismiss": { plain: "Got it", playful: "Got it" },
+  // Two jobs, one word, deliberately: the row control's busy label and the
+  // notice's in-flight line. They describe the same outstanding write from two
+  // places, so splitting them could only let the two drift apart.
+  "breakdown.eject.sending": { plain: "Sending…", playful: "Sending…" },
 
   // ── Schedule status banner (ground truth, Phase 4) ─────────────────────────
   // Reflects the PERSISTED task.scheduledAt marker — never optimistic UI. ⚠️/✅
