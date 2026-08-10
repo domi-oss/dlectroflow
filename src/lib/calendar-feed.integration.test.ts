@@ -1,14 +1,17 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "@/lib/db";
+import { prismaErrorsDuring } from "@/lib/__tests__/prisma-error-log";
 import { UserStatus } from "@/lib/constants";
 import {
   buildFeedIcs,
   createOwnFeed,
   disableOwnFeed,
   getOwnFeed,
+  mintFeedToken,
   regenerateOwnFeed,
   resolveFeed,
   FEED_PAST_WINDOW_DAYS,
+  type OwnFeed,
 } from "./calendar-feed";
 
 /**
@@ -228,6 +231,172 @@ describe("cross-account isolation — the calendar feed (#154)", () => {
         select: { token: true },
       }),
     ).toBeNull();
+  });
+});
+
+/**
+ * #223 — the race the module's own comment claimed to have closed.
+ *
+ * `upsert({ where, create, update: {} })` reads as atomic and is not. Prisma
+ * 6.19 only compiles an upsert to `INSERT … ON CONFLICT` when the update payload
+ * is NON-EMPTY; with `update: {}` it degrades to `BEGIN; SELECT; INSERT; COMMIT`
+ * — a read-then-insert at READ COMMITTED, which is the very shape the leading
+ * `findUnique` was written to be safe against. Two tabs pressing "create my
+ * feed" therefore both insert, and the loser raises P2002 out of the server
+ * action after the person has been told to expect a URL.
+ *
+ * Run against the pre-fix `upsert`, this file's first assertion captured
+ * **12 of 20 racing calls rejecting with P2002** (5 trials x 4 callers,
+ * 2026-08-09) and 12 matching `prisma:error` lines. So the zeroes below are a
+ * measurement, not an untested green — and `a duplicate token still raises`
+ * keeps proving that this harness can see a non-zero at all.
+ *
+ * The token identity assertion is the security half. `createMany` answers with
+ * a count rather than a row, so the conversion has to read the winner's row
+ * back; returning the token THIS call tried to mint would hand two tabs
+ * different feed URLs, one of which resolves to nothing.
+ *
+ * Not folded into `__tests__/handled-p2002.integration.test.ts` even though it
+ * shares that file's harness: those four sites handled their duplicate and only
+ * logged it, whereas these two raise it at the caller, and the property proved
+ * here — every racing caller gets the WINNER's capability token — is specific to
+ * this module and belongs beside the credential it guards. The cross-cutting
+ * protection for this class is `empty-upsert-hygiene`, which is a grep the
+ * moment a third site appears rather than a test somebody has to remember.
+ */
+const RACE_TRIALS = 5;
+const RACE_CONCURRENCY = 4;
+
+describe("createOwnFeed under genuine concurrency (#223)", () => {
+  // A fresh account per trial: the no-row state exists exactly once per user, so
+  // a single trial would be one coin flip. Five of them, each with four
+  // concurrent callers, makes a lost race effectively certain — and a run that
+  // did serialise completely still passes, correctly; it just proves less.
+  const racers: string[] = [];
+
+  beforeAll(async () => {
+    for (let i = 0; i < RACE_TRIALS; i += 1) {
+      const user = await prisma.user.create({
+        data: {
+          provider: "gitlab",
+          providerSub: `${SUB_PREFIX}race-${i}`,
+          status: UserStatus.Active,
+        },
+      });
+      racers.push(user.id);
+    }
+    // Open the connection pool before timing matters. Prisma connects lazily, so
+    // the very first burst serialises on the handshake and would not race.
+    await Promise.all(
+      Array.from({ length: RACE_CONCURRENCY }, () => prisma.user.count()),
+    );
+  });
+
+  it("four tabs at once: none raises, and all four get the winner's token", async () => {
+    const trials: PromiseSettledResult<OwnFeed>[][] = [];
+
+    const errors = await prismaErrorsDuring(async () => {
+      for (const userId of racers) {
+        trials.push(
+          await Promise.allSettled(
+            Array.from({ length: RACE_CONCURRENCY }, () =>
+              createOwnFeed(userId),
+            ),
+          ),
+        );
+      }
+    });
+
+    // 1. Nothing rejected. This is the defect: P2002 escaping into the action.
+    //    Mapped to the Prisma error CODE rather than counted, so a failure says
+    //    `["P2002", …]` — the defect by name — instead of "expected 15 to be 0".
+    expect(
+      trials
+        .flat()
+        .filter((r) => r.status === "rejected")
+        .map((r) => {
+          const reason = (r as PromiseRejectedResult).reason as {
+            code?: string;
+          };
+          return reason?.code ?? String(reason).split("\n")[0];
+        }),
+    ).toEqual([]);
+
+    // 2. Nothing printed at error level either. Prisma's client logger fires
+    //    BEFORE any `catch` (see the note on `log` in src/lib/db.ts), so a
+    //    conversion that merely swallowed the throw would still fail here.
+    expect(errors).toEqual([]);
+
+    // 3. Every caller was handed the token that is actually stored — not the one
+    //    it tried to mint. A feed URL nobody's row matches is a 404 in somebody's
+    //    calendar.
+    for (const [i, trial] of trials.entries()) {
+      const stored = await prisma.calendarFeed.findUnique({
+        where: { userId: racers[i] },
+        select: { token: true },
+      });
+      expect(stored).not.toBeNull();
+      const returned = new Set(
+        trial.map((r) =>
+          r.status === "fulfilled" ? r.value.token : "(threw)",
+        ),
+      );
+      expect([...returned]).toEqual([stored!.token]);
+    }
+
+    // 4. And exactly one row per account, so nothing above passed because the
+    //    conversion quietly stopped writing.
+    expect(
+      await prisma.calendarFeed.count({ where: { userId: { in: racers } } }),
+    ).toBe(RACE_TRIALS);
+  });
+
+  it("a duplicate token still raises — the control on the two zeroes above", async () => {
+    // "No P2002" and "no prisma:error" both look identical to a harness that is
+    // not watching anything. This forces the same two channels to report a
+    // non-zero, using the OTHER unique index on the same table so the row a
+    // racing caller wins is untouched.
+    const victim = racers[0];
+    const taken = (await prisma.calendarFeed.findUnique({
+      where: { userId: victim },
+      select: { token: true },
+    }))!.token;
+
+    const collider = await prisma.user.create({
+      data: {
+        provider: "gitlab",
+        providerSub: `${SUB_PREFIX}race-collider`,
+        status: UserStatus.Active,
+      },
+    });
+
+    let rejection: unknown;
+    const errors = await prismaErrorsDuring(async () => {
+      rejection = await prisma.calendarFeed
+        .create({ data: { userId: collider.id, token: taken } })
+        .then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+    });
+
+    expect(rejection).toMatchObject({ code: "P2002" });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("token");
+  });
+
+  it("mints a distinct token per account, so identity above is not a constant", async () => {
+    // The last way trial 3 could pass vacuously: if every account were handed the
+    // same token, "all callers agree" would be free. Ten fresh mints, all
+    // different, and every stored token distinct across the five accounts.
+    const minted = new Set(Array.from({ length: 10 }, () => mintFeedToken()));
+    expect(minted.size).toBe(10);
+
+    const stored = await prisma.calendarFeed.findMany({
+      where: { userId: { in: racers } },
+      select: { token: true },
+    });
+    expect(new Set(stored.map((r) => r.token)).size).toBe(RACE_TRIALS);
   });
 });
 

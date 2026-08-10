@@ -169,6 +169,129 @@ describe("AppearanceSection", () => {
   });
 });
 
+/**
+ * #227 — the audit half of the issue, and this section was **not** already
+ * correct.
+ *
+ * It had the reporting (`persist`'s catch → `markError()`) and not the rollback,
+ * exactly like `NotificationsSection`: a refused write left the checkbox and the
+ * radios showing the value the server had declined, with "couldn't save" beside
+ * them. Here it also drives two LIVE PREVIEWS off that value, so the completion
+ * sample and the typeface sample went on demonstrating a choice the database had
+ * refused — the lie rendered twice more, larger.
+ *
+ * The rollback restores only the field this attempt changed, only where the
+ * value it wrote is still showing. See `revert-optimistic.ts`.
+ */
+describe("AppearanceSection: when a save fails", () => {
+  const strike = () => screen.getByLabelText(/strike through completed/i);
+
+  it("puts the strike checkbox back where the server still has it", async () => {
+    vi.mocked(updateAppearanceSettings).mockRejectedValueOnce(
+      new Error("offline"),
+    );
+    const user = userEvent.setup();
+    render(<AppearanceSection {...base} />);
+    await user.click(strike()); // true → false, optimistically
+
+    await screen.findByRole("alert");
+    await waitFor(() => expect(strike()).toBeChecked());
+  });
+
+  it("puts the tick-colour radio back, and the preview with it", async () => {
+    vi.mocked(updateAppearanceSettings).mockRejectedValueOnce(
+      new Error("offline"),
+    );
+    const user = userEvent.setup();
+    render(<AppearanceSection {...base} />);
+    await user.click(screen.getByLabelText("Black"));
+
+    await screen.findByRole("alert");
+    await waitFor(() => expect(screen.getByLabelText("Green")).toBeChecked());
+    expect(screen.getByLabelText("Black")).not.toBeChecked();
+    // The preview reads its attributes off the same state, so a rollback that
+    // missed it would leave the sample demonstrating the refused choice.
+    expect(screen.getByTestId("completion-preview")).toHaveAttribute(
+      "data-tick",
+      "green",
+    );
+  });
+
+  it("puts the typeface back, and stops the sample showing the refused face", async () => {
+    vi.mocked(updateAppearanceSettings).mockRejectedValueOnce(
+      new Error("offline"),
+    );
+    const user = userEvent.setup();
+    render(<AppearanceSection {...base} />);
+    await user.click(screen.getByLabelText(/atkinson/i));
+
+    await screen.findByRole("alert");
+    await waitFor(() =>
+      expect(screen.getByLabelText(/figtree/i)).toBeChecked(),
+    );
+    expect(screen.getByTestId("typeface-preview")).toHaveAttribute(
+      "data-font",
+      "figtree",
+    );
+  });
+
+  it("undoes only the field that failed, leaving a landed change alone", async () => {
+    const user = userEvent.setup();
+    render(<AppearanceSection {...base} />);
+
+    await user.click(screen.getByLabelText("Black")); // lands
+    await waitFor(() => expect(screen.getByLabelText("Black")).toBeChecked());
+
+    vi.mocked(updateAppearanceSettings).mockRejectedValueOnce(
+      new Error("offline"),
+    );
+    await user.click(strike()); // refused
+
+    await screen.findByRole("alert");
+    await waitFor(() => expect(strike()).toBeChecked());
+    expect(screen.getByLabelText("Black")).toBeChecked();
+  });
+
+  /**
+   * #227 review — the rollback target is what the server last **confirmed**,
+   * not the prop this section was first rendered with.
+   *
+   * Black lands, so the database holds `black`. Picking Green back is then
+   * refused, and the radio has to return to Black. Restoring the initial prop
+   * would leave Green selected — the very choice the server declined — and the
+   * preview would go on demonstrating it.
+   */
+  it("undoes to the value the last successful save stored", async () => {
+    const user = userEvent.setup();
+    render(<AppearanceSection {...base} />);
+
+    await user.click(screen.getByLabelText("Black")); // lands
+    await waitFor(() => expect(screen.getByLabelText("Black")).toBeChecked());
+
+    vi.mocked(updateAppearanceSettings).mockRejectedValueOnce(
+      new Error("offline"),
+    );
+    await user.click(screen.getByLabelText("Green")); // refused
+
+    await screen.findByRole("alert");
+    await waitFor(() => expect(screen.getByLabelText("Black")).toBeChecked());
+    expect(screen.getByTestId("completion-preview")).toHaveAttribute(
+      "data-tick",
+      "black",
+    );
+  });
+
+  it("says nothing and keeps the new value when the save works", async () => {
+    const user = userEvent.setup();
+    render(<AppearanceSection {...base} />);
+    await user.click(strike());
+
+    await waitFor(() => expect(updateAppearanceSettings).toHaveBeenCalled());
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(strike()).not.toBeChecked();
+  });
+});
+
 describe("AppearanceSection — the disclosure (#101)", () => {
   const trigger = () =>
     document.querySelector('[data-section-toggle="settings-appearance"]')!;
