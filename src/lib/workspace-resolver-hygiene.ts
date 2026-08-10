@@ -176,8 +176,8 @@ export interface SessionResolver {
    * account is turned away".
    *
    * Closing that needs real control-flow analysis — every return reached only
-   * through a branch on the status — and it is tracked as separate follow-up
-   * work rather than approximated here. A guard that fires on most enforcing
+   * through a branch on the status — and it is tracked as #240 rather than
+   * approximated here. A guard that fires on most enforcing
    * resolvers and misses some is the kind that gets relaxed instead of fixed,
    * which is the hole this whole module was written to close; a limit written
    * down is worth more than a heuristic nobody can trust. Until then the
