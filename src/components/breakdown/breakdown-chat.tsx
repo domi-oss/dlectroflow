@@ -544,7 +544,21 @@ export function BreakdownChat({
         // dropped — the inbox item cannot be unsent, and removing the row would
         // destroy what the user typed while waiting — so the only thing left is
         // to tell them, or they get an item they never saw arrive.
-        if (settled.kind === "edited") return { key, text, outcome: "edited" };
+        if (settled.kind === "edited") {
+          // …but only into a free slot or this row's own (!311 review). The
+          // branch below already holds that a notice belongs to the row it
+          // names; writing this one without reading `prev` broke that in the
+          // one direction that costs the user an action, because the notice it
+          // displaced could be another row's unresolved failure — the only
+          // thing on screen carrying that row's Retry. What is given up the
+          // other way is an announcement about something already over: both
+          // copies of the words are safe and this notice's only control
+          // dismisses it. That asymmetry is what decides the single slot
+          // (#210's boundary, and see `ejectNotice`'s own note).
+          return prev === null || prev.key === key
+            ? { key, text, outcome: "edited" }
+            : prev;
+        }
         // Otherwise only THIS row clears its own notice. A different eject
         // succeeding says nothing about this one, and clearing it would drop
         // the only announcement that anything went wrong — including when the
@@ -556,6 +570,13 @@ export function BreakdownChat({
       // direction: the insert may have landed, so the user can end up with the
       // step in the editor AND in the inbox — a duplicate is one tap to delete,
       // a step nobody wrote down is not recoverable at all.
+      //
+      // Unconditional, unlike the `edited` branch above, and for the reason
+      // that branch is not (!311 review): this is a live failure of a press the
+      // user just made. Yielding the slot to an older notice would leave that
+      // press with nothing visible to show for it, which is #169's harm exactly
+      // — and the displaced failure's words are still in their row, with that
+      // row's own control able to send them again.
       setEjectNotice({
         key,
         text,

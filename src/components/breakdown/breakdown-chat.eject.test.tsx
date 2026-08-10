@@ -22,10 +22,14 @@
  * resolving, which is exactly why this survived — so these drive it the other
  * way.
  *
- * The last two blocks are Duo's review of !304, which found that the first cut
+ * Blocks two and three are Duo's review of !304, which found that the first cut
  * used the row's WORDS as its identity — the only thing available before the
  * editor minted keys. Both findings are that one fact: the words are not stable
  * across an edit, and they are not unique across rows.
+ *
+ * The last block is the follow-up finding, on the notice those keys are shared
+ * through: identity decided which row a notice BELONGS to, and one branch of the
+ * updater was still writing to that single slot without asking.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
@@ -695,5 +699,83 @@ describe("BreakdownChat — rows sharing identical text (!304 review)", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       /couldn't send that to your inbox/i,
     );
+  });
+});
+
+/**
+ * Duo review of !304 (raised on the !311 scaffold) — the notice slot is one
+ * slot, and one branch of the updater was writing to it without looking.
+ *
+ * The two branches above already agree that a notice belongs to the row it
+ * names: a settled eject clears the notice only when it is that row's own. The
+ * `edited` branch did not read `prev` at all, so a row diverging mid-flight
+ * overwrote whatever was there — including another row's still-unresolved
+ * failure, which is the one notice on screen carrying a Retry.
+ *
+ * Which way the slot goes is decided by what is lost. An `edited` notice
+ * reports something already over — both copies are safe, and its only control
+ * dismisses it — so displacing it costs an announcement. A failure notice is
+ * the live state of an eject that has not happened yet, and displacing that
+ * costs the user the action.
+ */
+describe("BreakdownChat — two rows contending for the notice (!311 review)", () => {
+  it("does not let one row's mid-flight edit displace another's failure", async () => {
+    const failing = deferWrite();
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.click(ejectButton(0));
+    await failing.fail(new Error("offline"));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /couldn't send that to your inbox/i,
+    );
+
+    // Row 1 now ejects and is edited while its write is in the air, so it
+    // settles `edited` — an outcome that has nothing to say about row 0.
+    const edited = deferWrite();
+    await user.click(ejectButton(1));
+    await user.type(screen.getAllByLabelText("Step text")[1], " (revised)");
+    await edited.settle();
+
+    // Both rows keep their words: row 0 because its write never landed, row 1
+    // because it holds what the user typed while waiting.
+    await waitFor(() =>
+      expect(stepTexts()).toEqual(["First step", "Second step (revised)"]),
+    );
+    // And row 0's failure is still the notice, still quoting row 0's words.
+    const notice = screen.getByRole("alert");
+    expect(notice).toHaveTextContent(/couldn't send that to your inbox/i);
+    expect(notice).toHaveTextContent(/First step/);
+    expect(screen.queryByRole("status")).toBeNull();
+
+    // Still actionable, and still aimed at row 0 — the point of keeping it.
+    await user.click(screen.getByRole("button", { name: /try again/i }));
+
+    await waitFor(() => expect(stepTexts()).toEqual(["Second step (revised)"]));
+    expect(createBrainDumpItem).toHaveBeenLastCalledWith("First step");
+  });
+
+  it("still replaces a row's own failure notice when that row diverges", async () => {
+    // The guard is row identity, not "never overwrite": this row's own notice
+    // is exactly the one an `edited` outcome supersedes, and leaving the
+    // failure up would tell the user nothing arrived when it just did.
+    createBrainDumpItem.mockRejectedValueOnce(new Error("offline"));
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.click(ejectButton(0));
+    await screen.findByRole("alert");
+
+    // Retry re-sends the words the notice remembers, so editing the row first
+    // makes that retry land on wording the row no longer says.
+    await user.type(screen.getAllByLabelText("Step text")[0], " (revised)");
+    const retried = deferWrite();
+    await user.click(screen.getByRole("button", { name: /try again/i }));
+    await retried.settle();
+
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveTextContent(/earlier wording/i);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(stepTexts()).toEqual(["First step (revised)", "Second step"]);
   });
 });
