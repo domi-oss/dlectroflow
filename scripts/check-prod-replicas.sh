@@ -93,12 +93,21 @@
 # ── Read-only, and careful with what the cluster says ───────────────────────
 # Every kubectl verb here is `get`. Nothing this script can do changes the
 # cluster. Its stdout is spliced into a note on an issue in a **PUBLIC** project,
-# so container messages — which are attacker-influenceable in the general case
-# and arbitrary text in every case — are truncated, stripped of backticks and
-# control characters, and prefixed so no line can begin with `/`. A bare fence
-# would break out of the code block and take the rest of the note's rendering
-# with it; a line starting with `/` would be a GitLab quick action executed with
-# the alerter's token.
+# so EVERY string the cluster supplies — container messages, pod names and
+# phases, image tags, condition text — is truncated and stripped of backticks,
+# angle brackets and control characters, and pod detail is prefixed so no line
+# can begin with `/`. A bare fence would break out of the code block and take
+# the rest of the note's rendering with it; a bare `<tag>` breaks the whole
+# surrounding document's Markdown on GitLab; a line starting with `/` would be a
+# GitLab quick action executed with the alerter's token.
+#
+# Container messages are the attacker-influenceable ones in the general case and
+# arbitrary text in every case, so they are the reason the filter exists — but it
+# is applied by SOURCE, not by how dangerous a field is judged to be. !293 review
+# found three fields exempted on that judgement while the comment beside them
+# already claimed there were none. `clean` (in jq) and `clean_field` (in shell,
+# for the values jq never sees) are the two places it is implemented; a new
+# cluster-supplied field goes through one of them.
 #
 # Env (all optional):
 #   REPLICAS_NAMESPACE   the app's namespace
