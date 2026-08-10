@@ -76,26 +76,27 @@ operators upgrading a self-hosted instance don't get surprised.
   project's own security scanning, and self-hosters inherit the same guard.
 
   One scanner rule — "this regular expression was built at run time rather than
-  written out" — accounted for **15 of the 38 findings** on the main branch, and
-  none of them was ever a real problem: every pattern in this codebase is
-  assembled from fixed constants, from text that has already been escaped, from
+  written out" — accounts for **15 of the 37 findings** the scanners report
+  about this codebase, and none of them was ever a real problem: every pattern
+  here is assembled from fixed constants, from text already escaped, from
   identifiers in the project's own database migrations, or from a test's own
   fixtures. There is no route from anything a user types to one of them.
 
-  The trouble was that the scanner remembers a finding by its **position in the
-  file**. Adding a comment above one brought a already-reviewed finding back as
-  brand new, which then blocked merge requests that had not touched anything
-  related — three landed that way on a change to the page footer, and the same
-  three in the tenancy test harness had been reviewed and dismissed eleven times
-  since July.
+  The cost was never that these blocked anything — they did not. It was that the
+  scanner remembers a finding by its **position in the file**, so adding a
+  comment above one brought an already-reviewed finding back as brand new, and
+  somebody had to read it and write down why it was fine all over again. Three
+  came back on a change to the page footer. The same three in the tenancy test
+  harness had been reviewed and dismissed eleven times since July.
 
   So the rule is turned down to informational, and a check that lives in this
-  repository takes over the part that actually matters: every `new RegExp` must
-  build its pattern from something no request can influence, and anything else
-  has to be listed with a written argument for why it is safe. Unlike the
-  scanner, it fails the build outright rather than asking for an approval, and
-  it identifies a site by what the code says rather than by which line it is on
-  — so moving code around no longer resurrects settled questions.
+  repository takes over the part that matters: every `new RegExp` must build its
+  pattern from something no request can influence, and anything else has to be
+  listed with a written argument and a count of how many places it covers.
+  Unlike the scanner, it **fails the build** — which is stricter than what the
+  rule was doing — and it identifies a site by what the code says rather than by
+  which line it is on, so moving code around no longer resurrects settled
+  questions.
 
   The neighbouring rule about patterns that can be made to run slowly is
   **deliberately left alone**: it measures something the new check does not, so

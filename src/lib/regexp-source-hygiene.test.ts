@@ -49,11 +49,19 @@ describe("scanRegExpSites — the verdicts", () => {
 
   it("interpolating only SCREAMING_CASE module constants is constant", () => {
     expect(
-      verdict("const r = new RegExp(`^[0-9a-f]{${SHORT_SHA_LENGTH},40}$`);"),
+      verdict(
+        [
+          "const SHORT_SHA_LENGTH = 7;",
+          "const r = new RegExp(`^[0-9a-f]{${SHORT_SHA_LENGTH},40}$`);",
+        ].join("\n"),
+      ),
     ).toBe("constant");
     expect(
       verdict(
-        "const r = new RegExp(`\\\\bALTER\\\\s+TABLE\\\\s+${IDENT}`, 'i');",
+        [
+          "const IDENT = '\"?([A-Za-z_]+)\"?';",
+          "const r = new RegExp(`\\\\bALTER\\\\s+TABLE\\\\s+${IDENT}`, 'i');",
+        ].join("\n"),
       ),
     ).toBe("constant");
   });
@@ -67,7 +75,10 @@ describe("scanRegExpSites — the verdicts", () => {
   it("mixing constants and escaped values is still safe", () => {
     expect(
       verdict(
-        "const r = new RegExp(`rm -rf${COMMAND_BOUNDARY}*${escapeForRegExp(path)}`);",
+        [
+          'const COMMAND_BOUNDARY = "[^&|;]";',
+          "const r = new RegExp(`rm -rf${COMMAND_BOUNDARY}*${escapeForRegExp(path)}`);",
+        ].join("\n"),
       ),
     ).toBe("escaped");
   });
@@ -86,6 +97,73 @@ describe("scanRegExpSites — the verdicts", () => {
     // The whole gate rests on this distinction. A rule that accepted any
     // identifier would pass every site in the tree and assert nothing.
     expect(verdict("const r = new RegExp(`^${prefix}$`);")).toBe("unreviewed");
+  });
+
+  /**
+   * Adversarial review of !293's sibling MR. Seven of ten constructions written
+   * to defeat this guard passed it green, and these are the four that mattered.
+   * Each is the ordinary way somebody would actually write the unsafe thing.
+   */
+  describe("the ways a dynamic pattern used to slip through", () => {
+    it("does not call string concatenation a literal", () => {
+      // The commonest way to build a dynamic regex in JS, and precisely what
+      // CWE-185 is about. It began with a quote and contained no `${`, so the
+      // interpolation count was zero and it was classified `literal`.
+      expect(
+        verdict('const r = new RegExp("^" + userPrefix + "[a-f]+$");'),
+      ).toBe("unreviewed");
+      expect(verdict('const r = new RegExp("^".concat(userPrefix));')).toBe(
+        "unreviewed",
+      );
+    });
+
+    it("does not let anything ride along after an escapeForRegExp call", () => {
+      // The check was a PREFIX test, so everything after the escaped value was
+      // unexamined — including a raw concatenation and a ternary that returns
+      // the unescaped branch.
+      expect(
+        verdict("const r = new RegExp(`${escapeForRegExp(a) + raw}`);"),
+      ).toBe("unreviewed");
+      expect(
+        verdict("const r = new RegExp(`${escapeForRegExp(a) ? raw : other}`);"),
+      ).toBe("unreviewed");
+      // The genuine single call still passes, or the fix would be a ban.
+      expect(verdict("const r = new RegExp(`^${escapeForRegExp(a)}$`);")).toBe(
+        "escaped",
+      );
+    });
+
+    it("counts an interpolation preceded by an escaped backslash", () => {
+      // `\\b` and `\\s+` are everywhere in this repo's patterns, so an
+      // interpolation after one is not exotic. The skip tested a single
+      // preceding character, so an escaped backslash hid the `${`.
+      expect(verdict("const r = new RegExp(`a\\\\${attacker}b`);")).toBe(
+        "unreviewed",
+      );
+      // A genuinely escaped `\${` is not an interpolation and must stay literal.
+      expect(verdict("const r = new RegExp(`a\\${notAnInterp}b`);")).toBe(
+        "literal",
+      );
+    });
+
+    it("does not accept a SCREAMING_CASE name that is not a file-level const", () => {
+      // The test was the identifier's SHAPE. A parameter, a reassignable `let`,
+      // and a constant read out of the environment or a request body all match
+      // it — and the last two are attacker-reachable by definition.
+      const asParam = `function f(PREFIX: string) { return new RegExp(\`^\${PREFIX}$\`); }`;
+      expect(verdict(asParam)).toBe("unreviewed");
+      const fromEnv = [
+        "const BASE = process.env.BASE ?? '';",
+        "const r = new RegExp(`^${BASE}$`);",
+      ].join("\n");
+      expect(verdict(fromEnv)).toBe("unreviewed");
+      // A real file-level literal constant still passes.
+      const real = [
+        "const PREFIX = '[a-f0-9]';",
+        "const r = new RegExp(`^${PREFIX}+$`);",
+      ].join("\n");
+      expect(verdict(real)).toBe("constant");
+    });
   });
 
   it("classifies a construction inside a test file as test-only", () => {
@@ -165,11 +243,22 @@ describe("regexpSiteKey", () => {
  * silently drop it out of the allowlist — which is the exact failure mode #234
  * exists to remove.
  */
-const REVIEWED_DYNAMIC_PATTERNS: Record<string, string> = {
+const REVIEWED_DYNAMIC_PATTERNS: Record<
+  string,
+  { count: number; reason: string }
+> = {
   [`src/lib/migration-data-harness.ts::\`\\\\bDROP\\\\s+CONSTRAINT\\\\s+(?:IF\\\\s+EXISTS\\\\s+)?"?\${constraint}"?\``]:
-    "`constraint` is a Postgres identifier read out of this repo's own migration SQL under prisma/migrations, at test time. It never comes from a request, and a migration file is a reviewed artefact that a human wrote.",
+    {
+      count: 1,
+      reason:
+        "`constraint` is a Postgres identifier read out of this repo's own migration SQL under prisma/migrations, at test time. It never comes from a request, and a migration file is a reviewed artefact that a human wrote.",
+    },
   [`src/lib/migration-data-harness.ts::\`\\\\bUPDATE\\\\s+"?\${table}"?\\\\b[^;]*?\\\\bSET\\\\b[^;]*?"?\${column}"?\\\\s*=\``]:
-    "`table` and `column` are Postgres identifiers from this repo's own migration SQL, evaluated at test time. Same argument as the DROP CONSTRAINT pattern above: no request can reach them.",
+    {
+      count: 1,
+      reason:
+        "`table` and `column` are Postgres identifiers from this repo's own migration SQL, evaluated at test time. Same argument as the DROP CONSTRAINT pattern above: no request can reach them.",
+    },
 };
 
 /** Every `.ts`/`.tsx` under a root, excluding build output. */
@@ -204,10 +293,12 @@ describe("the real tree", () => {
     // mean something. A scan that silently matched nothing would satisfy the
     // gate while asserting nothing at all — the failure shape this project has
     // recorded seven times.
-    // 15 is the number of `eslint.detect-non-literal-regexp` findings on main's
-    // pipeline (measured 2026-08-10, pipeline for 57a272a). The guard must see
-    // at least every site the rule does, or the demotion is uncovered.
-    expect(sites.length).toBeGreaterThanOrEqual(15);
+    // EXACT, not a floor. It was `>= 15` against 25 real sites, which left the
+    // guard free to lose 40% of its coverage and stay green — a floor is not a
+    // control when the thing being guarded against is silently seeing less
+    // (!319 review). Update this deliberately when a construction is added or
+    // removed; that is the point.
+    expect(sites.length).toBe(25);
     expect(sites.some((s) => s.verdict === "constant")).toBe(true);
     expect(sites.some((s) => s.verdict === "escaped")).toBe(true);
     expect(sites.some((s) => s.verdict === "test-only")).toBe(true);
@@ -221,6 +312,23 @@ describe("the real tree", () => {
       offenders.map((s) => s.key),
       "Add an entry to REVIEWED_DYNAMIC_PATTERNS with the argument for why this value cannot carry attacker input, or build the pattern from a module constant / escapeForRegExp instead.",
     ).toEqual([]);
+  });
+
+  /**
+   * !319 review. A key is `file::argument`, so N byte-identical constructions
+   * in one file collapse to ONE entry — and a second, unreviewed copy would
+   * ride in free on the first one's reviewed reason. Demonstrated at the time
+   * by appending a duplicate `DROP CONSTRAINT` construction to
+   * `migration-data-harness.ts`: the guard stayed green.
+   *
+   * So each entry states how many sites it covers, and a new duplicate has to
+   * be counted in deliberately.
+   */
+  it("an allowlist entry covers only as many sites as it says it does", () => {
+    for (const [key, { count }] of Object.entries(REVIEWED_DYNAMIC_PATTERNS)) {
+      const actual = sites.filter((s) => s.key === key).length;
+      expect(actual, `${key} is allowed ${count} time(s)`).toBe(count);
+    }
   });
 
   /**
@@ -252,13 +360,35 @@ describe("the real tree", () => {
       REPORTED_BY_SEMGREP.filter((f) => !scanned.has(f)),
       "the guard is blind to a file the rule it compensates for reports on",
     ).toEqual([]);
+
+    // Presence is too weak on its own: `migration-data-harness.ts` carries 8
+    // sites and would satisfy "seen" with 1. These are Semgrep's own per-file
+    // counts for the nine files, and the guard must see at least as many.
+    const SEMGREP_PER_FILE: Record<string, number> = {
+      "src/lib/__tests__/scoping.harness.test.ts": 3,
+      "src/lib/registry-prune.test.ts": 3,
+      "e2e/smoke/settings-disclosure.spec.ts": 2,
+      "src/lib/migration-data-harness.ts": 2,
+      "src/lib/dockerfile-hygiene.test.ts": 1,
+      "src/lib/git-env.test.ts": 1,
+      "src/lib/version-hygiene.ts": 1,
+      "src/lib/dockerfile-hygiene.ts": 2,
+      "src/components/dashboard/badge-grid.test.tsx": 1,
+    };
+    for (const [file, atLeast] of Object.entries(SEMGREP_PER_FILE)) {
+      const seen = sites.filter((s) => s.file === file).length;
+      expect(
+        seen,
+        `${file}: Semgrep reports ${atLeast}`,
+      ).toBeGreaterThanOrEqual(atLeast);
+    }
   });
 
   it("every REVIEWED_DYNAMIC_PATTERNS entry is live and carries a real reason", () => {
     // A stale allowlist is worse than none: it reads as review that happened
     // and is describing code that no longer exists.
     const keys = new Set(sites.map((s) => s.key));
-    for (const [key, reason] of Object.entries(REVIEWED_DYNAMIC_PATTERNS)) {
+    for (const [key, { reason }] of Object.entries(REVIEWED_DYNAMIC_PATTERNS)) {
       expect(keys.has(key), `${key} is no longer in the tree`).toBe(true);
       expect(reason.length, `${key} needs a real argument`).toBeGreaterThan(60);
     }
