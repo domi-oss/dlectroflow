@@ -53,9 +53,11 @@ beforeEach(() => {
   prismaMock.dailySpark.createManyAndReturn.mockImplementation(
     ({ data }: { data: SparkRow }) => Promise.resolve([data]),
   );
-  prismaMock.dailySpark.upsert.mockImplementation(
-    ({ create }: { create: SparkRow }) => Promise.resolve(create),
-  );
+  // No `upsert` implementation on purpose. `refreshTodaySpark` still upserts,
+  // but this file only exercises `getTodaySpark`, which no longer does — and a
+  // stub for a call nobody makes reads as though `upsert` were still on the
+  // path under test. It also would not clear between tests if it drifted:
+  // `vi.clearAllMocks()` resets calls, not implementations.
 });
 
 describe("spark.ts › getTodaySpark", () => {
