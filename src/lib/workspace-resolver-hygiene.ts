@@ -163,8 +163,27 @@ export interface SessionResolver {
   reachesSessionPrimitive: boolean;
   /** Holds or returns a workspace id that did not arrive as its own parameter. */
   surfacesWorkspaceId: boolean;
-  /** References the `UserStatus` constant as a VALUE — not in prose, not as a
-   *  type annotation. */
+  /**
+   * References the `UserStatus` constant as a VALUE — not in prose, not as a
+   * type annotation.
+   *
+   * That is the whole of it, and it is less than the name promises. It says the
+   * constant is reachable somewhere in the function body; it does NOT say the
+   * reference gates what the function returns. A resolver that reads the status
+   * into a variable and never branches on it, or branches and falls through to
+   * the same return, passes this check while enforcing nothing (`!305` review).
+   * So a `true` here means "somebody wrote a status check", not "a frozen
+   * account is turned away".
+   *
+   * Closing that needs real control-flow analysis — every return reached only
+   * through a branch on the status — and it is tracked as separate follow-up
+   * work rather than approximated here. A guard that fires on most enforcing
+   * resolvers and misses some is the kind that gets relaxed instead of fixed,
+   * which is the hole this whole module was written to close; a limit written
+   * down is worth more than a heuristic nobody can trust. Until then the
+   * enforcement itself is covered by the behavioural tests on
+   * `currentWorkspaceId()`, and this flag is the coverage question only.
+   */
   checksUserStatus: boolean;
 }
 
@@ -714,6 +733,15 @@ function returnsWorkspaceId(
   }
   if (ts.isObjectLiteralExpression(node)) {
     return node.properties.some((property) => {
+      // `return { ...ws }` names no key, so the branch below — which asks for a
+      // property name before anything else — answered false for it and a whole
+      // resolved workspace went out undetected (!305 review). Which fields a
+      // spread carries is not knowable from the syntax, so it takes the same
+      // fail-closed direction as the rest of this module: it counts unless it
+      // demonstrably came in through the front door.
+      if (ts.isSpreadAssignment(property)) {
+        return !propertyComesFromParameter(property, parameters);
+      }
       if (!property.name) return false;
       const key = bindingPropertyName(property.name);
       if (key === null || !RETURNED_ID_FIELDS.includes(key)) return false;
@@ -763,7 +791,7 @@ function readsOffParameter(
 
 /**
  * Does this object-literal property take its value from a parameter — directly
- * as shorthand, or by reading a field off one?
+ * as shorthand, spread whole, or by reading a field off one?
  *
  * Anything else (a method, a getter, an accessor, a call) is left alone and so
  * keeps counting, which is the fail-closed default: the question is only ever
@@ -776,8 +804,14 @@ function propertyComesFromParameter(
   if (ts.isShorthandPropertyAssignment(property)) {
     return parameters.has(property.name.text);
   }
-  if (!ts.isPropertyAssignment(property)) return false;
-  const value = unwrapExpression(property.initializer);
+  // `{ ...row }` is `{ id: row.id }` with the keys left implicit, so it is the
+  // same question asked of the spread expression rather than an initializer.
+  const value = ts.isSpreadAssignment(property)
+    ? unwrapExpression(property.expression)
+    : ts.isPropertyAssignment(property)
+      ? unwrapExpression(property.initializer)
+      : null;
+  if (value === null) return false;
   if (ts.isIdentifier(value)) return parameters.has(value.text);
   return readsOffParameter(value, parameters);
 }

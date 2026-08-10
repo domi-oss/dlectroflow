@@ -766,6 +766,46 @@ describe("findSessionResolvers — the controls, which must stay silent", () => 
     ).toEqual(["currentScope", "currentScopeShort"]);
   });
 
+  it("says nothing about an object literal that SPREADS a parameter", () => {
+    // The same front-door exclusion, in the spelling that names no key at all.
+    // A serialiser widening `{ id: row.id }` to `{ ...row }` is the same
+    // function doing the same thing, and it resolved no session to get there.
+    expect(
+      resolvers(`
+        export function pack(row: { id: string }): { id: string } {
+          return { ...row };
+        }
+        export function repack({ scope }: { scope: { id: string } }) {
+          return { ...scope };
+        }
+      `),
+    ).toEqual([]);
+  });
+
+  it("still flags a workspace handed back whole, as a SPREAD", () => {
+    // `{ ...ws }` carries `id` without writing it down, so the object-literal
+    // branch — which asked for a property NAME before anything else — returned
+    // false for the one property shape that has none, and a resolver could hand
+    // a whole workspace out undetected (`!305` review).
+    //
+    // Whether a spread carries an id is not knowable from the syntax, so the
+    // fail-closed direction the rest of this module takes applies: it counts
+    // unless it demonstrably came in through the front door, which is the test
+    // above.
+    const [found] = findSessionResolvers(
+      `
+        export async function currentScope() {
+          const ws = await decodeSignedCookie(token);
+          return { ...ws };
+        }
+      `,
+      WORKSPACE_MODULE,
+    );
+    expect(found?.name).toBe("currentScope");
+    expect(found?.reachesSessionPrimitive).toBe(false);
+    expect(found?.surfacesWorkspaceId).toBe(true);
+  });
+
   it("says nothing about a NON-exported helper", () => {
     // A module-private helper cannot be a resolver anybody outside reaches, and
     // this is the shape a test helper or a fixture builder takes.
