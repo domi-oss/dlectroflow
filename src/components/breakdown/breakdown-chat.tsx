@@ -318,7 +318,29 @@ export function BreakdownChat({
   const [ejectNotice, setEjectNotice] = useState<EjectNotice | null>(null);
   const ejectErrorId = useId();
   const ejectSendingId = useId();
-  const retryEjectRef = useRef<HTMLButtonElement | null>(null);
+  const confirmHeldId = useId();
+  /**
+   * The notice's Retry control, **and the row that notice was about**.
+   *
+   * Keyed by row, like `ejectButtonRefs` below and for a related reason (!304
+   * review) — except the single slot makes this one sharper rather than softer.
+   * There is one Retry button because there is one notice, and the
+   * failure branch of `setEjectNotice` takes that slot **unconditionally** — by
+   * design, see its comment. So another row's eject can fail while this one's
+   * retry is still in the air, and because the button is re-rendered rather than
+   * remounted, a bare `useRef<HTMLButtonElement>` still resolves to it and it
+   * still holds focus. It is simply somebody else's Retry by then.
+   *
+   * Reading that as "the control the user pressed" and handing focus onwards
+   * moves them off a live Retry — the only thing on screen that can resend words
+   * which never arrived — because a row left the list somewhere else (WCAG
+   * 3.2.2). Storing the key makes "is this still mine?" answerable at the only
+   * moment it matters: after the await.
+   */
+  const retryEjectRef = useRef<{
+    key: string;
+    el: HTMLButtonElement;
+  } | null>(null);
   const addStepRef = useRef<HTMLButtonElement | null>(null);
   /**
    * Each row's eject control, **by row key** — so focus can be handed to the
@@ -515,8 +537,18 @@ export function BreakdownChat({
       // Read while the pressed control still exists — it is about to unmount
       // with its row, and a focus target read afterwards is read from a button
       // that has already gone.
+      //
+      // For a retry that also means asking WHOSE Retry the one slot is showing
+      // now (!304 review): another row's failure may have taken it while this
+      // write was out, and the button is re-rendered rather than remounted, so
+      // both the ref and `document.activeElement` still point at it. `null` here
+      // is the whole remedy — no pressed control means no focus move, and the
+      // user stays on the live Retry they are actually looking at.
+      const retry = retryEjectRef.current;
       const pressed = fromRetry
-        ? retryEjectRef.current
+        ? retry?.key === key
+          ? retry.el
+          : null
         : (ejectButtonRefs.current.get(key) ?? null);
       // Decided ONCE, from the last committed steps, and then used for all
       // three of focus, removal and the notice. Deriving it twice from two
@@ -643,6 +675,31 @@ export function BreakdownChat({
 
   function confirm() {
     if (!proposal || proposal.steps.length === 0) return;
+    /**
+     * #212 (!304 review) — never across an outstanding eject.
+     *
+     * The two halves of this file each look right alone and duplicate a step
+     * together. `confirmBreakdown` persists **every** row that has text, and
+     * #212's whole fix is that an ejecting row STAYS until its write lands — so
+     * confirming in the gap writes that step into the plan while the identical
+     * words are on their way to the inbox. Two records, in two places nothing
+     * links, from one press.
+     *
+     * Worse than a duplicate the user can see, because by the time the write
+     * settles the editor has been replaced by the saved view: the removal lands
+     * on a list that is no longer rendered, and so does every notice that would
+     * have said a word about any of it. Nothing is announced, and the two copies
+     * only ever meet in front of the user, later.
+     *
+     * Gated on the in-flight set the eject path already keeps rather than a
+     * second mechanism, and on the REF rather than the state for the same reason
+     * `ejectStep` guards on the ref: the state is what paints, the ref is what
+     * decides. It is a wait, not a refusal — `ejectStep`'s `finally` drains the
+     * set on every exit including a throw, so the gate lifts the moment the
+     * write settles either way, and a failed eject leaves the row in the plan
+     * where it is now the only copy.
+     */
+    if (ejectsInFlight.current.size > 0) return;
     startConfirm(async () => {
       await confirmBreakdown(taskId, toProposal(proposal));
       setConfirmed(true);
@@ -694,6 +751,14 @@ export function BreakdownChat({
   const totalMin =
     proposal?.steps.reduce((n, s) => n + (s.estMinutes || 0), 0) ?? 0;
   const busy = streaming || confirmPending;
+  /**
+   * Is any row's eject still outstanding? The paint half of the confirm gate —
+   * `ejectsInFlight` decides, this is the same fact as state so the control can
+   * say it. Deliberately not folded into `busy`: that flag also drives the three
+   * re-plan controls and the free-text box, and none of those write anything a
+   * pending eject could duplicate.
+   */
+  const ejectPending = ejecting.size > 0;
 
   // Route the Google-vs-ICS control choice through the seam (S1, #34): the
   // "Schedule onto your calendar" (Google Tasks) section is offered to any
@@ -1015,7 +1080,17 @@ export function BreakdownChat({
               </button>
             ) : (
               <button
-                ref={retryEjectRef}
+                ref={(el) => {
+                  // Block body: a concise arrow would RETURN the assignment,
+                  // and React 19 reads a ref callback's return value as a
+                  // cleanup function. Same shape as the row controls' Map.
+                  //
+                  // Re-runs on every render, which is what keeps the key
+                  // honest: the slot can change rows without the button being
+                  // remounted, and this is the commit that sees it.
+                  if (el) retryEjectRef.current = { key: ejectNotice.key, el };
+                  else retryEjectRef.current = null;
+                }}
                 type="button"
                 // While a retry runs, the reason AND the wait are both reachable
                 // from the control.
@@ -1192,7 +1267,30 @@ export function BreakdownChat({
         <button
           onClick={confirm}
           disabled={busy || !proposal || proposal.steps.length === 0}
-          className="bg-primary text-primary-foreground rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+          // #212 (!304 review) — held while a row is still on its way to the
+          // inbox, or the same step is saved into the plan AND lands in the
+          // inbox.
+          //
+          // `aria-disabled`, not `disabled`, and for a reason the three
+          // conditions beside it do not have: this one has something to SAY.
+          // A `disabled` button is out of the tab order, so a keyboard user
+          // cannot land on it to be told why — and they are exactly the users
+          // who did not see the row's own control change to "Sending…". They
+          // would find a greyed control, no reason, and no way to ask for one.
+          // Keeping it focusable keeps the reason below reachable, which is the
+          // same call the row controls above make (WCAG 2.4.3); the press is
+          // refused in `confirm` instead, so nothing can slip through.
+          //
+          // The `disabled` conditions are left as they are. They are not this
+          // fix's to change, and none of them is a wait the user is meant to sit
+          // through — this one clears in a single round trip.
+          aria-disabled={ejectPending}
+          // The refusal is not silent (#169): the reason rides
+          // `aria-describedby` off this button, the mechanism the notice's Retry
+          // already uses for its in-flight line, rather than a second live
+          // region (#218).
+          aria-describedby={ejectPending ? confirmHeldId : undefined}
+          className="bg-primary text-primary-foreground rounded-md px-3 py-1.5 text-sm font-medium aria-disabled:opacity-50 disabled:opacity-50"
         >
           {confirmPending ? "Saving…" : t("breakdown.looksRight", voice)}
         </button>
@@ -1231,6 +1329,23 @@ export function BreakdownChat({
           {t("action.removeStep", voice)}
         </button>
       </div>
+
+      {/* #212 (!304 review) — why "Looks right" is not taking the press.
+          Rendered as a sibling of the button row rather than inside it, so the
+          wrapping flex row does not try to lay a sentence out as a control.
+
+          Deliberately NOT a live region. It appears as a consequence of a press
+          the user just made on a row's own control, which already announces
+          itself through that control's `aria-disabled`/`aria-busy` and its
+          changed label — a third announcement for one press is noise, and a
+          second live region beside the eject notice is #218's shape. It is
+          `aria-describedby`'d off the confirm button instead, which is where a
+          user who tries the press will meet it. */}
+      {ejectPending && (
+        <p id={confirmHeldId} className="text-muted-foreground text-sm">
+          {t("breakdown.confirmHeld", voice)}
+        </p>
+      )}
     </div>
   );
 }

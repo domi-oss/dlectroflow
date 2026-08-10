@@ -27,9 +27,16 @@
  * editor minted keys. Both findings are that one fact: the words are not stable
  * across an edit, and they are not unique across rows.
  *
- * The last block is the follow-up finding, on the notice those keys are shared
+ * The fourth block is the follow-up finding, on the notice those keys are shared
  * through: identity decided which row a notice BELONGS to, and one branch of the
  * updater was still writing to that single slot without asking.
+ *
+ * The last two blocks are the round after that, and they are the same shape once
+ * more — a single slot shared by rows that can be in flight at the same time.
+ * The notice's Retry is one button, so the ref pointing at it can be another
+ * row's by the time an earlier retry lands; and "Looks right" was not asking
+ * about in-flight ejects at all, so a row could be saved into the plan while its
+ * own words were on their way to the inbox.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
@@ -142,6 +149,38 @@ const ejectButton = (n = 0) =>
   screen.getAllByTitle(
     "Send back to the inbox as its own item to re-break-down",
   )[n];
+
+/** The confirm control — the one press that persists the whole plan. */
+const confirmButton = () => screen.getByRole("button", { name: "Looks right" });
+
+/**
+ * The texts that reached BOTH destinations: the saved plan (`confirmBreakdown`)
+ * and the inbox (`createBrainDumpItem`).
+ *
+ * A step's words belong in one or the other and never in both. The two are
+ * unrelated records with no link between them, so a step in both is a duplicate
+ * nothing in the app will ever reconcile — the user has to spot it and delete
+ * one by hand, having been told about neither.
+ *
+ * The inbox side counts writes that **resolved**, not writes that were
+ * attempted, and the distinction is the point rather than pedantry: an eject
+ * that rejects put nothing in the inbox, so its row is the only copy of those
+ * words and belongs in the saved plan. A write still pending is counted as
+ * neither, which is the same thing the UI says out loud on a timeout — the
+ * client cannot know, and asserting either way here would be inventing a fact.
+ */
+const inBothPlaces = () => {
+  const planned = new Set(
+    vi
+      .mocked(confirmBreakdown)
+      .mock.calls.flatMap(([, sent]) => sent.steps.map((s) => s.text.trim())),
+  );
+  const settled = createBrainDumpItem.mock.settledResults;
+  const landed = (createBrainDumpItem.mock.calls as unknown[][])
+    .filter((_, i) => settled[i]?.type === "fulfilled")
+    .map((call) => String(call[0]));
+  return [...new Set(landed.filter((text) => planned.has(text)))];
+};
 
 /**
  * Replaces the `ejectedStepIndex` block !304 opened with.
@@ -777,5 +816,182 @@ describe("BreakdownChat — two rows contending for the notice (!311 review)", (
     expect(notice).toHaveTextContent(/earlier wording/i);
     expect(screen.queryByRole("alert")).toBeNull();
     expect(stepTexts()).toEqual(["First step (revised)", "Second step"]);
+  });
+});
+
+/**
+ * Duo review of !304, finding 1 — the Retry the ref points at is whichever
+ * notice is up NOW, not the one whose retry is still in the air.
+ *
+ * The notice is one slot and its failure branch writes to that slot
+ * unconditionally, deliberately: a failure reports a press the user just made,
+ * and yielding to an older notice would leave that press with nothing visible.
+ * So while one row's retry is outstanding, another row's eject can fail and take
+ * the slot — and because the button is re-rendered rather than remounted, the
+ * shared `retryEjectRef` still resolves to it and it still holds focus. Handing
+ * focus onwards from there moves the user off a live Retry, for a row that left
+ * the list somewhere else on the page (WCAG 3.2.2, and 2.4.3's spirit — focus
+ * should follow the thing that went, not jump away from the thing that stayed).
+ */
+describe("BreakdownChat — a retry that outlives its own notice (!304 review)", () => {
+  it("does not move focus off a Retry that now belongs to another row", async () => {
+    // Row 1 goes first and hangs; row 0 goes second and fails outright, so the
+    // notice is row 0's and row 1's write is still in the air behind it.
+    const slow = deferWrite();
+    createBrainDumpItem.mockRejectedValueOnce(new Error("offline"));
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.click(ejectButton(1));
+    await user.click(ejectButton(0));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/First step/);
+
+    const retried = deferWrite();
+    const retry = screen.getByRole("button", { name: /try again/i });
+    await user.click(retry);
+    expect(retry).toHaveFocus();
+
+    // Row 1's write now fails, and its notice takes the slot. Same button, no
+    // remount, so the user is still standing on it — but it is row 1's Retry.
+    await slow.fail(new Error("offline"));
+    const notice = screen.getByRole("alert");
+    expect(notice).toHaveTextContent(/Second step/);
+    expect(notice).not.toHaveTextContent(/First step/);
+    expect(retry).toHaveFocus();
+
+    // Row 0's retry lands and its row leaves the list. Nothing the user can see
+    // has moved under them, so nothing should move their focus either.
+    await retried.settle();
+    await waitFor(() => expect(stepTexts()).toEqual(["Second step"]));
+    expect(retry).toHaveFocus();
+    // …and the control they are standing on still does what it says: row 1's
+    // words never arrived, and this is the only thing on screen that can resend
+    // them.
+    const resent = deferWrite();
+    await user.click(retry);
+    expect(createBrainDumpItem).toHaveBeenLastCalledWith("Second step");
+    await resent.settle();
+  });
+
+  it("still hands focus on when the Retry is the one that was pressed", async () => {
+    // The guard is row identity, not "never move focus". A retry whose own row
+    // is still the notice's row is the ordinary case, and there the pressed
+    // control unmounts with the row — so focus has to go somewhere deliberate
+    // rather than to <body> (WCAG 2.4.3).
+    createBrainDumpItem.mockRejectedValueOnce(new Error("offline"));
+    const user = userEvent.setup();
+    renderChat();
+    await user.click(ejectButton(0));
+    await screen.findByRole("alert");
+
+    const retried = deferWrite();
+    await user.click(screen.getByRole("button", { name: /try again/i }));
+    await retried.settle();
+
+    await waitFor(() => expect(stepTexts()).toEqual(["Second step"]));
+    expect(document.activeElement).not.toBe(document.body);
+    expect(ejectButton(0)).toHaveFocus();
+  });
+});
+
+/**
+ * Duo review of !304, finding 2 — "Looks right" while a row's eject is still in
+ * the air.
+ *
+ * #212's fix is that the row STAYS until the write lands, and `confirmBreakdown`
+ * saves every row that has text. Put those together and a confirm across the gap
+ * writes the step into the plan while the very same words are on their way to
+ * the inbox: two copies, in two places nothing links, from one press. It is
+ * worse than a visible duplicate, because the editor has been replaced by the
+ * saved view by the time the write settles — the row removal lands on a screen
+ * that is gone, and so does any notice that would have said a word about it.
+ *
+ * The remedy is the in-flight set the eject path already keeps, not a second
+ * mechanism: while it is non-empty the press is refused and the control says
+ * why, and the moment it drains the plan can be saved as before.
+ */
+describe("BreakdownChat — confirming mid-eject (!304 review)", () => {
+  it("never puts the same step in the plan and the inbox at once", async () => {
+    const write = deferWrite();
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.click(ejectButton(0));
+    await user.click(confirmButton());
+    await write.settle();
+
+    expect(inBothPlaces()).toEqual([]);
+  });
+
+  it("saves the plan as soon as the eject has landed", async () => {
+    // The gate is a wait, not a refusal — otherwise it would be its own trap.
+    const write = deferWrite();
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.click(ejectButton(0));
+    await user.click(confirmButton());
+    expect(confirmBreakdown).not.toHaveBeenCalled();
+
+    await write.settle();
+    await waitFor(() => expect(stepTexts()).toEqual(["Second step"]));
+    await user.click(confirmButton());
+
+    await waitFor(() => expect(confirmBreakdown).toHaveBeenCalledTimes(1));
+    const [, sent] = vi.mocked(confirmBreakdown).mock.calls[0];
+    // The ejected row is in the inbox and nowhere else; the one left behind is
+    // in the plan and nowhere else.
+    expect(sent.steps.map((s) => s.text)).toEqual(["Second step"]);
+    expect(createBrainDumpItem).toHaveBeenCalledExactlyOnceWith("First step");
+    expect(inBothPlaces()).toEqual([]);
+  });
+
+  it("saves the plan again once a failed eject has settled, row and all", async () => {
+    // Nothing reached the inbox, so the row is the only copy and belongs in the
+    // plan. A gate that stayed up after a failure would strand it there.
+    const write = deferWrite();
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.click(ejectButton(0));
+    await write.fail(new Error("offline"));
+    await screen.findByRole("alert");
+    await user.click(confirmButton());
+
+    await waitFor(() => expect(confirmBreakdown).toHaveBeenCalledTimes(1));
+    const [, sent] = vi.mocked(confirmBreakdown).mock.calls[0];
+    expect(sent.steps.map((s) => s.text)).toEqual([
+      "First step",
+      "Second step",
+    ]);
+    expect(inBothPlaces()).toEqual([]);
+  });
+
+  it("says why it is held, and stays focusable while it is (WCAG 2.4.3)", async () => {
+    const write = deferWrite();
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.click(ejectButton(0));
+
+    const confirm = confirmButton();
+    // `aria-disabled`, never `disabled`: this button is disabled by a press on a
+    // DIFFERENT control, so a real `disabled` can take focus out from under a
+    // user standing on it and drop them to <body>.
+    expect(confirm).toHaveAttribute("aria-disabled", "true");
+    expect(confirm).not.toBeDisabled();
+    // And the refusal is never silent (#169) — the reason rides
+    // `aria-describedby`, the same mechanism the notice's Retry uses for its
+    // in-flight line, rather than a second live region (#218).
+    const describedBy = confirm.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy!)?.textContent).toMatch(
+      /still being sent to your inbox/i,
+    );
+
+    await write.settle();
+    await waitFor(() => expect(stepTexts()).toEqual(["Second step"]));
+    expect(confirmButton()).not.toHaveAttribute("aria-disabled", "true");
+    expect(confirmButton().getAttribute("aria-describedby")).toBeNull();
   });
 });

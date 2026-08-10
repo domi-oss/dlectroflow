@@ -468,6 +468,13 @@ operators upgrading a self-hosted instance don't get surprised.
   busy, no longer swallows a press on it, and no longer clears a message about
   the first one.
 
+  Finally, **"Looks right" now waits for a step that is still being sent.** A
+  plan is saved with every row it still shows, and a row on its way to the inbox
+  is deliberately one of them until the inbox has it — so pressing Save in that
+  moment used to put the same step in both places at once, with nothing said and
+  no way for the app to notice afterwards. It now says why it is waiting, and
+  goes through the moment the step has landed, whichever way that went.
+
 - **The focus timer's Start and Resume no longer fail in silence (#139's shape,
   found via #198).** Both buttons handled a server that could not be *reached*,
   and neither handled a server that answered and *declined* — so in those cases

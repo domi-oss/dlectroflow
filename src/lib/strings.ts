@@ -675,6 +675,22 @@ export const STRINGS = {
 
   // ── Breakdown confirm ──────────────────────────────────────────────────────
   "breakdown.looksRight": { plain: "Looks right", playful: "👍 Looks right" },
+  // #212 (!304 review) — why the confirm above is not taking the press while a
+  // row is still on its way to the inbox. Saving the plan persists every row
+  // that has text, and an ejecting row is deliberately still one of them until
+  // its write lands, so confirming across the gap puts one step in two places.
+  //
+  // Identical across voices for the reason the `breakdown.eject.*` family gives:
+  // this is the app declining an action to protect the user's data, and a joke
+  // about it would read as the app being cute about something it will not do.
+  // Says what is happening and that it is brief, never "disabled" — the control
+  // is not broken and the wait is one round trip.
+  "breakdown.confirmHeld": {
+    plain:
+      "One step is still being sent to your inbox — saving the plan waits for it, so the same step cannot end up in both places.",
+    playful:
+      "One step is still being sent to your inbox — saving the plan waits for it, so the same step cannot end up in both places.",
+  },
 
   // ── #212: a step that could not be sent back to the inbox ──────────────────
   // Identical across voices, for the same reason `capture.error.*` and
