@@ -6,6 +6,8 @@ import {
   shoppingItemTextError,
   splitShoppingList,
   shoppingRemainingCount,
+  isStillToBuy,
+  shoppingSavedForLaterUpdate,
   nextShoppingOrder,
 } from "@/lib/shopping";
 
@@ -115,6 +117,69 @@ describe("shoppingRemainingCount", () => {
 
   it("is zero for an empty list", () => {
     expect(shoppingRemainingCount([])).toBe(0);
+  });
+});
+
+describe("isStillToBuy", () => {
+  // The predicate `shoppingRemainingCount` filters on, exported so the write side
+  // can ask it of ONE row without spelling `!done && !savedForLater` again.
+  it.each([
+    [false, false, true],
+    [true, false, false],
+    [false, true, false],
+    [true, true, false],
+  ])(
+    "done=%s savedForLater=%s → %s",
+    (done, savedForLater, expected: boolean) => {
+      expect(isStillToBuy({ done, savedForLater })).toBe(expected);
+    },
+  );
+});
+
+describe("shoppingSavedForLaterUpdate", () => {
+  /**
+   * #199, Duo review !295 — the round trip that was broken.
+   *
+   * Tick an item, send it down to Saved for later, then pull it back up: the write
+   * used to set `savedForLater` alone, so the item returned to the active section
+   * STILL TICKED and `shoppingRemainingCount` went on excluding it. "Put this back
+   * on the to-buy list" left the count where it was and the row struck through.
+   */
+  it("un-ticks an item pulled back up, so it really is back on the to-buy list", () => {
+    const pulledBackUp = {
+      ...item({ done: true, savedForLater: true }),
+      ...shoppingSavedForLaterUpdate(false),
+    };
+    expect(pulledBackUp.done).toBe(false);
+    expect(pulledBackUp.savedForLater).toBe(false);
+    expect(shoppingRemainingCount([pulledBackUp])).toBe(1);
+    expect(splitShoppingList([pulledBackUp]).active.map((i) => i.id)).toEqual([
+      "a",
+    ]);
+  });
+
+  it("leaves `done` alone when an item goes DOWN into the pile", () => {
+    // Only the pull-back direction carries an intention about buying it. Going
+    // down, "I already bought this" and "not this trip" stay independent facts —
+    // clearing the tick there would resurrect a bought item as unbought.
+    const savedForLater = {
+      ...item({ done: true }),
+      ...shoppingSavedForLaterUpdate(true),
+    };
+    expect(savedForLater.done).toBe(true);
+    expect(savedForLater.savedForLater).toBe(true);
+    expect(shoppingRemainingCount([savedForLater])).toBe(0);
+  });
+
+  it("touches nothing but those two flags, so `order` and `text` survive", () => {
+    // The item keeps its place in capture order rather than jumping to the end.
+    expect(Object.keys(shoppingSavedForLaterUpdate(false)).sort()).toEqual([
+      "done",
+      "savedForLater",
+    ]);
+    expect(Object.keys(shoppingSavedForLaterUpdate(true))).toEqual([
+      "savedForLater",
+    ]);
   });
 });
 

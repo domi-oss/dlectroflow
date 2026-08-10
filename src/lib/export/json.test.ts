@@ -143,6 +143,21 @@ describe("export.json — the round-trippable tier", () => {
     ).toEqual([false, false, true]);
   });
 
+  // #199 — the summary row is app-generated bookkeeping, and it is DELIBERATELY
+  // absent. This assertion exists so the exclusion can never be mistaken for
+  // hiding real user data: the shopping list itself is exported in full (above),
+  // and what is withheld is one nullable timestamp saying whether an inbox line is
+  // currently dismissed — a fact an importer can recreate from the exported rows.
+  // Registered with that reasoning in __tests__/model-coverage.test.ts's
+  // DELIBERATELY_EXCLUDED, which requires every exclusion to carry a reason.
+  it("does NOT carry the inbox summary row — and does carry the list it summarises", () => {
+    expect(everyKey(parsed)).not.toContain("shoppingSummary");
+    expect(everyKey(parsed)).not.toContain("clearedAt");
+    // The control that makes the two absences above mean something: a serialiser
+    // that dropped the whole feature would satisfy them too.
+    expect(parsed.shoppingItems).toHaveLength(3);
+  });
+
   it("writes every timestamp as ISO-8601 with an explicit offset", () => {
     const offsets =
       /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}(Z|[+-]\d{2}:\d{2})$/;

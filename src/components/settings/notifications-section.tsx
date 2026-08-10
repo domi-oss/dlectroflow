@@ -19,6 +19,7 @@ import {
   useSaveStatus,
   SaveIndicator,
 } from "@/components/settings/use-save-status";
+import { useOptimisticOwnership } from "@/components/settings/revert-optimistic";
 import { CollapsibleSection } from "@/components/nav/collapsible-section";
 
 type Prefs = {
@@ -35,6 +36,27 @@ type Prefs = {
  * prompts for it (same UX as roundup-card). The toggles here only persist the
  * preference — the actual firing lives in roundup-card / inbox-view / the
  * daily-review nudge.
+ *
+ * ## A failed save both speaks and steps back (#227)
+ *
+ * `persist` already caught and called `markError()`, so this section was half
+ * right — and that half is the one that made it worse than silence. `prefs` was
+ * never restored, so a rejected write left "couldn't save" sitting beside a
+ * switch that still looked on. The user cannot tell which of the two to believe,
+ * and the control looks more authoritative than the message.
+ *
+ * The rollback goes through the `revert-optimistic` ledger rather than
+ * `setPrefs(previous)`, because these controls stay live during a save —
+ * deliberately; they are cheap preferences — so attempts can interleave.
+ * Restoring the whole snapshot would both undo fields this attempt never
+ * touched and clobber a newer success with an older failure. Ownership is
+ * decided by the attempt's own token, not by whether the value on screen still
+ * looks like the one it wrote, which a re-toggle can match by coincidence. See
+ * that module for the argument in full.
+ *
+ * An action that never answers is handled a level up, by `useSaveStatus`'s
+ * `stalled` state: it says so and leaves the value alone, because undoing a
+ * write that may still land is the same lie in the other direction.
  */
 export function NotificationsSection({
   notifyRoundup,
@@ -47,6 +69,7 @@ export function NotificationsSection({
   const router = useRouter();
   const [, startTransition] = useTransition();
   const { status, markSaving, markSaved, markError } = useSaveStatus();
+  const ownership = useOptimisticOwnership<Prefs>();
 
   const [prefs, setPrefs] = useState<Prefs>({
     notifyRoundup,
@@ -67,17 +90,28 @@ export function NotificationsSection({
     registerServiceWorker();
   }, []);
 
-  const persist = (next: Prefs) =>
+  const persist = (next: Prefs, previous: Prefs) => {
+    // Claimed in the same synchronous turn as the optimistic `setPrefs(next)`
+    // above, so attempts are ordered the way the user made the changes.
+    const attempt = ownership.claim(next, previous);
     startTransition(async () => {
       markSaving();
       try {
         await updateNotificationSettings(next);
+        // What the server now holds, so a later failure undoes to this rather
+        // than to some earlier attempt's unconfirmed guess.
+        attempt.confirm();
         markSaved();
         router.refresh();
       } catch {
+        // #227 — say so AND put the control back. The functional updater reads
+        // the state as it stands now, not this closure's `prefs`, and the
+        // attempt restores only the fields it still owns.
+        setPrefs((current) => attempt.revert(current));
         markError();
       }
     });
+  };
 
   const setToggle = (key: keyof Prefs, value: boolean) => {
     const next = { ...prefs, [key]: value };
@@ -87,13 +121,13 @@ export function NotificationsSection({
     if (value && permission === "default") {
       void requestNotificationPermission();
     }
-    persist(next);
+    persist(next, prefs);
   };
 
   const setTime = (value: string) => {
     const next = { ...prefs, dailyReviewNudgeTime: value };
     setPrefs(next);
-    persist(next);
+    persist(next, prefs);
   };
 
   return (

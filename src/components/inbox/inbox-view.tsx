@@ -90,6 +90,7 @@ import {
 import { CompleteButton } from "@/components/inbox/complete-button";
 import { AddNoteButton } from "@/components/inbox/add-note-button";
 import { WelcomeCard } from "@/components/inbox/welcome-card";
+import { ShoppingSummaryCard } from "@/components/inbox/shopping-summary-card";
 import { newAccountLine, type AccountIdentity } from "@/lib/identity";
 import { SubHeader, SEE_ALL } from "@/components/inbox/sub-header";
 import { t } from "@/lib/strings";
@@ -283,6 +284,7 @@ export function InboxView({
   resumeStep,
   newAccount = null,
   notifyAging = true,
+  shoppingSummary = null,
   now: initialNow,
 }: {
   initialItems: Item[];
@@ -316,6 +318,22 @@ export function InboxView({
   newAccount?: AccountIdentity | null;
   /** Phase 6 — gates the aging→browser-notification firing (permission still applies). */
   notifyAging?: boolean;
+  /**
+   * #199 — the shopping-list summary line, or null for "show nothing".
+   *
+   * A COUNT, resolved on the server from the items themselves on the request that
+   * rendered this page — never a stored number, because the summary row deliberately
+   * holds no number (src/lib/shopping-summary.ts). One nullable prop rather than a
+   * count plus a boolean: "show nothing" has four causes on the server (no row, a
+   * dismissed row, an empty list, a nonsensical count) and this component has no
+   * business branching on which.
+   *
+   * Optional, defaulting to null, so a caller that predates it — or one whose
+   * workspace has the feature off — renders the inbox exactly as it did before.
+   * It is deliberately NOT part of `initialItems`: see the note on
+   * ShoppingSummaryCard for why a generated line must not enter the buckets.
+   */
+  shoppingSummary?: { count: number } | null;
   /**
    * #105 — the request-time clock, stamped ONCE on the server and handed down,
    * exactly as the Library page hands `now` to `<LibraryRows>`. It seeds the
@@ -1230,6 +1248,13 @@ export function InboxView({
   return (
     <div className="space-y-6">
       {welcomeVisible && <WelcomeCard voice={voice} />}
+      {/* #199 — above the buckets, beside the resume banner: this is where the
+          inbox already puts things that are ABOUT the inbox rather than in it. It
+          is not a row, so it cannot reach bucketItems, the Library tabs, the
+          freshness clock, the untriaged badge or maybeAwardInboxZero. */}
+      {shoppingSummary && (
+        <ShoppingSummaryCard count={shoppingSummary.count} voice={voice} />
+      )}
       {resumeStep && (
         <div
           role="status"

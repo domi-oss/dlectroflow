@@ -97,7 +97,58 @@ test.describe("accessibility: shopping-list mode (axe)", () => {
 
     await scanA11y(page, "/shopping");
 
-    // 4. Leave no fixture behind: the item would otherwise accumulate one row per
+    // 4. #199 part 2 — the inbox summary line, rendered in a REAL BROWSER.
+    //
+    // This step is not decoration. The card is a client component, and its first
+    // draft imported a module that reached `@/lib/db`, which constructs
+    // `new PrismaClient()` at module scope — so the whole Prisma client landed in
+    // the browser bundle and the chunk threw when evaluated. `next build` was green,
+    // the unit suite was green (it imports modules in node, where a server-only
+    // import is simply available), and no spec rendered this card because it only
+    // appears for a workspace with the feature ON and a non-empty list. Which is
+    // this one, now.
+    //
+    // `client-server-boundary.test.ts` is the structural gate for that class; this
+    // is the end-to-end proof that the page a person actually loads works.
+    await page.goto("/");
+    await waitForShell(page);
+    const summary = page.getByRole("link", {
+      name: /1 item on your shopping list/i,
+    });
+    await expect(summary).toBeVisible();
+    await expect(summary).toHaveAttribute("href", "/shopping");
+    await scanA11y(page, "/ with the shopping summary");
+
+    // "Not now" clears it, and the line goes.
+    await page
+      .getByRole("button", { name: /Not now — 1 item on your shopping list/i })
+      .click();
+    await expect(summary).toHaveCount(0);
+
+    // It comes back the next time the list GROWS. Ticking off would not bring it
+    // back, which is the rule the sync's `resurface` flag encodes.
+    await page.goto("/shopping");
+    await page.getByLabel(/add to the list/i).fill(`${label} two`);
+    await page.getByRole("button", { name: /^Add$/ }).click();
+    // Wait for the write to LAND before navigating. Not politeness: the first draft
+    // of this step navigated straight to `/`, and `/` is force-dynamic so it
+    // rendered from whatever the database held at that instant — which was
+    // sometimes before the add committed. `toBeVisible` then waited five seconds
+    // against a page that was never going to re-render, and the step failed while
+    // the database was correct (`clearedAt: null`, two items). A false failure that
+    // looks exactly like a product bug is worth one extra assertion.
+    await expect(page.getByText(`${label} two`)).toBeVisible();
+    await page.goto("/");
+    await waitForShell(page);
+    await expect(
+      page.getByRole("link", { name: /2 items on your shopping list/i }),
+    ).toBeVisible();
+
+    await page.goto("/shopping");
+    await page.getByRole("button", { name: `Delete ${label} two` }).click();
+    await expect(page.getByText(`${label} two`)).toHaveCount(0);
+
+    // 5. Leave no fixture behind: the item would otherwise accumulate one row per
     //    run in the shared database, and the next run's scan would be of a longer
     //    list than the one this file describes.
     // A plain string, NOT `new RegExp(...)`: Playwright's `name` already does a
