@@ -368,6 +368,11 @@ export function FocusTimer({
   // #137 — ties the failure message to the notice's primary action, so the
   // reason is announced with the remedy. See failureNotice below.
   const failureMessageId = useId();
+  // #218 — the retry-in-flight announcement's id. It sits on the visually
+  // hidden live region beside the notice, not on the visible line inside it,
+  // so the one node a screen reader can reach is also the one the CTA's
+  // `aria-describedby` points at. See failureNotice below.
+  const retryingMessageId = useId();
   // The setup screen's primary CTA (Resume or Start), focused after a
   // disclosure toggle — see the effect below.
   const setupCtaRef = useRef<HTMLButtonElement | null>(null);
@@ -1217,76 +1222,146 @@ export function FocusTimer({
   // carried by the text, never by the red alone (WCAG 1.4.1);
   // `text-destructive` on --background/--card is the token globals.css
   // documents as AA in both themes (5.2:1+); every control is a ≥44px target.
+  //
+  // #218 — while a retry runs, the description also picks up the wait, so the
+  // reason AND the fact that something is happening are both reachable from the
+  // one control focus is deliberately parked on. Derived once and applied to
+  // BOTH branches of the CTA below rather than written out twice: the stale
+  // branch's Reload does not set `pending` itself, but a stale failure arriving
+  // while a request is already in flight would otherwise be the one path where
+  // the wait is on screen and described by nothing. Retracts on its own when
+  // `pending` clears, so the button cannot go on claiming a retry is running.
+  //
+  // Duo round 16 — this is the SECOND of two channels, not the only one, and
+  // the distinction is the whole of the fix below. A description is computed
+  // when focus LANDS on a control. The two moments the wait can appear are
+  // therefore not symmetrical:
+  //
+  //   notice mounts with `pending` already true → the effect above moves focus
+  //     onto the CTA, focus lands, the description is read. This covers it.
+  //   notice already mounted, user presses Retry → focus never moves (that is
+  //     deliberate, `aria-disabled` not `disabled`), so nothing re-reads the
+  //     description and this channel is silent. The live region covers it.
+  const ctaDescribedBy = pending
+    ? `${failureMessageId} ${retryingMessageId}`
+    : failureMessageId;
   const failureNotice = failure ? (
-    <div
-      role="alert"
-      className="border-destructive/40 bg-destructive/5 mx-auto flex max-w-md flex-col items-center gap-2 rounded-md border p-3"
-    >
-      <p
-        id={failureMessageId}
-        className="text-destructive flex items-start gap-1.5 text-sm font-medium"
+    <>
+      <div
+        role="alert"
+        className="border-destructive/40 bg-destructive/5 mx-auto flex max-w-md flex-col items-center gap-2 rounded-md border p-3"
       >
-        <TriangleAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
-        <span>{t(failureMessageKey(failure), voice)}</span>
-      </p>
-      {pending && (
-        <p role="status" className="text-muted-foreground text-xs">
-          {t("focus.error.retrying", voice)}
+        <p
+          id={failureMessageId}
+          className="text-destructive flex items-start gap-1.5 text-sm font-medium"
+        >
+          <TriangleAlert
+            aria-hidden="true"
+            className="mt-0.5 h-4 w-4 shrink-0"
+          />
+          <span>{t(failureMessageKey(failure), voice)}</span>
         </p>
-      )}
-      <div className="flex flex-wrap justify-center gap-2">
-        {failure.stale ? (
-          // Retrying re-posts the same action id the running deployment has
-          // already forgotten, so a reload is the ONLY thing on offer here.
-          <button
-            ref={failureCtaRef}
-            type="button"
-            aria-describedby={failureMessageId}
-            onClick={() => window.location.reload()}
-            className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium"
+        {/* #218 — the SIGHTED copy of the wait, and only that. It is
+            `aria-hidden` because the announcement is the sibling region below,
+            and two nodes carrying one sentence is how it gets said twice.
+            Hiding it also stops the insertion from mutating this `role="alert"`:
+            an alert is an assertive, atomic live region, so a visible child
+            appearing inside it mid-retry re-reads the whole notice over the
+            polite announcement — louder and more interrupting than the nested
+            `role="status"` this replaced. Nothing changes on screen. */}
+        {pending && (
+          <p
+            data-testid="focus-retrying-visible"
+            aria-hidden="true"
+            className="text-muted-foreground text-xs"
           >
-            <RefreshCw aria-hidden="true" className="h-4 w-4 shrink-0" />
-            {t("focus.error.reload", voice)}
-          </button>
-        ) : (
-          // `aria-disabled`, not `disabled`: a disabled element cannot hold
-          // focus, so the browser would drop it to <body> the moment the retry
-          // starts — the very thing keeping the notice mounted is here to
-          // prevent. The press is guarded in the handler instead, so a
-          // double-tap still cannot fire two requests.
-          <button
-            ref={failureCtaRef}
-            type="button"
-            aria-describedby={failureMessageId}
-            aria-disabled={pending}
-            onClick={() => {
-              if (!pending) retryFailed();
-            }}
-            className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium aria-disabled:opacity-50"
-          >
-            <RotateCcw aria-hidden="true" className="h-4 w-4 shrink-0" />
-            {t("focus.error.retry", voice)}
-          </button>
+            {t("focus.error.retrying", voice)}
+          </p>
         )}
-        {/* The escape hatch from a failed re-estimate — but NOT when the
-            deployment moved on. Skipping only reveals the number field; the
-            Requeue behind it is another server action, which would post
-            another dead id and fail the same way. Offering it there would be
-            walking the user into a second dead end, which is the opposite of
-            what detecting the stale case is for. */}
-        {phase === "reestimate" &&
-          failure.handler === "reestimate" &&
-          !failure.stale && (
+        <div className="flex flex-wrap justify-center gap-2">
+          {failure.stale ? (
+            // Retrying re-posts the same action id the running deployment has
+            // already forgotten, so a reload is the ONLY thing on offer here.
             <button
+              ref={failureCtaRef}
               type="button"
-              onClick={skipReestimate}
-              className="hover:bg-accent inline-flex min-h-[44px] items-center rounded-md border px-4 font-medium"
+              aria-describedby={ctaDescribedBy}
+              onClick={() => window.location.reload()}
+              className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium"
             >
-              {t("focus.error.pickTime", voice)}
+              <RefreshCw aria-hidden="true" className="h-4 w-4 shrink-0" />
+              {t("focus.error.reload", voice)}
+            </button>
+          ) : (
+            // `aria-disabled`, not `disabled`: a disabled element cannot hold
+            // focus, so the browser would drop it to <body> the moment the retry
+            // starts — the very thing keeping the notice mounted is here to
+            // prevent. The press is guarded in the handler instead, so a
+            // double-tap still cannot fire two requests.
+            <button
+              ref={failureCtaRef}
+              type="button"
+              aria-describedby={ctaDescribedBy}
+              aria-disabled={pending}
+              onClick={() => {
+                if (!pending) retryFailed();
+              }}
+              className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium aria-disabled:opacity-50"
+            >
+              <RotateCcw aria-hidden="true" className="h-4 w-4 shrink-0" />
+              {t("focus.error.retry", voice)}
             </button>
           )}
+          {/* The escape hatch from a failed re-estimate — but NOT when the
+              deployment moved on. Skipping only reveals the number field; the
+              Requeue behind it is another server action, which would post
+              another dead id and fail the same way. Offering it there would be
+              walking the user into a second dead end, which is the opposite of
+              what detecting the stale case is for. */}
+          {phase === "reestimate" &&
+            failure.handler === "reestimate" &&
+            !failure.stale && (
+              <button
+                type="button"
+                onClick={skipReestimate}
+                className="hover:bg-accent inline-flex min-h-[44px] items-center rounded-md border px-4 font-medium"
+              >
+                {t("focus.error.pickTime", voice)}
+              </button>
+            )}
+        </div>
       </div>
-    </div>
+      {/* #218, Duo round 16 — where the wait is actually ANNOUNCED.
+          A SIBLING of the alert, never a descendant: a polite region nested
+          inside an assertive one inherits the container's politeness across its
+          whole subtree, which is the original bug and is not fixed by moving
+          the same nesting one level in.
+          It exists because `aria-describedby` cannot do this job alone. A
+          description is read when focus LANDS on a control, and the retry is
+          pressed on a control that already holds focus and keeps it by design —
+          so the description gaining this id mid-flight is a change nothing goes
+          back to re-read. A live region is the one channel defined for content
+          that changes while the user is stationary.
+          Rendered whenever the notice is, and EMPTY until there is something to
+          say: assistive technology announces a change to a region already in
+          the accessibility tree, so a region arriving together with its first
+          message is silent (same reasoning as the move announcer in
+          `inbox-view.tsx`). `sr-only` rather than `hidden` for the same reason —
+          a live region has to be rendered to be observed.
+          It keeps `retryingMessageId`, so the CTA's description still resolves
+          to real text; that covers the mirror-image path, where the notice
+          mounts with a retry already in flight and focus lands on the CTA. */}
+      <p
+        id={retryingMessageId}
+        data-testid="focus-retrying-announcer"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {pending && t("focus.error.retrying", voice)}
+      </p>
+    </>
   ) : null;
 
   // Single-task focus uses the auto-created ensureFocusStep step, whose text

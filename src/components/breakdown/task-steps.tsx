@@ -153,6 +153,69 @@ export function TaskSteps({
   const justUndidRef = useRef<Set<string>>(new Set());
   const ctaRefs = useRef(new Map<string, HTMLAnchorElement | null>());
 
+  // #215 — WCAG 2.4.3, the residual half of what round 15 fixed. Swapping both
+  // undo controls to `aria-disabled` covers the case where the pressed element is
+  // merely HELD; the Retry has a second, independent route to the same drop.
+  // Pressing it clears this row from `undoFailedIds` (see `uncomplete` below),
+  // which unmounts the `role="alert"` the button lives inside — it is destroyed,
+  // not disabled, so no attribute choice can keep focus on it.
+  //
+  // THE DECISION, recorded here so it sits beside the round-14 one it has to
+  // coexist with rather than appearing to contradict it. #215 offered two routes:
+  //
+  //   (a) keep the notice mounted across the retry, as `focus-timer.tsx` does;
+  //   (b) hand focus to the row's own undo control, which never unmounts.
+  //
+  // (b), for three reasons. It leaves round 14's clear-on-the-way-in intact —
+  // that decision is right, and a notice still reading "it is still marked done"
+  // while the retry that may already have fixed it is in flight is its own
+  // confusion. The row's undo is the SAME action, so focus has not wandered to
+  // something unrelated; the user is on the control that would repeat what they
+  // just asked for. And it is the better landing spot for the announcement too:
+  // that button carries `aria-busy` and appends the busy reason to its accessible
+  // name while `undoing`, so a screen-reader user who lands on it hears that the
+  // retry is running.
+  //
+  // That last point is why #218's live region has NO counterpart here, and the
+  // difference is worth being precise about (Duo round 16 on `!303` raised it).
+  // #218 is about text that changes while the user stands still: focus is held
+  // on the timer's Retry across the whole attempt, and neither a description nor
+  // an accessible name is re-read under held focus, so the wait there needs a
+  // live region to reach anyone. Here focus MOVES — onto a control whose
+  // accessible name already ends in the busy reason at the moment it lands, and
+  // a name is read on arrival by every screen reader. Adding a live region on
+  // top would say it a second time. Pinned by "hands focus to the row's own undo
+  // when Retry withdraws the notice", which asserts the busy name and the focus
+  // together.
+  //
+  // The timer is NOT inconsistent with this: it keeps its notice mounted because
+  // its notice is page-level and has nowhere else to send focus, whereas every row
+  // here owns a permanent control for the identical action.
+  //
+  // A Set, and keyed, for exactly the reason round 15 gives for `justUndidRef`:
+  // every other per-row record in this file is keyed, and a single slot is what
+  // let the second row's hand-off overwrite the first's, leaving the row that had
+  // been waiting longest with nothing. Refs, not state — the hand-off is a
+  // one-shot DOM side effect and must not drive a render.
+  const retryHandoffRef = useRef<Set<string>>(new Set());
+  const undoRefs = useRef(new Map<string, HTMLButtonElement | null>());
+
+  useEffect(() => {
+    const handoffs = retryHandoffRef.current;
+    if (handoffs.size === 0) return;
+    // Keyed on `undoFailedIds` because that is the state whose change unmounts the
+    // notice, and the arm and the clear happen in the same event — so the first
+    // run after arming is always the render in which the Retry has gone. Draining
+    // unconditionally is deliberate: an id whose row has since disappeared
+    // resolves to no element and no-ops, rather than staying armed to fire at some
+    // unrelated later render. Deleting the id being visited is defined behaviour
+    // for a Set iterator, the same as in the effect below.
+    for (const id of handoffs) {
+      handoffs.delete(id);
+      undoRefs.current.get(id)?.focus();
+    }
+  }, [undoFailedIds]);
+
   useEffect(() => {
     const handoffs = justUndidRef.current;
     if (handoffs.size === 0) return;
@@ -177,8 +240,10 @@ export function TaskSteps({
 
   const uncomplete = (stepId: string) => {
     setUndoingIds((ids) => new Set(ids).add(stepId));
-    // Cleared on the way in, not only on success: a retry that is still in flight
-    // must not still be showing the previous attempt's failure.
+    // Round 14 — cleared on the way in, not only on success: a retry that is still
+    // in flight must not still be showing the previous attempt's failure. #215
+    // kept this and paid for it on the focus side instead (`retryHandoffRef`
+    // above), rather than reversing it and leaving a stale notice on screen.
     setUndoFailedIds((ids) => withoutId(ids, stepId));
     start(async () => {
       try {
@@ -281,6 +346,12 @@ export function TaskSteps({
                     actions already solve this way. */}
                 <button
                   type="button"
+                  // #215 — the hand-off target for a Retry that has just unmounted
+                  // itself. Registered per row unconditionally, so no render
+                  // depends on which row failed, and mirroring `ctaRefs` above.
+                  ref={(el) => {
+                    undoRefs.current.set(s.id, el);
+                  }}
                   // Round 15 — `aria-disabled`, not `disabled`, and the same
                   // reasoning `focus-timer.tsx` carries for the timer's Retry: a
                   // disabled element cannot hold focus, so the browser blurs it to
@@ -342,11 +413,20 @@ export function TaskSteps({
                       same WCAG 2.4.3 reason and so that one file does not carry
                       two idioms for one state. It matters most here of anywhere:
                       this is the control INSIDE the notice, so it is the likeliest
-                      thing holding focus when the press lands. */}
+                      thing holding focus when the press lands.
+                      #215 — and `aria-disabled` is not enough on its own here,
+                      because this button does not become held, it ceases to exist:
+                      the press withdraws the notice around it. The hand-off is
+                      armed below and consumed by the effect on `undoFailedIds`. */}
                   <button
                     type="button"
                     onClick={() => {
-                      if (!undoing) uncomplete(s.id);
+                      // Armed only when the press is actually honoured. Arming on
+                      // a swallowed press would leave an id queued to steal focus
+                      // at whatever unrelated render moved `undoFailedIds` next.
+                      if (undoing) return;
+                      retryHandoffRef.current.add(s.id);
+                      uncomplete(s.id);
                     }}
                     aria-disabled={undoing}
                     className="focus-visible:ring-ring inline-flex min-h-11 items-center rounded underline underline-offset-4 outline-none focus-visible:ring-2 aria-disabled:opacity-50"
