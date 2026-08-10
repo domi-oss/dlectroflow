@@ -461,6 +461,43 @@ operators upgrading a self-hosted instance don't get surprised.
   of the **Try again** button you are still holding for anyone arriving at that
   button mid-attempt. It goes away again the moment nothing is in flight.
   Nothing changes on screen.
+- **Ticking off a multi-step to-do from the inbox left every step open in Google
+  Tasks (#209).** Scheduling a to-do that has been broken down gives each step
+  its own Google Task. Completing that to-do from the inbox — the row's Complete
+  button, or a bulk complete — closed it here and nowhere else: every step stayed
+  open on the Google side and Reclaim went on holding all of their calendar
+  blocks. Finishing the same steps one at a time through the focus timer always
+  worked, which is why this survived the stepless fix in #195. Both grains are
+  closed now, the to-do's own Google Task and each of its steps, and steps that
+  were already ticked off are left alone rather than re-sent.
+
+- **Putting a completed to-do back left it finished in Google Tasks (#196).**
+  Reopening an item from the Done view gave you the work back in the app while
+  Google Tasks still showed it complete, and nothing afterwards ever corrected
+  that — so the two sides parted permanently and Reclaim never re-booked the
+  time. Reopening now tells Google, for the to-do itself and for each step it
+  actually puts back. As everywhere else, the Google side is best-effort in the
+  strict sense: an unreachable Google, or an account disconnected since the to-do
+  was scheduled, costs you the sync and never the reopen.
+
+- **Reopening a to-do and finishing it again paid you twice (#196).** Completing
+  a to-do banks a point for each step it closes plus one for the to-do, and
+  putting it back took none of that away — so the same piece of work could be
+  banked over and over by completing, reopening and completing again. Reopening
+  now returns exactly what that completion paid: one per step it genuinely puts
+  back, and the to-do's own, only when the to-do really was complete. **Badges
+  are untouched by design** — they mark that something happened once, they cannot
+  be earned twice, and taking one back would make the collection lie about the
+  past.
+
+  **Reopening the same to-do twice takes the points back once.** A double-tap
+  that outruns the button, or the same Done row open on a phone and a laptop,
+  used to run the reopen twice — and because taking a point back means removing
+  the most recent one, the second pass reached into a different, already-finished
+  piece of work and took its points instead. Each reopen now claims the to-do and
+  its steps as it puts them back, so whichever press arrives second finds the work
+  already done and stops: silently, without an error, and without a second round
+  of updates to Google.
 
 - **The focus timer's Start and Resume no longer fail in silence (#139's shape,
   found via #198).** Both buttons handled a server that could not be *reached*,
