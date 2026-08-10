@@ -343,6 +343,14 @@ describe("InboxView — a row write that does not land (#225)", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       /no answer from the server/i,
     );
+    // The instruction half, asserted here so the precedence below cannot be
+    // widened by accident: while the row is STILL on the list, sending the user
+    // to look at it is exactly right, and a Retry is offered to act on what they
+    // find. That pairing is what the vanished-row spec deliberately breaks.
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /check your inbox before trying again/i,
+    );
+    expect(screen.getByRole("button", { name: RETRY })).toBeInTheDocument();
   });
 
   /**
@@ -383,6 +391,82 @@ describe("InboxView — a row write that does not land (#225)", () => {
         document.activeElement as HTMLElement,
       ),
     );
+  });
+
+  /**
+   * !306, Duo review — the two halves of the notice disagreed about the same
+   * pair of facts.
+   *
+   * `writeFailureKey` puts `timedOut` above `rowGone`, which is right: a timeout
+   * cannot support "nothing changed", because the row may be absent BECAUSE the
+   * write it is unsure about landed. `writeFailureRemedy` puts `rowGone` first,
+   * which is also right: `initialItems` excludes only archived rows, so a row
+   * missing from it is deleted or archived server-side and every one of these
+   * `findFirst`-then-write actions matches nothing, for good.
+   *
+   * Both are right and together they were incoherent — "check your inbox before
+   * trying again" printed above no button to try again with. The copy is the half
+   * that had to move, because the button is the half that cannot: retrying a row
+   * that is gone either re-posts a write that already landed or matches nothing,
+   * and both settle as a silent success that clears the notice — a false "saved
+   * this time" is worse than the dead end it replaces.
+   *
+   * So the copy stops sending the user to check a list the page has already
+   * checked for them, keeps the timeout's honesty about an unknown verdict, and
+   * accounts for the withdrawn Retry the way `inbox.errorSaveGone` does.
+   */
+  it("a timed-out write on a row that has since gone does not tell the user to try again — there is nothing left to press", async () => {
+    vi.useFakeTimers();
+    vi.mocked(deleteBrainDumpItem).mockReturnValueOnce(
+      new Promise<void>(() => {}),
+    );
+    const { rerender } = renderInbox([makeItem({ text: "water the plants" })]);
+
+    await act(async () => {
+      screen.getByRole("button", { name: /^delete$/i }).click();
+      await flushTicks();
+    });
+    await act(async () => {
+      screen.getByRole("button", { name: /^delete$/i }).click(); // the inline confirm
+      await flushTicks();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(INBOX_ACTION_TIMEOUT_MS);
+      await flushTicks();
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /check your inbox before trying again/i,
+    );
+
+    // The refresh that took the row off the list is not this write's — the
+    // failure path never refreshes — so it is the page observing, independently,
+    // that the row is no longer there.
+    await act(async () => {
+      rerender(
+        <InboxView
+          now={Date.now()}
+          initialItems={[]}
+          settings={settings}
+          welcomeVisible={false}
+          resumeStep={null}
+        />,
+      );
+      await flushTicks();
+    });
+
+    const alert = screen.getByRole("alert");
+    // Still says what it does not know: the write may well have landed, and this
+    // is the one message that must never harden into "nothing changed".
+    expect(alert).toHaveTextContent(/no answer from the server/i);
+    expect(alert).not.toHaveTextContent(/nothing changed/i);
+    // …and stops promising a control it withdraws in the same breath.
+    expect(alert).not.toHaveTextContent(/trying again/i);
+    expect(alert).toHaveTextContent(/not in your inbox any more/i);
+    expect(alert).toHaveTextContent(/water the plants/);
+    expect(screen.queryByRole("button", { name: RETRY })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /reload the page/i }),
+    ).toBeNull();
   });
 });
 
@@ -592,7 +676,15 @@ describe("InboxView — the write notice's accessibility (#225)", () => {
     expect(nestedLiveRegions(container).map((el) => el.outerHTML)).toEqual([]);
   });
 
-  it("carries the retry's wait on the button rather than nesting a live region", async () => {
+  /**
+   * Renamed at !306's Duo review, because the old name ("rather than nesting a
+   * live region") described the whole answer and is now only half of it. Not
+   * nesting is still the rule the spec below pins; the wait now ALSO has a real
+   * region beside the notice, which the next spec covers. Kept as its own case so
+   * the description channel cannot quietly disappear: it is the one that serves a
+   * notice mounting with a retry already in flight.
+   */
+  it("keeps the reason and the wait both reachable from the button, without nesting a live region", async () => {
     let settle!: () => void;
     vi.mocked(completeItem)
       .mockRejectedValueOnce(new Error("offline"))
@@ -617,6 +709,67 @@ describe("InboxView — the write notice's accessibility (#225)", () => {
       .map((id) => document.getElementById(id)?.textContent ?? "")
       .join(" ");
     expect(waitText).toMatch(/saving/i);
+
+    await act(async () => {
+      settle();
+      await flushTicks();
+    });
+  });
+
+  /**
+   * !306, Duo review — this notice shipped round 8's shape, and `!303` had
+   * already found that shape to be half a fix (#218, its own round 16). Not
+   * nesting the polite region inside the `role="alert"` was right. Leaving
+   * `aria-describedby` to carry the wait ALONE was not: a description is computed
+   * when focus LANDS on a control, and Retry is pressed on a control that already
+   * holds focus and keeps it by design (`aria-disabled`, not `disabled`). The
+   * description gaining `writeSavingId` mid-flight is a change nothing goes back
+   * to re-read, so the hole was moved onto the button rather than closed.
+   *
+   * A live region is the one channel defined for content that changes while the
+   * user is stationary. Same shape as `focus-timer.tsx` and the capture notice
+   * above, deliberately: polite, `sr-only`, a SIBLING of the alert rather than a
+   * descendant, mounted with the notice and EMPTY until there is something to say
+   * — a region that arrives together with its first message is silent, which the
+   * move announcer at the foot of `inbox-view.tsx` already documents.
+   *
+   * NOT verified against a screen reader. This asserts the DOM contract only.
+   */
+  it("announces the wait through a polite live region beside the notice, not by changing a description under held focus", async () => {
+    let settle!: () => void;
+    vi.mocked(completeItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          settle = resolve;
+        }),
+      );
+    renderInbox([makeItem()]);
+    await press(COMPLETE);
+
+    // Present and empty BEFORE the press — that ordering is the whole point of
+    // rendering it with the notice rather than with the message.
+    const announcer = screen.getByTestId("write-saving-announcer");
+    expect(announcer).toBeEmptyDOMElement();
+    expect(screen.getByRole("alert")).not.toContainElement(announcer);
+
+    await act(async () => {
+      screen.getByRole("button", { name: RETRY }).click();
+      await flushTicks();
+    });
+
+    expect(announcer).toHaveTextContent(/saving/i);
+    expect(announcer).toHaveAttribute("role", "status");
+    expect(announcer).toHaveAttribute("aria-live", "polite");
+    expect(announcer).toHaveClass("sr-only");
+    expect(screen.getByRole("alert")).not.toContainElement(announcer);
+
+    // Exactly one node carries the sentence to the accessibility tree: the
+    // visible line stays where it was, on screen, and is hidden from AT.
+    const visible = screen.getByTestId("write-saving-visible");
+    expect(screen.getByRole("alert")).toContainElement(visible);
+    expect(visible).toHaveAttribute("aria-hidden", "true");
+    expect(visible).not.toHaveClass("sr-only");
 
     await act(async () => {
       settle();

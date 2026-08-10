@@ -817,14 +817,33 @@ export const STRINGS = {
     plain: "That's not in your inbox any more, so nothing changed:",
     playful: "That's not in your inbox any more, so nothing changed:",
   },
+  // !306, Duo review — the two facts above arriving together, which neither of
+  // them says honestly on its own. The timeout copy sends the user to check the
+  // inbox "before trying again", and by the time the row has left the rendered
+  // list the page has already done that check AND withdrawn the Retry, because a
+  // row missing from `initialItems` is deleted or archived server-side and every
+  // one of these writes would match nothing for good.
+  //
+  // So it reports the check rather than asking for it, and stops offering a
+  // "trying again" that is not on the screen. What it must NOT do is collapse
+  // into `errorSaveGone`: "nothing changed" is the one claim a timeout can never
+  // support — the row may be absent precisely BECAUSE the write landed.
+  "inbox.errorSaveTimeoutGone": {
+    plain:
+      "No answer from the server, and that's not in your inbox any more — so it may already have gone through:",
+    playful:
+      "No answer from the server, and that's not in your inbox any more — so it may already have gone through:",
+  },
   "inbox.errorRetry": { plain: "Try again", playful: "Try again" },
   "inbox.errorReload": {
     plain: "Reload the page",
     playful: "Reload the page",
   },
-  // Shown from inside the notice while a retry is in flight, so the wait is not
-  // silent and Retry can keep focus instead of being `disabled`. Deliberately not
-  // its own live region — see the notice in inbox-view.tsx.
+  // Shown while a retry is in flight, so the wait is not silent and Retry can
+  // keep focus instead of being `disabled`. Rendered TWICE by the notice, and the
+  // split is the point: a visible `aria-hidden` line inside the alert, and a
+  // polite `sr-only` live region beside it that does the announcing. See
+  // inbox-view.tsx — a description is not re-read under held focus.
   "inbox.errorSaving": { plain: "Saving…", playful: "Saving…" },
 
   // ── Prompts ────────────────────────────────────────────────────────────────

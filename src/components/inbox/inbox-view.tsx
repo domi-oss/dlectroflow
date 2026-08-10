@@ -455,10 +455,19 @@ function answersFailure(
  */
 function writeFailureKey(failure: WriteFailure, rowGone: boolean): StringKey {
   if (failure.stale) return "inbox.errorSaveStale";
+  // !306, Duo review — the two facts together, and neither of the messages below
+  // is honest about the pair. `writeFailureRemedy` has already withdrawn every
+  // control by the time this is true, so the timeout's "before trying again"
+  // promises a button that is not on the screen; and the user is being sent to
+  // check a list the page has itself just checked. Kept ABOVE `timedOut` for that
+  // reason, and separate from `errorSaveGone` because it must not inherit
+  // "nothing changed" — see the note below, which applies to this arm too.
+  if (failure.timedOut && rowGone) return "inbox.errorSaveTimeoutGone";
   // Stays ABOVE `rowGone`: a timeout's verdict is genuinely unknown, and "nothing
   // changed" would be a claim the client cannot support — the row may be absent
-  // BECAUSE the write it is unsure about landed. "Check your inbox" is still the
-  // honest instruction, and the inbox is exactly where the answer is.
+  // BECAUSE the write it is unsure about landed. While the row is still on the
+  // list, "check your inbox" is the honest instruction, the inbox is exactly
+  // where the answer is, and a Retry is offered to act on what is found.
   if (failure.timedOut) return "inbox.errorSaveTimeout";
   if (rowGone) return "inbox.errorSaveGone";
   return "inbox.errorSaveFailed";
@@ -479,6 +488,16 @@ function writeFailureRemedy(
   if (failure.stale) return "reload";
   // Every one of these actions is `findFirst`-then-write against a row id, so a
   // row the list no longer holds makes each of them a no-op again, every time.
+  // The page queries everything except archived rows, so "not in `initialItems`"
+  // is deleted or archived on the server, not merely filtered off this view.
+  //
+  // !306, Duo review — this arm swallows `timedOut`, and that is the decision
+  // rather than the oversight. A timeout does not weaken the case for withdrawing
+  // the button, it strengthens it: retrying either re-posts a write that already
+  // landed or matches nothing, and BOTH settle as a silent success that clears
+  // the notice. A false "saved this time" is worse than the dead end it would
+  // replace. `writeFailureKey` carries the other half — a message that no longer
+  // offers a "trying again" this function is about to take away.
   if (rowGone) return "none";
   return "retry";
 }
@@ -1010,6 +1029,10 @@ export function InboxView({
   // Ties the failure message to the notice's control, so the reason is announced
   // with the remedy however the announcement races.
   const writeErrorId = useId();
+  // The retry's wait. It sits on the visually hidden live region BESIDE the
+  // notice, not on the visible line inside it, so the one node a screen reader
+  // can reach is also the one the CTA's `aria-describedby` points at (!306, Duo
+  // review; the same correction #218 made to the capture notice above).
   const writeSavingId = useId();
   const writeCtaRef = useRef<HTMLButtonElement | null>(null);
   /** The notice's message, and the focus target of last resort — see the effect
@@ -2212,91 +2235,143 @@ export function InboxView({
           `outline-none`, so the UA focus ring draws and WCAG 2.4.11 is satisfied
           without a bespoke indicator. */}
       {writeFailure && (
-        <div
-          role="alert"
-          className="border-destructive/40 bg-destructive/5 flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-start sm:justify-between"
-        >
-          <p
-            ref={writeNoticeRef}
-            id={writeErrorId}
-            // Focusable programmatically but not in the tab order: the notice has
-            // to be able to RECEIVE the hand-off even when it offers no control,
-            // and adding a stop for a paragraph nobody can act on would be noise.
-            //
-            // No `outline-none` here, and `a11y-class-hygiene` is why the first
-            // draft had one and this does not: the moment an element can hold
-            // focus, suppressing the UA outline leaves it with no visible focus
-            // indicator at all (WCAG 2.4.7 / 2.4.11). The gate caught it, which
-            // is the whole reason it exists — axe cannot see 2.4.11.
-            tabIndex={-1}
-            className="text-destructive flex min-w-0 items-start gap-1.5 text-sm font-medium"
+        <>
+          <div
+            role="alert"
+            className="border-destructive/40 bg-destructive/5 flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-start sm:justify-between"
           >
-            <TriangleAlert
-              aria-hidden="true"
-              className="mt-0.5 h-4 w-4 shrink-0"
-            />
-            <span className="break-words">
-              {t(writeFailureKey(writeFailure, writeFailureRowGone), voice)}{" "}
-              <strong>&ldquo;{writeFailure.subject}&rdquo;</strong>
-            </span>
+            <p
+              ref={writeNoticeRef}
+              id={writeErrorId}
+              // Focusable programmatically but not in the tab order: the notice
+              // has to be able to RECEIVE the hand-off even when it offers no
+              // control, and adding a stop for a paragraph nobody can act on
+              // would be noise.
+              //
+              // No `outline-none` here, and `a11y-class-hygiene` is why the first
+              // draft had one and this does not: the moment an element can hold
+              // focus, suppressing the UA outline leaves it with no visible focus
+              // indicator at all (WCAG 2.4.7 / 2.4.11). The gate caught it, which
+              // is the whole reason it exists — axe cannot see 2.4.11.
+              tabIndex={-1}
+              className="text-destructive flex min-w-0 items-start gap-1.5 text-sm font-medium"
+            >
+              <TriangleAlert
+                aria-hidden="true"
+                className="mt-0.5 h-4 w-4 shrink-0"
+              />
+              <span className="break-words">
+                {t(writeFailureKey(writeFailure, writeFailureRowGone), voice)}{" "}
+                <strong>&ldquo;{writeFailure.subject}&rdquo;</strong>
+              </span>
+            </p>
+            {/* No control at all when nothing could work — see writeFailureRemedy. */}
+            {writeRemedy !== "none" && (
+              <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+                {writeRemedy === "reload" ? (
+                  <button
+                    ref={writeCtaRef}
+                    type="button"
+                    aria-describedby={writeErrorId}
+                    onClick={() => window.location.reload()}
+                    className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 text-sm font-medium"
+                  >
+                    <RefreshCw
+                      aria-hidden="true"
+                      className="h-4 w-4 shrink-0"
+                    />
+                    {t("inbox.errorReload", voice)}
+                  </button>
+                ) : (
+                  // `aria-disabled`, not `disabled`: a disabled element cannot
+                  // hold focus, so the browser would drop it to <body> the moment
+                  // the retry starts — and this notice takes focus on purpose, so
+                  // that would be the WCAG 2.4.3 fault built in rather than
+                  // avoided. The press is guarded in `attemptWrite` instead, per
+                  // target, so a double-tap still cannot fire two writes.
+                  <button
+                    ref={writeCtaRef}
+                    type="button"
+                    // The SECOND channel for the wait, not the only one (!306,
+                    // Duo review). A description is computed when focus LANDS on
+                    // a control, so this covers the notice mounting with a retry
+                    // already in flight — the effect above then moves focus here
+                    // and the description is read on arrival. It cannot cover the
+                    // press itself, because that happens on a control that
+                    // already holds focus and keeps it by design; the live region
+                    // below is what covers that.
+                    aria-describedby={
+                      writeFailure.retrying
+                        ? `${writeErrorId} ${writeSavingId}`
+                        : writeErrorId
+                    }
+                    aria-disabled={writeFailure.retrying}
+                    onClick={retryWrite}
+                    className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 text-sm font-medium aria-disabled:opacity-50"
+                  >
+                    <RotateCcw
+                      aria-hidden="true"
+                      className="h-4 w-4 shrink-0"
+                    />
+                    {t("inbox.errorRetry", voice)}
+                  </button>
+                )}
+                {/* The SIGHTED copy of the wait, and only that. `aria-hidden`
+                    because the announcement is the sibling region below, and one
+                    sentence in two nodes is how it gets said twice. Hiding it
+                    also stops the insertion mutating this `role="alert"`: an
+                    alert is assertive AND atomic, so a visible child appearing
+                    inside it mid-retry re-reads the whole notice over the polite
+                    announcement. Nothing changes on screen. */}
+                {writeFailure.retrying && (
+                  <p
+                    data-testid="write-saving-visible"
+                    aria-hidden="true"
+                    className="text-muted-foreground text-xs"
+                  >
+                    {t("inbox.errorSaving", voice)}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+          {/* !306, Duo review — where the wait is actually ANNOUNCED.
+              This notice shipped `!290`'s shape, which `!303` had already found
+              to be half a fix (#218, its own round 16). Not nesting a polite
+              region inside this assertive one was right — the outer `aria-live`
+              applies to the whole subtree — but leaving `aria-describedby` to
+              carry the wait alone only moved the hole onto the button: a
+              description is read when focus LANDS on a control, and Retry is
+              pressed on a control that already holds focus and keeps it by
+              design, so the value gaining `writeSavingId` mid-flight is a change
+              nothing goes back to re-read. A live region is the one channel
+              defined for content that changes while the user is stationary.
+              A SIBLING of the alert, never a descendant: nesting one level in is
+              the original bug, not a fix for it.
+              Rendered whenever the notice is, and EMPTY until there is something
+              to say, because assistive technology announces a CHANGE to a region
+              already in the accessibility tree and one arriving with its first
+              message is silent — the move announcer at the foot of this file
+              documents the same thing. `sr-only` rather than `hidden` for the
+              same reason: a live region has to be rendered to be observed.
+              Outside the `writeRemedy !== "none"` gate above on purpose. A row
+              can vanish mid-retry, which withdraws the control and the sighted
+              line with it; the write is still running and the region is still the
+              honest place to say so.
+              Kept identical to the capture notice above and to
+              `focus-timer.tsx` — these have drifted apart once already, which is
+              what produced #218. */}
+          <p
+            id={writeSavingId}
+            data-testid="write-saving-announcer"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            className="sr-only"
+          >
+            {writeFailure.retrying && t("inbox.errorSaving", voice)}
           </p>
-          {/* No control at all when nothing could work — see writeFailureRemedy. */}
-          {writeRemedy !== "none" && (
-            <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
-              {writeRemedy === "reload" ? (
-                <button
-                  ref={writeCtaRef}
-                  type="button"
-                  aria-describedby={writeErrorId}
-                  onClick={() => window.location.reload()}
-                  className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 text-sm font-medium"
-                >
-                  <RefreshCw aria-hidden="true" className="h-4 w-4 shrink-0" />
-                  {t("inbox.errorReload", voice)}
-                </button>
-              ) : (
-                // `aria-disabled`, not `disabled`: a disabled element cannot hold
-                // focus, so the browser would drop it to <body> the moment the
-                // retry starts — and this notice takes focus on purpose, so that
-                // would be the WCAG 2.4.3 fault built in rather than avoided. The
-                // press is guarded in `attemptWrite` instead, per target, so a
-                // double-tap still cannot fire two writes.
-                <button
-                  ref={writeCtaRef}
-                  type="button"
-                  // While a retry runs, the reason AND the wait are both reachable
-                  // from the control.
-                  aria-describedby={
-                    writeFailure.retrying
-                      ? `${writeErrorId} ${writeSavingId}`
-                      : writeErrorId
-                  }
-                  aria-disabled={writeFailure.retrying}
-                  onClick={retryWrite}
-                  className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 text-sm font-medium aria-disabled:opacity-50"
-                >
-                  <RotateCcw aria-hidden="true" className="h-4 w-4 shrink-0" />
-                  {t("inbox.errorRetry", voice)}
-                </button>
-              )}
-              {/* Deliberately NOT `role="status"`, copying !290's capture
-                  notice rather than the shape it replaced. A polite live region
-                  nested inside this assertive one is undefined enough in practice
-                  that "will it announce" has no answer: the outer region's
-                  `aria-live` applies to the whole subtree. The wait rides the two
-                  mechanisms that ARE defined — the pressed button's
-                  `aria-disabled` state change, which a screen reader reports
-                  because focus is on it, and the `aria-describedby` above, which
-                  picks this node up while it shows. Sighted users see the
-                  identical text either way. */}
-              {writeFailure.retrying && (
-                <p id={writeSavingId} className="text-muted-foreground text-xs">
-                  {t("inbox.errorSaving", voice)}
-                </p>
-              )}
-            </div>
-          )}
-        </div>
+        </>
       )}
 
       {/* #163 — the drag surface. There is no provider to wrap it in any more:
