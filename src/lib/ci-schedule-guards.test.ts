@@ -107,6 +107,20 @@ describe("guardedFlags", () => {
     expect(guardedFlags(own!.text)).toEqual(new Set());
   });
 
+  it("collects EVERY flag on one if:, not just the first", () => {
+    // !293 review. The matcher was non-global, so a rule suppressing a block for
+    // two flags at once registered only the first and the second silently left
+    // the parity check — in the one module whose whole value is that it can be
+    // trusted to notice a missing guard. Latent today (no rule in the file has
+    // this shape) and pinned so it stays that way.
+    const yml = `job:
+  rules:
+    - if: '$FLAG_A == "true" && $FLAG_B == "true"'
+      when: never
+`;
+    expect(guardedFlags(yml)).toEqual(new Set(["FLAG_A", "FLAG_B"]));
+  });
+
   it("tolerates a comment between the if: and its when: never", () => {
     // The exact fragility Duo review named in the line-offset version: an
     // inserted comment must not turn a real guard into an apparent gap.
@@ -125,7 +139,7 @@ describe("guardedFlags", () => {
     // and the asymmetry was an accident of implementation rather than a decision.
     // It matters more than it looks: `.gitlab-ci.yml` is listed in
     // `.prettierignore` *because* it "relies on hand-aligned inline comments",
-    // and carries 41 of them — so the one file this parser exists to read is the
+    // and carries dozens of them — so the one file this parser exists to read is the
     // file where an inline comment is idiomatic and will never be normalised
     // away. Annotating a guard is an edit no reviewer would question.
     const yml = `job:

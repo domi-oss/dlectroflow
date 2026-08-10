@@ -818,7 +818,13 @@ describe("scripts/check-prod-replicas.sh", () => {
 // ── scripts/check-prod-drift.sh — the duration (#191) ────────────────────────
 
 interface DriftScenario {
-  head?: { id: string } | null;
+  /**
+   * The ref's own HEAD. `committed_date` is WHEN THE REF LAST MOVED, which is
+   * the grace's input and is deliberately independent of the compare list — a
+   * merge is recent while the commits it brings in are days old, and telling
+   * those two apart is !293's second blocking finding.
+   */
+  head?: { id: string; committed_date?: string } | null;
   health?: unknown | null;
   compare?: unknown | null;
   env?: Record<string, string | undefined>;
@@ -826,7 +832,10 @@ interface DriftScenario {
 }
 
 function drift(scenario: DriftScenario = {}): Result {
-  const head = scenario.head === undefined ? { id: HEAD_SHA } : scenario.head;
+  const head =
+    scenario.head === undefined
+      ? { id: HEAD_SHA, committed_date: "2026-08-07T09:00:00.000Z" }
+      : scenario.head;
   const health =
     scenario.health === undefined
       ? { status: "ok", sha: OLD_SHORT }
@@ -949,6 +958,7 @@ describe("scripts/check-prod-drift.sh reports how long production has been behin
     // days, and a channel that cries wolf gets muted — which is what took the
     // real alert down in the first place.
     const run = drift({
+      head: { id: HEAD_SHA, committed_date: minutesAgo(3) },
       compare: { commits: [{ id: OLD_SHA, committed_date: minutesAgo(3) }] },
       env: { DRIFT_GRACE_SECONDS: "1500" },
     });
@@ -968,11 +978,90 @@ describe("scripts/check-prod-drift.sh reports how long production has been behin
 
   it("alerts once the divergence is older than the grace", () => {
     const run = drift({
+      head: { id: HEAD_SHA, committed_date: minutesAgo(90) },
       compare: { commits: [{ id: OLD_SHA, committed_date: minutesAgo(90) }] },
       env: { DRIFT_GRACE_SECONDS: "1500" },
     });
     expect(run.status).toBe(1);
     expect(run.stdout).toContain("🔴");
+  });
+
+  /**
+   * !293's second blocking review finding, and the spec that makes the grace
+   * mean anything on this repo.
+   *
+   * The grace used to be tested against the age of the OLDEST COMMIT production
+   * is missing. On a merge workflow that set includes the merged branch's own
+   * commits, authored days before the merge — measured over this repo's last six
+   * merges into `main`, the gap between the merge and the oldest commit it
+   * brought in ran **21 to 38 hours**. So a merge that landed four minutes ago
+   * presented as 38 hours of drift and alerted at once: the anti-cry-wolf
+   * mechanism could not fire on the only history this project produces, and the
+   * false alarm was worded identically to the #180 outage it exists to catch.
+   *
+   * The grace's real question is "could the deploy for the ref's last movement
+   * still be running", so it reads when the REF moved.
+   */
+  it("graces a fresh merge whose commits are days old — the shape this repo actually produces", () => {
+    const run = drift({
+      head: { id: HEAD_SHA, committed_date: minutesAgo(4) },
+      compare: {
+        commits: [
+          // A branch's own commits, 38 hours old, arriving in a merge made four
+          // minutes ago. Both facts are true at once, and only one is about
+          // whether a deploy is in flight.
+          { id: OLD_SHA, committed_date: minutesAgo(38 * 60) },
+          { id: HEAD_SHA, committed_date: minutesAgo(4) },
+        ],
+      },
+      env: { DRIFT_GRACE_SECONDS: "1500" },
+    });
+    expect(run.status).toBe(3);
+    expect(run.stdout).not.toContain("🔴");
+    expect(run.stdout).toMatch(/last moved/i);
+  });
+
+  /**
+   * The other direction, so the fix cannot be read as "grace anything recent".
+   * Production genuinely wedged for hours, but somebody merges — the merge
+   * resets the ref clock, and the grace holds for one cycle. That is the bounded
+   * under-alert the implementation documents and accepts; what must NOT happen
+   * is it holding once the merging stops.
+   */
+  it("alerts again on the next run once the ref has stopped moving", () => {
+    const wedged = {
+      commits: [{ id: OLD_SHA, committed_date: minutesAgo(20 * 60) }],
+    };
+    const duringBurst = drift({
+      head: { id: HEAD_SHA, committed_date: minutesAgo(2) },
+      compare: wedged,
+      env: { DRIFT_GRACE_SECONDS: "1500" },
+    });
+    expect(duringBurst.status).toBe(3);
+
+    const afterBurst = drift({
+      head: { id: HEAD_SHA, committed_date: minutesAgo(40) },
+      compare: wedged,
+      env: { DRIFT_GRACE_SECONDS: "1500" },
+    });
+    expect(afterBurst.status).toBe(1);
+    expect(afterBurst.stdout).toContain("🔴");
+  });
+
+  /**
+   * The reported duration is an UPPER bound and used to be worded as a lower
+   * one ("behind since at least … — 38 hours ago"). Drift begins when the ref
+   * first moved past production's commit, and every missing commit was authored
+   * at or before that instant, so `now - min` can only overstate.
+   */
+  it("words the age as an upper bound, because that is the only thing it is", () => {
+    const run = drift({
+      compare: {
+        commits: [{ id: OLD_SHA, committed_date: minutesAgo(38 * 60) }],
+      },
+    });
+    expect(run.stdout).toMatch(/no more than \*\*38 hours\*\*/);
+    expect(run.stdout).not.toMatch(/at least .*38 hours/);
   });
 
   it("alerts rather than holding when the age cannot be established", () => {
@@ -1098,8 +1187,15 @@ interface AlertScenario {
   pods?: unknown;
   /** Existing notes on the alert issue; `false` makes the read fail. */
   notes?: unknown | false;
-  /** The oldest missing commit's date, for the deploy-in-flight grace. */
+  /** The oldest missing commit's date — the reported age's input. */
   committedDate?: string;
+  /**
+   * When the ref itself last moved — the GRACE's input, and a different
+   * quantity (!293 review). Defaults to `committedDate` so a squashed-history
+   * scenario needs only the one knob; set it separately to model a merge
+   * workflow, where the merge is minutes old and its commits are days old.
+   */
+  refMovedAt?: string;
   /** HTTP code the notes POST answers with. */
   postCode?: number;
   env?: Record<string, string | undefined>;
@@ -1114,7 +1210,17 @@ function alert(scenario: AlertScenario = {}): Result {
   const notes = scenario.notes === undefined ? [] : scenario.notes;
   return drive(ALERT_SCRIPT, {
     routes: [
-      { method: "GET", match: "/repository/commits/", body: { id: headSha } },
+      {
+        method: "GET",
+        match: "/repository/commits/",
+        body: {
+          id: headSha,
+          committed_date:
+            scenario.refMovedAt ??
+            scenario.committedDate ??
+            "2026-08-07T09:00:00.000Z",
+        },
+      },
       {
         method: "GET",
         match: "/api/health",

@@ -88,7 +88,7 @@ export function topLevelBlocks(yml: string): CiBlock[] {
  * Needed because the one file this parser exists to read is the file where an
  * inline comment is idiomatic: `.gitlab-ci.yml` is listed in `.prettierignore`,
  * and the reason recorded there is that it "relies on hand-aligned inline
- * comments". It carries 41. So no formatter will ever normalise one away, and
+ * comments". It carries dozens; the exact count is re-measurable and was wrong the first time it was written down. So no formatter will ever normalise one away, and
  * annotating a guard is an edit no reviewer would question.
  *
  * Stripping happens before any matching, which closes both directions at once —
@@ -157,8 +157,13 @@ export function guardedFlags(blockText: string): Set<string> {
     // `$FLAG == "true"` inside a rules `if:`. Anchored on the `if:` so a mention
     // in prose or a `variables:` default is not mistaken for a rule.
     if (!/\bif:/.test(line)) return;
-    const match = line.match(/\$([A-Z][A-Z0-9_]*)\s*==\s*"true"/);
-    if (!match) return;
+    // `matchAll`, not `match` (!293 review). A non-global `match` returns the
+    // first flag only, so an `if:` carrying `$FLAG_A == "true" && $FLAG_B ==
+    // "true"` silently dropped `FLAG_B` from the parity check. No rule in the
+    // file has that shape today, so this is latent — but it is latent in the one
+    // module whose entire value is that it can be trusted to notice.
+    const found = [...line.matchAll(/\$([A-Z][A-Z0-9_]*)\s*==\s*"true"/g)];
+    if (found.length === 0) return;
     for (let j = index + 1; j < lines.length; j++) {
       const next = lines[j].trim();
       // A comment-only line has already been stripped to nothing, so it arrives
@@ -166,7 +171,9 @@ export function guardedFlags(blockText: string): Set<string> {
       if (next === "") continue;
       // Tolerant of the spacing because this file is the one Prettier is told
       // to skip; `when:never` is not a mapping, so the space is still required.
-      if (/^when:\s+never$/.test(next)) flags.add(match[1]);
+      // Every flag on the line, not just the first: a `when: never` reached
+      // through `&&` suppresses the block for each of them.
+      if (/^when:\s+never$/.test(next)) found.forEach((m) => flags.add(m[1]));
       break;
     }
   });

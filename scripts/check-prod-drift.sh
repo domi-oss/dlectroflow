@@ -167,8 +167,13 @@ trap 'rm -rf "$WORK"' EXIT
 ref_code="$(curl -s -o "$WORK/ref.json" -w '%{http_code}' --max-time 30 \
   -H "$AUTH" "${API}/repository/commits/${DRIFT_REF}" || echo 000)"
 head_sha=""
+head_date=""
 if [ "$ref_code" = "200" ]; then
   head_sha="$(jq -r '.id // empty' "$WORK/ref.json" 2>/dev/null || true)"
+  # WHEN THE REF LAST MOVED, which is a different question from how old the
+  # oldest missing commit is — and it is the one the grace below actually needs.
+  # Free: already in this response.
+  head_date="$(jq -r '.committed_date // .created_at // empty' "$WORK/ref.json" 2>/dev/null || true)"
 fi
 if ! printf '%s' "$head_sha" | grep -Eq "$SHA_RE"; then
   head_sha=""
@@ -320,9 +325,23 @@ case "$verdict" in
     # the verdict so the instant survives even when no `date` on the image can
     # turn it into an age — the timestamp alone still answers "is this minutes
     # old or a day old", which is the whole question.
+    # How long ago the ref last moved — the grace's input, computed separately
+    # from the age below and reported separately, because they answer different
+    # questions and conflating them is !293's second blocking review finding.
+    moved_secs=""
+    if [ -n "$head_date" ]; then
+      moved_epoch="$(iso_to_epoch "$head_date" || true)"
+      if [ -n "$moved_epoch" ]; then
+        moved_secs=$(( $(date -u +%s) - moved_epoch ))
+        # A clock skew between the runner and the API would give a negative age;
+        # a negative number here would be graced as "very recent" no matter how
+        # stale production is, so it is treated as unusable rather than as zero.
+        [ "$moved_secs" -lt 0 ] && moved_secs=""
+      fi
+    fi
     age_secs=""
     if [ -n "$since" ]; then
-      age_line="- behind since at least \`${since}\` (${since_note})"
+      age_line="- behind since no earlier than \`${since}\` (${since_note})"
       now_epoch="$(date -u +%s 2>/dev/null || true)"
       # Reused from the selection above rather than recomputed: when a timestamp
       # could not be converted, `since_epoch` is deliberately empty and there must
@@ -334,24 +353,62 @@ case "$verdict" in
           if [ -n "$now_epoch" ] && [ -n "$then_epoch" ] && [ "$now_epoch" -ge "$then_epoch" ]; then
             age_secs=$(( now_epoch - then_epoch ))
             hours=$(( age_secs / 3600 ))
+            # An UPPER bound, and it used to be worded as a lower one ("behind
+            # since at least … — 38 hours ago"). !293 review: drift begins when
+            # the ref first moved past production's commit, and every missing
+            # commit was authored at or before that instant — so `now - min` can
+            # only overstate. On a merge workflow it overstates enormously,
+            # because the merged branch's own commits predate the merge by days:
+            # measured over this repo's last six merges, the gap between the
+            # merge and the oldest commit it brought in ran 21 to 38 hours. A
+            # deploy four minutes old therefore read "38 hours ago" — which is
+            # the exact signature of the #180 outage this monitor exists to
+            # catch, printed for an ordinary deploy.
             if [ "$hours" -lt 1 ]; then
               age_line="${age_line} — under an hour"
             elif [ "$hours" -eq 1 ]; then
-              age_line="${age_line} — **1 hour** ago"
+              age_line="${age_line} — no more than **1 hour** ago"
             else
-              age_line="${age_line} — **${hours} hours** ago"
+              age_line="${age_line} — no more than **${hours} hours** ago"
             fi
           fi
           ;;
       esac
     fi
+    if [ -n "$moved_secs" ]; then
+      age_line="${age_line}
+- \`${DRIFT_REF}\` last moved **${moved_secs}s** ago (\`${head_date}\`)"
+    fi
     status=1
     # The grace, applied last so it can only ever downgrade a fully-computed
-    # verdict — and only when the age is KNOWN. See the header for why this is
+    # verdict — and only when the input is KNOWN. See the header for why this is
     # off by default. No tick: nothing was verified in sync, only verified too
     # young to conclude from, and those are different claims.
-    if [ "$GRACE" -gt 0 ] && [ -n "$age_secs" ] && [ "$age_secs" -lt "$GRACE" ]; then
-      verdict_line="- 🔄 production is behind \`${DRIFT_REF}\` but only by ${age_secs}s, which is inside the ${GRACE}s grace this caller allows — **a deploy is most likely still in flight**, so this is not an alert yet. A deploy that blows its own \`--timeout\` fails its pipeline, and \`alert_pipeline_failure\` reports that immediately; anything still behind after the grace is alerted on by the next run."
+    #
+    # ── It is `moved_secs`, NOT `age_secs`, and that is !293's second blocking
+    # review finding. ────────────────────────────────────────────────────────
+    # `age_secs` is the age of the OLDEST COMMIT production is missing. On a
+    # merge workflow that includes the merged branch's own commits, which predate
+    # the merge by days — measured over this repo's last six merges, 21 to 38
+    # hours. So the grace could never fire here: a merge four minutes old
+    # presented as 38 hours of drift and alerted immediately. The mechanism added
+    # to stop this monitor crying wolf was inert on the only history this project
+    # produces, and the header three screens up predicts exactly what that costs.
+    #
+    # `moved_secs` is how long ago the ref itself last moved, which is the
+    # question the grace is actually asking: could the deploy for that movement
+    # still be running? It comes free from the ref lookup and it is immune to the
+    # shape of the branch that was merged.
+    #
+    # Bounded under-alerting, deliberately accepted: if several merges land in a
+    # burst, the newest resets this clock while production is behind by the
+    # oldest. The grace can then hold one cycle longer than it should. It is
+    # self-correcting — once the burst stops, nothing resets the clock and the
+    # next hourly run alerts — and the alternative is walking the first-parent
+    # chain, an extra paged API call to shave at most one cycle off a case that
+    # only arises while someone is actively merging.
+    if [ "$GRACE" -gt 0 ] && [ -n "$moved_secs" ] && [ "$moved_secs" -lt "$GRACE" ]; then
+      verdict_line="- 🔄 production is behind \`${DRIFT_REF}\`, but \`${DRIFT_REF}\` itself only moved ${moved_secs}s ago, which is inside the ${GRACE}s grace this caller allows — **a deploy is most likely still in flight**, so this is not an alert yet. A deploy that blows its own \`--timeout\` fails its pipeline, and \`alert_pipeline_failure\` reports that immediately; anything still behind after the grace is alerted on by the next run."
       # 3, not 0 — see the contract. The bullet above already refuses to print a
       # tick; returning 0 handed the caller the tick anyway.
       status=3

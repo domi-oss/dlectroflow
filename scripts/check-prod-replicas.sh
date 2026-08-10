@@ -114,6 +114,21 @@ DEPLOYMENT="${REPLICAS_DEPLOYMENT:-dlectroflow}"
 CONTAINER="${REPLICAS_CONTAINER:-app}"
 SELECTOR="${REPLICAS_SELECTOR:-app.kubernetes.io/name=dlectroflow}"
 MAX_PODS="${REPLICAS_MAX_PODS:-3}"
+# Validated for the same reason as MAX_DEADLINE below, and !293 review caught
+# that the comment there claimed EVERY operator-settable number was — this was
+# the one that wasn't. It reaches `jq --argjson`, which rejects a non-number, and
+# that `jq` is guarded by `2>/dev/null || :` so the failure is silent: the pod
+# report comes back empty and the note then says "no pod is failing readiness, so
+# the missing replica has no pod at all — check scheduling, quota". A wedged
+# migration in `Init:CrashLoopBackOff` is invisible and the reader is actively
+# sent to the wrong place. A typo must degrade to the default, not to a confident
+# wrong answer.
+case "$MAX_PODS" in
+  '' | *[!0-9]*)
+    echo "check-prod-replicas: REPLICAS_MAX_PODS is not a whole number ('${MAX_PODS}') — using 3." >&2
+    MAX_PODS=3
+    ;;
+esac
 # 1800s = 30 minutes. The monitor runs hourly, so a deadline within this bound
 # means at worst one quiet run before the condition flips and the next run
 # alerts. Anything longer and staying quiet is no longer self-limiting.
