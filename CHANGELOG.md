@@ -469,6 +469,64 @@ operators upgrading a self-hosted instance don't get surprised.
   leaves your value alone: the app cannot tell a hung save from a slow one, so
   undoing it might undo something that did land.
 
+- **Retrying a failed "Mark not done" no longer loses your place (#215).** When a
+  step's undo failed, the row showed the reason with a **Try again** beside it —
+  and pressing that with the keyboard dropped focus to the top of the page. The
+  notice is withdrawn while the retry runs (a message saying the step is still
+  done should not stay up while the attempt that may fix it is in flight), and it
+  took the button being pressed with it. Focus now moves to the row's own **Mark
+  not done** control: the same action, in a place that does not disappear, and one
+  that says out loud that the retry is running. The first failure was never
+  affected — that press leaves you on a control that stays put.
+
+- **"Trying again…" on the focus timer's error notice now reliably reaches a
+  screen reader (#218), and "Saving…" on the inbox's capture notice with it.**
+  Both sat inside the notice's own announcement, and a polite region nested
+  inside an urgent one is read twice by some screen readers and not at all by
+  others — so the one message telling you the app had heard you was the one that
+  might go missing. Each now has its own quiet announcement, kept separate from
+  the notice rather than tucked inside it, and it is also part of the description
+  of the **Try again** button you are still holding for anyone arriving at that
+  button mid-attempt. It goes away again the moment nothing is in flight.
+  Nothing changes on screen.
+- **Ticking off a multi-step to-do from the inbox left every step open in Google
+  Tasks (#209).** Scheduling a to-do that has been broken down gives each step
+  its own Google Task. Completing that to-do from the inbox — the row's Complete
+  button, or a bulk complete — closed it here and nowhere else: every step stayed
+  open on the Google side and Reclaim went on holding all of their calendar
+  blocks. Finishing the same steps one at a time through the focus timer always
+  worked, which is why this survived the stepless fix in #195. Both grains are
+  closed now, the to-do's own Google Task and each of its steps, and steps that
+  were already ticked off are left alone rather than re-sent.
+
+- **Putting a completed to-do back left it finished in Google Tasks (#196).**
+  Reopening an item from the Done view gave you the work back in the app while
+  Google Tasks still showed it complete, and nothing afterwards ever corrected
+  that — so the two sides parted permanently and Reclaim never re-booked the
+  time. Reopening now tells Google, for the to-do itself and for each step it
+  actually puts back. As everywhere else, the Google side is best-effort in the
+  strict sense: an unreachable Google, or an account disconnected since the to-do
+  was scheduled, costs you the sync and never the reopen.
+
+- **Reopening a to-do and finishing it again paid you twice (#196).** Completing
+  a to-do banks a point for each step it closes plus one for the to-do, and
+  putting it back took none of that away — so the same piece of work could be
+  banked over and over by completing, reopening and completing again. Reopening
+  now returns exactly what that completion paid: one per step it genuinely puts
+  back, and the to-do's own, only when the to-do really was complete. **Badges
+  are untouched by design** — they mark that something happened once, they cannot
+  be earned twice, and taking one back would make the collection lie about the
+  past.
+
+  **Reopening the same to-do twice takes the points back once.** A double-tap
+  that outruns the button, or the same Done row open on a phone and a laptop,
+  used to run the reopen twice — and because taking a point back means removing
+  the most recent one, the second pass reached into a different, already-finished
+  piece of work and took its points instead. Each reopen now claims the to-do and
+  its steps as it puts them back, so whichever press arrives second finds the work
+  already done and stops: silently, without an error, and without a second round
+  of updates to Google.
+
 - **The focus timer's Start and Resume no longer fail in silence (#139's shape,
   found via #198).** Both buttons handled a server that could not be *reached*,
   and neither handled a server that answered and *declined* — so in those cases

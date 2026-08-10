@@ -8,6 +8,8 @@ import { patchGoogleTask } from "@/lib/google";
 import {
   actingUserGoogleToken,
   completeGoogleTaskForTask,
+  completeGoogleTaskForStep,
+  reopenGoogleTaskForStep,
 } from "@/lib/google-task-sync";
 import {
   BadgeKey,
@@ -213,62 +215,24 @@ async function markTaskCompleted(
 }
 
 /**
- * The step-grain twin of `completeGoogleTaskForTask`. Stays here rather than
- * moving to `@/lib/google-task-sync` because it still has only this file's
- * callers; #209 moves it when `braindump.ts` needs it too.
+ * ── The step-grain Google helpers moved to `@/lib/google-task-sync` (#209) ───
  *
- * The try/catch is the same contract, and it is needed for the same reason
- * (Duo review, !288): `patchGoogleTask` throws on a network error and the
- * shared `actingUserGoogleToken` throws when a token refresh fails, and neither
- * is a reason to lose a step completion the user asked for. It is a real
- * behaviour change for `completeStep`, which patches Google BEFORE its local
- * write — a stale refresh token used to abort the whole action, leaving the
- * step open. Diverging silently from Google is the lesser harm and is the
- * contract every other call site already had.
+ * `!288` left `completeGoogleTaskForStep` and `reopenGoogleTaskForStep` here
+ * because this file was their only caller, and predicted #209 would move them
+ * when `braindump.ts` needed one. It does: completing a multi-step to-do from
+ * the inbox has to close each step's Google task, and a `"use server"` module
+ * cannot lend a private helper out — exporting one would put a raw "patch this
+ * Google task" endpoint on the wire.
  *
- * What the swallow leaves behind is a completion Google never heard about that
- * nothing will ever repair: the app only writes TO Google and never reads back,
- * so no later action notices the divergence. That INBOUND gap is #194's. It is
- * deliberately not #196 (Duo review, !288, asked): #196 is still an outbound
- * patch — the `needsAction` call `reopenItem` never makes — which is also what
- * "the reverse patch" means on {@link reopenGoogleTaskForStep} below.
+ * Their contract is unchanged for this file's callers, with one exception worth
+ * knowing about here: the reopen twin swallows its own failures now, so the
+ * try/catch {@link uncompleteStep} used to wrap it in is gone rather than
+ * duplicated. What the swallow leaves behind is a local change Google never
+ * heard about that nothing will ever repair — the app only writes TO Google and
+ * never reads back. That INBOUND gap is #194's, and is deliberately not #196
+ * (Duo review, !288, asked): #196 is an outbound patch, the `needsAction` call
+ * `reopenItem` never made.
  */
-async function completeGoogleTaskForStep(step: {
-  googleTaskId: string | null;
-  googleTaskListId: string | null;
-}): Promise<boolean> {
-  if (!step.googleTaskId || !step.googleTaskListId) return false;
-  try {
-    const token = await actingUserGoogleToken();
-    if (!token) return false;
-    return await patchGoogleTask(
-      token,
-      step.googleTaskListId,
-      step.googleTaskId,
-      { status: "completed" },
-    );
-  } catch {
-    return false;
-  }
-}
-
-/**
- * The reverse patch, for {@link uncompleteStep} (#198). `needsAction` is the
- * value `patchGoogleTask` has always accepted and never been sent — before this,
- * the app could only ever tell Google a task was finished, never that it wasn't.
- * (#196 is the other half of that: `reopenItem` still doesn't send it.)
- */
-async function reopenGoogleTaskForStep(step: {
-  googleTaskId: string | null;
-  googleTaskListId: string | null;
-}): Promise<boolean> {
-  if (!step.googleTaskId || !step.googleTaskListId) return false;
-  const token = await actingUserGoogleToken();
-  if (!token) return false;
-  return patchGoogleTask(token, step.googleTaskListId, step.googleTaskId, {
-    status: "needsAction",
-  });
-}
 
 /** Complete a step directly (no focus session). Awards StepDone; finishes the task on the last step. */
 export async function completeStep(stepId: string) {
@@ -449,16 +413,17 @@ export async function uncompleteStep(stepId: string) {
   // the user asked for, and must not strand anything behind it — there is
   // nothing behind it.
   //
+  // The try/catch that used to sit here is gone, not dropped: #209 moved this
+  // helper into `@/lib/google-task-sync`, where the swallow is inside it and
+  // therefore true for every caller. Leaving a second one here would say the
+  // contract is a caller's job, which is the shape that let `reopenItem` be
+  // written without one (#196).
+  //
   // Skipped when this call lost the race above: the winner has already reopened
   // the Google task, and a second PATCH would be a redundant round trip to an
   // API this app is rate-limited against. `revalidatePath` below is NOT skipped —
   // each request still has to refresh its own render, whoever did the write.
-  try {
-    if (applied) await reopenGoogleTaskForStep(step);
-  } catch {
-    // Best-effort by design. The local state is already correct, and #196 covers
-    // the wider "reopen does not tell Google" gap this shares a helper with.
-  }
+  if (applied) await reopenGoogleTaskForStep(step);
 
   revalidatePath(`/tasks/${step.taskId}`);
   revalidatePath("/");

@@ -27,7 +27,11 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import type { Prisma } from "@prisma/client";
-import { awardBadge, reverseStepCompletionRewards } from "./rewards";
+import {
+  awardBadge,
+  reverseStepCompletionRewards,
+  reverseItemCompletionRewards,
+} from "./rewards";
 import { BadgeKey, RewardType } from "./constants";
 
 class FakeOtherError extends Error {
@@ -239,4 +243,166 @@ describe("reverseStepCompletionRewards — undoing a step completion (#198)", ()
       (c) => (c[0] as { where: { type: string } }).where.type,
     );
   }
+});
+
+/**
+ * #196 — `reopenItem` un-completes a WHOLE to-do, so it can undo several step
+ * completions in one action. `reverseStepCompletionRewards` takes back exactly
+ * one `step_done`, which is right for `uncompleteStep` and one short per extra
+ * step here.
+ *
+ * The rule is unchanged, only the arity: a reward comes back when the same work
+ * could otherwise be paid for twice. Reopening a five-step to-do and completing
+ * it again would bank five `step_done` rows for work already paid for.
+ */
+describe("reverseItemCompletionRewards — undoing a whole to-do (#196)", () => {
+  /** Reward types the mock was asked for, in call order. */
+  function types(): string[] {
+    return prismaMock.rewardEvent.findFirst.mock.calls.map(
+      (c) => (c[0] as { where: { type: string } }).where.type,
+    );
+  }
+
+  it("takes back one step_done per step the reopen actually un-completed", async () => {
+    prismaMock.rewardEvent.findFirst.mockResolvedValue({ id: "re-9" });
+    prismaMock.rewardEvent.deleteMany.mockResolvedValue({ count: 1 });
+
+    expect(
+      await reverseItemCompletionRewards("ws", {
+        stepDone: 3,
+        includeTaskComplete: false,
+      }),
+    ).toEqual({ stepDone: 3, taskComplete: false });
+
+    expect(types()).toEqual([
+      RewardType.StepDone,
+      RewardType.StepDone,
+      RewardType.StepDone,
+    ]);
+  });
+
+  it("reverses task_complete once alongside them", async () => {
+    prismaMock.rewardEvent.findFirst.mockResolvedValue({ id: "re-9" });
+    prismaMock.rewardEvent.deleteMany.mockResolvedValue({ count: 1 });
+
+    expect(
+      await reverseItemCompletionRewards("ws", {
+        stepDone: 2,
+        includeTaskComplete: true,
+      }),
+    ).toEqual({ stepDone: 2, taskComplete: true });
+
+    expect(types()).toEqual([
+      RewardType.StepDone,
+      RewardType.StepDone,
+      RewardType.TaskComplete,
+    ]);
+  });
+
+  // A stepless to-do earns a `task_complete` and no `step_done` at all, so the
+  // two counts have to move independently. Asking for one step_done regardless
+  // — which reusing `reverseStepCompletionRewards` in a loop would force — would
+  // take back the newest step_done in the WORKSPACE, belonging to unrelated work.
+  it("reverses task_complete alone when the to-do had no steps to un-complete", async () => {
+    prismaMock.rewardEvent.findFirst.mockResolvedValue({ id: "re-9" });
+    prismaMock.rewardEvent.deleteMany.mockResolvedValue({ count: 1 });
+
+    expect(
+      await reverseItemCompletionRewards("ws", {
+        stepDone: 0,
+        includeTaskComplete: true,
+      }),
+    ).toEqual({ stepDone: 0, taskComplete: true });
+
+    expect(types()).toEqual([RewardType.TaskComplete]);
+  });
+
+  it("does nothing at all when there is nothing to take back", async () => {
+    prismaMock.rewardEvent.findFirst.mockResolvedValue({ id: "re-9" });
+
+    expect(
+      await reverseItemCompletionRewards("ws", {
+        stepDone: 0,
+        includeTaskComplete: false,
+      }),
+    ).toEqual({ stepDone: 0, taskComplete: false });
+
+    expect(prismaMock.rewardEvent.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.rewardEvent.deleteMany).not.toHaveBeenCalled();
+  });
+
+  // Stops rather than spinning: once the workspace has no `step_done` left, the
+  // remaining requests cannot find one either, and each would be a wasted round
+  // trip inside somebody's open transaction.
+  it("stops as soon as the workspace runs out of rows to reverse", async () => {
+    prismaMock.rewardEvent.findFirst
+      .mockResolvedValueOnce({ id: "re-9" })
+      .mockResolvedValue(null);
+    prismaMock.rewardEvent.deleteMany.mockResolvedValue({ count: 1 });
+
+    expect(
+      await reverseItemCompletionRewards("ws", {
+        stepDone: 4,
+        includeTaskComplete: false,
+      }),
+    ).toEqual({ stepDone: 1, taskComplete: false });
+
+    expect(prismaMock.rewardEvent.findFirst).toHaveBeenCalledTimes(2);
+    expect(prismaMock.rewardEvent.deleteMany).toHaveBeenCalledTimes(1);
+  });
+
+  // The reversals are strictly sequential, and must be: each one reads "the
+  // newest row of this type" and then deletes it, so running them together
+  // would have every request read the SAME row and only one delete land.
+  it("never reverses in parallel — each read must see the previous delete", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    prismaMock.rewardEvent.findFirst.mockImplementation(async () => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await Promise.resolve();
+      inFlight -= 1;
+      return { id: "re-9" };
+    });
+    prismaMock.rewardEvent.deleteMany.mockResolvedValue({ count: 1 });
+
+    await reverseItemCompletionRewards("ws", {
+      stepDone: 3,
+      includeTaskComplete: true,
+    });
+
+    expect(peak).toBe(1);
+  });
+
+  it("runs on the transaction client it is handed, not the singleton", async () => {
+    const tx = {
+      rewardEvent: {
+        findFirst: vi.fn().mockResolvedValue({ id: "re-tx" }),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+
+    await reverseItemCompletionRewards(
+      "ws",
+      { stepDone: 2, includeTaskComplete: true },
+      tx as unknown as Prisma.TransactionClient,
+    );
+
+    expect(tx.rewardEvent.deleteMany).toHaveBeenCalledTimes(3);
+    expect(prismaMock.rewardEvent.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("a genuine database failure still reaches the caller, unmasked", async () => {
+    prismaMock.rewardEvent.findFirst.mockResolvedValue({ id: "re-9" });
+    prismaMock.rewardEvent.deleteMany.mockRejectedValue(
+      new FakeOtherError("connection lost"),
+    );
+
+    await expect(
+      reverseItemCompletionRewards("ws", {
+        stepDone: 2,
+        includeTaskComplete: false,
+      }),
+    ).rejects.toMatchObject({ code: "P1001" });
+  });
 });
