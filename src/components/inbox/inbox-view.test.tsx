@@ -873,6 +873,50 @@ describe("InboxView — a capture that fails (#210)", () => {
   });
 
   /**
+   * #218 / Duo round 16 on `!303` — round 8's answer was half of one. Not
+   * nesting the live region was right; leaving `aria-describedby` to carry the
+   * wait on its own was not. A description is computed when focus LANDS on a
+   * control, and this control already has focus and deliberately keeps it, so
+   * the value gaining `captureSavingId` mid-flight is not something a screen
+   * reader goes back and re-reads. The nested-region hole was moved, not closed.
+   *
+   * A live region is the one spec-defined channel for content that changes
+   * while the user is stationary, so the wait gets a real one — polite,
+   * visually hidden, and a SIBLING of the `role="alert"`. Mounted empty with the
+   * notice, for the reason the move announcer below already documents: a region
+   * that arrives together with its first message is silent. The visible copy
+   * stays exactly where it was and goes `aria-hidden`, so the sentence reaches
+   * a screen reader once rather than also re-reading the assertive notice.
+   *
+   * Kept identical to `focus-timer.tsx`'s notice on purpose — the two have
+   * drifted once already, which is what produced this round.
+   */
+  it("announces the wait through a polite live region beside the notice, not by changing a description under held focus", async () => {
+    vi.mocked(createBrainDumpItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockReturnValueOnce(new Promise<void>(() => {}));
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    const announcer = screen.getByTestId("capture-saving-announcer");
+    expect(announcer).toBeEmptyDOMElement();
+    expect(screen.getByRole("alert")).not.toContainElement(announcer);
+
+    await clickRetry();
+
+    expect(announcer).toHaveTextContent(/saving/i);
+    expect(announcer).toHaveAttribute("role", "status");
+    expect(announcer).toHaveAttribute("aria-live", "polite");
+    expect(announcer).toHaveClass("sr-only");
+    expect(screen.getByRole("alert")).not.toContainElement(announcer);
+
+    const visible = screen.getByTestId("capture-saving-visible");
+    expect(screen.getByRole("alert")).toContainElement(visible);
+    expect(visible).toHaveAttribute("aria-hidden", "true");
+    expect(visible).not.toHaveClass("sr-only");
+  });
+
+  /**
    * Duo review round 4 — the superseding rule, reached from the one path the
    * round-3 specs did not walk: a **retry that fails again**.
    *
