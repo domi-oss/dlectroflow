@@ -102,18 +102,19 @@ model Workspace {
   userId String? @unique
   user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  settings       Settings?
-  streak         Streak?
-  brainDumpItems BrainDumpItem[]
-  tasks          Task[]
-  focusSessions  FocusSession[]
-  focusPlaylists FocusPlaylist[]
-  dayRollups     DayRollup[]
-  rewardEvents   RewardEvent[]
-  streakRecords  StreakRecord[]
-  badges         Badge[]
-  dailySparks    DailySpark[]
-  shoppingItems  ShoppingItem[]
+  settings        Settings?
+  streak          Streak?
+  brainDumpItems  BrainDumpItem[]
+  tasks           Task[]
+  focusSessions   FocusSession[]
+  focusPlaylists  FocusPlaylist[]
+  dayRollups      DayRollup[]
+  rewardEvents    RewardEvent[]
+  streakRecords   StreakRecord[]
+  badges          Badge[]
+  dailySparks     DailySpark[]
+  shoppingItems   ShoppingItem[]
+  shoppingSummary ShoppingSummary?
 
   @@index([lastSeenAt])
 }
@@ -645,20 +646,20 @@ model DailySpark {
 // Behind Settings.shoppingList (off by default), gated server-side on
 // /shopping itself rather than only by hiding the menu entry.
 model ShoppingItem {
-  id   String  @id @default(cuid())
-  text String
-  done Boolean @default(false)
+  id            String    @id @default(cuid())
+  text          String
+  done          Boolean   @default(false)
   // The undated "saved for later" section. ONE boolean, and there is deliberately
   // no date, no snooze column and no scheduler involvement: nothing here
   // reappears on its own, it is pulled back up by hand. That is what makes this
   // list visibly outside the scheduling machinery instead of looking broken.
-  savedForLater Boolean @default(false)
+  savedForLater Boolean   @default(false)
   // Capture order, same idea as Step.order. Allocated as max+1 by
   // nextShoppingOrder (src/lib/shopping.ts), so two concurrent adds can duplicate
   // a value; splitShoppingList breaks the tie on `id` so the rendered order is
   // stable across reads rather than reshuffling between page loads.
   order         Int
-  createdAt     DateTime @default(now())
+  createdAt     DateTime  @default(now())
   // Bounded at 200 CHARACTERS by ShoppingItem_text_check
   // (20260808120000_shopping_items), which also refuses whitespace-only text.
   // Prisma can't express a CHECK, so that migration and this comment are its only
@@ -666,10 +667,52 @@ model ShoppingItem {
   // src/lib/enum-constraint-sync.integration.test.ts (LENGTH_REGISTRY) so
   // dropping it out of band fails the suite. The bound lives in
   // SHOPPING_ITEM_TEXT_MAX_LENGTH (src/lib/shopping.ts).
-  workspaceId String
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId   String
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId])
+}
+
+// #199 — the inbox's shopping-list summary line.
+//
+// ONE ROW PER WORKSPACE, and it stores WHETHER to show a summary — never HOW MANY.
+// The count is derived from ShoppingItem at render time (see
+// src/lib/shopping-summary.ts), which is what makes "the count can never disagree
+// with the list" structural rather than a maintenance promise: there is no second
+// copy of the number to drift. A missed sync can only leave the row outliving the
+// list, and the read side answers that with no summary at all.
+//
+// Its own table rather than a generated BrainDumpItem, because a generated row in
+// that table is visible to every query against it — and two of those are not
+// cosmetic. maybeAwardInboxZero counts un-triaged inbox items, so a permanent row
+// would make inbox zero unreachable for anyone keeping a shopping list; and
+// bucketItems files items by status/snoozedUntil/completedAt, so dismissing the
+// summary would drop it into the Library's "saved for later" or "done" tabs.
+//
+// `workspaceId` IS the primary key, so the summary is single-per-workspace
+// structurally and `upsert` on it is the whole concurrency story — two concurrent
+// adds cannot create two rows.
+//
+// Deliberately absent from the data export: it is app-generated bookkeeping the
+// user never typed, and it says nothing their own ShoppingItem rows do not. Listed
+// with that reason in DELIBERATELY_EXCLUDED
+// (src/lib/export/__tests__/model-coverage.test.ts) and its absence is asserted in
+// src/lib/export/json.test.ts, so the exclusion can never be mistaken for hiding
+// real user data.
+model ShoppingSummary {
+  workspaceId String    @id
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  // When the summary was dismissed from the inbox. Cleared again by the next
+  // shopping write that can INCREASE the count — adding an item, un-ticking one,
+  // or pulling one back up from saved-for-later. Ticking off, saving for later,
+  // deleting and renaming leave a dismissal alone: a change that cannot make the
+  // list longer is not a new reason to remind anybody.
+  //
+  // One column, not a tick and a snooze: the issue asks for snoozing to behave
+  // consistently with ticking off, and one gesture with one meaning is the most
+  // consistent that gets.
+  clearedAt   DateTime?
 }
 
 // ── Phase 2 — guest AI allowance (IP-hash scoped, rolling window) ──────────

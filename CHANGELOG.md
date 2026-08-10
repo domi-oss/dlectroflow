@@ -31,12 +31,29 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Added
 
+- **The inbox tells you the shopping list is there (#199).** When something is on
+  the list, one line at the top of the inbox reads *"3 items on your shopping
+  list"* and takes you straight there. **Not now** clears it, and it comes back the
+  next time the list grows — adding an item, un-ticking one, or pulling one back up
+  out of Saved for later. Ticking things off does not bring it back: that is
+  progress, not a new reason to be reminded. If a **Not now** does not reach the
+  server it says so and leaves the line where it is, rather than disappearing and
+  turning up again later as though the button had never worked.
+
+  The count is worked out from the list itself every time the inbox renders, and
+  nothing anywhere stores a copy of it — so the number cannot drift away from the
+  list, and the worst a missed update can do is hide the line rather than show a
+  figure that is wrong. It is also not a captured item: it does not count toward
+  the number of things you have to triage, it does not age, it cannot be dragged
+  into a bucket, and it does not stop you reaching inbox zero.
+
 - **A shopping list, if you want one (#199).** A plain list for the things that are
   not tasks: no estimate, no steps, nothing that lands in your calendar, and
   ticking one off does not touch your streak. It lives at its own `/shopping`
   destination in the menu, with a second **Saved for later** section below the
   live list — undated on purpose, so nothing there comes back on its own; you pull
-  an item up when you want it again.
+  an item up when you want it again, and it arrives back un-ticked, because
+  pulling it up is you saying you want to buy it.
 
   **Off by default**, behind Settings → Shopping list. Nothing is stored until you
   turn it on, and turning it off again hides the list rather than deleting it, so

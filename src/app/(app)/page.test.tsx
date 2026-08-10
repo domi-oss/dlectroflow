@@ -35,7 +35,13 @@ const OWNER = {
 
 const { db, currentUserMock, hasHistoryMock, settingsOverride } = vi.hoisted(
   () => ({
-    db: { brainDumpItem: { findMany: vi.fn() } },
+    db: {
+      brainDumpItem: { findMany: vi.fn() },
+      // #199 — the summary's two reads. Both are only reached when
+      // Settings.shoppingList is on, which the assertions below prove.
+      shoppingSummary: { findUnique: vi.fn() },
+      shoppingItem: { count: vi.fn() },
+    },
     currentUserMock: vi.fn(),
     hasHistoryMock: vi.fn(),
     settingsOverride: vi.fn(),
@@ -75,6 +81,7 @@ vi.mock("@/components/inbox/inbox-view", () => ({
   InboxView: ({
     newAccount,
     initialItems,
+    shoppingSummary,
   }: {
     newAccount?: AccountIdentity | null;
     // #44 — the mapped rows, so the page's own row mapper is observable. The
@@ -86,6 +93,8 @@ vi.mock("@/components/inbox/inbox-view", () => ({
       notes?: string | null;
       itemNotes?: string | null;
     }[];
+    /** #199 — the summary line's count, or null for "show nothing". */
+    shoppingSummary?: { count: number } | null;
   }) => (
     <div
       data-testid="inbox-view"
@@ -102,6 +111,9 @@ vi.mock("@/components/inbox/inbox-view", () => ({
       data-item-notes={JSON.stringify(
         (initialItems ?? []).map((i) => [i.id, i.itemNotes ?? null]),
       )}
+      data-shopping-summary={
+        shoppingSummary ? String(shoppingSummary.count) : "null"
+      }
     />
   ),
 }));
@@ -121,6 +133,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   settingsOverride.mockReturnValue({ ...settingsFixture });
   db.brainDumpItem.findMany.mockResolvedValue([]);
+  db.shoppingSummary.findUnique.mockResolvedValue(null);
+  db.shoppingItem.count.mockResolvedValue(0);
   currentUserMock.mockResolvedValue(OWNER);
   hasHistoryMock.mockResolvedValue(false);
 });
@@ -348,5 +362,91 @@ describe("Inbox page — the task note reaches the rows (#44)", () => {
     expect(
       JSON.parse(screen.getByTestId("inbox-view").dataset.notes as string),
     ).toEqual([["i2", null]]);
+  });
+});
+
+/**
+ * #199 — the summary line's server half.
+ *
+ * The count is the whole point: it is read from the ITEMS on this request, never
+ * from the summary row, so no state of the database can make the inbox claim a
+ * number the list does not have. That is what the "row outlived the list" case
+ * below proves — the row exists, is not dismissed, and the answer is still
+ * nothing, because the count is zero.
+ */
+describe("Inbox page — the shopping-list summary (#199)", () => {
+  const summaryProp = () =>
+    screen.getByTestId("inbox-view").dataset.shoppingSummary;
+
+  it("asks nothing at all while the feature is off", async () => {
+    render(await renderInbox());
+    expect(summaryProp()).toBe("null");
+    expect(db.shoppingSummary.findUnique).not.toHaveBeenCalled();
+    expect(db.shoppingItem.count).not.toHaveBeenCalled();
+  });
+
+  it("hands the DERIVED count when a live row meets a non-empty list", async () => {
+    settingsOverride.mockReturnValue({
+      ...settingsFixture,
+      shoppingList: true,
+    });
+    db.shoppingSummary.findUnique.mockResolvedValue({ clearedAt: null });
+    db.shoppingItem.count.mockResolvedValue(3);
+    render(await renderInbox());
+    expect(summaryProp()).toBe("3");
+    // Scoped, and counting only what is still to buy — the same predicate
+    // shoppingRemainingCount applies in memory on /shopping.
+    expect(db.shoppingItem.count).toHaveBeenCalledWith({
+      where: { workspaceId: "ws-test", done: false, savedForLater: false },
+    });
+    expect(db.shoppingSummary.findUnique).toHaveBeenCalledWith({
+      where: { workspaceId: "ws-test" },
+    });
+  });
+
+  it("hands nothing while the summary is dismissed", async () => {
+    settingsOverride.mockReturnValue({
+      ...settingsFixture,
+      shoppingList: true,
+    });
+    db.shoppingSummary.findUnique.mockResolvedValue({
+      clearedAt: new Date("2026-08-08T09:00:00Z"),
+    });
+    db.shoppingItem.count.mockResolvedValue(3);
+    render(await renderInbox());
+    expect(summaryProp()).toBe("null");
+  });
+
+  it("hands nothing when the row outlived the list, rather than a wrong count", async () => {
+    // The failure mode a stored count would have: a missed sync leaves the row
+    // behind. Because the number is derived, the worst outcome available is a
+    // hidden line — never "0 items on your shopping list" or a stale 3.
+    settingsOverride.mockReturnValue({
+      ...settingsFixture,
+      shoppingList: true,
+    });
+    db.shoppingSummary.findUnique.mockResolvedValue({ clearedAt: null });
+    db.shoppingItem.count.mockResolvedValue(0);
+    render(await renderInbox());
+    expect(summaryProp()).toBe("null");
+  });
+
+  it("hands nothing in the first-run preview, and asks nothing either", async () => {
+    // Duo review, !295 — the two queries used to run and have their result thrown
+    // away one branch later. The page already short-circuits `workspaceHasHistory()`
+    // on `firstRunPreview` for exactly this reason: the preview shows the inbox as a
+    // brand-new workspace would see it, and a brand-new workspace has no shopping
+    // list, so the answer cannot change anything.
+    settingsOverride.mockReturnValue({
+      ...settingsFixture,
+      shoppingList: true,
+      firstRunPreview: true,
+    });
+    db.shoppingSummary.findUnique.mockResolvedValue({ clearedAt: null });
+    db.shoppingItem.count.mockResolvedValue(3);
+    render(await renderInbox());
+    expect(summaryProp()).toBe("null");
+    expect(db.shoppingSummary.findUnique).not.toHaveBeenCalled();
+    expect(db.shoppingItem.count).not.toHaveBeenCalled();
   });
 });

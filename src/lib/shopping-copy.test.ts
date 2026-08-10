@@ -71,6 +71,20 @@ describe("shopping copy quotes the real bounds (#199)", () => {
     },
   );
 
+  // Duo review, !295 — the dismiss had no error handling at all, so a rejected
+  // action left the user believing "Not now" had worked. The replacement message
+  // is only worth anything if it contradicts that belief: it must name the state
+  // the user can check (the line is still on screen), not say "something went
+  // wrong" and leave them to work out which half failed.
+  it.each(VOICES)(
+    "the failed-dismiss notice says the line is still there (%s)",
+    (voice) => {
+      expect(STRINGS["shopping.summaryDismissError"][voice]).toMatch(
+        /still (?:here|there)/i,
+      );
+    },
+  );
+
   // The page's own promise about what this list is NOT. The absence of the focus,
   // schedule and estimate controls is asserted in shopping-list.test.tsx; this is
   // the half that tells the reader it is deliberate.
