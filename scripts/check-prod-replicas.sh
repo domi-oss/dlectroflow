@@ -151,6 +151,24 @@ esac
 # somebody's inbox.
 MAX_MSG=300
 
+# The shell-side twin of the `clean` defined in the jq programs below, character
+# class for character class — see the long comment on the pod report for why each
+# class is removed. It exists because not every cluster-supplied string is read
+# by jq: the image tag is taken with a parameter expansion, and !293 review found
+# that was exactly the one reaching stdout raw. A Deployment whose image tag held
+# `<img src=x>` and a fence published both, whole, into a note on a PUBLIC issue.
+#
+# Replaces rather than deletes, like its jq twin, so the surrounding text is
+# neutralised instead of lost and the line still answers its question.
+clean_field() {
+  local value="${1//[\`<>]/ }"
+  value="${value//[[:cntrl:]]/ }"
+  if [ "${#value}" -gt "$MAX_MSG" ]; then
+    value="${value:0:$MAX_MSG}…"
+  fi
+  printf '%s' "$value"
+}
+
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -210,16 +228,29 @@ spec_image="$(jq -r --arg c "$CONTAINER" \
   "$WORK/deploy.json" 2> /dev/null || true)"
 # Tag only. The registry path is already public in .gitlab-ci.yml, but the tag is
 # the whole of the question and a full ref makes the note harder to scan.
+#
+# Cleaned because it is published: Kubernetes does not validate `image` against
+# the reference grammar, so a Deployment can legally carry any string here. Both
+# sides of the pod/spec comparison below are cleaned, so it stays an equality
+# between like and like — two tags that differ ONLY in the characters this strips
+# would compare equal, which needs two references that are both already illegal
+# and costs one wrong sentence in an alert that has already fired.
 spec_tag="${spec_image##*:}"
 [ -n "$spec_tag" ] || spec_tag="unknown"
+spec_tag="$(clean_field "$spec_tag")"
 
+# `full` is the only mode that reaches stdout, so it is the only one cleaned:
+# `status` and `reason` are compared against literals below and must stay exact.
 cond() {
-  jq -r --arg t "$1" --arg f "$2" \
-    '(.status.conditions // []) | map(select(.type == $t)) | .[0]
+  jq -r --arg t "$1" --arg f "$2" --argjson maxmsg "$MAX_MSG" \
+    'def clean: (. // "") | tostring
+       | gsub("[`<>[:cntrl:]]"; " ")
+       | if (. | length) > $maxmsg then (.[:$maxmsg] + "…") else . end;
+     (.status.conditions // []) | map(select(.type == $t)) | .[0]
      | if . == null then (if $f == "full" then "absent" else "" end)
        elif $f == "status" then (.status // "")
        elif $f == "reason" then (.reason // "")
-       else "\(.status) (\(.reason // "no reason")) since \(.lastTransitionTime // "an unknown time")" end' \
+       else "\(.status | clean) (\((.reason // "no reason") | clean)) since \((.lastTransitionTime // "an unknown time") | clean)" end' \
     "$WORK/deploy.json" 2> /dev/null || echo ""
 }
 progressing="$(cond Progressing full)"
@@ -283,8 +314,15 @@ pod_block=""
 if kubectl get pods -n "$NAMESPACE" -l "$SELECTOR" -o json \
   > "$WORK/pods.json" 2> "$WORK/pods.err"; then
   # `clean` is applied to EVERY cluster-supplied string that reaches stdout,
-  # because stdout is spliced into a note on an issue in a PUBLIC project. It
-  # removes four classes of character, each for its own reason:
+  # because stdout is spliced into a note on an issue in a PUBLIC project. That
+  # is the whole rule and it holds across the file, not just here: the same four
+  # classes are stripped from the pod tags below, from the condition text in
+  # `cond` and from the spec's image tag by `clean_field`, which is this
+  # definition rewritten in shell for the one value jq never sees. !293 review
+  # found those three raw while this comment already claimed otherwise, so if a
+  # new cluster-supplied field ever reaches stdout, it goes through one of the
+  # two — or this sentence has to stop saying "EVERY". It removes four classes of
+  # character, each for its own reason:
   #   `      a fence would break out of the code block and take the rest of the
   #          note's rendering with it;
   #   <>     a BARE `<tag>` breaks the whole surrounding document's Markdown on
@@ -327,9 +365,15 @@ if kubectl get pods -n "$NAMESPACE" -l "$SELECTOR" -o json \
   # pod was the STALE one, and that difference is what a human uses to tell
   # "still rolling" from "wedged". One line, from two documents already fetched.
   image_line=""
-  pod_tags="$(jq -r --arg c "$CONTAINER" '
+  # Each tag is cleaned BEFORE the join, because the backticks in the separator
+  # are ours and must survive: cleaning the joined string would strip the very
+  # code-span markers that keep the list readable.
+  pod_tags="$(jq -r --arg c "$CONTAINER" --argjson maxmsg "$MAX_MSG" '
+    def clean: (. // "") | tostring
+      | gsub("[`<>[:cntrl:]]"; " ")
+      | if (. | length) > $maxmsg then (.[:$maxmsg] + "…") else . end;
     [ (.items // [])[] | (.spec.containers // []) | map(select(.name == $c)) | .[0].image // empty ]
-    | map(sub("^.*:"; "")) | unique | join("`, `")' "$WORK/pods.json" 2> /dev/null || true)"
+    | map(sub("^.*:"; "") | clean) | unique | join("`, `")' "$WORK/pods.json" 2> /dev/null || true)"
   if [ -n "$pod_tags" ] && [ "$spec_tag" = "unknown" ]; then
     # The comparison needs BOTH sides. Without the spec's image, "unknown" would
     # differ from every real tag and the check would report stale code purely

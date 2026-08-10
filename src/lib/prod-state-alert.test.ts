@@ -774,6 +774,119 @@ describe("scripts/check-prod-replicas.sh", () => {
     expect(run.stdout).toContain("end");
   });
 
+  // ── The sanitiser's own claim, checked against the code that makes it ──────
+  //
+  // The script's comment says `clean` is applied to EVERY cluster-supplied
+  // string that reaches stdout, because stdout is spliced into a note on an
+  // issue in a PUBLIC project. !293 review found three that were not: the
+  // Deployment spec's image tag (read with a shell parameter expansion, so no
+  // jq was involved), the tags read back off the pods, and the text of the
+  // `Progressing` / `Available` conditions.
+  //
+  // None is a security hole on its own — writing any of them needs write access
+  // to the production Deployment — but the comment is load-bearing, and the next
+  // person to add an output line will trust it. These three tests are what makes
+  // it true rather than aspirational. Same payload in each: a triple backtick
+  // (breaks out of a code block and takes the rest of the note's rendering with
+  // it) and a bare `<tag>` (breaks the whole surrounding document's Markdown on
+  // GitLab — this project has already lost an MR description to it).
+  const HOSTILE = "```<img src=x onerror=alert(1)>";
+
+  it("neutralises the image tag read from the Deployment spec", () => {
+    // The healthy path prints it too — `image \`${spec_tag}\`` is on the count
+    // line in EVERY arm, including exit 0 — so this needs no degraded state.
+    const run = replicas({
+      kubectl: [
+        {
+          match: "deployment",
+          body: deployment({ image: `registry.test/dlectroflow:m-${HOSTILE}` }),
+        },
+      ],
+    });
+    expect(run.status).toBe(0);
+    expect(run.stdout).not.toContain("```");
+    expect(run.stdout).not.toContain("<");
+    expect(run.stdout).not.toContain(">");
+    // Neutralised, not discarded: the readable part of the tag survives so the
+    // line still answers "which image is this".
+    expect(run.stdout).toContain("m-");
+  });
+
+  it("neutralises the image tags read back off the pods", () => {
+    const run = replicas({
+      kubectl: [
+        {
+          match: "deployment",
+          body: deployment({
+            available: 1,
+            ready: 1,
+            image: "registry.test/dlectroflow:main-newsha",
+          }),
+        },
+        {
+          match: "pods",
+          body: podsWithWedgedMigrate(
+            "Error: P3009",
+            `registry.test/dlectroflow:p-${HOSTILE}`,
+          ),
+        },
+      ],
+    });
+    expect(run.status).toBe(1);
+    expect(run.stdout).not.toContain("```");
+    expect(run.stdout).not.toContain("<");
+    expect(run.stdout).not.toContain(">");
+    expect(run.stdout).toContain("p-");
+  });
+
+  it("neutralises the text of a Deployment condition", () => {
+    // `.reason` and `.lastTransitionTime` are written by the deployment
+    // controller and are a fixed enum in practice — which is exactly the
+    // argument that would leave them raw forever. They are still strings the
+    // cluster chose and this script publishes, so they go through the same
+    // filter as everything else rather than being trusted by category.
+    const run = replicas({
+      kubectl: [
+        {
+          match: "deployment",
+          body: deployment({
+            progressing: { status: "True", reason: `Rollout${HOSTILE}` },
+          }),
+        },
+      ],
+    });
+    expect(run.status).toBe(0);
+    expect(run.stdout).not.toContain("```");
+    expect(run.stdout).not.toContain("<");
+    expect(run.stdout).not.toContain(">");
+    expect(run.stdout).toContain("Rollout");
+  });
+
+  it("still tells a matching image from a differing one after sanitising", () => {
+    // Cleaning both sides of the comparison must not make every tag look equal.
+    const same = replicas({
+      kubectl: [
+        {
+          match: "deployment",
+          body: deployment({
+            available: 1,
+            ready: 1,
+            image: "registry.test/dlectroflow:main-samesha",
+          }),
+        },
+        {
+          match: "pods",
+          body: podsWithWedgedMigrate(
+            "Error: P3009",
+            "registry.test/dlectroflow:main-samesha",
+          ),
+        },
+      ],
+    });
+    expect(same.stdout).toMatch(/every pod is on the current spec's image/);
+    expect(same.stdout).not.toMatch(/different image/);
+  });
+
   it("rejects a non-numeric REPLICAS_MAX_PROGRESS_DEADLINE instead of trusting it", () => {
     // Duo review finding: every other operator-settable number in these scripts
     // is validated with a `case … *[!0-9]*` guard — the k8s `deadline` here,
