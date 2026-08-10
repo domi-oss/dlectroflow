@@ -34,7 +34,7 @@ services:
     # Pinned to the same digest as docker-compose.yml and the Helm chart so all
     # three environments run one Postgres minor. In-major bumps (16.x -> 16.y)
     # are binary-compatible; a cross-major bump needs a dump/restore.
-    image: postgres:16@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20
+    image: postgres:16@sha256:95206741a5b214807675e14165369d05b93a9cf692223b616d07cca227e74b0b
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env.prod}
@@ -162,7 +162,7 @@ services:
   #             and the database is the only thing here that cannot be rebuilt
   #             from source. That is what `backup-upload` is for.
   backup:
-    image: postgres:16@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20
+    image: postgres:16@sha256:95206741a5b214807675e14165369d05b93a9cf692223b616d07cca227e74b0b
     profiles: ["tools"]
     depends_on:
       db:

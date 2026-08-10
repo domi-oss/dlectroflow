@@ -469,7 +469,7 @@ test_app:
   # queries — e.g. workspace scoping — and skipping them in CI would gate on
   # less than the local suite runs).
   services:
-    - postgres:16@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20
+    - postgres:16@sha256:95206741a5b214807675e14165369d05b93a9cf692223b616d07cca227e74b0b
   variables:
     POSTGRES_USER: dlectroflow
     POSTGRES_PASSWORD: ci-test-only
@@ -563,7 +563,7 @@ e2e_test:
   interruptible: true
   needs: []          # starts at pipeline start, in parallel with build_app
   services:
-    - postgres:16@sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20
+    - postgres:16@sha256:95206741a5b214807675e14165369d05b93a9cf692223b616d07cca227e74b0b
   variables:
     POSTGRES_USER: dlectroflow
     POSTGRES_PASSWORD: ci-test-only
