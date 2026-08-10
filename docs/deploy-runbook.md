@@ -865,6 +865,19 @@ That case is built in rather than assumed away, because a monitor that can die
 quietly manufactures false confidence:
 
 - "Could not tell" is a distinct state and never renders as ✅.
+- **Nor as a confident sentence anywhere else in the note.** Not rendering an
+  unknown as a tick is the easy half; the hard half is the headline and the
+  recovery instruction, which are the parts anybody actually acts on. Both are
+  composed from each check's **own** exit code, tested one value at a time, so a
+  check that could not read the cluster contributes "the replica count could not
+  be determined" and never "every replica is available". Matching on "not
+  degraded" instead would put *verified healthy* and *we could not look* behind
+  the same sentence — the original bug, committed by the monitor built to catch
+  it. A proven fault standing beside an unreadable check therefore says so in the
+  headline rather than presenting as one clean diagnosis.
+- **Both checks contribute their recovery steps, not just the loudest one.** A
+  simultaneous drift and replica alert needs the migration path *and* the
+  not-deployed path, because they are different repairs.
 - A rejected note POST prints the **whole note to the job log** and still exits
   non-zero, so the diagnosis survives a broken channel.
 - Being unconfigured is an alert, not a skip — unlike `alert_pipeline_failure`,

@@ -154,12 +154,24 @@ else
   FINGERPRINT_LINE="_\`${SELF}\` fingerprint: \`${FINGERPRINT}\`. Silent while unchanged; the job keeps failing every run until this clears._"
 fi
 
+# Every arm below tests a check's exit code for ONE value. Matching on "not 1"
+# and letting 0 and 2 share an arm is the collapse this whole family of scripts
+# exists to prevent — it renders "we could not look" as "we looked and it was
+# fine" — and the headline is the line that actually gets read, so a proven fault
+# standing next to an unreadable check must not present as a clean single-fault
+# diagnosis. Duo review on !293 caught the same collapse in the recovery text
+# below; this is its sibling, found by sweeping for the shape rather than the
+# instance.
 case "$severity" in
   alert)
     if [ "$drift_code" = "1" ] && [ "$replicas_code" = "1" ]; then
       HEADLINE="### 🔴 production is behind \`${DRIFT_REF}\` **and** short of replicas"
+    elif [ "$drift_code" = "1" ] && [ "$replicas_code" = "2" ]; then
+      HEADLINE="### 🔴 production is not running \`${DRIFT_REF}\` — and its replica count is **undetermined**"
     elif [ "$drift_code" = "1" ]; then
       HEADLINE="### 🔴 production is not running \`${DRIFT_REF}\`"
+    elif [ "$drift_code" = "2" ]; then
+      HEADLINE="### 🔴 production is short of replicas — and whether it runs \`${DRIFT_REF}\` is **undetermined**"
     else
       HEADLINE="### 🔴 production is short of replicas"
     fi
@@ -204,14 +216,51 @@ fi
 # because the cluster could not be read, and when the only problem is that a
 # deploy did not happen. Sending somebody to the migrations at 2am because the
 # check has no credentials is a wrong first step, and the note is the product.
+#
+# A second Duo round on !293 found the two bugs left in the shape of that fix,
+# and they are the same bug from either side — the text was PICKED from one check
+# instead of COMPOSED from both:
+#
+#   * the last arm was reached whenever `replicas_code` was not 1, so it opened
+#     with "every replica is available" on the strength of a check that had
+#     exited **2** — a `kubectl` read that was refused. That is the unproven
+#     green #191 exists to abolish, reintroduced in the one sentence somebody
+#     acts on at 3am, by the alerter itself;
+#   * a simultaneous drift AND replica alert only ever printed the replica half,
+#     so nobody was told the deploy had not landed either.
+#
+# So each check now contributes a fragment chosen from its OWN exit code, tested
+# for one value at a time. A check that returned 2 contributes a fragment saying
+# so — "could not determine" is a third answer, and rendering it as either of the
+# other two is the collapse, whichever direction it collapses in.
+case "$drift_code" in
+  1) DRIFT_STEP="**Production is not running \`${DRIFT_REF}\`.** Check \`deploy_production\` on the most recent \`${DRIFT_REF}\` pipeline: a failure in an earlier stage *skips* it rather than failing it (#147), so a merge can go green without deploying. Rolling forward on \`${DRIFT_REF}\` deploys with the next green pipeline." ;;
+  2) DRIFT_STEP="**Whether production is running \`${DRIFT_REF}\` could not be determined** — an unknown, and neither a fault nor an all-clear. The \`curl\` error is in this job's log; stdout withholds it deliberately." ;;
+  *) DRIFT_STEP="Production **is** running \`${DRIFT_REF}\`, so stale code is not part of this." ;;
+esac
+case "$replicas_code" in
+  1) REPLICAS_STEP="**Production is short of replicas.** A wedged migration is the likeliest cause, and it is the one that compounds: it blocks every LATER migration, so each merge from now makes it worse — § 19 for that path." ;;
+  2) REPLICAS_STEP="**The replica count could not be determined** — an unknown, and neither a fault nor an all-clear. The \`kubectl\` error is in this job's log; stdout withholds it deliberately." ;;
+  *) REPLICAS_STEP="Every replica **is** available, so nothing here is a shortfall in capacity." ;;
+esac
+
 if [ "$severity" = "healthy" ]; then
   NEXT_STEPS="Nothing to do. This note exists so the channel closes its own loops — an alerting path that only ever reports bad news gives you no way to tell \"fixed\" from \"stopped running\"."
-elif [ "$severity" = "undetermined" ]; then
-  NEXT_STEPS="**Establish the facts first — nothing above is a diagnosis.** One of the two checks could not read what it needed, so this is an unknown rather than a fault, and an unknown is reported because a check nobody can see is indistinguishable from a passing one. Start with this job's log: it carries the \`kubectl\` or \`curl\` error that stdout deliberately withholds. \`docs/deploy-runbook.md\` § 18 covers reading this alert."
-elif [ "$replicas_code" = "1" ]; then
-  NEXT_STEPS="**Recovery** — a wedged migration is the likeliest cause of a replica shortfall here, and it is the one that compounds: it blocks every LATER migration, so each merge from now makes it worse. \`docs/deploy-runbook.md\` § 19 for that path, § 14 to go back a revision, § 18 to read this alert."
 else
-  NEXT_STEPS="**Recovery** — every replica is available, so this is a deploy that did not land rather than a broken one. Check \`deploy_production\` on the most recent \`${DRIFT_REF}\` pipeline: a failure in an earlier stage *skips* it rather than failing it (#147). Rolling forward on \`${DRIFT_REF}\` deploys with the next green pipeline; \`docs/deploy-runbook.md\` § 14 to go back a revision instead, § 18 to read this alert."
+  if [ "$severity" = "undetermined" ]; then
+    LEAD="**Establish the facts first — nothing above is a diagnosis.** An unknown is reported because a check nobody can see is indistinguishable from a passing one."
+  else
+    LEAD="**Recovery.**"
+  fi
+  # Blank-separated so each fragment is its own paragraph; the awk squeeze below
+  # tidies the run of blanks either fragment would leave if it were ever empty.
+  NEXT_STEPS="${LEAD}
+
+${DRIFT_STEP}
+
+${REPLICAS_STEP}
+
+\`docs/deploy-runbook.md\` § 14 goes back a revision, § 18 covers reading this alert."
 fi
 
 # ── 4. The note ──────────────────────────────────────────────────────────────

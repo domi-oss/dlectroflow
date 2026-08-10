@@ -503,6 +503,30 @@ describe("scripts/check-prod-replicas.sh", () => {
     expect(run.stdout).not.toContain("✅");
   });
 
+  it("says the missing replica has no pod at all when none is failing readiness", () => {
+    // Found while sweeping the alerter for the collapse Duo named, and it is the
+    // same disease: the branch written to explain a genuinely confusing state
+    // never rendered, so the note showed a bare "pods that are not ready:"
+    // heading with nothing under it and the reader was told nothing at all.
+    //
+    // `jq -r … | join("\n")` writes a single NEWLINE for an empty list, so the
+    // file is 1 byte and `[ -s ]` on it is always true whenever the pod read
+    // succeeded. Degraded with every listed pod Ready is real — the missing
+    // replica has no pod object at all (unschedulable, quota, a ReplicaSet that
+    // cannot create) — and it is the shape where "look at the pods" is the wrong
+    // next step, which is precisely why the branch exists.
+    const run = replicas({
+      kubectl: [
+        { match: "deployment", body: deployment({ available: 1, ready: 1 }) },
+        { match: "pods", body: { items: [] } },
+      ],
+    });
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain("no pod at all");
+    expect(run.stdout).toContain("scheduling, quota");
+    expect(run.stdout).not.toContain("pods that are not ready");
+  });
+
   it("treats an absent availableReplicas as zero available, not as healthy", () => {
     // Kubernetes omits the field rather than writing 0. `.status.availableReplicas`
     // read with a `// 0` default is correct; read as "missing means fine" it
@@ -1395,6 +1419,92 @@ describe("scripts/alert-prod-state.sh — the alerter cannot fail quietly", () =
     expect(run.status).not.toBe(0);
     expect(run.note?.body).toMatch(/migration/i);
     expect(run.note?.body).toContain("§ 19");
+  });
+
+  /**
+   * The claim "every replica is available" in a note where the replica check
+   * exited **2**.
+   *
+   * This is the defining bug of #191 wearing the alerter's own clothes: the
+   * three-state contract exists so "we could not look" never renders as "it is
+   * fine", and a recovery instruction that opens by asserting capacity is fine —
+   * on the strength of a `kubectl` read that was REFUSED — is that collapse
+   * committed in the one sentence somebody acts on at 3am.
+   *
+   * Asserted as a pair on purpose. The negative alone is satisfied by deleting
+   * the sentence, which would throw away a true and useful fact on the arm where
+   * the check really did return 0.
+   */
+  it("never claims availability off a replica check that returned UNDETERMINED", () => {
+    const unknown = alert({ prodSha: OLD_SHORT, deploy: false });
+    expect(unknown.status).not.toBe(0);
+    expect(unknown.note?.body).not.toMatch(
+      /every replica[^.\n]{0,24}available/i,
+    );
+    expect(unknown.note?.body).toMatch(
+      /replica count could not be determined/i,
+    );
+
+    // Same alert, replica check genuinely green: the claim is proven, so it stays.
+    const proven = alert({ prodSha: OLD_SHORT });
+    expect(proven.note?.body).toMatch(/every replica[^.\n]{0,24}available/i);
+    expect(proven.note?.body).not.toMatch(
+      /replica count could not be determined/i,
+    );
+  });
+
+  it("carries BOTH recovery paths when drift and replicas alert together", () => {
+    // Duo review finding. The guidance was picked from one check rather than
+    // composed from both, so a simultaneous alert sent the reader to the
+    // migrations and never mentioned that the deploy had not landed either.
+    const run = alert({
+      prodSha: OLD_SHORT,
+      deploy: deployment({ available: 1, ready: 1 }),
+      pods: podsWithWedgedMigrate("Error: P3009"),
+    });
+    expect(run.status).not.toBe(0);
+    // The replica half.
+    expect(run.note?.body).toContain("§ 19");
+    expect(run.note?.body).toMatch(/migration/i);
+    // The drift half, which used to be dropped entirely.
+    expect(run.note?.body).toContain("deploy_production");
+    expect(run.note?.body).toContain("#147");
+  });
+
+  it("names an undetermined companion in the headline, not one clean fault", () => {
+    // The sibling of the finding above, found by sweeping for the same `!= 1`
+    // shape: the headline chain also treated 0 and 2 alike, so a proven fault
+    // beside a check that could not read anything rendered as a complete,
+    // single-fault diagnosis. The headline is the line that gets read.
+    const driftProven = alert({ prodSha: OLD_SHORT, deploy: false });
+    expect(driftProven.note?.body?.split("\n")[0]).toMatch(/undetermined/i);
+
+    const replicasProven = alert({
+      prodSha: null,
+      deploy: deployment({ available: 1, ready: 1 }),
+      pods: podsWithWedgedMigrate("Error: P3009"),
+    });
+    expect(replicasProven.note?.body?.split("\n")[0]).toMatch(/undetermined/i);
+
+    // And a genuinely single-fault alert is NOT hedged, or the word stops
+    // meaning anything.
+    expect(
+      alert({ prodSha: OLD_SHORT }).note?.body?.split("\n")[0],
+    ).not.toMatch(/undetermined/i);
+  });
+
+  it("says WHICH check could not be established, not merely that one could not", () => {
+    // "Could not determine" is a third answer, not a softer way of saying
+    // unhealthy — so the note has to name the check it applies to. The old text
+    // said "one of the two checks", which is also simply untrue when BOTH of
+    // them failed to read anything, as here.
+    const run = alert({ prodSha: null, deploy: false });
+    expect(run.status).not.toBe(0);
+    expect(run.note?.body).toMatch(
+      /whether production is running `main` could not be determined/i,
+    );
+    expect(run.note?.body).toMatch(/replica count could not be determined/i);
+    expect(run.note?.body).not.toMatch(/one of the two checks/i);
   });
 
   it("exits non-zero and prints the whole note when the POST is rejected", () => {

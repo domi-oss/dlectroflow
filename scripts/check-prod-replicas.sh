@@ -318,7 +318,15 @@ if kubectl get pods -n "$NAMESPACE" -l "$SELECTOR" -o json \
     fi
   fi
 
-  if [ -s "$WORK/pods.md" ]; then
+  # NOT `[ -s ]`, and the difference is a whole branch. `jq -r … | join("\n")`
+  # writes a single NEWLINE for an empty list, so the file is 1 byte and `-s` is
+  # true whenever the pod read merely succeeded. The else arm below — the one
+  # that explains the confusing state where the missing replica has no pod
+  # OBJECT at all — was therefore unreachable, and the note rendered a bare
+  # "pods that are not ready:" heading with nothing beneath it: a reader sent to
+  # look at pods at precisely the moment the pods are not where the answer is.
+  # Found sweeping for the sibling of the `!= 1` collapse Duo caught on !293.
+  if grep -q '[^[:space:]]' "$WORK/pods.md"; then
     pod_block="$(printf -- '%s- pods that are not ready:\n%s\n' \
       "${image_line:+${image_line}
 }" "$(cat "$WORK/pods.md")")"
