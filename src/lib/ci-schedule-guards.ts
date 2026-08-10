@@ -12,10 +12,21 @@
  * The first version of #191's parity assertion did it with line arithmetic:
  * "every `SECURITY_ASSESSMENT` guard must have a `PROD_STATE_CHECK` guard exactly
  * two lines below it", plus `expect(count).toBeGreaterThan(4)`. Duo review flagged
- * it and was right on both counts — that asserts **incidental formatting**, not
- * intent. Reordering conditions inside a rule block, or inserting one comment
- * between two guards, fails a test whose subject is untouched; and the magic 4
- * describes today's count of an unrelated job's rules.
+ * both. It was right about the line arithmetic, which asserts **incidental
+ * formatting** rather than intent: reordering conditions inside a rule block, or
+ * inserting one comment between two guards, fails a test whose subject is
+ * untouched.
+ *
+ * **The 4 is still shipped, on purpose**, at `security-assessment.test.ts` — so
+ * "right on both counts" would be the wrong thing to write here. What was wrong
+ * was the number's JOB, not its value. It used to *be* the coverage claim,
+ * standing in for "every guard is present" by counting an unrelated job's rules,
+ * and that is a fact about today's layout which rots on the next edit. Now
+ * `guardParityGaps` makes the coverage claim structurally and the 4 is only a
+ * floor beneath it: no gaps is equally true of a file with no guards at all and
+ * of a parser that matched nothing, so something has to show the derivation came
+ * back non-empty. "More than nothing was found" and "this is how many there are"
+ * are different assertions, and only the second one goes stale.
  *
  * So the parsing lives here, as a pure module with no `fs`, which is the shape
  * `CLAUDE.md` prescribes for every file-parsing guard in this repo: the parser is

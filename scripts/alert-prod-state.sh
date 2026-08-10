@@ -70,12 +70,21 @@
 #
 # ── Env ──────────────────────────────────────────────────────────────────────
 #   CI_API_V4_URL, CI_PROJECT_ID, CI_PIPELINE_ID, CI_PIPELINE_URL  — GitLab CI
+#   CI_JOB_NAME       how the job names itself in its own note; defaults to
+#                     `alert_prod_state`
 #   GL_TOKEN          `api`-scoped token that can post issue notes and read them
 #   ALERT_ISSUE_IID   issue to post on; defaults to OPS_DIGEST_ISSUE_IID
 #   ALERT_MENTION     optional single `@handle`; what raises the to-do
 #   PROD_URL          optional; defaults to the prod origin
 #   DRIFT_REF         optional; defaults to `main`
+#   DRIFT_GRACE_SECONDS  how long a divergence is treated as a deploy still in
+#                     flight rather than as drift; defaults to 1500 and is
+#                     EXPORTED to check-prod-drift.sh, where it is off by default
 #   ALERT_NOTE_LOOKBACK  how many recent notes to search for our own last word
+#
+# This list is asserted complete by `src/lib/prod-state-alert.test.ts` — every
+# `${VAR:-…}` the script reads has to appear here, because this block is what the
+# operator setting the schedule up reads instead of the code.
 set -euo pipefail
 
 API="${CI_API_V4_URL:-https://gitlab.com/api/v4}/projects/${CI_PROJECT_ID:-}"

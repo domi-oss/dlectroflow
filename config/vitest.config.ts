@@ -75,9 +75,11 @@ export default defineConfig({
     //
     // MEASURED, same tree, one file: the heaviest case in
     // `prod-state-alert.test.ts` spawns four subprocesses and takes ~1.0 s run
-    // on its own — and 7.1 s inside a full 298-file run, where it blew the
-    // default and failed. Three other full runs of that same tree were green,
-    // which is the signature of a budget being crossed rather than a bug.
+    // on its own — and 7.1 s inside a full-suite run, where it blew the default
+    // and failed. The suite held 298 files when that was measured; the count is
+    // recorded as a condition of the measurement rather than as a current fact,
+    // and it only ever grows. Three other full runs of that same tree were
+    // green, which is the signature of a budget being crossed, not a bug.
     //
     // 30 s is chosen to be far above the loaded worst case and far below
     // anything a genuinely hung test would reach; it only costs time on a

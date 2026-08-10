@@ -2027,6 +2027,42 @@ describe("the schedule-flag guards", () => {
   });
 });
 
+describe("scripts/alert-prod-state.sh documents what it reads", () => {
+  /**
+   * The `── Env ──` header is the only inventory of this script's inputs — the
+   * runbook points at it, and the operator setting the schedule up reads it
+   * rather than the code. !293 review found it two short: `DRIFT_GRACE_SECONDS`,
+   * which the script both reads AND exports into the sibling check, and
+   * `CI_JOB_NAME`, which decides how the job names itself in its own note.
+   *
+   * `${NAME:-…}` is the exact shape of "read an input, with a fallback", and it
+   * distinguishes inputs from the script's own locals without heuristics: a
+   * local is assigned, an input is defaulted. One direction only — a variable
+   * documented but not read here is not a defect, because two of them are passed
+   * straight through the environment to the checks this script invokes.
+   */
+  const script = readFileSync(ALERT_SCRIPT, "utf8");
+
+  it("names every environment variable it reads in its Env header", () => {
+    const header = (script.split(/^# ── Env ─+$/m)[1] ?? "").split(
+      /^set -euo pipefail$/m,
+    )[0];
+    expect(header).not.toBe("");
+    const read = [
+      ...new Set(
+        [...script.matchAll(/\$\{([A-Z][A-Z0-9_]*):[-?+]/g)].map((m) => m[1]),
+      ),
+    ].sort();
+    // An empty list would make the assertion below pass while checking nothing.
+    expect(read).toContain("GL_TOKEN");
+    const undocumented = read.filter((name) => !header.includes(name));
+    expect(
+      undocumented,
+      `read by the script but absent from its Env header: ${undocumented.join(", ")}`,
+    ).toEqual([]);
+  });
+});
+
 describe("the runbook sections the alert points at", () => {
   /**
    * An alert whose "what to do next" line cites a section that does not exist is

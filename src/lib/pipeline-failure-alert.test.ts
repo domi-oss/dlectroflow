@@ -25,6 +25,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseJobNeeds } from "./ci-job-deps";
+import { allGuardedFlags } from "./ci-schedule-guards";
 
 const REPO_ROOT = process.cwd();
 const ALERT_SCRIPT = join(REPO_ROOT, "scripts/alert-pipeline-failure.sh");
@@ -1087,6 +1088,31 @@ describe("the alert_pipeline_failure CI job", () => {
     expect(rules.join("\n")).toMatch(
       /if: '\$CI_COMMIT_BRANCH == "main"'\s*\n\s*when: on_failure/,
     );
+  });
+
+  it("names every schedule flag in the blanket guard's comment", () => {
+    // The guard itself is right and needs no change: one
+    // `$CI_PIPELINE_SOURCE == "schedule"` rule suppresses every flagged schedule
+    // by construction, which is precisely why it does not carry one rule per
+    // flag. What rots is the COMMENT's enumeration — #191 added a fifth schedule
+    // and a fourth flag while the list still named three, and a comment that
+    // undercounts is how the next person concludes a flag is not covered and
+    // adds a redundant rule to a job that already suppresses it.
+    //
+    // Derived from the file with the same parser the parity check uses, rather
+    // than a second hard-coded list which would rot in exactly the same way.
+    const flags = allGuardedFlags(CI_YML);
+    // Not a count: a count is the incidental-formatting assertion this parser
+    // exists to replace. Naming the flag #191 added proves the derivation ran.
+    expect(flags).toContain("PROD_STATE_CHECK");
+    const comment = rules
+      .filter((line) => line.trim().startsWith("#"))
+      .join(" ");
+    const unnamed = flags.filter((flag) => !comment.includes(flag));
+    expect(
+      unnamed,
+      `the blanket schedule guard's comment does not name: ${unnamed.join(", ")}`,
+    ).toEqual([]);
   });
 
   it("never runs on a merge-request pipeline", () => {

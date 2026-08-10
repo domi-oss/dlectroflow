@@ -1203,7 +1203,9 @@ alert_pipeline_failure:
     # cannot cause the divergence this job exists to catch, and the weekly digest
     # already counts failed `main` pipelines. One blanket guard rather than one
     # per flag, matching deploy_production — it covers RENOVATE_RUN,
-    # REGISTRY_PRUNE and SECURITY_ASSESSMENT by construction.
+    # REGISTRY_PRUNE, SECURITY_ASSESSMENT and PROD_STATE_CHECK by construction,
+    # and any flag added later, since it never asks which one is set.
+    # `src/lib/pipeline-failure-alert.test.ts` keeps this list from undercounting.
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
       when: never
     # `main` only. A red merge-request pipeline is already in front of the person
