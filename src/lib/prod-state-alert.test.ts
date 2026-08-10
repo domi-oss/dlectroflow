@@ -2060,6 +2060,63 @@ describe("the runbook sections the alert points at", () => {
     }
   });
 
+  /**
+   * A runbook block is read at 3am and **pasted**, not retyped, so one that is
+   * not valid shell is a defect in the recovery rather than a typo in a doc.
+   *
+   * `MIG=<the migration directory name from the alert>` was the one that failed:
+   * an unquoted `<` is a redirect, so the shell reads a placeholder as "run
+   * `migration` with stdin from a file called `the`" and then dies on the
+   * trailing `>`. 23 of the file's 24 blocks already parsed, which is what makes
+   * this cheap to assert rather than a rewrite — and why it is worth keeping: a
+   * placeholder is the natural thing to write and the failure is invisible until
+   * somebody is already having a bad night.
+   *
+   * Explicitly-tagged non-shell blocks are skipped so a future YAML example does
+   * not read as broken bash. Untagged ones are NOT skipped — the defect this
+   * catches was in an untagged block, and skipping them would be the guard
+   * quietly checking nothing.
+   */
+  it("every shell block in the runbook parses, because they get pasted", () => {
+    const NON_SHELL = new Set(["yaml", "yml", "json", "toml", "ts", "js"]);
+    const blocks: Array<{ line: number; body: string }> = [];
+    let open: { line: number; lang: string; body: string[] } | null = null;
+    RUNBOOK.split("\n").forEach((text, index) => {
+      const fence = /^```(\w*)\s*$/.exec(text);
+      if (open === null) {
+        if (fence) open = { line: index + 1, lang: fence[1], body: [] };
+        return;
+      }
+      if (fence && fence[1] === "") {
+        if (!NON_SHELL.has(open.lang)) {
+          blocks.push({ line: open.line, body: open.body.join("\n") });
+        }
+        open = null;
+        return;
+      }
+      open.body.push(text);
+    });
+
+    // An empty list would make every assertion below vacuous, which is the
+    // failure mode a fence-matching regex has. Prove it found the blocks.
+    expect(blocks.length).toBeGreaterThan(10);
+
+    const broken = blocks
+      .map((block) => ({
+        block,
+        result: spawnSync("bash", ["-n"], {
+          input: block.body,
+          encoding: "utf8",
+        }),
+      }))
+      .filter(({ result }) => result.status !== 0)
+      .map(
+        ({ block, result }) =>
+          `docs/deploy-runbook.md:${block.line} — ${result.stderr.trim().split("\n")[0]}`,
+      );
+    expect(broken, broken.join("\n")).toEqual([]);
+  });
+
   it("documents the monitor and the wedged-migration recovery it points at", () => {
     expect(RUNBOOK).toMatch(/^## 18\. .*monitor/im);
     expect(RUNBOOK).toMatch(/^## 19\. .*P3009/im);

@@ -754,7 +754,7 @@ not alerting, it is logging.**
 
 ### What runs, and when
 
-| | |
+| Piece | Where it is defined |
 | --- | --- |
 | Job | `alert_prod_state` in `.gitlab-ci.yml` |
 | Schedule | "Hourly production state check", cron `0 * * * *`, variable `PROD_STATE_CHECK=true` |
@@ -823,7 +823,7 @@ image, and `rollout status` returned success 90 seconds later. So the check does
 
 | `Progressing` condition | Meaning | Alert? |
 | --- | --- | --- |
-| `True` / `ReplicaSetUpdated` | rollout in flight, deadline not blown | no — 🔄, and the next hourly run alerts if it stops progressing |
+| `True` / `ReplicaSetUpdated` | rollout in flight, deadline not blown | no — 🔄, and the next hourly run alerts if it stops progressing. **Except** when `progressDeadlineSeconds` is longer than `REPLICAS_MAX_PROGRESS_DEADLINE` (30 min): staying quiet then depends on a flip that may not come for hours, so that alerts — see below |
 | `False` / `ProgressDeadlineExceeded` | stuck | **yes** |
 | `True` / `NewReplicaSetAvailable` | rollout finished, a replica is still gone | **yes** — the `1/2` that does not move |
 
@@ -915,21 +915,28 @@ than re-verified on every read.
 redundancy — the init containers stop failing the moment P3009 is gone, before any
 merge:
 
+Replace the `MIG` value below with the migration directory name the alert quotes
+— the P3009 message names it, and the quotes matter because the name is pasted
+straight into a command. The rest of the block computes what it needs.
+
 ```
 POD=$(kubectl -n dlectroflow-prod get pods -l app.kubernetes.io/name=dlectroflow \
   --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')
-MIG=<the migration directory name from the alert>
+MIG='20260806142530_add_focus_streak'
 kubectl -n dlectroflow-prod exec "$POD" -- npx prisma migrate resolve --rolled-back "$MIG"
 ```
 
 `migrate resolve` reads the **database ledger, not the migrations directory**, so
-it works from a pod whose image predates the migration — `P3011` means the name is
-absent from the folder, `P3012` that it is present but not marked failed. Both are
-database-state errors, not a reason to rebuild anything.
+it works from a pod whose image predates the migration. Both errors it can answer
+with are statements about that ledger too: `P3011` means the name was never
+applied to the database — in practice a typo in the name copied out of the alert
+— and `P3012` means it is there but not in a failed state, so there is nothing to
+roll back. Neither is a reason to rebuild anything.
 
 **2. Do not trust `prisma migrate status` across versions.** It reports against
-its own image's copy of the migrations, so a pod carrying 36 of `main`'s 38 will
-cheerfully answer "Database schema is up to date!".
+its own image's copy of the migrations, so a pod whose image predates the newest
+migrations will cheerfully answer "Database schema is up to date!" while the ones
+it has never heard of are the problem.
 
 **3. Then fix the migration and roll forward.** The next green pipeline on `main`
 deploys. To go backwards instead, § 14.
