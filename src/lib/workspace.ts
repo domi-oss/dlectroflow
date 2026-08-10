@@ -292,6 +292,15 @@ const SEALED_JAR_MESSAGE = "Cookies can only be modified";
  * reading `err.message` is itself a property access on an object this code did
  * not construct, and an observability step must not become the response —
  * least of all on the path that is refusing a frozen account.
+ *
+ * Which leaves the outer catch holding a second silence, and !305's review
+ * found it: with the classification inside, a throw from `err.message` itself
+ * skips the emission and lands there, so the one input most likely to be a
+ * genuine fault produced no line at all — the exact swallow this function
+ * exists to end, one layer down. Hence {@link emitUnreadableClearFailure},
+ * which says only that something failed and could not be read. That is the
+ * floor: the tag is always emitted, and every attempt to say more than the tag
+ * is made somewhere a throw can be caught above it.
  */
 function reportUnexpectedClearFailure(err: unknown): void {
   try {
@@ -302,12 +311,116 @@ function reportUnexpectedClearFailure(err: unknown): void {
     console.error(
       JSON.stringify({
         tag: "session_clear_failed",
-        message: err instanceof Error ? err.message : String(err),
+        message: describeThrown(err),
+        ts: new Date().toISOString(),
+      }),
+    );
+  } catch {
+    emitUnreadableClearFailure();
+  }
+}
+
+/**
+ * The floor of {@link reportUnexpectedClearFailure}: a line built entirely from
+ * literals, so nothing in it can throw a second time.
+ *
+ * It is deliberately almost empty. Reaching here means the thrown value refused
+ * to be read at all — a `message` getter that throws, or a null-prototype object
+ * that has no `toString` — so there is nothing true left to say beyond the tag.
+ * `session_clear_failed` is the same tag as the informative line rather than a
+ * variant of it, because the grep that matters is "did signing anybody out ever
+ * fail", and a second tag would let one of the two answer it alone. `message`
+ * distinguishes them.
+ *
+ * Still wrapped, because `console.error` is itself replaceable and a test double
+ * or a log shipper can throw from it. An empty catch is the honest end of the
+ * chain here, and only here: at this point there is no surface left to report a
+ * reporting failure to, and the request must still be refused.
+ */
+function emitUnreadableClearFailure(): void {
+  try {
+    console.error(
+      JSON.stringify({
+        tag: "session_clear_failed",
+        message: "unreadable",
         ts: new Date().toISOString(),
       }),
     );
   } catch {
     // Observability must never take the request down with it.
+  }
+}
+
+/**
+ * Render a thrown `unknown` as one line of log text, keeping whatever it
+ * carried (!305 review).
+ *
+ * `String(err)` was the whole of this and rendered every plain object as
+ * `[object Object]` — a `{ code, syscall, path }` reduced to the word "object",
+ * in the line whose only job is to describe an unanticipated failure. The two
+ * inputs it did serve are kept on their own branches:
+ *
+ *  - **`Error`** → `message`, unchanged and unquoted, which is what the sibling
+ *    lines in `google.ts` and `observability.ts` print.
+ *  - **primitives** (`throw "boom"`, a number, `null`, `undefined`, a symbol) →
+ *    `String`, because `JSON.stringify` would wrap a thrown string in a second
+ *    pair of quotes inside a field that is already JSON-encoded.
+ *
+ * Only objects reach the serialiser, and only they ever produced the complaint.
+ *
+ * Not size-capped, deliberately. The value is whatever `jar.delete()` threw
+ * inside Next's cookie adapter — framework internals, not anything a request
+ * body reaches — so a cap would be an unexplainable constant guarding a case
+ * that cannot arrive. Revisit if this helper is ever reused somewhere the
+ * thrown value IS attacker-shaped.
+ *
+ * The last expression can still throw (`String()` on a null-prototype object),
+ * and that is intentional rather than overlooked: catching it here would have to
+ * invent a value, whereas letting it reach the caller's catch spends
+ * {@link emitUnreadableClearFailure}, which is exactly what that line is for. So
+ * the tag survives every input; the detail degrades in one step.
+ */
+function describeThrown(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err !== "object" || err === null) return String(err);
+  return serialiseWithoutCycles(err) ?? String(err);
+}
+
+/**
+ * `JSON.stringify`, minus the two ways it takes a diagnostic line down.
+ *
+ * A cycle is the common one and is not a corner: an error escaping a framework's
+ * internals routinely holds a reference to a request, a socket or a parent
+ * frame, any of which points back. Plain `JSON.stringify` throws on it, so the
+ * naive fix for `[object Object]` would have replaced a useless line with no
+ * line — and, once {@link emitUnreadableClearFailure} exists, with a line
+ * reading "unreadable" about a value that was perfectly readable. Replacing the
+ * back-reference keeps every sibling key that made the object worth logging.
+ *
+ * The `catch` covers the rest, which no replacer can help with: a `BigInt`
+ * value, a getter or a `toJSON` that throws. `undefined` is returned rather than
+ * a placeholder so the caller falls through to `String(err)` and the old
+ * behaviour remains the floor rather than the ceiling.
+ *
+ * Known and accepted imprecision: `seen` is never unwound, so the SAME object
+ * appearing twice in sibling positions is labelled `[circular]` on its second
+ * appearance even though it is a repeat rather than a cycle. Tracking the
+ * ancestor path instead would fix it and costs an allocation per node; for a
+ * line that only ever prints when something already went wrong, a repeat
+ * rendered as `[circular]` loses nothing an operator was going to use.
+ */
+function serialiseWithoutCycles(value: object): string | undefined {
+  const seen = new WeakSet<object>();
+  try {
+    return JSON.stringify(value, (_key, nested: unknown) => {
+      if (typeof nested === "object" && nested !== null) {
+        if (seen.has(nested)) return "[circular]";
+        seen.add(nested);
+      }
+      return nested;
+    });
+  } catch {
+    return undefined;
   }
 }
 

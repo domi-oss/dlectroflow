@@ -366,6 +366,33 @@ describe("currentWorkspaceId", () => {
       });
       expect(lines).toHaveLength(1);
       expect(JSON.parse(lines[0]).tag).toBe("session_clear_failed");
+      // And it carries WHAT was thrown (!305 review). `String({…})` renders
+      // every plain object as `[object Object]`, so the one line that exists to
+      // surface an unanticipated failure was naming a type and discarding the
+      // only part an operator can act on.
+      expect(JSON.parse(lines[0]).message).toContain("ERR_UNKNOWN");
+      expect(refusal).toBeInstanceOf(RevokedAccountError);
+    });
+
+    it("keeps the diagnostics of a thrown object that will not serialise whole", async () => {
+      // The obvious fix for the line above — `JSON.stringify(err)` — throws on a
+      // circular reference, and error objects from a framework's internals
+      // routinely hold one (a request, a socket, a parent frame). So the
+      // serialisation is guarded AND the guard keeps what it can reach, rather
+      // than falling back to the `[object Object]` it was introduced to replace.
+      const circular: { code: string; self?: unknown } = {
+        code: "ERR_CIRCULAR",
+      };
+      circular.self = circular;
+      const { refusal, lines } = await frozenWithFailingDelete(circular);
+      expect(lines).toHaveLength(1);
+      const parsed = JSON.parse(lines[0]);
+      expect(parsed.tag).toBe("session_clear_failed");
+      expect(parsed.message).toContain("ERR_CIRCULAR");
+      // Handled HERE, not by escaping into the last-resort line below: reaching
+      // that would mean a routine shape had spent the one fallback reserved for
+      // a value nothing can read at all.
+      expect(parsed.message).not.toBe("unreadable");
       expect(refusal).toBeInstanceOf(RevokedAccountError);
     });
 
@@ -380,8 +407,19 @@ describe("currentWorkspaceId", () => {
           throw new Error("message is not readable");
         },
       });
-      const { refusal } = await frozenWithFailingDelete(hostile);
+      const { refusal, lines } = await frozenWithFailingDelete(hostile);
       expect(refusal).toBeInstanceOf(RevokedAccountError);
+      // And it still says SOMETHING (!305 review). Reading `err.message` is the
+      // first thing this path does, so a throw from it jumped straight to the
+      // outer catch and emitted nothing at all — reinstating the silent swallow
+      // one layer down, in the function written to end it, for the single input
+      // most likely to be a real fault rather than the sealed jar.
+      expect(lines).toHaveLength(1);
+      expect(JSON.parse(lines[0])).toMatchObject({
+        tag: "session_clear_failed",
+        message: "unreadable",
+      });
+      expect(JSON.parse(lines[0]).ts).toEqual(expect.any(String));
     });
   });
 
