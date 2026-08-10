@@ -2,6 +2,15 @@ import { describe, it, expect } from "vitest";
 import { Prisma } from "@prisma/client";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import {
+  SESSION_PRIMITIVES,
+  TOKEN_LEVEL_RESOLVERS,
+  WORKSPACE_MODULE,
+  findExportedFunctionNames,
+  findSessionPrimitiveBindings,
+  findSessionResolvers,
+  findTokenResolverEscapes,
+} from "@/lib/workspace-resolver-hygiene";
 
 /**
  * #35 Phase A — the workspace-scoping harness.
@@ -802,5 +811,322 @@ describe("workspace-scoping harness", () => {
     // The control: the file really does authorise, so an absent `prisma.` is
     // "it delegates" rather than "it never checks anything".
     expect(code).toMatch(/resolveFeed\(/);
+  });
+
+  // ── #220 — no status-blind path back to a workspace id ────────────────────
+  //
+  // Everything above polices WHICH ROWS a query may reach, given a workspace.
+  // #220 was a level below that: the workspace id itself was handed out without
+  // asking whether the account behind the session was still allowed to have one.
+  // `resolveWorkspace()` verified the signed token and stopped, and because
+  // effectively every write resolves through it, a frozen account kept writing
+  // — with every query in the tree perfectly workspace-scoped the whole time.
+  // The scoping rules could not have caught it and still cannot; this block is
+  // what does.
+  //
+  // Two rules, and they close the two ways it comes back:
+  //
+  //  1. Every resolver INSIDE `workspace.ts` that turns a session into a
+  //     workspace id checks `UserStatus`, or is named below with a reason.
+  //     A `currentWorkspaceIdFast()` added next year fails this on the day it
+  //     is written.
+  //  2. No module OUTSIDE `workspace.ts` gets hold of a token-level resolver at
+  //     all. Rule 1 is worth nothing if an action file can reach past the
+  //     helper that does the checking and call `resolveWorkspaceId()` itself.
+  //
+  // BOTH rules shipped as a substring search and BOTH were defeated by the same
+  // shape — a resolution the fixed string could not predict — which is why they
+  // now share one parser, `@/lib/workspace-resolver-hygiene`.
+  //
+  // Rule 2 went first (`!305` round 1): a rename on import spells the call site
+  // something no fixed string predicts, so the rule reported a clean zero for
+  // the regression it exists to catch. It asks about the REFERENCE now, which is
+  // named at the import whatever the local alias becomes.
+  //
+  // Rule 1 had the identical hole one level in (`!305` round 2). Its set of
+  // "session resolvers" was every exported function whose text contained
+  // `resolveWorkspace(` or `resolveWorkspaceId(` — so a function that verified
+  // the token ITSELF and returned `payload.wsId` was not a session resolver at
+  // all, and could hand out a workspace id with no status check while this block
+  // reported a clean zero. That was not hypothetical: `currentUser()` is exactly
+  // that shape, and was invisible here while checking the status correctly, so
+  // nothing would have failed if the check were deleted from it. The rule now
+  // asks about the PROPERTY — reaches a session primitive, or surfaces a
+  // workspace id it was not handed — and both fixtures below prove it bites.
+
+  /**
+   * Session→workspace resolvers allowed to skip the status check, each with its
+   * reason. Same shape as REVIEWED_UNSCOPED above: adding an entry is a security
+   * decision and the review conversation is the point.
+   */
+  const STATUS_BLIND_RESOLVERS: Record<string, string> = {
+    resolveWorkspace:
+      "the token-level primitive itself — it performs no database read at all, which is what lets hasSession() stay free; rule 2 below is what keeps it unreachable from outside this module",
+    resolveWorkspaceId:
+      "a one-line unwrap of resolveWorkspace, inheriting both its reason and rule 2's confinement",
+    hasSession:
+      "#61 — answers 'is this a real caller' with no database round trip, for the lo-fi catalogue and audio proxy only. Those read no account data and write nothing, and checking status would put a query on every byte-range request of every seek",
+  };
+
+  /**
+   * Exported functions that turn a session into a workspace id.
+   *
+   * Two questions, unioned so the rule fails closed — see
+   * `@/lib/workspace-resolver-hygiene`, where every case it accepts and refuses
+   * is pinned against synthetic input:
+   *
+   *  - it CALLS a session primitive (`verifySession` and the two token-level
+   *    resolvers), through an import alias or a namespace, or
+   *  - it SURFACES a workspace id it was not handed — the payload's `wsId`, a
+   *    `workspaceId` that is not one of its own parameters, or a returned `id`
+   *    read off something other than a parameter.
+   *
+   * Neither half is enough on its own, and the union is the whole point. The
+   * first is walked around by inventing a third primitive; the second cannot see
+   * `hasSession()`, which reads the session, returns a boolean, and still needs
+   * an argued position in STATUS_BLIND_RESOLVERS because what a frozen account
+   * gets by passing it is a real (small) exposure. "Returns no id" is therefore
+   * not a proof of harmlessness and does not buy silence here.
+   */
+  function sessionResolvers(src: string) {
+    return findSessionResolvers(src, WORKSPACE_MODULE);
+  }
+
+  /**
+   * Resolvers that turn a session into a workspace id without consulting
+   * `UserStatus`.
+   *
+   * "Consults the status" is spelled as a reference to the `UserStatus` constant
+   * rather than to the word `status`: the constant is the single source of truth
+   * for the allowed values (`src/lib/constants.ts`), so a check written any other
+   * way — a bare `"active"` string, a `!== "revoked"` — is a finding in its own
+   * right and should fail here too. It has to be a reference the runtime makes,
+   * which is why the parser counts neither a mention in prose nor a type
+   * annotation: #220's whole shape was a doc comment promising a check the code
+   * did not make.
+   */
+  function statusBlindResolvers(src: string): string[] {
+    return sessionResolvers(src)
+      .filter((fn) => !fn.checksUserStatus)
+      .map((fn) => fn.name);
+  }
+
+  it("the workspace resolver lives where this test thinks it does", () => {
+    // Without this, renaming the module turns every rule below into a test that
+    // reads no file and passes forever — the same guard the People block uses.
+    expect(
+      () => readFileSync(WORKSPACE_MODULE, "utf8"),
+      `${WORKSPACE_MODULE} is missing`,
+    ).not.toThrow();
+  });
+
+  it("still binds every session primitive rule 1 watches", () => {
+    // The other anti-vacuous half, and the one the pinned set below cannot
+    // supply. Every question rule 1 asks is asked about a NAME, so a rename in
+    // `src/lib/auth/session.ts` would quietly shrink the set rather than fail —
+    // and a resolver dropping out of a guard looks exactly like a guard passing.
+    expect(
+      findSessionPrimitiveBindings(
+        readFileSync(WORKSPACE_MODULE, "utf8"),
+        WORKSPACE_MODULE,
+      ).sort(),
+    ).toEqual([...SESSION_PRIMITIVES].sort());
+  });
+
+  it("finds the session resolvers at all", () => {
+    // The anti-vacuous half. If the parser stopped matching — a reformat, a
+    // rename, arrow functions — every rule below would report a clean zero, and
+    // an unproven zero is the failure mode this whole file exists to avoid.
+    const resolvers = sessionResolvers(readFileSync(WORKSPACE_MODULE, "utf8"));
+    // Pinned as an exact set, not a `toContain`: a NEW resolver must fail this
+    // and force a decision — checked, or exempted with a reason — instead of
+    // arriving unpoliced. `resolveWorkspace` is in the list because it calls
+    // `verifySession`, which is the right answer: it is a session resolver, and
+    // it is exempted below with the reason it performs no database read.
+    //
+    // `currentUser` is here because of `!305` round 2, and it is the whole
+    // finding: it verifies the token itself and returns `workspaceId: p.wsId`
+    // without ever touching `resolveWorkspace`, so the substring version of this
+    // rule could not see it. It checks the status correctly and always has —
+    // being INVISIBLE was the defect, because nothing would have failed on the
+    // day somebody deleted that check.
+    expect(resolvers.map((fn) => fn.name).sort()).toEqual([
+      "currentUser",
+      "currentWorkspaceId",
+      "hasSession",
+      "resolveWorkspace",
+      "resolveWorkspaceId",
+    ]);
+  });
+
+  it("rule 1 bites: the direct-token resolver that defeated its first version", () => {
+    // The `!305` round-2 finding as a fixture, and the proof that the rule below
+    // can fail. This function is a complete session→workspace resolver with no
+    // status check that mentions neither watched name, so the substring version
+    // of rule 1 reported a clean zero for it — verified against the real harness
+    // before the parser was written.
+    const bad = `
+      export async function currentWorkspaceIdFast(): Promise<string> {
+        const jar = await cookies();
+        const p = await verifySession(jar.get(OWNER_COOKIE)?.value ?? "", secret);
+        if (p?.kind !== "user") throw new MissingWorkspaceError();
+        return p.wsId;
+      }
+    `;
+    expect(statusBlindResolvers(bad)).toEqual(["currentWorkspaceIdFast"]);
+  });
+
+  it("rule 1 does not fire on a function merely HANDED a workspace id", () => {
+    // The control. Most of `src/lib` takes a `workspaceId` and queries with it,
+    // and a guard that flags the correct shape is one that gets relaxed rather
+    // than fixed. The rule below reporting zero is only meaningful because this
+    // shape is silent for a reason and not because nothing matches.
+    const good = `
+      export async function listTasks(workspaceId: string) {
+        return prisma.task.findMany({ where: { workspaceId } });
+      }
+      export function idOf(row: { id: string }): string {
+        return row.id;
+      }
+    `;
+    expect(sessionResolvers(good)).toEqual([]);
+  });
+
+  it("flags a resolver that hands out a workspace id without checking status", () => {
+    // The fixture is the proof this rule can fail, and it is #220 itself: a
+    // helper that verifies the token and stops. It passed review once.
+    const bad = `
+      export async function currentWorkspaceIdFast(): Promise<string> {
+        const ws = await resolveWorkspace({ owner: token });
+        return ws.id;
+      }
+    `;
+    expect(statusBlindResolvers(bad)).toEqual(["currentWorkspaceIdFast"]);
+  });
+
+  it("accepts a resolver that does check status", () => {
+    const good = `
+      export async function currentWorkspaceId(): Promise<string> {
+        const ws = await resolveWorkspace({ owner: token });
+        const { ownerStatus } = await touchWorkspace(ws.id, ws.kind);
+        if (ws.kind === WorkspaceKind.User && ownerStatus !== UserStatus.Active) {
+          throw new RevokedAccountError();
+        }
+        return ws.id;
+      }
+    `;
+    expect(statusBlindResolvers(good)).toEqual([]);
+  });
+
+  it("is not satisfied by a comment that merely discusses the status check", () => {
+    // A rule that cannot tell code from prose is a rule any doc comment can
+    // switch off — and #220's whole shape was a doc comment promising a check
+    // the code did not make.
+    const bad = `
+      // UserStatus is checked by currentUser(), so this does not need to.
+      export async function currentWorkspaceIdFast(): Promise<string> {
+        return (await resolveWorkspaceId({ owner: token }));
+      }
+    `;
+    expect(statusBlindResolvers(bad)).toEqual(["currentWorkspaceIdFast"]);
+  });
+
+  it("every STATUS_BLIND_RESOLVERS entry names a real export and states a reason", () => {
+    // An entry for a function that no longer exists is a stale exemption that
+    // reads like considered coverage.
+    const names = findExportedFunctionNames(
+      readFileSync(WORKSPACE_MODULE, "utf8"),
+      WORKSPACE_MODULE,
+    );
+    for (const [fn, reason] of Object.entries(STATUS_BLIND_RESOLVERS)) {
+      expect(names, `${fn} is not exported from ${WORKSPACE_MODULE}`).toContain(
+        fn,
+      );
+      expect(reason.length).toBeGreaterThan(40);
+    }
+  });
+
+  it("every session→workspace resolver checks status, or is named with a reason", () => {
+    const offenders = statusBlindResolvers(
+      readFileSync(WORKSPACE_MODULE, "utf8"),
+    ).filter((fn) => !STATUS_BLIND_RESOLVERS[fn]);
+    // A resolver that hands out a workspace id without asking whether the
+    // account may still act is #220 exactly: every query downstream of it is
+    // perfectly scoped, and all of them are writing for a frozen account.
+    expect(offenders).toEqual([]);
+  });
+
+  it("rule 2's parser tells prose from code, on a file that really holds both", () => {
+    // The control for the rule below. `src/app/actions/account.ts` names
+    // `resolveWorkspace()` in prose, to explain why it does NOT call it — so a
+    // rule that could not tell code from prose would flag it, and the rule below
+    // passing is only meaningful because that string is really there.
+    //
+    // Asserted against the real file rather than a fixture: if the comment is
+    // ever reworded away this fails and says so, instead of the control quietly
+    // becoming a test of nothing. This repo has twice shipped a tool that read a
+    // comment as code, which is most of why rule 2 parses now.
+    const account = readFileSync("src/app/actions/account.ts", "utf8");
+    expect(account).toContain("resolveWorkspace()");
+    expect(
+      findTokenResolverEscapes(account, "src/app/actions/account.ts"),
+    ).toEqual([]);
+  });
+
+  it("rule 2 bites: the rename-on-import that defeated its first version", () => {
+    // The anti-vacuous half of the rule below, and the `!305` review finding as
+    // a fixture. `getWsId(` matches neither resolver's name, so the substring
+    // rule this replaced reported a clean zero for a call reaching straight past
+    // `currentWorkspaceId()`. A zero from the real tree only means something
+    // alongside this.
+    const escapes = findTokenResolverEscapes(
+      `import { resolveWorkspaceId as getWsId } from "@/lib/workspace";
+
+       export async function ownerWorkspace(owner: string) {
+         return getWsId({ owner });
+       }`,
+      "src/app/actions/synthetic.ts",
+    );
+    expect(escapes.map((e) => [e.resolver, e.local])).toEqual([
+      ["resolveWorkspaceId", "getWsId"],
+    ]);
+  });
+
+  it("no module outside workspace.ts holds a token-level resolver", () => {
+    // Rule 1 is worth nothing on its own: an action file that reaches the
+    // token-level resolvers directly gets past the helper doing the checking and
+    // is back to #220 with none of the resolvers in workspace.ts changed.
+    //
+    // The question is asked of the REFERENCE rather than of the call. The
+    // exported name is written at the import whatever the local alias becomes,
+    // and outside that module there is no legitimate use for the reference at
+    // all — so `withWorkspace(resolveWorkspaceId)`, which never writes a call,
+    // counts too. Every case the parser accepts and refuses is pinned in
+    // `src/lib/workspace-resolver-hygiene.test.ts`.
+    const offenders: string[] = [];
+    for (const file of sourceFiles()) {
+      if (file === WORKSPACE_MODULE) continue;
+      for (const escape of findTokenResolverEscapes(
+        readFileSync(file, "utf8"),
+        file,
+      )) {
+        offenders.push(`${file}:${escape.line} — ${escape.reason}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("everything rule 2 confines, rule 1 exempted with a reason", () => {
+    // The two rules share TOKEN_LEVEL_RESOLVERS, so they cannot drift apart on
+    // the NAME — but they can on the reason. Each of those resolvers skips the
+    // status check, and is only safe doing so because rule 2 keeps it out of
+    // reach; one of them arriving without an entry above would be a confinement
+    // nobody argued for, which is the shape #220 shipped in.
+    for (const resolver of TOKEN_LEVEL_RESOLVERS) {
+      expect(
+        STATUS_BLIND_RESOLVERS[resolver],
+        `${resolver} is confined by rule 2 but states no reason for skipping the status check`,
+      ).toBeTruthy();
+    }
   });
 });
