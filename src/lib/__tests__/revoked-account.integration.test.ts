@@ -86,11 +86,24 @@ function itemCount(workspaceId: string) {
   return prisma.brainDumpItem.count({ where: { workspaceId } });
 }
 
-/** Put the account back to active, undoing whatever the previous case did. */
-function reactivate() {
-  return prisma.user.update({
-    where: { id: USER_ID },
-    data: { status: UserStatus.Active, revokedAt: null, purgeAfter: null },
+/**
+ * The state every case is entitled to find: the account exists, is active, and
+ * owns an empty workspace.
+ *
+ * Built fresh rather than repaired, because two of the cases below do not leave
+ * an account to repair — the deleted-outright one removes the row and lets the
+ * cascade take the workspace with it.
+ */
+async function createFixture() {
+  await prisma.user.create({
+    data: {
+      id: USER_ID,
+      provider: "gitlab",
+      providerSub: PROVIDER_SUB,
+      handle: "frozen-person",
+      status: UserStatus.Active,
+      workspace: { create: { id: WS_ID, kind: WorkspaceKind.User } },
+    },
   });
 }
 
@@ -100,22 +113,12 @@ describe("#220 a revoked account with a valid cookie (real Postgres)", () => {
 
   beforeAll(async () => {
     vi.stubEnv("AUTH_SESSION_SECRET", SECRET);
-    await wipe();
-    await prisma.user.create({
-      data: {
-        id: USER_ID,
-        provider: "gitlab",
-        providerSub: PROVIDER_SUB,
-        handle: "frozen-person",
-        status: UserStatus.Active,
-        workspace: { create: { id: WS_ID, kind: WorkspaceKind.User } },
-      },
-    });
-    // Signed ONCE, while the account is still active, and reused by every case
-    // below. That is the whole scenario: freezing does not and cannot reach into
+    // Signed ONCE, and reused by every case below rather than re-signed per
+    // test. That is the whole scenario: freezing does not and cannot reach into
     // a cookie the browser already holds, so the token stays cryptographically
-    // valid for its full 30 days. Re-signing per test would quietly test
-    // something else.
+    // valid for its full 30 days. It survives `beforeEach` rebuilding the
+    // account because a session token carries no status — only the ids, and
+    // those are stable.
     ownerToken = await signUserSession(
       { kind: "user", userId: USER_ID, wsId: WS_ID },
       SECRET,
@@ -129,25 +132,39 @@ describe("#220 a revoked account with a valid cookie (real Postgres)", () => {
     await prisma.$disconnect();
   });
 
+  /**
+   * A full teardown and rebuild per case, not a per-case repair (!305 review).
+   *
+   * Every case here mutates the one shared account — that IS the subject — so
+   * "who puts it back" has to be answered once, here, rather than by each case
+   * remembering. It was previously answered by each case calling `reactivate()`
+   * on the way IN, which reads as isolation but is not: a case's precondition
+   * was still whatever its predecessor happened to leave, and two of them left
+   * something. The guest case revoked the account and never restored it, and
+   * the deleted-outright case rebuilt a row without its `handle`. Both were
+   * reproduced by asserting the fixture immediately after them, which is what
+   * the last case in this file now does permanently.
+   *
+   * Rebuilding costs four statements against a local database and buys an
+   * ordering the suite does not depend on — so `--sequence.shuffle`, a split
+   * into concurrent blocks, or a case inserted in the middle next year are all
+   * non-events instead of silent corruption.
+   */
   beforeEach(async () => {
     cookiesMock.mockResolvedValue(jarWith(OWNER_COOKIE, ownerToken));
-    await prisma.brainDumpItem.deleteMany({
-      where: { workspaceId: { in: [WS_ID, GUEST_WS_ID] } },
-    });
+    await wipe();
+    await createFixture();
   });
 
   // The control. Without it, every refusal below could just as easily mean the
   // fixture never worked — the "a zero nobody proved" failure the harnesses in
   // this repo guard against everywhere else.
   it("writes normally while the account is active", async () => {
-    await reactivate();
     await createBrainDumpItem("something an active account may capture");
     expect(await itemCount(WS_ID)).toBe(1);
   });
 
   it("refuses the write once the account is frozen, on the very next request", async () => {
-    await reactivate();
-
     // The real thing, not a hand-written UPDATE: this is what `revokePerson`
     // calls, so the promise under test is the one `freezeAccount`'s own doc
     // comment makes.
@@ -160,7 +177,6 @@ describe("#220 a revoked account with a valid cookie (real Postgres)", () => {
   });
 
   it("signs the frozen account out rather than only refusing it", async () => {
-    await reactivate();
     const jar = jarWith(OWNER_COOKIE, ownerToken);
     cookiesMock.mockResolvedValue(jar);
     await freezeAccount(USER_ID);
@@ -176,7 +192,6 @@ describe("#220 a revoked account with a valid cookie (real Postgres)", () => {
     // Next 16 seals the cookie jar during Server Component rendering, so
     // `.delete` throws. Signing somebody out is best-effort; refusing them is
     // not — the throw must survive the attempt failing.
-    await reactivate();
     cookiesMock.mockResolvedValue({
       get: (name: string) =>
         name === OWNER_COOKIE ? { value: ownerToken } : undefined,
@@ -197,6 +212,9 @@ describe("#220 a revoked account with a valid cookie (real Postgres)", () => {
   // #220's second requirement: the guest and header branches have no `User` row
   // to have a status, and must not have been collateral damage.
   it("leaves a guest sandbox writing exactly as before", async () => {
+    // Revoked as this case's OWN precondition — a frozen account existing in
+    // the database at the same time is the situation being ruled out, so it has
+    // to be set here rather than inherited. `beforeEach` is what puts it back.
     await prisma.user.update({
       where: { id: USER_ID },
       data: { status: UserStatus.Revoked },
@@ -220,18 +238,29 @@ describe("#220 a revoked account with a valid cookie (real Postgres)", () => {
       RevokedAccountError,
     );
     expect(await itemCount(WS_ID)).toBe(0);
+  });
 
-    // Rebuild the fixture for whatever runs next: the cascade took the workspace
-    // with the user, and `afterAll`'s wipe expects to find both.
-    await prisma.workspace.deleteMany({ where: { id: WS_ID } });
-    await prisma.user.create({
-      data: {
-        id: USER_ID,
-        provider: "gitlab",
-        providerSub: PROVIDER_SUB,
-        status: UserStatus.Active,
-        workspace: { create: { id: WS_ID, kind: WorkspaceKind.User } },
-      },
+  /**
+   * The canary for `beforeEach` (!305 review).
+   *
+   * Declared last so that in declaration order it runs after both cases that
+   * mutate the shared account, and under `--sequence.shuffle` it lands after
+   * one of them about half the time. Against the version of this file that
+   * repaired the fixture per case instead of rebuilding it, exactly these two
+   * assertions failed: `'revoked'` where `'active'` was expected after the
+   * guest case, and `null` where `'frozen-person'` was expected after the
+   * deleted-outright case rebuilt a row without its handle.
+   *
+   * So it is a check with a demonstrated failing mode rather than a restatement
+   * of `beforeEach` — deleting the rebuild brings both failures straight back.
+   */
+  it("is handed the same fixture as every other case, whatever ran before it", async () => {
+    const owner = await prisma.user.findUnique({
+      where: { id: USER_ID },
+      select: { status: true, handle: true },
     });
+    expect(owner?.status).toBe(UserStatus.Active);
+    expect(owner?.handle).toBe("frozen-person");
+    expect(await itemCount(WS_ID)).toBe(0);
   });
 });
