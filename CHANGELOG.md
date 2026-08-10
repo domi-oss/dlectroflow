@@ -441,6 +441,26 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **Retrying a failed "Mark not done" no longer loses your place (#215).** When a
+  step's undo failed, the row showed the reason with a **Try again** beside it —
+  and pressing that with the keyboard dropped focus to the top of the page. The
+  notice is withdrawn while the retry runs (a message saying the step is still
+  done should not stay up while the attempt that may fix it is in flight), and it
+  took the button being pressed with it. Focus now moves to the row's own **Mark
+  not done** control: the same action, in a place that does not disappear, and one
+  that says out loud that the retry is running. The first failure was never
+  affected — that press leaves you on a control that stays put.
+
+- **"Trying again…" on the focus timer's error notice now reliably reaches a
+  screen reader (#218), and "Saving…" on the inbox's capture notice with it.**
+  Both sat inside the notice's own announcement, and a polite region nested
+  inside an urgent one is read twice by some screen readers and not at all by
+  others — so the one message telling you the app had heard you was the one that
+  might go missing. Each now has its own quiet announcement, kept separate from
+  the notice rather than tucked inside it, and it is also part of the description
+  of the **Try again** button you are still holding for anyone arriving at that
+  button mid-attempt. It goes away again the moment nothing is in flight.
+  Nothing changes on screen.
 - **Ticking off a multi-step to-do from the inbox left every step open in Google
   Tasks (#209).** Scheduling a to-do that has been broken down gives each step
   its own Google Task. Completing that to-do from the inbox — the row's Complete
