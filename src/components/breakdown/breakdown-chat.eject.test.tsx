@@ -31,12 +31,17 @@
  * through: identity decided which row a notice BELONGS to, and one branch of the
  * updater was still writing to that single slot without asking.
  *
- * The last two blocks are the round after that, and they are the same shape once
+ * The next two blocks are the round after that, and they are the same shape once
  * more — a single slot shared by rows that can be in flight at the same time.
  * The notice's Retry is one button, so the ref pointing at it can be another
  * row's by the time an earlier retry lands; and "Looks right" was not asking
  * about in-flight ejects at all, so a row could be saved into the plan while its
  * own words were on their way to the inbox.
+ *
+ * The last block closes the reverse of that same race. Every gate above points
+ * one way — a confirm and a re-plan both wait for an outstanding eject — and
+ * nothing was asking the question backwards, so an eject started while the plan
+ * was already out reproduced the identical duplicate from the other end.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
@@ -144,6 +149,31 @@ function deferWrite() {
   };
 }
 
+/**
+ * The same trick for the plan write: a `confirmBreakdown` that stays in flight.
+ *
+ * The reverse-direction specs need the confirm to still be OUTSTANDING when the
+ * eject starts, which the default resolved mock cannot express — by the time it
+ * has settled the editor has been replaced by the saved view and there is no row
+ * control left to press.
+ */
+function deferConfirm() {
+  let settle!: () => void;
+  vi.mocked(confirmBreakdown).mockReturnValueOnce(
+    new Promise<void>((resolve) => {
+      settle = resolve;
+    }),
+  );
+  return {
+    settle: async () => {
+      await act(async () => {
+        settle();
+        await Promise.resolve();
+      });
+    },
+  };
+}
+
 /** The first row's eject control, whichever state it is in. */
 const ejectButton = (n = 0) =>
   screen.getAllByTitle(
@@ -213,6 +243,53 @@ function replanEchoingSnapshot() {
       },
     });
   });
+}
+
+/**
+ * `replanEchoingSnapshot`, held open until the spec releases it.
+ *
+ * Same echo — the answer is the snapshot the model was shown, plus one row — but
+ * the stream does not produce it until asked. The reverse direction is about
+ * what a press can do WHILE the re-plan is outstanding, and the resolved version
+ * cannot express that: by the time its answer has been read, the gate under test
+ * has already lifted.
+ */
+function heldReplanEchoingSnapshot() {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const encoder = new TextEncoder();
+  const fetchMock = vi.fn(async (_url: string, init: { body: string }) => {
+    const sent = JSON.parse(init.body) as { currentProposal: Proposal | null };
+    const answer: StreamEvent = {
+      type: "steps",
+      data: {
+        parentEmoji: sent.currentProposal?.parentEmoji ?? "🗂️",
+        steps: [
+          ...(sent.currentProposal?.steps ?? []),
+          { text: "Third step", estMinutes: 5, subtaskEmoji: "🧊" },
+        ],
+      },
+    };
+    let delivered = false;
+    return {
+      body: {
+        getReader: () => ({
+          read: async () => {
+            if (delivered) return { done: true, value: undefined };
+            await held;
+            delivered = true;
+            return {
+              done: false,
+              value: encoder.encode(`${JSON.stringify(answer)}\n`),
+            };
+          },
+        }),
+      },
+    };
+  });
+  return { fetchMock, release: () => release() };
 }
 
 /** What the last re-plan told the model the plan currently is. */
@@ -1416,5 +1493,185 @@ describe("BreakdownChat — re-planning mid-eject (!304 review)", () => {
 
     await write.settle();
     await waitFor(() => expect(stepTexts()).toEqual(["Second step"]));
+  });
+});
+
+/**
+ * The same race, run backwards (!304 review, round seven).
+ *
+ * The blocks above close it in one direction only: `confirm` and `request` both
+ * ask whether an eject is outstanding, and neither an eject nor the notice's
+ * Retry was asking whether one of THEM was. The duplicate is the same one, from
+ * the other end, and nothing on screen prevented it — `busy` disables the
+ * re-plan controls, "Add a step" and "Remove step", and reaches neither the
+ * row's own "Back to inbox" nor the Retry, so both were pressable throughout.
+ *
+ *   • confirm first — `confirmBreakdown` was handed a snapshot with the row in
+ *     it before the press, so the eject sends the identical words to the inbox
+ *     while the plan is being written with them. Then the saved view replaces
+ *     the editor, so the removal and every notice land on a list nobody is
+ *     looking at: nothing is said.
+ *   • re-plan first — the row is in the snapshot the model was shown, so it
+ *     comes back in the answer under a fresh key moments after the eject took it
+ *     away. Silent by construction, because a successful eject is silent by
+ *     design; the two copies only ever meet in the user's inbox, later.
+ *
+ * These drive `inBothPlaces()` from the other side, and pin the mirror of what
+ * the forward direction already has: a wait rather than a refusal, on the ref
+ * that decides with the state that paints, said out loud through `aria-disabled`
+ * + `aria-describedby` so the control stays focusable and explains itself.
+ */
+describe("BreakdownChat — ejecting mid-confirm and mid-re-plan (!304 review)", () => {
+  it("never puts the same step in the plan and the inbox when the confirm went first", async () => {
+    const save = deferConfirm();
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.click(confirmButton());
+    // The plan is already on its way out with this row in it.
+    expect(confirmBreakdown).toHaveBeenCalledTimes(1);
+
+    await user.click(ejectButton(0));
+    expect(createBrainDumpItem).not.toHaveBeenCalled();
+
+    await save.settle();
+    expect(inBothPlaces()).toEqual([]);
+  });
+
+  it("never lets an eject during a re-plan come back in the answer", async () => {
+    const { fetchMock, release } = heldReplanEchoingSnapshot();
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.click(moreSteps());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // The row is deliberately still in the snapshot the model was shown, so
+    // sending it to the inbox now is sending it to a place the answer is about
+    // to put it back from.
+    await user.click(ejectButton(0));
+    expect(createBrainDumpItem).not.toHaveBeenCalled();
+
+    release();
+    await waitFor(() => expect(stepTexts()).toContain("Third step"));
+    // The answer carries the row, as it must — nothing was ejected.
+    expect(stepTexts()).toEqual(["First step", "Second step", "Third step"]);
+
+    await waitFor(() => expect(confirmButton()).toBeEnabled());
+    await user.click(confirmButton());
+    await waitFor(() => expect(confirmBreakdown).toHaveBeenCalledTimes(1));
+    expect(inBothPlaces()).toEqual([]);
+  });
+
+  it("holds the notice's Retry on the same fact", async () => {
+    // The second route into `ejectStep`, and the one a guard written on the row
+    // control alone would miss. A failed eject leaves the row in the plan and
+    // drains the in-flight set, so the re-plan below is allowed to start — and
+    // its snapshot carries that row, which is exactly what makes resending the
+    // words mid-stream a duplicate.
+    const write = deferWrite();
+    const { fetchMock, release } = heldReplanEchoingSnapshot();
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.click(ejectButton(0));
+    await write.fail(new Error("offline"));
+    await screen.findByRole("alert");
+
+    await user.click(moreSteps());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const retry = screen.getByRole("button", { name: /try again/i });
+    expect(retry).toHaveAttribute("aria-disabled", "true");
+    expect(retry).not.toBeDisabled();
+    // Multi-id here: the notice's own reason stays reachable alongside the hold.
+    const described = (retry.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
+    expect(described).toMatch(/couldn't send that to your inbox/i);
+    expect(described).toMatch(/waits for that to finish/i);
+
+    await user.click(retry);
+    expect(createBrainDumpItem).toHaveBeenCalledTimes(1);
+
+    release();
+    await waitFor(() => expect(stepTexts()).toContain("Third step"));
+    await waitFor(() => expect(confirmButton()).toBeEnabled());
+    await user.click(confirmButton());
+    await waitFor(() => expect(confirmBreakdown).toHaveBeenCalledTimes(1));
+    expect(inBothPlaces()).toEqual([]);
+  });
+
+  it("says why the row's own control is held, and keeps it focusable (WCAG 2.4.3)", async () => {
+    // Same call as the forward direction (and the same reason): `aria-disabled`,
+    // never `disabled`, so a keyboard user can land on the control and be told
+    // why instead of finding a greyed button with nothing to ask.
+    const { fetchMock, release } = heldReplanEchoingSnapshot();
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.click(moreSteps());
+
+    for (const control of [ejectButton(0), ejectButton(1)]) {
+      expect(control).toHaveAttribute("aria-disabled", "true");
+      expect(control).not.toBeDisabled();
+      expect(heldReason(control)).toMatch(/waits for that to finish/i);
+    }
+
+    release();
+    await waitFor(() => expect(stepTexts()).toContain("Third step"));
+    expect(ejectButton(0)).not.toHaveAttribute("aria-disabled", "true");
+    expect(ejectButton(0).getAttribute("aria-describedby")).toBeNull();
+  });
+
+  it("holds a blank row's eject too, rather than saying held and acting", async () => {
+    // The one branch that never reaches `ejectStep`'s door: a blank row has
+    // nothing to send, so "Back to inbox" just removes it, like ✕. Removing it
+    // is harmless in itself — the answer replaces the whole list anyway, and a
+    // blank row is never persisted — but a control painting `aria-disabled` and
+    // then acting is the announcement being wrong about what it announced.
+    const { fetchMock, release } = heldReplanEchoingSnapshot();
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.click(screen.getByRole("button", { name: "Add a step" }));
+    expect(stepTexts()).toEqual(["First step", "Second step", ""]);
+
+    await user.click(moreSteps());
+    await user.click(ejectButton(2));
+    expect(stepTexts()).toEqual(["First step", "Second step", ""]);
+    expect(createBrainDumpItem).not.toHaveBeenCalled();
+
+    release();
+    await waitFor(() => expect(stepTexts()).toContain("Third step"));
+  });
+
+  it("lets the eject through the moment the re-plan has landed", async () => {
+    // The gate is a wait, not a refusal — the same property the forward
+    // direction pins, and without it this fix would be its own trap.
+    const { fetchMock, release } = heldReplanEchoingSnapshot();
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.click(moreSteps());
+    await user.click(ejectButton(0));
+    expect(createBrainDumpItem).not.toHaveBeenCalled();
+
+    release();
+    await waitFor(() => expect(stepTexts()).toContain("Third step"));
+    await user.click(ejectButton(0));
+
+    await waitFor(() =>
+      expect(createBrainDumpItem).toHaveBeenCalledExactlyOnceWith("First step"),
+    );
+    await waitFor(() =>
+      expect(stepTexts()).toEqual(["Second step", "Third step"]),
+    );
   });
 });

@@ -309,6 +309,41 @@ export function BreakdownChat({
    */
   const ejectsInFlight = useRef<Set<string>>(new Set());
   /**
+   * #212 (!304 review) — is the plan itself in flight: being saved, or being
+   * re-planned?
+   *
+   * The mirror of `ejectsInFlight`, and the direction the earlier rounds left
+   * open. `confirm` and `request` both wait for an outstanding eject; neither an
+   * eject nor the notice's Retry was asking whether one of THEM was already out,
+   * and nothing on screen stopped them — `busy` reaches the re-plan controls,
+   * "Add a step" and "Remove step", and neither eject affordance. Both halves
+   * produce #212's own duplicate from the other end:
+   *
+   *   - confirm first: `confirmBreakdown` was handed a snapshot with the row in
+   *     it before the press, so the eject sends the identical words to the inbox
+   *     while the plan is being written with them. The saved view then replaces
+   *     the editor, so the removal and any notice land on a list nobody is
+   *     looking at — nothing is said;
+   *   - re-plan first: the row is in the snapshot the model was shown (that IS
+   *     #212's fix), so it comes back in the answer under a fresh key moments
+   *     after the eject took it away. Silent by construction, because a
+   *     successful eject is silent by design.
+   *
+   * A boolean where its sibling is a keyed Set, and that asymmetry is the truth
+   * rather than a shortcut: there is one plan and only ever one operation on it
+   * at a time — `request` returns early on `streaming`, and a confirm that lands
+   * replaces the editor outright — so there is nothing to key by. #169's lesson
+   * (a list-wide flag cleared by whichever request settled last) does not apply
+   * where the list is one.
+   *
+   * On the ref rather than `busy`, for the reason `ejecting` gives: the state is
+   * what paints, the ref is what decides. Raised synchronously in each handler
+   * BEFORE its first await, so a press arriving in the gap cannot read a flag
+   * that has not gone up yet, and lowered in a `finally` so a rejected save or a
+   * failed stream lifts the hold rather than stranding it.
+   */
+  const planInFlight = useRef(false);
+  /**
    * The eject the notice is about. ONE slot, like the capture bar's (#210) — but
    * the boundary costs much less here, because a displaced notice loses only the
    * announcement. The words of every failed eject are still in their rows, which
@@ -319,6 +354,8 @@ export function BreakdownChat({
   const ejectErrorId = useId();
   const ejectSendingId = useId();
   const ejectHeldId = useId();
+  /** The mirror of `ejectHeldId`, for the hold pointing the other way. */
+  const planHeldId = useId();
   /**
    * The notice's Retry control, **and the row that notice was about**.
    *
@@ -450,6 +487,9 @@ export function BreakdownChat({
      * re-planning around it is the truth, and the gate lifts either way.
      */
     if (ejectsInFlight.current.size > 0) return;
+    // Raised here — past both gates, before the fetch — so an eject pressed
+    // while this stream is open reads it. See `planInFlight`.
+    planInFlight.current = true;
     setError(null);
     setFallbackNote(null);
     if (userLabel)
@@ -515,6 +555,10 @@ export function BreakdownChat({
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
+      // Lowered beside `setStreaming(false)`, and on every exit including the
+      // catch above: a stream that failed still leaves the plan as it was, so
+      // the row is once again the only copy and its eject must be pressable.
+      planInFlight.current = false;
       setStreaming(false);
       setStreamText("");
     }
@@ -582,6 +626,17 @@ export function BreakdownChat({
     { fromRetry }: { fromRetry: boolean },
   ) => {
     if (ejectsInFlight.current.has(key)) return;
+    /**
+     * #212 (!304 review) — nor while the plan itself is out, which is the same
+     * duplicate approached from the other end (see `planInFlight`).
+     *
+     * At the door, the shape `request`'s gate settled on, so both routes in are
+     * covered by one guard rather than each caller remembering: the row's own
+     * control and the notice's Retry. A wait, not a refusal — both holders lower
+     * the flag in a `finally`, so the gate lifts on a rejected save and a failed
+     * stream as readily as on a successful one.
+     */
+    if (planInFlight.current) return;
     ejectsInFlight.current.add(key);
     markEjecting(key, true);
     try {
@@ -705,6 +760,13 @@ export function BreakdownChat({
     // A blank row has nothing to send and nothing to lose, so it just goes —
     // same as pressing ✕, which is what the user means by ejecting an empty step.
     if (!text) {
+      // The one branch `ejectStep`'s door cannot answer for (!304 review): it
+      // removes the row without a write, so it never reaches that gate. Asked
+      // here, and ONLY here, so the door stays the single guard on everything
+      // that writes — otherwise the control would paint `aria-disabled` while
+      // this branch quietly carried on, which is the ARIA equivalent of the
+      // silent refusal #169 is about.
+      if (planInFlight.current) return;
       removeStep(i);
       return;
     }
@@ -778,9 +840,20 @@ export function BreakdownChat({
      * where it is now the only copy.
      */
     if (ejectsInFlight.current.size > 0) return;
+    // And the reverse of it (!304 review). Raised before `startConfirm` rather
+    // than inside the transition, because the snapshot below is taken from the
+    // plan as it stands right now: from this line on, an eject would be sending
+    // to the inbox words this save is already committing to the plan.
+    planInFlight.current = true;
     startConfirm(async () => {
-      await confirmBreakdown(taskId, toProposal(proposal));
-      setConfirmed(true);
+      try {
+        await confirmBreakdown(taskId, toProposal(proposal));
+        setConfirmed(true);
+      } finally {
+        // A save that rejects leaves the plan unsaved and every row still the
+        // only copy of its words, so the hold has to lift with it.
+        planInFlight.current = false;
+      }
     });
   }
 
@@ -860,6 +933,24 @@ export function BreakdownChat({
     ejecting.size === 1 ? "breakdown.stepOne" : "breakdown.stepMany",
     voice,
   )} ${t("breakdown.ejectHeld", voice)}`;
+  /**
+   * #212 (!304 review) — the reverse hold, painted: is the plan out, AND is
+   * there an eject affordance for that to be about?
+   *
+   * `busy` is the same fact as `planInFlight`, held as state — the ref decides,
+   * this paints, exactly the split `ejectsInFlight`/`ejecting` uses. It is read
+   * off `busy` rather than a fourth piece of state because `streaming` and
+   * `confirmPending` already ARE that fact and a second copy could only drift
+   * from them.
+   *
+   * The second clause is not belt-and-braces. The mount-time propose raises
+   * `streaming` before any row exists, and a sentence explaining why "Back to
+   * inbox" is waiting, on a screen with no "Back to inbox" on it, is a stray
+   * announcement rather than an explanation — the notice's Retry is the other
+   * affordance it can be about, and that one outlives its row on purpose.
+   */
+  const ejectHeldByPlan =
+    busy && ((proposal?.steps.length ?? 0) > 0 || ejectNotice !== null);
 
   // Route the Google-vs-ICS control choice through the seam (S1, #34): the
   // "Schedule onto your calendar" (Google Tasks) section is offered to any
@@ -1229,13 +1320,19 @@ export function BreakdownChat({
                 }}
                 type="button"
                 // While a retry runs, the reason AND the wait are both reachable
-                // from the control.
+                // from the control — and so is the OTHER wait (!304 review),
+                // the one where the plan is out and this resend would duplicate
+                // into it. The notice's own reason is never dropped for either:
+                // a Retry that cannot say what it is retrying is worse than one
+                // that cannot say why it is waiting.
                 aria-describedby={
                   ejecting.has(ejectNotice.key)
                     ? `${ejectErrorId} ${ejectSendingId}`
-                    : ejectErrorId
+                    : ejectHeldByPlan
+                      ? `${ejectErrorId} ${planHeldId}`
+                      : ejectErrorId
                 }
-                aria-disabled={ejecting.has(ejectNotice.key)}
+                aria-disabled={ejecting.has(ejectNotice.key) || ejectHeldByPlan}
                 onClick={retryEject}
                 className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 text-sm font-medium aria-disabled:opacity-50"
               >
@@ -1371,8 +1468,20 @@ export function BreakdownChat({
                           ? `Back to inbox — ${t("breakdown.eject.sending", voice)}`
                           : "Back to inbox"
                       }
-                      aria-disabled={ejecting.has(s.key)}
+                      // Two holds, one control (!304 review). This row's own
+                      // write is one; the plan being saved or re-planned is the
+                      // other, and they are mutually exclusive by construction —
+                      // each gate stops the other from starting — so the
+                      // description below is never ambiguous about which.
+                      aria-disabled={ejecting.has(s.key) || ejectHeldByPlan}
+                      // `aria-busy` stays this row's fact alone: the plan being
+                      // out says nothing about THIS control having work in
+                      // flight, and the label below stays "Back to inbox"
+                      // accordingly (WCAG 2.5.3).
                       aria-busy={ejecting.has(s.key)}
+                      aria-describedby={
+                        ejectHeldByPlan ? planHeldId : undefined
+                      }
                       onClick={() => {
                         if (!ejecting.has(s.key)) backToInbox(i);
                       }}
@@ -1497,6 +1606,26 @@ export function BreakdownChat({
       {ejectPending && (
         <p id={ejectHeldId} className="text-muted-foreground text-sm">
           {ejectHeldLine}
+        </p>
+      )}
+
+      {/* #212 (!304 review) — the same explanation for the hold pointing the
+          other way: why a row's "Back to inbox" and the notice's Retry are not
+          taking the press while the plan is being saved or re-planned.
+
+          Beside its sibling rather than next to the controls it describes, and
+          for the same reason that one is: `aria-describedby` does not care
+          where the node lives, the controls it serves are scattered across the
+          list and the notice, and one paragraph for all of them beats a copy
+          per row. Never both at once — the two holds each stop the other from
+          starting — so this is not a second sentence competing with the first.
+
+          Not a live region either, and this one has less claim to be than its
+          sibling: it appears while something the user just started is visibly
+          running, next to a "Saving…" label or a streaming reply. */}
+      {ejectHeldByPlan && (
+        <p id={planHeldId} className="text-muted-foreground text-sm">
+          {t("breakdown.planHeld", voice)}
         </p>
       )}
     </div>

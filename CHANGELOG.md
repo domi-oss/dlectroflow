@@ -493,12 +493,23 @@ operators upgrading a self-hosted instance don't get surprised.
   Each of those used to drop you at the top of the page, which for anyone
   navigating by keyboard or screen reader means starting the tab sequence over.
 
-  Finally, **"Looks right" now waits for a step that is still being sent.** A
-  plan is saved with every row it still shows, and a row on its way to the inbox
-  is deliberately one of them until the inbox has it — so pressing Save in that
-  moment used to put the same step in both places at once, with nothing said and
-  no way for the app to notice afterwards. It now says why it is waiting, and
-  goes through the moment the step has landed, whichever way that went.
+  Finally, **a step can no longer be in the plan and the inbox at the same
+  time, whichever way round you press.** A plan is saved with every row it still
+  shows, and a row on its way to the inbox is deliberately one of them until the
+  inbox has it — so pressing "Looks right" in that moment used to put the same
+  step in both places at once, with nothing said and no way for the app to
+  notice afterwards. Asking for a different plan did the same thing more quietly
+  still: the request shows the AI the plan as it stands, ejected row included,
+  and then replaces the plan with the answer — which hands that row straight
+  back, seconds after you watched it leave.
+
+  So "Looks right", "More steps", "Fewer steps", the feedback box's Send and the
+  error banner's Try again all wait for a step that is still being sent — and,
+  the other way round, **"Back to inbox" and its own Try again wait while the
+  plan is being saved or a new one is being asked for.** Every one of them says
+  why it is waiting rather than just greying out, stays reachable by keyboard so
+  the reason can be read, and goes through the moment the wait is over — however
+  it ended.
 
 - **Creating your calendar feed in two tabs at once no longer errors (#223).**
   Pressing "create my feed" twice at the same moment — two tabs, a double-click

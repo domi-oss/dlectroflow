@@ -716,6 +716,32 @@ export const STRINGS = {
     playful:
       "still being sent to your inbox — saving the plan and asking for a new one both wait, so the same step cannot end up in both places.",
   },
+  // #212 (!304 review) — the same fact from the other side: why "Back to inbox"
+  // and the notice's Retry are not taking the press while the plan itself is in
+  // flight.
+  //
+  // Its own key rather than a re-use of the tail above, because the two are not
+  // the same sentence and only look alike: that one is a TAIL with a count
+  // composed in front of it, this one is whole. There is no count to compose —
+  // there is one plan, and only ever one operation on it at a time.
+  //
+  // One string for the confirm and the re-plan together, for the reason its
+  // sibling gives: it is one fact, both refusals lift on the same event, and the
+  // harm is identical. Saving the plan writes every row that has text, so a step
+  // whose words are on their way to the inbox lands in both; asking for a new
+  // plan shows the model the row and then replaces the plan with an answer that
+  // hands it straight back, moments after the eject took it away.
+  //
+  // Identical across voices, and never the word "disabled", for the reasons the
+  // `breakdown.eject.*` family and `breakdown.ejectHeld` give: the app is
+  // declining an action to protect the user's data, the control is not broken,
+  // and the wait is one round trip.
+  "breakdown.planHeld": {
+    plain:
+      "Saving the plan, or asking for a new one — sending a step back to your inbox waits for that to finish, so the same step cannot end up in both places.",
+    playful:
+      "Saving the plan, or asking for a new one — sending a step back to your inbox waits for that to finish, so the same step cannot end up in both places.",
+  },
 
   // ── #212: a step that could not be sent back to the inbox ──────────────────
   // Identical across voices, for the same reason `capture.error.*` and
