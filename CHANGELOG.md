@@ -441,6 +441,17 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **Creating your calendar feed in two tabs at once no longer errors (#223).**
+  Pressing "create my feed" twice at the same moment — two tabs, a double-click
+  that outran the button — failed one of them outright, after you had already
+  been told to expect a URL. Nothing was ever lost or leaked when it happened,
+  and nobody ended up with a broken subscription; the write that came second was
+  simply refused instead of being recognised as the same request. Both presses
+  now finish, and **both hand back the same URL**, so there is no way to end up
+  pasting a feed address into your calendar that nothing answers. The daily
+  encouragement line had the identical fault and is fixed with it: two requests
+  landing together on the first visit of the day could leave one of them with no
+  quote on the dashboard until the next reload.
 - **Retrying a failed "Mark not done" no longer loses your place (#215).** When a
   step's undo failed, the row showed the reason with a **Try again** beside it —
   and pressing that with the keyboard dropped focus to the top of the page. The
