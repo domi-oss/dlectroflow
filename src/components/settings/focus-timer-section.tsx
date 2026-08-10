@@ -10,6 +10,7 @@ import {
   useSaveStatus,
   SaveIndicator,
 } from "@/components/settings/use-save-status";
+import { useOptimisticOwnership } from "@/components/settings/revert-optimistic";
 import { TimerStylePreview } from "@/components/focus/timer-style-preview";
 import { CollapsibleSection } from "@/components/nav/collapsible-section";
 
@@ -38,6 +39,26 @@ type Prefs = {
  * plain) so one option is always shown selected, and picking any option persists
  * that explicit value. A failed write surfaces a non-blocking error and leaves
  * the controls editable.
+ *
+ * ## A failed save both speaks and steps back (#227)
+ *
+ * Audited alongside the two sites #227 names, and it was NOT already correct:
+ * `set()` wrote `prefs` optimistically and `persist`'s catch reported the
+ * failure without restoring it, so a refused write left five switches and the
+ * style radiogroup showing values the server had declined — an error message
+ * next to controls still reading the way the user set them.
+ *
+ * `timerStyle` is the part worth spelling out. `null` means "never chosen", and
+ * the UI renders the voice-resolved default for it, so a rollback that lost the
+ * null would quietly promote that default into an explicit stored choice — the
+ * exact write this section has just failed to make. The `revert-optimistic`
+ * ledger restores the field's stored value rather than the value it renders as,
+ * which is why the rollback goes through it and not through
+ * `setPrefs(previous)`; that also keeps a slow failure from clobbering a newer
+ * success, since nothing here disables a control during a save. Ownership is a
+ * per-attempt token rather than a value comparison, because re-picking an
+ * earlier style puts that value back on screen without transferring ownership
+ * to the attempt that first wrote it.
  */
 export function FocusTimerSection({
   timerStyle,
@@ -52,6 +73,7 @@ export function FocusTimerSection({
   const router = useRouter();
   const [, startTransition] = useTransition();
   const { status, markSaving, markSaved, markError } = useSaveStatus();
+  const ownership = useOptimisticOwnership<Prefs>();
   const [prefs, setPrefs] = useState<Prefs>({
     timerStyle,
     minimalMode,
@@ -61,22 +83,35 @@ export function FocusTimerSection({
     pauseTogether,
   });
 
-  const persist = (next: Prefs) =>
+  const persist = (next: Prefs, previous: Prefs) => {
+    // Claimed in the same synchronous turn as the optimistic `setPrefs(next)`
+    // above, so attempts are ordered the way the user made the changes.
+    const attempt = ownership.claim(next, previous);
     startTransition(async () => {
       markSaving();
       try {
         await updateFocusTimerSettings(next);
+        // What the server now holds, so a later failure undoes to this rather
+        // than to some earlier attempt's unconfirmed guess.
+        attempt.confirm();
         markSaved();
         router.refresh();
       } catch {
+        // #227 — say so AND put the control back. The functional updater reads
+        // the state as it stands now, not this closure's `prefs`; the attempt
+        // restores only the fields it still owns, and it restores a null
+        // `timerStyle` as a null rather than as the default the UI renders in
+        // its place.
+        setPrefs((current) => attempt.revert(current));
         markError();
       }
     });
+  };
 
   const set = <K extends keyof Prefs>(key: K, value: Prefs[K]) => {
     const next = { ...prefs, [key]: value };
     setPrefs(next);
-    persist(next);
+    persist(next, prefs);
   };
 
   const styleOptions: { value: FocusTimerStyle; label: string }[] = [

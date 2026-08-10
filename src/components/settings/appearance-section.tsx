@@ -16,6 +16,7 @@ import {
   useSaveStatus,
   SaveIndicator,
 } from "@/components/settings/use-save-status";
+import { useOptimisticOwnership } from "@/components/settings/revert-optimistic";
 import { cn } from "@/lib/utils";
 import { CollapsibleSection } from "@/components/nav/collapsible-section";
 
@@ -40,6 +41,23 @@ const TYPEFACE_LABEL: Record<Typeface, StringKey> = {
  * strike resolve from the same CSS custom properties the whole app uses, scoped
  * to the pending choice via completionRootAttrs — so the preview updates
  * instantly, before the server round-trip re-paints the shell.
+ *
+ * ## A failed save both speaks and steps back (#227)
+ *
+ * Audited alongside the two sites #227 names, and it was NOT already correct: it
+ * had the reporting (`persist`'s catch → `markError()`) and not the rollback, so
+ * a refused write left the checkbox and both radiogroups showing a value the
+ * server had declined. Worse here than in the sections with switches alone,
+ * because the two live previews read the same state: the completion sample and
+ * the typeface sample went on demonstrating the refused choice, so the page made
+ * the same false claim three times over.
+ *
+ * The repair goes through the `revert-optimistic` ledger rather than
+ * `setPrefs(previous)` — these controls stay live during a save, so attempts
+ * can interleave and a slow failure must not clobber a newer success. Which
+ * attempt owns a field is decided by its token rather than by the value on
+ * screen, since re-picking an earlier option restores that value by
+ * coincidence. That module holds the argument.
  */
 export function AppearanceSection({
   completeStrikethrough,
@@ -51,6 +69,7 @@ export function AppearanceSection({
   const router = useRouter();
   const [, startTransition] = useTransition();
   const { status, markSaving, markSaved, markError } = useSaveStatus();
+  const ownership = useOptimisticOwnership<AppearancePrefs>();
   const [prefs, setPrefs] = useState<AppearancePrefs>({
     completeStrikethrough,
     completeTickColor,
@@ -58,14 +77,28 @@ export function AppearanceSection({
   });
 
   const persist = (next: AppearancePrefs) => {
+    // Captured before the optimistic write: this render's `prefs` IS the
+    // pre-attempt state, and the rollback needs it to know what to put back.
+    const previous = prefs;
     setPrefs(next); // optimistic: the live preview reflects the pending choice
+    // Same synchronous turn as the write it describes, so attempts are ordered
+    // the way the user made the changes.
+    const attempt = ownership.claim(next, previous);
     startTransition(async () => {
       markSaving();
       try {
         await updateAppearanceSettings(next);
+        // What the server now holds, so a later failure undoes to this rather
+        // than to some earlier attempt's unconfirmed guess.
+        attempt.confirm();
         markSaved();
         router.refresh();
       } catch {
+        // #227 — say so AND put the control (and its previews) back. The
+        // functional updater reads the state as it stands now, not this
+        // closure's `prefs`, and the attempt restores only the fields it still
+        // owns.
+        setPrefs((current) => attempt.revert(current));
         markError();
       }
     });

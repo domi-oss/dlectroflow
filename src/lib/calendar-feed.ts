@@ -158,23 +158,75 @@ export async function getOwnFeed(userId: string): Promise<OwnFeed | null> {
  * silently revoke a URL that is working in somebody's calendar, and they would
  * find out days later when their week stopped updating. Rotation is a separate,
  * deliberately-named action.
+ *
+ * ## Why `createManyAndReturn`, and not the `upsert` that used to be here
+ *
+ * The read above is a TOCTOU: two tabs can both see no feed and both write. That
+ * used to be answered by `upsert({ where, create, update: {} })`, with a comment
+ * saying so — and it was **wrong** (#223). Prisma 6.19 only compiles an upsert to
+ * a native `INSERT … ON CONFLICT` when the update payload is NON-EMPTY; with an
+ * empty one it degrades to `BEGIN; SELECT; INSERT; COMMIT`, which is the same
+ * read-then-insert the leading `findUnique` already was. Measured at 12 of 20
+ * racing callers raising P2002, out of an action that has no branch for it.
+ *
+ * `createManyAndReturn` + `skipDuplicates` is the only Prisma API that compiles
+ * to `INSERT … ON CONFLICT DO NOTHING` (#156, #158, and the note on `log` in
+ * src/lib/db.ts). The loser inserts nothing, gets an empty array, and raises
+ * nothing — which also matters because catching a P2002 would not have been
+ * enough: Prisma's client logger prints a failed query strictly before any
+ * `catch` sees it, so the caught version still reports an incident.
+ *
+ * **The read-back is not optional, and it is the security-relevant part.**
+ * `createManyAndReturn` returns only the rows THIS statement inserted, so a
+ * loser gets nothing back and must go and read the row that won. Returning the
+ * token this call happened to mint instead would hand two tabs two different
+ * feed URLs, only one of which resolves — a person pasting the other into their
+ * calendar gets a 404 forever and no explanation.
+ *
+ * `ON CONFLICT DO NOTHING` carries no conflict target, so ANY unique index on
+ * `CalendarFeed` skips rather than raises. That is `userId` (the PK, the case
+ * this is for) and `token`. A token collision is a 2^-256 event and skipping it
+ * is still the safe direction: nothing is overwritten, and the read-back returns
+ * whatever is genuinely stored for this account — which, in that impossible
+ * case, is nothing, and the throw below says so rather than inventing a URL.
  */
 export async function createOwnFeed(userId: string): Promise<OwnFeed> {
+  // The leading read stays. Every render of the Settings card that already has a
+  // feed comes through here, and an indexed SELECT is cheaper than a speculative
+  // insert Postgres has to conflict-check and discard.
   const existing = await prisma.calendarFeed.findUnique({
     where: { userId },
     select: { token: true },
   });
   if (existing) return existing;
-  // `upsert` rather than `create` closes the race between the read above and
-  // this write — two tabs pressing the button at once would otherwise make one
-  // of them a P2002. `update: {}` keeps the loser's token, which is the same
-  // idempotence the read is providing.
-  return prisma.calendarFeed.upsert({
-    where: { userId },
-    create: { userId, token: mintFeedToken() },
-    update: {},
+
+  const [created] = await prisma.calendarFeed.createManyAndReturn({
+    data: { userId, token: mintFeedToken() },
+    skipDuplicates: true,
     select: { token: true },
   });
+  if (created) return created;
+
+  // DO NOTHING means somebody else got there first and their row is already
+  // committed: Postgres blocks the conflicting insert on the unique index until
+  // the winning transaction resolves, and only then decides to skip. So this
+  // read cannot miss for timing reasons.
+  const winner = await prisma.calendarFeed.findUnique({
+    where: { userId },
+    select: { token: true },
+  });
+  if (winner) return winner;
+
+  // Which leaves one way to get here: the row was created and then DELETED
+  // between the two statements — a third tab pressing "turn my feed off" inside
+  // that window. Not retried on purpose. The person's most recent instruction
+  // was to turn the feed OFF, and a silent re-create would resurrect a
+  // credential they had just revoked; failing loudly leaves the account in the
+  // state they last asked for and costs them one more click.
+  throw new Error(
+    `CalendarFeed for user ${userId} vanished during creation — the feed was ` +
+      `disabled concurrently. Nothing was minted; press create again.`,
+  );
 }
 
 /**
