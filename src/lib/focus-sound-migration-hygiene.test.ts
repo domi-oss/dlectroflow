@@ -5,6 +5,7 @@ import {
   findLateConstraintDrops,
   findFocusSoundViolations,
   parseFocusSoundCategoryBackfill,
+  redactStringLiterals,
   splitStatements,
   splitTopLevelCommas,
   stripSqlComments,
@@ -769,6 +770,183 @@ describe("findLateConstraintDrops — every column a SET clause assigns", () => 
     expect(v).toHaveLength(1);
     expect(v[0].reason).toMatch(/writes "focusSound"/);
     expect(v[0].reason).toMatch(/same statement/);
+  });
+});
+
+/**
+ * #190, raised in review of !292 — SQL stored as DATA is not SQL, and this scan
+ * was the one guard reading it as if it were.
+ *
+ * `findDataDependentStatements` and `dropConstraintAfterWrite` both redact
+ * string literals before matching; this one matched comment-stripped text
+ * directly. Migrations here quote SQL in their values as well as in their
+ * prose — `20260804120000_google_auth_user_id_not_null` raises a WARNING whose
+ * message names columns and rows — so a literal that mentions a drop or an
+ * update is an ordinary thing to write, not a contrived one.
+ *
+ * The direction matters, and the review that raised this had it the wrong way
+ * round. It read the gap as a false PASS: a quoted drop "masking" an unguarded
+ * write. That is unreachable, for the same reason it is unreachable for a
+ * commented-out drop (see the test above): `dropAtByColumn` keeps the LAST drop
+ * in the file, so the position it holds is the MAXIMUM of the real drop and
+ * every phantom. A phantom can only push it later, and later is what a
+ * violation is made of. The same monotonicity applies to a phantom WRITE, which
+ * only ever adds a write for the drop to be late for.
+ *
+ * So the reachable defect is the mirror: a false ACCUSATION, on a migration
+ * ordered exactly as the guard demands. This file's own docstrings say why that
+ * costs the same as a miss — the next author it blocks deletes the guard — and
+ * the accusation is aimed at the FIXED shape, which makes it the one that gets
+ * deleted fastest. Both directions are pinned below, plus the cost of the fix.
+ */
+describe("findLateConstraintDrops — SQL quoted inside a string literal", () => {
+  const file = (sql: string) => [{ name: "20260101000000_x", sql }];
+
+  // The falsification, kept as a test so the claim is not re-argued: a quoted
+  // drop above the write does NOT hide the real one below it.
+  it("still flags the real late drop when a literal also quotes one", () => {
+    const v = findLateConstraintDrops(
+      file(`
+        INSERT INTO "AuditLog" ("note")
+          VALUES ('#180 moves this above the write: DROP CONSTRAINT "Settings_focusSound_check"');
+        UPDATE "Settings" SET "focusSound" = 'on';
+        ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+      `),
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].reason).toMatch(/still live when the write runs/);
+  });
+
+  // The reachable direction, drop side. The file is correctly ordered — drop,
+  // write, re-add — and a stored audit note quoting the old order is what
+  // accuses it, because "last drop wins" hands the note's position to a column
+  // whose real drop ran three statements earlier.
+  it("is not accused by a DROP quoted in a string literal", () => {
+    expect(
+      findLateConstraintDrops(
+        file(`
+          ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+          UPDATE "Settings" SET "focusSound" = 'on' WHERE "focusSound" <> 'off';
+          ALTER TABLE "Settings" ADD CONSTRAINT "Settings_focusSound_check"
+            CHECK ("focusSound" IN ('off', 'on'));
+          INSERT INTO "AuditLog" ("note")
+            VALUES ('until #180 this ran last: DROP CONSTRAINT "Settings_focusSound_check"');
+        `),
+      ),
+    ).toEqual([]);
+  });
+
+  // The same shape one level down, in the construct this repo actually writes:
+  // a `RAISE` message inside a `DO $$ … $$` body. `20260804120000` and
+  // `20260729140000` both log their data surgery that way, so a message
+  // describing the drop it just performed is the expected style here.
+  it("is not accused by a DROP quoted in a RAISE message", () => {
+    expect(
+      findLateConstraintDrops(
+        file(`
+          ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+          DO $$
+          BEGIN
+            UPDATE "Settings" SET "focusSound" = 'on' WHERE "focusSound" <> 'off';
+            RAISE NOTICE '#180: DROP CONSTRAINT "Settings_focusSound_check" ran first';
+          END
+          $$;
+        `),
+      ),
+    ).toEqual([]);
+  });
+
+  // The reachable direction, write side: nothing in this file writes
+  // `focusSound` at all. `setClauseOf` already refuses to read an assignment
+  // out of a literal INSIDE a SET clause; the `UPDATE` keyword itself was the
+  // half still being read out of one.
+  it("is not accused by an UPDATE quoted in a string literal", () => {
+    expect(
+      findLateConstraintDrops(
+        file(`
+          INSERT INTO "AuditLog" ("note")
+            VALUES ('the 2026-08-07 file ran UPDATE "Settings" SET "focusSound" = ''on''');
+          ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+        `),
+      ),
+    ).toEqual([]);
+  });
+
+  // The control the redaction has to keep: a real write, whose own value is a
+  // literal, still pairs with a real drop that a `RAISE` in the same body also
+  // talks about. Redaction empties literals, so the risk it carries is losing
+  // the write or the drop — not the phantom.
+  it("still flags a real late drop inside a body that logs it", () => {
+    const v = findLateConstraintDrops(
+      file(`
+        DO $$
+        BEGIN
+          RAISE NOTICE 'about to DROP CONSTRAINT "Settings_focusSound_check"';
+          UPDATE "Settings" SET "typeface" = 'figtree', "focusSound" = 'on';
+          ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check";
+        END
+        $$;
+      `),
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].reason).toMatch(/writes "focusSound"/);
+    expect(v[0].reason).toMatch(/same statement/);
+  });
+
+  // The cost of redaction, pinned rather than left to be discovered: SQL that
+  // is BOTH a literal and executed — `EXECUTE 'ALTER TABLE …'` — becomes
+  // invisible to this scan, as it already is to `findDataDependentStatements`
+  // and `dropConstraintAfterWrite`. No migration in this tree uses dynamic SQL
+  // (`grep -rn "EXECUTE" prisma/migrations` finds nothing), and the alternative
+  // is reading every stored string as SQL, which is the false accusation above.
+  // A migration that reaches for `EXECUTE` needs this guard taught the
+  // construct, and should land on this test when it does.
+  it("cannot see a drop issued as dynamic SQL — the accepted cost", () => {
+    expect(
+      findLateConstraintDrops(
+        file(`
+          UPDATE "Settings" SET "focusSound" = 'on';
+          DO $$
+          BEGIN
+            EXECUTE 'ALTER TABLE "Settings" DROP CONSTRAINT "Settings_focusSound_check"';
+          END
+          $$;
+        `),
+      ),
+    ).toEqual([]);
+  });
+});
+
+/**
+ * Moved here from `migration-data-harness.test.ts` with the function itself
+ * (#190, raised in review of !292), for the reason `CLAUDE.md` gives: a test
+ * colocates with its code.
+ */
+describe("redactStringLiterals", () => {
+  it("empties literals so their contents cannot be read as SQL", () => {
+    expect(
+      redactStringLiterals(`UPDATE "T" SET "c" = 'DELETE FROM "Other"'`),
+    ).toBe(`UPDATE "T" SET "c" = ''`);
+  });
+
+  it("survives a doubled quote", () => {
+    expect(redactStringLiterals(`SELECT 'it''s fine', 1`)).toBe(`SELECT '', 1`);
+  });
+
+  // The property `findLateConstraintDrops` and `dropConstraintAfterWrite` both
+  // lean on. A literal cannot redact to something LONGER than itself — the
+  // shortest one there is, `''`, is already the replacement — so redaction can
+  // never move a later match in front of an earlier one.
+  it("never lengthens the text, so matches keep their order", () => {
+    for (const sql of [
+      `SELECT '', 1`,
+      `SELECT 'a'`,
+      `SELECT 'it''s'`,
+      `RAISE NOTICE 'unterminated`,
+      `UPDATE "T" SET "a" = 'x', "b" = 'y'`,
+    ]) {
+      expect(redactStringLiterals(sql).length).toBeLessThanOrEqual(sql.length);
+    }
   });
 });
 

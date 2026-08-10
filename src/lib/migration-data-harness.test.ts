@@ -5,7 +5,6 @@ import {
   findDataDependentStatements,
   findSeedGaps,
   planSeededDeploy,
-  redactStringLiterals,
   dropConstraintAfterWrite,
   tablesInsertedBy,
   type SeedFile,
@@ -47,17 +46,9 @@ function readMigrations(): MigrationFile[] {
 const scan = (sql: string) => findDataDependentStatements([{ name: "m", sql }]);
 const shapesOf = (sql: string) => scan(sql).map((s) => `${s.shape}:${s.table}`);
 
-describe("redactStringLiterals", () => {
-  it("empties literals so their contents cannot be read as SQL", () => {
-    expect(
-      redactStringLiterals(`UPDATE "T" SET "c" = 'DELETE FROM "Other"'`),
-    ).toBe(`UPDATE "T" SET "c" = ''`);
-  });
-
-  it("survives a doubled quote", () => {
-    expect(redactStringLiterals(`SELECT 'it''s fine', 1`)).toBe(`SELECT '', 1`);
-  });
-});
+// `redactStringLiterals` moved to `focus-sound-migration-hygiene.ts` with its
+// third caller (#190, raised in review of !292), and its tests moved with it —
+// colocation is what makes a helper's contract findable from the code.
 
 describe("findDataDependentStatements — the shapes whose outcome depends on rows", () => {
   it("flags an UPDATE, which is the shape that caused the 2026-08-07 incident", () => {

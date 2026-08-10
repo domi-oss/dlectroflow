@@ -356,6 +356,57 @@ function stringLiteralLengthAt(text: string, i: number): number {
 }
 
 /**
+ * Replace the contents of every string literal with nothing.
+ *
+ * Comment stripping is not enough on its own: `INSERT INTO "Log" VALUES
+ * ('DELETE FROM "Task"')` inserts a row and deletes nothing, and a scan that
+ * reads the literal reads a log message as SQL. Values are irrelevant to every
+ * caller below — only table names, column names and statement shape are — so
+ * emptying literals costs nothing and removes the class.
+ *
+ * A doubled quote is Postgres's escape for a quote inside a literal, so it is
+ * lexed as one literal rather than two: `'it''s'` collapses to a single `''`.
+ * Getting that wrong would not leak content, but it would leave a run of empty
+ * literals where the SQL has one value, which is harder to read in a report.
+ *
+ * Deliberately applied inside dollar-quoted bodies too. A `RAISE NOTICE` string
+ * is not SQL, and letting it through would be the one way a message could
+ * answer a question the statement around it does not.
+ *
+ * ── It lives here, next to the lexer it shares (#190, raised in review of !292)
+ *
+ * Written in `migration-data-harness.ts`, where two of its three callers are,
+ * and moved here when the third turned out to be `findLateConstraintDrops` in
+ * this file — an import the other way round would be a cycle. One more piece of
+ * one lexer shared rather than copied, like `isBefore`, `splitInnerStatements`
+ * and `splitTopLevelCommas` before it, and it now reads its literals through
+ * `stringLiteralLengthAt` like the two scans above rather than re-deriving the
+ * doubled-quote rule a third time.
+ *
+ * It cannot reorder anything: a literal only ever gets SHORTER, and every
+ * caller either compares two offsets taken from the same redacted copy or
+ * rebuilds its output from the originals. What it does cost is sight of SQL
+ * that is a literal AND executed — `EXECUTE 'ALTER TABLE …'` — which no
+ * migration in this tree writes, and which is the price of not reading the
+ * other several hundred stored strings as statements.
+ */
+export function redactStringLiterals(sql: string): string {
+  let out = "";
+  let i = 0;
+  while (i < sql.length) {
+    const literal = stringLiteralLengthAt(sql, i);
+    if (literal > 0) {
+      out += "''";
+      i += literal;
+      continue;
+    }
+    out += sql[i];
+    i += 1;
+  }
+  return out;
+}
+
+/**
  * The pieces of `text` separated by the commas that are OUTSIDE every bracket
  * and every string literal — i.e. the commas that end one clause and begin the
  * next, rather than the ones separating a function's arguments or a value list's
@@ -858,6 +909,27 @@ function columnWritesIn(statement: string): ColumnWrite[] {
  * follows. A constraint named otherwise is skipped rather than guessed at —
  * a false accusation would get the guard relaxed, and a guard that cries wolf
  * is worse than none.
+ *
+ * ── Both scans read literal-REDACTED text (#190, raised in review of !292) ───
+ *
+ * This was the last scan in either module reading stored strings as SQL:
+ * `findDataDependentStatements` and `dropConstraintAfterWrite` redact first,
+ * and the reasoning for it — a value is data, and these migrations quote SQL in
+ * their values as well as in their prose — applies here identically. The review
+ * that raised it read the gap as a false PASS, a quoted drop masking a real
+ * write. It is not, and the arithmetic says so rather than a test: the drop map
+ * keeps the LAST drop, so it holds the MAXIMUM position over the real drop and
+ * every phantom, and a violation is `dropAt >= writeAt`. A phantom can only
+ * raise that maximum, and a phantom write only adds a write. Both directions
+ * are monotonic towards reporting MORE.
+ *
+ * So the reachable defect was the mirror, and it is worse than a nit for the
+ * reason this docstring already gives twice: the file accused is the one
+ * ordered exactly as this guard demands — drop, write, re-add, plus an audit
+ * note or a `RAISE` naming the drop it just did, which is how
+ * `20260804120000_google_auth_user_id_not_null` logs its own surgery. Being
+ * blocked by the guard for doing what the guard asked is what gets a guard
+ * deleted.
  */
 export function findLateConstraintDrops(
   files: readonly MigrationFile[],
@@ -866,12 +938,23 @@ export function findLateConstraintDrops(
 
   for (const file of files) {
     const statements = splitStatements(stripSqlComments(file.sql));
+    // Both scans below read the literal-REDACTED copy, and the report is built
+    // from the originals — the same split `dropConstraintAfterWrite` makes, for
+    // the same two reasons. Redaction is what stops stored prose being read as
+    // SQL; keeping the originals is what leaves the value in the report, and
+    // `'on'` is the whole point of the line an author is being shown.
+    //
+    // Redacted per statement, after the split rather than before it, so the two
+    // arrays are index-for-index the same statements. Offsets from the drop
+    // scan and the write scan are compared against each other, so they have to
+    // come from one text; they do, because both read `probes`.
+    const probes = statements.map(redactStringLiterals);
 
     // Where each column's CHECK constraint is dropped. The LAST drop wins, as
     // it always has: a second drop of the same constraint name in one file
     // means something re-added it in between, so the constraint is live again.
     const dropAtByColumn = new Map<string, SqlPosition>();
-    statements.forEach((s, statement) => {
+    probes.forEach((s, statement) => {
       for (const m of s.matchAll(DROP_CONSTRAINT)) {
         // A constraint named otherwise is skipped rather than guessed at, which
         // is the "no CHECK on this column in this file" branch — see the
@@ -885,7 +968,7 @@ export function findLateConstraintDrops(
       }
     });
 
-    statements.forEach((s, statement) => {
+    probes.forEach((s, statement) => {
       for (const write of columnWritesIn(s)) {
         const dropAt = dropAtByColumn.get(`${write.table}.${write.column}`);
         const writeAt = { statement, offset: write.offset };
@@ -897,7 +980,12 @@ export function findLateConstraintDrops(
             : `at statement ${dropAt.statement + 1}`;
         violations.push({
           migration: file.name,
-          statement: s.replace(/\s+/g, " ").trim().slice(0, 160),
+          // The ORIGINAL statement, not the probe: an author shown
+          // `SET "focusSound" = ''` has been shown the shape and not the value.
+          statement: statements[statement]
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 160),
           reason:
             `writes "${write.column}" at statement ${statement + 1} but drops ` +
             `"${write.table}_${write.column}_check" ${dropWhere}. The old ` +

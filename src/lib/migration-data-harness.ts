@@ -54,6 +54,7 @@
 import {
   isBefore,
   parseCheckConstraintName,
+  redactStringLiterals,
   splitInnerStatements,
   splitStatements,
   splitTopLevelCommas,
@@ -107,49 +108,6 @@ export interface DeployPhase {
   migrations: string[];
   /** `after` of the seed to run once this phase is applied, if any. */
   seedAfter?: string;
-}
-
-/**
- * Replace the contents of every string literal with nothing.
- *
- * Comment stripping is not enough on its own: `INSERT INTO "Log" VALUES
- * ('DELETE FROM "Task"')` inserts a row and deletes nothing, and a classifier
- * that reads the literal would demand a seed for `Task` on the strength of a log
- * message. Values are irrelevant here — only table names and statement shape
- * are — so emptying literals costs nothing and removes the class.
- *
- * A doubled quote is Postgres's escape for a quote inside a literal, so it is
- * lexed as one literal rather than two: `'it''s'` collapses to a single `''`.
- * Getting that wrong would not leak content, but it would leave a run of empty
- * literals where the SQL has one value, which is harder to read in a report.
- *
- * Deliberately applied inside dollar-quoted bodies too. A `RAISE NOTICE` string
- * is not SQL, and letting it through would be the one way a message could ask
- * the classifier for a seed the migration does not need.
- */
-export function redactStringLiterals(sql: string): string {
-  let out = "";
-  let i = 0;
-  while (i < sql.length) {
-    if (sql[i] !== "'") {
-      out += sql[i];
-      i += 1;
-      continue;
-    }
-    out += "''";
-    i += 1;
-    while (i < sql.length) {
-      if (sql[i] !== "'") {
-        i += 1;
-      } else if (sql[i + 1] === "'") {
-        i += 2; // an escaped quote: still inside the same literal
-      } else {
-        i += 1; // the closing quote
-        break;
-      }
-    }
-  }
-  return out;
 }
 
 /**
