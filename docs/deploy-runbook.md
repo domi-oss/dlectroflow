@@ -913,7 +913,7 @@ than re-verified on every read.
 
 **1. Clear the failed entry from the ledger first.** This alone restores
 redundancy — the init containers stop failing the moment P3009 is gone, before any
-merge:
+merge.
 
 Replace the `MIG` value below with the migration directory name the alert quotes
 — the P3009 message names it, and the quotes matter because the name is pasted
