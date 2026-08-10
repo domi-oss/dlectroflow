@@ -37,10 +37,20 @@
 #   1  degraded — fewer available than desired, with what the pods say about why
 #   2  undetermined — the cluster could not be read, or answered without the
 #      fields the question needs
+#   3  in flight — degraded, but a rollout is progressing inside its own deadline,
+#      so deliberately not concluded from
 #
 # Exit 2 is a distinct state on purpose and both collapses are lies: reporting 1
 # when the read simply failed cries wolf, and reporting 0 is the unproven green
 # this issue exists to kill. A caller that treats 2 as 0 has reintroduced the bug.
+#
+# **Exit 3 is distinct for the same reason, and it used to be 0** — a defect found
+# by review on !293. The in-flight arm's own comment says it "deliberately does
+# NOT print a tick — nothing here was verified healthy, only verified
+# self-limiting, and those are different claims", and then it returned the code
+# meaning verified healthy. `alert-prod-state.sh` builds its headline from exit
+# codes alone, so `1/2` mid-rollout could render as "✅ production has recovered,
+# fully replicated". A caller that treats 3 as 0 has put that back.
 #
 # ── `1/2` on its own is NOT this incident, and that is measured ─────────────
 # The tempting rule is "alert whenever available < desired". It was tried and it

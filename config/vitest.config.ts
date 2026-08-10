@@ -65,9 +65,9 @@ export default defineConfig({
     environment: "node",
     setupFiles: [path.join(__dirname, "vitest.setup.ts")],
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
-    // #191 — Vitest's 5000 ms default is a WALL-CLOCK budget, and nine test
-    // files in `src/lib/` drive a real `scripts/*.sh` through a blocking
-    // `spawnSync`, several of them with `curl` and `kubectl` stubbed on PATH
+    // #191 — Vitest's 5000 ms default is a WALL-CLOCK budget, and every
+    // `src/lib` suite that drives a real `scripts/*.sh` does so through a
+    // blocking `spawnSync`, several with `curl` and `kubectl` stubbed on PATH
     // (the `pipeline-failure-alert` / `registry-prune` / `prod-state-alert`
     // idiom). Those tests spend their time waiting on child processes that
     // compete for the same cores as every other worker, so their wall clock

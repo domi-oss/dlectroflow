@@ -952,7 +952,13 @@ describe("scripts/check-prod-drift.sh reports how long production has been behin
       compare: { commits: [{ id: OLD_SHA, committed_date: minutesAgo(3) }] },
       env: { DRIFT_GRACE_SECONDS: "1500" },
     });
-    expect(run.status).toBe(0);
+    // 3, not 0 (!293 review). This spec used to assert 0 and so pinned the bug:
+    // the two lines below already said "not a tick — nothing was verified in
+    // sync", and 0 is precisely the code that means it was. The caller composes
+    // its headline from exit codes alone, so returning 0 here published
+    // "✅ production has recovered" over a stdout that carries no ✅ at all.
+    // The assertion and the return value have to agree about what happened.
+    expect(run.status).toBe(3);
     expect(run.stdout).not.toContain("🔴");
     // Not a tick either — nothing was verified in sync, only verified too young
     // to conclude from.
@@ -1194,6 +1200,71 @@ describe("scripts/alert-prod-state.sh — the healthy path is silent", () => {
     });
     expect(run.status).toBe(0);
     expect(run.note).toBeNull();
+  });
+
+  /**
+   * !293 review, found independently by two reviewers, and the spec above is
+   * why it was missed: with no note on record the post is suppressed, so the
+   * composed headline is never rendered and `note === null` passes over the top
+   * of it. The state that POSTS is the same rollout **with a prior alert
+   * fingerprint on record** — and that is the state an hourly monitor meets in
+   * the middle of every incident, because each merged fix restarts the
+   * `progressDeadlineSeconds` window.
+   *
+   * What it used to produce, reproduced verbatim before the fix:
+   *
+   *     ### ✅ production has recovered — on `main`, fully replicated
+   *     - `deployment/dlectroflow`: **1/2** replicas available
+   *     - 🔄 a rollout is in progress and has not yet exceeded its deadline
+   *     Nothing to do.
+   *     @handle — cleared, no action needed.
+   *
+   * Exit 0, so no pipeline mail either. An unproven green addressed to the
+   * on-call by name, five lines above evidence reading `1/2`, emitted by the
+   * monitor written to abolish unproven greens.
+   *
+   * Asserted on the words rather than on the severity string: the words are the
+   * product, and they are what somebody acts on at 3am.
+   */
+  it("never words an in-flight deploy as a recovery, even with an alert on record", () => {
+    const run = alert({
+      prodSha: OLD_SHORT,
+      committedDate: new Date(Date.now() - 4 * 60_000)
+        .toISOString()
+        .replace("Z", "+00:00"),
+      deploy: deployment({
+        available: 1,
+        ready: 1,
+        updated: 1,
+        progressing: { status: "True", reason: "ReplicaSetUpdated" },
+      }),
+      notes: noteWithFingerprint("drift=1 replicas=1"),
+    });
+
+    // It posts — the state genuinely changed since the alert, and saying nothing
+    // would leave the reader with the alert as the last word.
+    expect(run.note).not.toBeNull();
+    const body = run.note?.body ?? "";
+    expect(body).not.toMatch(/recovered/i);
+    expect(body).not.toMatch(/fully replicated/i);
+    expect(body).not.toMatch(/cleared, no action needed/i);
+    expect(body).not.toMatch(/Nothing to do\./);
+    // And the positive half, so this cannot pass by posting nothing useful.
+    expect(body).toMatch(/deploy is in flight/i);
+    expect(body).toMatch(/not.*all-clear/i);
+    // Still exit 0: an ordinary deploy must not wake anyone.
+    expect(run.status).toBe(0);
+  });
+
+  /**
+   * The other direction, so the fix cannot be read as "never say recovered".
+   * Two proven ticks after an alert is exactly when the channel must close its
+   * own loop.
+   */
+  it("still reports a real recovery after an alert", () => {
+    const run = alert({ notes: noteWithFingerprint("drift=1 replicas=1") });
+    expect(run.status).toBe(0);
+    expect(run.note?.body ?? "").toMatch(/production has recovered/i);
   });
 
   it("posts nothing and exits 0 when production is current and fully replicated", () => {
@@ -1656,6 +1727,40 @@ describe("the alert_prod_state CI job", () => {
 
   it("does not retry, so a flaky run cannot mask a real alert", () => {
     expect(job).not.toMatch(/^\s+retry:/m);
+  });
+
+  /**
+   * !293 review — the one property the whole MR rests on, and the only one
+   * nothing pinned. Adding `allow_failure: true` to this job left **260 tests
+   * across seven CI-hygiene suites green**, verified by applying exactly that
+   * mutation.
+   *
+   * It is a plausible edit, not a contrived one: quietening a flapping monitor
+   * mid-incident is precisely when someone would reach for it. The job would go
+   * on exiting non-zero and go on posting its note — and the pipeline would stay
+   * green, so GitLab would send the schedule owner nothing. That is channel 1,
+   * the one the runbook calls out as needing no configuration and being
+   * impossible to forget, silently removed.
+   *
+   * `.deploy_base` is checked too rather than assumed: `extends` inherits, so a
+   * later `allow_failure` added there would arrive here without touching this
+   * block.
+   */
+  it("never allows failure — the red pipeline IS the alert channel", () => {
+    expect(job).not.toMatch(/^\s+allow_failure:\s*true/m);
+    const base = (CI_YML.split(/^\.deploy_base:$/m)[1] ?? "").split(/^\S/m)[0];
+    expect(base).not.toBe("");
+    expect(base).not.toMatch(/^\s+allow_failure:\s*true/m);
+  });
+
+  it("stays in the maintenance stage and keeps its hang timeout", () => {
+    // Both are overrides and both are load-bearing. `.deploy_base` puts a job in
+    // `deploy`, and a monitor carrying deploy semantics is a monitor that gets
+    // reasoned about as a deployment. The timeout is what turns a hung check —
+    // the cluster unreachable, `curl` never answering — into a red pipeline
+    // rather than a job that sits there being neither healthy nor an alert.
+    expect(job).toMatch(/^\s+stage: maintenance\b/m);
+    expect(job).toMatch(/^\s+timeout: \d+m\b/m);
   });
 });
 

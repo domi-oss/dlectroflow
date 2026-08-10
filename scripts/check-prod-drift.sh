@@ -29,10 +29,22 @@
 #   0  in sync — production is running the ref's HEAD
 #   1  drifted — behind, or on a commit that is not an ancestor of the ref
 #   2  undetermined — one of the two facts could not be established
+#   3  in flight — drifted, but inside the caller's grace, so deliberately not
+#      concluded from (only reachable when DRIFT_GRACE_SECONDS > 0)
 #
 # Exit 2 is a distinct state on purpose. "Could not reach production" must never
 # collapse into "in sync": an unproven green is the failure mode this whole issue
 # is about, and a caller that treats 2 as 0 has reintroduced it.
+#
+# **Exit 3 is distinct for exactly the same reason, and it used to be 0.** That
+# was a defect, found by review on !293: this script's own comment beside the
+# grace says "nothing was verified in sync, only verified too young to conclude
+# from, and those are different claims" — and then it returned the code that
+# means the first one. `alert-prod-state.sh` composes its headline from exit
+# codes alone, so a graced drift during a rollout rendered as
+# "✅ production has recovered", which is the unproven green #191 exists to
+# abolish, emitted by the alerter itself. A caller that treats 3 as 0 has
+# reintroduced it a third time.
 #
 # Env:
 #   CI_API_V4_URL, CI_PROJECT_ID   — provided by GitLab CI
@@ -47,7 +59,7 @@
 # minutes. An HOURLY caller will land inside that window every few days, and an
 # alert that cries wolf gets muted — which is how the real alert went unread in
 # the first place. So a caller on a clock can ask for divergence younger than N
-# seconds to be reported as "a deploy may still be in flight" (exit 0) instead.
+# seconds to be reported as "a deploy may still be in flight" (exit 3) instead.
 #
 # It defaults to 0 — no grace — because the two existing callers want the opposite.
 # `alert_pipeline_failure` runs immediately after a pipeline failed, where "the
@@ -340,7 +352,9 @@ case "$verdict" in
     # young to conclude from, and those are different claims.
     if [ "$GRACE" -gt 0 ] && [ -n "$age_secs" ] && [ "$age_secs" -lt "$GRACE" ]; then
       verdict_line="- 🔄 production is behind \`${DRIFT_REF}\` but only by ${age_secs}s, which is inside the ${GRACE}s grace this caller allows — **a deploy is most likely still in flight**, so this is not an alert yet. A deploy that blows its own \`--timeout\` fails its pipeline, and \`alert_pipeline_failure\` reports that immediately; anything still behind after the grace is alerted on by the next run."
-      status=0
+      # 3, not 0 — see the contract. The bullet above already refuses to print a
+      # tick; returning 0 handed the caller the tick anyway.
+      status=3
     fi
     ;;
   *)

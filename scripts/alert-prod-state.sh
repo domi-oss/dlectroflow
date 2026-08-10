@@ -56,10 +56,17 @@
 #     suppressed alert is an incident.
 #
 # ── Exit codes ───────────────────────────────────────────────────────────────
-#   0  healthy — production is on `main` with every replica available
+#   0  healthy — production is on `main` with every replica available, OR a
+#      deploy is in flight (severity `in_flight`: not an alert, and deliberately
+#      not reported as a clean bill of health either — see the classifier)
 #   1  alerting — a check reported a problem
-#   2  undetermined — a check could not establish its facts
+#   2  undetermined — a check could not establish its facts, or exited a code
+#      that is not one of its four defined outcomes
 #   3  the alert could not be delivered, or this job is not configured to deliver
+#
+# NOTE the children use a `3` of their own, meaning "in flight, deliberately not
+# concluded". It is not this 3 and does not propagate: it maps to severity
+# `in_flight` and exit 0 above.
 #
 # ── Env ──────────────────────────────────────────────────────────────────────
 #   CI_API_V4_URL, CI_PROJECT_ID, CI_PIPELINE_ID, CI_PIPELINE_URL  — GitLab CI
@@ -126,13 +133,40 @@ set -e
 # the headline even when the other could not read anything. An unknown still
 # outranks healthy — which is the rule the whole `check-*.sh` family exists to
 # enforce, and the one a caller is tempted to break.
+#
+# `healthy` is tested for POSITIVELY — both codes exactly 0 — and never as
+# "nothing alerted". That ordering is !293's review finding, caught independently
+# by two reviewers, and it is the whole family's rule turned on the alerter
+# itself. Both children have a fourth outcome, `3`, meaning "a deploy is in
+# flight, so I deliberately did not conclude"; both refuse to print a tick for it
+# and say so in their own comments; and both used to return 0 for it. A graced
+# drift or a rollout mid-flight therefore rendered as
+# "### ✅ production has recovered — fully replicated", five lines above evidence
+# reading `1/2`, addressed to the on-call by name, with "Nothing to do." That is
+# an unproven green in the one sentence somebody acts on at 3am, manufactured by
+# the monitor written to abolish it.
+#
+# The precedence is alert > undetermined > in flight > healthy: a proven fault
+# outranks everything, an unknown outranks a deliberate non-verdict (we could not
+# look beats we chose not to conclude), and only two proven ticks are healthy.
 if [ "$drift_code" = "1" ] || [ "$replicas_code" = "1" ]; then
   severity="alert"
   exit_code=1
+elif [ "$drift_code" = "2" ] || [ "$replicas_code" = "2" ]; then
+  severity="undetermined"
+  exit_code=2
+elif [ "$drift_code" = "3" ] || [ "$replicas_code" = "3" ]; then
+  # Exit 0: a deploy in flight is genuinely not something to wake anyone for, and
+  # the next run alerts if it is still true. But it is not a recovery and must
+  # never be worded as one.
+  severity="in_flight"
+  exit_code=0
 elif [ "$drift_code" = "0" ] && [ "$replicas_code" = "0" ]; then
   severity="healthy"
   exit_code=0
 else
+  # Anything else is a child that died rather than decided — a `set -e` abort, an
+  # OOM kill, 141 from a SIGPIPE. Reported as an unknown, never as an all-clear.
   severity="undetermined"
   exit_code=2
 fi
@@ -148,7 +182,10 @@ FINGERPRINT="drift=${drift_code} replicas=${replicas_code}"
 # and a line that is wrong on the good days is a line nobody reads on the bad
 # ones. The `<job> fingerprint: <value>` prefix is fixed, because that is what the
 # next run greps for.
-if [ "$severity" = "healthy" ]; then
+if [ "$severity" = "healthy" ] || [ "$severity" = "in_flight" ]; then
+  # `in_flight` shares this wording because it also exits 0 — "the job keeps
+  # failing every run until this clears" would be false, and a line that is wrong
+  # on the quiet days is a line nobody reads on the loud ones.
   FINGERPRINT_LINE="_\`${SELF}\` fingerprint: \`${FINGERPRINT}\`. Recorded so a later recurrence is not mistaken for this one and suppressed._"
 else
   FINGERPRINT_LINE="_\`${SELF}\` fingerprint: \`${FINGERPRINT}\`. Silent while unchanged; the job keeps failing every run until this clears._"
@@ -179,6 +216,9 @@ case "$severity" in
   healthy)
     HEADLINE="### ✅ production has recovered — on \`${DRIFT_REF}\`, fully replicated"
     ;;
+  in_flight)
+    HEADLINE="### 🔄 a deploy is in flight — not an alert, and **not** a clean bill of health"
+    ;;
   *)
     HEADLINE="### ⚠️ production's state is **undetermined** — an unknown, not an all-clear"
     ;;
@@ -202,6 +242,11 @@ if [ -n "${ALERT_MENTION:-}" ]; then
   if [[ "$ALERT_MENTION" =~ ^@[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$ ]]; then
     if [ "$severity" = "healthy" ]; then
       MENTION_LINE="${ALERT_MENTION} — cleared, no action needed."
+    elif [ "$severity" = "in_flight" ]; then
+      # "cleared" is the word this severity must never reach — it is the line
+      # addressed to the on-call BY NAME, so it is the one sentence most likely
+      # to be read on its own and acted on (!293 review).
+      MENTION_LINE="${ALERT_MENTION} — a deploy is in flight; nothing to do yet, and not an all-clear."
     else
       MENTION_LINE="${ALERT_MENTION} — production needs a look."
     fi
@@ -236,16 +281,33 @@ fi
 case "$drift_code" in
   1) DRIFT_STEP="**Production is not running \`${DRIFT_REF}\`.** Check \`deploy_production\` on the most recent \`${DRIFT_REF}\` pipeline: a failure in an earlier stage *skips* it rather than failing it (#147), so a merge can go green without deploying. Rolling forward on \`${DRIFT_REF}\` deploys with the next green pipeline." ;;
   2) DRIFT_STEP="**Whether production is running \`${DRIFT_REF}\` could not be determined** — an unknown, and neither a fault nor an all-clear. The \`curl\` error is in this job's log; stdout withholds it deliberately." ;;
-  *) DRIFT_STEP="Production **is** running \`${DRIFT_REF}\`, so stale code is not part of this." ;;
+  3) DRIFT_STEP="**Production is behind \`${DRIFT_REF}\`, but recently enough that a deploy is most likely still running.** Not concluded from either way — the next run alerts if it is still behind." ;;
+  0) DRIFT_STEP="Production **is** running \`${DRIFT_REF}\`, so stale code is not part of this." ;;
+  # `0)` is explicit and this arm is the unknown, not the all-clear (!293 review).
+  # A default that catches everything-but-1-and-2 is the same collapse `55d2833`
+  # fixed one level up: a child that dies rather than decides — a `set -e` abort,
+  # 141 from a SIGPIPE, an OOM kill — was asserting that production is on `main`.
+  *) DRIFT_STEP="**The drift check exited \`${drift_code}\`**, which is not one of its four defined outcomes. Treat it as an unknown and read this job's log; nothing about production's commit was established." ;;
 esac
 case "$replicas_code" in
   1) REPLICAS_STEP="**Production is short of replicas.** A wedged migration is the likeliest cause, and it is the one that compounds: it blocks every LATER migration, so each merge from now makes it worse — § 19 for that path." ;;
   2) REPLICAS_STEP="**The replica count could not be determined** — an unknown, and neither a fault nor an all-clear. The \`kubectl\` error is in this job's log; stdout withholds it deliberately." ;;
-  *) REPLICAS_STEP="Every replica **is** available, so nothing here is a shortfall in capacity." ;;
+  3) REPLICAS_STEP="**Fewer replicas than desired, but a rollout is progressing inside its own deadline**, so this is not concluded from either way. Kubernetes flips \`Progressing\` to False if it stops making progress, and the next run alerts on that." ;;
+  0) REPLICAS_STEP="Every replica **is** available, so nothing here is a shortfall in capacity." ;;
+  *) REPLICAS_STEP="**The replica check exited \`${replicas_code}\`**, which is not one of its four defined outcomes. Treat it as an unknown and read this job's log; nothing about capacity was established." ;;
 esac
 
 if [ "$severity" = "healthy" ]; then
   NEXT_STEPS="Nothing to do. This note exists so the channel closes its own loops — an alerting path that only ever reports bad news gives you no way to tell \"fixed\" from \"stopped running\"."
+elif [ "$severity" = "in_flight" ]; then
+  # Deliberately NOT "nothing to do": nothing was verified healthy, and the
+  # difference between "no action needed" and "no action needed yet" is the
+  # difference this severity exists to preserve.
+  NEXT_STEPS="**Nothing to do yet, and nothing here is an all-clear.** A deploy appears to be running, so the state below is expected to be temporary — it has not been confirmed good, only confirmed self-limiting. The next run alerts if it is still true.
+
+${DRIFT_STEP}
+
+${REPLICAS_STEP}"
 else
   if [ "$severity" = "undetermined" ]; then
     LEAD="**Establish the facts first — nothing above is a diagnosis.** An unknown is reported because a check nobody can see is indistinguishable from a passing one."
@@ -351,8 +413,8 @@ _De-duplication was unavailable this run (\`GET …/notes\` → HTTP ${notes_cod
 fi
 
 if [ "$last_fp" = "$FINGERPRINT" ]; then
-  if [ "$severity" = "healthy" ]; then
-    echo "alert-prod-state: production is healthy and was healthy at the last check — nothing to post."
+  if [ "$severity" = "healthy" ] || [ "$severity" = "in_flight" ]; then
+    echo "alert-prod-state: state unchanged since the last check (\`${FINGERPRINT}\`, ${severity}) — nothing to post."
   else
     echo "alert-prod-state: state unchanged since the last note (\`${FINGERPRINT}\`) — not repeating it. This job still exits ${exit_code}, so the pipeline notification keeps firing."
   fi
@@ -368,11 +430,14 @@ fi
 # recurrence of the same signature reads as "unchanged since the last note". A
 # real, new incident would be silently suppressed — the exact failure this whole
 # MR exists to remove, reintroduced one level down.
-if [ "$severity" = "healthy" ] && [ "$notes_code" = "200" ] && [ -z "$last_fp" ]; then
+if { [ "$severity" = "healthy" ] || [ "$severity" = "in_flight" ]; } &&
+  [ "$notes_code" = "200" ] && [ -z "$last_fp" ]; then
   # Healthy, and the read SUCCEEDED and found nothing: the first run, or an issue
   # whose notes have rolled past the lookback. Posting "all is well" unprompted is
-  # how an alert channel trains its reader to ignore it.
-  echo "alert-prod-state: production is healthy and this job has said nothing before — staying quiet."
+  # how an alert channel trains its reader to ignore it. `in_flight` joins it for
+  # the same reason — announcing an ordinary deploy to a channel that has said
+  # nothing before is noise, and noise is what gets a channel muted.
+  echo "alert-prod-state: ${severity}, and this job has said nothing before — staying quiet."
   exit 0
 fi
 
