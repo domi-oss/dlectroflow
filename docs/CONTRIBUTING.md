@@ -285,6 +285,51 @@ them:
 New dependencies also go through the blocking scanners — see the security-scan
 note above.
 
+## Writing a migration that touches data
+
+`prisma migrate deploy` against an empty schema proves a migration parses. It
+proves nothing about what the migration does **to rows**, and on 2026-08-07 that
+gap cost two days of deploys: a migration wrote a value the still-live CHECK
+constraint forbade, every existing row violated it, and the whole thing rolled
+back (#180 / #190). It had passed every gate, because a fresh table has no rows
+for a constraint to be evaluated against.
+
+So `npm test` now applies the migrations to a database that already holds rows,
+seeded from `src/lib/__tests__/migration-seeds/`. **A seed file is named for the
+migration it is applied straight after**, which pins it to the schema version it
+was written against; the rows then travel forward through every later migration
+exactly as production rows do.
+
+If `migration-data-harness.integration.test.ts` fails, read which of its
+assertions went red:
+
+- **"a committed migration failed against seeded rows"** — your migration does
+  not work on data. This is the real thing, not a test problem; the SQLSTATE and
+  the failing row are in the output.
+- **"ran with 0 rows in `<table>`"** — a statement whose behaviour depends on the
+  rows already stored was applied to an empty table, so nothing it does was
+  tested. The failure names the shape it caught (`update`, `set-not-null`,
+  `validate-constraint` and so on); **the authoritative list is the
+  `DataDependentShape` union in `src/lib/migration-data-harness.ts`**, and it is
+  deliberately not copied out here. A prose list of them was wrong within one
+  release — three shapes had been added to the type and not to this bullet, so a
+  contributor whose `DELETE` or `VALIDATE CONSTRAINT` tripped the check could not
+  find their own shape in the docs. Same reasoning as the model count that used
+  to sit in `CLAUDE.md`.
+
+  Fix it by adding rows in a seed named for a migration **before** yours. Note
+  that a table cleared mid-timeline needs a seed on the far side of the clearing
+  — the check counts rows rather than trusting the corpus, precisely because a
+  `DELETE FROM` in between is invisible to anything that only reads the seed
+  files.
+- **"the reconstructed pre-fix migration APPLIED CLEANLY"** — the harness has
+  stopped being able to catch the 2026-08-07 defect. Fix that before anything
+  else; a gate that cannot be shown to fail is not a gate.
+
+Seeds are synthetic and deliberately awkward (a value below a floor, a NULL where
+one is allowed, an off state that must stay off), because a seed of tidy defaults
+is one no migration can trip over. Never paste real data into one.
+
 ## MR workflow
 
 1. Branch from `main` (e.g. `feat/short-description` or `fix/short-description`).
