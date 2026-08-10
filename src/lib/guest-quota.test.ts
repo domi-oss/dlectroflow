@@ -1,24 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const db = vi.hoisted(() => ({
+  // #158: both inserts are `createMany({ skipDuplicates: true })` now, so a
+  // duplicate resolves with `count: 0` instead of rejecting with P2002.
+  // `create` is still mocked so a silent regression back to it is visible.
   guestAiUsage: {
     findUnique: vi.fn(),
     updateMany: vi.fn(),
     create: vi.fn(),
+    createMany: vi.fn(),
     update: vi.fn(),
   },
-  guestDailyActivity: { findUnique: vi.fn(), count: vi.fn(), create: vi.fn() },
+  guestDailyActivity: {
+    findUnique: vi.fn(),
+    count: vi.fn(),
+    create: vi.fn(),
+    createMany: vi.fn(),
+  },
 }));
 
-vi.mock("@/lib/db", () => ({
-  prisma: db,
-  isUniqueViolation: (e: unknown) =>
-    !!e && typeof e === "object" && (e as { code?: string }).code === "P2002",
-}));
-
-class FakeP2002 extends Error {
-  code = "P2002";
-}
+vi.mock("@/lib/db", () => ({ prisma: db }));
 
 import {
   clientIpHash,
@@ -80,7 +81,7 @@ describe("consumeGuestBreakdown", () => {
   it("allows and increments (atomically) when under quota and under global cap", async () => {
     db.guestDailyActivity.findUnique.mockResolvedValue(null);
     db.guestDailyActivity.count.mockResolvedValue(3);
-    db.guestDailyActivity.create.mockResolvedValue({});
+    db.guestDailyActivity.createMany.mockResolvedValue({ count: 1 });
     // pre-check read (active window, under quota)
     db.guestAiUsage.findUnique.mockResolvedValueOnce({
       count: 1,
@@ -98,7 +99,7 @@ describe("consumeGuestBreakdown", () => {
     expect(r.allowed).toBe(true);
     expect(r.remaining).toBe(3); // 5 - 2
     expect(db.guestAiUsage.updateMany).toHaveBeenCalledTimes(2);
-    expect(db.guestAiUsage.create).not.toHaveBeenCalled();
+    expect(db.guestAiUsage.createMany).not.toHaveBeenCalled();
   });
   it("blocks with reason=quota when the per-IP window is exhausted (no metered write)", async () => {
     db.guestAiUsage.findUnique.mockResolvedValue({
@@ -109,7 +110,7 @@ describe("consumeGuestBreakdown", () => {
     expect(r.allowed).toBe(false);
     expect(r.reason).toBe("quota");
     // exhausted guest is blocked before any global-cap reservation or write
-    expect(db.guestDailyActivity.create).not.toHaveBeenCalled();
+    expect(db.guestDailyActivity.createMany).not.toHaveBeenCalled();
     expect(db.guestAiUsage.updateMany).not.toHaveBeenCalled();
   });
   it("blocks a NEW guest with reason=global_cap when the day is full", async () => {
@@ -143,23 +144,23 @@ describe("consumeGuestBreakdown", () => {
   it("first use: no row yet → creates the window", async () => {
     db.guestDailyActivity.findUnique.mockResolvedValue(null);
     db.guestDailyActivity.count.mockResolvedValue(0);
-    db.guestDailyActivity.create.mockResolvedValue({});
+    db.guestDailyActivity.createMany.mockResolvedValue({ count: 1 });
     db.guestAiUsage.findUnique
       .mockResolvedValueOnce(null) // pre-check: no row
       .mockResolvedValueOnce(null); // step-3 guard: still no row
     db.guestAiUsage.updateMany
       .mockResolvedValueOnce({ count: 0 }) // reset: nothing
       .mockResolvedValueOnce({ count: 0 }); // increment: no row
-    db.guestAiUsage.create.mockResolvedValueOnce({});
+    db.guestAiUsage.createMany.mockResolvedValueOnce({ count: 1 });
     const r = await consumeGuestBreakdown("iphash");
     expect(r.allowed).toBe(true);
     expect(r.remaining).toBe(4); // 5 - 1
-    expect(db.guestAiUsage.create).toHaveBeenCalledTimes(1);
+    expect(db.guestAiUsage.createMany).toHaveBeenCalledTimes(1);
   });
-  it("create race: guard sees no row, create loses P2002 → retries the guarded increment", async () => {
+  it("create race: guard sees no row, insert is skipped → retries the guarded increment", async () => {
     db.guestDailyActivity.findUnique.mockResolvedValue(null);
     db.guestDailyActivity.count.mockResolvedValue(0);
-    db.guestDailyActivity.create.mockResolvedValue({});
+    db.guestDailyActivity.createMany.mockResolvedValue({ count: 1 });
     db.guestAiUsage.findUnique
       .mockResolvedValueOnce(null) // pre-check
       .mockResolvedValueOnce(null) // step-3 guard: row not visible yet
@@ -168,7 +169,9 @@ describe("consumeGuestBreakdown", () => {
       .mockResolvedValueOnce({ count: 0 }) // reset
       .mockResolvedValueOnce({ count: 0 }) // first increment (no row)
       .mockResolvedValueOnce({ count: 1 }); // retry increment (row appeared)
-    db.guestAiUsage.create.mockRejectedValueOnce(new FakeP2002("unique"));
+    // ON CONFLICT DO NOTHING inserted nothing — resolved, never rejected, so
+    // nothing reached Prisma's error log (#158).
+    db.guestAiUsage.createMany.mockResolvedValueOnce({ count: 0 });
     const r = await consumeGuestBreakdown("iphash");
     expect(r.allowed).toBe(true);
     expect(r.remaining).toBe(2); // 5 - 3
@@ -189,7 +192,7 @@ describe("consumeGuestBreakdown", () => {
     const r = await consumeGuestBreakdown("iphash");
     expect(r.allowed).toBe(false);
     expect(r.reason).toBe("quota");
-    expect(db.guestAiUsage.create).not.toHaveBeenCalled(); // no create on the exhausted path
+    expect(db.guestAiUsage.createMany).not.toHaveBeenCalled(); // no create on the exhausted path
   });
 });
 
@@ -199,7 +202,7 @@ describe("peekGuestAllowance", () => {
     const result = await peekGuestAllowance("iphash");
     expect(result.remaining).toBe(5);
     expect(db.guestAiUsage.updateMany).not.toHaveBeenCalled();
-    expect(db.guestAiUsage.create).not.toHaveBeenCalled();
+    expect(db.guestAiUsage.createMany).not.toHaveBeenCalled();
     expect(db.guestAiUsage.update).not.toHaveBeenCalled();
   });
 });

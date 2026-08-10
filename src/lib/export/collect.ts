@@ -30,15 +30,15 @@ import type { ExportSnapshot } from "./types";
  * nothing to do with SQL: `Workspace` carries no `workspaceId` column, so
  * `src/lib/__tests__/scoping.harness.test.ts` — which is what makes the scoping
  * invariant structural rather than aspirational — cannot see inside the include
- * and would report this file as clean while it read ten tables under a filter
+ * and would report this file as clean while it read every one of these tables under a filter
  * nobody was checking. Written as separate `where: { workspaceId }` statements,
  * every one of them is policed by name.
  *
  * The array form of `$transaction` then buys back the property the nested read
  * would have had for free — but only at `RepeatableRead`, which is why the
  * isolation level is set explicitly. Postgres's default `READ COMMITTED` takes a
- * FRESH snapshot per statement even inside a transaction, so eleven statements
- * would see up to eleven different states of the database and an export could
+ * FRESH snapshot per statement even inside a transaction, so these statements
+ * would each see a different state of the database and an export could
  * contain a brain-dump item pointing at a task that is not in the same archive.
  * `RepeatableRead` pins one snapshot for all of them. It costs nothing here: the
  * transaction is read-only, so it cannot hit the serialization failures that make
@@ -80,6 +80,8 @@ export async function collectExport(input: {
     tasks,
     inbox,
     focusSessions,
+    focusPlaylists,
+    shoppingItems,
     streak,
     streakRecords,
     badges,
@@ -112,6 +114,19 @@ export async function collectExport(input: {
         where: { workspaceId },
         orderBy: { startedAt: "asc" },
       }),
+      // #185, added in review of #199 — see the note on `focusPlaylists` in
+      // types.ts. This table was missing from the export entirely.
+      prisma.focusPlaylist.findMany({
+        where: { workspaceId },
+        orderBy: { createdAt: "asc" },
+      }),
+      // #199 — the shopping list. Ordered by the same key the page renders in
+      // (capture order, tie-broken on id) so two exports of unchanged data are
+      // byte-identical, which is what makes an export diffable and assertable.
+      prisma.shoppingItem.findMany({
+        where: { workspaceId },
+        orderBy: [{ order: "asc" }, { id: "asc" }],
+      }),
       prisma.streak.findUnique({ where: { workspaceId } }),
       prisma.streakRecord.findMany({
         where: { workspaceId },
@@ -134,8 +149,8 @@ export async function collectExport(input: {
         orderBy: { date: "asc" },
       }),
     ],
-    // See the note above: at the default READ COMMITTED these eleven statements
-    // would each get their own snapshot.
+    // See the note above: at the default READ COMMITTED each of these statements
+    // would get its own snapshot.
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   );
 
@@ -183,6 +198,8 @@ export async function collectExport(input: {
     tasks,
     inbox,
     focusSessions,
+    focusPlaylists,
+    shoppingItems,
     gamification: {
       streak,
       streakRecords,

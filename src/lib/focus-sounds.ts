@@ -9,12 +9,40 @@
 import { FocusSound, FocusSoundCategory } from "@/lib/constants";
 
 /**
+ * #43 — the id of each bundled CC0 track.
+ *
+ * These lived in `FocusSound` (src/lib/constants.ts) until #180, because
+ * `Settings.focusSound` used to persist one of them as the session's opening
+ * track. It does not any more — that column is a two-value switch — so they are
+ * no longer a DB value set and have no CHECK constraint to mirror. Keeping them
+ * in constants.ts would have left `enum-constraint-sync`'s neighbours implying a
+ * constraint that does not exist.
+ *
+ * They are still ids, and still stable ones: `/api/focus-catalog` distinguishes a
+ * bundled track from a streamed one by the absence of `CATALOG_TRACK_ID_PREFIX`,
+ * and `lofi_calm` is retained from MR ② rather than renamed to match its
+ * category, so nothing that recorded a track id by value has to be rewritten.
+ */
+export const BundledFocusTrack = {
+  Calm: "lofi_calm",
+  Chillhop: "lofi_chillhop",
+  Jazzhop: "lofi_jazzhop",
+  SoulRnb: "lofi_soul_rnb",
+  LateNight: "lofi_late_night",
+  FunkSoul: "lofi_funk_soul",
+  Asian: "lofi_asian",
+  Seasonal: "lofi_seasonal",
+  Activities: "lofi_activities",
+  Hybrid: "lofi_hybrid",
+} as const;
+export type BundledFocusTrack =
+  (typeof BundledFocusTrack)[keyof typeof BundledFocusTrack];
+
+/**
  * #43 — the curated, bundled lo-fi library. One CC0 track per open-lofi category
  * (see public/audio/lofi/ + public/audio/LICENSE.md for provenance). This array
- * is BOTH the settings-picker data source and the in-timer mini-player playlist;
- * its order is the playlist's in-order pass (#68). `id` is the FocusSound value
- * persisted in Settings.focusSound. Titles/categories mirror open-lofi's
- * catalog.json.
+ * is the in-timer mini-player's playlist, and its order is the in-order pass
+ * (#68). Titles/categories mirror open-lofi's catalog.json.
  */
 export type FocusTrack = {
   id: string;
@@ -34,70 +62,70 @@ export type FocusTrack = {
 
 export const FOCUS_SOUND_TRACKS: readonly FocusTrack[] = [
   {
-    id: FocusSound.LofiCalm,
+    id: BundledFocusTrack.Calm,
     title: "Aurora on Mute",
     category: FocusSoundCategory.AmbientLofi,
     categoryLabel: "Ambient lo-fi",
     src: "/audio/lofi/aurora-on-mute.mp3",
   },
   {
-    id: FocusSound.LofiChillhop,
+    id: BundledFocusTrack.Chillhop,
     title: "Porchlight Golden Hour",
     category: FocusSoundCategory.Chillhop,
     categoryLabel: "Chillhop",
     src: "/audio/lofi/porchlight-golden-hour.mp3",
   },
   {
-    id: FocusSound.LofiJazzhop,
+    id: BundledFocusTrack.Jazzhop,
     title: "Breezy Afternoon Terrace",
     category: FocusSoundCategory.Jazzhop,
     categoryLabel: "Jazz hop",
     src: "/audio/lofi/breezy-afternoon-terrace.mp3",
   },
   {
-    id: FocusSound.LofiSoulRnb,
+    id: BundledFocusTrack.SoulRnb,
     title: "Barefoot in the Kitchen",
     category: FocusSoundCategory.SoulRnb,
     categoryLabel: "Soul / R&B",
     src: "/audio/lofi/barefoot-in-the-kitchen.mp3",
   },
   {
-    id: FocusSound.LofiLateNight,
+    id: BundledFocusTrack.LateNight,
     title: "3 AM Echoes",
     category: FocusSoundCategory.LateNight,
     categoryLabel: "Late night",
     src: "/audio/lofi/3-am-echoes.mp3",
   },
   {
-    id: FocusSound.LofiFunkSoul,
+    id: BundledFocusTrack.FunkSoul,
     title: "Burnt Sunset Groove",
     category: FocusSoundCategory.FunkSoul,
     categoryLabel: "Funk / soul",
     src: "/audio/lofi/burnt-sunset-groove.mp3",
   },
   {
-    id: FocusSound.LofiAsian,
+    id: BundledFocusTrack.Asian,
     title: "Lanterns in Slow Motion",
     category: FocusSoundCategory.AsianLofi,
     categoryLabel: "Asian lo-fi",
     src: "/audio/lofi/lanterns-in-slow-motion.mp3",
   },
   {
-    id: FocusSound.LofiSeasonal,
+    id: BundledFocusTrack.Seasonal,
     title: "After School Rain",
     category: FocusSoundCategory.SeasonalWeather,
     categoryLabel: "Seasonal / weather",
     src: "/audio/lofi/after-school-rain.mp3",
   },
   {
-    id: FocusSound.LofiActivities,
+    id: BundledFocusTrack.Activities,
     title: "Chapter By Lamplight",
     category: FocusSoundCategory.Activities,
     categoryLabel: "Activities",
     src: "/audio/lofi/chapter-by-lamplight.mp3",
   },
   {
-    id: FocusSound.LofiHybrid,
+    id: BundledFocusTrack.Hybrid,
     title: "Cafe Da Tarde",
     category: FocusSoundCategory.Hybrid,
     categoryLabel: "Hybrid / world",
@@ -162,7 +190,7 @@ export function prevFocusTrackId(id: string): string {
  * track, which is what we already have". Two is therefore the floor at which a
  * category becomes a different thing from a track.
  *
- * It is a floor on OFFERING, not on honouring: see {@link resolveFocusPlaylist}.
+ * It is a floor on OFFERING, not on honouring: see {@link resolveFocusPool}.
  *
  * Deriving it from the data rather than from the env var is deliberate. The
  * origin is server-only configuration (`focus-catalog-source.ts`), the client has
@@ -243,16 +271,20 @@ export function focusPlaylistCategories(
  * The categories a PICKER may offer — {@link focusPlaylistCategories}, minus any
  * the database would refuse.
  *
- * `Settings.focusSoundCategory` is CHECK-constrained to `FocusSoundCategory`, so
- * a self-hoster whose manifest declares its own category gets tracks that play
- * (they are in the merged list, and they group) but a slug that cannot be SAVED.
- * Offering it would be a control that silently does not stick, which is worse
- * than not offering it — the server action coerces the unknown slug to null and
- * the radio would spring back on the next load with no explanation.
+ * `Settings.focusSoundCategories` is CHECK-constrained to `FocusSoundCategory`
+ * (by containment, #180), so a self-hoster whose manifest declares its own
+ * category gets tracks that play (they are in the merged list, and they group)
+ * but a slug that cannot be SAVED. Offering it would be a control that silently
+ * does not stick, which is worse than not offering it — the server action drops
+ * the unknown slug and the control would spring back on the next load with no
+ * explanation.
  *
  * Widening the constraint to accept arbitrary manifest slugs is the alternative,
  * and it was declined: a CHECK constraint over an open set is no constraint, and
  * `enum-constraint-sync` would have nothing to mirror.
+ *
+ * #180 moved the picker itself off the Settings page; this stays because the
+ * in-session player (#181) asks the same question of the same data.
  */
 export function offerableFocusCategories(
   tracks: readonly FocusTrack[],
@@ -265,44 +297,188 @@ export function offerableFocusCategories(
 }
 
 /**
- * The bundled track of a category — where a category selection opens.
+ * The categories the in-session PICKER lists — {@link offerableFocusCategories},
+ * widened by whatever is already selected (#181).
  *
- * Picking a category still has to answer "which track first", and that answer has
- * to be a value `Settings.focusSound` can hold. Each of the ten has exactly one
- * bundled track (#43), which is both persistable and playable with no store
- * reachable, so it is the only candidate that cannot fail.
+ * The floor exists so a one-track category is not offered as a "playlist", and
+ * that is still right for a category nobody has chosen. It is wrong for one that
+ * IS chosen, and not as an edge case: every new row is created with
+ * `focusSoundCategories: ["ambient-lofi"]`, and the default install is #43's
+ * bundled ten — one track per category, so nothing clears the floor. A picker
+ * built on `offerableFocusCategories` alone would therefore open, out of the box,
+ * showing a single unticked "All tracks" row while the session was really playing
+ * one category: precisely the "nothing is ticked and you cannot tell what will
+ * play" state #181 exists to rule out, and with no control on screen to leave it.
+ *
+ * So: offer at the floor, and always show what is switched on. The count is the
+ * category's REAL size, including below the floor — "(1)" is the honest answer to
+ * "what am I picking?" and is the number that makes the floor's reasoning visible
+ * rather than hidden behind an absent row.
+ *
+ * A selected slug the catalogue does not carry gets NO row, deliberately. A "(0)"
+ * would be a lie about what plays: {@link resolveFocusPool} widens a selection
+ * that matches nothing back to the whole catalogue, so the honest rendering is no
+ * row at all and a ticked "All tracks" — see {@link poolIsWholeCatalogue}.
+ *
+ * The persistable filter survives the widening, for the reason
+ * `offerableFocusCategories` gives: a slug outside `FocusSoundCategory` cannot be
+ * stored, so a control for it would silently not stick. The CHECK constraint
+ * means such a slug cannot really BE selected, but this takes the selection as an
+ * argument and must not depend on its caller having checked.
  */
-export function focusTrackForCategory(
-  category: string,
-): FocusTrack | undefined {
-  return FOCUS_SOUND_TRACKS.find((t) => t.category === category);
+export function pickerFocusCategories(
+  tracks: readonly FocusTrack[],
+  selected: readonly string[] | null | undefined,
+  min: number = MIN_CATEGORY_PLAYLIST_TRACKS,
+): FocusPlaylistCategory[] {
+  const persistable = new Set<string>(Object.values(FocusSoundCategory));
+  const chosen = new Set(selected ?? []);
+  // One pass over the catalogue (min = 1 counts everything), then a filter over
+  // the ten-ish categories it found — not a second pass over the manifest.
+  return focusPlaylistCategories(tracks, 1).filter(
+    (c) => persistable.has(c.slug) && (c.count >= min || chosen.has(c.slug)),
+  );
 }
 
 /**
- * The playlist a stored category selection resolves to.
+ * Does this selection narrow anything at all? (#181)
  *
- * Three cases, and the last two are the ones that matter:
+ * The "All tracks" row's ticked state, and it has to be true in all three cases
+ * where the whole catalogue is what plays: nothing selected, a selection that
+ * matches nothing (which {@link resolveFocusPool} widens rather than let the
+ * session go silent), and a selection that happens to name every category there
+ * is. Comparing the pool's IDENTITY to the catalogue would get the first two and
+ * miss the third, because the filter builds a new array; the length is exact,
+ * since the pool is always a subset.
  *
- * 1. **No selection** — returns `tracks` ITSELF, same identity. `useFocusSound`
- *    re-deals its play order when the list changes, so "nobody picked a category"
- *    must not look like a change (the same reason `mergeFocusTracks` returns the
- *    bundled array when the catalog added nothing).
- * 2. **A category that has shrunk to one track** — honoured, not widened. A
+ * #185 — it takes the custom-playlist half as well, and has to: derived from the
+ * categories alone, ticking a playlist would narrow what plays while "All
+ * tracks" stayed ticked, which is the picker saying one thing and the speakers
+ * doing another.
+ */
+export function poolIsWholeCatalogue(
+  tracks: readonly FocusTrack[],
+  categories: readonly string[] | null | undefined,
+  playlistTrackIds?: readonly string[] | null,
+): boolean {
+  return (
+    resolveFocusPool(tracks, categories, playlistTrackIds).length ===
+    tracks.length
+  );
+}
+
+/** One category heading in the player's jump-list, with the tracks under it. */
+export type FocusTrackGroup = {
+  slug: string;
+  label: string;
+  tracks: FocusTrack[];
+};
+
+/**
+ * The pool, split under category headings in first-appearance order (#181).
+ *
+ * Headings rather than a flat list because 166 titles in one uninterrupted run
+ * loses which playlist a track came from, and because they give a screen reader
+ * structure to move between. First-appearance order for the same reason
+ * {@link focusPlaylistCategories} uses it: the list then reads in the same order
+ * as the tick-list above it.
+ *
+ * A track whose manifest gave it no category is KEPT, under a humanised heading
+ * of its own. `parseCatalog` stores `""` for that and still plays the track, so
+ * dropping it here would leave a track that plays and cannot be jumped to.
+ */
+export function groupTracksByCategory(
+  tracks: readonly FocusTrack[],
+): FocusTrackGroup[] {
+  const groups = new Map<string, FocusTrackGroup>();
+  for (const track of tracks) {
+    const existing = groups.get(track.category);
+    if (existing) {
+      existing.tracks.push(track);
+      continue;
+    }
+    groups.set(track.category, {
+      slug: track.category,
+      // Same precedence as focusPlaylistCategories: the label already on the
+      // track, then the slug, then a last-resort word for the uncategorised —
+      // an empty heading is not a heading.
+      label: track.categoryLabel || track.category || UNCATEGORISED_LABEL,
+      tracks: [track],
+    });
+  }
+  return [...groups.values()];
+}
+
+/** Heading for tracks whose manifest declared no category at all. Matches
+ * `focus-catalog.ts`'s own fallback for an unnameable slug. */
+const UNCATEGORISED_LABEL = "Other";
+
+/**
+ * The pool a session draws from, given the categories stored in
+ * `Settings.focusSoundCategories`.
+ *
+ * #180 — this took one nullable slug until the column became an array. The union
+ * is built by FILTERING the catalogue rather than by concatenating a slice per
+ * category, and that is the behavioural difference rather than a style one: the
+ * player's in-order pass walks this list, so a concatenation would group it by
+ * category and sound like three short playlists played back to back. Filtering
+ * keeps catalogue order whatever order the categories were ticked in, and makes
+ * a repeated slug impossible to hear.
+ *
+ * All three of #70's fallbacks are kept, because each one exists to stop a focus
+ * session going silent:
+ *
+ * 1. **Nothing selected** — the whole catalogue, returned as `tracks` ITSELF,
+ *    same identity. `useFocusSound` re-deals its play order when the list
+ *    changes, so "the whole catalogue" must not look like a change (the same
+ *    reason `mergeFocusTracks` returns the bundled array when the catalog added
+ *    nothing). The empty array is what the column stores for this; `null` and
+ *    `undefined` are accepted because the prop is optional on the way down.
+ * 2. **A selection that has shrunk to one track** — honoured, not widened. A
  *    selection made while the store was reachable must not silently change genre
  *    when it stops answering: one chillhop track is what the user asked for, all
  *    ten categories is not. So the {@link MIN_CATEGORY_PLAYLIST_TRACKS} floor
- *    governs what the picker OFFERS and deliberately not what this honours.
- * 3. **A category with no tracks at all** — falls back to the whole list. A
- *    retired slug, or a manifest that no longer carries the category, must never
- *    leave a focus session with an empty playlist and therefore silent.
+ *    governs what a picker OFFERS and deliberately not what this honours.
+ * 3. **A selection that matches nothing at all** — falls back to the whole list.
+ *    A retired slug, or a manifest that no longer carries the category, must
+ *    never leave a focus session with an empty playlist and therefore silent.
+ *
+ * A category that is merely absent from a selection that also names a live one
+ * contributes nothing and does NOT trigger case 3: the live half is still
+ * exactly what was asked for.
+ *
+ * ── #185: the second half of the union ──────────────────────────────────────
+ *
+ * `playlistTrackIds` is the flattened selection of the workspace's own named
+ * playlists (`selectedPlaylistTrackIds` in focus-playlists.ts), and it joins the
+ * categories by widening the SAME filter rather than by appending a second list.
+ * That is the same behavioural argument #180 made one level up: appending would
+ * play the categories and then the playlist as two audible blocks, and a track
+ * that is in both would be heard twice in one pass. Filtering keeps one
+ * catalogue-ordered pool in which every track appears exactly once, whichever
+ * half — or both — put it there.
+ *
+ * It also gives "unknown track ids are filtered at resolution time" for free,
+ * which is the promise made in place of a CHECK constraint the column cannot
+ * have: an id no catalogue entry carries matches nothing and therefore
+ * contributes nothing. All three fallbacks above read the two halves together —
+ * "nothing selected" means neither half selected anything, and a playlist whose
+ * every id has left the manifest is case 3, not a silent session.
  */
-export function resolveFocusPlaylist(
+export function resolveFocusPool(
   tracks: readonly FocusTrack[],
-  category: string | null | undefined,
+  categories: readonly string[] | null | undefined,
+  playlistTrackIds?: readonly string[] | null,
 ): readonly FocusTrack[] {
-  if (!category) return tracks;
-  const narrowed = tracksInCategory(tracks, category);
-  return narrowed.length > 0 ? narrowed : tracks;
+  const noCategories = !categories || categories.length === 0;
+  const noTrackIds = !playlistTrackIds || playlistTrackIds.length === 0;
+  if (noCategories && noTrackIds) return tracks;
+  const selected = new Set(categories ?? []);
+  const selectedIds = new Set(playlistTrackIds ?? []);
+  const pool = tracks.filter(
+    (t) => selected.has(t.category) || selectedIds.has(t.id),
+  );
+  return pool.length > 0 ? pool : tracks;
 }
 
 /** Clamp a volume to the [0, 1] range the <audio> element accepts. */

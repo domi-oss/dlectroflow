@@ -31,7 +31,7 @@ vi.mock("@prisma/client", () => ({
   Prisma: { PrismaClientKnownRequestError },
 }));
 
-import { getSettings, getStreak, isUniqueViolation } from "./db";
+import { getSettings, getStreak } from "./db";
 
 beforeEach(() => {
   // reset, not clear: these delegates are queued per test with
@@ -143,30 +143,7 @@ describe.each(singletons)(
   },
 );
 
-describe("isUniqueViolation", () => {
-  // Not used by getSettings/getStreak any more (#156 removed the need to catch
-  // P2002 at all), but still the shared guard for the call sites that *do* have
-  // to tolerate a duplicate — src/lib/rewards.ts, guest-quota.ts, user-quota.ts
-  // and src/app/actions/people.ts. It is exported API, not dead code.
-  it("matches any P2002, whichever column collided", () => {
-    expect(
-      isUniqueViolation(
-        new PrismaClientKnownRequestError(
-          "Unique constraint failed on the fields: (`id`)",
-          "P2002",
-        ),
-      ),
-    ).toBe(true);
-  });
-
-  it("does not match other Prisma errors or plain throwables", () => {
-    expect(
-      isUniqueViolation(
-        new PrismaClientKnownRequestError("connection lost", "P1001"),
-      ),
-    ).toBe(false);
-    expect(isUniqueViolation(new Error("P2002"))).toBe(false);
-    expect(isUniqueViolation({ code: "P2002" })).toBe(false);
-    expect(isUniqueViolation(undefined)).toBe(false);
-  });
-});
+// `isUniqueViolation` used to be tested here. It is gone (#158): the four call
+// sites its docblock named — rewards.ts, guest-quota.ts, user-quota.ts and
+// app/actions/people.ts — now insert with ON CONFLICT DO NOTHING and have no
+// P2002 to recognise, so the helper had no callers left. See the note in db.ts.

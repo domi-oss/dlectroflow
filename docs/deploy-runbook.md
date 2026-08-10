@@ -203,13 +203,37 @@ ingress `X-Forwarded-Proto` header and Task 3's `requestOrigin`.
 - Ten CC0 tracks ship inside the image, one per open-lofi category. The full
   open-lofi set is 166 tracks / ~544 MB, too much for a container image, so the
   rest is read at run time from wherever it is kept.
-- Extract the `openlofi.zip` release somewhere an HTTP server can reach, then set
-  the chart value:
+- **`catalog.json` is not inside the zip.** `openlofi.zip` is 166 `.mp3` entries
+  and nothing else — no manifest, no enclosing directory. The manifest is
+  published separately, at
+  <https://raw.githubusercontent.com/btahir/open-lofi/main/catalog.json>; fetch
+  it alongside the extraction. Miss it and the store answers 404 for the
+  manifest, which reads exactly like an unconfigured instance.
+- **The layout is flat.** `catalog.json` and every `.mp3` sit directly under the
+  configured origin, one path segment each — the app requests
+  `<origin>/catalog.json` and `<origin>/<filename>.mp3` and builds no other
+  shape, so a per-category subdirectory will not be found.
+- **The store must answer unauthenticated `GET`s, and must honour `Range`.**
+  There is no credential to give it: the app reads a bare URL, refuses one
+  carrying userinfo or a query string (so a pre-signed base cannot work), and
+  does not follow redirects — a 3xx moves the request to a host nobody
+  configured and is treated as a failure. Scrubbing depends on the store
+  returning `206 Partial Content` with `Accept-Ranges: bytes`; one that ignores
+  `Range` and returns the whole file leaves the track playable but unseekable.
+- Extract the `openlofi.zip` release somewhere an HTTP server can reach, put
+  `catalog.json` beside the mp3s, then set the chart value:
   ```
   --set focus.catalogOrigin=https://your-store.example.com/openlofi
   ```
   It renders as `FOCUS_CATALOG_ORIGIN` in the app Secret, and is omitted entirely
   when empty — the default.
+- **This deployment sets it.** `deploy_production` passes
+  `--set-string focus.catalogOrigin="$FOCUS_CATALOG_ORIGIN"` from a masked,
+  protected CI/CD variable, so the address is deployment configuration rather
+  than repository content. `src/lib/deploy-values.test.ts` fails if that flag is
+  dropped: an absent flag and a deliberately empty one are indistinguishable once
+  the pod is running, so nothing else would notice the feature switching itself
+  off.
 - **The URL never reaches a browser.** `next.config.ts` keeps `default-src 'self'`
   with `media-src` unset, so a browser refuses audio from any other origin; the
   pod fetches the bytes and streams them back through `/api/focus-catalog/audio`,

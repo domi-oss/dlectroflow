@@ -31,6 +31,111 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Added
 
+- **The inbox tells you the shopping list is there (#199).** When something is on
+  the list, one line at the top of the inbox reads *"3 items on your shopping
+  list"* and takes you straight there. **Not now** clears it, and it comes back the
+  next time the list grows — adding an item, un-ticking one, or pulling one back up
+  out of Saved for later. Ticking things off does not bring it back: that is
+  progress, not a new reason to be reminded. If a **Not now** does not reach the
+  server it says so and leaves the line where it is, rather than disappearing and
+  turning up again later as though the button had never worked.
+
+  The count is worked out from the list itself every time the inbox renders, and
+  nothing anywhere stores a copy of it — so the number cannot drift away from the
+  list, and the worst a missed update can do is hide the line rather than show a
+  figure that is wrong. It is also not a captured item: it does not count toward
+  the number of things you have to triage, it does not age, it cannot be dragged
+  into a bucket, and it does not stop you reaching inbox zero.
+
+- **A shopping list, if you want one (#199).** A plain list for the things that are
+  not tasks: no estimate, no steps, nothing that lands in your calendar, and
+  ticking one off does not touch your streak. It lives at its own `/shopping`
+  destination in the menu, with a second **Saved for later** section below the
+  live list — undated on purpose, so nothing there comes back on its own; you pull
+  an item up when you want it again, and it arrives back un-ticked, because
+  pulling it up is you saying you want to buy it.
+
+  **Off by default**, behind Settings → Shopping list. Nothing is stored until you
+  turn it on, and turning it off again hides the list rather than deleting it, so
+  the items are still there if you change your mind.
+
+  Shopping items are their own kind of thing rather than tasks in disguise, which
+  is what keeps them out of the focus timer, the scheduler and the streak — the
+  code that grants those cannot see them. Entries are capped at 200 characters and
+  a list at 500 items. `/privacy` names the new category of stored content and the
+  effective date moves with it.
+
+- **Pick your playlists and jump to any track, from inside the focus timer
+  (#181).** The mini-player gains one expandable panel, collapsed by default and
+  opening below the progress bar at a capped height with its own scroll. It holds
+  both halves of "what am I listening to": a tick-list of the playlists the
+  session draws from — ticking several plays the union, and each row shows how
+  many tracks it has, because on an instance with no catalog configured they
+  would otherwise all look identical — and, under it, the tracks that selection
+  resolves to, grouped under their category headings, any of which starts playing
+  when you tap its title.
+
+  **Neither list interrupts what you are hearing.** Ticking a playlist while
+  something is playing re-orders what comes next and nothing else; unticking the
+  playlist of the track currently playing lets that track finish and draws the
+  next one from the new selection, rather than cutting the audio mid-bar. Tapping
+  a title plays it and then carries on through the rest of the list, so it is a
+  jump rather than a filter. Changes save by themselves, a moment after the last
+  tick.
+
+  The panel is a real disclosure throughout: keyboard operable, Escape closes it,
+  each playlist's track count is part of what a screen reader reads out rather
+  than decoration beside it, and the playing track is marked in words as well as
+  in colour.
+
+- **Focus sounds are on by default, and Settings holds one switch (#180).** A new
+  account starts with sound on, the ambient lo-fi playlist and shuffle — a
+  catalogue you only hear after finding a settings page is a feature in hiding.
+  **Existing accounts are not changed**: those are column defaults, applying to
+  rows created after the upgrade, and there is deliberately no data migration
+  turning anyone's audio on. `src/lib/focus-sound-migration-hygiene.test.ts`
+  fails the build if a later migration ever tries.
+
+  **Settings → Focus timer now holds a single on/off switch** and nothing else
+  about music. The ten track radios, their preview buttons and #70's category
+  radios are gone; which playlists and which track are chosen from the
+  in-session player instead, because both are decisions you make while
+  listening. One consequence is deliberate and worth knowing: **nothing
+  persists an opening track any more**, so a session opens on the head of its
+  playlist rather than on a track picked in advance.
+
+  Under it, `Settings.focusSound` narrows from eleven values to `off | on`, and
+  `Settings.focusSoundCategory` (one slug, or null) becomes
+  `Settings.focusSoundCategories` — a text array guarded by a containment CHECK,
+  so a playlist can draw from **several genre categories at once**. An empty
+  array means the whole catalogue, which is exactly what the old `null` meant.
+  Everyone's existing choice is carried across unchanged; where a row had both a
+  track and a category, the category wins.
+
+- **Notes on a task and on a step, which ride along into what you schedule
+  (#44).** Jot the context you would otherwise lose — "bring the Figma link",
+  "call before 5" — and it travels into the calendar event or Google Task
+  alongside the focus deep-link, so the reminder arrives carrying its own
+  context instead of just a title.
+
+  **Collapsed until you want it.** With no note there is only a compact "Note"
+  button; once a note exists it is shown as text, so coming back to a task never
+  costs a tap to read what you wrote. It is a proper disclosure — keyboard
+  operable, focus moves into the field when it opens and back to the trigger on
+  Escape, and each control is named after the task or step it belongs to rather
+  than being one of a dozen buttons all called "Note". Saving is automatic;
+  there is no Save button.
+
+  **Where both a task note and a step note exist, the scheduled item carries
+  both**, task first. A calendar entry is read on its own, days later, so
+  letting the step's note suppress the task's would mean the more carefully you
+  annotate, the less each entry tells you. Notes are plain text (no markdown
+  rendering) and bounded at 2000 characters each — Google Tasks rejects a note
+  field over 8192, and yours is one part of what gets sent.
+
+  Both notes are included in a data export: quoted in `tasks.md`, verbatim in
+  `export.json`, and deliberately absent from the CSVs, where a paragraph with
+  embedded newlines is the thing spreadsheets import wrong.
 - **The focus timer can play the full lo-fi catalog (#61).** Ten CC0 tracks still
   ship inside the image, one per open-lofi category; the other 156 are read at run
   time from wherever an operator keeps them. **New optional environment variable:
@@ -353,6 +458,303 @@ operators upgrading a self-hosted instance don't get surprised.
 
 ### Fixed
 
+- **"Back to inbox" in the step editor can no longer lose a step (#212).** The
+  control takes one step out of the plan you are editing and puts it in your
+  inbox as its own thing to break down later. It used to take the row away
+  first and send the words afterwards, without waiting to hear whether they
+  arrived — so if the connection dropped, or the app had updated in another tab
+  since you opened this one, the step was gone from the screen and had never
+  reached the inbox. Nothing said so, and because a plan is not saved until you
+  press "Looks right", that row was the only copy.
+
+  **The row now stays until the inbox has the words.** While it is sending, the
+  control says so; if it cannot send, the row is still there, still editable,
+  and a message above the list says what happened and offers to try again. If
+  the app updated while the page was open it offers a reload instead, because
+  that is the only thing that can work. And if the server simply never answers,
+  it says the step **may** already be in your inbox and asks you to check
+  before retrying, rather than claiming a failure it cannot be sure of — the
+  step stays in the plan either way, so nothing is lost.
+
+  Two more things the same control now gets right, because the plan's rows have
+  an identity of their own rather than being told apart by their words. **A
+  step you edit while it is still sending keeps the edit**, and a short note
+  says your inbox has the wording as it read when you pressed, so you know an
+  item arrived that you did not see. And **two steps that happen to say exactly
+  the same thing are two steps**: pressing one no longer makes the other look
+  busy, no longer swallows a press on it, and no longer clears a message about
+  the first one.
+
+  **Keyboard focus never lands nowhere.** Every control in this flow that
+  vanishes when you press it now hands you on to a specific, still-present one:
+  ejecting a step moves you to the row that takes its place, dismissing the
+  "your inbox has the earlier wording" note puts you on that row's own control,
+  and trying again after you have deleted the row leaves you on "Add a step".
+  Each of those used to drop you at the top of the page, which for anyone
+  navigating by keyboard or screen reader means starting the tab sequence over.
+
+  Finally, **a step can no longer be in the plan and the inbox at the same
+  time, whichever way round you press.** A plan is saved with every row it still
+  shows, and a row on its way to the inbox is deliberately one of them until the
+  inbox has it — so pressing "Looks right" in that moment used to put the same
+  step in both places at once, with nothing said and no way for the app to
+  notice afterwards. Asking for a different plan did the same thing more quietly
+  still: the request shows the AI the plan as it stands, ejected row included,
+  and then replaces the plan with the answer — which hands that row straight
+  back, seconds after you watched it leave.
+
+  So "Looks right", "More steps", "Fewer steps", the feedback box's Send and the
+  error banner's Try again all wait for a step that is still being sent — and,
+  the other way round, **"Back to inbox" and its own Try again wait while the
+  plan is being saved or a new one is being asked for.** Every one of them says
+  why it is waiting rather than just greying out, stays reachable by keyboard so
+  the reason can be read, and goes through the moment the wait is over — however
+  it ended.
+- **A Settings switch no longer stays flipped on a change that did not save
+  (#227).** Four sections could leave a control showing a value the server had
+  refused. **First-run preview** was the quietest: it said nothing at all, so the
+  checkbox simply looked switched while the setting was not. **Notifications**,
+  **Appearance** and **Focus timer** were arguably worse — they showed "couldn't
+  save" next to a control that still read the way you had just set it, leaving
+  you to guess which of the two to believe. Appearance made the same false claim
+  three times, because its completion and typeface samples previewed the refused
+  choice too. All four now say the save failed **and** put the control back where
+  the server still has it, and a save that fails while you are changing something
+  else undoes only the one that failed.
+
+  Flipping the *same* control several times in quick succession is handled too.
+  Each save is tracked as its own attempt rather than by the value it wrote, so a
+  slow failure can no longer undo a later change that did save — even when the
+  two happen to land on the same setting. And a control that steps back steps
+  back to the last value the server actually accepted, rather than to whatever it
+  was showing when the page loaded.
+
+  Two things deliberately unchanged. The **aging thresholds** are typed-in
+  numbers rather than switches, so a failed save reports itself and leaves your
+  typing exactly where it is — putting the stored number back would delete what
+  you were in the middle of writing. And a save that gets **no answer at all** —
+  a dropped connection, a server restarting mid-request — now says *"No answer
+  yet — this may not have saved"* instead of showing the saving dots forever, and
+  leaves your value alone: the app cannot tell a hung save from a slow one, so
+  undoing it might undo something that did land.
+
+- **Creating your calendar feed in two tabs at once no longer errors (#223).**
+  Pressing "create my feed" twice at the same moment — two tabs, a double-click
+  that outran the button — failed one of them outright, after you had already
+  been told to expect a URL. Nothing was ever lost or leaked when it happened,
+  and nobody ended up with a broken subscription; the write that came second was
+  simply refused instead of being recognised as the same request. Both presses
+  now finish, and **both hand back the same URL**, so there is no way to end up
+  pasting a feed address into your calendar that nothing answers. The daily
+  encouragement line had the identical fault and is fixed with it: two requests
+  landing together on the first visit of the day could leave one of them with no
+  quote on the dashboard until the next reload.
+
+- **Retrying a failed "Mark not done" no longer loses your place (#215).** When a
+  step's undo failed, the row showed the reason with a **Try again** beside it —
+  and pressing that with the keyboard dropped focus to the top of the page. The
+  notice is withdrawn while the retry runs (a message saying the step is still
+  done should not stay up while the attempt that may fix it is in flight), and it
+  took the button being pressed with it. Focus now moves to the row's own **Mark
+  not done** control: the same action, in a place that does not disappear, and one
+  that says out loud that the retry is running. The first failure was never
+  affected — that press leaves you on a control that stays put.
+
+- **"Trying again…" on the focus timer's error notice now reliably reaches a
+  screen reader (#218), and "Saving…" on the inbox's capture notice with it.**
+  Both sat inside the notice's own announcement, and a polite region nested
+  inside an urgent one is read twice by some screen readers and not at all by
+  others — so the one message telling you the app had heard you was the one that
+  might go missing. Each now has its own quiet announcement, kept separate from
+  the notice rather than tucked inside it, and it is also part of the description
+  of the **Try again** button you are still holding for anyone arriving at that
+  button mid-attempt. It goes away again the moment nothing is in flight.
+  Nothing changes on screen.
+- **Ticking off a multi-step to-do from the inbox left every step open in Google
+  Tasks (#209).** Scheduling a to-do that has been broken down gives each step
+  its own Google Task. Completing that to-do from the inbox — the row's Complete
+  button, or a bulk complete — closed it here and nowhere else: every step stayed
+  open on the Google side and Reclaim went on holding all of their calendar
+  blocks. Finishing the same steps one at a time through the focus timer always
+  worked, which is why this survived the stepless fix in #195. Both grains are
+  closed now, the to-do's own Google Task and each of its steps, and steps that
+  were already ticked off are left alone rather than re-sent.
+
+- **Putting a completed to-do back left it finished in Google Tasks (#196).**
+  Reopening an item from the Done view gave you the work back in the app while
+  Google Tasks still showed it complete, and nothing afterwards ever corrected
+  that — so the two sides parted permanently and Reclaim never re-booked the
+  time. Reopening now tells Google, for the to-do itself and for each step it
+  actually puts back. As everywhere else, the Google side is best-effort in the
+  strict sense: an unreachable Google, or an account disconnected since the to-do
+  was scheduled, costs you the sync and never the reopen.
+
+- **Reopening a to-do and finishing it again paid you twice (#196).** Completing
+  a to-do banks a point for each step it closes plus one for the to-do, and
+  putting it back took none of that away — so the same piece of work could be
+  banked over and over by completing, reopening and completing again. Reopening
+  now returns exactly what that completion paid: one per step it genuinely puts
+  back, and the to-do's own, only when the to-do really was complete. **Badges
+  are untouched by design** — they mark that something happened once, they cannot
+  be earned twice, and taking one back would make the collection lie about the
+  past.
+
+  **Reopening the same to-do twice takes the points back once.** A double-tap
+  that outruns the button, or the same Done row open on a phone and a laptop,
+  used to run the reopen twice — and because taking a point back means removing
+  the most recent one, the second pass reached into a different, already-finished
+  piece of work and took its points instead. Each reopen now claims the to-do and
+  its steps as it puts them back, so whichever press arrives second finds the work
+  already done and stops: silently, without an error, and without a second round
+  of updates to Google.
+
+- **The focus timer's Start and Resume no longer fail in silence (#139's shape,
+  found via #198).** Both buttons handled a server that could not be *reached*,
+  and neither handled a server that answered and *declined* — so in those cases
+  the button did nothing at all: no message, no movement, nothing announced. Most
+  reachable right after putting a step back, where the screen briefly still
+  offered "Resume · ~Xm left" for the session that completion had just closed.
+  Pressing it now says so and offers a retry, and that spent offer is **no longer
+  shown in the first place** — once a step has been put back, the screen offers a
+  fresh start, which is the only thing that can actually work. A genuinely paused
+  session is still offered exactly as before.
+
+- **A step completed by accident can now be put back (#198).** There was no way
+  to un-complete a step while its task still had other steps outstanding: the
+  only reopen path in the app worked on a whole inbox item, which an unfinished
+  task never becomes. Finishing the wrong step was therefore permanent. Two
+  places now undo it — **"Actually, I hadn't finished" on the timer's completion
+  screen**, which is where the mistake is actually noticed, and a **"Mark not
+  done"** control on any completed step row. Undoing reopens the parent task and
+  its inbox item if that step was what closed them, tells Google Tasks the task
+  is open again (the first time this app has ever sent that, rather than only
+  ever reporting completions), and **takes back the points that completion
+  awarded** so finishing the step again cannot bank them twice — a loophole that
+  already existed through the inbox's Reopen. Your streak and any badges stay:
+  the focus session really happened, and undoing a step does not un-happen it.
+  On the timer, the undo also cancels the five-second countdown to the next step,
+  so nothing navigates away from the step just rescued. If the step being put back
+  was the one that finished its task, the task-completion points come back too —
+  otherwise finishing that last step again would have paid for the same task twice.
+  **Points for time spent focusing are yours to keep**, on both sides of an undo:
+  you really did focus, and focusing on the step again means running another real
+  session for it. **An undo that fails is an undo you can retry** — it either
+  happens completely or not at all, so a hiccup leaves the step exactly as it was
+  rather than half put-back with the points still banked, and pressing the button
+  again finishes the job. And **using the keyboard, focus lands on the step's own
+  Start button** once the step is back, rather than being dropped nowhere at the
+  moment you have just fixed a mistake.
+
+  **Pressing undo twice takes back one reward, not two.** A double-tap that
+  outruns the button, or the same step open on a phone and a laptop, used to run
+  the undo twice — and because taking a reward back means removing the most
+  recent one, the second pass removed a *different* step's points. The undo now
+  claims the step as it reopens it, so whichever press arrives second finds the
+  work already done and stops, silently and without an error. **And one row's
+  undo no longer greys out another's:** completing, renaming or re-estimating any
+  step used to disable every "Mark not done" button on the page for the length of
+  that request, so a press landing in the gap vanished with nothing to explain
+  it. Each button now waits only on its own step, and while it is waiting it says
+  so out loud rather than just going grey.
+
+  **The button you press keeps the keyboard's focus while it works (#206).** It
+  dims and says why, but it is still the control you are holding. Before, the
+  browser dropped focus to the top of the page the moment the button went
+  inactive, leaving a keyboard or screen-reader user holding nothing — in a list
+  of identical-looking completed rows, while a change they could not observe went
+  through. **And undoing two steps before either finishes now returns focus for
+  both (#206).** The hand-off onto the reopened step's Start button remembered one
+  step at a time, so the second undo erased the first's, and whichever row
+  reopened first was left with focus nowhere: the exact problem the hand-off
+  exists to prevent, on the row that had been waiting longest.
+
+  **Un-completing two steps of the same finished task no longer takes back two
+  task rewards.** The task only reopens once, so only one reopening is paid back —
+  before, the second undo removed some other, already-finished task's reward
+  instead. And **a failed undo on a step row now says so and offers to try
+  again**, the way the timer's has all along: it was the one place this promise
+  was made and not kept, because a failure there left the row looking untouched
+  with nothing said.
+
+- **The focus timer's "Complete step" sat where Pause belongs (#197).** In a
+  running session the controls read *Complete step, then Pause*, with Complete
+  the only filled button in the row — so the leading, most prominent, most
+  colourful slot belonged to the one action that cannot be undone, in the exact
+  position where every media player and timer puts pause. Reached for by muscle
+  memory, it ended the step instead of pausing it: five separate accidental
+  completions by one user before it was reported. **Pause now leads** and carries
+  the filled treatment; Complete follows it, keeping the AA-measured green from
+  #99. There is deliberately no confirmation dialog — that would put a tap
+  between finishing a step and the reward, on every step, forever — so the
+  recovery path is un-completing a step instead (#198). The code's own idea of
+  the primary control (`sessionCtaRef`, where focus lands after a resume) was
+  already on Pause; the row now agrees with it.
+
+- **Migrations are tested against a database that already holds rows (#190).**
+  `prisma migrate deploy` on an empty schema proves a migration parses and
+  nothing more, and every gate this project had did exactly that — which is why
+  the 2026-08-07 defect could not fail anywhere except production: its data steps
+  were `UPDATE`s, and zero rows updated means no constraint is ever evaluated.
+  `npm test` now applies the real migrations, one at a time, to a scratch schema
+  seeded with synthetic rows at the schema version each was written against, then
+  asserts what the conversions actually did to them. It counts the rows in every
+  table a migration is about to touch, so "this migration met data" is a measured
+  number rather than a claim about the seed files — the first thing that found was
+  a table emptied mid-timeline whose later migrations were still running empty.
+  The harness is **demonstrated to fail**: it reconstructs the pre-fix statement
+  order of `20260806100000` and requires SQLSTATE 23514 and the P3009 that
+  followed, so a gate that has quietly stopped being able to catch that defect
+  fails the suite rather than passing it. Nothing an operator runs changes; the
+  migrations themselves are untouched.
+
+- **Completing a to-do with no steps left its Google Task open (#195).** A
+  stepless to-do is pushed to Google Tasks as one task, so the scheduling unit is
+  the to-do itself rather than any step of it — and only steps were ever marked
+  completed on the Google side. Ticking such an item off in the app closed it
+  here and nowhere else: it stayed open in Google Tasks, and Reclaim went on
+  holding the block it had booked for work already finished. Both routes that
+  close a to-do now complete its own Google Task, including the one taken when
+  you finish a stepless item from the focus timer. The sync stays best-effort in
+  the strict sense — an unreachable Google, or a Google account that has been
+  disconnected since the item was scheduled, costs you the sync and never the
+  completion. The timer's "marked complete in Google Tasks ✅" line now counts
+  that case too; it was reading the step's sync alone and so said nothing for
+  the very to-dos this fixes.
+- **Two "best-effort" Google syncs that could still fail the thing they were
+  attached to (#195).** Finishing a step, and requeueing one with a new time
+  estimate, both talked to Google in a step marked best-effort — but a network
+  error or an expired Google sign-in threw out of the whole action. Finishing a
+  step could fail outright; requeueing saved the new estimate and then reported
+  an error, leaving the list showing the old number until the next refresh.
+  Both now do what the label always said: you keep the change, and only the
+  Google side is skipped.
+- **Signing in from any hostname but the canonical one looped forever (#174).**
+  The app answers on more than one hostname, but every OAuth redirect URI is
+  built from the single origin `PUBLIC_ORIGIN` names, and the PKCE verifier and
+  state cookies are set with no `Domain` attribute — so they are host-only. A
+  sign-in begun elsewhere set its cookies there, was returned by the provider to
+  the `PUBLIC_ORIGIN` host, and failed on cookies the browser held but would not
+  send. It then bounced to a login page on the *other* hostname, so retrying
+  repeated it exactly. Reported as a hang on mobile, where the collapsed URL bar
+  hides the hostname change; the auth-flow paths now move to the canonical
+  origin before the flow starts. Every failed sign-in also writes one structured
+  log line naming the reason and the hostname it arrived on — diagnosing this
+  one needed an ingress access log, because the app itself said nothing.
+- **Scheduling one inbox row disabled the Schedule button on every other row
+  (#169).** A single `useTransition` was shared by the whole list, so its
+  `pending` flag meant "some schedule call is in flight somewhere" while the
+  control it guarded was documented as meaning "a schedule call for *this* row".
+  On a list of any length that reads as the app locking up. `pending` is now
+  keyed by item id and raised only by the schedule runners; the list-wide signal
+  keeps its own name, `refreshing`, and keeps driving the list dimming, which is
+  honest because every wrapper does end in a refresh.
+- **Row action buttons sat exactly on the minimum touch target (#184).** The
+  primary call to action on every item row was the smallest thing in the row,
+  while the icon cluster beside it was already 44px — in a tool for people with
+  ADHD, used mostly on a phone, where a mis-tap costs the thread you were
+  holding. Every control in a row's action group is now 44x44, across the inbox,
+  the library and the note trigger.
+
 - **The inbox's drag instructions were being announced to nobody (#94).** On
   every hard load of `/`, the drag handle's `aria-describedby` named an element
   that was not in the document: the old library built that id from a per-render
@@ -381,6 +783,20 @@ operators upgrading a self-hosted instance don't get surprised.
   told "already there" instead of raising. Nothing about error logging changed:
   a genuine Prisma failure still prints exactly as before, and a test asserts
   both halves against a real database.
+
+- **…and the same false alarm is gone from the four other places it could still
+  come from (#158).** #156 fixed the one that had actually been reported and
+  deliberately left the rest recorded. Earning a badge you already hold, a guest
+  and a signed-in account each using AI for the first time, and — with no
+  concurrency involved at all — an owner inviting somebody who is already
+  invited: every one of those was handled correctly and every one still printed
+  `Unique constraint failed` at error level, because Prisma's logger fires
+  before the application's error handling ever sees it. All four now insert with
+  `INSERT ... ON CONFLICT DO NOTHING` and read the row count instead. No
+  behaviour changes: the same badge is awarded once, the same quotas are
+  enforced to the same numbers, and re-inviting somebody still reports "already
+  invited". Error logging is again untouched — the test that proves the four are
+  silent also proves a genuine database failure still prints.
 
 - **The WCAG-AA failures the accessibility suite could not see, and the gate that
   now catches them (#109, #117).** Both issues are one structural blind
@@ -418,6 +834,29 @@ operators upgrading a self-hosted instance don't get surprised.
     `fetch-host-hygiene` uses. Verified failing on the unfixed tree first: 15
     text findings across 9 files, 2 focus findings, 4 unmeasured banner tones.
 ### Security
+
+- **Freezing an account now actually stops it writing (#220).** Revoking somebody
+  set their status and showed them as **Revoked** in the People panel, but did
+  nothing to the browser cookie they were already holding — and the write path
+  never read the status, so they could keep capturing, editing and deleting for
+  the thirty days that cookie had left. Sign-in was blocked and pages treated
+  them as signed out; only the writes were not. A frozen account is now refused
+  on its very next request, whatever it tries, and is signed out rather than left
+  to hit silent failures. The same check closes the matching hole for an account
+  that has been **deleted** while its cookie was still alive.
+
+  Guest sandboxes are unaffected — they have no account to freeze, and the check
+  is skipped before any query is made, so an anonymous visitor's page load is
+  unchanged. A signed-in request now makes one extra database read. Self-hosters
+  running more than one account should take this one; on a single-account
+  instance there is nobody to freeze.
+
+  Signing the frozen account out is best-effort, because Next seals the cookie
+  jar during a page render and there is nothing to be done about that — but only
+  that one refusal is expected, and anything else now prints
+  `session_clear_failed` rather than being absorbed alongside it. Refusing the
+  request never depended on the sign-out landing, so this changes what an
+  operator can see, not what the gate allows.
 
 - **`.ics` text values now escape every line terminator, not just `\n` (#154).**
   `esc()` in `src/lib/ics.ts` handled `\`, `;`, `,` and LF but not **CR**. RFC
@@ -469,6 +908,17 @@ operators upgrading a self-hosted instance don't get surprised.
   - `postgres` majors are capped in the same pass: the version is pinned in three
     places that must move together, and moving it is a dump/restore migration
     rather than an image swap.
+
+### Fixed
+
+- **Your data export was missing a table (#199, found while adding one).** Custom
+  focus playlists (#185) were absent from `export.json` — the export names every
+  table by hand and nothing failed when one was left out, so the whole test suite
+  stayed green while the archive quietly held less than the app did. The export now
+  derives its obligations from the schema: a model that carries user data and is
+  not read by the export fails the build. Nobody had a playlist to lose yet, since
+  the feature has no save path on `main`, but the class of bug is closed rather
+  than the instance.
 
 ## [0.5.0] - 2026-08-01
 

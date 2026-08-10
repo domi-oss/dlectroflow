@@ -18,6 +18,7 @@ import {
   beginFocus,
   completeFocus,
   requeueFocus,
+  uncompleteStep,
   proposeNewEstimate,
   pauseFocus,
   resumeFocus,
@@ -26,11 +27,13 @@ import {
 import {
   dismissFocusTimerTip,
   updateFocusShuffle,
+  updateFocusSoundCategories,
 } from "@/app/actions/settings";
 import { ensureFocusStep } from "@/app/actions/braindump";
 import { AutoAdvance } from "@/components/focus/auto-advance";
 import { Celebration } from "@/components/focus/celebration";
 import { TimerVisual } from "@/components/focus/timer-visual";
+import { NoteText } from "@/components/breakdown/note-field";
 import { Button } from "@/components/ui/button";
 import {
   FocusStepTracker,
@@ -64,6 +67,7 @@ import { usePrefersReducedMotion } from "@/lib/use-prefers-reduced-motion";
 import { useHyperFocus } from "@/lib/use-hyper-focus";
 import { t, type StringKey } from "@/lib/strings";
 import { cn } from "@/lib/utils";
+import { pickOne } from "@/lib/pick-one";
 import { useVoice } from "@/components/voice-provider";
 
 // #43 — the shared focus control strings carry a leading functional glyph
@@ -111,6 +115,16 @@ export const REESTIMATE_TIMEOUT_MS = 30_000;
 const ACTION_TIMEOUT_MS = 10_000;
 
 /**
+ * #181 — how long the playlist tick-list waits before persisting.
+ *
+ * Matched to `AgingSection`'s auto-save, which is the repo's existing answer to
+ * the same question, and for the same reason: ticking three playlists is one
+ * decision, and it should cost one write rather than three. Exported so the test
+ * advances the real value rather than a copy of it.
+ */
+export const FOCUS_CATEGORY_SAVE_DEBOUNCE_MS = 600;
+
+/**
  * Which handler failed. Not cosmetic: it decides where the notice renders,
  * which affordances it offers, and what Retry re-runs.
  */
@@ -121,6 +135,9 @@ type FailedHandler =
   | "complete"
   | "reestimate"
   | "requeue"
+  // #198 — putting a step back after an accidental completion. Its own handler
+  // because its failure message is the one that cannot say "nothing is lost".
+  | "undo"
   // #142 — opening the next single-task to-do. It is a server action too
   // (`ensureFocusStep` creates the to-do's one step on demand), so a chain that
   // failed used to be indistinguishable from a button that does nothing —
@@ -157,10 +174,10 @@ export type TimerSettings = {
   keepAwake: boolean;
   alarmEnabled: boolean;
   sound: string;
-  /** #70 — persisted category playlist (Settings.focusSoundCategory). Optional
-   * and null by default: omitted means the whole track list, which is what an
-   * instance with no reachable catalog plays. */
-  category?: string | null;
+  /** #180 — the persisted category selection (Settings.focusSoundCategories).
+   * Optional and empty by default: no categories means the whole catalogue,
+   * which is what an instance with no reachable catalog plays anyway. */
+  categories?: readonly string[] | null;
   /** #68 — persisted playlist shuffle (Settings.focusShuffle). Optional: the
    * column defaults false, so a caller that predates the pref (or a test that
    * doesn't care) simply gets in-order playback. */
@@ -216,6 +233,8 @@ function failureMessageKey(failure: ActionFailure): StringKey {
       return "focus.error.requeue";
     case "complete":
       return "focus.error.complete";
+    case "undo":
+      return "focus.error.undo";
     case "chain":
       return "focus.error.chain";
     // start / resumeExisting / togglePause — all "the session couldn't be
@@ -246,6 +265,8 @@ export function FocusTimer({
   nextStep,
   nextUp = null,
   isSingleTask,
+  taskNote = null,
+  stepNote = null,
   addTimeIncrementMin,
   settings,
   tipDismissed,
@@ -267,6 +288,13 @@ export function FocusTimer({
    * gets the "nothing else" ending. */
   nextUp?: NextUp | null;
   isSingleTask: boolean;
+  /** #44 — the task's freeform note, and this step's own. READ-ONLY here: the
+   *  issue asks for the jotted context to be present "while you're doing the
+   *  work", and the session's whole job is to remove decisions — a live text
+   *  field with an autosave is an invitation to edit instead of to work. Every
+   *  other surface that renders this task or step can edit it. */
+  taskNote?: string | null;
+  stepNote?: string | null;
   addTimeIncrementMin: number;
   settings: TimerSettings;
   tipDismissed: boolean;
@@ -318,6 +346,10 @@ export function FocusTimer({
   const [failure, setFailure] = useState<ActionFailure | null>(null);
   const [newEst, setNewEst] = useState(step.estMinutes);
   const [result, setResult] = useState<CompleteResult | null>(null);
+  // #198 — set by the done-screen undo so the setup screen it lands on confirms
+  // what happened. A phase change is silent to a screen-reader user, and "did
+  // that work?" is the whole question in the moment after an accident.
+  const [undone, setUndone] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [tipVisible, setTipVisible] = useState(!tipDismissed);
   // #66 — progressive disclosure. While a resumable session exists the setup
@@ -336,6 +368,11 @@ export function FocusTimer({
   // #137 — ties the failure message to the notice's primary action, so the
   // reason is announced with the remedy. See failureNotice below.
   const failureMessageId = useId();
+  // #218 — the retry-in-flight announcement's id. It sits on the visually
+  // hidden live region beside the notice, not on the visible line inside it,
+  // so the one node a screen reader can reach is also the one the CTA's
+  // `aria-describedby` points at. See failureNotice below.
+  const retryingMessageId = useId();
   // The setup screen's primary CTA (Resume or Start), focused after a
   // disclosure toggle — see the effect below.
   const setupCtaRef = useRef<HTMLButtonElement | null>(null);
@@ -373,8 +410,8 @@ export function FocusTimer({
   // changed. See the effect below for why it is not the auto-advance panel.
   const doneSummaryRef = useRef<HTMLDivElement | null>(null);
   // #23 — the celebration line is rolled when the step is actually completed
-  // (an event), not during render into a ref: Math.random() in render is impure
-  // (react-hooks/purity) and reading a ref during render is unsafe
+  // (an event), not during render into a ref: an unseeded random draw in render
+  // is impure (react-hooks/purity) and reading a ref during render is unsafe
   // (react-hooks/refs) — under the React compiler a render could be repeated or
   // discarded, so a "stable" ref read is not guaranteed stable. The initial
   // value is never shown: `done` is only reachable through finishComplete.
@@ -395,10 +432,56 @@ export function FocusTimer({
   const persistShuffle = useCallback((next: boolean) => {
     void updateFocusShuffle(next);
   }, []);
-  // #70 — the category narrows the playlist the hook walks; null is the whole
-  // list. Read-only here: it is chosen in settings, not from the timer.
-  const sound = useFocusSound(settings.sound, {
-    category: settings.category ?? null,
+  /**
+   * #180 — the selected categories narrow the pool the hook walks; empty is the
+   * whole catalogue. #181 makes them editable from the player, so this is state
+   * rather than a straight read of the prop: ONE value drives both the pool the
+   * hook resolves and the ticks the panel draws, and a tick has to change what is
+   * playing immediately rather than after a round-trip.
+   *
+   * Seeded from Settings and never re-seeded. The focus route is force-dynamic,
+   * so the prop only changes on a fresh load — and a `router.refresh()` from some
+   * unrelated action must not reach in and undo a tick that is still in its
+   * debounce window.
+   */
+  const [categories, setCategories] = useState<readonly string[]>(
+    settings.categories ?? [],
+  );
+  const categorySaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingCategoriesRef = useRef<string[] | null>(null);
+  /** Write the outstanding selection now, if there is one. Idempotent. */
+  const flushCategories = useCallback(() => {
+    if (categorySaveRef.current) {
+      clearTimeout(categorySaveRef.current);
+      categorySaveRef.current = null;
+    }
+    const pending = pendingCategoriesRef.current;
+    if (!pending) return;
+    pendingCategoriesRef.current = null;
+    void updateFocusSoundCategories(pending);
+  }, []);
+  const changeCategories = useCallback(
+    (next: string[]) => {
+      setCategories(next);
+      pendingCategoriesRef.current = next;
+      if (categorySaveRef.current) clearTimeout(categorySaveRef.current);
+      categorySaveRef.current = setTimeout(
+        flushCategories,
+        FOCUS_CATEGORY_SAVE_DEBOUNCE_MS,
+      );
+    },
+    [flushCategories],
+  );
+  // Flush rather than merely cancel on unmount, which is where this differs from
+  // AgingSection's otherwise identical debounce. A settings page is somewhere you
+  // linger; the focus timer is somewhere you leave abruptly — Complete, ← Back, a
+  // chained next step — and it has no save indicator, so a dropped write would be
+  // a tick that silently never happened.
+  useEffect(() => flushCategories, [flushCategories]);
+  // No opening track is passed, and there is no longer one to pass: `focusSound`
+  // is a two-value switch, so every session opens on the head of its pass.
+  const sound = useFocusSound({
+    categories,
     shuffle: settings.shuffle ?? false,
     onShuffleChange: persistShuffle,
   });
@@ -558,10 +641,22 @@ export function FocusTimer({
   );
 
   const start = async () => {
+    // #198 — a new attempt on this step is no longer "just put back". Clearing it
+    // here rather than only gating the render keeps the state honest for anything
+    // that reads it later.
+    setUndone(false);
     const outcome = await run("start", () => beginFocus(step.id, plannedMin));
     if (!outcome.ok) return;
     const id = outcome.value;
-    if (!id) return;
+    if (!id) {
+      // #139's shape, one function above the case that exposed it (review round
+      // 5). `beginFocus` answers `null` when the step is not in the resolved
+      // workspace, and discarding that left Start visibly doing nothing — the
+      // dead end #139 is about. `stale: false`: a returned value proves the
+      // action was found and ran, so pressing again can legitimately work.
+      setFailure({ handler: "start", stale: false });
+      return;
+    }
     // Prime device effects inside the user gesture (unlocks audio playback).
     if (settings.alarmEnabled) alarmRef.current = createAlarm();
     if (!soundOff) playSound();
@@ -578,12 +673,33 @@ export function FocusTimer({
   // the countdown, same as start().
   const resumeExisting = async () => {
     if (!existingSession) return;
+    // #198 — same reason as `start()`: resuming is a new attempt, not a state of
+    // having just undone something.
+    setUndone(false);
     const outcome = await run("resumeExisting", () =>
       resumeFocus(existingSession.id),
     );
     if (!outcome.ok) return;
     const res = outcome.value;
-    if (!res.ok) return;
+    if (!res.ok) {
+      // #139's shape, and the case that made it matter (review round 5).
+      // `resumeFocus` filters on `endedAt: null`, so it refuses a session that has
+      // been closed — and discarding that answer left this button doing nothing at
+      // all: no notice, no phase change, nothing announced. Verbatim the defect
+      // #139 named on `confirmRequeue`, "indistinguishable from a successful one".
+      //
+      // The commonest cause is now prevented rather than explained: a spent
+      // `existingSession` is no longer offered at all (see `resumable` below), so
+      // what reaches here is a genuine refusal — another device closed the row, or
+      // it turns out not to be paused — which a retry can legitimately answer.
+      // `stale: false` for the reason `confirmRequeue` records: a returned
+      // `ok: false` proves the action was found and ran, so its id is live.
+      //
+      // Staying in `setup` is the fail-safe direction, matching `togglePause`: do
+      // not advance to a running session the server does not have.
+      setFailure({ handler: "resumeExisting", stale: false });
+      return;
+    }
     if (settings.alarmEnabled) alarmRef.current = createAlarm();
     if (!soundOff) playSound();
     setSessionId(existingSession.id);
@@ -735,10 +851,34 @@ export function FocusTimer({
     setResult(res);
     stopSound();
     releaseWake();
-    setDoneMsg(DONE_MESSAGES[Math.floor(Math.random() * DONE_MESSAGES.length)]);
+    setDoneMsg(pickOne(DONE_MESSAGES));
     goToPhase("done");
     router.refresh();
   }, [sessionId, net, router, stopSound, goToPhase, run]);
+
+  /**
+   * #198 — put the step back after an accidental completion.
+   *
+   * Offered on the done screen because that is where the mistake #197 produced
+   * actually happens: before this, the only un-complete route in the app was
+   * `reopenItem` from the inbox Done view, which a step inside a still-open task
+   * never reaches. An undo two screens away from the error is not a recovery path.
+   *
+   * Returning to `setup` is doing real work, not just tidying the view: it
+   * unmounts the done block and with it `AutoAdvance`, whose five-second
+   * countdown would otherwise keep running and navigate away from the very step
+   * the user has just rescued. Leaving the closed FocusSession closed is also
+   * deliberate — the session genuinely ran, and the claim being corrected is
+   * "this step is finished", not "that time never happened".
+   */
+  const undoComplete = useCallback(async () => {
+    const outcome = await run("undo", () => uncompleteStep(step.id));
+    if (!outcome.ok) return;
+    setResult(null);
+    setUndone(true);
+    goToPhase("setup");
+    router.refresh();
+  }, [goToPhase, router, run, step.id]);
 
   const startReestimate = useCallback(async () => {
     goToPhase("reestimate");
@@ -801,6 +941,15 @@ export function FocusTimer({
       resumeExisting: () => void resumeExisting(),
       togglePause: () => void togglePause(),
       complete: () => void finishComplete(),
+      // #198 — retrying an undo is both safe and effective, and it took review
+      // round 4 to make the second half true. `uncompleteStep` is atomic, so a
+      // failure rolled every one of its writes back and the retry re-runs the
+      // whole undo, reward reversal included. Safe for the reason this comment
+      // always gave: an undo that DID succeed leaves a step that is already not
+      // done, which the action's own guard no-ops on, so nothing can be reversed
+      // or reopened twice. Before that fix only the safety held — a retry after a
+      // partial failure hit the same guard and silently did nothing at all.
+      undo: () => void undoComplete(),
       reestimate: () => void startReestimate(),
       requeue: () => void confirmRequeue(),
       chain: () => void startSingle(),
@@ -931,6 +1080,35 @@ export function FocusTimer({
     if (phase === "done") doneSummaryRef.current?.focus();
   }, [phase]);
 
+  // #198 a11y (WCAG 2.4.3) — the mirror image of the effect above, for the way
+  // back. An undo returns to `setup`, which unmounts the whole `done` block
+  // including the "Actually, I hadn't finished" button that was just pressed, so
+  // focus fell to <body> at the precise moment the user had corrected a mistake
+  // and most needed to know where they were. It goes to whichever setup CTA is now
+  // primary — the same landing spot the #66 disclosure effect uses, and it works
+  // for either of `setupCtaRef`'s two mutually-exclusive call sites because only
+  // one is ever mounted.
+  //
+  // Gated on `undone`, which is the state the notice is ALREADY gated on, so the
+  // announcement and the hand-off cannot disagree about whether an undo happened.
+  // That gate is also what stops it stealing focus on first render or on an
+  // ordinary arrival at `setup` — opening /focus/[stepId] normally, where nothing
+  // was pressed and nothing unmounted, and moving focus would be the rudeness the
+  // hand-off exists to prevent. `undone` is reset when a session begins, so it
+  // cannot re-fire later either.
+  //
+  // No conflict with the #66 effect: that one fires on `startingFresh`, which an
+  // undo does not touch, and these deps do not change when the disclosure is
+  // toggled — so each transition is handled exactly once, by one of them.
+  //
+  // Focusing does not disturb the notice. It is a sibling <p role="status">, not
+  // an ancestor of the CTA, so the polite announcement queues behind the button's
+  // own rather than being suppressed or repeated — the same coexistence the
+  // done-summary focus has with the auto-advance panel's live region.
+  useEffect(() => {
+    if (undone && phase === "setup") setupCtaRef.current?.focus();
+  }, [undone, phase]);
+
   const remainingInTask = steps
     .filter((s) => !s.done)
     .reduce((n, s) => n + s.estMinutes, 0);
@@ -946,7 +1124,35 @@ export function FocusTimer({
   // The paused session the setup screen is currently OFFERING (null once the
   // user has asked to start fresh). Every setup-phase figure below derives from
   // this single value, so the ring and the CTA cannot disagree.
-  const resumable = startingFresh ? null : existingSession;
+  //
+  // A live `sessionId` retires it as well (review round 5). `existingSession` is a
+  // PROP: it keeps describing the row the page loaded long after that row has been
+  // closed, and it is only replaced when `router.refresh()` lands. Both routes out
+  // of this screen close it — `resumeExisting` adopts the row and `finishComplete`
+  // ends it, while `beginFocus` retires any open session on the step before
+  // creating its own — so once this component holds a `sessionId`, the prop is
+  // spent and `resumeFocus` can only refuse it. Offering "Resume · ~Xm left" for
+  // it was a control the app already knew was dead, which is the same thing the
+  // `stale` flag refuses to do by never offering Retry it cannot honour.
+  //
+  // In practice this only bites after an undo, since `goToPhase("setup")` has
+  // exactly one call site (`undoComplete`) and `sessionId` is never cleared. That
+  // is an invariant, not a coincidence: a NEW transition back to `setup` while a
+  // session is still open would need this gate revisited, or it would hide a
+  // legitimate offer. Kept separate from `startingFresh` deliberately — that flag
+  // means "the user asked for a fresh one", this means "the server row is spent",
+  // and collapsing them would reopen whichever question it dropped.
+  const resumable =
+    startingFresh || sessionId !== null ? null : existingSession;
+  // Review round 14 — the toggle back out of the start-fresh disclosure may only
+  // appear when pressing it would actually change something. It was gated on the
+  // raw `existingSession` prop, which survives an undo, while `resumable` does not:
+  // once `sessionId !== null` the session is spent, so clearing `startingFresh`
+  // leaves `resumable` null and the press does NOTHING. A control the app knows is
+  // dead — the #139 class the rest of this MR exists to remove, reintroduced by the
+  // gate two lines up. Derived from the same inputs as `resumable` so the two
+  // cannot drift.
+  const canKeepPaused = Boolean(existingSession) && sessionId === null;
   // Rounded UP to whole minutes, once, and reused by both the CTA and the quiet
   // line — never recomputed differently in two places. No 1m floor: a session
   // paused with nothing left must read the same 0m the ring shows (resuming it
@@ -1016,76 +1222,146 @@ export function FocusTimer({
   // carried by the text, never by the red alone (WCAG 1.4.1);
   // `text-destructive` on --background/--card is the token globals.css
   // documents as AA in both themes (5.2:1+); every control is a ≥44px target.
+  //
+  // #218 — while a retry runs, the description also picks up the wait, so the
+  // reason AND the fact that something is happening are both reachable from the
+  // one control focus is deliberately parked on. Derived once and applied to
+  // BOTH branches of the CTA below rather than written out twice: the stale
+  // branch's Reload does not set `pending` itself, but a stale failure arriving
+  // while a request is already in flight would otherwise be the one path where
+  // the wait is on screen and described by nothing. Retracts on its own when
+  // `pending` clears, so the button cannot go on claiming a retry is running.
+  //
+  // Duo round 16 — this is the SECOND of two channels, not the only one, and
+  // the distinction is the whole of the fix below. A description is computed
+  // when focus LANDS on a control. The two moments the wait can appear are
+  // therefore not symmetrical:
+  //
+  //   notice mounts with `pending` already true → the effect above moves focus
+  //     onto the CTA, focus lands, the description is read. This covers it.
+  //   notice already mounted, user presses Retry → focus never moves (that is
+  //     deliberate, `aria-disabled` not `disabled`), so nothing re-reads the
+  //     description and this channel is silent. The live region covers it.
+  const ctaDescribedBy = pending
+    ? `${failureMessageId} ${retryingMessageId}`
+    : failureMessageId;
   const failureNotice = failure ? (
-    <div
-      role="alert"
-      className="border-destructive/40 bg-destructive/5 mx-auto flex max-w-md flex-col items-center gap-2 rounded-md border p-3"
-    >
-      <p
-        id={failureMessageId}
-        className="text-destructive flex items-start gap-1.5 text-sm font-medium"
+    <>
+      <div
+        role="alert"
+        className="border-destructive/40 bg-destructive/5 mx-auto flex max-w-md flex-col items-center gap-2 rounded-md border p-3"
       >
-        <TriangleAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
-        <span>{t(failureMessageKey(failure), voice)}</span>
-      </p>
-      {pending && (
-        <p role="status" className="text-muted-foreground text-xs">
-          {t("focus.error.retrying", voice)}
+        <p
+          id={failureMessageId}
+          className="text-destructive flex items-start gap-1.5 text-sm font-medium"
+        >
+          <TriangleAlert
+            aria-hidden="true"
+            className="mt-0.5 h-4 w-4 shrink-0"
+          />
+          <span>{t(failureMessageKey(failure), voice)}</span>
         </p>
-      )}
-      <div className="flex flex-wrap justify-center gap-2">
-        {failure.stale ? (
-          // Retrying re-posts the same action id the running deployment has
-          // already forgotten, so a reload is the ONLY thing on offer here.
-          <button
-            ref={failureCtaRef}
-            type="button"
-            aria-describedby={failureMessageId}
-            onClick={() => window.location.reload()}
-            className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium"
+        {/* #218 — the SIGHTED copy of the wait, and only that. It is
+            `aria-hidden` because the announcement is the sibling region below,
+            and two nodes carrying one sentence is how it gets said twice.
+            Hiding it also stops the insertion from mutating this `role="alert"`:
+            an alert is an assertive, atomic live region, so a visible child
+            appearing inside it mid-retry re-reads the whole notice over the
+            polite announcement — louder and more interrupting than the nested
+            `role="status"` this replaced. Nothing changes on screen. */}
+        {pending && (
+          <p
+            data-testid="focus-retrying-visible"
+            aria-hidden="true"
+            className="text-muted-foreground text-xs"
           >
-            <RefreshCw aria-hidden="true" className="h-4 w-4 shrink-0" />
-            {t("focus.error.reload", voice)}
-          </button>
-        ) : (
-          // `aria-disabled`, not `disabled`: a disabled element cannot hold
-          // focus, so the browser would drop it to <body> the moment the retry
-          // starts — the very thing keeping the notice mounted is here to
-          // prevent. The press is guarded in the handler instead, so a
-          // double-tap still cannot fire two requests.
-          <button
-            ref={failureCtaRef}
-            type="button"
-            aria-describedby={failureMessageId}
-            aria-disabled={pending}
-            onClick={() => {
-              if (!pending) retryFailed();
-            }}
-            className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium aria-disabled:opacity-50"
-          >
-            <RotateCcw aria-hidden="true" className="h-4 w-4 shrink-0" />
-            {t("focus.error.retry", voice)}
-          </button>
+            {t("focus.error.retrying", voice)}
+          </p>
         )}
-        {/* The escape hatch from a failed re-estimate — but NOT when the
-            deployment moved on. Skipping only reveals the number field; the
-            Requeue behind it is another server action, which would post
-            another dead id and fail the same way. Offering it there would be
-            walking the user into a second dead end, which is the opposite of
-            what detecting the stale case is for. */}
-        {phase === "reestimate" &&
-          failure.handler === "reestimate" &&
-          !failure.stale && (
+        <div className="flex flex-wrap justify-center gap-2">
+          {failure.stale ? (
+            // Retrying re-posts the same action id the running deployment has
+            // already forgotten, so a reload is the ONLY thing on offer here.
             <button
+              ref={failureCtaRef}
               type="button"
-              onClick={skipReestimate}
-              className="hover:bg-accent inline-flex min-h-[44px] items-center rounded-md border px-4 font-medium"
+              aria-describedby={ctaDescribedBy}
+              onClick={() => window.location.reload()}
+              className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium"
             >
-              {t("focus.error.pickTime", voice)}
+              <RefreshCw aria-hidden="true" className="h-4 w-4 shrink-0" />
+              {t("focus.error.reload", voice)}
+            </button>
+          ) : (
+            // `aria-disabled`, not `disabled`: a disabled element cannot hold
+            // focus, so the browser would drop it to <body> the moment the retry
+            // starts — the very thing keeping the notice mounted is here to
+            // prevent. The press is guarded in the handler instead, so a
+            // double-tap still cannot fire two requests.
+            <button
+              ref={failureCtaRef}
+              type="button"
+              aria-describedby={ctaDescribedBy}
+              aria-disabled={pending}
+              onClick={() => {
+                if (!pending) retryFailed();
+              }}
+              className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium aria-disabled:opacity-50"
+            >
+              <RotateCcw aria-hidden="true" className="h-4 w-4 shrink-0" />
+              {t("focus.error.retry", voice)}
             </button>
           )}
+          {/* The escape hatch from a failed re-estimate — but NOT when the
+              deployment moved on. Skipping only reveals the number field; the
+              Requeue behind it is another server action, which would post
+              another dead id and fail the same way. Offering it there would be
+              walking the user into a second dead end, which is the opposite of
+              what detecting the stale case is for. */}
+          {phase === "reestimate" &&
+            failure.handler === "reestimate" &&
+            !failure.stale && (
+              <button
+                type="button"
+                onClick={skipReestimate}
+                className="hover:bg-accent inline-flex min-h-[44px] items-center rounded-md border px-4 font-medium"
+              >
+                {t("focus.error.pickTime", voice)}
+              </button>
+            )}
+        </div>
       </div>
-    </div>
+      {/* #218, Duo round 16 — where the wait is actually ANNOUNCED.
+          A SIBLING of the alert, never a descendant: a polite region nested
+          inside an assertive one inherits the container's politeness across its
+          whole subtree, which is the original bug and is not fixed by moving
+          the same nesting one level in.
+          It exists because `aria-describedby` cannot do this job alone. A
+          description is read when focus LANDS on a control, and the retry is
+          pressed on a control that already holds focus and keeps it by design —
+          so the description gaining this id mid-flight is a change nothing goes
+          back to re-read. A live region is the one channel defined for content
+          that changes while the user is stationary.
+          Rendered whenever the notice is, and EMPTY until there is something to
+          say: assistive technology announces a change to a region already in
+          the accessibility tree, so a region arriving together with its first
+          message is silent (same reasoning as the move announcer in
+          `inbox-view.tsx`). `sr-only` rather than `hidden` for the same reason —
+          a live region has to be rendered to be observed.
+          It keeps `retryingMessageId`, so the CTA's description still resolves
+          to real text; that covers the mirror-image path, where the notice
+          mounts with a retry already in flight and focus lands on the CTA. */}
+      <p
+        id={retryingMessageId}
+        data-testid="focus-retrying-announcer"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {pending && t("focus.error.retrying", voice)}
+      </p>
+    </>
   ) : null;
 
   // Single-task focus uses the auto-created ensureFocusStep step, whose text
@@ -1116,6 +1392,19 @@ export function FocusTimer({
           </h1>
         </>
       )}
+
+      {/* #44 — the context you jotted, where you actually need it. Both grains,
+          task first, matching the order `buildScheduleNote` composes them into
+          a calendar entry, so the same note reads the same way wherever it
+          surfaces. Deduped: on a single-task focus the two can be the same
+          string, and printing it twice reads as a bug. */}
+      {[taskNote?.trim(), stepNote?.trim()]
+        .filter((n, i, all): n is string => Boolean(n) && all.indexOf(n) === i)
+        .map((n) => (
+          <div key={n} className="mt-2">
+            <NoteText>{n}</NoteText>
+          </div>
+        ))}
     </div>
   );
 
@@ -1331,6 +1620,33 @@ export function FocusTimer({
               </>
             )}
 
+          {/* #198 — the undo, and it belongs HERE rather than only on the step
+              row, because this screen is where an accidental completion is
+              discovered: the tick has just landed and the countdown to the next
+              step has started. Recovery that lives two screens away is not
+              recovery.
+
+              Rendered for every `ending.kind`, deliberately — a mis-tap on the
+              LAST step of a task lands on the celebration branch, and that is
+              the case with the most to put right, since it closed the task and
+              moved the inbox item to Done as well.
+
+              Quiet by design, and the only destructive-looking thing on a screen
+              whose job is to feel good: it sits under every other answer, in the
+              muted register the "Done for now" escape already uses, so it is
+              findable when wanted and not an invitation to second-guess a real
+              finish. No confirm dialog on it either — it is itself the
+              correction, and it is reversible by pressing Complete again. */}
+          <button
+            type="button"
+            onClick={() => void undoComplete()}
+            disabled={pending}
+            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex min-h-[44px] items-center gap-1.5 rounded text-sm underline underline-offset-4 outline-none focus-visible:ring-2 disabled:opacity-50"
+          >
+            <RotateCcw aria-hidden="true" className="h-4 w-4 shrink-0" />
+            {t("focus.done.undo", voice)}
+          </button>
+
           {/* #137/#142 — the same notice as everywhere else. The done screen
               returns early, so without this a failed chain would report
               nothing at all: a button that visibly does nothing, which is the
@@ -1382,6 +1698,32 @@ export function FocusTimer({
           </span>
         )}
       </div>
+
+      {/* #198 — confirm the undo actually landed. The phase change alone is
+          silent to a screen-reader user, and "did that work?" is the entire
+          question in the moment after correcting an accident — the answer has to
+          be stated, not inferred from the screen having changed. `role="status"`
+          (polite) rather than an alert: this is good news arriving, not an
+          interruption.
+
+          **Gated on `phase === "setup"`, and `undone` is also reset when a session
+          begins.** An earlier version had neither, on the stated but false
+          reasoning that "starting the step again replaces this whole screen" — it
+          does not. This is ONE component with `phase` toggling inside it, and this
+          block sits in the shared tree above the phase-specific ones, so the
+          notice kept showing over a live countdown for the same step (Duo review
+          round 2). Belt and braces on purpose: the gate fixes what is displayed,
+          the reset fixes the state, and either alone would leave the other
+          misleading to the next reader. */}
+      {undone && phase === "setup" && (
+        <p
+          role="status"
+          className="text-muted-foreground text-sm"
+          data-testid="focus-undone-notice"
+        >
+          {t("focus.done.undone", voice)}
+        </p>
+      )}
 
       {tipVisible && (
         <TimerCustomizationHint voice={voice} onDismiss={dismissTip} />
@@ -1522,7 +1864,7 @@ export function FocusTimer({
               {!isSingleTask && taskTotalLine}
               {/* The way back out of the disclosure — the paused session is
                   still there until Start actually retires it. */}
-              {existingSession && (
+              {canKeepPaused && (
                 <button
                   type="button"
                   onClick={() => setStartingFresh(false)}
@@ -1540,6 +1882,46 @@ export function FocusTimer({
 
       {(phase === "running" || phase === "paused") && (
         <div className="flex flex-wrap items-center justify-center gap-2">
+          {/* #197 — Pause LEADS this row, and Complete step follows it.
+              It was the other way round, and one user completed a step by
+              accident five separate times reaching for pause. Two reasons the
+              order matters more than it looks:
+
+              1. Pause is reversible and frequent; Complete is irreversible and
+                 happens once per step. Every media and timer convention puts the
+                 transport control in the leading slot, so muscle memory arrives
+                 there expecting pause — and the row is `flex-wrap` with no
+                 `order-*` utilities, so this source order is also the visual
+                 order and the tab/switch order.
+              2. `sessionCtaRef` — the element focus returns to after a resume —
+                 has always been on THIS button, so the code's own idea of the
+                 primary control disagreed with what the row looked like.
+
+              Pause also takes the filled `bg-primary` treatment so that Complete
+              is no longer the only filled button competing for the eye. Deliberately
+              NOT a confirm dialog on Complete: that was weighed and declined
+              (recorded on #197) because it taxes the app's happy path forever, and
+              #198 supplies the recovery path instead. `focus-timer.test.tsx`
+              asserts both the order and the weighting, so a later style pass
+              cannot quietly undo this. */}
+          <button
+            ref={sessionCtaRef}
+            onClick={togglePause}
+            disabled={pending}
+            className="bg-primary text-primary-foreground hover:bg-primary/80 inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-5 font-medium disabled:opacity-50"
+          >
+            {phase === "running" ? (
+              <>
+                <Pause aria-hidden="true" className="h-4 w-4 shrink-0" />
+                {stripLeadingGlyph(t("focus.pause", voice))}
+              </>
+            ) : (
+              <>
+                <Play aria-hidden="true" className="h-4 w-4 shrink-0" />
+                {stripLeadingGlyph(t("focus.resume", voice))}
+              </>
+            )}
+          </button>
           {/* #99 a11y — green-700, not green-600. White on `bg-green-600`
               (#00a63e) measures 3.21:1 and AA-normal needs 4.5:1: at 16px /
               weight 500 this is not "large text" (that needs 18.66px bold or
@@ -1557,28 +1939,10 @@ export function FocusTimer({
           <button
             onClick={finishComplete}
             disabled={pending}
-            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-md bg-green-700 px-5 font-medium text-white disabled:opacity-50"
+            className="inline-flex min-h-[44px] items-center gap-1.5 rounded-md bg-green-700 px-4 font-medium text-white disabled:opacity-50"
           >
             <Check aria-hidden="true" className="h-4 w-4 shrink-0" />
             {stripLeadingGlyph(t("focus.timer.completeStep", voice))}
-          </button>
-          <button
-            ref={sessionCtaRef}
-            onClick={togglePause}
-            disabled={pending}
-            className="hover:bg-accent inline-flex min-h-[44px] items-center gap-1.5 rounded-md border px-4 disabled:opacity-50"
-          >
-            {phase === "running" ? (
-              <>
-                <Pause aria-hidden="true" className="h-4 w-4 shrink-0" />
-                {stripLeadingGlyph(t("focus.pause", voice))}
-              </>
-            ) : (
-              <>
-                <Play aria-hidden="true" className="h-4 w-4 shrink-0" />
-                {stripLeadingGlyph(t("focus.resume", voice))}
-              </>
-            )}
           </button>
           <button
             onClick={() => changeTime(-inc)}
@@ -1766,6 +2130,8 @@ export function FocusTimer({
         <FocusSoundPlayer
           controls={sound}
           voice={voice}
+          categories={categories}
+          onCategoriesChange={changeCategories}
           onPauseTogether={pauseTogether ? togglePauseFromPlayer : undefined}
           pauseTogetherPending={pending}
         />

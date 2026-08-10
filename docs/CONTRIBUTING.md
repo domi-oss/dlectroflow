@@ -192,6 +192,37 @@ npx tsc --noEmit       # typecheck
 - **Keep the diff focused.** One logical change per MR; avoid repo-wide reformatting (it re-fingerprints security findings and blocks unrelated work).
 - **This is not stock Next.js** — it tracks a fast-moving version with breaking changes. Check `node_modules/next/dist/docs/` before reaching for an API you remember.
 
+### Which e2e suites are allowed to retry
+
+`npm run test:e2e` is three Playwright projects, and they are **not** held to the
+same standard (#127):
+
+| Project | Specs | Retries in CI |
+| --- | --- | --- |
+| `a11y` | `e2e/a11y/`, `e2e/a11y-contrast.spec.ts` | **0** |
+| `chromium` | everything else under `e2e/` (today, all of `e2e/smoke/`) | 1 |
+| `member` | `e2e/smoke/member-*.spec.ts` | 1 |
+
+The smoke projects boot two standalone servers against a real Postgres and drive
+redirect chains, so a single odd failure there is more often the infrastructure
+than the app, and a retry is cheaper than a human re-run.
+
+The accessibility gate gets no such benefit of the doubt, because **a
+retry-masked flake in an axe spec looks exactly like a real AA regression that
+happens to be timing-dependent.** Both are "failed once, passed once"; one is
+noise and the other is a shipped contrast bug, and a retry throws away the
+distinction — the flaky-test summary that records it gates on nothing. #110 was
+a genuine 1 ms race the suite had been absorbing for that reason, and it was
+found by CPU-throttling the page rather than by the gate.
+
+So if an a11y spec fails, **treat it as a real finding first.** Reproduce it
+with `npx playwright test --project=a11y --repeat-each=20` before concluding it was
+the runner; the trace is in the job's `playwright-report/` artifact
+(`trace: "retain-on-failure"`, because a project that never retries would
+otherwise record none). A11y assertions that live *inside* a smoke spec — the
+touch-target measurements in `e2e/smoke/member-google.spec.ts`, for instance —
+still retry; only the axe gate is zero-tolerance.
+
 ## Adding a dependency
 
 Three steps, and one trap that has cost this project real time twice (#67, #76).
@@ -253,6 +284,51 @@ them:
 
 New dependencies also go through the blocking scanners — see the security-scan
 note above.
+
+## Writing a migration that touches data
+
+`prisma migrate deploy` against an empty schema proves a migration parses. It
+proves nothing about what the migration does **to rows**, and on 2026-08-07 that
+gap cost two days of deploys: a migration wrote a value the still-live CHECK
+constraint forbade, every existing row violated it, and the whole thing rolled
+back (#180 / #190). It had passed every gate, because a fresh table has no rows
+for a constraint to be evaluated against.
+
+So `npm test` now applies the migrations to a database that already holds rows,
+seeded from `src/lib/__tests__/migration-seeds/`. **A seed file is named for the
+migration it is applied straight after**, which pins it to the schema version it
+was written against; the rows then travel forward through every later migration
+exactly as production rows do.
+
+If `migration-data-harness.integration.test.ts` fails, read which of its
+assertions went red:
+
+- **"a committed migration failed against seeded rows"** — your migration does
+  not work on data. This is the real thing, not a test problem; the SQLSTATE and
+  the failing row are in the output.
+- **"ran with 0 rows in `<table>`"** — a statement whose behaviour depends on the
+  rows already stored was applied to an empty table, so nothing it does was
+  tested. The failure names the shape it caught (`update`, `set-not-null`,
+  `validate-constraint` and so on); **the authoritative list is the
+  `DataDependentShape` union in `src/lib/migration-data-harness.ts`**, and it is
+  deliberately not copied out here. A prose list of them was wrong within one
+  release — three shapes had been added to the type and not to this bullet, so a
+  contributor whose `DELETE` or `VALIDATE CONSTRAINT` tripped the check could not
+  find their own shape in the docs. Same reasoning as the model count that used
+  to sit in `CLAUDE.md`.
+
+  Fix it by adding rows in a seed named for a migration **before** yours. Note
+  that a table cleared mid-timeline needs a seed on the far side of the clearing
+  — the check counts rows rather than trusting the corpus, precisely because a
+  `DELETE FROM` in between is invisible to anything that only reads the seed
+  files.
+- **"the reconstructed pre-fix migration APPLIED CLEANLY"** — the harness has
+  stopped being able to catch the 2026-08-07 defect. Fix that before anything
+  else; a gate that cannot be shown to fail is not a gate.
+
+Seeds are synthetic and deliberately awkward (a value below a floor, a NULL where
+one is allowed, an off state that must stay off), because a seed of tidy defaults
+is one no migration can trip over. Never paste real data into one.
 
 ## MR workflow
 

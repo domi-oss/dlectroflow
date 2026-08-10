@@ -65,10 +65,62 @@ export const OWNER_ONLY_PREFIXES: readonly string[] = [];
  */
 export const AUTHENTICATED_PREFIXES = ["/api/account/", "/api/google/oauth/"];
 
-export function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PREFIXES.some(
+/**
+ * Paths that only work on the ONE origin PUBLIC_ORIGIN names, and are therefore
+ * redirected there from any other hostname (#174).
+ *
+ * A fourth, orthogonal category: this is about *where* a path is served, not
+ * who may reach it. Everything here either sets or reads a cookie written with
+ * no `Domain` attribute — the PKCE verifier, the OAuth state, the session — and
+ * such a cookie is **host-only**. The app answers on more than one hostname,
+ * but the provider always returns the browser to PUBLIC_ORIGIN, because that is
+ * what the redirect URI is built from (src/lib/origin.ts `requestOrigin`). So a
+ * sign-in begun anywhere else set its cookies on a host the callback never
+ * reached, failed `missing_oauth_params`, and looped forever with no way out.
+ *
+ * **Deliberately not the whole app.** `/`, `/privacy` and `/terms` must keep
+ * answering 200 on every hostname the ingress serves — see the reasoning in
+ * `.gitlab-ci.yml`'s `deploy_production` — so this is the narrow set that has
+ * to move, not a blanket canonical-host redirect. It is also why the two
+ * Kubernetes probe paths need no exemption: they are outside these prefixes, so
+ * a probe addressing the pod by IP is never redirected. A 3xx counts as a pass
+ * to the kubelet, which would make readiness green without /api/health ever
+ * running its `SELECT 1`.
+ *
+ * `/login` is in the list so the whole visible journey — the button, the
+ * provider hop, the callback and any error page — happens on one origin, rather
+ * than starting on one hostname and silently finishing on another.
+ *
+ * Matching is exact-or-`prefix + "/"`, as PUBLIC_PREFIXES above, so `/login`
+ * here does not also catch `/loginhack`.
+ */
+export const CANONICAL_ORIGIN_PREFIXES = [
+  "/api/auth/",
+  "/api/google/oauth/",
+  "/login",
+];
+
+/**
+ * Exact match, or a prefix that ends on a path segment boundary.
+ *
+ * The trailing-slash normalisation is the whole point and is easy to lose: a
+ * plain `startsWith("/login")` also catches `/loginhack`, which would hand an
+ * attacker-chosen path the treatment `/login` gets. Shared between the two
+ * classifiers that need it rather than written twice — they had drifted apart
+ * once already in review (!280), and two copies of a security predicate is one
+ * copy too many.
+ */
+function matchesExactOrSegmentPrefix(
+  pathname: string,
+  prefixes: readonly string[],
+): boolean {
+  return prefixes.some(
     (p) => pathname === p || pathname.startsWith(p.endsWith("/") ? p : p + "/"),
   );
+}
+
+export function isPublicPath(pathname: string): boolean {
+  return matchesExactOrSegmentPrefix(pathname, PUBLIC_PREFIXES);
 }
 
 export function isOwnerOnlyPath(pathname: string): boolean {
@@ -77,4 +129,8 @@ export function isOwnerOnlyPath(pathname: string): boolean {
 
 export function isAuthenticatedOnlyPath(pathname: string): boolean {
   return AUTHENTICATED_PREFIXES.some((p) => pathname.startsWith(p));
+}
+
+export function isCanonicalOriginPath(pathname: string): boolean {
+  return matchesExactOrSegmentPrefix(pathname, CANONICAL_ORIGIN_PREFIXES);
 }

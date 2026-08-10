@@ -23,6 +23,10 @@ import { isoStamp, isoStampOrEmpty, type ExportSnapshot } from "./types";
  *    re-import can reconcile.
  *  - **The coaching conversation** (`BreakdownTurn`). It is prose, and prose in a
  *    CSV cell is a cell nobody can read. It is in `tasks.md` and `export.json`.
+ *  - **`Task.notes`** (#44), on exactly that reasoning: it is free text the user
+ *    typed, routinely multi-line, and a CSV cell containing a paragraph with
+ *    embedded newlines is the thing spreadsheets import wrong. Quoted in
+ *    `tasks.md`, verbatim in `export.json`.
  *  - **Streaks, badges, rewards, rollups and sparks.** Derived from activity, and
  *    they port nowhere.
  *

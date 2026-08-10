@@ -11,7 +11,6 @@ import {
   getGoogleStatus,
   disconnectGoogle,
 } from "@/lib/google";
-import { TaskSource, TaskStatus } from "@/lib/constants";
 import { currentWorkspaceId, currentUser } from "@/lib/workspace";
 import { awardFirstSchedule } from "@/lib/scheduling/award";
 import { SchedulingMethod } from "@/lib/scheduling/types";
@@ -21,6 +20,7 @@ import { deriveWindows } from "@/lib/scheduling/windows";
 import { pickEncoder } from "@/lib/scheduling/encoder";
 import { publicOrigin } from "@/lib/origin";
 import type { Voice } from "@/lib/strings";
+import { brainDumpItemToTaskData } from "@/lib/braindump-to-task";
 
 export type GoogleScheduleResult =
   | { ok: true; scheduled: number; listTitle: string }
@@ -108,6 +108,12 @@ export async function pushStepsToGoogleTasks(
     const { windows } = deriveWindows(intent);
     const byUnit = new Map(windows.map((w) => [w.unitId, w]));
 
+    // #44 — step notes by id, built once from the SCOPED rows rather than
+    // looked up per unit inside the loop. `intent.units` comes from the client,
+    // so a unit id that is not one of this task's steps simply misses and gets
+    // no note; it cannot reach another task's.
+    const stepNotes = new Map(task.steps.map((s) => [s.id, s.notes]));
+
     let scheduled = 0;
     for (const unit of intent.units) {
       const window = byUnit.get(unit.id);
@@ -120,6 +126,12 @@ export async function pushStepsToGoogleTasks(
         parentEmoji: task.parentEmoji ?? "🗂️",
         origin,
         voice,
+        // #44 — the task's note on every unit, plus THIS step's own. Both are
+        // read from the scoped `task` above, so neither can come from the
+        // caller: `intent.units` is client-supplied and is used for the id
+        // only, exactly as the comment above already requires.
+        taskNote: task.notes,
+        stepNote: stepNotes.get(unit.id) ?? null,
       });
       const step = task.steps.find((s) => s.id === unit.id)!;
       const { id } = await upsertGoogleTask(
@@ -264,25 +276,39 @@ export async function scheduleSingleTask(
   const alreadyScheduled = item.task?.scheduledAt != null;
 
   let taskId = item.taskId;
+  // #179 review (`!281`) — the note the Google Task payload must carry, derived
+  // ONCE, here, before the branch below can change what the answer is.
+  //
+  // Re-reading `item.task?.notes` after the lazy-create is stale BY CONSTRUCTION:
+  // `item.task` was fetched before this point, so it is null in exactly the case
+  // where the note has just been written to a brand-new Task. The old comment on
+  // the payload line said as much — "a task that did not exist a moment ago has no
+  // note" — which was true until this MR made `brainDumpItemToTaskData` copy
+  // `item.notes` across at creation.
+  let taskNote: string | null = item.task?.notes ?? null;
   if (!taskId) {
     // Atomic lazy-create (Duo review): the Task insert and the item link must
     // commit together — otherwise a failed link orphans the Task row and a
     // retry creates a second one (the item's taskId stays null).
-    taskId = await prisma.$transaction(async (tx) => {
+    const created = await prisma.$transaction(async (tx) => {
+      // #179 — the ONE conversion. It returns data only, which is exactly why it
+      // can be used inside this transaction: the insert and the item link still
+      // commit together.
       const task = await tx.task.create({
-        data: {
-          title: item.text,
-          source: TaskSource.BrainDump,
-          status: TaskStatus.Active,
-          workspaceId,
-        },
+        data: brainDumpItemToTaskData(item, workspaceId),
       });
       await tx.brainDumpItem.update({
         where: { id: item.id },
         data: { taskId: task.id },
       });
-      return task.id;
+      // The note is taken from the row that was actually written, not re-derived
+      // from `item`. `brainDumpItemToTaskData` normalises and re-validates on the
+      // way across, so a second derivation here could disagree with what landed —
+      // and the whole point of that helper is that there is one conversion.
+      return { id: task.id, notes: task.notes ?? null };
     });
+    taskId = created.id;
+    taskNote = created.notes;
     // Invalidate the cache now that the item has a linked Task, regardless of
     // whether the Google Tasks push below succeeds — a later failure must not
     // leave the inbox serving stale data for the new task row (Duo review).
@@ -315,6 +341,12 @@ export async function scheduleSingleTask(
       parentEmoji: null,
       origin: publicOrigin(),
       voice,
+      // #44 / #179 — resolved above, once, rather than read from `item.task`
+      // here. That read was null in exactly the lazy-create case where the note
+      // had just been written, so the note reached Postgres and never reached
+      // Google. No step note: this path schedules a stepless to-do, whose unit id
+      // is the TASK's id.
+      taskNote,
     });
     const existing = await prisma.task.findFirst({
       where: { id: taskId, workspaceId },

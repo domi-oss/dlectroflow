@@ -748,7 +748,7 @@ describe("ScheduleControl — the Schedule menu (#106)", () => {
     expect(btn.className).toContain("min-w-11");
   });
 
-  it("pending disables the trigger, so the menu cannot be opened mid-push", () => {
+  it("pending disables the trigger and says why, so the menu cannot be opened mid-push", () => {
     render(
       <RowActions
         inline={[]}
@@ -762,7 +762,41 @@ describe("ScheduleControl — the Schedule menu (#106)", () => {
         }}
       />,
     );
-    expect(screen.getByRole("button", { name: "Schedule" })).toBeDisabled();
+    const trigger = screen.getByRole("button", { name: /^Schedule\b/ });
+    expect(trigger).toBeDisabled();
+    // #169 — the reason travels with the control. `pending` used to be one
+    // list-wide flag, so the only true sentence would have been "something,
+    // somewhere, is busy"; it now means one row, so the control names it. A
+    // disabled button is skipped by most screen readers, which is why this
+    // rides on the accessible NAME rather than on `aria-describedby`.
+    expect(trigger).toHaveAccessibleName(
+      "Schedule — already in progress for this row",
+    );
+    expect(trigger).toHaveAttribute(
+      "title",
+      trigger.getAttribute("aria-label"),
+    );
+    expect(trigger).toHaveAttribute("aria-busy", "true");
+  });
+
+  it("an idle trigger carries no busy wording and no aria-busy", () => {
+    // The other half of the pair: the reason must appear only while it is
+    // true, or it is just noise on every row of the list (#169).
+    render(
+      <RowActions
+        inline={[]}
+        menu={[]}
+        schedule={{
+          state: "ready_steps",
+          taskTitle: "t",
+          scheduleIntent: intent,
+          onScheduleSteps: vi.fn(),
+        }}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: "Schedule" });
+    expect(trigger).toBeEnabled();
+    expect(trigger).not.toHaveAttribute("aria-busy");
   });
 });
 
@@ -827,5 +861,22 @@ describe("ScheduleControl — the pick-your-account hint (#128)", () => {
       />,
     );
     expect(screen.queryByText(GOOGLE_ACCOUNT_HINT)).toBeNull();
+  });
+});
+
+// #183 sweep — the same shape as the brain-dump input: a placeholder standing
+// in for a name. One line, and the popup it lives in already says "duration",
+// so the field only has to name itself within that context.
+describe("ScheduleControl — the custom-duration input is named (#183)", () => {
+  it("has a computed accessible name, not just placeholder='min'", async () => {
+    const user = userEvent.setup();
+    render(
+      <ScheduleControl state="needs_duration" onScheduleSingle={vi.fn()} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Schedule" }));
+    const field = await screen.findByRole("spinbutton", {
+      name: "Custom duration in minutes",
+    });
+    expect(field.getAttribute("placeholder")).toBe("min");
   });
 });

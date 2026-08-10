@@ -9,6 +9,7 @@ import {
   SkipForward,
   Volume2,
 } from "lucide-react";
+import { FocusPlaylistPanel } from "@/components/focus/focus-playlist-panel";
 import { t, type Voice } from "@/lib/strings";
 import { cn } from "@/lib/utils";
 import type { FocusSoundControls } from "@/lib/use-focus-sound";
@@ -39,11 +40,24 @@ function formatTime(seconds: number): string {
 export function FocusSoundPlayer({
   controls,
   voice,
+  categories,
+  onCategoriesChange,
   onPauseTogether,
   pauseTogetherPending = false,
 }: {
   controls: FocusSoundControls;
   voice: Voice;
+  /**
+   * #181 — the live playlist selection (`Settings.focusSoundCategories`) and its
+   * setter, forwarded to the panel below the progress bar.
+   *
+   * Required rather than optional, unlike `onPauseTogether`: an absent
+   * persistence callback would be a tick-list that silently does not stick, and
+   * a default no-op would hide that from the one place it could be noticed —
+   * the type.
+   */
+  categories: readonly string[];
+  onCategoriesChange: (next: string[]) => void;
   /**
    * #65 — supplied only when the workspace opted into the music↔timer pause
    * coupling. The transport button then pauses/resumes the whole SESSION (the
@@ -103,10 +117,22 @@ export function FocusSoundPlayer({
     if (!volumeOpen) return;
     sliderRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setVolumeOpen(false);
-        volBtnRef.current?.focus();
-      }
+      if (e.key !== "Escape") return;
+      // #181 — only OUR Escape, the mirror of the guard in FocusPlaylistPanel.
+      // The panel below is a second disclosure with its own document-level
+      // Escape handler, and the two can be open at once by keyboard (opening the
+      // panel with the mouse fires the mousedown that closes this popover;
+      // Enter on its toggle does not). Unscoped, a press meant for the panel
+      // closed this as well and then moved focus to the volume button, throwing
+      // away the focus the panel had just handed back to its own toggle.
+      const target = e.target as Node | null;
+      const mine =
+        target !== null &&
+        (volWrapRef.current?.contains(target) === true ||
+          target === volBtnRef.current);
+      if (!mine) return;
+      setVolumeOpen(false);
+      volBtnRef.current?.focus();
     };
     const onDown = (e: MouseEvent) => {
       if (
@@ -264,6 +290,15 @@ export function FocusSoundPlayer({
         </div>
         <span aria-hidden="true">{formatTime(pos.duration)}</span>
       </div>
+      {/* #181 — "what am I listening to", inline and below the progress bar so
+          it never covers the timer's number. Collapsed by default; see
+          FocusPlaylistPanel for why it is not a popover or a drawer. */}
+      <FocusPlaylistPanel
+        controls={controls}
+        voice={voice}
+        categories={categories}
+        onCategoriesChange={onCategoriesChange}
+      />
     </section>
   );
 }

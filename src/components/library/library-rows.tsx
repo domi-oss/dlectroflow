@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { cn } from "@/lib/utils";
+import { cn, touchTarget } from "@/lib/utils";
 import { RowActions } from "@/components/inbox/row-actions";
 import { CompleteButton } from "@/components/inbox/complete-button";
 import {
@@ -19,6 +19,7 @@ import { formatWake } from "@/lib/format";
 import { useSelectMode } from "./use-select-mode";
 import { SelectActionBar } from "./select-action-bar";
 import { RowNumber, AgeLabel, singleTaskEstimate } from "./library-row-meta";
+import { TaskNoteRow } from "@/components/breakdown/task-note";
 
 /**
  * Inline estimate editor for a single-task ("plated") row — mirrors the
@@ -275,44 +276,72 @@ export function LibraryRows({
                   />
                 )}
               </div>
+              {/* #44 — the note's collapsed trigger goes INSIDE the action
+                  group, beside Complete (owner request from the review app);
+                  the editor body opens below the action line but stays in this
+                  same <li>, so it reads as belonging to this row and not to the
+                  next one. `TaskNoteRow` hands back both halves and yields
+                  nulls for a row with no `Task`, which is why the action group
+                  is rendered from inside it rather than beside it. */}
               {!selecting && (
-                <RowActions
-                  inline={[
-                    <button
-                      key="focus"
-                      type="button"
-                      onClick={() => focusOnItem(item.id)}
-                      className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
-                    >
-                      {t("action.startFocus", voice)}
-                    </button>,
-                    <CompleteButton
-                      key="complete"
-                      voice={voice}
-                      onClick={() => run(() => completeItem(item.id))}
-                    />,
-                  ]}
-                  del={deleteControl(item.id, "delete", { icon: true })}
-                  menu={[
-                    <button
-                      key="focus-m"
-                      type="button"
-                      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                      onClick={() => focusOnItem(item.id)}
-                    >
-                      {t("step.startFocusTimer", voice)}
-                    </button>,
-                    <button
-                      key="complete-m"
-                      type="button"
-                      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                      onClick={() => run(() => completeItem(item.id))}
-                    >
-                      {t("action.completeFull", voice)}
-                    </button>,
-                    deleteControl(item.id, "delete-m", { fullWidth: true }),
-                  ]}
-                />
+                <TaskNoteRow
+                  taskId={item.taskId}
+                  taskTitle={item.text}
+                  notes={item.notes}
+                  voice={voice}
+                >
+                  {({ trigger, body }) => (
+                    <>
+                      <RowActions
+                        inline={[
+                          <button
+                            key="focus"
+                            type="button"
+                            onClick={() => focusOnItem(item.id)}
+                            className={cn(
+                              touchTarget,
+                              "bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
+                            )}
+                          >
+                            {t("action.startFocus", voice)}
+                          </button>,
+                          <CompleteButton
+                            key="complete"
+                            voice={voice}
+                            onClick={() => run(() => completeItem(item.id))}
+                          />,
+                          // #44 — third inline control, after Complete. Null for a
+                          // row with no task, and `inline` is rendered as a list, so
+                          // a null simply contributes nothing.
+                          trigger,
+                        ]}
+                        del={deleteControl(item.id, "delete", { icon: true })}
+                        menu={[
+                          <button
+                            key="focus-m"
+                            type="button"
+                            className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                            onClick={() => focusOnItem(item.id)}
+                          >
+                            {t("step.startFocusTimer", voice)}
+                          </button>,
+                          <button
+                            key="complete-m"
+                            type="button"
+                            className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                            onClick={() => run(() => completeItem(item.id))}
+                          >
+                            {t("action.completeFull", voice)}
+                          </button>,
+                          deleteControl(item.id, "delete-m", {
+                            fullWidth: true,
+                          }),
+                        ]}
+                      />
+                      {body}
+                    </>
+                  )}
+                </TaskNoteRow>
               )}
             </li>
           );

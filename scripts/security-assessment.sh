@@ -152,6 +152,23 @@ BY_SCANNER="$(count '
 
 TITLE="Security Assessment — ${DATE}: ${STILL} active on main, ${CH_STILL} critical/high"
 
+# ── 2b. How old are those numbers? (#166) ────────────────────────────────────
+# This job files a PERMANENT artefact stating a count. #152 — Security
+# Assessment — 2026-08-01 recorded `0` active findings and `0` Critical/High;
+# the same surface read 12 active and 3 HIGH three days later. The snapshot was
+# true when it was written and carried nothing that said when it stopped being
+# true, so the next reader had no way to know it had expired.
+#
+# Freshness is CONTEXT on the numbers above, not a second gate: the assessment
+# query has already exited non-zero if it could not read the report, and an
+# unknown belongs in the issue where a human will see it rather than in a red
+# maintenance pipeline nobody is watching. Hence `set +e` and no status check —
+# the block carries its own ⚠️ when it cannot establish the age.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+set +e
+FRESHNESS_BLOCK="$(bash "${HERE}/check-vuln-freshness.sh")"
+set -e
+
 # Heredoc into a file, then read it back — NOT `$(cat <<EOF …)`. bash 3.2 (the
 # system bash on macOS, where `npm test` runs this script) mis-parses a heredoc
 # inside a command substitution and dies with "unexpected EOF"; alpine's bash 5
@@ -161,6 +178,11 @@ cat > "$WORK/body.md" <<EOF
 > Filed automatically by the \`security_assessment\` CI job (pipeline ${CI_PIPELINE_ID}) on the **Monthly security assessment** schedule. Cadence: \`docs/quality-audit-prompts.md ## Cadence\` + \`docs/SECURITY.md\`. Opened by #134.
 
 ## Snapshot
+
+> **How old are these numbers?** (#166) — a snapshot with no expiry reads as
+> current forever. #152 recorded \`0\` active and \`0\` Critical/High; the same
+> surface read 12 and 3 three days later.
+${FRESHNESS_BLOCK}
 
 Active findings (\`DETECTED\` + \`CONFIRMED\`): **${TOTAL}**
 

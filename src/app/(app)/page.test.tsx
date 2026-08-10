@@ -35,7 +35,13 @@ const OWNER = {
 
 const { db, currentUserMock, hasHistoryMock, settingsOverride } = vi.hoisted(
   () => ({
-    db: { brainDumpItem: { findMany: vi.fn() } },
+    db: {
+      brainDumpItem: { findMany: vi.fn() },
+      // #199 — the summary's two reads. Both are only reached when
+      // Settings.shoppingList is on, which the assertions below prove.
+      shoppingSummary: { findUnique: vi.fn() },
+      shoppingItem: { count: vi.fn() },
+    },
     currentUserMock: vi.fn(),
     hasHistoryMock: vi.fn(),
     settingsOverride: vi.fn(),
@@ -72,11 +78,41 @@ vi.mock("@/lib/workspace-history", async (importOriginal) => {
 // would quietly stop describing the prop contract the moment the identity gains
 // or loses a field, which is exactly the drift identity.test.ts guards against.
 vi.mock("@/components/inbox/inbox-view", () => ({
-  InboxView: ({ newAccount }: { newAccount?: AccountIdentity | null }) => (
+  InboxView: ({
+    newAccount,
+    initialItems,
+    shoppingSummary,
+  }: {
+    newAccount?: AccountIdentity | null;
+    // #44 — the mapped rows, so the page's own row mapper is observable. The
+    // rendering is inbox-view.test.tsx's job; what only the PAGE can get wrong
+    // is dropping a column on the way into the DTO, and that is invisible to
+    // every component test.
+    initialItems?: {
+      id: string;
+      notes?: string | null;
+      itemNotes?: string | null;
+    }[];
+    /** #199 — the summary line's count, or null for "show nothing". */
+    shoppingSummary?: { count: number } | null;
+  }) => (
     <div
       data-testid="inbox-view"
       data-new-account={
         newAccount ? `${newAccount.label}/${newAccount.provider}` : "null"
+      }
+      data-notes={JSON.stringify(
+        (initialItems ?? []).map((i) => [i.id, i.notes ?? null]),
+      )}
+      // #186 — the ITEM's own note column, exposed SEPARATELY. Merging the two
+      // here would hide the exact bug this pins: `...item` brings
+      // `BrainDumpItem.notes` in as `notes`, which the task's note then
+      // overwrites, so one name for two columns made the item's unreachable.
+      data-item-notes={JSON.stringify(
+        (initialItems ?? []).map((i) => [i.id, i.itemNotes ?? null]),
+      )}
+      data-shopping-summary={
+        shoppingSummary ? String(shoppingSummary.count) : "null"
       }
     />
   ),
@@ -97,6 +133,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   settingsOverride.mockReturnValue({ ...settingsFixture });
   db.brainDumpItem.findMany.mockResolvedValue([]);
+  db.shoppingSummary.findUnique.mockResolvedValue(null);
+  db.shoppingItem.count.mockResolvedValue(0);
   currentUserMock.mockResolvedValue(OWNER);
   hasHistoryMock.mockResolvedValue(false);
 });
@@ -170,5 +208,245 @@ describe("Inbox page — brand-new account empty state (#111)", () => {
   it("scopes the probe to the resolved workspace", async () => {
     render(await renderInbox());
     expect(hasHistoryMock).toHaveBeenCalledExactlyOnceWith("ws-test");
+  });
+});
+
+// ── #44 — the task note has to survive the page's row mapper ────────────────
+//
+// The Library shipped this gap: the component was correct and the surface never
+// received the data. A component test cannot see that, and neither can a test
+// that only checks what InboxView renders — so this asserts the PROP.
+describe("Inbox page — the task note reaches the rows (#44)", () => {
+  it("carries Task.notes onto the item the row renders", async () => {
+    db.brainDumpItem.findMany.mockResolvedValue([
+      {
+        id: "i1",
+        text: "Renew the passport",
+        createdAt: new Date(),
+        status: "triaged",
+        triagedAt: new Date(),
+        remindedAt: null,
+        snoozedUntil: null,
+        freshenedAt: null,
+        promptDismissedAt: null,
+        completedAt: null,
+        breakdownRequestedAt: null,
+        taskId: "t1",
+        workspaceId: "ws-test",
+        estMinutes: null,
+        task: {
+          id: "t1",
+          status: "active",
+          scheduledAt: null,
+          scheduleDueAt: null,
+          schedulePriority: null,
+          scheduleHours: null,
+          notes: "photo booth on the high street",
+          steps: [],
+        },
+      },
+    ]);
+    render(await renderInbox());
+    expect(
+      JSON.parse(screen.getByTestId("inbox-view").dataset.notes as string),
+    ).toEqual([["i1", "photo booth on the high street"]]);
+  });
+
+  it("carries BOTH note columns, under distinct names (#186)", async () => {
+    // The shadowing regression, pinned. `items` spreads `...item` and then sets
+    // `notes` from the task — so before #186 named the second one, an item that
+    // had its own note handed the row the TASK's value under that name and the
+    // item's was silently unreachable. Only the page can get this wrong, and no
+    // component test can see it.
+    db.brainDumpItem.findMany.mockResolvedValue([
+      {
+        id: "i3",
+        text: "water the plants",
+        createdAt: new Date(),
+        status: "triaged",
+        triagedAt: new Date(),
+        remindedAt: null,
+        snoozedUntil: null,
+        freshenedAt: null,
+        promptDismissedAt: null,
+        completedAt: null,
+        breakdownRequestedAt: null,
+        taskId: "t3",
+        workspaceId: "ws-test",
+        estMinutes: null,
+        notes: "stale item copy",
+        task: {
+          id: "t3",
+          status: "active",
+          scheduledAt: null,
+          scheduleDueAt: null,
+          schedulePriority: null,
+          scheduleHours: null,
+          notes: "live task note",
+          steps: [],
+        },
+      },
+    ]);
+    render(await renderInbox());
+    const view = screen.getByTestId("inbox-view");
+    expect(JSON.parse(view.dataset.notes as string)).toEqual([
+      ["i3", "live task note"],
+    ]);
+    expect(JSON.parse(view.dataset.itemNotes as string)).toEqual([
+      ["i3", "stale item copy"],
+    ]);
+  });
+
+  it("carries an untriaged row's own note, where no task note exists", async () => {
+    // The grain #179 actually writes at capture. `taskId` null means `liveNote`
+    // reads this column, so the page dropping it would make an inline capture
+    // look like text that went missing.
+    db.brainDumpItem.findMany.mockResolvedValue([
+      {
+        id: "i4",
+        text: "water the plants",
+        createdAt: new Date(),
+        status: "inbox",
+        triagedAt: null,
+        remindedAt: null,
+        snoozedUntil: null,
+        freshenedAt: null,
+        promptDismissedAt: null,
+        completedAt: null,
+        breakdownRequestedAt: null,
+        taskId: null,
+        workspaceId: "ws-test",
+        estMinutes: null,
+        notes: "can under sink",
+        task: null,
+      },
+    ]);
+    render(await renderInbox());
+    const view = screen.getByTestId("inbox-view");
+    expect(JSON.parse(view.dataset.itemNotes as string)).toEqual([
+      ["i4", "can under sink"],
+    ]);
+    expect(JSON.parse(view.dataset.notes as string)).toEqual([["i4", null]]);
+  });
+
+  it("carries null for a row whose task has no note", async () => {
+    db.brainDumpItem.findMany.mockResolvedValue([
+      {
+        id: "i2",
+        text: "no note",
+        createdAt: new Date(),
+        status: "triaged",
+        triagedAt: new Date(),
+        remindedAt: null,
+        snoozedUntil: null,
+        freshenedAt: null,
+        promptDismissedAt: null,
+        completedAt: null,
+        breakdownRequestedAt: null,
+        taskId: "t2",
+        workspaceId: "ws-test",
+        estMinutes: null,
+        task: {
+          id: "t2",
+          status: "active",
+          scheduledAt: null,
+          scheduleDueAt: null,
+          schedulePriority: null,
+          scheduleHours: null,
+          notes: null,
+          steps: [],
+        },
+      },
+    ]);
+    render(await renderInbox());
+    expect(
+      JSON.parse(screen.getByTestId("inbox-view").dataset.notes as string),
+    ).toEqual([["i2", null]]);
+  });
+});
+
+/**
+ * #199 — the summary line's server half.
+ *
+ * The count is the whole point: it is read from the ITEMS on this request, never
+ * from the summary row, so no state of the database can make the inbox claim a
+ * number the list does not have. That is what the "row outlived the list" case
+ * below proves — the row exists, is not dismissed, and the answer is still
+ * nothing, because the count is zero.
+ */
+describe("Inbox page — the shopping-list summary (#199)", () => {
+  const summaryProp = () =>
+    screen.getByTestId("inbox-view").dataset.shoppingSummary;
+
+  it("asks nothing at all while the feature is off", async () => {
+    render(await renderInbox());
+    expect(summaryProp()).toBe("null");
+    expect(db.shoppingSummary.findUnique).not.toHaveBeenCalled();
+    expect(db.shoppingItem.count).not.toHaveBeenCalled();
+  });
+
+  it("hands the DERIVED count when a live row meets a non-empty list", async () => {
+    settingsOverride.mockReturnValue({
+      ...settingsFixture,
+      shoppingList: true,
+    });
+    db.shoppingSummary.findUnique.mockResolvedValue({ clearedAt: null });
+    db.shoppingItem.count.mockResolvedValue(3);
+    render(await renderInbox());
+    expect(summaryProp()).toBe("3");
+    // Scoped, and counting only what is still to buy — the same predicate
+    // shoppingRemainingCount applies in memory on /shopping.
+    expect(db.shoppingItem.count).toHaveBeenCalledWith({
+      where: { workspaceId: "ws-test", done: false, savedForLater: false },
+    });
+    expect(db.shoppingSummary.findUnique).toHaveBeenCalledWith({
+      where: { workspaceId: "ws-test" },
+    });
+  });
+
+  it("hands nothing while the summary is dismissed", async () => {
+    settingsOverride.mockReturnValue({
+      ...settingsFixture,
+      shoppingList: true,
+    });
+    db.shoppingSummary.findUnique.mockResolvedValue({
+      clearedAt: new Date("2026-08-08T09:00:00Z"),
+    });
+    db.shoppingItem.count.mockResolvedValue(3);
+    render(await renderInbox());
+    expect(summaryProp()).toBe("null");
+  });
+
+  it("hands nothing when the row outlived the list, rather than a wrong count", async () => {
+    // The failure mode a stored count would have: a missed sync leaves the row
+    // behind. Because the number is derived, the worst outcome available is a
+    // hidden line — never "0 items on your shopping list" or a stale 3.
+    settingsOverride.mockReturnValue({
+      ...settingsFixture,
+      shoppingList: true,
+    });
+    db.shoppingSummary.findUnique.mockResolvedValue({ clearedAt: null });
+    db.shoppingItem.count.mockResolvedValue(0);
+    render(await renderInbox());
+    expect(summaryProp()).toBe("null");
+  });
+
+  it("hands nothing in the first-run preview, and asks nothing either", async () => {
+    // Duo review, !295 — the two queries used to run and have their result thrown
+    // away one branch later. The page already short-circuits `workspaceHasHistory()`
+    // on `firstRunPreview` for exactly this reason: the preview shows the inbox as a
+    // brand-new workspace would see it, and a brand-new workspace has no shopping
+    // list, so the answer cannot change anything.
+    settingsOverride.mockReturnValue({
+      ...settingsFixture,
+      shoppingList: true,
+      firstRunPreview: true,
+    });
+    db.shoppingSummary.findUnique.mockResolvedValue({ clearedAt: null });
+    db.shoppingItem.count.mockResolvedValue(3);
+    render(await renderInbox());
+    expect(summaryProp()).toBe("null");
+    expect(db.shoppingSummary.findUnique).not.toHaveBeenCalled();
+    expect(db.shoppingItem.count).not.toHaveBeenCalled();
   });
 });

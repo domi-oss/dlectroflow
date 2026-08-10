@@ -29,6 +29,10 @@ function task(overrides: Partial<FocusTask> & { id: string }): FocusTask {
   return {
     title: overrides.id,
     createdAt: new Date(NOW),
+    // #187 — most tasks have never been given a deadline, and that is the
+    // fixture default for the same reason it is the column default: "nobody has
+    // said when" is a state the launcher has to render (as nothing at all).
+    dueAt: null,
     steps: [],
     ...overrides,
   };
@@ -63,6 +67,7 @@ describe("focusableSteps", () => {
       estMinutes: 25,
       taskId: "t1",
       taskTitle: "Write report",
+      dueAt: null,
       resumable: false,
       resumeAt: null,
       remainingMin: 25,
@@ -72,6 +77,29 @@ describe("focusableSteps", () => {
       nextStepText: "Later",
       nextStepEmoji: null,
     });
+  });
+
+  // #187 — a multi-step row's deadline is its parent TASK's `scheduleDueAt`; a
+  // step has no deadline of its own. Carrying it here rather than looking it up
+  // at render time is what keeps the lane a pure render of one flat row type.
+  it("carries the parent task's deadline onto every entry", () => {
+    const due = new Date("2026-08-13T09:00:00Z");
+    const tasks = [
+      task({
+        id: "t1",
+        dueAt: due,
+        steps: [step({ id: "s1", order: 1, done: true }), step({ id: "s2" })],
+      }),
+    ];
+    expect(focusableSteps(tasks)[0]).toMatchObject({
+      stepId: "s2",
+      dueAt: due,
+    });
+  });
+
+  it("leaves the deadline null for a task nobody has scheduled", () => {
+    const tasks = [task({ id: "t1", steps: [step({ id: "s1" })] })];
+    expect(focusableSteps(tasks)[0].dueAt).toBeNull();
   });
 
   it("carries resumeAt through from the next incomplete step", () => {
@@ -253,6 +281,8 @@ const single = (
 ): SingleFocusable => ({
   text: o.itemId,
   estMinutes: 5,
+  taskId: null,
+  dueAt: null,
   ...o,
 });
 
@@ -347,6 +377,35 @@ describe("focusLauncherData", () => {
     ];
     // 20 (hero a2) + 15 (b1) + 8 + 12 = 55
     expect(focusLauncherData(tasks, items).meta.minutesToClear).toBe(55);
+  });
+
+  // #187 — the deadline is threaded in by the CALLER, which is the whole point
+  // of the seam: this module has no DB access, so it must not be the place that
+  // decides where a single-task to-do's deadline comes from. It carries what it
+  // was handed, and derives nothing.
+  it("passes each single-task row's deadline through untouched", () => {
+    const due = new Date("2026-08-13T09:00:00Z");
+    const items = [
+      single({ itemId: "i1", dueAt: due }),
+      single({ itemId: "i2" }),
+    ];
+    const { singleTasks } = focusLauncherData([], items);
+    expect(singleTasks.map((s) => s.dueAt)).toEqual([due, null]);
+  });
+
+  it("keeps the hero's own deadline when it is lifted out of the lane", () => {
+    const due = new Date("2026-08-13T09:00:00Z");
+    const tasks = [
+      task({
+        id: "a",
+        dueAt: due,
+        steps: [
+          step({ id: "a1", order: 1, done: true }),
+          step({ id: "a2", order: 2, resumable: true, resumeAt: 100 }),
+        ],
+      }),
+    ];
+    expect(focusLauncherData(tasks, []).resumeHero?.dueAt).toEqual(due);
   });
 
   it("returns empty lanes + null hero + 0 minutes for the empty/all-cleared case", () => {

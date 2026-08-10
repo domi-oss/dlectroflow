@@ -245,6 +245,67 @@ describe("pushStepsToGoogleTasks — provider-agnostic marker + reward-once", ()
     delete process.env.PUBLIC_ORIGIN;
   });
 
+  // #44: the task's own note rides into the Google Task notes, on every unit.
+  it("threads the task's note into every unit's notes, above the deep-link", async () => {
+    process.env.PUBLIC_ORIGIN = "https://app.example";
+    taskFindFirstMock.mockResolvedValue(
+      baseTask({
+        notes: "Bring the Figma link",
+        steps: [
+          {
+            id: "s1",
+            order: 1,
+            text: "a",
+            estMinutes: 10,
+            subtaskEmoji: null,
+            googleTaskId: null,
+          },
+          {
+            id: "s2",
+            order: 2,
+            text: "b",
+            estMinutes: 10,
+            subtaskEmoji: null,
+            googleTaskId: null,
+          },
+        ],
+      }),
+    );
+    await pushStepsToGoogleTasks("task-1");
+
+    expect(upsertGoogleTaskMock).toHaveBeenCalledTimes(2);
+    for (const call of upsertGoogleTaskMock.mock.calls) {
+      const { title, notes } = call[3] as { title: string; notes: string };
+      expect(notes).toContain("Bring the Figma link");
+      expect(notes.indexOf("Bring the Figma link")).toBeLessThan(
+        notes.indexOf("/focus/"),
+      );
+      // Notes, never the title: Reclaim parses `(...)` out of a title and acts
+      // on it, so a note in there could rewrite the schedule it was attached to.
+      expect(title).not.toContain("Bring the Figma link");
+    }
+    delete process.env.PUBLIC_ORIGIN;
+  });
+
+  it("sends the pre-#44 notes for a task with no note", async () => {
+    taskFindFirstMock.mockResolvedValue(baseTask({ notes: null }));
+    await pushStepsToGoogleTasks("task-1");
+    const withNull = (
+      upsertGoogleTaskMock.mock.calls[0][3] as { notes: string }
+    ).notes;
+
+    vi.clearAllMocks();
+    upsertGoogleTaskMock.mockResolvedValue({ id: "g1", created: true });
+    stepFindFirstMock.mockResolvedValue({ id: "s1" });
+    taskFindFirstMock.mockResolvedValue(baseTask());
+    await pushStepsToGoogleTasks("task-1");
+    const withAbsent = (
+      upsertGoogleTaskMock.mock.calls[0][3] as { notes: string }
+    ).notes;
+
+    expect(withNull).toBe(withAbsent);
+  });
+
   // #104: the sequence Reclaim needs in order to stop inverting the steps.
   it("briefs Reclaim with disjoint windows, the 30-minute floor and the hours category", async () => {
     taskFindFirstMock.mockResolvedValue(

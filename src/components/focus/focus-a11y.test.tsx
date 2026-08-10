@@ -37,6 +37,9 @@ const hero: FocusableStep = {
   estMinutes: 12,
   taskId: "t1",
   taskTitle: "Ship",
+  // #187 — no deadline on this fixture; the a11y specs are about names and
+  // target sizes, and a due-by would only add noise to what they assert.
+  dueAt: null,
   resumable: true,
   resumeAt: 1,
   remainingMin: 12,
@@ -104,7 +107,15 @@ describe("launcher a11y sweep", () => {
     render(
       <SingleTaskLane
         voice="plain"
-        items={[{ itemId: "i1", text: "Buy milk", estMinutes: 8 }]}
+        items={[
+          {
+            itemId: "i1",
+            text: "Buy milk",
+            estMinutes: 8,
+            taskId: null,
+            dueAt: null,
+          },
+        ]}
       />,
     );
     expect(screen.getByRole("button", { name: /start/i }).className).toMatch(

@@ -195,43 +195,47 @@ export const FocusTimerStyle = {
 export type FocusTimerStyle =
   (typeof FocusTimerStyle)[keyof typeof FocusTimerStyle];
 
-// #43 — real lofi library. Each value (other than Off) is one bundled CC0 track
-// from the open-lofi collection (one per category), mapped to its file in
-// src/lib/focus-sounds.ts (FOCUS_SOUND_SRC / FOCUS_SOUND_TRACKS). Adding/removing
-// a value REQUIRES a paired Settings_focusSound_check migration + keeps the
-// enum-constraint-sync test green (#38). `lofi_calm` is retained from MR ② for
-// backward-compat with already-saved rows; it now points at a real ambient track.
+// #180 — focus sound is a switch, not a track picker.
+//
+// It held eleven values until #180: "off" plus one per bundled #43 track, so the
+// column answered "is there music" and "which track does the session open on" at
+// once. Choosing what to hear is a decision you make while listening, so it moved
+// to the in-session player, and nothing persists an opening track any more — a
+// session opens on the head of the pass built from Settings.focusSoundCategories.
+// The bundled track ids still exist as ids (BundledFocusTrack in
+// src/lib/focus-sounds.ts); they are simply no longer a thing this column can
+// hold, which is why the narrowing needed a paired Settings_focusSound_check
+// migration converting stored track ids to "on".
+//
+// New accounts default to "on" (see the Prisma default), because a catalogue
+// nobody can hear without first finding a settings page is a feature in hiding.
 export const FocusSound = {
   Off: "off",
-  LofiCalm: "lofi_calm",
-  LofiChillhop: "lofi_chillhop",
-  LofiJazzhop: "lofi_jazzhop",
-  LofiSoulRnb: "lofi_soul_rnb",
-  LofiLateNight: "lofi_late_night",
-  LofiFunkSoul: "lofi_funk_soul",
-  LofiAsian: "lofi_asian",
-  LofiSeasonal: "lofi_seasonal",
-  LofiActivities: "lofi_activities",
-  LofiHybrid: "lofi_hybrid",
+  On: "on",
 } as const;
 export type FocusSound = (typeof FocusSound)[keyof typeof FocusSound];
 
 // #70 — the ten open-lofi categories, as a persistable value set.
 //
-// `Settings.focusSoundCategory` (nullable; null = "play the whole list") stores
-// one of these and is guarded by Settings_focusSoundCategory_check, so this
-// object is the single source of truth the constraint and
-// enum-constraint-sync both mirror. `FOCUS_SOUND_TRACKS` in
-// src/lib/focus-sounds.ts reads its `category` values from here, which is what
-// keeps the slug a picker offers, the slug a bundled track carries and the slug
-// the DB will accept from ever being three different strings.
+// #180 — `Settings.focusSoundCategories` is a `text[]` holding zero or more of
+// these, guarded by a CONTAINMENT check (Settings_focusSoundCategories_check),
+// so this object is the single source of truth the constraint and
+// enum-constraint-sync both mirror. An EMPTY array means the whole catalogue,
+// which is what #70's NULL used to mean; collapsing "nothing narrowed" onto the
+// empty array leaves exactly one way to express it, and exactly one way to get
+// silence (FocusSound.Off).
+//
+// `FOCUS_SOUND_TRACKS` in src/lib/focus-sounds.ts reads its `category` values
+// from here, which is what keeps the slug a picker offers, the slug a bundled
+// track carries and the slug the DB will accept from ever being three different
+// strings.
 //
 // These are open-lofi's OWN slugs, deliberately not paraphrases: #70's first
 // version invented `ambient`, `asian` and `seasonal`, and the corrected list is
 // what a future streamed manifest has to match for a category to group at all.
 //
 // A NEW category is not just a constant: it needs a paired
-// Settings_focusSoundCategory_check migration, or enum-constraint-sync goes red.
+// Settings_focusSoundCategories_check migration, or enum-constraint-sync goes red.
 export const FocusSoundCategory = {
   AmbientLofi: "ambient-lofi",
   Chillhop: "chillhop",

@@ -10,6 +10,7 @@ import { AgingSection } from "@/components/settings/aging-section";
 import { VoiceSection } from "@/components/settings/voice-section";
 import { BreakdownModelSection } from "@/components/settings/breakdown-model-section";
 import { DemoSection } from "@/components/settings/demo-section";
+import { ShoppingSection } from "@/components/settings/shopping-section";
 import { randomFableLine } from "@/lib/fable-lines";
 import {
   modelChoicesForProvider,
@@ -119,7 +120,6 @@ export default async function SettingsPage({
           keepAwake={settings.focusKeepAwake}
           alarmEnabled={settings.focusAlarmEnabled}
           sound={settings.focusSound}
-          category={settings.focusSoundCategory}
           pauseTogether={settings.focusPauseTogether}
           voice={voice}
           defaultExpanded
@@ -222,6 +222,12 @@ export default async function SettingsPage({
           />
         </div>
       )}
+      {/* #199 — shopping-list mode's switch, at the low-frequency end and ahead
+          of Demo and administration (#101's ordering rule). The order here and in
+          SETTINGS_SECTIONS are the same list twice over. */}
+      <div className="border-t pt-4">
+        <ShoppingSection shoppingList={settings.shoppingList} voice={voice} />
+      </div>
       <div className="border-t pt-4">
         <DemoSection firstRunPreview={settings.firstRunPreview} voice={voice} />
       </div>

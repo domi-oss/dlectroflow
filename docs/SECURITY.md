@@ -96,3 +96,75 @@ effect without a manual `kubectl rollout restart`.
 > reports "still detected on `main`" separately from "already fixed but never
 > resolved", because the Vulnerability Report's default view does not
 > distinguish them.
+
+### Which surface is authoritative, and how old is its answer (#166)
+
+Two surfaces report vulnerability counts for this project and they **disagree
+without saying so**. On 2026-08-04, against the same tree, the pipeline query
+read 12 dependency findings where the Vulnerability Report read 11.
+Reconciling them cost an afternoon, twice, before the answer was written down:
+
+| Question | Query | Notes |
+|---|---|---|
+| What is on `main` right now? | `project.vulnerabilities(state: [DETECTED, CONFIRMED])` | **Authoritative.** Paginate it — this project already holds 100 records on page one. |
+| What did *this merge request* introduce? | `project.pipeline(iid:).securityReportFindings` | Merge-request pipelines **only**. |
+
+**A pipeline-level query looks empty against `main`, and the cause is a default
+argument — not the surface.** `securityReportFindings` with **no `state:`
+argument returns `DETECTED` only**. A well-triaged `main` has a tiny `DETECTED`
+set, so the query reads 0 or 1 and looks like a surface that reports nothing by
+design. It is not one.
+
+Measured 2026-08-07: it returned **1** on `main` pipeline iid 2005 (`fe5321a`)
+and **1** on iid 2009 (`0d47b2f`). On MR pipeline iid 1981 — unfiltered **1**,
+`state: [DISMISSED]` **29**, all four states **30**. Pass the filter and the
+records are there:
+
+```
+securityReportFindings(first: 200, state: [DETECTED, CONFIRMED, DISMISSED, RESOLVED])
+```
+
+The 2026-08-06 observation this paragraph used to rest on — `main` pipeline iid
+1606 reading 0 dependency findings on the exact tree (`cca6fdd`) that MR
+pipeline iid 1611 reads 12 on — is a real measurement, but the explanation
+attached to it was wrong. Those 12 were triaged records an unfiltered query
+cannot see, not findings that had stopped being reported.
+
+**This paragraph previously said the opposite**, and asserting that a zero was
+expected is worse than saying nothing: it taught the reader not to question one.
+The same claim sat uncorrected in a maintainer's own notes for five days. **Never
+accept a zero from this query without a control** — run it with the state filter,
+or against a pipeline known to hold findings, and watch it come back non-zero
+before believing the zero.
+
+**Every count must carry its age.** `scripts/check-vuln-freshness.sh` emits the
+count together with the query that produced it and the instant that dates it;
+the weekly `ops_digest` and the monthly `security_assessment` both embed it, so
+neither files a number a reader cannot date. Its freshness budget is **192h** —
+the 168h weekly rescan cycle plus 24h of scheduler grace.
+
+Two things date the answer, and they are **not** interchangeable:
+
+- **The scanner job**, not the pipeline. The scanners are `allow_failure: true`
+  on `main` on purpose (a scanner flake must not block a production deploy), so
+  a green `main` pipeline does not prove a scan ran and a red one does not
+  prove it did not. Measured 2026-08-06, four of the last six `main` pipelines
+  were red with all five analyzers green, and the last green pipeline finished
+  33.6h before the last successful scan.
+- **`detectedAt`**, which moves when Continuous Vulnerability Scanning
+  re-evaluates the stored SBOM with no pipeline at all. It dates only the
+  scanner whose findings it belongs to — the SBOM is dependency scanning's
+  artefact, so a dependency finding re-detected an hour ago says nothing about
+  whether container scanning has run this month.
+
+An aggregate count is only as fresh as its **stalest** contributing scanner,
+and a count of zero has no `detectedAt` of its own — so when the scan cannot be
+found, the honest answer is *undetermined*, never *clean*.
+
+**Neither is a timestamp ahead of the clock.** A finish time or a `detectedAt`
+later than the instant the check ran is not a fresh one, it is one that cannot
+be read, and it is reported as *undetermined* like any other unknown. Five
+minutes of runner clock skew is allowed for, because gitlab.com dispatches jobs
+from a shared pool and a runner clock is not the API clock; anything past that
+is data, not drift. Without the bound a container scanner three weeks dead read
+`✅ Fresh, 1h old` as soon as one row carried a future stamp.

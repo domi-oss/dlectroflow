@@ -20,13 +20,9 @@ describe("focus-timer redesign strings (MR ②)", () => {
     expect(t("focusSettings.heading", "plain")).toBe("Focus timer");
     expect(t("focusSettings.heading", "playful")).toBe("⏱️ Focus timer");
     expect(t("focusSettings.styleMug", "plain")).toBe("Mug");
-    expect(t("focusSettings.soundOff", "plain")).toBe("Off");
-    expect(t("focusSettings.soundLofiCalm", "plain")).toBe("Lo-fi (calm)");
   });
 
-  it("#43 — lo-fi picker + mini-player control labels resolve; plain stays plain", () => {
-    expect(t("focusSettings.preview", "plain")).toBe("Preview");
-    expect(t("focusSettings.stopPreview", "plain")).toBe("Stop preview");
+  it("#43 — mini-player control labels resolve; plain stays plain", () => {
     expect(t("focus.sound.play", "plain")).toBe("Play focus sound");
     expect(t("focus.sound.pause", "plain")).toBe("Pause focus sound");
     expect(t("focus.sound.next", "plain")).toBe("Next track");
@@ -38,31 +34,23 @@ describe("focus-timer redesign strings (MR ②)", () => {
   });
 
   it("#68 — the settings copy promises a playlist, never a looping track", () => {
-    // The picker seeds where the playlist starts; nothing loops a single file
-    // any more, so the hints must not say it does.
-    expect(t("focusSettings.soundPickerHint", "plain")).toMatch(/playlist/i);
+    // Nothing loops a single file any more, so the hint must not say it does.
+    expect(t("focusSettings.soundHint", "plain")).toMatch(/playlist/i);
     for (const voice of ["plain", "playful"] as const) {
-      expect(t("focusSettings.soundPickerHint", voice)).not.toMatch(/loop/i);
       expect(t("focusSettings.soundHint", voice)).not.toMatch(/loop/i);
     }
   });
 
-  it("#70 — the category copy promises a pass, and the count has both grammatical forms", () => {
+  it("#180 — the switch's hint says where the playlist controls went", () => {
+    // The removal's only mitigation. It has to name BOTH things that moved —
+    // playlists and individual tracks — and say they are in the player, or the
+    // simplification reads as a feature that was taken away.
     for (const voice of ["plain", "playful"] as const) {
-      // Same promise as the track picker's hint: a pass, never a loop.
-      expect(t("focusSettings.soundCategoryHint", voice)).toMatch(/category/i);
-      expect(t("focusSettings.soundCategoryHint", voice)).not.toMatch(/loop/i);
+      const hint = t("focusSettings.soundPlayerHint", voice);
+      expect(hint).toMatch(/playlist/i);
+      expect(hint).toMatch(/track/i);
+      expect(hint).toMatch(/player/i);
     }
-    // Functional labels, identical across voices (the #43 picker convention).
-    for (const key of [
-      "focusSettings.soundWholeCategory",
-      "focusSettings.soundTrackCount",
-      "focusSettings.soundTrackCountOne",
-    ] as const) {
-      expect(t(key, "plain")).toBe(t(key, "playful"));
-    }
-    expect(t("focusSettings.soundTrackCount", "plain")).toBe("tracks");
-    expect(t("focusSettings.soundTrackCountOne", "plain")).toBe("track");
   });
 
   it("#65 — the pause-coupling setting names its consequence and keeps plain emoji-free", () => {
@@ -94,6 +82,32 @@ describe("focus-timer redesign strings (MR ②)", () => {
         "Resume music and timer",
       );
     }
+  });
+
+  it("#181 — the player panel's labels resolve identically in both voices (functional controls)", () => {
+    // The panel sits on a screen someone is using to concentrate. A playful
+    // flourish here would be it drawing attention to itself, which is the one
+    // thing it must not do — so no key in this set may differ by voice.
+    for (const key of [
+      "focus.sound.panel",
+      "focus.sound.playlists",
+      "focus.sound.playlistsHint",
+      "focus.sound.allTracks",
+      "focus.sound.tracks",
+      "focus.sound.playing",
+      "focus.sound.trackOne",
+      "focus.sound.trackMany",
+    ] as const) {
+      expect(t(key, "plain")).toBe(t(key, "playful"));
+      expect(t(key, "plain")).not.toMatch(/\p{Extended_Pictographic}/u);
+    }
+  });
+
+  it("#181 — the hint says how to leave the all-tracks state", () => {
+    // "All tracks" is the only row that cannot be unticked directly; you leave
+    // it by ticking a playlist. A control whose off-switch is elsewhere has to
+    // say where, or it reads as broken.
+    expect(t("focus.sound.playlistsHint", "plain")).toMatch(/tick a playlist/i);
   });
 
   it("#68 — shuffle label + state text resolve identically in both voices (functional control)", () => {

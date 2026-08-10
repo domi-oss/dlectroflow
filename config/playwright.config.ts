@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import { config as readDotenvFile } from "dotenv";
+import path from "node:path";
 import {
   SESSION_SECRET,
   STORAGE_STATE,
@@ -7,7 +8,17 @@ import {
   MEMBER_STORAGE_STATE,
   MEMBER_BASE_URL,
   TOKEN_ENC_KEY,
-} from "./e2e/constants";
+} from "../e2e/constants";
+
+// #133 — this file lives in `config/`, not the repo root. Playwright resolves
+// `testDir` and `globalSetup` against THIS FILE's directory, and — the one that
+// bites hardest — so does `webServer.cwd`, which defaults to the config's
+// directory rather than to the project root. Every shell path in the server
+// commands below (`.next/standalone/server.js`, `public`, `.next/static`) is
+// relative to that cwd, so without the explicit `cwd` the suite would try to
+// boot `config/.next/standalone/server.js` and fail the preflight check with a
+// message about a missing build rather than about a misconfigured path.
+const REPO_ROOT = path.resolve(__dirname, "..");
 
 // ── The server under test is the artefact that ships (#97) ───────────────────
 // `next.config.ts` sets `output: "standalone"`, so production runs
@@ -85,11 +96,16 @@ const memberServerCommand = "exec node .next/standalone/server.js";
 // object rather than mutating process.env, and only DATABASE_URL is forwarded —
 // so the API keys and TOKEN_ENC_KEY in a developer's env file cannot reach the
 // server under test and displace the dummies below.
+// Absolute since #133, for the reason config/vitest.config.ts states at the
+// same spot: dotenv resolves a relative path against `process.cwd()`, and a
+// missed env file is silent — it drops DATABASE_URL rather than erroring, which
+// is exactly the two-databases divergence the paragraph above is about.
 const envFileValues: Record<string, string | undefined> = {};
 for (const file of [".env", ".env.local"]) {
   Object.assign(
     envFileValues,
-    readDotenvFile({ path: file, processEnv: {} }).parsed ?? {},
+    readDotenvFile({ path: path.join(REPO_ROOT, file), processEnv: {} })
+      .parsed ?? {},
   );
 }
 const DATABASE_URL = process.env.DATABASE_URL ?? envFileValues.DATABASE_URL;
@@ -181,13 +197,41 @@ const memberServerEnv = {
  */
 const MEMBER_SPECS = /member-[\w-]+\.spec\.ts/;
 
+/**
+ * The specs that make up the ACCESSIBILITY GATE — the only project that runs
+ * with no retries (#127). See the `a11y` project below for why.
+ *
+ * Two shapes, because the gate grew in two places: the baseline-relative WCAG
+ * scans live in `e2e/a11y/`, and the zero-tolerance contrast gate is the
+ * single file `e2e/a11y-contrast.spec.ts` (deliberately left where it is —
+ * moving it would churn the half-dozen `src/` comments that cite it by path
+ * for no behavioural gain). `a11y` followed by `-` or a path separator catches
+ * both and nothing else; anchoring on `/e2e/` keeps a checkout that happens to
+ * sit under an `a11y/` directory from matching every spec in the suite.
+ *
+ * The `\.spec\.ts$` tail is load-bearing, not decoration: a project's
+ * `testMatch` REPLACES the top-level `testMatch: "**\/*.spec.ts"` rather than
+ * intersecting with it (MEMBER_SPECS above gets away with the same thing only
+ * because it spells the extension out too). Without the tail this also matched
+ * `e2e/a11y/axe-helpers.ts`, and Playwright refused to collect the suite at all
+ * — "test file a11y-contrast.spec.ts should not import test file
+ * a11y/axe-helpers.ts", once per importer.
+ *
+ * Put a new gate spec in `e2e/a11y/` and it lands here. Anything else keeps
+ * the retry, which is the safe direction to fail: a spec in the wrong project
+ * is over-tolerant, not silently unrun.
+ */
+const A11Y_SPECS = /[\\/]e2e[\\/]a11y[-\\/].*\.spec\.ts$/;
+
 export default defineConfig({
-  testDir: "./e2e",
+  testDir: path.join(REPO_ROOT, "e2e"),
   testMatch: "**/*.spec.ts",
-  globalSetup: "./e2e/global-setup.ts",
+  globalSetup: path.join(REPO_ROOT, "e2e", "global-setup.ts"),
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
+  // The default for the SMOKE projects only — the `a11y` project overrides it
+  // to 0 and explains why (#127).
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI
     ? [["list"], ["html", { open: "never" }]]
@@ -198,12 +242,81 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   projects: [
+    // ── #127: the accessibility gate gets no second chance ───────────────────
+    // `retries: 1` above is the right default for a smoke suite — a runner that
+    // drops a connection or a container that stalls under load is noise, and
+    // re-running it is cheaper than re-running a human. It is the WRONG default
+    // here, because a retry-masked flake in these specs is INDISTINGUISHABLE
+    // from a real AA regression that happens to be timing-dependent. Both read
+    // as "failed once, passed once"; Playwright calls both green and files the
+    // detail in a flaky-test summary that nothing gates on. One is noise, the
+    // other is a shipped contrast bug, and the gate cannot tell you which.
+    //
+    // #110 was exactly that shape: a genuine 1 ms race the suite had been
+    // quietly absorbing. It was found by instrumenting and CPU-throttling the
+    // page, not by the gate — because the gate had a retry to spend.
+    //
+    // Chosen over the two alternatives #127 also lists, on evidence rather than
+    // taste:
+    //   * `retries: 0` for the WHOLE suite is stricter than the problem. The
+    //     smoke specs boot two standalone servers against a real Postgres and
+    //     drive redirect chains; a one-off there is genuinely more likely to be
+    //     the infrastructure than the app, and the AA question is not on trial.
+    //   * `failOnFlakyTests` is a TestConfig field with no TestProject
+    //     equivalent (checked against @playwright/test 1.61's types), so it is
+    //     all-or-nothing across projects and cannot express "strict here,
+    //     tolerant there" at all.
+    // Measured before committing to it, 2026-08-06: these 59 tests were run
+    // 30x each locally (1,770 runs) at retries 0, zero failures. The gate is
+    // not absorbing anything today, so zero tolerance costs nothing now and
+    // starts failing loudly the day that stops being true.
+    //
+    // Runs FIRST, and that is now ENFORCED rather than assumed. Several of
+    // these specs seed and delete rows in the shared owner workspace, so
+    // running them after the smoke suite would change the database state they
+    // scan against — a real behaviour change that a config reshuffle could
+    // smuggle in.
+    //
+    // This used to rest on "with `workers: 1` Playwright runs projects in
+    // declaration order". That is an observed implementation detail, not a
+    // documented contract, and nothing verified it — so reordering this array
+    // would have silently reintroduced the hazard (raised in review on !277).
+    // The other two projects now declare `dependencies: ["a11y"]`, which makes
+    // the runner itself responsible for the ordering, and
+    // `e2e-project-split.test.ts` additionally pins the array position as a
+    // second line of defence in case the dependencies are ever removed.
+    //
+    // The cost, stated because it is a real change to the CI signal: a failing
+    // a11y project now SKIPS chromium and member rather than letting them run
+    // independently. That is the right trade for this suite — the a11y gate
+    // failing means the shared workspace state is not what the smoke specs
+    // assume anyway, so their result would not have been trustworthy.
+    {
+      name: "a11y",
+      testMatch: A11Y_SPECS,
+      retries: 0,
+      use: {
+        ...devices["Desktop Chrome"],
+        // Without this, `retries: 0` would cost this project its diagnostics:
+        // the global `trace: "on-first-retry"` records nothing when there is no
+        // first retry, so a failing contrast scan would arrive with no trace at
+        // all — strictly worse than what it replaces. `retain-on-failure` is
+        // the no-retry equivalent, and the html reporter inlines the trace into
+        // `playwright-report/`, which e2e_test already uploads on failure.
+        trace: "retain-on-failure",
+      },
+    },
     {
       name: "chromium",
+      // Ordering, enforced by the runner — see the a11y project above.
+      dependencies: ["a11y"],
       // The member specs need the member's own session, so they are excluded
       // here rather than skipped inside the spec: a spec that silently passes
-      // against the wrong server is worse than one that does not run.
-      testIgnore: MEMBER_SPECS,
+      // against the wrong server is worse than one that does not run. The a11y
+      // specs are excluded for a different reason — they are their own project
+      // above, and matching here too would run every scan twice, the second
+      // time with a retry that defeats the point.
+      testIgnore: [MEMBER_SPECS, A11Y_SPECS],
       use: { ...devices["Desktop Chrome"] },
     },
     {
@@ -211,6 +324,8 @@ export default defineConfig({
       // session", and Google was merely its first occupant. Self-serve account
       // deletion is the second, and it is not a Google feature.
       name: "member",
+      // Ordering, enforced by the runner — see the a11y project above.
+      dependencies: ["a11y"],
       testMatch: MEMBER_SPECS,
       use: {
         ...devices["Desktop Chrome"],
@@ -226,6 +341,8 @@ export default defineConfig({
   webServer: [
     {
       command: standaloneServerCommand,
+      // #133: defaults to the CONFIG's directory, which is `config/` now.
+      cwd: REPO_ROOT,
       url: `${BASE_URL}/api/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 180_000,
@@ -233,6 +350,7 @@ export default defineConfig({
     },
     {
       command: memberServerCommand,
+      cwd: REPO_ROOT,
       url: `${MEMBER_BASE_URL}/api/health`,
       reuseExistingServer: !process.env.CI,
       timeout: 180_000,

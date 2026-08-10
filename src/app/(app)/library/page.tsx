@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { DonePill } from "@/components/completion/done-pill";
 import { LibraryRows } from "@/components/library/library-rows";
 import { LibraryMultistep } from "@/components/library/library-multistep";
+import { NoteText } from "@/components/breakdown/note-field";
 import { BackLink } from "@/components/nav/back-link";
 import { openSessionRemainingSec } from "@/lib/focus-timer-clock";
 
@@ -112,6 +113,9 @@ export default async function LibraryPage({
     stepsTotal: task?.steps.length ?? 0,
     stepsDone: task?.steps.filter((s) => s.done).length ?? 0,
     taskStatus: task?.status ?? null,
+    // #44 — the task's own note, for the row-level disclosure. `task` is the
+    // workspace-scoped relation already loaded here, so this costs no query.
+    notes: task?.notes ?? null,
     scheduledAt: task?.scheduledAt ?? null,
     estMinutes: item.estMinutes,
     steps:
@@ -124,6 +128,10 @@ export default async function LibraryPage({
           done: s.done,
           estMinutes: s.estMinutes,
           subtaskEmoji: s.subtaskEmoji,
+          // #44 — this row expands into the same <TaskSteps> the task page
+          // renders, so the note travels with the step rather than the two
+          // surfaces disagreeing about whether a step has one.
+          notes: s.notes,
           resumable: session?.pausedAt != null,
           openRemainingSec: openSessionRemainingSec(session, now),
         };
@@ -289,6 +297,13 @@ function LibraryRow({
       ) : (
         body
       )}
+      {/* #44 — READ-ONLY here, and deliberately so. Done is a closure view
+          carrying no other controls, and annotating finished work has no
+          purpose — the same call a done step row makes in <TaskSteps>. Hiding
+          a note the owner wrote would be the worse of the two, so it is shown
+          and simply not editable. Outside the <Link>, or the note would become
+          part of a navigation target's accessible name. */}
+      {item.notes && <NoteText>{item.notes}</NoteText>}
     </li>
   );
 }

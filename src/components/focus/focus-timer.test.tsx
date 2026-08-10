@@ -11,10 +11,15 @@ import {
 import userEvent from "@testing-library/user-event";
 import {
   FocusTimer,
+  FOCUS_CATEGORY_SAVE_DEBOUNCE_MS,
   REESTIMATE_TIMEOUT_MS,
 } from "@/components/focus/focus-timer";
 import { AUTO_ADVANCE_SEC } from "@/components/focus/auto-advance";
 import type { TrackerStep } from "@/components/focus/focus-step-tracker";
+// `pickOne` reads the platform CSPRNG rather than `Math.random`, so the done
+// message is only deterministic if that is what gets pinned. Shared helper
+// (!275 review) — see src/lib/__tests__/mock-csprng.ts.
+import { mockCsprngDraw } from "@/lib/__tests__/mock-csprng";
 
 const refresh = vi.fn();
 // #142 — `push` is module-level rather than created inside `useRouter()`: the
@@ -45,6 +50,7 @@ vi.mock("@/app/actions/focus", () => ({
     freshStart: false,
   }),
   requeueFocus: vi.fn().mockResolvedValue({ ok: true }),
+  uncompleteStep: vi.fn().mockResolvedValue(undefined),
   proposeNewEstimate: vi.fn().mockResolvedValue(20),
   pauseFocus: vi.fn().mockResolvedValue({ ok: true }),
   resumeFocus: vi.fn().mockResolvedValue({
@@ -60,6 +66,7 @@ vi.mock("@/app/actions/braindump", () => ({
 vi.mock("@/app/actions/settings", () => ({
   dismissFocusTimerTip: vi.fn().mockResolvedValue(undefined),
   updateFocusShuffle: vi.fn().mockResolvedValue(undefined),
+  updateFocusSoundCategories: vi.fn().mockResolvedValue(undefined),
 }));
 // #89 — the paused ring's breathing pacer must be absent entirely under reduced
 // motion, so this is per-test switchable (the mockVoice pattern below).
@@ -131,10 +138,14 @@ vi.mock("@/lib/use-focus-sound", () => ({
 vi.mock("@/components/focus/focus-sound-player", () => ({
   FocusSoundPlayer: ({
     controls,
+    categories,
+    onCategoriesChange,
     onPauseTogether,
     pauseTogetherPending,
   }: {
     controls: { toggle: () => void; setVolume: (v: number) => void };
+    categories: readonly string[];
+    onCategoriesChange: (next: string[]) => void;
     onPauseTogether?: () => void;
     pauseTogetherPending?: boolean;
   }) => (
@@ -149,6 +160,16 @@ vi.mock("@/components/focus/focus-sound-player", () => ({
       <button type="button" onClick={() => controls.setVolume(0)}>
         mini volume zero
       </button>
+      {/* #181 — the panel's own behaviour is covered in
+          focus-playlist-panel.test.tsx; this stub exposes the two props the
+          TIMER owns, so these tests can see what it seeds and what it persists. */}
+      <span data-testid="mini-categories">{categories.join(",")}</span>
+      <button type="button" onClick={() => onCategoriesChange(["jazzhop"])}>
+        mini tick jazzhop
+      </button>
+      <button type="button" onClick={() => onCategoriesChange(["late-night"])}>
+        mini tick late-night
+      </button>
     </div>
   ),
 }));
@@ -160,10 +181,12 @@ import {
   proposeNewEstimate,
   requeueFocus,
   resumeFocus,
+  uncompleteStep,
 } from "@/app/actions/focus";
 import {
   dismissFocusTimerTip,
   updateFocusShuffle,
+  updateFocusSoundCategories,
 } from "@/app/actions/settings";
 import { ensureFocusStep } from "@/app/actions/braindump";
 
@@ -606,25 +629,131 @@ describe("FocusTimer — device effects behind the boundary", () => {
             minimalMode: false,
             keepAwake: false,
             alarmEnabled: false,
-            sound: "lofi_calm",
+            sound: "on",
+            categories: ["chillhop"],
             shuffle: true,
           },
         })}
       />,
     );
-    const opts = soundHookArgs[1] as {
+    // #180 — the hook takes one options object and no opening track: focusSound
+    // is a switch, so there is no stored track to seed a session from.
+    const opts = soundHookArgs[0] as {
+      categories?: readonly string[];
       shuffle?: boolean;
       onShuffleChange?: (v: boolean) => void;
     };
-    expect(soundHookArgs[0]).toBe("lofi_calm");
+    expect(soundHookArgs).toHaveLength(1);
+    expect(opts.categories).toEqual(["chillhop"]);
     expect(opts.shuffle).toBe(true);
     act(() => opts.onShuffleChange?.(false));
     expect(updateFocusShuffle).toHaveBeenCalledWith(false);
   });
 
+  // #181 — the tick-list lives in the player, so the SELECTION is timer state
+  // now rather than a read-only prop: one value drives the pool the hook
+  // resolves and the ticks the panel draws, and it is persisted on a debounce
+  // because a tick is a click, not a form submit.
+  describe("the playlist selection (#181)", () => {
+    const withSound = (categories: string[]) =>
+      base({
+        settings: {
+          timerStyle: null,
+          minimalMode: false,
+          keepAwake: false,
+          alarmEnabled: false,
+          sound: "on",
+          categories,
+        },
+      });
+
+    it("hands the same live selection to the hook and to the player", async () => {
+      const user = userEvent.setup();
+      render(<FocusTimer {...withSound(["chillhop"])} />);
+      await start(user);
+      expect(
+        (soundHookArgs[0] as { categories?: readonly string[] }).categories,
+      ).toEqual(["chillhop"]);
+      expect(screen.getByTestId("mini-categories")).toHaveTextContent(
+        "chillhop",
+      );
+    });
+
+    it("a tick takes effect immediately, before anything is persisted", async () => {
+      const user = userEvent.setup();
+      render(<FocusTimer {...withSound(["chillhop"])} />);
+      await start(user);
+      await user.click(
+        screen.getByRole("button", { name: /mini tick jazzhop/i }),
+      );
+      // The pool must follow the tick straight away — waiting on a debounced
+      // round-trip to change what is playing would make the control feel broken.
+      expect(
+        (soundHookArgs[0] as { categories?: readonly string[] }).categories,
+      ).toEqual(["jazzhop"]);
+      expect(updateFocusSoundCategories).not.toHaveBeenCalled();
+    });
+
+    // The two below drive the DOM with act(...click()) rather than userEvent,
+    // matching the other fake-timer tests in this file: the timer runs a 1s
+    // countdown interval of its own, and userEvent's internal delay under fake
+    // timers deadlocks against it.
+    const press = async (name: RegExp) => {
+      await act(async () => {
+        screen.getByRole("button", { name }).click();
+      });
+    };
+
+    it("collapses a burst of ticks into ONE write, of the last value", async () => {
+      vi.useFakeTimers();
+      try {
+        render(<FocusTimer {...withSound([])} />);
+        await press(/start focusing/i);
+        await press(/mini tick jazzhop/i);
+        await press(/mini tick late-night/i);
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(FOCUS_CATEGORY_SAVE_DEBOUNCE_MS);
+        });
+        expect(updateFocusSoundCategories).toHaveBeenCalledTimes(1);
+        expect(updateFocusSoundCategories).toHaveBeenCalledWith(["late-night"]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("flushes a pending write when the timer unmounts", async () => {
+      // Ticking a playlist and then pressing Complete (or ← Back) inside the
+      // debounce window must not silently lose the tick. Unlike the settings
+      // page, this surface is one people leave abruptly and it has no save
+      // indicator that could tell them the write never happened.
+      vi.useFakeTimers();
+      try {
+        const { unmount } = render(<FocusTimer {...withSound([])} />);
+        await press(/start focusing/i);
+        await press(/mini tick jazzhop/i);
+        expect(updateFocusSoundCategories).not.toHaveBeenCalled();
+        act(() => unmount());
+        expect(updateFocusSoundCategories).toHaveBeenCalledWith(["jazzhop"]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("writes nothing on unmount when nothing was ticked", async () => {
+      const user = userEvent.setup();
+      const { unmount } = render(<FocusTimer {...withSound(["chillhop"])} />);
+      await start(user);
+      unmount();
+      expect(updateFocusSoundCategories).not.toHaveBeenCalled();
+    });
+  });
+
   it("defaults shuffle to off when Settings has never stored it", () => {
+    // The prop, not the column: Settings.focusShuffle defaults TRUE for new
+    // accounts since #180, but a caller that omits it still gets in-order
+    // playback rather than a silently different default on the way down.
     render(<FocusTimer {...base()} />);
-    expect((soundHookArgs[1] as { shuffle?: boolean }).shuffle).toBe(false);
+    expect((soundHookArgs[0] as { shuffle?: boolean }).shuffle).toBe(false);
   });
 });
 
@@ -1280,6 +1409,519 @@ describe("FocusTimer — time-up: keep going for N more minutes (#138)", () => {
   });
 });
 
+describe("FocusTimer — the accidental-completion guard (#197)", () => {
+  // Reported as FIVE separate accidental completions by one user: `Complete step`
+  // held the leading slot of the running-session control row, which is where
+  // every media and timer convention puts Pause. The irreversible action was
+  // sitting in the muscle-memory position of the reversible one, wearing the only
+  // filled colour in the row — and until #198 there was no way back at all for a
+  // step whose task still had other open steps.
+  //
+  // The decision on #197 was reorder + undo and explicitly NOT a confirm dialog,
+  // so these two assertions are the entire mechanical guard. That is why they
+  // assert order rather than looks alone: a future style pass may re-colour the
+  // row, and the ordering must survive it.
+  //
+  // DOM order is the right axis to pin. The row is `flex-wrap` with no `order-*`
+  // utilities, so source order IS visual order, and it is also the sequence a
+  // keyboard or switch user tabs through — one assertion covering both.
+  async function running(user: ReturnType<typeof userEvent.setup>) {
+    render(<FocusTimer {...base()} />);
+    await start(user);
+    return {
+      complete: screen.getByRole("button", { name: /complete step/i }),
+      pause: screen.getByRole("button", { name: /pause/i }),
+    };
+  }
+
+  it("puts Pause BEFORE Complete step, in DOM and therefore tab order", async () => {
+    const user = userEvent.setup();
+    const { complete, pause } = await running(user);
+    // compareDocumentPosition rather than an index into `children`: it still
+    // holds if the two ever stop being siblings, which a later layout change
+    // could easily do without meaning to reopen this bug.
+    expect(
+      pause.compareDocumentPosition(complete) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("gives Pause the filled treatment, so Complete is no longer the only filled button", async () => {
+    const user = userEvent.setup();
+    const { complete, pause } = await running(user);
+    // `bg-primary`/`text-primary-foreground` and not a new colour pair: globals.css
+    // documents the light token at 5.42:1 and ships a dark variant, so this
+    // re-weighting cannot introduce the state-dependent contrast failure #109 and
+    // #99 were both about.
+    expect(pause.className).toContain("bg-primary");
+    expect(pause.className).toContain("text-primary-foreground");
+    // Complete keeps #99's measured AA green. This issue re-weights the row; it
+    // does not reopen the contrast question.
+    expect(complete.className).toContain("bg-green-700");
+    expect(complete.className).toContain("text-white");
+  });
+});
+
+describe("FocusTimer — putting a step back after an accident (#198)", () => {
+  // The recovery half of #197. It is on the DONE screen because that is where an
+  // accidental completion is discovered — the tick has landed and the countdown
+  // to the next step has already started. Before this the only un-complete route
+  // was `reopenItem` from the inbox Done view, which a step inside a
+  // still-unfinished task never reaches.
+  async function completeAStep(user: ReturnType<typeof userEvent.setup>) {
+    render(<FocusTimer {...base()} />);
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /complete step/i }));
+  }
+
+  it("offers the undo on the done screen and calls uncompleteStep for THIS step", async () => {
+    const user = userEvent.setup();
+    await completeAStep(user);
+    await user.click(
+      screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+    );
+    expect(uncompleteStep).toHaveBeenCalledWith("s2");
+  });
+
+  it("leaves the celebration and confirms out loud that the step is open again", async () => {
+    const user = userEvent.setup();
+    await completeAStep(user);
+    await user.click(
+      screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+    );
+    // Back on the step's own setup screen, so it can simply be started again.
+    expect(
+      await screen.findByRole("button", { name: /start focusing/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("focus-done-summary")).not.toBeInTheDocument();
+    // Announced, not merely implied: a phase change is silent to a screen-reader
+    // user, and "did that work?" is the whole question in this moment.
+    expect(screen.getByTestId("focus-undone-notice")).toHaveTextContent(
+      /open again/i,
+    );
+  });
+
+  it("also offers it when the completion finished the WHOLE task", async () => {
+    // The mis-tap with the most to put right: this branch closed the task and
+    // moved the inbox item to Done as well, and it renders a different ending.
+    (completeFocus as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      nextStepId: null,
+      points: 15,
+      googleSynced: false,
+      streak: 1,
+      freshStart: false,
+    });
+    const user = userEvent.setup();
+    render(
+      <FocusTimer
+        {...base({
+          nextStep: null,
+          step: {
+            id: "s3",
+            text: "Polish",
+            estMinutes: 1,
+            subtaskEmoji: null,
+            order: 3,
+            total: 3,
+            done: false,
+          },
+        })}
+      />,
+    );
+    await start(user);
+    await user.click(screen.getByRole("button", { name: /complete step/i }));
+    await user.click(
+      screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+    );
+    expect(uncompleteStep).toHaveBeenCalledWith("s3");
+  });
+
+  it("cancels the auto-advance, so nothing navigates off the rescued step", async () => {
+    vi.useFakeTimers();
+    try {
+      render(<FocusTimer {...base()} />);
+      await act(async () => {
+        screen.getByRole("button", { name: /start focusing/i }).click();
+      });
+      await act(async () => {
+        screen.getByRole("button", { name: /complete step/i }).click();
+      });
+      await act(async () => {
+        screen
+          .getByRole("button", { name: /actually, i hadn't finished/i })
+          .click();
+      });
+      // The countdown lives inside the done block, so returning to `setup`
+      // unmounts it. Without that, the five-second timer would keep running and
+      // push to the NEXT step — navigating away from the one just rescued, which
+      // would make the undo look broken while having worked perfectly.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(AUTO_ADVANCE_SEC * 1000 + 1000);
+      });
+      expect(push).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Duo review round 2, and it was right: the notice sits in the shared
+  // setup/running/paused/timeup render tree, not inside a `setup &&` block, and
+  // `undone` was never reset — so "Put back. The step is open again." survived
+  // pressing Start and kept showing over a live countdown for the same step. The
+  // code comment claiming "starting the step again replaces this whole screen"
+  // was simply false: it is one component with `phase` toggling inside it.
+  it("the notice does not survive starting the step again", async () => {
+    const user = userEvent.setup();
+    await completeAStep(user);
+    await user.click(
+      screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+    );
+    expect(screen.getByTestId("focus-undone-notice")).toBeInTheDocument();
+    await start(user);
+    expect(screen.queryByTestId("focus-undone-notice")).not.toBeInTheDocument();
+  });
+
+  it("a failed undo says the step is STILL done, and keeps the screen it failed on", async () => {
+    (uncompleteStep as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("boom"),
+    );
+    const user = userEvent.setup();
+    await completeAStep(user);
+    await user.click(
+      screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+    );
+    // Every other failure notice in this component reassures with "nothing is
+    // lost". Here that would be a lie — the step really is still marked done —
+    // and someone would walk away believing they had recovered work they had not.
+    expect(await screen.findByText(/still marked done/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("focus-undone-notice")).not.toBeInTheDocument();
+    // Still on the done screen, so the Retry in the notice has something to
+    // retry and the undo can be pressed again.
+    expect(screen.getByTestId("focus-done-summary")).toBeInTheDocument();
+  });
+
+  // ── a11y (WCAG 2.4.3), review round 4 ──────────────────────────────────────
+  //
+  // The undo button lives inside the `done` block, which the return to `setup`
+  // unmounts. Nothing handed focus on, so a keyboard or screen-reader user was
+  // dropped to <body> at the precise moment they had corrected a mistake and most
+  // needed to know where they were — and the only announcement, the polite
+  // notice, says the step is open again without saying where "here" now is.
+  //
+  // The existing hand-offs cover every neighbouring transition and not this one:
+  // the #142 effect fires on arrival INTO `done`, and the #66 one on
+  // `startingFresh`, which an undo never touches.
+  describe("focus after the undo (WCAG 2.4.3)", () => {
+    it("hands focus to the setup CTA rather than dropping it to <body>", async () => {
+      const user = userEvent.setup();
+      await completeAStep(user);
+      await user.click(
+        screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+      );
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: /^start focusing$/i }),
+        ).toHaveFocus(),
+      );
+      expect(document.body).not.toHaveFocus();
+    });
+
+    it("lands on Start after an undo that spent a resumable session", async () => {
+      // Review round 5 — the post-undo CTA is ALWAYS the Start branch, because the
+      // Resume offer is retired by then (see the describe below for why). So this
+      // is the only landing site the undo path can produce; `setupCtaRef`'s other
+      // call site is exercised by the #66 disclosure test in the single-task
+      // block, which is where that branch is actually reachable.
+      const user = userEvent.setup();
+      render(
+        <FocusTimer
+          {...base({
+            existingSession: {
+              id: "sess-paused",
+              plannedMin: 10,
+              totalSec: 600,
+              remainingSec: 300,
+            },
+          })}
+        />,
+      );
+      await user.click(screen.getByRole("button", { name: /resume/i }));
+      await user.click(screen.getByRole("button", { name: /complete step/i }));
+      await user.click(
+        screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+      );
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: /^start focusing$/i }),
+        ).toHaveFocus(),
+      );
+    });
+
+    it("still announces the notice — the focus move does not replace it", async () => {
+      // Two separate jobs, and the hand-off must not be mistaken for doing both.
+      // The notice is a sibling <p role=status>, not an ancestor of the CTA, so
+      // the polite announcement queues rather than being suppressed — the same
+      // coexistence the #142 done-summary focus has with the auto-advance panel's
+      // live region.
+      const user = userEvent.setup();
+      await completeAStep(user);
+      await user.click(
+        screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+      );
+      const notice = await screen.findByTestId("focus-undone-notice");
+      expect(notice).toHaveAttribute("role", "status");
+      expect(notice).toHaveTextContent(/open again/i);
+      expect(notice).not.toContainElement(
+        screen.getByRole("button", { name: /^start focusing$/i }),
+      );
+      expect(
+        screen.getByRole("button", { name: /^start focusing$/i }),
+      ).toHaveFocus();
+    });
+
+    it("an ordinary arrival at setup steals nothing", async () => {
+      // Opening /focus/[stepId] normally lands in `setup` with nothing pressed and
+      // nothing unmounted, so moving focus would be the rudeness the hand-off
+      // exists to prevent. This is what the `undone` gate buys.
+      render(<FocusTimer {...base()} />);
+      await waitFor(() => expect(document.body).toHaveFocus());
+      expect(
+        screen.getByRole("button", { name: /^start focusing$/i }),
+      ).not.toHaveFocus();
+    });
+
+    it("does not fight the #66 disclosure effect", async () => {
+      // The two effects want the same element and must not disarm each other. They
+      // cannot collide, because they fire on disjoint deps — `startingFresh` for
+      // #66, `undone`/`phase` here — and this pins the half that is checkable
+      // without an undo: toggling the disclosure still hands focus over, with the
+      // undo effect present and its gate closed (`undone` false).
+      const user = userEvent.setup();
+      render(
+        <FocusTimer
+          {...base({
+            existingSession: {
+              id: "sess-paused",
+              plannedMin: 10,
+              totalSec: 600,
+              remainingSec: 300,
+            },
+          })}
+        />,
+      );
+      await user.click(screen.getByRole("button", { name: /start fresh/i }));
+      expect(
+        screen.getByRole("button", { name: /^start focusing$/i }),
+      ).toHaveFocus();
+      expect(
+        screen.queryByTestId("focus-undone-notice"),
+      ).not.toBeInTheDocument();
+    });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Review round 5 — the two handlers #139 never reached.
+//
+// `run()` reports a THROW. A server action that RUNS and answers `ok: false` (or
+// `null`) was discarded with a bare `return`, so the button did nothing at all —
+// no notice, no state change, nothing announced. That is verbatim the defect #139
+// named on `confirmRequeue`: "a failed requeue indistinguishable from a
+// successful one".
+//
+// The trigger was the undo. `undoComplete` returns to `setup` synchronously and
+// only then awaits `router.refresh()`, so for that window the screen still
+// rendered the page's `existingSession` prop — a FocusSession that
+// `completeFocus` had already closed via `closeSession`'s `endedAt`. `resumeFocus`
+// filters on `endedAt: null`, so pressing "Resume · ~Xm left" resolved
+// `ok: false` and fell straight down the bare return.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("FocusTimer — a refused resume or start is not a silent no-op (#139)", () => {
+  const paused = {
+    id: "sess-paused",
+    plannedMin: 10,
+    totalSec: 600,
+    remainingSec: 300,
+  };
+  const refused = { ok: false, remainingSec: 0, totalSec: 0, plannedMin: 0 };
+
+  it("a resume the server refuses says so, rather than doing nothing", async () => {
+    vi.mocked(resumeFocus).mockResolvedValueOnce(refused);
+    const user = userEvent.setup();
+    render(<FocusTimer {...base({ existingSession: paused })} />);
+    await user.click(screen.getByRole("button", { name: /resume/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /couldn't reach the server/i,
+    );
+    // Still in `setup`, so both the offer and the Retry are there to press. The
+    // fail-safe direction matters: a refused resume must not advance the phase to
+    // a running session the server does not have.
+    expect(screen.getByRole("button", { name: /resume/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^pause$/i })).toBeNull();
+  });
+
+  it("offers Retry, not Reload — a returned ok:false proves the deployment is current", async () => {
+    // `stale: false`, on the reasoning `confirmRequeue` already records: the action
+    // was found and ran, so its id is live and pressing again can legitimately
+    // work. A stale-deployment failure is the case that must NOT offer a retry.
+    vi.mocked(resumeFocus).mockResolvedValueOnce(refused);
+    const user = userEvent.setup();
+    render(<FocusTimer {...base({ existingSession: paused })} />);
+    await user.click(screen.getByRole("button", { name: /resume/i }));
+
+    expect(
+      await screen.findByRole("button", { name: /try again/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /reload/i })).toBeNull();
+  });
+
+  it("Retry re-runs the resume and starts the session when it works", async () => {
+    vi.mocked(resumeFocus).mockResolvedValueOnce(refused);
+    const user = userEvent.setup();
+    render(<FocusTimer {...base({ existingSession: paused })} />);
+    await user.click(screen.getByRole("button", { name: /resume/i }));
+    await user.click(await screen.findByRole("button", { name: /try again/i }));
+
+    expect(vi.mocked(resumeFocus)).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /^pause$/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("a Start the server cannot satisfy says so too", async () => {
+    // The same bare return, one function up: `beginFocus` answers `null` when the
+    // step is not in the resolved workspace, and `start()` discarded it. Folded in
+    // rather than left for the next review round — same defect, same handler
+    // union, same message.
+    vi.mocked(beginFocus).mockResolvedValueOnce(null);
+    const user = userEvent.setup();
+    render(<FocusTimer {...base()} />);
+    await user.click(screen.getByRole("button", { name: /^start focusing$/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /couldn't reach the server/i,
+    );
+    expect(screen.queryByRole("button", { name: /^pause$/i })).toBeNull();
+  });
+});
+
+// Review round 5, the cause rather than the symptom. Surfacing the failure (above)
+// is the defect fixed; this stops the app offering an affordance it already knows
+// cannot work, which is the same rule the `stale` flag encodes — see the notice's
+// own comment on why a stale failure offers Reload and never Retry.
+describe("FocusTimer — a spent session is not offered again (#198)", () => {
+  const paused = {
+    id: "sess-paused",
+    plannedMin: 10,
+    totalSec: 600,
+    remainingSec: 300,
+  };
+
+  it("undoing a resumed session withdraws the Resume offer it just closed", async () => {
+    const user = userEvent.setup();
+    render(<FocusTimer {...base({ existingSession: paused })} />);
+    // The offer is legitimately there to begin with — the non-zero control, so a
+    // pass cannot mean "Resume was never rendered at all".
+    expect(screen.getByRole("button", { name: /resume/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /resume/i }));
+    await user.click(screen.getByRole("button", { name: /complete step/i }));
+    await user.click(
+      screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+    );
+
+    // `completeFocus` closed that row, so resuming it can only ever be refused.
+    // Offering it anyway is a control the app knows is dead.
+    expect(screen.queryByRole("button", { name: /resume/i })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /^start focusing$/i }),
+    ).toBeInTheDocument();
+    // …and the undo is still announced. Withdrawing the offer must not cost the
+    // confirmation.
+    expect(screen.getByTestId("focus-undone-notice")).toHaveTextContent(
+      /open again/i,
+    );
+  });
+
+  it("withdraws the 'Keep my paused session' toggle too, not just Resume", async () => {
+    // Review round 14. Withdrawing the Resume offer left a SECOND control behind:
+    // the way back out of the start-fresh disclosure was gated on the raw
+    // `existingSession` prop rather than on the new `resumable` semantics. After an
+    // undo, `resumable` is null because `sessionId !== null` — so pressing "Keep my
+    // paused session" cleared `startingFresh`, `resumable` stayed null anyway, and
+    // NOTHING happened. A control the app knows is dead, which is precisely the
+    // #139 class the rest of this MR removes.
+    const user = userEvent.setup();
+    render(<FocusTimer {...base({ existingSession: paused })} />);
+
+    await user.click(screen.getByRole("button", { name: /resume/i }));
+    await user.click(screen.getByRole("button", { name: /complete step/i }));
+    await user.click(
+      screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+    );
+
+    // Reveal the disclosure the toggle lives in, if it is offered at all.
+    const startFresh = screen.queryByRole("button", { name: /start fresh/i });
+    if (startFresh) await user.click(startFresh);
+
+    expect(
+      screen.queryByRole("button", { name: /keep my paused session/i }),
+    ).toBeNull();
+  });
+
+  it("still offers 'Keep my paused session' when it would actually do something", async () => {
+    // The non-zero control for the case above: on arrival, with no session resumed,
+    // the toggle is real and must survive. Removing a dead control must not cost
+    // the live one — that is how a fix for a dead button becomes a missing button.
+    const user = userEvent.setup();
+    render(<FocusTimer {...base({ existingSession: paused })} />);
+    await user.click(screen.getByRole("button", { name: /start fresh/i }));
+    const keep = screen.getByRole("button", {
+      name: /keep my paused session/i,
+    });
+    expect(keep).toBeInTheDocument();
+    // And pressing it really goes back to the Resume offer, so "present" is not
+    // standing in for "works".
+    await user.click(keep);
+    expect(screen.getByRole("button", { name: /resume/i })).toBeInTheDocument();
+  });
+
+  it("the fresh-start route was already safe, and stays safe", async () => {
+    // Honest about which mechanism does the work here: `beginFocus` retires any
+    // open session on the step, so the prop is just as stale on this route — but
+    // `startingFresh` is latched by then and never cleared, so `resumable` was
+    // already null without the `sessionId` gate. Pinned anyway, because the two
+    // mechanisms answer different questions ("the user asked for a fresh one" vs
+    // "the server row is spent") and a future tidy-up that collapses them into one
+    // would reopen this on whichever route it dropped.
+    const user = userEvent.setup();
+    render(<FocusTimer {...base({ existingSession: paused })} />);
+    await user.click(screen.getByRole("button", { name: /start fresh/i }));
+    await user.click(screen.getByRole("button", { name: /^start focusing$/i }));
+    await user.click(screen.getByRole("button", { name: /complete step/i }));
+    await user.click(
+      screen.getByRole("button", { name: /actually, i hadn't finished/i }),
+    );
+
+    expect(screen.queryByRole("button", { name: /resume/i })).toBeNull();
+  });
+
+  it("still offers a genuinely paused session on arrival", async () => {
+    // The regression guard: the prop exists for exactly this, and #27's decision
+    // was to ask rather than silently resume. Nothing above may cost that.
+    render(<FocusTimer {...base({ existingSession: paused })} />);
+    expect(
+      screen.getByRole("button", { name: /resume.*5m.*left/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^start focusing$/i }),
+    ).not.toBeInTheDocument();
+  });
+});
+
 describe("FocusTimer — complete", () => {
   it("Complete step calls completeFocus and stops the lofi player", async () => {
     const user = userEvent.setup();
@@ -1306,7 +1948,10 @@ describe("FocusTimer — complete", () => {
   // random (it used to be rolled during render into a ref — impure render +
   // a ref read during render; it is now picked when the step is completed).
   it("celebrates with a randomly chosen done message", async () => {
-    const random = vi.spyOn(Math, "random").mockReturnValue(0.9); // → last entry
+    // A full-range draw is the top of the range, which pickOne maps to the
+    // LAST entry — the same case this test has always covered, expressed in
+    // the unit the code now reads.
+    const random = mockCsprngDraw(0xffffffff);
     try {
       const user = userEvent.setup();
       render(<FocusTimer {...base()} />);
@@ -1321,7 +1966,7 @@ describe("FocusTimer — complete", () => {
   });
 
   it("picks a different done message for a different roll", async () => {
-    const random = vi.spyOn(Math, "random").mockReturnValue(0); // → first entry
+    const random = mockCsprngDraw(0); // → first entry
     try {
       const user = userEvent.setup();
       render(<FocusTimer {...base()} />);
@@ -2078,7 +2723,139 @@ describe("FocusTimer — server-action failures (#137, #139)", () => {
       expect(
         screen.getByRole("button", { name: /try again/i }),
       ).toHaveAttribute("aria-disabled", "true");
-      expect(screen.getByRole("status")).toHaveTextContent(/trying again/i);
+      // #218 — the wait is asserted by its text, not by `getByRole("status")`.
+      // That query was pinning the MECHANISM (a nested live region), and the
+      // mechanism was the bug; the behaviour it stood for — the wait is on
+      // screen while the retry runs — is what survives, and the spec below
+      // pins how it now reaches a screen reader.
+      expect(screen.getByRole("alert")).toHaveTextContent(/trying again/i);
+    });
+
+    // #218 — a polite `role="status"` nested inside this assertive `role="alert"`
+    // has no defined announcement behaviour: the outer region's politeness
+    // applies to its whole subtree, so whether the inner text is read politely,
+    // assertively, twice or not at all is down to the screen reader. Nothing
+    // live may live inside the notice, and the sighted line stays where it was.
+    it("keeps every live region out of the notice, and the wait visibly inside it", async () => {
+      vi.mocked(proposeNewEstimate)
+        .mockRejectedValueOnce(new Error("nope"))
+        .mockReturnValueOnce(new Promise<number>(() => {}));
+      await askForNewEstimate();
+      await click(/try again/i);
+
+      const notice = screen.getByRole("alert");
+      // Nothing polite anywhere in the assertive region's subtree — neither the
+      // role nor a bare `aria-live`, which would nest just as unreliably.
+      expect(within(notice).queryByRole("status")).toBeNull();
+      expect(notice.querySelector("[role='status']")).toBeNull();
+      expect(notice.querySelector("[aria-live]")).toBeNull();
+
+      // No visual change: the same text, in the same place, for sighted users.
+      expect(notice).toContainElement(
+        screen.getByTestId("focus-retrying-visible"),
+      );
+
+      // …and it is also reachable from the control that is deliberately still
+      // holding focus, alongside the reason it is being retried — the channel
+      // that carries the mirror-image case, where focus LANDS on the CTA with a
+      // retry already running. Duo round 16: this is the second channel, not
+      // the only one; the live region above is what covers the press itself.
+      const retry = screen.getByRole("button", { name: /try again/i });
+      const ids = (retry.getAttribute("aria-describedby") ?? "").split(/\s+/);
+      const announcer = screen.getByTestId("focus-retrying-announcer");
+      expect(announcer.id).toBeTruthy();
+      expect(ids).toContain(announcer.id);
+      const described = ids
+        .map((id) => document.getElementById(id)?.textContent ?? "")
+        .join(" ");
+      expect(described).toMatch(/couldn't get a new estimate/i);
+      expect(described).toMatch(/trying again/i);
+    });
+
+    // #218, Duo round 16 — `aria-describedby` was doing this on its own, and it
+    // cannot. A description is computed when focus LANDS on a control; the
+    // retry is pressed on a control that already has focus and deliberately
+    // keeps it, so the value gaining `retryingMessageId` mid-flight changes
+    // nothing a screen reader re-reads. That is the same "not reliably
+    // announced" hole the nested `role="status"` had, moved onto the button.
+    //
+    // The one spec-defined channel for content that changes while the user is
+    // stationary is a live region, so the wait gets a real one — polite,
+    // visually hidden, and a SIBLING of the notice rather than a descendant, so
+    // it is not the nested-region bug again. It is mounted empty with the
+    // notice, because assistive technology announces a *change* to a region
+    // already in the accessibility tree and one that arrives with its first
+    // message is silent (the same reasoning `inbox-view.tsx`'s move announcer
+    // carries).
+    it("announces the wait through a polite live region that is a sibling of the notice", async () => {
+      vi.mocked(proposeNewEstimate)
+        .mockRejectedValueOnce(new Error("nope"))
+        .mockReturnValueOnce(new Promise<number>(() => {}));
+      await askForNewEstimate();
+
+      // Present and empty BEFORE the wait exists — otherwise the change that is
+      // supposed to be announced is the region's own arrival, which is not one.
+      const announcer = screen.getByTestId("focus-retrying-announcer");
+      expect(announcer).toBeEmptyDOMElement();
+      expect(screen.getByRole("alert")).not.toContainElement(announcer);
+
+      await click(/try again/i);
+
+      expect(announcer).toHaveTextContent(/trying again/i);
+      expect(announcer).toHaveAttribute("role", "status");
+      expect(announcer).toHaveAttribute("aria-live", "polite");
+      // Visually hidden, not `hidden`: a live region has to be rendered to be
+      // observed, and the sighted copy inside the notice has not moved.
+      expect(announcer).toHaveClass("sr-only");
+      // Still not nested, which was the whole of #218.
+      expect(screen.getByRole("alert")).not.toContainElement(announcer);
+    });
+
+    // The other half of the live region: the sentence must exist exactly once in
+    // the accessibility tree. The visible copy stays for sighted users but is
+    // hidden from assistive technology — otherwise inserting it into the
+    // assertive `role="alert"` re-reads the entire notice over the polite
+    // announcement, which is the double-announcement #218 set out to remove.
+    it("keeps the visible wait out of the accessibility tree, so the notice is not re-read", async () => {
+      vi.mocked(proposeNewEstimate)
+        .mockRejectedValueOnce(new Error("nope"))
+        .mockReturnValueOnce(new Promise<number>(() => {}));
+      await askForNewEstimate();
+      await click(/try again/i);
+
+      const visible = screen.getByTestId("focus-retrying-visible");
+      expect(screen.getByRole("alert")).toContainElement(visible);
+      expect(visible).toHaveAttribute("aria-hidden", "true");
+      expect(visible).not.toHaveClass("sr-only");
+
+      // Exactly one node carries it to a screen reader, and it is the announcer.
+      expect(
+        screen.getAllByText(/trying again/i, {
+          ignore: "[aria-hidden='true']",
+        }),
+      ).toEqual([screen.getByTestId("focus-retrying-announcer")]);
+    });
+
+    // The other half of the same contract: a description that never retracts
+    // would have the button claiming a retry is running long after it stopped.
+    it("drops the wait from the button's description once nothing is in flight", async () => {
+      vi.mocked(proposeNewEstimate).mockRejectedValueOnce(new Error("nope"));
+      await askForNewEstimate();
+
+      const retry = screen.getByRole("button", { name: /try again/i });
+      const ids = (retry.getAttribute("aria-describedby") ?? "").split(/\s+/);
+      expect(screen.queryByText(/trying again/i)).toBeNull();
+      const described = ids
+        .map((id) => document.getElementById(id)?.textContent ?? "")
+        .join(" ");
+      expect(described).toMatch(/couldn't get a new estimate/i);
+      expect(described).not.toMatch(/trying again/i);
+      // The live region empties with it, so nothing is left claiming a retry is
+      // running — and it stays MOUNTED, which is what makes the next press
+      // announceable at all.
+      expect(
+        screen.getByTestId("focus-retrying-announcer"),
+      ).toBeEmptyDOMElement();
     });
 
     it("does not fire a second request when Retry is pressed mid-flight", async () => {
@@ -2615,5 +3392,40 @@ describe("FocusTimer — where a finished TASK goes (#142)", () => {
     vi.mocked(ensureFocusStep).mockResolvedValue("new-step");
     await user.click(screen.getByRole("button", { name: /try again/i }));
     await waitFor(() => expect(push).toHaveBeenCalledWith("/focus/new-step"));
+  });
+});
+
+// ── #44 — the jotted context, present while you do the work ─────────────────
+//
+// The issue asks for the note in the focus session specifically: "the context
+// you jotted is right there while you're doing the work". READ-ONLY here, and
+// that is the decision — the session exists to remove decisions, and a text
+// field with an autosave is an invitation to edit rather than to work. Every
+// other surface can edit it.
+describe("FocusTimer — the notes for this work (#44)", () => {
+  it("shows the task's note", () => {
+    render(<FocusTimer {...base({ taskNote: "bring the Figma link" })} />);
+    expect(screen.getByText("bring the Figma link")).toBeInTheDocument();
+  });
+
+  it("shows the step's own note as well as the task's", () => {
+    render(
+      <FocusTimer
+        {...base({ taskNote: "bring the Figma link", stepNote: "call Sam" })}
+      />,
+    );
+    expect(screen.getByText("bring the Figma link")).toBeInTheDocument();
+    expect(screen.getByText("call Sam")).toBeInTheDocument();
+  });
+
+  it("renders no note region at all when neither exists", () => {
+    render(<FocusTimer {...base()} />);
+    expect(screen.queryByTestId("note-text")).toBeNull();
+  });
+
+  it("offers no way to EDIT here — no trigger and no textbox", () => {
+    render(<FocusTimer {...base({ taskNote: "read only" })} />);
+    expect(screen.queryByRole("button", { name: /^note for/i })).toBeNull();
+    expect(screen.queryByRole("textbox")).toBeNull();
   });
 });

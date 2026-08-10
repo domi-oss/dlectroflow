@@ -4,7 +4,13 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { getLLM } from "@/lib/llm";
 import { resolveUtilityModel } from "@/lib/models";
-import { getValidAccessToken, patchGoogleTask } from "@/lib/google";
+import { patchGoogleTask } from "@/lib/google";
+import {
+  actingUserGoogleToken,
+  completeGoogleTaskForTask,
+  completeGoogleTaskForStep,
+  reopenGoogleTaskForStep,
+} from "@/lib/google-task-sync";
 import {
   BadgeKey,
   FocusOutcome,
@@ -12,8 +18,13 @@ import {
   TaskStatus,
 } from "@/lib/constants";
 import { isGuestWorkspace } from "@/lib/workspace-kind";
-import { awardBadge, logReward, rewardStepDone } from "@/lib/rewards";
-import { currentWorkspaceId, currentUser } from "@/lib/workspace";
+import {
+  awardBadge,
+  logReward,
+  rewardStepDone,
+  reverseStepCompletionRewards,
+} from "@/lib/rewards";
+import { currentWorkspaceId } from "@/lib/workspace";
 import { remainingSecForSession } from "@/lib/focus-timer-clock";
 
 /**
@@ -172,9 +183,17 @@ async function closeSession(
   });
 }
 
-/** Mark a task and its linked inbox item(s) completed, and award the task-complete reward+badge. */
-async function markTaskCompleted(workspaceId: string, taskId: string) {
-  await prisma.task.update({
+/**
+ * Mark a task and its linked inbox item(s) completed, and award the
+ * task-complete reward+badge. Returns whether the task's OWN Google Task was
+ * patched — `completeFocus` folds that into the `googleSynced` it reports, so
+ * the return value is UI-visible rather than bookkeeping (see the call site).
+ */
+async function markTaskCompleted(
+  workspaceId: string,
+  taskId: string,
+): Promise<boolean> {
+  const task = await prisma.task.update({
     // Scoped for the same reason as closeSession above: the helper is given a
     // workspaceId, so it must filter on it rather than trust its callers.
     where: { id: taskId, workspaceId },
@@ -186,38 +205,34 @@ async function markTaskCompleted(workspaceId: string, taskId: string) {
   });
   await logReward(workspaceId, RewardType.TaskComplete);
   await awardBadge(workspaceId, BadgeKey.TaskComplete);
+  // #195 — a task can carry its OWN Google id, from having been scheduled while
+  // it was still stepless (`scheduleSingleTask`). `ensureFocusStep` then creates
+  // a step the moment it is focused, and that step has no id of its own, so the
+  // step patch above finds nothing and the task-level Google task would stay
+  // open forever. Reuses the update's return value rather than re-reading the
+  // row, and runs last: it is best-effort and must not precede the local writes.
+  return completeGoogleTaskForTask(task);
 }
 
 /**
- * The ACTING account's Google access token, or null.
+ * ── The step-grain Google helpers moved to `@/lib/google-task-sync` (#209) ───
  *
- * #118 Phase C — credentials are per user, so the best-effort Google sync a
- * step-completion or a requeue performs uses the credential of whoever is
- * acting. A caller with no account (a guest, or a revoked account) has no
- * credential and gets null, which every call site treats as "skip the sync"
- * rather than as an error — the same shape the missing-token branch already had.
+ * `!288` left `completeGoogleTaskForStep` and `reopenGoogleTaskForStep` here
+ * because this file was their only caller, and predicted #209 would move them
+ * when `braindump.ts` needed one. It does: completing a multi-step to-do from
+ * the inbox has to close each step's Google task, and a `"use server"` module
+ * cannot lend a private helper out — exporting one would put a raw "patch this
+ * Google task" endpoint on the wire.
  *
- * Before Phase C these call sites resolved the ONE instance-wide row, so a
- * non-owner completing a step would have patched the OWNER's Google task. Not
- * reachable in practice (only the owner could schedule, so only their steps ever
- * carried a googleTaskId) but it stops being possible at all now.
+ * Their contract is unchanged for this file's callers, with one exception worth
+ * knowing about here: the reopen twin swallows its own failures now, so the
+ * try/catch {@link uncompleteStep} used to wrap it in is gone rather than
+ * duplicated. What the swallow leaves behind is a local change Google never
+ * heard about that nothing will ever repair — the app only writes TO Google and
+ * never reads back. That INBOUND gap is #194's, and is deliberately not #196
+ * (Duo review, !288, asked): #196 is an outbound patch, the `needsAction` call
+ * `reopenItem` never made.
  */
-async function actingUserGoogleToken(): Promise<string | null> {
-  const me = await currentUser();
-  return me ? getValidAccessToken(me.id) : null;
-}
-
-async function completeGoogleTaskForStep(step: {
-  googleTaskId: string | null;
-  googleTaskListId: string | null;
-}): Promise<boolean> {
-  if (!step.googleTaskId || !step.googleTaskListId) return false;
-  const token = await actingUserGoogleToken();
-  if (!token) return false;
-  return patchGoogleTask(token, step.googleTaskListId, step.googleTaskId, {
-    status: "completed",
-  });
-}
 
 /** Complete a step directly (no focus session). Awards StepDone; finishes the task on the last step. */
 export async function completeStep(stepId: string) {
@@ -234,6 +249,181 @@ export async function completeStep(stepId: string) {
 
   const stillOpen = step.task.steps.filter((s) => s.id !== stepId && !s.done);
   if (stillOpen.length === 0) await markTaskCompleted(workspaceId, step.taskId);
+
+  revalidatePath(`/tasks/${step.taskId}`);
+  revalidatePath("/");
+  revalidatePath("/dashboard");
+}
+
+/**
+ * Un-complete a step (#198) — the inverse of {@link completeStep}, and the only
+ * recovery path in the app for a step that was completed by accident.
+ *
+ * It has to exist as its own action because `reopenItem`
+ * (src/app/actions/braindump.ts) — the one un-complete route that already
+ * existed — takes a **BrainDumpItem** id, so it is unreachable until the whole
+ * item is complete and sitting in the inbox Done view. A step completed while
+ * its task still had other open steps could not be undone anywhere, which is
+ * exactly the state #197's button placement kept producing.
+ *
+ * Three things differ from `completeStep` on purpose:
+ *
+ *  1. **The Google patch happens LAST, and cannot throw out of this action.**
+ *     Completing patches Google first, so a step is never marked done locally
+ *     while Google still shows it open. Undoing has the opposite priority: the
+ *     user has asked to get their work back, and an unreachable Google must not be
+ *     able to refuse them.
+ *
+ *     The ordering is load-bearing, not stylistic (Duo review round 2). The guard
+ *     above is `if (!step.done) return`, so anything that throws *after* the step
+ *     write has committed is unrecoverable: the retry sees a step that is already
+ *     not-done and returns immediately, silently skipping whatever had not run.
+ *     That made a transient Google error permanently strand the reward reversal
+ *     while showing a notice that falsely said the step was still done. So the
+ *     reversal runs BEFORE the Google call, and the Google call is wrapped — which
+ *     is what makes the word "best-effort" true of the code rather than only of
+ *     the comment.
+ *
+ *     **Round 4: ordering was necessary and not sufficient, because the reversal
+ *     can throw too.** Moving it earlier only relocated the unrecoverable window
+ *     — `reverseLatestReward` reads the newest row then deletes it, so two
+ *     concurrent undos raced and the loser got P2025 (now fixed at source with
+ *     `deleteMany`, but a dead connection can still fail the write). With the step
+ *     already committed, that failure skipped the Google patch and all three
+ *     revalidations, told the user "it is still marked done" — false by then — and
+ *     turned every retry into a silent no-op via the guard. The points stayed
+ *     banked for work that had been un-done, permanently.
+ *
+ *     The fix is therefore **atomicity, not ordering**: the local writes and the
+ *     reversal share one `$transaction`, so a failed reversal rolls the step write
+ *     back and leaves the undo exactly as retryable as it was before it was
+ *     pressed — and the failure notice's claim becomes true again. The Google call
+ *     and the revalidations stay OUTSIDE it: a Google failure must still not fail
+ *     the undo (that is this whole point), and revalidating a transaction that
+ *     went on to abort would publish a rollback.
+ *  2. **The parent task is reopened if THIS step had closed it**, along with its
+ *     inbox item(s) — otherwise the step is open inside a task the Done view
+ *     still renders as finished.
+ *  3. **The rewards that could otherwise be earned twice are taken back**, so
+ *     complete → un-complete → complete cannot pay for one piece of work twice.
+ *     `step_done` always; `task_complete` only when this undo actually reopened a
+ *     task that was closed. `session_finished` is deliberately kept — it pays for
+ *     time genuinely spent focusing, and re-completing through the timer needs a
+ *     *new* session to do it. `reverseStepCompletionRewards` carries the full rule
+ *     and the two review rounds that shaped it.
+ */
+export async function uncompleteStep(stepId: string) {
+  const workspaceId = await currentWorkspaceId();
+  const step = await prisma.step.findFirst({
+    where: { id: stepId, task: { workspaceId } },
+    include: { task: true },
+  });
+  if (!step || !step.done) return;
+
+  // Whether this undo actually reopened a CLOSED task is the gate for the
+  // task-level reward below, so it is recorded as a fact rather than re-derived.
+  // Read outside the transaction on purpose: it describes the state the undo is
+  // correcting, so re-reading it inside would only invite it to change.
+  const reopenedTask = step.task?.status === TaskStatus.Done;
+
+  // One transaction, for the reason in (1) above: if the reward reversal fails,
+  // the step must still be `done` when the user retries. Every write in here runs
+  // on `tx` — one left on `prisma` would commit independently and survive the
+  // rollback, which is the original bug wearing this fix's clothes.
+  const applied = await prisma.$transaction(async (tx) => {
+    // The `!step.done` guard above is read OUTSIDE this transaction and takes no
+    // lock, so it cannot stop two undos of the same step — a double-click that
+    // outruns the button's own `disabled`, or the step open in two tabs, and both
+    // pass it before either commits (review round 10). A second pass through here
+    // is not harmlessly idempotent: `reverseLatestReward` takes back *the newest
+    // `step_done` in the workspace*, not one tied to this step, so the loser
+    // reverses an UNRELATED step's reward. One press, two rewards gone.
+    //
+    // So the precondition moves INTO the write, which is the same guarded-bulk
+    // shape `reverseLatestReward` itself adopted in round 4 and for the same
+    // reason: Postgres re-evaluates an UPDATE's WHERE after the row lock it was
+    // waiting on is released, so the loser matches nothing and reports
+    // `count: 0` rather than quietly overwriting. `count: 0` means "another
+    // caller has already done all of this", which is a no-op, not an error —
+    // nothing may be raised at a user who merely clicked twice.
+    //
+    // Scoped by `task.workspaceId` as well as by id: `updateMany` is a bulk write,
+    // and `scoping.harness.test.ts` requires those to carry the scope in their own
+    // arguments rather than inherit it from a read further up. `Step` has no
+    // `workspaceId` column of its own, so the scope comes through its task.
+    const { count } = await tx.step.updateMany({
+      where: { id: stepId, done: true, task: { workspaceId } },
+      data: { done: false },
+    });
+    if (count === 0) return false;
+
+    // Round 11 — the same hole one level up, and it does NOT contend on the step
+    // guard above: two undos of *different* steps of the same completed task touch
+    // different `Step` rows, so both sail through and both carry the
+    // `reopenedTask` snapshot read before either transaction opened. The task
+    // transitions Done→Active once, but the reversal would run twice, and
+    // `reverseLatestReward` takes back the newest `task_complete` in the
+    // WORKSPACE — so the second reaches an unrelated, already-settled task's
+    // reward. One reopening, two rewards gone.
+    //
+    // Note this is a different defect from the "which `step_done` row goes is
+    // unobservable" argument in (1): that is about not caring *which* of N
+    // equivalent rows is removed for one correctly-counted reversal. Here the
+    // COUNT is wrong, and a count is very much observable.
+    //
+    // So the same guarded-write shape again, and `reopenedNow` — did THIS call
+    // perform the transition — replaces the snapshot as the gate on the reward.
+    let reopenedNow = false;
+    if (reopenedTask) {
+      const { count: reopened } = await tx.task.updateMany({
+        where: { id: step.taskId, workspaceId, status: TaskStatus.Done },
+        data: { status: TaskStatus.Active },
+      });
+      reopenedNow = reopened > 0;
+      // Deliberately NOT gated on `reopenedNow`. Clearing `completedAt` is
+      // idempotent, and the loser of the race wants it cleared just as much as the
+      // winner did — while a task that some other path had already set Active
+      // could still be carrying a completed inbox item, and gating here would stop
+      // reopening it. The bug being fixed is a miscounted reward, not this write.
+      await tx.brainDumpItem.updateMany({
+        where: { taskId: step.taskId, workspaceId },
+        data: { completedAt: null },
+      });
+    }
+
+    // `markTaskCompleted` logs `task_complete` whenever a step closes its task,
+    // and nothing stops it running again when the step is re-completed —
+    // `awardBadge` is idempotent, `logReward` is not. So reopening a task has to
+    // take that reward back, or the farm this action exists to close is simply
+    // moved one level up (review round 3).
+    //
+    // Gated on `reopenedNow` rather than the `reopenedTask` snapshot (round 11):
+    // "this call reopened the task" is the only thing that earns a reversal. The
+    // snapshot means "the task looked closed when I read it", which two concurrent
+    // undos of different steps both see and only one of them acts on.
+    await reverseStepCompletionRewards(
+      workspaceId,
+      { includeTaskComplete: reopenedNow },
+      tx,
+    );
+    return true;
+  });
+
+  // Last, and swallowed: see (1) above. A Google failure must not fail an undo
+  // the user asked for, and must not strand anything behind it — there is
+  // nothing behind it.
+  //
+  // The try/catch that used to sit here is gone, not dropped: #209 moved this
+  // helper into `@/lib/google-task-sync`, where the swallow is inside it and
+  // therefore true for every caller. Leaving a second one here would say the
+  // contract is a caller's job, which is the shape that let `reopenItem` be
+  // written without one (#196).
+  //
+  // Skipped when this call lost the race above: the winner has already reopened
+  // the Google task, and a second PATCH would be a redundant round trip to an
+  // API this app is rate-limited against. `revalidatePath` below is NOT skipped —
+  // each request still has to refresh its own render, whoever did the write.
+  if (applied) await reopenGoogleTaskForStep(step);
 
   revalidatePath(`/tasks/${step.taskId}`);
   revalidatePath("/");
@@ -323,7 +513,7 @@ export async function completeFocus(
       freshStart: false,
     };
 
-  const googleSynced = await completeGoogleTaskForStep(step);
+  let googleSynced = await completeGoogleTaskForStep(step);
 
   // Guard step ownership before update
   const stepCheck = await prisma.step.findFirst({
@@ -351,7 +541,13 @@ export async function completeFocus(
     where: { taskId: step.taskId, done: false, task: { workspaceId } },
   });
   if (openCount === 0) {
-    await markTaskCompleted(workspaceId, step.taskId);
+    // Duo review (!288): OR, not overwrite. `googleSynced` drives a
+    // user-visible "marked complete in Google Tasks ✅" line, and the two
+    // grains are independent — a broken-down task syncs at the step, a stepless
+    // one that `ensureFocusStep` gave a step syncs only here. Reading either
+    // one alone reports "not synced" for a completion that did reach Google.
+    googleSynced =
+      (await markTaskCompleted(workspaceId, step.taskId)) || googleSynced;
   }
 
   // #139 — `/` unconditionally. This used to sit inside the branch above, so
@@ -439,19 +635,29 @@ export async function requeueFocus(
     data: { estMinutes: newEst, estimateHistory: JSON.stringify(history) },
   });
 
-  // Best-effort: update the Google Task's duration syntax so Reclaim reschedules.
+  // Best-effort: update the Google Task's duration syntax so Reclaim
+  // reschedules. The try/catch is what makes that comment true — until !288 a
+  // network error or a failed token refresh threw straight out of the action,
+  // so the user got an error for an estimate that HAD been saved, and the
+  // revalidation trio below never ran, leaving `/` rendering the old number.
+  // That is #139's exact failure mode arriving by another route.
   if (step.googleTaskId && step.googleTaskListId) {
-    const token = await actingUserGoogleToken();
-    if (token) {
-      const task = await prisma.task.findFirst({
-        where: { id: step.taskId, workspaceId },
-      });
-      const emoji = task?.parentEmoji ? `${task.parentEmoji} ` : "";
-      const sub = step.subtaskEmoji ? `${step.subtaskEmoji} ` : "";
-      const title = `${emoji}${task?.title ?? ""}: ${step.order} of ${step.total} ${sub}${step.text} (duration:${newEst}m)`;
-      await patchGoogleTask(token, step.googleTaskListId, step.googleTaskId, {
-        title,
-      });
+    try {
+      const token = await actingUserGoogleToken();
+      if (token) {
+        const task = await prisma.task.findFirst({
+          where: { id: step.taskId, workspaceId },
+        });
+        const emoji = task?.parentEmoji ? `${task.parentEmoji} ` : "";
+        const sub = step.subtaskEmoji ? `${step.subtaskEmoji} ` : "";
+        const title = `${emoji}${task?.title ?? ""}: ${step.order} of ${step.total} ${sub}${step.text} (duration:${newEst}m)`;
+        await patchGoogleTask(token, step.googleTaskListId, step.googleTaskId, {
+          title,
+        });
+      }
+    } catch {
+      // The estimate is saved and the requeue stands; only the Google title
+      // drifts, which the next schedule or requeue rewrites anyway.
     }
   }
 

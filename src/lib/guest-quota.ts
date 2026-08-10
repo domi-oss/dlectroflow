@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { prisma, isUniqueViolation } from "@/lib/db";
+import { prisma } from "@/lib/db";
 import {
   meterConsume,
   usedInWindow,
@@ -103,12 +103,16 @@ function guestMeterStore(ipHash: string): SlidingWindowStore {
           data: { count: { increment: 1 } },
         })
       ).count,
-    createFirstUse: async (now) => {
-      await prisma.guestAiUsage.create({
-        data: { ipHash, count: 1, windowStartedAt: now },
-      });
-    },
-    isDuplicate: isUniqueViolation,
+    createFirstUse: async (now) =>
+      (
+        await prisma.guestAiUsage.createMany({
+          data: { ipHash, count: 1, windowStartedAt: now },
+          // ON CONFLICT DO NOTHING: a concurrent first use for this IP gets
+          // `count: 0` instead of a P2002 the meter would have to catch — and
+          // that Prisma would have printed at error level first (#158).
+          skipDuplicates: true,
+        })
+      ).count === 1,
   };
 }
 
@@ -159,12 +163,14 @@ export async function consumeGuestBreakdown(
     const distinct = await prisma.guestDailyActivity.count({ where: { day } });
     if (distinct >= globalCap)
       return { allowed: false, remaining: quota - used, reason: "global_cap" };
-    try {
-      await prisma.guestDailyActivity.create({ data: { day, ipHash } });
-    } catch (e) {
-      // Concurrent insert from the same IP — already counted today; proceed.
-      if (!isUniqueViolation(e)) throw e;
-    }
+    // Nothing here reads the row back or cares which caller wrote it — the
+    // tally is "this IP used AI today", and presence is the whole fact. So the
+    // concurrent insert from the same IP is skipped rather than caught: ON
+    // CONFLICT DO NOTHING never raises, and therefore never prints (#158).
+    await prisma.guestDailyActivity.createMany({
+      data: { day, ipHash },
+      skipDuplicates: true,
+    });
   }
 
   // The per-IP invariant itself: see sliding-window-meter.ts. `reason` is added

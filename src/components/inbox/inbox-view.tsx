@@ -11,7 +11,7 @@ import {
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Clock } from "lucide-react";
+import { Clock, RefreshCw, RotateCcw, TriangleAlert } from "lucide-react";
 import { cn, touchTarget } from "@/lib/utils";
 import { COMPLETE_TEXT } from "@/lib/completion-style";
 import { DonePill } from "@/components/completion/done-pill";
@@ -64,6 +64,9 @@ import { downloadIcs } from "@/lib/download-ics";
 import type { GoogleConnStatus, ScheduleIntent } from "@/lib/scheduling/types";
 import { StatusPill } from "@/components/inbox/status-pill";
 import { TaskSteps } from "@/components/breakdown/task-steps";
+import { TaskNoteRow } from "@/components/breakdown/task-note";
+import { inlineNoteSource } from "@/lib/braindump-note-syntax";
+import { liveNote } from "@/lib/braindump-to-task";
 import {
   bucketItems,
   bucketOfItem,
@@ -71,6 +74,11 @@ import {
   type Item,
   type BucketId,
 } from "@/components/inbox/bucket";
+import {
+  ActionTimeoutError,
+  isStaleActionError,
+  withActionTimeout,
+} from "@/lib/server-action-failure";
 import { itemRemainingMin, activeStepRemainingMin } from "@/lib/task-remaining";
 import { dropPlan } from "@/components/inbox/move-dispatch";
 import { MoveToMenu } from "@/components/inbox/move-to-menu";
@@ -80,12 +88,14 @@ import {
   type ScheduleControlProps,
 } from "@/components/inbox/row-actions";
 import { CompleteButton } from "@/components/inbox/complete-button";
+import { AddNoteButton } from "@/components/inbox/add-note-button";
 import { WelcomeCard } from "@/components/inbox/welcome-card";
+import { ShoppingSummaryCard } from "@/components/inbox/shopping-summary-card";
 import { newAccountLine, type AccountIdentity } from "@/lib/identity";
 import { SubHeader, SEE_ALL } from "@/components/inbox/sub-header";
 import { t } from "@/lib/strings";
 import { useVoice } from "@/components/voice-provider";
-import type { Voice } from "@/lib/strings";
+import type { StringKey, Voice } from "@/lib/strings";
 import {
   notificationPermission,
   requestNotificationPermission,
@@ -104,6 +114,106 @@ import { formatAgo } from "@/lib/format";
  */
 const DRAG_ITEM_KEY = "inboxItemId";
 const DROP_BUCKET_KEY = "inboxBucketId";
+
+/**
+ * #210 — how long the capture bar is willing to WAIT for `createBrainDumpItem`
+ * before calling it a failure.
+ *
+ * The third failure mode is silence rather than a rejection — a pod rolling
+ * mid-request, a connection that never closes — and from the user's side an
+ * un-timed-out `await` is indistinguishable from the bug this fixes: an emptied
+ * field, no confirmation, no error, no words. `createBrainDumpItem` is one
+ * Prisma insert plus a streak touch, so ten seconds is already pathological;
+ * this matches `focus-timer.tsx`'s `ACTION_TIMEOUT_MS` for the same class of
+ * call. The request itself carries on (a server action cannot be aborted from
+ * the client), so a write that lands late still lands — the next
+ * `router.refresh()` picks it up. Exported so the test advances the real value
+ * rather than a copy of it.
+ */
+export const CAPTURE_TIMEOUT_MS = 10_000;
+
+/** How long "captured ✓" stays on screen after a write resolves. */
+const CAPTURE_CONFIRM_MS = 1500;
+
+/**
+ * #210 — a capture whose write did not land.
+ *
+ * Holds the words, not just a flag: they are the only thing at stake, and the
+ * notice quoting them is what makes them recoverable even in the one case the
+ * input cannot be restored (see `capture` below).
+ */
+type CaptureFailure = {
+  value: string;
+  /**
+   * The browser is running a different deployment than the server. Next
+   * regenerates server-action ids on every build, so a retry re-posts the same
+   * dead id — the ONLY thing that can work is a reload, and offering a retry
+   * would be offering something that cannot.
+   */
+  stale: boolean;
+  /**
+   * The write never answered, so **whether it landed is unknown** (Duo review
+   * round 2). `withActionTimeout` bounds how long the UI waits, not the request:
+   * a server action cannot be aborted from the client, so the insert may still
+   * complete, and a retry after it does leaves two identical items.
+   *
+   * Which is why this is a distinct flag rather than folded into the generic
+   * failure. Telling the user "couldn't save that" here would be a claim the
+   * client cannot support — the same unverifiable confirmation as the
+   * `captured ✓` this issue is about, pointing the other way. Retry is still
+   * offered, because a duplicate item is one tap to delete while an unwritten
+   * thought is not recoverable at all; the notice just says which risk they are
+   * taking. The durable answer is an idempotency key on the insert, which needs
+   * a schema change and so is not this fix.
+   */
+  timedOut: boolean;
+  /**
+   * A retry of THESE words is in flight.
+   *
+   * On the failure record rather than in a component-wide `capturing` flag, and
+   * that is the whole point (Duo review round 2). A capture the user types while
+   * a retry is outstanding is deliberately ungated, so it settles inside the
+   * retry's window — and a shared boolean would then be cleared by the wrong
+   * request, handing the Retry button back mid-flight and letting a double press
+   * post the same words twice. Same lesson `schedulingIds` already applies
+   * per-row to the Schedule controls (#169).
+   */
+  retrying: boolean;
+  /**
+   * The words are sitting in the capture field, where the user can see them.
+   *
+   * Which decides whether a LATER successful capture supersedes this notice (Duo
+   * review round 3). If they are in the box and the user submits something else
+   * from it — an edit, or a different thought typed over them — they have seen
+   * them and moved on, so the alert is only noise inviting a near-duplicate
+   * Retry. If they are not (the field already held the user's next thought) the
+   * notice is the ONLY copy of them, and it has to outlive any number of
+   * successful captures.
+   *
+   * Deliberately "are they in the field", not "did we just put them there" (Duo
+   * review round 4). A retry does not clear the field — only success does — so on
+   * a retry that fails again the words are already there, untouched. Asking the
+   * narrower question answered no, and the notice then refused to be superseded:
+   * a stale alert beside a fresh "captured ✓" after the user had visibly typed
+   * over those words. Which is this issue's own bug, from a different door.
+   */
+  wordsInField: boolean;
+};
+
+/**
+ * #210 — which message a failed capture gets.
+ *
+ * Ordered by how much the user can be told, most-certain first. `stale` and
+ * `timedOut` both override the generic copy because both change what the user
+ * should DO: a stale bundle makes a retry impossible, and a timeout makes the
+ * outcome unknown, so "couldn't save that" would be a claim the client cannot
+ * support. Mirrors `focus-timer.tsx`'s `failureMessageKey`.
+ */
+function captureMessageKey(failure: CaptureFailure): StringKey {
+  if (failure.stale) return "capture.error.stale";
+  if (failure.timedOut) return "capture.error.timeout";
+  return "capture.error.failed";
+}
 
 /** True when a native drag was started by one of our rows rather than by an
  * image, a text selection, or another surface on the page. */
@@ -174,6 +284,7 @@ export function InboxView({
   resumeStep,
   newAccount = null,
   notifyAging = true,
+  shoppingSummary = null,
   now: initialNow,
 }: {
   initialItems: Item[];
@@ -208,6 +319,22 @@ export function InboxView({
   /** Phase 6 — gates the aging→browser-notification firing (permission still applies). */
   notifyAging?: boolean;
   /**
+   * #199 — the shopping-list summary line, or null for "show nothing".
+   *
+   * A COUNT, resolved on the server from the items themselves on the request that
+   * rendered this page — never a stored number, because the summary row deliberately
+   * holds no number (src/lib/shopping-summary.ts). One nullable prop rather than a
+   * count plus a boolean: "show nothing" has four causes on the server (no row, a
+   * dismissed row, an empty list, a nonsensical count) and this component has no
+   * business branching on which.
+   *
+   * Optional, defaulting to null, so a caller that predates it — or one whose
+   * workspace has the feature off — renders the inbox exactly as it did before.
+   * It is deliberately NOT part of `initialItems`: see the note on
+   * ShoppingSummaryCard for why a generated line must not enter the buckets.
+   */
+  shoppingSummary?: { count: number } | null;
+  /**
    * #105 — the request-time clock, stamped ONCE on the server and handed down,
    * exactly as the Library page hands `now` to `<LibraryRows>`. It seeds the
    * live clock below so the server's markup and the browser's hydration are
@@ -227,7 +354,61 @@ export function InboxView({
 }) {
   const router = useRouter();
   const voice = useVoice();
-  const [pending, startTransition] = useTransition();
+  /**
+   * #169 — TWO pending signals, because there are two different questions here
+   * and one flag was answering both, wrongly.
+   *
+   * `refreshing` is list-wide, and honest about it: every wrapper below ends in
+   * `router.refresh()`, which redraws the whole list, so dimming the whole list
+   * while one is in flight is exactly what it means.
+   *
+   * `schedulingIds` is keyed by item id and is the ONLY thing the 📅 controls
+   * read. It exists because `refreshing` used to be wired straight to
+   * `disabled` on every row's Schedule control — and 20 of the call sites that
+   * set it go through the generic `run()` below: rename, complete, snooze,
+   * delete, freshen, keepAsTask, reopen, dismissPrompt. So renaming one item
+   * disabled every Schedule button in the list, and a press landing in that
+   * window was discarded with no error and no explanation. `row-actions.tsx`
+   * documents the prop as "a schedule call for THIS row"; now the parent
+   * honours it.
+   *
+   * **Concurrent Schedule pushes get no broader guard, deliberately.** #169
+   * asked for that decision to be made rather than inherited, and the answer is
+   * no:
+   *
+   *   - Two rows pushing at once write disjoint records.
+   *     `pushStepsToGoogleTasks(taskId)` and `scheduleSingleTask(itemId)` upsert
+   *     against each step's own persisted `googleTaskId` (`upsertGoogleTask`,
+   *     #104), so there is no shared row to race over and no duplicate calendar
+   *     block to create — which is the failure a lock would exist to prevent.
+   *   - The one genuinely workspace-wide failure, `reconnect_required`, already
+   *     has a workspace-wide response: `setReconnectRequired` swaps EVERY row's
+   *     control to the Reconnect link. A second, weaker lock aimed at the same
+   *     condition would only obscure the one that works.
+   *   - The remaining shared resource is the OAuth access token, which
+   *     `getValidAccessToken` may refresh mid-push. That is a server-side
+   *     concurrency question reachable from any two requests — a second tab,
+   *     the focus lane, a scheduled action — so a lock inside one client list
+   *     component could not arbitrate it, and having one would imply a
+   *     guarantee that is not there.
+   *
+   * The hazard the prop was actually written for — double-submitting the SAME
+   * row — is per-control by definition, and that is what this guards.
+   */
+  const [refreshing, startTransition] = useTransition();
+  const [schedulingIds, setSchedulingIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  // Never mutates the previous Set: React bails out of a re-render when the
+  // reference is unchanged, which would strand the row's control disabled.
+  const markScheduling = (itemId: string, active: boolean) =>
+    setSchedulingIds((prev) => {
+      if (prev.has(itemId) === active) return prev;
+      const next = new Set(prev);
+      if (active) next.add(itemId);
+      else next.delete(itemId);
+      return next;
+    });
   const [text, setText] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -240,6 +421,67 @@ export function InboxView({
     };
   }, []);
 
+  /**
+   * #210 — the capture whose write did not land.
+   *
+   * Deliberately not `refreshing`, which all ~20 `run()` call sites raise:
+   * renaming a row would otherwise make the capture notice's Retry read as busy
+   * and announce a save that has nothing to do with it — the same over-broad-flag
+   * mistake #169 fixed for the 📅 controls. And deliberately not a
+   * component-wide `capturing` boolean either; the in-flight marker lives on the
+   * record it guards (`CaptureFailure.retrying`), for the reason documented
+   * there.
+   *
+   * ONE failure slot rather than a queue, and the boundary that buys is sharper
+   * than a first draft of this note claimed (Duo review round 7, then the specs
+   * that were written to defend it and falsified it instead):
+   *
+   * **A second outstanding failure displaces the first, and the first's words are
+   * then in neither place.** The draft said the notice and the field between them
+   * hold two, and they do not — submitting anything empties the field, so the
+   * second failure takes the notice AND repopulates the field with its own words.
+   * There is no arrangement in which both survive.
+   *
+   * Not closed here, and not closed by accident. Every fix available inside this
+   * issue trades the loss for a different silence: keeping the older record
+   * leaves the newer failure unannounced, and rescuing the older words into the
+   * field puts text the user did not just type where they are looking. A
+   * persisted queue needs neither, and #210 scopes "a real offline session" to
+   * #175 — consecutive failures being exactly that. The boundary is recorded on
+   * both issues, and `capture-failure-pile-up` in the spec file pins it as
+   * executable behaviour rather than a comment nothing checks, which is how the
+   * wrong version of this paragraph survived in the first place.
+   *
+   * What is guaranteed at every point, however many fail: the notice names words
+   * that did not save, those words are in the field, and a Retry is offered.
+   * Never an emptied field and a false confirmation, which is the bug itself.
+   */
+  const [captureFailure, setCaptureFailure] = useState<CaptureFailure | null>(
+    null,
+  );
+  // #210 — ties the failure message to the notice's control, so the reason is
+  // announced with the remedy however the announcement races. See captureNotice.
+  const captureErrorId = useId();
+  const captureSavingId = useId();
+  const retryCtaRef = useRef<HTMLButtonElement | null>(null);
+  /**
+   * #210, Duo review round 3 — hand focus back when the notice unmounts.
+   *
+   * Set only when the notice's own Retry is the focused element at the moment a
+   * retry succeeds, because that is the only case where the unmount takes focus
+   * away from the user (WCAG 2.4.3). A ref rather than state: it is a one-shot
+   * instruction to the effect below, not something anything renders, and putting
+   * it in state would schedule a render just to say "no focus move needed".
+   */
+  const returnFocusToInput = useRef(false);
+  useEffect(() => {
+    if (captureFailure || !returnFocusToInput.current) return;
+    returnFocusToInput.current = false;
+    // In an effect rather than beside the state update: the button is still
+    // mounted then, so focusing the input would be undone by the unmount.
+    inputRef.current?.focus();
+  }, [captureFailure]);
+
   // Per-row inline delete confirm — only one row confirms at a time.
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
@@ -251,6 +493,15 @@ export function InboxView({
 
   // Which row (any bucket) is editing its title via the ✎ pencil.
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  // #186 — the inline-note rule, as the ✎ editor's DESCRIPTION. Declared beside
+  // the state it serves (and before `titleEditor` reads it) rather than with the
+  // other two ids further down. The node it names is rendered `hidden` at the
+  // foot of the board: a dense row has nowhere to put a visible hint line, and
+  // one per editing row would be noise, but an `aria-describedby` target
+  // contributes its text whether or not it is painted — the same dialect
+  // `MOVE_INSTRUCTIONS` uses on this surface.
+  const noteHintId = useId();
 
   // Which completed multi-step row (if any) has its per-step Reopen picker open.
   const [reopenPickerId, setReopenPickerId] = useState<string | null>(null);
@@ -377,38 +628,63 @@ export function InboxView({
     fn: () => Promise<
       { ok: true } | { ok: false; reason: string; message?: string }
     >,
-  ) =>
-    startTransition(async () => {
-      setScheduleErrors((prev) => {
-        if (!(itemId in prev)) return prev;
-        const next = { ...prev };
-        delete next[itemId];
-        return next;
-      });
-      const res = await fn();
-      if (res.ok) {
-        router.refresh();
-        return;
-      }
-      if (res.reason === "reconnect_required") {
-        setReconnectRequired(true);
-        // Every row's control just swapped to the Reconnect link, so any per-row
-        // schedule error left from an earlier attempt is now stale — clear them
-        // all rather than show a red error beside a Reconnect prompt (Duo review).
-        setScheduleErrors({});
-        return;
-      }
-      setScheduleErrors((prev) => ({
-        ...prev,
-        // Prefer the action's own message — e.g. pushStepsToGoogleTasks's
-        // no_reclaim_list failure lists the available lists, which is more
-        // useful than the generic dictionary copy for the same reason.
-        [itemId]:
-          res.message ??
-          SCHEDULE_ERROR_MESSAGES[res.reason] ??
-          "Scheduling failed.",
-      }));
+  ) => {
+    // #169 — both of these are URGENT and deliberately outside the transition.
+    // React 19 holds an async transition's own state updates until the action
+    // settles, so a flag raised inside it would first paint at the moment it
+    // stopped being true: a double-submit guard that guards nothing, and a
+    // stale error still on screen for the whole round trip. The transition is
+    // for the `router.refresh()` that follows, which is what it is good at.
+    markScheduling(itemId, true);
+    setScheduleErrors((prev) => {
+      if (!(itemId in prev)) return prev;
+      const next = { ...prev };
+      delete next[itemId];
+      return next;
     });
+    return startTransition(async () => {
+      try {
+        const res = await fn();
+        if (res.ok) {
+          router.refresh();
+          return;
+        }
+        if (res.reason === "reconnect_required") {
+          setReconnectRequired(true);
+          // Every row's control just swapped to the Reconnect link, so any
+          // per-row schedule error left from an earlier attempt is now stale —
+          // clear them all rather than show a red error beside a Reconnect
+          // prompt (Duo review).
+          setScheduleErrors({});
+          return;
+        }
+        setScheduleErrors((prev) => ({
+          ...prev,
+          // Prefer the action's own message — e.g. pushStepsToGoogleTasks's
+          // no_reclaim_list failure lists the available lists, which is more
+          // useful than the generic dictionary copy for the same reason.
+          [itemId]:
+            res.message ??
+            SCHEDULE_ERROR_MESSAGES[res.reason] ??
+            "Scheduling failed.",
+        }));
+      } catch {
+        // #169 — "a discarded press should never be silent", by the other door.
+        // A server action that REJECTS (dropped connection, a redeploy mid-push)
+        // resolves to no `res` at all, so without this the row shows nothing and
+        // the user is back to "I pressed Schedule and nothing happened".
+        setScheduleErrors((prev) => ({
+          ...prev,
+          [itemId]: "Scheduling failed.",
+        }));
+      } finally {
+        // Must run on every exit, including the two early returns and a throw:
+        // a row left in `schedulingIds` is a control disabled for the rest of
+        // the session, which is the #169 harm made permanent.
+        markScheduling(itemId, false);
+      }
+    });
+  };
 
   // ICS "Add to calendar" runner: builds the .ics server-side (marks + rewards),
   // then downloads it client-side. Guest-allowed (no owner gate) + no reconnect
@@ -419,28 +695,42 @@ export function InboxView({
       | { ok: true; ics: string; icsFilename: string }
       | { ok: false; reason: string; message?: string }
     >,
-  ) =>
-    startTransition(async () => {
-      setScheduleErrors((prev) => {
-        if (!(itemId in prev)) return prev;
-        const next = { ...prev };
-        delete next[itemId];
-        return next;
-      });
-      const res = await fn();
-      if (res.ok) {
-        downloadIcs(res.ics, res.icsFilename);
-        router.refresh();
-        return;
-      }
-      setScheduleErrors((prev) => ({
-        ...prev,
-        [itemId]:
-          res.message ??
-          SCHEDULE_ERROR_MESSAGES[res.reason] ??
-          "Couldn't build the calendar file.",
-      }));
+  ) => {
+    // Urgent, outside the transition — see runSchedule above for why (#169).
+    markScheduling(itemId, true);
+    setScheduleErrors((prev) => {
+      if (!(itemId in prev)) return prev;
+      const next = { ...prev };
+      delete next[itemId];
+      return next;
     });
+    return startTransition(async () => {
+      try {
+        const res = await fn();
+        if (res.ok) {
+          downloadIcs(res.ics, res.icsFilename);
+          router.refresh();
+          return;
+        }
+        setScheduleErrors((prev) => ({
+          ...prev,
+          [itemId]:
+            res.message ??
+            SCHEDULE_ERROR_MESSAGES[res.reason] ??
+            "Couldn't build the calendar file.",
+        }));
+      } catch {
+        // #169 — same reasoning as runSchedule: a rejected action must say so
+        // rather than leave the row looking like nothing was pressed.
+        setScheduleErrors((prev) => ({
+          ...prev,
+          [itemId]: "Couldn't build the calendar file.",
+        }));
+      } finally {
+        markScheduling(itemId, false);
+      }
+    });
+  };
 
   // Guest primary control + owner ▾ alternative both use this. State depends
   // on whether the task already has steps (per-step events vs. one timed event).
@@ -456,7 +746,7 @@ export function InboxView({
         ),
       );
     },
-    pending,
+    pending: schedulingIds.has(item.id),
   });
 
   const breakdown = (id: string) =>
@@ -510,16 +800,46 @@ export function InboxView({
       {t("action.editTitle", voice)}
     </button>
   );
-  const titleEditor = (item: Item) => (
-    <EditTitleInput
-      initial={item.text}
-      onSave={(value) => {
-        setEditingId(null);
-        if (value && value !== item.text) run(() => renameItem(item.id, value));
-      }}
-      onCancel={() => setEditingId(null)}
-    />
-  );
+  const titleEditor = (item: Item) => {
+    // #179 — the field holds the RECONSTRUCTION (`text {note}`), not the bare
+    // stored text. That is what makes the round trip an identity by construction:
+    // re-parsing it yields exactly what was stored, so a save that changed
+    // nothing writes back what was already there. Pre-filled with the bare text,
+    // an unchanged save re-split it — eroding the text one brace group per save
+    // and overwriting the note. `inlineNoteSource` also refuses to compose a note
+    // whose braces could not survive the round trip, falling back to the text
+    // alone; `renameItem` keeps such a note rather than losing it.
+    //
+    // `liveNote` picks the column, the same rule `TaskNoteRow` and `renameItem`
+    // use. Pre-filling from the other grain would show a note the row does not
+    // display and let a save revert one edited through `NoteField`.
+    const source = inlineNoteSource({
+      text: item.text,
+      note: liveNote({
+        taskId: item.taskId,
+        itemNotes: item.itemNotes ?? null,
+        taskNotes: item.notes ?? null,
+      }),
+    });
+    return (
+      <EditTitleInput
+        initial={source}
+        // #186 — the row's own title, so the inline-note button beside this field
+        // is not a second control called "Add note". The capture bar's is mounted
+        // at the same time.
+        subject={item.text}
+        noteHintId={noteHintId}
+        voice={voice}
+        onSave={(value) => {
+          setEditingId(null);
+          // Compared against what the field was GIVEN, not against `item.text` —
+          // otherwise every row carrying a note posts a rename on open-and-close.
+          if (value && value !== source) run(() => renameItem(item.id, value));
+        }}
+        onCancel={() => setEditingId(null)}
+      />
+    );
+  };
 
   const itemsById = new Map(initialItems.map((i) => [i.id, i]));
 
@@ -648,15 +968,212 @@ export function InboxView({
   // that never server-rendered, so on a hard load `aria-describedby` pointed at
   // nothing at all.
   const moveInstructionsId = useId();
+  // #183 — associates the capture field with the hint sentence beneath it, so
+  // that sentence is announced as the field's DESCRIPTION rather than being
+  // orphaned text a screen-reader user only reaches after leaving the input.
+  const captureHintId = useId();
+
+  /**
+   * #210 — the one write in the app whose failure is irreversible, so the only
+   * one that cannot go through the generic `run()`.
+   *
+   * Every other inbox action operates on an `id` that exists because the server
+   * already has the row: a rejection there leaves the data intact and the press
+   * repeatable. A capture's words exist nowhere but this component, and the old
+   * code emptied the field and rendered "captured ✓" before the call, outside
+   * any `try`. A rejection destroyed the text and lied about it in the same
+   * breath — with no `error.tsx` anywhere in `src/` to catch the throw either.
+   *
+   * `fromRetry` distinguishes the notice's button from a fresh Enter. It is not
+   * cosmetic: only a retry may clear the input on success, because only a retry
+   * knows the text sitting there is the copy IT restored rather than the user's
+   * next thought (see the success branch).
+   *
+   * `supersedes` carries the words of a notice this capture replaces — see
+   * `submit()`, which is where the user's intent is legible.
+   */
+  const capture = (
+    value: string,
+    { fromRetry = false, supersedes = null as string | null } = {},
+  ) => {
+    // Urgent, and deliberately OUTSIDE the transition — see runSchedule (#169):
+    // React 19 holds an async transition's own state updates until the action
+    // settles, so a guard raised inside one first paints at the moment it stops
+    // being true, which is a guard that guards nothing. Discrete events like a
+    // click flush at synchronous priority, so this has landed before the next
+    // press can read it.
+    if (fromRetry) markRetrying(value, true);
+    return startTransition(async () => {
+      // Duo review round 8 — `router.refresh()` used to live inside the `try`,
+      // so a refresh that threw ran the catch and told the user a capture had
+      // failed when the row was already written. That is #210's own lie,
+      // produced by the code fixing #210. The `try` governs the WRITE; anything
+      // after it is a consequence of success and cannot un-write the row.
+      let landed = false;
+      try {
+        await withActionTimeout(createBrainDumpItem(value), CAPTURE_TIMEOUT_MS);
+        landed = true;
+        // A later capture succeeding says nothing about an earlier one that
+        // failed, so the notice is cleared by only two things: these words
+        // landing at last, or the user having replaced them in the field and
+        // captured that instead. Anything else and the notice may be the only
+        // copy of words that never reached the server.
+        //
+        // Both tests read `prev`, not the closure: by now the notice may hold a
+        // different failure entirely, and clearing THAT would be the data loss
+        // this whole function exists to prevent.
+        setCaptureFailure((prev) => {
+          if (!prev) return null;
+          if (prev.value === value) return null;
+          // Duo review round 6 — the invariant, enforced where the record is
+          // written rather than only where the decision is taken: a record whose
+          // own attempt is UNSETTLED is never cleared by anything but that
+          // attempt. `supersedes` was decided when this capture was submitted,
+          // and a Retry pressed since then has made the outcome unknown again,
+          // so acting on the stale decision would clear a notice out from under
+          // a live request.
+          if (prev.retrying) return prev;
+          if (supersedes !== null && prev.value === supersedes) return null;
+          return prev;
+        });
+        // Only a retry clears the field, and only when it still holds exactly
+        // what we just saved. A fresh Enter has already emptied it
+        // synchronously, so anything in there now is the user's NEXT thought —
+        // and clearing that would be this bug with the roles reversed.
+        if (fromRetry) {
+          setText((prev) => (prev.trim() === value ? "" : prev));
+          // The notice is about to unmount. If the user is standing on its Retry
+          // — which they are, they just pressed it — the unmount would drop them
+          // to <body> (WCAG 2.4.3), so the effect above puts them back in the
+          // capture field. Read here, while the button still exists.
+          returnFocusToInput.current =
+            retryCtaRef.current !== null &&
+            retryCtaRef.current === document.activeElement;
+        }
+        setJustCaptured(true);
+        if (captureTimeoutRef.current) clearTimeout(captureTimeoutRef.current);
+        captureTimeoutRef.current = setTimeout(
+          () => setJustCaptured(false),
+          CAPTURE_CONFIRM_MS,
+        );
+      } catch (error) {
+        // An earlier capture's "captured ✓" can still be inside its 1.5s
+        // window. Leaving it up would put two live regions on screen saying
+        // opposite things about the same keystroke — and a screen reader would
+        // read both.
+        if (captureTimeoutRef.current) clearTimeout(captureTimeoutRef.current);
+        setJustCaptured(false);
+        // Restore the words, but ONLY into a field the user has not since typed
+        // into. A ten-second hang is long enough to type the next thought, and
+        // overwriting that would be the same data loss wearing the other hat.
+        // When we can't restore, the notice quotes the words instead, so they
+        // are never only in a variable.
+        //
+        // Read off the DOM node rather than through a functional `setText`
+        // updater, because the answer is needed HERE — `wordsInField` decides
+        // whether a later capture may clear this notice. An updater that also
+        // reported what it decided would have to mutate on the way past, which
+        // is not a pure updater and would run twice under StrictMode. The input
+        // is controlled, so its value is `text` as currently rendered, which is
+        // exactly what the updater would have been handed.
+        const inField = (inputRef.current?.value ?? "").trim();
+        if (inField === "") setText(value);
+        // Duo review round 9 — yes, this writes unconditionally while the
+        // success path above declines to clear a record whose attempt is
+        // unsettled, and the asymmetry is deliberate rather than an oversight.
+        // The two are answering different questions: a success may decline the
+        // slot because its own words are safe on the server, whereas a failure
+        // that declines it reports nothing at all. With one slot and two
+        // outstanding failures, whichever record wins leaves the other
+        // unannounced — so the tie is broken toward the news the user has not
+        // heard yet. The words of the displaced one are still in the field; the
+        // cost is a missing notice, not missing text, and
+        // `capture-failure-pile-up` pins both directions. Closing it properly is
+        // #175's queue.
+        setCaptureFailure({
+          value,
+          stale: isStaleActionError(error),
+          timedOut: error instanceof ActionTimeoutError,
+          // A fresh record, so the retry flag starts down: this attempt is over,
+          // whatever it was.
+          retrying: false,
+          // Either we just put them back, or a retry that failed again found
+          // them still there — both mean the user is looking at them.
+          wordsInField: inField === "" || inField === value,
+        });
+      } finally {
+        // Must run on every exit including a throw: a retry flag left up is a
+        // Retry button that reads permanently busy. Scoped to `value`, so a
+        // capture the user typed during the retry cannot clear it — the race Duo
+        // review round 2 found.
+        if (fromRetry) markRetrying(value, false);
+      }
+      // Outside the try/catch on purpose (round 8): the row is written, so a
+      // refresh that throws is a stale list, not a lost capture, and must never
+      // be reported as one.
+      if (landed) router.refresh();
+    });
+  };
+
+  /**
+   * Raise or drop `retrying` on the failure record for `value`, and only for
+   * that record.
+   *
+   * The functional update is what makes it per-attempt: it reads the CURRENT
+   * failure rather than the one captured in this closure, so an unrelated
+   * capture that displaced the notice in the meantime is left alone instead of
+   * being marked busy on another attempt's behalf.
+   */
+  const markRetrying = (value: string, active: boolean) =>
+    setCaptureFailure((prev) => {
+      if (!prev || prev.value !== value || prev.retrying === active)
+        return prev;
+      return { ...prev, retrying: active };
+    });
 
   const submit = () => {
     const value = text.trim();
     if (!value) return;
+    // Duo review round 5 — the one exception to "never gate a capture". These
+    // exact words are already being resubmitted by the notice's Retry, and they
+    // are in the field only because the notice put them back, so this Enter is
+    // the same request by a second route rather than the independent insert the
+    // ungating exists to protect. Not a silent discard either (#169's other
+    // harm): the notice is on screen announcing a save for these very words, and
+    // its Retry reads busy.
+    if (captureFailure?.retrying && captureFailure.value === value) return;
+    // Duo review round 3: a notice whose words are sitting in THIS field, and
+    // which the user has now submitted something else from, has been seen and
+    // answered — an edited typo, or a different thought typed over them. Leaving
+    // it up puts a stale alert beside a fresh "captured ✓" and invites a Retry
+    // that would post a near-duplicate. The words are carried rather than a
+    // boolean, so a failure that lands between this press and its response
+    // cannot be cleared by it.
+    //
+    // Duo review round 5 — but NOT while its retry is in flight. Superseding
+    // means "the user has seen how this attempt ended and replaced its words",
+    // and mid-flight they have seen no such thing: clearing the notice there
+    // would clear it out from under a request whose outcome nobody knows, and
+    // the eventual failure would look like a notice resurrecting itself from
+    // nothing. Leaving it up is the fix; suppressing the failure would be the
+    // silence this whole issue exists to remove.
+    const supersedes =
+      captureFailure?.wordsInField && !captureFailure.retrying
+        ? captureFailure.value
+        : null;
+    // Cleared synchronously and urgently, which is both the instant-capture
+    // feel and the double-submit guard: a second Enter arriving before the
+    // write resolves finds an empty field and returns below. Deliberately NOT
+    // gated on an in-flight capture — firing three thoughts in a row is the
+    // whole point of this control, and they are independent inserts.
     setText("");
-    run(() => createBrainDumpItem(value));
-    setJustCaptured(true);
-    if (captureTimeoutRef.current) clearTimeout(captureTimeoutRef.current);
-    captureTimeoutRef.current = setTimeout(() => setJustCaptured(false), 1500);
+    capture(value, { supersedes });
+  };
+
+  /** #210 — the notice's Retry: re-posts the exact words that did not land. */
+  const retryCapture = () => {
+    if (!captureFailure || captureFailure.retrying) return;
+    capture(captureFailure.value, { fromRetry: true });
   };
 
   // Inline delete confirm: first click reveals Delete/Cancel; the action only
@@ -731,6 +1248,13 @@ export function InboxView({
   return (
     <div className="space-y-6">
       {welcomeVisible && <WelcomeCard voice={voice} />}
+      {/* #199 — above the buckets, beside the resume banner: this is where the
+          inbox already puts things that are ABOUT the inbox rather than in it. It
+          is not a row, so it cannot reach bucketItems, the Library tabs, the
+          freshness clock, the untriaged badge or maybeAwardInboxZero. */}
+      {shoppingSummary && (
+        <ShoppingSummaryCard count={shoppingSummary.count} voice={voice} />
+      )}
       {resumeStep && (
         <div
           role="status"
@@ -767,22 +1291,63 @@ export function InboxView({
 
       {/* Capture bar */}
       <div className="space-y-1">
-        <input
-          ref={inputRef}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          placeholder="Brain dump anything… (Enter to save)"
-          className="border-input bg-background focus-visible:ring-ring w-full rounded-lg border px-4 py-3 text-base shadow-sm outline-none focus-visible:ring-2"
-          autoFocus
-        />
-        <p className="text-muted-foreground px-1 text-xs">
-          No fields required. Press Enter to capture instantly.
+        {/* #186 — the input and its inline-note button on one line. The input
+            keeps `flex-1 min-w-0` rather than `w-full`, so the button cannot be
+            pushed off the edge of a phone by a long capture. */}
+        <div className="flex items-center gap-2">
+          <input
+            ref={inputRef}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            placeholder="Brain dump anything… (Enter to save)"
+            // #183 — the app's most-used control had NO accessible name: a
+            // placeholder and nothing else. A placeholder is not a name. Support
+            // varies, and it VANISHES on the first keystroke, so anyone who tabs
+            // away mid-capture and back had a field full of text and no way to
+            // re-read what it was for. WCAG 4.1.2 Name, Role, Value; the gap also
+            // undermines 3.3.2 Labels or Instructions.
+            //
+            // `aria-label` rather than a visually-hidden <label>: nothing may
+            // change visually (the placeholder-led look is deliberate), and this
+            // is the smaller change. Short, and deliberately NOT the placeholder
+            // sentence — a name is what you call the control, and a voice-control
+            // user saying "brain dump" has to be able to hit it.
+            aria-label="Brain dump"
+            // The hint below is a DESCRIPTION, not a name. Associated so it is
+            // announced with the field instead of being orphaned text that a
+            // screen-reader user only meets after leaving the input.
+            aria-describedby={captureHintId}
+            className="border-input bg-background focus-visible:ring-ring min-w-0 flex-1 rounded-lg border px-4 py-3 text-base shadow-sm outline-none focus-visible:ring-2"
+            autoFocus
+          />
+          {/* #186 — inserts the note braces and puts the caret between them, so
+              nobody has to reach the symbol keyboard for `{`. Named after this
+              field, because an open ✎ row editor mounts a second one. */}
+          <AddNoteButton
+            subject="Brain dump"
+            value={text}
+            inputRef={inputRef}
+            onChange={setText}
+            voice={voice}
+          />
+        </div>
+        <p id={captureHintId} className="text-muted-foreground px-1 text-xs">
+          {/* #186 — the second sentence is the only thing on screen saying the
+              note syntax exists, and it states the POSITION as well as the
+              punctuation: "at the end" IS the rule (#179 Decision 1), so anyone
+              who learns only the braces meets a mid-string group staying literal
+              and reads that refusal as a bug. Both sentences share this one
+              node, so they are announced together as the field's description.
+              The braces themselves live in `capture.noteHint` rather than in
+              this JSX, where a literal brace opens an expression. */}
+          No fields required. Press Enter to capture instantly.{" "}
+          {t("capture.noteHint", voice)}
         </p>
         {justCaptured && (
           <p
@@ -791,6 +1356,154 @@ export function InboxView({
           >
             {t("capture.confirm", voice)}
           </p>
+        )}
+        {/* ── #210: the capture that did not land ────────────────────────────
+            a11y, and three decisions that are not the focus timer's:
+
+            `role="alert"` (assertive), not the confirmation's polite
+            `role="status"`. The two describe opposite outcomes, so the failure
+            path clears a still-showing "captured ✓" before setting this — they
+            cannot contradict each other about the same keystroke. Where they DO
+            legitimately coexist (a later capture succeeding while an earlier
+            failure stands unresolved) they are reporting different captures, and
+            assertive-interrupts-polite is exactly the priority wanted: the words
+            still at risk outrank the ones already safe.
+
+            Focus is NOT moved here. `focus-timer.tsx` hands focus to its
+            notice's primary action because the pressed control unmounts, which
+            would otherwise drop the user to <body> (WCAG 2.4.3). Nothing
+            unmounts here — the capture input is still mounted, still focused,
+            and still where the user is typing — so taking focus would interrupt
+            them mid-sentence and fight the restored text (WCAG 3.2.2). The
+            alert announces without stealing.
+
+            The words are quoted, not merely referred to. In the common case they
+            are also back in the input, but when the user has typed on the notice
+            is the only copy, and a notice that says "your words are safe"
+            without showing them is the same unverifiable promise this issue is
+            about.
+
+            Colour: the failure is carried by the text and the icon, never by the
+            red alone (WCAG 1.4.1). `text-destructive` / `border-destructive/40`
+            / `bg-destructive/5` is the token pairing globals.css documents as AA
+            in both themes (5.2:1+) and the one focus-timer's notice already
+            uses — not a raw palette shade, which is what dropped the emerald
+            confirmation below 4.5:1 on the warm-tinted --background in #40. */}
+        {captureFailure && (
+          <>
+            <div
+              role="alert"
+              className="border-destructive/40 bg-destructive/5 mt-2 flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-start sm:justify-between"
+            >
+              <p
+                id={captureErrorId}
+                className="text-destructive flex min-w-0 items-start gap-1.5 text-sm font-medium"
+              >
+                <TriangleAlert
+                  aria-hidden="true"
+                  className="mt-0.5 h-4 w-4 shrink-0"
+                />
+                <span className="break-words">
+                  {t(captureMessageKey(captureFailure), voice)}{" "}
+                  <strong>&ldquo;{captureFailure.value}&rdquo;</strong>
+                </span>
+              </p>
+              <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+                {captureFailure.stale ? (
+                  // Retrying re-posts the same action id the running deployment
+                  // has already forgotten, so a reload is the ONLY thing on offer.
+                  <button
+                    type="button"
+                    aria-describedby={captureErrorId}
+                    onClick={() => window.location.reload()}
+                    className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium"
+                  >
+                    <RefreshCw
+                      aria-hidden="true"
+                      className="h-4 w-4 shrink-0"
+                    />
+                    {t("capture.error.reload", voice)}
+                  </button>
+                ) : (
+                  // `aria-disabled`, not `disabled`: a disabled element cannot
+                  // hold focus, so the browser would drop it to <body> the moment
+                  // the retry starts. The press is guarded in the handler instead,
+                  // so a double-tap still cannot fire two writes.
+                  <button
+                    ref={retryCtaRef}
+                    type="button"
+                    // While a retry runs, the reason AND the wait are both
+                    // reachable from the control (Duo review round 8). This is
+                    // the channel for focus LANDING here with a write already in
+                    // flight; the press itself is announced by the live region
+                    // below, because a description is not re-read under held
+                    // focus (Duo round 16 on `!303`).
+                    aria-describedby={
+                      captureFailure.retrying
+                        ? `${captureErrorId} ${captureSavingId}`
+                        : captureErrorId
+                    }
+                    aria-disabled={captureFailure.retrying}
+                    onClick={() => {
+                      if (!captureFailure.retrying) retryCapture();
+                    }}
+                    className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 font-medium aria-disabled:opacity-50"
+                  >
+                    <RotateCcw
+                      aria-hidden="true"
+                      className="h-4 w-4 shrink-0"
+                    />
+                    {t("capture.error.retry", voice)}
+                  </button>
+                )}
+                {/* Duo review round 8 — deliberately NOT `role="status"`. That
+                    would be a polite live region nested inside this assertive
+                    one, which is undefined enough in practice that "will it
+                    announce" has no answer. This is the SIGHTED copy only, and
+                    `aria-hidden` keeps it that way: the announcement is the
+                    sibling region below, and one sentence in two places is how
+                    it gets said twice. Hiding it also stops the insertion from
+                    mutating this `role="alert"` — an alert is assertive and
+                    atomic, so a visible child appearing inside it mid-retry
+                    re-reads the whole notice over the polite announcement.
+                    Nothing changes on screen. */}
+                {captureFailure.retrying && (
+                  <p
+                    data-testid="capture-saving-visible"
+                    aria-hidden="true"
+                    className="text-muted-foreground text-xs"
+                  >
+                    {t("capture.error.saving", voice)}
+                  </p>
+                )}
+              </div>
+            </div>
+            {/* Duo round 16 on `!303` — where the wait is actually ANNOUNCED,
+                and a SIBLING of the alert rather than a descendant, because a
+                polite region nested inside an assertive one inherits the
+                container's politeness across its whole subtree.
+                `aria-describedby` cannot do this alone: a description is read
+                when focus LANDS on a control, and Retry is pressed on a control
+                that already holds focus and keeps it by design, so the value
+                gaining this id mid-flight is not something a screen reader goes
+                back to re-read. A live region is the one channel defined for
+                content that changes while the user is stationary.
+                Mounted with the notice and EMPTY until there is something to
+                say — the move announcer at the foot of this file documents why:
+                a region that arrives together with its first message is silent.
+                Kept identical to the timer's notice in `focus-timer.tsx`, which
+                these two have already drifted apart on once. */}
+            <p
+              id={captureSavingId}
+              data-testid="capture-saving-announcer"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              className="sr-only"
+            >
+              {captureFailure.retrying && t("capture.error.saving", voice)}
+            </p>
+          </>
         )}
       </div>
 
@@ -826,7 +1539,7 @@ export function InboxView({
                   : t("inbox.zero", voice)}
               </p>
             ) : (
-              <ul className={cn("space-y-2", pending && "opacity-70")}>
+              <ul className={cn("space-y-2", refreshing && "opacity-70")}>
                 {needsReview.map((item) => {
                   // v5: review rows are now schedulable — an unclarified
                   // capture has no steps, so 📅 always offers the same
@@ -838,70 +1551,94 @@ export function InboxView({
                           runSchedule(item.id, () =>
                             scheduleSingleTask(item.id, minutes),
                           ),
-                        pending,
+                        pending: schedulingIds.has(item.id),
                       }
                     : icsProps(item);
                   return (
-                    <ItemRow
-                      isDragging={activeDragId === item.id}
+                    // #186 — the wrapper picks the note grain and hands back the
+                    // two halves; the row places them. Untriaged rows are the
+                    // item grain, which is where #179's captured note lives.
+                    <TaskNoteRow
                       key={item.id}
-                      item={item}
-                      settings={settings}
+                      taskId={item.taskId}
+                      itemId={item.id}
+                      taskTitle={item.text}
+                      notes={item.notes}
+                      itemNotes={item.itemNotes}
                       voice={voice}
-                      now={now}
-                      onBreakdown={() => breakdown(item.id)}
-                      onKeep={() => run(() => keepAsTask(item.id))}
-                      onSaveForLater={() =>
-                        moveItemToBucket(item.id, "savedLater")
-                      }
-                      onSnooze={() =>
-                        run(() => snoozeBrainDumpItem(item.id, 60))
-                      }
-                      onComplete={() => run(() => completeItem(item.id))}
-                      confirmingDelete={confirmDeleteId === item.id}
-                      onRequestDelete={() => requestDelete(item.id)}
-                      onConfirmDelete={() => confirmDelete(item.id)}
-                      onCancelDelete={cancelDelete}
-                      onFreshen={() => run(() => freshenItem(item.id))}
-                      onDismissPrompt={() => run(() => dismissPrompt(item.id))}
-                      schedule={schedule}
-                      scheduled={item.scheduledAt != null}
-                      icsMenu={
-                        effectiveGoogle ? (
-                          <ScheduleControl
-                            key="ics-m"
-                            variant="menu"
-                            {...icsProps(item)}
-                            label={t("action.addToCalendar", voice)}
-                          />
-                        ) : null
-                      }
-                      scheduleError={scheduleErrors[item.id]}
-                      moveMenu={
-                        <MoveToMenu
-                          key="move"
-                          currentBucket={bucketOfItem(item, now)}
+                    >
+                      {({ trigger, body }) => (
+                        <ItemRow
+                          isDragging={activeDragId === item.id}
+                          item={item}
+                          noteTrigger={trigger}
+                          noteBody={body}
+                          settings={settings}
                           voice={voice}
-                          onMove={(target) => moveItemToBucket(item.id, target)}
+                          now={now}
+                          onBreakdown={() => breakdown(item.id)}
+                          onKeep={() => run(() => keepAsTask(item.id))}
+                          onSaveForLater={() =>
+                            moveItemToBucket(item.id, "savedLater")
+                          }
+                          onSnooze={() =>
+                            run(() => snoozeBrainDumpItem(item.id, 60))
+                          }
+                          onComplete={() => run(() => completeItem(item.id))}
+                          confirmingDelete={confirmDeleteId === item.id}
+                          onRequestDelete={() => requestDelete(item.id)}
+                          onConfirmDelete={() => confirmDelete(item.id)}
+                          onCancelDelete={cancelDelete}
+                          onFreshen={() => run(() => freshenItem(item.id))}
+                          onDismissPrompt={() =>
+                            run(() => dismissPrompt(item.id))
+                          }
+                          schedule={schedule}
+                          scheduled={item.scheduledAt != null}
+                          icsMenu={
+                            effectiveGoogle ? (
+                              <ScheduleControl
+                                key="ics-m"
+                                variant="menu"
+                                {...icsProps(item)}
+                                label={t("action.addToCalendar", voice)}
+                              />
+                            ) : null
+                          }
+                          scheduleError={scheduleErrors[item.id]}
+                          moveMenu={
+                            <MoveToMenu
+                              key="move"
+                              currentBucket={bucketOfItem(item, now)}
+                              voice={voice}
+                              onMove={(target) =>
+                                moveItemToBucket(item.id, target)
+                              }
+                            />
+                          }
+                          moveIcon={
+                            <MoveToMenu
+                              key="move-icon"
+                              compact
+                              describedById={moveInstructionsId}
+                              currentBucket={bucketOfItem(item, now)}
+                              voice={voice}
+                              onMove={(target) =>
+                                moveItemToBucket(item.id, target)
+                              }
+                            />
+                          }
+                          dragGrip={<DragGrip id={item.id} text={item.text} />}
+                          editButton={pencil(item)}
+                          editMenuItem={editMenuItem(item)}
+                          titleEditor={
+                            editingId === item.id
+                              ? titleEditor(item)
+                              : undefined
+                          }
                         />
-                      }
-                      moveIcon={
-                        <MoveToMenu
-                          key="move-icon"
-                          compact
-                          describedById={moveInstructionsId}
-                          currentBucket={bucketOfItem(item, now)}
-                          voice={voice}
-                          onMove={(target) => moveItemToBucket(item.id, target)}
-                        />
-                      }
-                      dragGrip={<DragGrip id={item.id} text={item.text} />}
-                      editButton={pencil(item)}
-                      editMenuItem={editMenuItem(item)}
-                      titleEditor={
-                        editingId === item.id ? titleEditor(item) : undefined
-                      }
-                    />
+                      )}
+                    </TaskNoteRow>
                   );
                 })}
               </ul>
@@ -927,7 +1664,7 @@ export function InboxView({
               {multiStep.length === 0 ? (
                 <EmptyBucket voice={voice} />
               ) : (
-                <ul className={cn("space-y-2", pending && "opacity-70")}>
+                <ul className={cn("space-y-2", refreshing && "opacity-70")}>
                   {multiStep.map((item) => {
                     /* multi-step row — extended in Task 9 (step count + expand) and Task 10 (drag/menu).
                        A 0-step row is awaiting its breakdown (breakdownRequestedAt): instead of a
@@ -956,7 +1693,7 @@ export function InboxView({
                                 runSchedule(item.id, () =>
                                   scheduleSingleTask(item.id, minutes),
                                 ),
-                              pending,
+                              pending: schedulingIds.has(item.id),
                             }
                           : {
                               state: scheduleState(
@@ -979,7 +1716,7 @@ export function InboxView({
                                     pushStepsToGoogleTasks(tid, intent),
                                   );
                               },
-                              pending,
+                              pending: schedulingIds.has(item.id),
                             };
                     return (
                       <li
@@ -1052,141 +1789,180 @@ export function InboxView({
                               ` · ≈${activeRemainingMin} ${t("lib.minOnStep", voice)}`}
                           </p>
                         )}
-                        <RowActions
-                          className="pl-9"
-                          scheduled={item.scheduledAt != null}
-                          inline={
-                            awaitingBreakdown
-                              ? [
-                                  <button
-                                    key="break-now"
-                                    type="button"
-                                    onClick={() => breakdown(item.id)}
-                                    className="bg-destructive text-destructive-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90"
-                                  >
-                                    {t("prompt.breakNow", voice)}
-                                  </button>,
-                                ]
-                              : [
-                                  // Primary CTA — matches the single-task row (▶ Focus + Complete):
-                                  // jumps straight into the next unfinished step's timer.
-                                  <button
-                                    key="focus"
-                                    type="button"
-                                    onClick={() => focusNextStep(item)}
-                                    className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
-                                  >
-                                    ▶ Start Focus
-                                  </button>,
-                                  <CompleteButton
-                                    key="complete"
+                        {/* #44 — the note's collapsed trigger sits INSIDE the
+                            action group beside Complete (owner request); the
+                            editor body opens below the action line but stays in
+                            this row's <li>. Both halves are null for a row with
+                            no `Task` — an untriaged brain-dump item has no
+                            `notes` column — which is why the action group is
+                            rendered from inside `TaskNoteRow`. */}
+                        <TaskNoteRow
+                          taskId={item.taskId}
+                          // #186 — the item grain, for a row that is triaged but
+                          // has no `Task` yet (`triageBrainDumpItem` does not
+                          // create one). `TaskNoteRow` picks between the two.
+                          itemId={item.id}
+                          taskTitle={item.text}
+                          notes={item.notes}
+                          itemNotes={item.itemNotes}
+                          voice={voice}
+                        >
+                          {({ trigger, body }) => (
+                            <>
+                              <RowActions
+                                className="pl-9"
+                                scheduled={item.scheduledAt != null}
+                                inline={
+                                  awaitingBreakdown
+                                    ? [
+                                        <button
+                                          key="break-now"
+                                          type="button"
+                                          onClick={() => breakdown(item.id)}
+                                          className={cn(
+                                            touchTarget,
+                                            "bg-destructive text-destructive-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
+                                          )}
+                                        >
+                                          {t("prompt.breakNow", voice)}
+                                        </button>,
+                                      ]
+                                    : [
+                                        // Primary CTA — matches the single-task row (▶ Focus + Complete):
+                                        // jumps straight into the next unfinished step's timer.
+                                        <button
+                                          key="focus"
+                                          type="button"
+                                          onClick={() => focusNextStep(item)}
+                                          className={cn(
+                                            touchTarget,
+                                            "bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
+                                          )}
+                                        >
+                                          ▶ Start Focus
+                                        </button>,
+                                        <CompleteButton
+                                          key="complete"
+                                          voice={voice}
+                                          onClick={() =>
+                                            run(() => completeItem(item.id))
+                                          }
+                                        />,
+                                        trigger,
+                                      ]
+                                }
+                                move={
+                                  <MoveToMenu
+                                    key="move-icon"
+                                    compact
+                                    describedById={moveInstructionsId}
+                                    currentBucket={bucketOfItem(item, now)}
                                     voice={voice}
-                                    onClick={() =>
-                                      run(() => completeItem(item.id))
+                                    onMove={(target) =>
+                                      moveItemToBucket(item.id, target)
+                                    }
+                                  />
+                                }
+                                schedule={schedule}
+                                del={deleteControl(item.id, "delete", {
+                                  icon: true,
+                                })}
+                                menu={[
+                                  <MoveToMenu
+                                    key="move"
+                                    currentBucket={bucketOfItem(item, now)}
+                                    voice={voice}
+                                    onMove={(target) =>
+                                      moveItemToBucket(item.id, target)
                                     }
                                   />,
-                                ]
-                          }
-                          move={
-                            <MoveToMenu
-                              key="move-icon"
-                              compact
-                              describedById={moveInstructionsId}
-                              currentBucket={bucketOfItem(item, now)}
-                              voice={voice}
-                              onMove={(target) =>
-                                moveItemToBucket(item.id, target)
-                              }
-                            />
-                          }
-                          schedule={schedule}
-                          del={deleteControl(item.id, "delete", { icon: true })}
-                          menu={[
-                            <MoveToMenu
-                              key="move"
-                              currentBucket={bucketOfItem(item, now)}
-                              voice={voice}
-                              onMove={(target) =>
-                                moveItemToBucket(item.id, target)
-                              }
-                            />,
-                            // Rows with steps: view the broken-down list (inline
-                            // expand) + jump to the task page to focus a step —
-                            // above "Mark as completed". Hidden while awaiting.
-                            !awaitingBreakdown ? (
-                              <button
-                                key="view-list-m"
-                                type="button"
-                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                onClick={() =>
-                                  setExpandedId(expanded ? null : item.id)
-                                }
-                              >
-                                View multi-step task list
-                              </button>
-                            ) : null,
-                            !awaitingBreakdown ? (
-                              <button
-                                key="focus-list-m"
-                                type="button"
-                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                // Guard rather than assert: a multi-step row's Task always
-                                // exists by construction, but a data inconsistency must not
-                                // navigate to `/tasks/null` (Duo review).
-                                onClick={() =>
-                                  item.taskId &&
-                                  router.push(`/tasks/${item.taskId}`)
-                                }
-                              >
-                                Start visual focus timer
-                              </button>
-                            ) : null,
-                            awaitingBreakdown ? (
-                              <button
-                                key="break-now-m"
-                                type="button"
-                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                onClick={() => breakdown(item.id)}
-                              >
-                                {t("prompt.breakNow", voice)}
-                              </button>
-                            ) : (
-                              <button
-                                key="complete-m"
-                                type="button"
-                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                onClick={() => run(() => completeItem(item.id))}
-                              >
-                                {t("action.completeFull", voice)}
-                              </button>
-                            ),
-                            schedule ? (
-                              <ScheduleControl
-                                key="schedule-m"
-                                {...schedule}
-                                variant="menu"
-                                label={scheduleMenuLabel(schedule.state, voice)}
+                                  // Rows with steps: view the broken-down list (inline
+                                  // expand) + jump to the task page to focus a step —
+                                  // above "Mark as completed". Hidden while awaiting.
+                                  !awaitingBreakdown ? (
+                                    <button
+                                      key="view-list-m"
+                                      type="button"
+                                      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                      onClick={() =>
+                                        setExpandedId(expanded ? null : item.id)
+                                      }
+                                    >
+                                      View multi-step task list
+                                    </button>
+                                  ) : null,
+                                  !awaitingBreakdown ? (
+                                    <button
+                                      key="focus-list-m"
+                                      type="button"
+                                      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                      // Guard rather than assert: a multi-step row's Task always
+                                      // exists by construction, but a data inconsistency must not
+                                      // navigate to `/tasks/null` (Duo review).
+                                      onClick={() =>
+                                        item.taskId &&
+                                        router.push(`/tasks/${item.taskId}`)
+                                      }
+                                    >
+                                      Start visual focus timer
+                                    </button>
+                                  ) : null,
+                                  awaitingBreakdown ? (
+                                    <button
+                                      key="break-now-m"
+                                      type="button"
+                                      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                      onClick={() => breakdown(item.id)}
+                                    >
+                                      {t("prompt.breakNow", voice)}
+                                    </button>
+                                  ) : (
+                                    <button
+                                      key="complete-m"
+                                      type="button"
+                                      className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                      onClick={() =>
+                                        run(() => completeItem(item.id))
+                                      }
+                                    >
+                                      {t("action.completeFull", voice)}
+                                    </button>
+                                  ),
+                                  schedule ? (
+                                    <ScheduleControl
+                                      key="schedule-m"
+                                      {...schedule}
+                                      variant="menu"
+                                      label={scheduleMenuLabel(
+                                        schedule.state,
+                                        voice,
+                                      )}
+                                    />
+                                  ) : null,
+                                  effectiveGoogle ? (
+                                    <ScheduleControl
+                                      key="ics-m"
+                                      variant="menu"
+                                      {...icsProps(item)}
+                                      label={t("action.addToCalendar", voice)}
+                                    />
+                                  ) : null,
+                                  editMenuItem(item),
+                                  deleteControl(item.id, "delete-m", {
+                                    fullWidth: true,
+                                  }),
+                                ]}
                               />
-                            ) : null,
-                            effectiveGoogle ? (
-                              <ScheduleControl
-                                key="ics-m"
-                                variant="menu"
-                                {...icsProps(item)}
-                                label={t("action.addToCalendar", voice)}
-                              />
-                            ) : null,
-                            editMenuItem(item),
-                            deleteControl(item.id, "delete-m", {
-                              fullWidth: true,
-                            }),
-                          ]}
-                        />
-                        {scheduleErrors[item.id] && (
-                          <p className="text-destructive mt-1 text-xs">
-                            {scheduleErrors[item.id]}
-                          </p>
-                        )}
+                              {scheduleErrors[item.id] && (
+                                <p className="text-destructive mt-1 text-xs">
+                                  {scheduleErrors[item.id]}
+                                </p>
+                              )}
+                              {body}
+                            </>
+                          )}
+                        </TaskNoteRow>
+
                         {expanded && item.taskId && (
                           <div className="mt-2">
                             <TaskSteps
@@ -1200,6 +1976,7 @@ export function InboxView({
                                 subtaskEmoji: s.subtaskEmoji,
                                 estMinutes: s.estMinutes,
                                 done: s.done,
+                                notes: s.notes ?? null,
                                 resumable: s.resumable,
                               }))}
                             />
@@ -1225,7 +2002,7 @@ export function InboxView({
               {singleTask.length === 0 ? (
                 <EmptyBucket voice={voice} />
               ) : (
-                <ul className={cn("space-y-2", pending && "opacity-70")}>
+                <ul className={cn("space-y-2", refreshing && "opacity-70")}>
                   {singleTask.map((item) => {
                     const schedule: ScheduleControlProps | null =
                       effectiveGoogle
@@ -1238,7 +2015,7 @@ export function InboxView({
                               runSchedule(item.id, () =>
                                 scheduleSingleTask(item.id, minutes),
                               ),
-                            pending,
+                            pending: schedulingIds.has(item.id),
                           }
                         : icsProps(item);
                     return (
@@ -1271,90 +2048,126 @@ export function InboxView({
                             </span>
                           )}
                         </div>
-                        <RowActions
-                          className="pl-9"
-                          scheduled={item.scheduledAt != null}
-                          inline={[
-                            <button
-                              key="focus"
-                              type="button"
-                              onClick={() => focusOnItem(item.id)}
-                              className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
-                            >
-                              ▶ Start Focus
-                            </button>,
-                            <CompleteButton
-                              key="complete"
-                              voice={voice}
-                              onClick={() => run(() => completeItem(item.id))}
-                            />,
-                          ]}
-                          move={
-                            <MoveToMenu
-                              key="move-icon"
-                              compact
-                              describedById={moveInstructionsId}
-                              currentBucket={bucketOfItem(item, now)}
-                              voice={voice}
-                              onMove={(target) =>
-                                moveItemToBucket(item.id, target)
-                              }
-                            />
-                          }
-                          schedule={schedule}
-                          del={deleteControl(item.id, "delete", { icon: true })}
-                          menu={[
-                            <MoveToMenu
-                              key="move"
-                              currentBucket={bucketOfItem(item, now)}
-                              voice={voice}
-                              onMove={(target) =>
-                                moveItemToBucket(item.id, target)
-                              }
-                            />,
-                            <button
-                              key="focus-m"
-                              type="button"
-                              className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                              onClick={() => focusOnItem(item.id)}
-                            >
-                              Start visual focus timer
-                            </button>,
-                            <button
-                              key="complete-m"
-                              type="button"
-                              className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                              onClick={() => run(() => completeItem(item.id))}
-                            >
-                              {t("action.completeFull", voice)}
-                            </button>,
-                            schedule ? (
-                              <ScheduleControl
-                                key="schedule-m"
-                                {...schedule}
-                                variant="menu"
-                                label={scheduleMenuLabel(schedule.state, voice)}
+                        {/* #44 — a single-step to-do is a real `Task` row with a
+                            real `notes` column, and this is the Inbox twin of
+                            the Library gap: it has no steps to reach a note
+                            through. Trigger in the action group beside
+                            Complete, body below it, both null when the row has
+                            no task. */}
+                        <TaskNoteRow
+                          taskId={item.taskId}
+                          // #186 — the item grain, for a row that is triaged but
+                          // has no `Task` yet (`triageBrainDumpItem` does not
+                          // create one). `TaskNoteRow` picks between the two.
+                          itemId={item.id}
+                          taskTitle={item.text}
+                          notes={item.notes}
+                          itemNotes={item.itemNotes}
+                          voice={voice}
+                        >
+                          {({ trigger, body }) => (
+                            <>
+                              <RowActions
+                                className="pl-9"
+                                scheduled={item.scheduledAt != null}
+                                inline={[
+                                  <button
+                                    key="focus"
+                                    type="button"
+                                    onClick={() => focusOnItem(item.id)}
+                                    className={cn(
+                                      touchTarget,
+                                      "bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
+                                    )}
+                                  >
+                                    ▶ Start Focus
+                                  </button>,
+                                  <CompleteButton
+                                    key="complete"
+                                    voice={voice}
+                                    onClick={() =>
+                                      run(() => completeItem(item.id))
+                                    }
+                                  />,
+                                  trigger,
+                                ]}
+                                move={
+                                  <MoveToMenu
+                                    key="move-icon"
+                                    compact
+                                    describedById={moveInstructionsId}
+                                    currentBucket={bucketOfItem(item, now)}
+                                    voice={voice}
+                                    onMove={(target) =>
+                                      moveItemToBucket(item.id, target)
+                                    }
+                                  />
+                                }
+                                schedule={schedule}
+                                del={deleteControl(item.id, "delete", {
+                                  icon: true,
+                                })}
+                                menu={[
+                                  <MoveToMenu
+                                    key="move"
+                                    currentBucket={bucketOfItem(item, now)}
+                                    voice={voice}
+                                    onMove={(target) =>
+                                      moveItemToBucket(item.id, target)
+                                    }
+                                  />,
+                                  <button
+                                    key="focus-m"
+                                    type="button"
+                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                    onClick={() => focusOnItem(item.id)}
+                                  >
+                                    Start visual focus timer
+                                  </button>,
+                                  <button
+                                    key="complete-m"
+                                    type="button"
+                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                    onClick={() =>
+                                      run(() => completeItem(item.id))
+                                    }
+                                  >
+                                    {t("action.completeFull", voice)}
+                                  </button>,
+                                  schedule ? (
+                                    <ScheduleControl
+                                      key="schedule-m"
+                                      {...schedule}
+                                      variant="menu"
+                                      label={scheduleMenuLabel(
+                                        schedule.state,
+                                        voice,
+                                      )}
+                                    />
+                                  ) : null,
+                                  effectiveGoogle ? (
+                                    <ScheduleControl
+                                      key="ics-m"
+                                      variant="menu"
+                                      {...icsProps(item)}
+                                      label={t("action.addToCalendar", voice)}
+                                    />
+                                  ) : null,
+                                  editMenuItem(item),
+                                  deleteControl(item.id, "delete-m", {
+                                    fullWidth: true,
+                                  }),
+                                ]}
                               />
-                            ) : null,
-                            effectiveGoogle ? (
-                              <ScheduleControl
-                                key="ics-m"
-                                variant="menu"
-                                {...icsProps(item)}
-                                label={t("action.addToCalendar", voice)}
-                              />
-                            ) : null,
-                            editMenuItem(item),
-                            deleteControl(item.id, "delete-m", {
-                              fullWidth: true,
-                            }),
-                          ]}
-                        />
-                        {scheduleErrors[item.id] && (
-                          <p className="text-destructive mt-1 text-xs">
-                            {scheduleErrors[item.id]}
-                          </p>
-                        )}
+                              {scheduleErrors[item.id] && (
+                                <p className="text-destructive mt-1 text-xs">
+                                  {scheduleErrors[item.id]}
+                                </p>
+                              )}
+                              {body}
+                            </>
+                          )}
+                        </TaskNoteRow>
                       </li>
                     );
                   })}
@@ -1382,14 +2195,27 @@ export function InboxView({
                        Idle rows are dimmed; a row under review looks active. */
                     const optionsOpen = savedOptionsId === item.id;
                     return (
-                      <li
+                      // #186 — a parked row is untriaged too, so its note lives on
+                      // the item. A note that vanished because somebody moved a
+                      // row to the pantry would be the same defect in a quieter
+                      // place, which is exactly how the Library gap shipped.
+                      <TaskNoteRow
                         key={item.id}
-                        className={cn(
-                          "rounded-lg border px-4 py-3 text-sm",
-                          item.id === activeDragId && "opacity-40",
-                        )}
+                        taskId={item.taskId}
+                        itemId={item.id}
+                        taskTitle={item.text}
+                        notes={item.notes}
+                        itemNotes={item.itemNotes}
+                        voice={voice}
                       >
-                        {/* Title line + action row below — mirrors the Needs-review row layout.
+                        {({ trigger, body }) => (
+                          <li
+                            className={cn(
+                              "rounded-lg border px-4 py-3 text-sm",
+                              item.id === activeDragId && "opacity-40",
+                            )}
+                          >
+                            {/* Title line + action row below — mirrors the Needs-review row layout.
                             An idle row reads as "asleep" by dimming ONLY this title/metadata
                             line — NOT the whole row (#56). Layering opacity-70 over the <li>
                             also composited the bg-primary "Review now" CTA below WCAG-AA
@@ -1397,159 +2223,191 @@ export function InboxView({
                             Keeping the dim off the CTA lets it stay at its full 5.41:1 (light)
                             / 6.32:1 (dark). The dim lifts once the row is under review
                             (optionsOpen) or being dragged (the <li>'s opacity-40 covers it). */}
-                        <div
-                          className={cn(
-                            "flex items-start gap-2",
-                            !optionsOpen &&
-                              item.id !== activeDragId &&
-                              "opacity-70",
-                          )}
-                        >
-                          <DragGrip id={item.id} text={item.text} />
-                          {editingId === item.id ? (
-                            titleEditor(item)
-                          ) : (
-                            <span className="min-w-0 flex-1 break-words">
-                              <button
-                                type="button"
-                                aria-expanded={optionsOpen}
-                                onClick={() =>
-                                  setSavedOptionsId(
-                                    optionsOpen ? null : item.id,
-                                  )
-                                }
-                                className="text-lg font-semibold break-words text-left hover:underline"
-                              >
-                                {item.text}
-                              </button>{" "}
-                              {pencil(item)}
-                            </span>
-                          )}
-                        </div>
-                        {/* Idle: Review now + 📥 Move. Reviewing: the full v6
+                            <div
+                              className={cn(
+                                "flex items-start gap-2",
+                                !optionsOpen &&
+                                  item.id !== activeDragId &&
+                                  "opacity-70",
+                              )}
+                            >
+                              <DragGrip id={item.id} text={item.text} />
+                              {editingId === item.id ? (
+                                titleEditor(item)
+                              ) : (
+                                <span className="min-w-0 flex-1 break-words">
+                                  <button
+                                    type="button"
+                                    aria-expanded={optionsOpen}
+                                    onClick={() =>
+                                      setSavedOptionsId(
+                                        optionsOpen ? null : item.id,
+                                      )
+                                    }
+                                    className="text-lg font-semibold break-words text-left hover:underline"
+                                  >
+                                    {item.text}
+                                  </button>{" "}
+                                  {pencil(item)}
+                                </span>
+                              )}
+                            </div>
+                            {/* Idle: Review now + 📥 Move. Reviewing: the full v6
                             review-row frame (short buttons + ▾ full mirror);
                             the short "Save" re-snoozes and puts the row back
                             to sleep. */}
-                        {optionsOpen ? (
-                          <RowActions
-                            className="pl-9"
-                            inline={[
-                              <button
-                                key="breakdown"
-                                onClick={() => breakdown(item.id)}
-                                className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
-                              >
-                                {t("action.breakdown", voice)} →
-                              </button>,
-                              <button
-                                key="keep"
-                                className="hover:bg-accent rounded-md px-2.5 py-1 font-medium"
-                                onClick={() => run(() => keepAsTask(item.id))}
-                              >
-                                {t("action.addTodo", voice)}
-                              </button>,
-                              <button
-                                key="save"
-                                className="hover:bg-accent rounded-md px-2.5 py-1 font-medium"
-                                onClick={() => {
-                                  setSavedOptionsId(null);
-                                  run(() => snoozeBrainDumpItem(item.id, 60));
-                                }}
-                              >
-                                {t("action.saveShort", voice)}
-                              </button>,
-                              <CompleteButton
-                                key="complete"
-                                voice={voice}
-                                onClick={() => run(() => completeItem(item.id))}
-                              />,
-                            ]}
-                            move={
-                              <MoveToMenu
-                                key="move-icon"
-                                compact
-                                describedById={moveInstructionsId}
-                                currentBucket={bucketOfItem(item, now)}
-                                voice={voice}
-                                onMove={(target) =>
-                                  moveItemToBucket(item.id, target)
+                            {optionsOpen ? (
+                              <RowActions
+                                className="pl-9"
+                                inline={[
+                                  <button
+                                    key="breakdown"
+                                    onClick={() => breakdown(item.id)}
+                                    className={cn(
+                                      touchTarget,
+                                      "bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
+                                    )}
+                                  >
+                                    {t("action.breakdown", voice)} →
+                                  </button>,
+                                  <button
+                                    key="keep"
+                                    className={cn(
+                                      touchTarget,
+                                      "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
+                                    )}
+                                    onClick={() =>
+                                      run(() => keepAsTask(item.id))
+                                    }
+                                  >
+                                    {t("action.addTodo", voice)}
+                                  </button>,
+                                  <button
+                                    key="save"
+                                    className={cn(
+                                      touchTarget,
+                                      "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
+                                    )}
+                                    onClick={() => {
+                                      setSavedOptionsId(null);
+                                      run(() =>
+                                        snoozeBrainDumpItem(item.id, 60),
+                                      );
+                                    }}
+                                  >
+                                    {t("action.saveShort", voice)}
+                                  </button>,
+                                  <CompleteButton
+                                    key="complete"
+                                    voice={voice}
+                                    onClick={() =>
+                                      run(() => completeItem(item.id))
+                                    }
+                                  />,
+                                  // #186 — beside Complete, the placement !270
+                                  // settled for every list row.
+                                  trigger,
+                                ]}
+                                move={
+                                  <MoveToMenu
+                                    key="move-icon"
+                                    compact
+                                    describedById={moveInstructionsId}
+                                    currentBucket={bucketOfItem(item, now)}
+                                    voice={voice}
+                                    onMove={(target) =>
+                                      moveItemToBucket(item.id, target)
+                                    }
+                                  />
                                 }
+                                del={deleteControl(item.id, "delete-saved", {
+                                  icon: true,
+                                })}
+                                menu={[
+                                  <MoveToMenu
+                                    key="move"
+                                    currentBucket={bucketOfItem(item, now)}
+                                    voice={voice}
+                                    onMove={(target) =>
+                                      moveItemToBucket(item.id, target)
+                                    }
+                                  />,
+                                  <button
+                                    key="breakdown-m"
+                                    onClick={() => breakdown(item.id)}
+                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                  >
+                                    {t("action.breakdownFull", voice)}
+                                  </button>,
+                                  <button
+                                    key="keep-m"
+                                    onClick={() =>
+                                      run(() => keepAsTask(item.id))
+                                    }
+                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                  >
+                                    {t("action.addTodoFull", voice)}
+                                  </button>,
+                                  <button
+                                    key="save-m"
+                                    onClick={() => {
+                                      setSavedOptionsId(null);
+                                      run(() =>
+                                        snoozeBrainDumpItem(item.id, 60),
+                                      );
+                                    }}
+                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                  >
+                                    {t("action.saveForLater", voice)}
+                                  </button>,
+                                  <button
+                                    key="complete-m"
+                                    onClick={() =>
+                                      run(() => completeItem(item.id))
+                                    }
+                                    className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
+                                  >
+                                    {t("action.completeFull", voice)}
+                                  </button>,
+                                  editMenuItem(item),
+                                  deleteControl(item.id, "delete-saved-m", {
+                                    fullWidth: true,
+                                  }),
+                                ]}
                               />
-                            }
-                            del={deleteControl(item.id, "delete-saved", {
-                              icon: true,
-                            })}
-                            menu={[
-                              <MoveToMenu
-                                key="move"
-                                currentBucket={bucketOfItem(item, now)}
-                                voice={voice}
-                                onMove={(target) =>
-                                  moveItemToBucket(item.id, target)
-                                }
-                              />,
-                              <button
-                                key="breakdown-m"
-                                onClick={() => breakdown(item.id)}
-                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                              >
-                                {t("action.breakdownFull", voice)}
-                              </button>,
-                              <button
-                                key="keep-m"
-                                onClick={() => run(() => keepAsTask(item.id))}
-                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                              >
-                                {t("action.addTodoFull", voice)}
-                              </button>,
-                              <button
-                                key="save-m"
-                                onClick={() => {
-                                  setSavedOptionsId(null);
-                                  run(() => snoozeBrainDumpItem(item.id, 60));
-                                }}
-                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                              >
-                                {t("action.saveForLater", voice)}
-                              </button>,
-                              <button
-                                key="complete-m"
-                                onClick={() => run(() => completeItem(item.id))}
-                                className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                              >
-                                {t("action.completeFull", voice)}
-                              </button>,
-                              editMenuItem(item),
-                              deleteControl(item.id, "delete-saved-m", {
-                                fullWidth: true,
-                              }),
-                            ]}
-                          />
-                        ) : (
-                          <div className="mt-2 flex flex-wrap items-center gap-2 pl-9 text-xs">
-                            {/* Wakes the item for review IN the bucket — same
+                            ) : (
+                              <div className="mt-2 flex flex-wrap items-center gap-2 pl-9 text-xs">
+                                {/* Wakes the item for review IN the bucket — same
                                 toggle as pressing the row title. */}
-                            <button
-                              type="button"
-                              aria-expanded={optionsOpen}
-                              onClick={() => setSavedOptionsId(item.id)}
-                              className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
-                            >
-                              {t("action.reviewNow", voice)}
-                            </button>
-                            <span className="flex-1" />
-                            <MoveToMenu
-                              compact
-                              describedById={moveInstructionsId}
-                              currentBucket={bucketOfItem(item, now)}
-                              voice={voice}
-                              onMove={(target) =>
-                                moveItemToBucket(item.id, target)
-                              }
-                            />
-                          </div>
+                                <button
+                                  type="button"
+                                  aria-expanded={optionsOpen}
+                                  onClick={() => setSavedOptionsId(item.id)}
+                                  className={cn(
+                                    touchTarget,
+                                    "bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
+                                  )}
+                                >
+                                  {t("action.reviewNow", voice)}
+                                </button>
+                                <span className="flex-1" />
+                                <MoveToMenu
+                                  compact
+                                  describedById={moveInstructionsId}
+                                  currentBucket={bucketOfItem(item, now)}
+                                  voice={voice}
+                                  onMove={(target) =>
+                                    moveItemToBucket(item.id, target)
+                                  }
+                                />
+                              </div>
+                            )}
+                            {/* #186 — below the action line, inside this row's <li>,
+                            and where the saved note is READ while collapsed. */}
+                            {body}
+                          </li>
                         )}
-                      </li>
+                      </TaskNoteRow>
                     );
                   })}
                 </ul>
@@ -1615,10 +2473,26 @@ export function InboxView({
                             />
                           )}
                         </div>
-                        <div className="mt-2 flex flex-wrap items-center gap-2 pl-9 text-xs">
+                        {/* The Done bucket hand-rolls its action line instead
+                            of rendering <RowActions>, because it needs Reopen
+                            where the primary CTA goes and none of the rest.
+                            It still carries `data-row-actions` (#184): without
+                            the marker this line is invisible to the target-size
+                            guard, which is exactly how its Reopen button sat at
+                            24px while every other bucket's CTA was checked.
+                            The layout classes are duplicated from RowActions
+                            deliberately-for-now — folding this into that
+                            component is worth doing and is not this issue. */}
+                        <div
+                          data-row-actions=""
+                          className="mt-2 flex flex-wrap items-center gap-2 pl-9 text-xs"
+                        >
                           <button
                             type="button"
-                            className="hover:bg-accent rounded-md px-2.5 py-1 font-medium"
+                            className={cn(
+                              touchTarget,
+                              "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
+                            )}
                             onClick={() =>
                               item.stepsTotal > 1
                                 ? setReopenPickerId(
@@ -1684,6 +2558,13 @@ export function InboxView({
       <p id={moveInstructionsId} hidden>
         {MOVE_INSTRUCTIONS}
       </p>
+      {/* #186 — the ✎ row editor's description, once for the whole board. Same
+          reasoning as the node above: referenced text contributes to the
+          description without being painted, so the rule reaches a screen-reader
+          user without putting a hint line inside every row. */}
+      <p id={noteHintId} hidden>
+        {t("capture.noteHint", voice)}
+      </p>
     </div>
   );
 }
@@ -1692,29 +2573,55 @@ export function InboxView({
  * Enter saves, Escape cancels. */
 function EditTitleInput({
   initial,
+  subject,
+  noteHintId,
+  voice,
   onSave,
   onCancel,
 }: {
   initial: string;
+  /** #186 — this row's title, for the inline-note button's accessible name. */
+  subject: string;
+  /** #186 — the board's one hidden node describing the note syntax. */
+  noteHintId: string;
+  voice: Voice;
   onSave: (value: string) => void;
   onCancel: () => void;
 }) {
   const [value, setValue] = useState(initial);
+  // #186 — the note button places a caret, which is a DOM operation: `value`
+  // says what the text is and nothing says where in it the user is.
+  const inputRef = useRef<HTMLInputElement>(null);
   return (
-    <input
-      autoFocus
-      value={value}
-      aria-label="Edit title"
-      onChange={(e) => setValue(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          onSave(value.trim());
-        }
-        if (e.key === "Escape") onCancel();
-      }}
-      className="border-input bg-background focus-visible:ring-ring min-w-0 flex-1 rounded-md border px-2 py-1 text-sm outline-none focus-visible:ring-2"
-    />
+    <span className="flex min-w-0 flex-1 items-center gap-1">
+      <input
+        ref={inputRef}
+        autoFocus
+        value={value}
+        aria-label="Edit title"
+        // #186 — the same rule the capture bar states visibly. There is no room
+        // for a hint line inside a row, and one per editing row would be noise,
+        // so a screen-reader user gets it from the referenced hidden node while
+        // a sighted user has already met it under the capture bar.
+        aria-describedby={noteHintId}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            onSave(value.trim());
+          }
+          if (e.key === "Escape") onCancel();
+        }}
+        className="border-input bg-background focus-visible:ring-ring min-w-0 flex-1 rounded-md border px-2 py-1 text-sm outline-none focus-visible:ring-2"
+      />
+      <AddNoteButton
+        subject={subject}
+        value={value}
+        inputRef={inputRef}
+        onChange={setValue}
+        voice={voice}
+      />
+    </span>
   );
 }
 
@@ -1961,6 +2868,22 @@ function EmptyBucket({ voice }: { voice: Voice }) {
   );
 }
 
+/**
+ * A Needs-review row: an untriaged brain-dump item.
+ *
+ * #186 — this row DOES offer a note now, and the comment that used to say
+ * otherwise was right when it was written. #44's reasoning was that an untriaged
+ * item has no `Task` row and therefore no `notes` column, so the affordance could
+ * only render as nothing. #186 gave `BrainDumpItem` its own `notes` column and
+ * #179 began writing it at CAPTURE — which means a row in this bucket is now the
+ * most likely place in the app for a note to exist, and the one place it had
+ * nowhere to be read.
+ *
+ * The two halves arrive as props rather than being built here: the caller wraps
+ * this row in `TaskNoteRow`, which is what picks the grain, so the trigger can go
+ * inside `RowActions` beside Complete (owner request, settled on !270) with the
+ * body below the action line and still inside this row's `<li>`.
+ */
 function ItemRow({
   item,
   settings,
@@ -1988,6 +2911,8 @@ function ItemRow({
   editButton,
   editMenuItem,
   titleEditor,
+  noteTrigger,
+  noteBody,
 }: {
   item: Item;
   settings: AgingSettings;
@@ -2024,6 +2949,10 @@ function ItemRow({
   /** v6: "Edit task title" text entry for the ▾ dropdown (title line keeps editButton). */
   editMenuItem?: React.ReactNode;
   titleEditor?: React.ReactNode;
+  /** #186 — the note disclosure's two halves, from the `TaskNoteRow` this row is
+   *  wrapped in. The trigger joins the action group; the body opens below it. */
+  noteTrigger?: React.ReactNode;
+  noteBody?: React.ReactNode;
 }) {
   // #105 — every age question this row asks is answered by the ONE clock it was
   // handed. Each of these three used to default to a fresh `Date.now()`, and all
@@ -2163,21 +3092,30 @@ function ItemRow({
               <button
                 key="breakdown"
                 onClick={onBreakdown}
-                className="bg-primary text-primary-foreground hover:opacity-90 rounded-md px-2.5 py-1 font-medium"
+                className={cn(
+                  touchTarget,
+                  "bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
+                )}
               >
                 {t("action.breakdown", voice)} →
               </button>,
               <button
                 key="keep"
                 onClick={onKeep}
-                className="hover:bg-accent rounded-md px-2.5 py-1 font-medium"
+                className={cn(
+                  touchTarget,
+                  "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
+                )}
               >
                 {t("action.addTodo", voice)}
               </button>,
               <button
                 key="save-for-later"
                 onClick={onSaveForLater}
-                className="hover:bg-accent rounded-md px-2.5 py-1 font-medium"
+                className={cn(
+                  touchTarget,
+                  "hover:bg-accent rounded-md px-2.5 py-1 font-medium",
+                )}
               >
                 {t("action.saveShort", voice)}
               </button>,
@@ -2186,6 +3124,10 @@ function ItemRow({
                 voice={voice}
                 onClick={onComplete}
               />,
+              // #186 — beside Complete, the placement !270 settled for every
+              // list row. Null on a row whose caller has not been given the
+              // item's id, which `RowActions` renders as nothing.
+              noteTrigger,
             ]}
             move={moveIcon}
             schedule={schedule}
@@ -2248,6 +3190,11 @@ function ItemRow({
           {scheduleError && (
             <p className="text-destructive mt-1 text-xs">{scheduleError}</p>
           )}
+          {/* #186 — below the action line, still inside this row's <li>, so the
+              note reads as belonging to this row. Also where the SAVED note is
+              rendered while collapsed: #179 splits notes off at capture, so this
+              is the bucket where one most often already exists. */}
+          {noteBody}
         </div>
       </div>
     </li>

@@ -24,6 +24,12 @@ import {
 // server actions and the Schedule menu import it), so these two value sets are
 // authoritative from there rather than from constants.ts.
 import { SchedulePriority, ScheduleHours } from "@/lib/scheduling/types";
+// #44 — the note bound is a product decision, not a SQL literal to re-type
+// here. Importing it is what makes task-notes.ts authoritative: raising the
+// constant without a matching migration fails the assertion below.
+import { TASK_NOTE_MAX_LENGTH } from "@/lib/task-notes";
+import { FOCUS_PLAYLIST_NAME_MAX_LENGTH } from "@/lib/focus-playlists";
+import { SHOPPING_ITEM_TEXT_MAX_LENGTH } from "@/lib/shopping";
 
 // #38 — keep the DB CHECK constraints (see the
 // 20260719171754_add_status_check_constraints migration) in lockstep with the
@@ -138,17 +144,6 @@ const REGISTRY: ReadonlyArray<{
     values: FocusSound,
     nullable: false,
   },
-  // #70 — the category playlist selection. Nullable, and the NULL is the common
-  // case rather than an edge one: it means "play the whole list", which is what
-  // every row said before this column existed and what every row on an instance
-  // with no reachable catalog will keep saying.
-  {
-    constraint: "Settings_focusSoundCategory_check",
-    table: "Settings",
-    column: "focusSoundCategory",
-    values: FocusSoundCategory,
-    nullable: true,
-  },
   {
     constraint: "Settings_completeTickColor_check",
     table: "Settings",
@@ -211,6 +206,62 @@ const REGISTRY: ReadonlyArray<{
     values: LlmProvider,
     nullable: true,
   },
+  // #186 — the SAME two pseudo-enums, one grain earlier. `BrainDumpItem` got
+  // its own copy of the Schedule menu's intent so an UNTRIAGED item can carry a
+  // deadline: an item with no `Task` row had nowhere to persist one, which is
+  // why the full menu was only ever reachable from a multi-step task.
+  //
+  // Listed as two more rows rather than derived from the `Task` pair above, for
+  // the reason LENGTH_REGISTRY states for `Step_notes_check`: a registry that
+  // generated both grains from one entry would report an agreement it had never
+  // checked. Same `values` import, though — the vocabulary is one vocabulary,
+  // and mirroring it is the whole point.
+  {
+    constraint: "BrainDumpItem_schedulePriority_check",
+    table: "BrainDumpItem",
+    column: "schedulePriority",
+    values: SchedulePriority,
+    nullable: true,
+  },
+  {
+    constraint: "BrainDumpItem_scheduleHours_check",
+    table: "BrainDumpItem",
+    column: "scheduleHours",
+    values: ScheduleHours,
+    nullable: true,
+  },
+];
+
+// #180 — the schema's CHECK constraints over ARRAY columns.
+//
+// `Settings.focusSoundCategories` holds zero or more category slugs (empty = the
+// whole catalogue), so the guard has to be CONTAINMENT — `col <@ ARRAY[…]` —
+// rather than the `= ANY` equality the scalar REGISTRY above mirrors. Every
+// element must be one of the ten, and holding none must stay legal.
+//
+// It can reuse `literalsFromDef` because Postgres renders the containment form
+// as `CHECK ((col <@ ARRAY['a'::text, 'b'::text]))` — the same single-quoted
+// literals, in the same place. What it CANNOT reuse is the nullability field:
+// there is no `IS NULL` allowance to look for, and one appearing would be a bug
+// rather than a style choice, because `NULL <@ ARRAY[…]` evaluates to NULL and a
+// CHECK passes on NULL. A nullable column would therefore accept a NULL that no
+// constraint had actually validated, which is why the column is NOT NULL and why
+// that is asserted here rather than assumed.
+const ARRAY_REGISTRY: ReadonlyArray<{
+  constraint: string;
+  table: string;
+  column: string;
+  values: Readonly<Record<string, string>>;
+}> = [
+  {
+    // 20260806100000_settings_focus_sound_categories — replaces the single
+    // nullable `focusSoundCategory` (#70) with a multi-select. Behavioural half
+    // in src/lib/settings-focus-sound-categories-check.integration.test.ts.
+    constraint: "Settings_focusSoundCategories_check",
+    table: "Settings",
+    column: "focusSoundCategories",
+    values: FocusSoundCategory,
+  },
 ];
 
 // #78 — numeric-range CHECK constraints. Unlike the pseudo-enum columns above
@@ -269,6 +320,114 @@ const RANGE_REGISTRY: ReadonlyArray<{
   },
 ];
 
+// #44 — text-LENGTH CHECK constraints. A third shape, kept in its own registry
+// rather than bolted onto RANGE_REGISTRY: that one asserts a `>= min` on a
+// numeric column, and an upper bound measured by a FUNCTION (`char_length`)
+// does not fit its assertions at all. The reason it stays in this file is the
+// same one the range registry gives — one place still answers "which CHECK
+// constraints does this schema manage?".
+//
+// `max` is the inclusive upper bound the SQL must declare, and `fn` is the
+// measuring function it must use. Pinning the function is not pedantry:
+// `octet_length` and `char_length` differ by 4x on astral characters, so
+// silently swapping one for the other would reject an all-emoji note a quarter
+// the length of a Latin one the constraint accepts.
+const LENGTH_REGISTRY: ReadonlyArray<{
+  constraint: string;
+  table: string;
+  column: string;
+  max: number;
+  fn: string;
+  nullable: boolean;
+}> = [
+  {
+    // 20260805120000_task_and_step_notes (#44) — the user's freeform note.
+    // Bounded because it is threaded into the Google Task `notes` field, which
+    // the Tasks API rejects over 8192 characters; the note is one part of that
+    // envelope, so it cannot be allowed to fill it alone. Behavioural half in
+    // src/lib/notes-length-check.integration.test.ts.
+    constraint: "Task_notes_check",
+    table: "Task",
+    column: "notes",
+    max: TASK_NOTE_MAX_LENGTH,
+    fn: "char_length",
+    nullable: true,
+  },
+  {
+    // The per-step twin, same migration and same bound. Listed separately
+    // rather than derived from the entry above so that the two CAN diverge
+    // visibly if a future migration changes one — a registry that generated
+    // both from one row would report agreement it had not checked.
+    constraint: "Step_notes_check",
+    table: "Step",
+    column: "notes",
+    max: TASK_NOTE_MAX_LENGTH,
+    fn: "char_length",
+    nullable: true,
+  },
+  {
+    // 20260807120000_braindump_item_notes_and_schedule (#186 / #179) — the
+    // third grain, and the earliest one: an UNTRIAGED item can now hold a note,
+    // either typed into the inbox row or split off a capture's trailing `{…}`
+    // group (#179). Same bound and same measuring function as the two above,
+    // because the note is COPIED into `Task.notes` when the item is triaged
+    // (`brainDumpItemToTaskData`), so a wider bound here would be a value the
+    // narrower column then refuses on a routine action.
+    // Behavioural half in src/lib/notes-length-check.integration.test.ts.
+    constraint: "BrainDumpItem_notes_check",
+    table: "BrainDumpItem",
+    column: "notes",
+    max: TASK_NOTE_MAX_LENGTH,
+    fn: "char_length",
+    nullable: true,
+  },
+  {
+    // 20260807140000_focus_playlists (#185) — a user-chosen playlist name.
+    //
+    // ADDED IN REVIEW, and it is the reason this registry earns its keep. The
+    // migration's own comment asserted the constraint was "registered in
+    // LENGTH_REGISTRY" while `FocusPlaylist` appeared nowhere in this file — so
+    // the comment described a safety net that did not exist, and the sentence
+    // asserting it was the only thing standing in for the net. `!282` review.
+    //
+    // `char_length`, never `octet_length`: the two disagree by up to 4x on
+    // astral characters, so a byte bound would reject an all-emoji name a
+    // quarter the length of a Latin one it accepts. Same argument as the notes
+    // bounds above (#44).
+    //
+    // `nullable: false` — `FocusPlaylist.name` is NOT NULL, so the constraint
+    // must carry no `IS NULL` allowance. The lower bound (a name cannot be
+    // whitespace-only) is a separate clause in the same CHECK and is proved
+    // behaviourally in src/lib/focus-playlist-name-check.integration.test.ts,
+    // because this registry pins upper bounds and measuring functions only.
+    constraint: "FocusPlaylist_name_check",
+    table: "FocusPlaylist",
+    column: "name",
+    max: FOCUS_PLAYLIST_NAME_MAX_LENGTH,
+    fn: "char_length",
+    nullable: false,
+  },
+  {
+    // 20260808120000_shopping_items (#199) — a shopping-list entry.
+    //
+    // `char_length`, never `octet_length`, for the reason the two entries above
+    // give: a byte bound would reject an all-emoji entry a quarter the length of
+    // a Latin one it accepts.
+    //
+    // `nullable: false` — `ShoppingItem.text` is NOT NULL, so the constraint must
+    // carry no `IS NULL` allowance. The lower bound (an entry cannot be
+    // whitespace-only) is a separate clause in the same CHECK and is proved
+    // behaviourally in src/lib/shopping-item-text-check.integration.test.ts,
+    // because this registry pins upper bounds and measuring functions only.
+    constraint: "ShoppingItem_text_check",
+    table: "ShoppingItem",
+    column: "text",
+    max: SHOPPING_ITEM_TEXT_MAX_LENGTH,
+    fn: "char_length",
+    nullable: false,
+  },
+];
+
 // The schema the client is connected to (Prisma's `?schema=` param, default
 // "public"). We scope the pg_constraint query to it explicitly rather than
 // relying on current_schema() / search_path ordering.
@@ -288,6 +447,47 @@ function literalsFromDef(def: string): Set<string> {
     out.add(lit.replace(/''/g, "'"));
   }
   return out;
+}
+
+/**
+ * A constraint definition, flattened for substring matching.
+ *
+ * Postgres re-renders `CHECK (char_length("notes") <= 2000)` as
+ * `CHECK (((notes IS NULL) OR (char_length(notes) <= 2000)))` — it adds parens,
+ * and it quotes an identifier only when the identifier needs it, which differs
+ * between `"estMinutes"` and `notes`. Stripping the identifier quotes and
+ * collapsing whitespace makes the comparison one stable string.
+ *
+ * Substring matching rather than a regex assembled from the registry row, and
+ * that is deliberate. Such a regex is harder to read than the string it is
+ * looking for, and building one from variables is a pattern SAST flags as a
+ * class — correctly, even where the inputs are local constants as they are
+ * here. Written out, the comparison is just the SQL. Only double quotes are
+ * removed; single-quoted VALUE literals are what `literalsFromDef` reads.
+ */
+function flatDef(def: string): string {
+  return def.replace(/"/g, "").replace(/\s+/g, " ");
+}
+
+/**
+ * Every function NAME called in a constraint definition, lowercased.
+ *
+ * Needed because substring matching cannot answer "does this measure with
+ * `length`?" — `length(` is a substring of `char_length(`, so a plain
+ * `includes` reports the wrong function in every definition that uses the right
+ * one. The regex this replaced carried a word boundary that was doing that work
+ * invisibly; losing it turned two passing assertions red, which is how it was
+ * caught.
+ *
+ * The regex here is a fixed LITERAL — nothing is interpolated into it — so it
+ * carries none of the non-literal-construction risk that motivated the rewrite.
+ */
+function calledFunctions(def: string): Set<string> {
+  return new Set(
+    [...flatDef(def).matchAll(/([a-z_][a-z0-9_]*)\s*\(/gi)].map((m) =>
+      m[1].toLowerCase(),
+    ),
+  );
 }
 
 type CheckRow = { conname: string; def: string };
@@ -367,6 +567,64 @@ describe("enum CHECK constraints ↔ constants.ts are in sync", () => {
   );
 });
 
+describe("array containment CHECK constraints ↔ constants.ts are in sync (#180)", () => {
+  it("has exactly the managed array CHECK constraints (no missing, no strays)", () => {
+    const managedNames = new Set(ARRAY_REGISTRY.map((r) => r.constraint));
+    const applied = [...checks.keys()]
+      .filter((n) => managedNames.has(n))
+      .sort();
+    const expected = ARRAY_REGISTRY.map((r) => r.constraint).sort();
+    expect(applied).toEqual(expected);
+  });
+
+  it.each(ARRAY_REGISTRY)(
+    "$constraint ($table.$column) contains exactly its constants.ts value set",
+    ({ constraint, column, values }) => {
+      const def = checks.get(constraint);
+      expect(
+        def,
+        `constraint ${constraint} is not applied to the DB — add the migration`,
+      ).toBeDefined();
+
+      // Containment, not equality. A `= ANY (…)` here would mean the column had
+      // silently gone back to holding one slug, which the whole point of #180 is
+      // that it does not. The column name is quoted by Postgres when it is
+      // mixed-case, so the pattern tolerates both renderings; it is a literal
+      // that CAPTURES the name rather than one built around it, because a
+      // dynamically constructed pattern is a SAST finding even here.
+      const contained = /"?(\w+)"?\s*<@\s*ARRAY\[/.exec(def as string);
+      expect(
+        contained?.[1],
+        `${constraint} is not a containment (<@) check on "${column}" — its definition is: ${def}`,
+      ).toBe(column);
+
+      const constrained = literalsFromDef(def as string);
+      const expectedValues = new Set(Object.values(values));
+      for (const v of expectedValues) {
+        expect(
+          constrained.has(v),
+          `value "${v}" is in constants.ts but NOT in ${constraint} — add a migration to update the constraint`,
+        ).toBe(true);
+      }
+      for (const v of constrained) {
+        expect(
+          expectedValues.has(v),
+          `value "${v}" is in ${constraint} but NOT in constants.ts — remove it from the constraint or add the constant`,
+        ).toBe(true);
+      }
+      expect([...constrained].sort()).toEqual([...expectedValues].sort());
+
+      // See the registry comment: an `IS NULL` allowance on a containment check
+      // is not a widening, it is a hole — `NULL <@ ARRAY[…]` is NULL and a CHECK
+      // passes on NULL, so the column would accept an unvalidated NULL.
+      expect(
+        /IS NULL/i.test(def as string),
+        `${constraint} carries an "IS NULL" allowance; the column must be NOT NULL, because a NULL array passes containment unchecked`,
+      ).toBe(false);
+    },
+  );
+});
+
 describe("numeric-range CHECK constraints are applied (#78)", () => {
   it("has exactly the managed range CHECK constraints (no missing, no strays)", () => {
     const managedNames = new Set(RANGE_REGISTRY.map((r) => r.constraint));
@@ -388,8 +646,14 @@ describe("numeric-range CHECK constraints are applied (#78)", () => {
 
       // Postgres normalises `CHECK ("estMinutes" >= 1)` to
       // `CHECK (("estMinutes" >= 1))`; match the comparison, not the parens.
+      // #180 reached the same place from the other direction, with a literal
+      // capturing pattern. This file now has TWO bound assertions (`>= min`
+      // here, `<= max` below), so they share one idiom rather than each
+      // carrying its own — `flatDef` normalises the quoting and whitespace and
+      // the comparison is then just the SQL, with no pattern built from a
+      // variable for SAST to flag.
       expect(
-        new RegExp(`"${column}"\\s*>=\\s*${min}\\b`).test(def as string),
+        flatDef(def as string).includes(`${column} >= ${min}`),
         `${constraint} does not pin "${column}" >= ${min} — its definition is: ${def}`,
       ).toBe(true);
 
@@ -404,6 +668,69 @@ describe("numeric-range CHECK constraints are applied (#78)", () => {
       } else {
         // A NOT NULL column needs no NULL allowance; one appearing here would
         // mean the column went nullable without this registry noticing.
+        expect(
+          /IS NULL/i.test(def as string),
+          `${constraint} guards a non-nullable column but unexpectedly contains an "IS NULL" allowance`,
+        ).toBe(false);
+      }
+    },
+  );
+});
+
+describe("text-length CHECK constraints are applied (#44)", () => {
+  it("has exactly the managed length CHECK constraints (no missing, no strays)", () => {
+    const managedNames = new Set(LENGTH_REGISTRY.map((r) => r.constraint));
+    const applied = [...checks.keys()]
+      .filter((n) => managedNames.has(n))
+      .sort();
+    const expected = LENGTH_REGISTRY.map((r) => r.constraint).sort();
+    expect(applied).toEqual(expected);
+  });
+
+  it.each(LENGTH_REGISTRY)(
+    "$constraint pins $column <= $max, measured with $fn",
+    ({ constraint, column, max, fn, nullable }) => {
+      const def = checks.get(constraint);
+      expect(
+        def,
+        `constraint ${constraint} is not applied to the DB — add the migration`,
+      ).toBeDefined();
+
+      // Matched against the flattened definition, so the parens and quoting
+      // Postgres chooses for itself cannot break the assertion.
+      expect(
+        flatDef(def as string).includes(`${fn}(${column}) <= ${max}`),
+        `${constraint} does not pin ${fn}("${column}") <= ${max} — its definition is: ${def}`,
+      ).toBe(true);
+
+      // The measuring function is pinned above; this catches the swap in the
+      // other direction, where a second call to the wrong one is added rather
+      // than the right one replaced.
+      const otherFns = ["octet_length", "length", "bit_length"].filter(
+        (f) => f !== fn,
+      );
+      const called = calledFunctions(def as string);
+      expect(
+        called.has(fn),
+        `${constraint} does not call ${fn} at all — its definition is: ${def}`,
+      ).toBe(true);
+      for (const other of otherFns) {
+        expect(
+          called.has(other),
+          `${constraint} measures with ${other}, which disagrees with ${fn} on multi-byte text — its definition is: ${def}`,
+        ).toBe(false);
+      }
+
+      if (nullable) {
+        // Without the allowance a plain `char_length(col) <= n` is UNKNOWN for
+        // NULL, which a CHECK treats as satisfied — so this one is belt rather
+        // than braces, and it is asserted because the day the column goes NOT
+        // NULL the allowance becomes wrong and nothing else would notice.
+        expect(
+          /IS NULL/i.test(def as string),
+          `${constraint} guards a nullable column but has no "IS NULL" allowance`,
+        ).toBe(true);
+      } else {
         expect(
           /IS NULL/i.test(def as string),
           `${constraint} guards a non-nullable column but unexpectedly contains an "IS NULL" allowance`,

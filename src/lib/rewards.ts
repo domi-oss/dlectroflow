@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
   RewardType,
@@ -7,7 +8,7 @@ import {
   type RewardType as RewardTypeT,
   type BadgeKey as BadgeKeyT,
 } from "@/lib/constants";
-import { getSettings, getStreak, isUniqueViolation } from "@/lib/db";
+import { getSettings, getStreak } from "@/lib/db";
 
 // ── helpers ────────────────────────────────────────────────────────────────
 function ymd(d: Date): string {
@@ -74,10 +75,25 @@ export async function maybeAwardInboxZero(workspaceId: string) {
 // ── badges ─────────────────────────────────────────────────────────────────
 /**
  * Award a badge once. Returns true if it was newly earned, false if it was
- * already held. The findUnique→create pair is a TOCTOU: two concurrent awards
- * can both pass the existence check and one loses the unique (workspaceId,key)
- * constraint with P2002. Treat that as "already earned" (return false) rather
- * than throwing — the badge exists either way.
+ * already held.
+ *
+ * The findUnique→create pair is a TOCTOU by design: two concurrent awards can
+ * both pass the existence check and both write. That used to be handled by
+ * catching the resulting P2002, which was correct and still printed — Prisma's
+ * client logger fires before our `catch` ever sees the error (#158, and see the
+ * note on `log` in src/lib/db.ts). `createMany` + `skipDuplicates` compiles to
+ * `INSERT ... ON CONFLICT DO NOTHING`, so the loser inserts nothing and is told
+ * so by `count`, rather than raising.
+ *
+ * `createMany` rather than `!240`'s `createManyAndReturn`: the caller wants the
+ * boolean, never the row, so there is nothing to RETURNING. And `count` carries
+ * exactly the fact the old `catch` was reconstructing — 1 means this call
+ * earned it, 0 means somebody already had.
+ *
+ * The leading read stays. Most calls are for a badge already held
+ * (`maybeAwardTenStepsDay` fires on every step completion past the tenth), and
+ * an indexed SELECT is cheaper than a speculative insert that has to be rolled
+ * back on conflict.
  */
 export async function awardBadge(
   workspaceId: string,
@@ -87,13 +103,11 @@ export async function awardBadge(
     where: { workspaceId_key: { workspaceId, key } },
   });
   if (existing) return false;
-  try {
-    await prisma.badge.create({ data: { key, workspaceId } });
-    return true;
-  } catch (e) {
-    if (isUniqueViolation(e)) return false; // concurrent award won the race
-    throw e;
-  }
+  const { count } = await prisma.badge.createMany({
+    data: { key, workspaceId },
+    skipDuplicates: true,
+  });
+  return count > 0; // 0 = a concurrent award won the race; the badge exists
 }
 
 /** Award ten-steps-in-a-day once StepDone count for today reaches 10. */
@@ -123,6 +137,180 @@ export async function rewardStepDone(
   const streak = await touchStreakOnEngagement(workspaceId); // completion is a qualifying engagement
   await maybeAwardTenStepsDay(workspaceId);
   return streak;
+}
+
+/**
+ * Take back the points a step completion awarded, because that completion is
+ * being undone (#198).
+ *
+ * ── What gets reversed, and the rule behind it ──────────────────────────────
+ *
+ * A reward is reversed when **the same work could otherwise be paid for twice**.
+ * It is kept when the reward records something that genuinely happened and does
+ * not un-happen. Applying that rule to the four types this app awards:
+ *
+ *  * **`step_done` — reversed.** Awarded once per completion of a step, and a
+ *    step can be completed, undone and completed again with no new work in
+ *    between. Duplicable, so it comes back.
+ *  * **`task_complete` — reversed, but only when this undo actually reopens a
+ *    task that was closed.** `markTaskCompleted` logs it whenever a step closes
+ *    its task, and nothing stops it running again when that step is re-completed
+ *    (`awardBadge` is idempotent; `logReward` is not). Same farm as `step_done`,
+ *    one level up — found in review round 3. The gate is real state (the task WAS
+ *    `Done` and is now Active), never an inference.
+ *  * **`session_finished` — NOT reversed, deliberately.** It pays for *having
+ *    focused for a stretch of time*, not for the step being finished, and that
+ *    time was really spent. This is the same argument that keeps the streak
+ *    below, and it has to be the same or the two are incoherent. It is also not
+ *    farmable: re-completing through the timer requires pressing Start, which
+ *    calls `beginFocus` and opens a **new** `FocusSession`, so a second
+ *    `session_finished` is paid for by a second real session.
+ *
+ *    Review round 2 flagged the missing reversal and round 3 showed the fix was
+ *    the wrong remedy: it inferred "this completion came from a session" from
+ *    whether *any* completed `FocusSession` existed for the step, and those rows
+ *    are never cleared — so after one timer completion, every later undo claimed
+ *    a session and deleted the newest `session_finished` in the workspace, which
+ *    could belong to unrelated, legitimately finished work. The inference is gone
+ *    rather than made cleverer, because there was nothing correct for it to infer
+ *    from.
+ *  * **Badges — not reversed.** Once-ever achievements; revoking one would make
+ *    the collection lie about the past, and `awardBadge` is idempotent anyway.
+ *
+ * ── Why "the newest row of that type" is enough ─────────────────────────────
+ *
+ * Each reversal removes the most recent row of its type, not "the one this step
+ * earned", because there is no such thing: `RewardEvent` carries type, points and
+ * workspace and holds no step or task reference (see `prisma/schema.prisma`), so
+ * every row of one type in a workspace is an identical `RewardPoints[type]`.
+ * **Within a type, which row goes is unobservable** — the points total, the
+ * dashboard and the day rollup all read the same afterwards, and nothing displays
+ * per-step or per-task points. Attributing rewards to their source would need a
+ * nullable column and a migration, which is not worth buying an identical
+ * outcome.
+ *
+ * That argument holds **within** a type and **not across** types, which is
+ * exactly where round 2's fix went wrong: deleting a `session_finished` to
+ * compensate for a `step_done` is not a relabelling, it is taking points from
+ * different work. Every gate here is therefore a fact about state, not a guess
+ * about provenance.
+ *
+ * Returns what was actually removed, so callers can be tested on it and so
+ * "nothing to reverse" is a normal answer rather than an error.
+ *
+ * ── `db`: why this takes a transaction client ────────────────────────────────
+ *
+ * `uncompleteStep` (src/app/actions/focus.ts) runs its local writes and this
+ * reversal inside ONE `prisma.$transaction`, so that a reversal that fails rolls
+ * the step write back with it and the undo stays retryable — read the note there
+ * for the failure it closes (review round 4). That only holds if the reversal
+ * actually joins the transaction, so the client is a parameter rather than the
+ * module-level singleton. It defaults to `prisma`, which keeps every other
+ * caller and the unit tests unchanged.
+ */
+export async function reverseStepCompletionRewards(
+  workspaceId: string,
+  opts: { includeTaskComplete: boolean },
+  db: Prisma.TransactionClient = prisma,
+): Promise<{ stepDone: boolean; taskComplete: boolean }> {
+  const { stepDone, taskComplete } = await reverseItemCompletionRewards(
+    workspaceId,
+    { stepDone: 1, includeTaskComplete: opts.includeTaskComplete },
+    db,
+  );
+  return { stepDone: stepDone > 0, taskComplete };
+}
+
+/**
+ * The same reversal at whole-to-do arity, for `reopenItem` (#196).
+ *
+ * ── Why the step count is a parameter ───────────────────────────────────────
+ *
+ * `uncompleteStep` undoes exactly one step, so
+ * {@link reverseStepCompletionRewards} takes back exactly one `step_done`.
+ * Reopening a to-do from the inbox Done view undoes as many as the user
+ * selected, and `completeItem` banked one per step it closed — so a five-step
+ * reopen owes five, and reopening then re-completing paid for the same work
+ * twice. That defect was live in production and is what #196 records as its
+ * second half.
+ *
+ * The two counts move **independently**, which is why this is not a loop around
+ * the singular version: a stepless to-do earns a `task_complete` and no
+ * `step_done` at all, and calling the singular one anyway would take back the
+ * newest `step_done` in the WORKSPACE — a row belonging to unrelated work. Same
+ * class of error as the `session_finished` inference round 3 removed above.
+ *
+ * ── Sequential, deliberately ────────────────────────────────────────────────
+ *
+ * Each reversal reads "the newest row of this type" and then deletes it, so
+ * running them concurrently would have every read return the same row and only
+ * one delete land — reporting N reversals for one. The loop also stops the
+ * moment the workspace runs out: once there is no `step_done` left there will
+ * not be one on the next pass either, and each extra request is a wasted round
+ * trip inside the caller's open transaction.
+ *
+ * `stepDone` in the result is a COUNT, not a flag, so a caller can be tested on
+ * having asked for the right number.
+ */
+export async function reverseItemCompletionRewards(
+  workspaceId: string,
+  opts: { stepDone: number; includeTaskComplete: boolean },
+  db: Prisma.TransactionClient = prisma,
+): Promise<{ stepDone: number; taskComplete: boolean }> {
+  let stepDone = 0;
+  while (stepDone < opts.stepDone) {
+    if (!(await reverseLatestReward(workspaceId, RewardType.StepDone, db))) {
+      break; // nothing left in this workspace to take back
+    }
+    stepDone += 1;
+  }
+  const taskComplete = opts.includeTaskComplete
+    ? await reverseLatestReward(workspaceId, RewardType.TaskComplete, db)
+    : false;
+  return { stepDone, taskComplete };
+}
+
+/**
+ * Remove the newest reward of one type in one workspace. See above for why
+ * "newest", and for why the client is a parameter.
+ *
+ * `deleteMany` on a single id, rather than `delete` — the read and the write are
+ * a TOCTOU, the same shape `awardBadge` above has and for the same reason: two
+ * concurrent reversals can both see the same newest row, and the loser's
+ * `delete` then raises P2025 because the row is already gone (review round 4).
+ * `deleteMany` compiles to a plain `DELETE … WHERE id = …` and reports how many
+ * rows it matched instead of raising, so a lost race resolves to `count: 0` and
+ * is reported as `false` — which is already this function's word for "there was
+ * nothing to take back". Fixing it here rather than by catching P2025 at the
+ * call site keeps the primitive honest for every caller.
+ *
+ * A genuine failure (a dead connection, say) still rejects, and must: at the
+ * call site it is what rolls the step write back.
+ */
+async function reverseLatestReward(
+  workspaceId: string,
+  type: RewardTypeT,
+  db: Prisma.TransactionClient,
+): Promise<boolean> {
+  const latest = await db.rewardEvent.findFirst({
+    where: { workspaceId, type },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+  if (!latest) return false;
+  // `workspaceId` in the filter as well as the id, not because the id is in doubt
+  // — it came from the workspace-scoped read directly above — but because
+  // `deleteMany` is a BULK operation, and the scoping harness
+  // (src/lib/__tests__/scoping.harness.test.ts) requires every bulk write to
+  // carry the scope in its own arguments rather than inherit it from a read a few
+  // lines up. It is right to: the previous by-id `delete` was accepted only as a
+  // primary-key write guarded by that read, and swapping in a bulk op quietly
+  // changed which rule applied. Belt and braces either way — a foreign id now
+  // resolves to `count: 0` instead of reaching another workspace's row.
+  const { count } = await db.rewardEvent.deleteMany({
+    where: { id: latest.id, workspaceId },
+  });
+  return count > 0; // 0 = a concurrent reversal already took this row
 }
 
 // ── streak ───────────────────────────────────────────────────────────────
@@ -224,7 +412,8 @@ export async function touchStreakOnEngagement(
   });
 
   // Streak badges — only when the streak actually moved (matches the prior
-  // early-return for same-day repeats). awardBadge is itself P2002-safe.
+  // early-return for same-day repeats). awardBadge tolerates a concurrent
+  // award without raising (#158).
   const { changed, ...update } = result;
   if (changed) {
     // Comeback — restarted after a gap (a prior streak had ended). No-shame.

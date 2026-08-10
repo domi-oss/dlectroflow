@@ -8,7 +8,7 @@
  * over-commit is the owner's call, so the warning informs and the Schedule button
  * stays enabled.
  */
-import { schedulingTimeZone } from "./hours";
+import { formatShortDay } from "./hours";
 import type { WindowPlan } from "./windows";
 
 /** `"45m"` / `"2h"` / `"3h30m"` — never `"2h0m"`, never `"NaNm"`. */
@@ -22,15 +22,9 @@ export function formatBlockMinutes(total: number): string {
   return rest === 0 ? `${h}h` : `${h}h${rest}m`;
 }
 
-/** `"Fri 31 Jul"` — in the scheduling zone, not the server's. */
-function shortDay(d: Date): string {
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: schedulingTimeZone(),
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-  }).format(d);
-}
+/** `"Fri 31 Jul"` — in the scheduling zone, not the server's. Shared with the
+ *  /focus launcher's due-by (#187) so the two cannot name different days. */
+const shortDay = (d: Date): string => formatShortDay(d);
 
 export function scheduleSummary(
   plan: WindowPlan,

@@ -7,19 +7,20 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const db = vi.hoisted(() => ({
   user: { findUnique: vi.fn() },
+  // #158: the first-use insert is `createMany({ skipDuplicates: true })`, so a
+  // concurrent first use resolves with `count: 0` rather than rejecting with a
+  // P2002 Prisma has already printed. `create` stays mocked so a regression
+  // back to it shows up as an unexpected call rather than as a pass.
   userAiUsage: {
     findUnique: vi.fn(),
     updateMany: vi.fn(),
     create: vi.fn(),
+    createMany: vi.fn(),
     update: vi.fn(),
   },
 }));
 
-vi.mock("@/lib/db", () => ({
-  prisma: db,
-  isUniqueViolation: (e: unknown) =>
-    !!e && typeof e === "object" && (e as { code?: string }).code === "P2002",
-}));
+vi.mock("@/lib/db", () => ({ prisma: db }));
 
 import {
   consumeUserBreakdown,
@@ -50,7 +51,7 @@ beforeEach(() => {
   // Default: nothing consumed yet, and every write succeeds.
   db.userAiUsage.findUnique.mockResolvedValue(null);
   db.userAiUsage.updateMany.mockResolvedValue({ count: 0 });
-  db.userAiUsage.create.mockResolvedValue({});
+  db.userAiUsage.createMany.mockResolvedValue({ count: 1 });
 });
 
 afterEach(() => {
@@ -94,9 +95,11 @@ describe("consumeUserBreakdown — the policy matrix", () => {
     });
     // First use → the row is created with a single consumed unit, exactly as a
     // capped account's would be. The panel has something to show.
-    expect(db.userAiUsage.create).toHaveBeenCalledWith({
+    expect(db.userAiUsage.createMany).toHaveBeenCalledWith({
       data: { userId: USER_ID, count: 1, windowStartedAt: expect.any(Date) },
+      skipDuplicates: true,
     });
+    expect(db.userAiUsage.create).not.toHaveBeenCalled();
   });
 
   it("uncapped: increments an existing row inside the active window", async () => {
@@ -151,7 +154,7 @@ describe("consumeUserBreakdown — the policy matrix", () => {
 
   it("capped, under quota: instance key, ONE unit metered", async () => {
     db.user.findUnique.mockResolvedValue(userRow({ aiQuota: 5 }));
-    db.userAiUsage.create.mockResolvedValue({});
+    db.userAiUsage.createMany.mockResolvedValue({ count: 1 });
 
     const access = await consumeUserBreakdown(USER_ID);
 
@@ -162,9 +165,11 @@ describe("consumeUserBreakdown — the policy matrix", () => {
       blockedReason: null,
     });
     // First use → the row is created with a single consumed unit.
-    expect(db.userAiUsage.create).toHaveBeenCalledWith({
+    expect(db.userAiUsage.createMany).toHaveBeenCalledWith({
       data: { userId: USER_ID, count: 1, windowStartedAt: expect.any(Date) },
+      skipDuplicates: true,
     });
+    expect(db.userAiUsage.create).not.toHaveBeenCalled();
   });
 
   it("capped, over quota: blocked with the same 'quota' reason the guest cap returns", async () => {
@@ -185,7 +190,7 @@ describe("consumeUserBreakdown — the policy matrix", () => {
       metered: false,
       blockedReason: "quota",
     });
-    expect(db.userAiUsage.create).not.toHaveBeenCalled();
+    expect(db.userAiUsage.createMany).not.toHaveBeenCalled();
   });
 
   it("own_key WITH a key present: their key, no cap, nothing metered", async () => {
@@ -289,7 +294,7 @@ describe("consumeUserBreakdown — the policy matrix", () => {
     const access = await consumeUserBreakdown(USER_ID);
 
     expect(access.blockedReason).toBe("quota");
-    expect(db.userAiUsage.create).not.toHaveBeenCalled();
+    expect(db.userAiUsage.createMany).not.toHaveBeenCalled();
     expect(db.userAiUsage.updateMany).not.toHaveBeenCalled();
   });
 });

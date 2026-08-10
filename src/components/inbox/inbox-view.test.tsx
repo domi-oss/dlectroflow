@@ -11,6 +11,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
+  CAPTURE_TIMEOUT_MS,
   InboxView,
   dragEndToMove,
   DragGhostRow,
@@ -70,6 +71,23 @@ vi.mock("@/app/actions/ics-schedule", () => ({
   scheduleViaIcs: scheduleViaIcsMock,
 }));
 vi.mock("@/lib/download-ics", () => ({ downloadIcs: downloadIcsMock }));
+// #44 — the rows mount the note disclosure, so its actions must exist.
+vi.mock("@/app/actions/task-notes", () => ({
+  updateTaskNotes: vi
+    .fn()
+    .mockImplementation(async (_id: string, notes: string | null) => ({
+      ok: true,
+      notes,
+    })),
+}));
+vi.mock("@/app/actions/step-notes", () => ({
+  updateStepNotes: vi
+    .fn()
+    .mockImplementation(async (_id: string, notes: string | null) => ({
+      ok: true,
+      notes,
+    })),
+}));
 
 vi.mock("@/lib/notifications", () => ({
   notificationPermission: () => "default",
@@ -283,6 +301,882 @@ describe("InboxView — capture confirm", () => {
     });
 
     expect(screen.queryByText("captured ✓")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * #210 — the capture bar used to clear the input and render "captured ✓"
+ * unconditionally, before the write had resolved and regardless of whether it
+ * ever did. Capture is the only irreversible loss in the app: every other
+ * action works on an `id` that exists because the server already has the row,
+ * so a failure there can be retried against data that is still present. Here
+ * the words existed nowhere else.
+ *
+ * Every other spec in this file mocks `createBrainDumpItem` as resolving, which
+ * is exactly why this survived — so these drive the mock the other way.
+ */
+describe("InboxView — a capture that fails (#210)", () => {
+  /**
+   * #168's hazard, from the other end: `vi.clearAllMocks()` in the global
+   * beforeEach drops recorded calls but NOT a queued `mockRejectedValueOnce`.
+   * These specs queue one every time, so reset the queue and restore the
+   * module-level default rather than leaving a rejection for whichever spec
+   * runs next.
+   */
+  beforeEach(() => {
+    vi.mocked(createBrainDumpItem).mockReset();
+    vi.mocked(createBrainDumpItem).mockResolvedValue(undefined);
+  });
+
+  /** What Next 16's client throws when the action id is from another build. */
+  function staleActionError() {
+    return Object.assign(
+      new Error(
+        'Server Action "40bef5efc6c80527f80d35d95a902c7e0bc4056eb0" was not found on the server.',
+      ),
+      { name: "UnrecognizedActionError" },
+    );
+  }
+
+  function renderInbox(initialItems: Item[] = []) {
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={initialItems}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    return screen.getByPlaceholderText(/Brain dump/i) as HTMLInputElement;
+  }
+
+  /**
+   * `fireEvent` rather than `userEvent`: two of these specs drive fake timers
+   * (the action timeout, the confirm window) and userEvent's own timer plumbing
+   * has to be wired to them separately. The "clears the captured indicator
+   * after ~1.5s" spec above sets the same precedent.
+   */
+  async function capture(input: HTMLInputElement, value: string) {
+    fireEvent.change(input, { target: { value } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await flush();
+  }
+
+  /**
+   * The notice's Retry, on the same flush budget as `capture` above.
+   *
+   * Duo review round 1: the click-then-flush block was inlined four times with
+   * the tick count drifting between two and four, so a spec could have passed
+   * for having flushed enough rather than for the behaviour it names. One helper
+   * with one budget, and it moves in one place if the async hop count changes.
+   */
+  async function clickRetry() {
+    await act(async () => {
+      screen.getByRole("button", { name: /try again/i }).click();
+      await flushTicks();
+    });
+  }
+
+  /** Flush the microtask queue driving the startTransition/async action. */
+  async function flush() {
+    await act(async () => {
+      await flushTicks();
+    });
+  }
+
+  async function flushTicks() {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  it("does not claim 'captured ✓' when the write rejected", async () => {
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    const input = renderInbox();
+
+    await capture(input, "buy milk");
+
+    expect(screen.queryByText("captured ✓")).not.toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /couldn't save that/i,
+    );
+  });
+
+  it("keeps the typed words recoverable in the input", async () => {
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    const input = renderInbox();
+
+    await capture(input, "buy milk");
+
+    expect(input).toHaveValue("buy milk");
+  });
+
+  it("names the words it could not save, so they survive even if the field has moved on", async () => {
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    const input = renderInbox();
+
+    await capture(input, "buy milk");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/buy milk/);
+  });
+
+  it("offers Retry, and Retry re-posts the same words", async () => {
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    await clickRetry();
+
+    expect(vi.mocked(createBrainDumpItem).mock.calls).toEqual([
+      ["buy milk"],
+      ["buy milk"],
+    ]);
+  });
+
+  it("a successful Retry clears both the notice and the text it restored", async () => {
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    await clickRetry();
+
+    // The row is on the server now, so leaving the words in the field would
+    // invite a duplicate on the next Enter.
+    expect(input).toHaveValue("");
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(screen.getByText("captured ✓")).toBeInTheDocument();
+  });
+
+  // The restore must never be a second kind of data loss: a slow failure gives
+  // the user time to type their next thought, and overwriting THAT would be the
+  // same bug wearing the other hat.
+  it("does not clobber words typed while the failed capture was still in flight", async () => {
+    let rejectWrite!: (reason: unknown) => void;
+    vi.mocked(createBrainDumpItem).mockReturnValueOnce(
+      new Promise<void>((_, reject) => {
+        rejectWrite = reject;
+      }),
+    );
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    fireEvent.change(input, { target: { value: "call mum" } });
+    await act(async () => {
+      rejectWrite(new Error("offline"));
+      await flushTicks();
+    });
+
+    expect(input).toHaveValue("call mum");
+    // "buy milk" is not lost — the notice is holding it, with a Retry.
+    expect(await screen.findByRole("alert")).toHaveTextContent(/buy milk/);
+  });
+
+  it("a stale deployment offers a reload and no Retry, which could never work", async () => {
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(staleActionError());
+    const input = renderInbox();
+
+    await capture(input, "buy milk");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/app updated/i);
+    expect(screen.getByRole("button", { name: /reload/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
+    // Still recoverable: the reload cannot happen without the user pressing it,
+    // and the words are on screen either way.
+    expect(input).toHaveValue("buy milk");
+  });
+
+  // The third failure mode is silence, not a rejection: a pod rolling
+  // mid-request leaves the write hanging, and an un-timed-out await looks
+  // exactly like the bug from the user's side — cleared field, no confirmation,
+  // no error, no words.
+  it("surfaces a write that never answers, once CAPTURE_TIMEOUT_MS elapses", async () => {
+    vi.useFakeTimers();
+    vi.mocked(createBrainDumpItem).mockReturnValueOnce(
+      new Promise<void>(() => {}),
+    );
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText("captured ✓")).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CAPTURE_TIMEOUT_MS);
+    });
+
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(input).toHaveValue("buy milk");
+  });
+
+  /**
+   * Duo review round 2: a timeout is the one failure whose verdict is genuinely
+   * unknown. `withActionTimeout` bounds how long the UI waits, not the request —
+   * a server action cannot be aborted from the client — so the write may still
+   * land, and a retry after it does creates a duplicate. "Couldn't save that"
+   * would be a claim the client cannot make, and it is the same class of
+   * unverifiable confirmation as the `captured ✓` this issue is about, just
+   * pointing the other way.
+   */
+  it("says a timed-out capture MAY have saved, rather than asserting it did not", async () => {
+    vi.useFakeTimers();
+    vi.mocked(createBrainDumpItem).mockReturnValueOnce(
+      new Promise<void>(() => {}),
+    );
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(CAPTURE_TIMEOUT_MS);
+    });
+
+    const notice = screen.getByRole("alert");
+    expect(notice).toHaveTextContent(/may already have saved/i);
+    expect(notice).toHaveTextContent(/check your inbox/i);
+    expect(notice).not.toHaveTextContent(/couldn't save that/i);
+    // Retry is still offered: a duplicate item is one tap to delete, an
+    // unwritten thought is not recoverable at all, so the choice is the user's
+    // and the notice gives them what they need to make it.
+    expect(
+      screen.getByRole("button", { name: /try again/i }),
+    ).toBeInTheDocument();
+    expect(input).toHaveValue("buy milk");
+  });
+
+  /**
+   * Duo review round 2, and the reason `schedulingIds` is keyed per row rather
+   * than being one boolean (#169): a shared in-flight flag belongs to whichever
+   * request settles last, not to the one it is guarding.
+   *
+   * A capture the user starts while a retry is outstanding is deliberately not
+   * gated (independent inserts, and firing thoughts in a row is the point of the
+   * control) — so it WILL settle inside the retry's window, and a shared flag
+   * would hand the Retry button back while its own request was still in flight.
+   */
+  it("scopes the Retry guard to the retry, so an unrelated capture settling cannot unblock it", async () => {
+    let rejectFirst!: (reason: unknown) => void;
+    let resolveOther!: () => void;
+    vi.mocked(createBrainDumpItem)
+      // the original capture, failed on demand so the field can be typed into
+      // first — that is what makes the second capture a genuinely unrelated
+      // thought rather than one that supersedes the notice
+      .mockReturnValueOnce(
+        new Promise<void>((_, reject) => {
+          rejectFirst = reject;
+        }),
+      )
+      // its retry, which never answers
+      .mockReturnValueOnce(new Promise<void>(() => {}))
+      // the unrelated capture, resolved on demand
+      .mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          resolveOther = resolve;
+        }),
+      );
+    const input = renderInbox();
+    await capture(input, "buy milk");
+    fireEvent.change(input, { target: { value: "call mum" } });
+    await act(async () => {
+      rejectFirst(new Error("offline"));
+      await flushTicks();
+    });
+
+    await clickRetry();
+    expect(screen.getByRole("button", { name: /try again/i })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    await flush();
+    await act(async () => {
+      resolveOther();
+      await flushTicks();
+    });
+
+    // "buy milk"'s retry is still outstanding, so Retry must still be blocked —
+    // and a press must not post it a second time.
+    expect(screen.getByRole("button", { name: /try again/i })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    await clickRetry();
+    expect(vi.mocked(createBrainDumpItem).mock.calls).toEqual([
+      ["buy milk"],
+      ["buy milk"],
+      ["call mum"],
+    ]);
+  });
+
+  /**
+   * Duo review round 3 — WCAG 2.4.3, on the far side of the press. Keeping the
+   * notice mounted stops focus dropping to `<body>` while the retry runs; a
+   * retry that SUCCEEDS then unmounts the button the user is standing on, which
+   * is the same failure the `aria-disabled` decision was written to avoid, one
+   * step later. The capture input is where they want to be anyway.
+   */
+  it("hands focus back to the capture input when a successful Retry unmounts the notice", async () => {
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    screen.getByRole("button", { name: /try again/i }).focus();
+    await clickRetry();
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(input).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
+  });
+
+  // …but only from the notice's own button. Focus is the user's, and pulling it
+  // out of wherever they have moved to would be a different WCAG problem (3.2.2)
+  // dressed as a fix for this one.
+  it("does not pull focus off whatever the user moved to before the retry landed", async () => {
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    const input = renderInbox([makeItem({ id: "abc", text: "delete me" })]);
+    await capture(input, "buy milk");
+
+    const elsewhere = within(
+      screen.getByText("delete me").closest("li")!,
+    ).getByRole("button", { name: "Delete" });
+    elsewhere.focus();
+    await clickRetry();
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(elsewhere).toHaveFocus();
+  });
+
+  /**
+   * Duo review round 3 — the notice is cleared by the words landing, so editing
+   * the restored text and pressing Enter used to leave a stale alert beside the
+   * fresh "captured ✓", inviting a Retry that would post a near-duplicate.
+   *
+   * The discriminator is whether the words are IN THE FIELD: if they are, the
+   * user has seen them and replaced them, so this capture supersedes the notice.
+   * If they are not, the notice is the only copy of them, and the spec below pins
+   * that it survives.
+   */
+  it("clears the notice when the user edits the restored words and captures the edit", async () => {
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    const input = renderInbox();
+    await capture(input, "buy milk");
+    expect(input).toHaveValue("buy milk");
+
+    fireEvent.change(input, { target: { value: "buy oat milk" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await flush();
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(screen.getByText("captured ✓")).toBeInTheDocument();
+    expect(vi.mocked(createBrainDumpItem).mock.calls).toEqual([
+      ["buy milk"],
+      ["buy oat milk"],
+    ]);
+  });
+
+  it("keeps a notice whose words it could NOT restore, even once a later capture succeeds", async () => {
+    let rejectWrite!: (reason: unknown) => void;
+    vi.mocked(createBrainDumpItem).mockReturnValueOnce(
+      new Promise<void>((_, reject) => {
+        rejectWrite = reject;
+      }),
+    );
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    fireEvent.change(input, { target: { value: "call mum" } });
+    await act(async () => {
+      rejectWrite(new Error("offline"));
+      await flushTicks();
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent(/buy milk/);
+
+    // The field never held "buy milk", so this is a different thought and the
+    // notice is still the only copy of the first one.
+    await capture(input, "call mum");
+
+    expect(screen.getByText("captured ✓")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(/buy milk/);
+  });
+
+  /**
+   * capture-failure-pile-up — Duo review round 7, and the correction that came
+   * out of writing these.
+   *
+   * Duo flagged that the single notice slot can drop an earlier failure's only
+   * copy of its words. Real. Writing the specs then falsified the comment that
+   * was defending it: it claimed the notice and the field between them hold two
+   * outstanding failures, and **they do not.** Submitting anything empties the
+   * field, so a second failure both takes the notice AND repopulates the field
+   * with its own words. There is no arrangement in which both survive.
+   *
+   * These pin that boundary rather than leaving it as a claim nothing checks —
+   * which is precisely how the wrong claim survived. It is #175's to close: the
+   * issue scopes "a real offline session" there, and consecutive failures ARE
+   * one. Every fix available inside this issue trades the loss for a different
+   * silence (keeping the older record leaves the newer failure unannounced;
+   * rescuing the older words into the field puts text the user did not just type
+   * where they are looking). A queue needs neither.
+   */
+  describe("two failures outstanding, one notice slot (#210 → #175)", () => {
+    /** Two captures that both fail, the second typed while the first is in flight. */
+    async function twoFailures(input: HTMLInputElement) {
+      let rejectFirst!: (reason: unknown) => void;
+      vi.mocked(createBrainDumpItem)
+        .mockReturnValueOnce(
+          new Promise<void>((_, reject) => {
+            rejectFirst = reject;
+          }),
+        )
+        .mockRejectedValueOnce(new Error("offline"));
+      await capture(input, "buy milk");
+      fireEvent.change(input, { target: { value: "call mum" } });
+      await act(async () => {
+        rejectFirst(new Error("offline"));
+        await flushTicks();
+      });
+      // The field was occupied, so "buy milk" went to the notice only.
+      expect(screen.getByRole("alert")).toHaveTextContent("“buy milk”");
+      expect(input).toHaveValue("call mum");
+
+      fireEvent.keyDown(input, { key: "Enter" });
+      await flush();
+    }
+
+    it("lets the second failure displace the first, whose words were only in the notice", async () => {
+      const input = renderInbox();
+      await twoFailures(input);
+
+      expect(screen.getByRole("alert")).toHaveTextContent("“call mum”");
+      expect(screen.getByRole("alert")).not.toHaveTextContent("buy milk");
+      // The honest statement of the cost, executable rather than asserted in
+      // prose: "buy milk" is now in neither place.
+      expect(input).not.toHaveValue("buy milk");
+    });
+
+    /**
+     * Duo review round 9 — the same slot, from the other direction, and the
+     * asymmetry it names is real: the SUCCESS path refuses to clear a record
+     * whose own attempt is unsettled, while the catch writes unconditionally. So
+     * an older retry failing late takes the notice from a newer failure.
+     *
+     * Deferred with the rest, not overlooked. The asymmetry cannot be removed by
+     * making the catch match the success path, because the two are answering
+     * different questions: a success may decline the slot (its words are safe on
+     * the server), whereas a failure that declines it reports nothing at all.
+     * Whichever record wins, the other is unannounced. What is verified here is
+     * the part that matters — the loser's WORDS are still in the field, so the
+     * cost is a missing notice rather than missing text.
+     */
+    it("lets a late retry failure take the notice, leaving the newer words in the field", async () => {
+      let rejectRetry!: (reason: unknown) => void;
+      vi.mocked(createBrainDumpItem)
+        .mockRejectedValueOnce(new Error("offline"))
+        .mockReturnValueOnce(
+          new Promise<void>((_, reject) => {
+            rejectRetry = reject;
+          }),
+        )
+        .mockRejectedValueOnce(new Error("offline"));
+      const input = renderInbox();
+      await capture(input, "buy milk");
+      await clickRetry();
+
+      // A newer, unrelated capture fails while that retry is still outstanding.
+      fireEvent.change(input, { target: { value: "call mum" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      await flush();
+      expect(screen.getByRole("alert")).toHaveTextContent("“call mum”");
+      expect(input).toHaveValue("call mum");
+
+      await act(async () => {
+        rejectRetry(new Error("still offline"));
+        await flushTicks();
+      });
+
+      // The older retry took the slot back…
+      expect(screen.getByRole("alert")).toHaveTextContent("“buy milk”");
+      // …but "call mum" is not lost — it is in the field, which is the guarantee
+      // that holds however many fail.
+      expect(input).toHaveValue("call mum");
+    });
+
+    it("is never silent about the failure it does hold", async () => {
+      const input = renderInbox();
+      await twoFailures(input);
+
+      // Whatever it drops, the state it leaves is always the honest one: an
+      // alert naming words that did not save, those words in the field, and a
+      // Retry. Never an empty field and a false confirmation, which is #210.
+      const notice = screen.getByRole("alert");
+      expect(notice).toHaveTextContent(/couldn't save that/i);
+      expect(notice).toHaveTextContent("“call mum”");
+      expect(input).toHaveValue("call mum");
+      expect(
+        within(notice).getByRole("button", { name: /try again/i }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("captured ✓")).not.toBeInTheDocument();
+    });
+  });
+
+  /**
+   * Duo review round 8 — the `try` must govern the WRITE, not everything after
+   * it. `router.refresh()` sat inside it, so a refresh that threw would run the
+   * catch and tell the user a capture had failed when the row was already
+   * written: #210's lie, produced by the code fixing #210.
+   */
+  it("does not report a capture as failed when only the list refresh threw", async () => {
+    const input = renderInbox();
+    refresh.mockImplementationOnce(() => {
+      throw new Error("refresh blew up");
+    });
+
+    await capture(input, "buy milk");
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByText("captured ✓")).toBeInTheDocument();
+    expect(input).toHaveValue("");
+  });
+
+  /**
+   * Duo review round 8 — nested live regions are the question it raised, and the
+   * answer is not to have one. A `role="status"` inside a `role="alert"` is a
+   * polite region inside an assertive one, which is undefined enough in practice
+   * that "will it announce" cannot be answered.
+   *
+   * So the wait is carried by the two mechanisms that ARE defined: the pressed
+   * button's own `aria-disabled` state change, and its `aria-describedby`, which
+   * picks up the "Saving…" text while it is showing. Sighted users see exactly
+   * the same thing.
+   */
+  it("carries the retry's wait on the button rather than nesting a live region", async () => {
+    vi.mocked(createBrainDumpItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockReturnValueOnce(new Promise<void>(() => {}));
+    const input = renderInbox();
+    await capture(input, "buy milk");
+    await clickRetry();
+
+    const notice = screen.getByRole("alert");
+    expect(within(notice).queryByRole("status")).toBeNull();
+    expect(notice).toHaveTextContent(/saving/i);
+
+    const retry = within(notice).getByRole("button", { name: /try again/i });
+    const ids = retry.getAttribute("aria-describedby")!.trim().split(/\s+/);
+    expect(ids).toHaveLength(2);
+    const described = ids
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
+    expect(described).toMatch(/couldn't save that/i);
+    expect(described).toMatch(/saving/i);
+  });
+
+  /**
+   * #218 / Duo round 16 on `!303` — round 8's answer was half of one. Not
+   * nesting the live region was right; leaving `aria-describedby` to carry the
+   * wait on its own was not. A description is computed when focus LANDS on a
+   * control, and this control already has focus and deliberately keeps it, so
+   * the value gaining `captureSavingId` mid-flight is not something a screen
+   * reader goes back and re-reads. The nested-region hole was moved, not closed.
+   *
+   * A live region is the one spec-defined channel for content that changes
+   * while the user is stationary, so the wait gets a real one — polite,
+   * visually hidden, and a SIBLING of the `role="alert"`. Mounted empty with the
+   * notice, for the reason the move announcer below already documents: a region
+   * that arrives together with its first message is silent. The visible copy
+   * stays exactly where it was and goes `aria-hidden`, so the sentence reaches
+   * a screen reader once rather than also re-reading the assertive notice.
+   *
+   * Kept identical to `focus-timer.tsx`'s notice on purpose — the two have
+   * drifted once already, which is what produced this round.
+   */
+  it("announces the wait through a polite live region beside the notice, not by changing a description under held focus", async () => {
+    vi.mocked(createBrainDumpItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockReturnValueOnce(new Promise<void>(() => {}));
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    const announcer = screen.getByTestId("capture-saving-announcer");
+    expect(announcer).toBeEmptyDOMElement();
+    expect(screen.getByRole("alert")).not.toContainElement(announcer);
+
+    await clickRetry();
+
+    expect(announcer).toHaveTextContent(/saving/i);
+    expect(announcer).toHaveAttribute("role", "status");
+    expect(announcer).toHaveAttribute("aria-live", "polite");
+    expect(announcer).toHaveClass("sr-only");
+    expect(screen.getByRole("alert")).not.toContainElement(announcer);
+
+    const visible = screen.getByTestId("capture-saving-visible");
+    expect(screen.getByRole("alert")).toContainElement(visible);
+    expect(visible).toHaveAttribute("aria-hidden", "true");
+    expect(visible).not.toHaveClass("sr-only");
+  });
+
+  /**
+   * Duo review round 4 — the superseding rule, reached from the one path the
+   * round-3 specs did not walk: a **retry that fails again**.
+   *
+   * A retry does not clear the field (only success does), so on the second
+   * failure the words are already sitting there untouched. Deciding "were these
+   * words put back in the field?" by asking "was the field empty?" answered no,
+   * and the notice then refused to be superseded — leaving a stale alert beside
+   * a fresh "captured ✓" after the user had visibly typed over those words and
+   * captured the edit. Which is #210's own bug, from a different door.
+   */
+  it("still supersedes the notice after a retry that failed again", async () => {
+    vi.mocked(createBrainDumpItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockRejectedValueOnce(new Error("still offline"));
+    const input = renderInbox();
+    await capture(input, "buy milk");
+    await clickRetry();
+
+    // The words are back where the user can see them, twice over.
+    expect(input).toHaveValue("buy milk");
+    expect(screen.getByRole("alert")).toHaveTextContent(/buy milk/);
+
+    fireEvent.change(input, { target: { value: "buy oat milk" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await flush();
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(screen.getByText("captured ✓")).toBeInTheDocument();
+  });
+
+  /**
+   * Duo review round 5 — `submit()` is deliberately ungated, because firing
+   * thoughts in a row is the point of the control and they are independent
+   * inserts. The exception is the words a Retry is already resubmitting: those
+   * are not an independent insert, they are the same request by a second route,
+   * and the field is holding them precisely because the notice put them back.
+   */
+  it("ignores an Enter that would re-post the words a Retry is already resubmitting", async () => {
+    vi.mocked(createBrainDumpItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockReturnValueOnce(new Promise<void>(() => {}));
+    const input = renderInbox();
+    await capture(input, "buy milk");
+    await clickRetry();
+    expect(input).toHaveValue("buy milk");
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    await flush();
+
+    expect(vi.mocked(createBrainDumpItem)).toHaveBeenCalledTimes(2);
+    // Not a silent discard — #169's other harm. The notice is on screen saying a
+    // save for these exact words is in flight, and Retry reads busy.
+    const notice = screen.getByRole("alert");
+    expect(notice).toHaveTextContent(/saving/i);
+    expect(
+      within(notice).getByRole("button", { name: /try again/i }),
+    ).toHaveAttribute("aria-disabled", "true");
+    expect(input).toHaveValue("buy milk");
+  });
+
+  /**
+   * Duo review round 5 — superseding means "the user has seen how this attempt
+   * ended and replaced its words". While a retry is still in flight they have
+   * seen no such thing, so clearing the notice would be clearing it out from
+   * under a request whose outcome nobody knows yet — and a later failure would
+   * then look like a notice resurrecting itself from nothing.
+   *
+   * The answer is to leave the notice up, not to suppress the failure. A write
+   * the client knows did not land and says nothing about is the silence this
+   * whole issue exists to remove.
+   */
+  it("does not let a capture supersede a failure whose retry has not answered yet", async () => {
+    let rejectRetry!: (reason: unknown) => void;
+    vi.mocked(createBrainDumpItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockReturnValueOnce(
+        new Promise<void>((_, reject) => {
+          rejectRetry = reject;
+        }),
+      )
+      .mockResolvedValueOnce(undefined);
+    const input = renderInbox();
+    await capture(input, "buy milk");
+    await clickRetry();
+
+    fireEvent.change(input, { target: { value: "buy oat milk" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await flush();
+
+    expect(screen.getByRole("alert")).toHaveTextContent("“buy milk”");
+
+    await act(async () => {
+      rejectRetry(new Error("still offline"));
+      await flushTicks();
+    });
+
+    // It failed, and the notice never left — so this is a report, not a
+    // resurrection. The words go back into the field the other capture emptied.
+    expect(screen.getByRole("alert")).toHaveTextContent("“buy milk”");
+    expect(input).toHaveValue("buy milk");
+  });
+
+  /**
+   * Duo review round 6 — the same hazard through the remaining door. `supersedes`
+   * is decided when a capture is SUBMITTED; a Retry pressed between that press
+   * and its response makes the outcome unknown again, and the stale decision
+   * would still have cleared the record on arrival.
+   *
+   * So the invariant is enforced where the record is written rather than only
+   * where the decision is taken: **a record whose own attempt is unsettled is
+   * never cleared by anything except that attempt.**
+   */
+  it("does not clear a record mid-retry, even when an earlier submit had marked it superseded", async () => {
+    let resolveOther!: () => void;
+    let rejectRetry!: (reason: unknown) => void;
+    vi.mocked(createBrainDumpItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          resolveOther = resolve;
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise<void>((_, reject) => {
+          rejectRetry = reject;
+        }),
+      );
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    // Typed over the restored words and captured, so this submit decides
+    // `supersedes = "buy milk"` — while its own request is still in flight.
+    fireEvent.change(input, { target: { value: "call mum" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await flush();
+
+    // …and only THEN is Retry pressed, after the decision was taken.
+    await clickRetry();
+    await act(async () => {
+      resolveOther();
+      await flushTicks();
+    });
+
+    const notice = screen.getByRole("alert");
+    expect(notice).toHaveTextContent("“buy milk”");
+    expect(
+      within(notice).getByRole("button", { name: /try again/i }),
+    ).toHaveAttribute("aria-disabled", "true");
+
+    await act(async () => {
+      rejectRetry(new Error("still offline"));
+      await flushTicks();
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("“buy milk”");
+  });
+
+  /**
+   * WCAG 2.4.3 — the finding `focus-timer.tsx:1252` documents: a native
+   * `disabled` attribute cannot hold focus, so the browser drops the focused
+   * element to `<body>` the moment the retry starts. `aria-disabled` plus a
+   * guarded handler keeps the press point where it is.
+   */
+  it("marks Retry aria-disabled rather than disabled while it is in flight", async () => {
+    vi.mocked(createBrainDumpItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockReturnValueOnce(new Promise<void>(() => {}));
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    screen.getByRole("button", { name: /try again/i }).focus();
+    await clickRetry();
+
+    const after = screen.getByRole("button", { name: /try again/i });
+    expect(after).toHaveAttribute("aria-disabled", "true");
+    expect(after).not.toHaveAttribute("disabled");
+    expect(after).toHaveFocus();
+    expect(after.className).toMatch(/min-h-\[44px\]/);
+  });
+
+  it("does not fire a second write when Retry is pressed mid-flight", async () => {
+    vi.mocked(createBrainDumpItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockReturnValueOnce(new Promise<void>(() => {}));
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    await clickRetry();
+    await clickRetry();
+
+    // once for the original attempt, once for the retry — not three times
+    expect(vi.mocked(createBrainDumpItem)).toHaveBeenCalledTimes(2);
+  });
+
+  /**
+   * WCAG 3.2.2 On Input, and the deliberate divergence from `focus-timer.tsx`:
+   * there, the pressed control unmounted, so focus HAD to be handed somewhere.
+   * Here the capture input never unmounts and is where the user is still
+   * typing, so moving focus to the notice would interrupt them and fight the
+   * restored text. `role="alert"` announces the failure without taking focus.
+   */
+  it("leaves focus in the capture input rather than taking it to the notice", async () => {
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    const input = renderInbox();
+    input.focus();
+
+    await capture(input, "buy milk");
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(input).toHaveFocus();
+  });
+
+  /**
+   * Two live regions must never contradict each other. A confirmation from an
+   * earlier capture is on screen for 1.5s, so a failure landing inside that
+   * window would render "captured ✓" and "couldn't save that" together — and a
+   * screen reader would hear both.
+   */
+  it("clears a still-showing 'captured ✓' when the next capture fails", async () => {
+    const input = renderInbox();
+    await capture(input, "first thought");
+    expect(screen.getByText("captured ✓")).toBeInTheDocument();
+
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    await capture(input, "second thought");
+
+    expect(screen.queryByText("captured ✓")).not.toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /couldn't save that/i,
+    );
+  });
+
+  it("a11y: the notice reads as an error and its control describes the reason", async () => {
+    vi.mocked(createBrainDumpItem).mockRejectedValueOnce(new Error("offline"));
+    const input = renderInbox();
+    await capture(input, "buy milk");
+
+    const notice = await screen.findByRole("alert");
+    const retry = screen.getByRole("button", { name: /try again/i });
+    const describedBy = retry.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    const message = document.getElementById(describedBy!)!;
+
+    // The state is carried by the text, never by the red alone (WCAG 1.4.1),
+    // and the reason is reachable from the control — whichever announcement
+    // wins, the user gets both.
+    expect(notice.textContent).toMatch(/couldn't save that/i);
+    expect(message).toHaveTextContent(/couldn't save that/i);
+
+    // Duo review round 1: this spec's comment claimed `text-destructive` was
+    // under test while only the border was asserted, so a non-AA text colour
+    // would have passed it. Duo's own patch put the assertion on the notice,
+    // which would have failed — the token is on the MESSAGE, and the notice
+    // carries the surface pair. Both are asserted, on the elements that have
+    // them. `text-destructive` on --background/--card is the pairing globals.css
+    // documents as AA in both themes (5.2:1+); a raw palette shade is what
+    // dropped the emerald confirmation below 4.5:1 on the warm-tinted
+    // --background in #40.
+    expect(message.className).toContain("text-destructive");
+    expect(notice.className).toContain("border-destructive/40");
+    expect(notice.className).toContain("bg-destructive/5");
   });
 });
 
@@ -2235,38 +3129,22 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     ).toBeInTheDocument();
   });
 
-  it("holds every row's Schedule control while one row's schedule is in flight (#168)", async () => {
-    // The trap behind #168, pinned so the next spec to press two Schedule
-    // controls in sequence finds it documented rather than rediscovering it as
-    // a load-dependent flake.
+  it("holds only the scheduling row's own control while its push is in flight (#169)", async () => {
+    // The spec !265 landed, turned round. That one pinned the shared flag as
+    // OBSERVED behaviour and said so in as many words — "not as correct
+    // behaviour — #169" — so fixing #169 means inverting it, not deleting it:
+    // the same scenario, the opposite expectation, and the #168 trap it
+    // documented removed at the source rather than merely renamed.
     //
-    // `pending` comes from ONE `useTransition` shared by the whole list
-    // (inbox-view.tsx:230) and every Schedule control carries
-    // `disabled={pending}` (row-actions.tsx), so an action started on one row
-    // disables the control on all of them.
+    // What survives unchanged is the guard the prop was written for. Row A's
+    // own control is still held while row A's push is in flight, which is all
+    // double-submit protection ever needed. What goes is the reach: `pending`
+    // used to come from ONE `useTransition` shared by every action in the list,
+    // so 20 call sites through the generic `run()` — rename, complete, snooze,
+    // delete, dismissPrompt — disabled every Schedule button in the list.
     //
-    // This spec pins that as OBSERVED BEHAVIOUR, not as correct behaviour —
-    // #169. An earlier version of this comment justified the shared lock as
-    // "pushing to Google Tasks is workspace-wide"; that is wrong, and the
-    // codebase disproves it. The same flag is flipped by 20 call sites through
-    // the generic `run()` — completeItem, renameItem, snoozeBrainDumpItem,
-    // deleteBrainDumpItem, freshenItem, keepAsTask, reopenItem, dismissPrompt —
-    // so RENAMING an item disables every Schedule button in the list, which no
-    // workspace-wide argument covers. `row-actions.tsx:44` documents the prop as
-    // "a schedule call for THIS row", and two of its own unit tests say the same,
-    // so the prop is honest about the intent and the parent does not honour it.
-    //
-    // Waiting for the control to be enabled is the right thing for a test to do
-    // either way, which is why this MR still lands ahead of #169: it removes a
-    // dropped press, and it does not depend on who wins the design argument.
-    //
-    // The consequence for tests is the part that cost a pipeline: `await
-    // user.click` does not await the transition, and `userEvent` discards a
-    // press on a disabled control WITHOUT raising anything. So a spec that
-    // presses a second Schedule control without waiting gets no error at the
-    // press — it gets a timeout, one second later, on a find for something that
-    // was never going to render. Holding the action's promise unresolved makes
-    // the window real rather than a race (the technique !237 and !264 used).
+    // Holding the action's promise unresolved makes the in-flight window real
+    // rather than a race (the technique !237, !264 and !265 used).
     const { scheduleSingleTask, pushStepsToGoogleTasks } =
       await import("@/app/actions/google-schedule");
     let release!: (value: { ok: true }) => void;
@@ -2296,11 +3174,17 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
 
     await user.click(within(rowA).getByRole("button", { name: /schedule/i }));
     await user.click(within(rowA).getByRole("button", { name: /^30 min$/i }));
-    expect(scheduleB).toBeDisabled();
 
-    // The press that goes nowhere, and says nothing about having gone nowhere.
+    // Row A's own control: held, and it says why rather than going quietly
+    // grey — a disabled button swallows a press with no error and no toast.
+    const scheduleA = within(rowA).getByRole("button", { name: /schedule/i });
+    expect(scheduleA).toBeDisabled();
+    expect(scheduleA).toHaveAccessibleName(/already in progress for this row/i);
+
+    // Row B: never a party to row A's push, so its press must land.
+    expect(scheduleB).toBeEnabled();
     await user.click(scheduleB);
-    expect(pushStepsToGoogleTasks).not.toHaveBeenCalled();
+    expect(pushStepsToGoogleTasks).toHaveBeenCalledWith("t1", undefined);
 
     // Settle the transition before returning. An unresolved action outliving
     // the spec fires its state update during or after `afterEach(cleanup)`,
@@ -2309,7 +3193,77 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     // live again is the observable end of the transition, so waiting on it
     // needs no arbitrary timeout.
     release({ ok: true });
-    await waitFor(() => expect(scheduleB).toBeEnabled());
+    await waitFor(() => expect(scheduleA).toBeEnabled());
+  });
+
+  it("renaming a row disables no Schedule control at all — the live half of #169", async () => {
+    // The production defect, driven through the exact path a user takes.
+    //
+    // `pending` came from one `useTransition` shared by every action in the
+    // list while ONLY the Schedule controls read it, so renaming a row — which
+    // has nothing to do with scheduling, and no workspace-wide argument covers
+    // — greyed out the 📅 button on that row AND on every other row for the
+    // length of the round trip. A press landing in that window was discarded
+    // with no error, no toast and no visual explanation beyond a briefly grey
+    // control the user probably was not looking at. Completing, snoozing,
+    // deleting and dismissing a freshness prompt all did the same.
+    //
+    // Rename is the case with no defensible reading whatsoever, which is why it
+    // is the one pinned here.
+    const { renameItem } = await import("@/app/actions/braindump");
+    const { pushStepsToGoogleTasks } =
+      await import("@/app/actions/google-schedule");
+    let release!: () => void;
+    (renameItem as ReturnType<typeof vi.fn>).mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        release = () => resolve();
+      }),
+    );
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[
+          makeItem({ id: "r1", text: "old name" }),
+          makeMultiStep(),
+        ]}
+        settings={settings}
+        google={connected}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const rowB = screen.getByText("plan trip").closest("li")!;
+    const scheduleB = within(rowB).getByRole("button", { name: /schedule/i });
+    expect(scheduleB).toBeEnabled();
+
+    const rowA = screen.getByText("old name").closest("li")!;
+    await user.click(
+      within(rowA).getByRole("button", { name: "Edit old name" }),
+    );
+    const input = screen.getByRole("textbox", { name: "Edit title" });
+    await user.clear(input);
+    await user.type(input, "new name{Enter}");
+    expect(renameItem).toHaveBeenCalledWith("r1", "new name");
+
+    // The rename is still in flight. No Schedule control is a party to it —
+    // not the renaming row's, and certainly not another row's. (The title
+    // itself still reads "old name": there is no optimistic update, the row
+    // re-reads from the server on `router.refresh()`.)
+    const renamingRow = screen.getByText("old name").closest("li")!;
+    expect(
+      within(renamingRow).getByRole("button", { name: /schedule/i }),
+    ).toBeEnabled();
+    expect(scheduleB).toBeEnabled();
+
+    // And the press that used to vanish now lands.
+    await user.click(scheduleB);
+    expect(pushStepsToGoogleTasks).toHaveBeenCalledWith("t1", undefined);
+
+    // Settle the held rename before returning, for the !264 reason above.
+    await act(async () => {
+      release();
+    });
   });
 
   it("a reconnect_required response clears a stale schedule error left on another row (Duo review)", async () => {
@@ -2347,23 +3301,19 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
     // Row B (multi-step) then hits the workspace-wide reconnect_required condition.
     const rowB = screen.getByText("plan trip").closest("li")!;
     const scheduleB = within(rowB).getByRole("button", { name: /schedule/i });
-    // #168 — wait for row B's control to be live before pressing it, or this
-    // press is silently discarded and the spec fails 1000ms later on a find
-    // that could never have succeeded.
+    // This used to be `await waitFor(() => expect(scheduleB).toBeEnabled())`,
+    // carrying a long comment about row A's in-flight action disabling row B's
+    // button through ONE shared `useTransition`. **#169 deleted that behaviour**,
+    // so the comment described a world that no longer exists and the `waitFor`
+    // resolved on its first tick — a guard that guarded nothing, wearing the
+    // explanation of a real bug. Raised by an independent review of !278.
     //
-    // Every Schedule control in the list is `disabled={pending}` from ONE
-    // shared `useTransition` (inbox-view.tsx:230), so row A's in-flight action
-    // disables row B's button too. **Not deliberately** — see #169; the same
-    // flag is set by rename, complete, snooze and delete, none of which is a
-    // workspace-wide operation. Row A's error text and the clearing of `pending` land in
-    // SEPARATE render passes, error first, and `await user.click` does not
-    // await the transition. Measured: at the instant the error text is inserted
-    // into the DOM, this button is still disabled. `findByText` above normally
-    // resolves after the second pass — but under full-suite load it can resolve
-    // inside the gap, and `userEvent` drops a press on a disabled control
-    // without raising anything. That is how this spec turned `main` red on
-    // ccbc8dc while passing 8/8 in isolation.
-    await waitFor(() => expect(scheduleB).toBeEnabled());
+    // Inverted into the assertion the fix actually earns: row B is enabled
+    // ALREADY, with no waiting, because row A's schedule is none of its
+    // business. A plain `expect` rather than a `waitFor` on purpose — `waitFor`
+    // would pass again if the shared flag ever came back, and being unable to
+    // regress silently is the whole point.
+    expect(scheduleB).toBeEnabled();
     await user.click(scheduleB);
     // One `waitFor` for both halves, deliberately: row A's now-stale error must
     // not sit beside a Reconnect prompt, and a bare `queryByText(...).not.
@@ -2381,6 +3331,51 @@ describe("InboxView — 📅 row scheduling (Task 5)", () => {
         within(rowA).queryByText(/Reclaim-synced Google Tasks list/i),
       ).not.toBeInTheDocument();
     });
+  });
+
+  // #169's `finally` is the reason a rejected schedule does not strand the row
+  // disabled forever, and nothing tested it — `mockRejected` appears in 34
+  // files across `src/` and zero times in this one, so both `catch` blocks the
+  // fix introduced had no coverage at all. Raised by an independent review of
+  // !278. A THROWN action, not an `{ ok: false }` result: the resolved-but-failed
+  // path is already covered below, and it never reaches the `catch`.
+  it("re-enables the row after a schedule that throws, not just one that fails", async () => {
+    const { scheduleSingleTask } =
+      await import("@/app/actions/google-schedule");
+    (scheduleSingleTask as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("network died mid-push"),
+    );
+    const user = userEvent.setup();
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[
+          makeItem({ id: "thr1", text: "single todo", status: "triaged" }),
+        ]}
+        settings={settings}
+        google={connected}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const row = screen.getByText("single todo").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: /schedule/i }));
+    await user.click(within(row).getByRole("button", { name: /^30 min$/i }));
+
+    // The control comes back. Without the `finally` this row would be dead for
+    // the rest of the session with no error and no way to retry — strictly
+    // worse than the bug #169 fixed, because that one at least cleared.
+    await waitFor(() =>
+      expect(
+        within(row).getByRole("button", { name: /schedule/i }),
+      ).toBeEnabled(),
+    );
+
+    // And it is genuinely usable again, not merely un-disabled.
+    await user.click(within(row).getByRole("button", { name: /schedule/i }));
+    expect(
+      within(row).getByRole("button", { name: /^30 min$/i }),
+    ).toBeInTheDocument();
   });
 
   it("a scheduleSingleTask failure shows an inline error message under the row", async () => {
@@ -2844,5 +3839,530 @@ describe("InboxView — resume banner (Task 3, #8)", () => {
     expect(
       screen.queryByRole("link", { name: /resume/i }),
     ).not.toBeInTheDocument();
+  });
+});
+
+// ── #44 — the note affordance at the TASK grain in the Inbox ────────────────
+//
+// The Inbox got step notes with #44's first pass (through the expanded
+// <TaskSteps>) and no task note. Same class of gap the owner found in the
+// Library: a surface that renders a task and offers no way to annotate it.
+// A component test cannot see this — only a test that renders the SURFACE can.
+describe("InboxView — the task note (#44)", () => {
+  const render1 = (item: Item) =>
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[item]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+
+  it("offers a note on a task-backed to-do row, named after the task", () => {
+    render1(
+      makeItem({
+        id: "s1",
+        text: "Renew the passport",
+        status: "triaged",
+        triagedAt: new Date(),
+        taskId: "t1",
+      }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Note for Renew the passport" }),
+    ).toBeTruthy();
+  });
+
+  it("NOW offers a note on an untriaged item — #186 gave it a column", () => {
+    // This assertion used to be its inverse, and #44 was right at the time: a
+    // brain-dump item in Needs review has no `Task` row, so there was no `notes`
+    // column and the control could only render as nothing. #186 added
+    // `BrainDumpItem.notes` and #179 writes it at CAPTURE, which makes this the
+    // bucket where a note is now MOST likely to already exist. Rewritten rather
+    // than deleted, so the reversal reads as a decision with a reason.
+    render1(makeItem({ id: "n1", text: "raw thought", taskId: null }));
+    expect(
+      screen.getByRole("button", { name: "Note for raw thought" }),
+    ).toBeTruthy();
+  });
+
+  // The null-`itemId` branch is deliberately NOT tested from here — a test that
+  // claimed to and did not is what this replaces (review, `!281`). It rendered the
+  // same item as the case above, asserted the control WAS present (the opposite of
+  // its own title), and could not have done otherwise: `InboxView` always passes
+  // `itemId={item.id}` to `TaskNoteRow`, so there is no route through this surface
+  // that reaches a null item id. The branch is only reachable from Library rows.
+  //
+  // Its real coverage lives where the branch is reachable, at the component's own
+  // grain: `task-note.test.tsx` → "still renders nothing when there is no row to
+  // write to at all", which renders `<TaskNoteRow taskId={null} itemId={null}>` and
+  // asserts the render prop receives `{ trigger: null, body: null }` while the
+  // caller's own placeholder still mounts. That is the behaviour that matters, and
+  // asserting it here would have been a second, weaker copy of it.
+});
+
+// ── #183 — the capture input had no accessible name ─────────────────────────
+//
+// The app's most-used control was an <input> with a placeholder and nothing
+// else: no <label>, no aria-label, no aria-labelledby. A placeholder is not a
+// name — support varies, and it VANISHES on the first keystroke, so anyone who
+// tabs away mid-capture and back has a field full of text and no way to re-read
+// what it was for. WCAG 4.1.2, and it undermines 3.3.2.
+//
+// Every assertion below goes through `getByRole(..., { name })`, which computes
+// the name with `dom-accessibility-api` — the same engine screen readers'
+// behaviour is modelled on. An attribute-level check would have passed on all
+// three of the mangled-name bugs this codebase produced in one day, including
+// one in #44's own note control ("Add notefor Ship the thing").
+describe("InboxView — the capture input's accessible name (#183)", () => {
+  const renderCapture = () =>
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+
+  it("has a computed accessible name, not merely a placeholder", () => {
+    renderCapture();
+    expect(
+      screen.getByRole("textbox", { name: "Brain dump" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the name once the placeholder is gone", async () => {
+    // The regression that matters. The placeholder disappears the moment you
+    // type; the name must not.
+    const user = userEvent.setup();
+    renderCapture();
+    await user.type(screen.getByRole("textbox", { name: "Brain dump" }), "x");
+    expect(screen.getByRole("textbox", { name: "Brain dump" })).toHaveValue(
+      "x",
+    );
+  });
+
+  it("keeps the placeholder as supplementary text, never as the name", () => {
+    renderCapture();
+    const input = screen.getByRole("textbox", { name: "Brain dump" });
+    expect(input.getAttribute("placeholder")).toBe(
+      "Brain dump anything… (Enter to save)",
+    );
+    // Not welded into the name — the failure mode this project has hit twice.
+    expect(input.getAttribute("aria-label")).toBe("Brain dump");
+  });
+
+  it("announces the hint as the field's DESCRIPTION, not orphaned text", () => {
+    renderCapture();
+    const input = screen.getByRole("textbox", { name: "Brain dump" });
+    const describedBy = input.getAttribute("aria-describedby") as string;
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy)?.textContent).toContain(
+      "Press Enter to capture instantly",
+    );
+  });
+});
+
+describe("InboxView — row action group target size (#184)", () => {
+  // Every control in a row's action group is a 44x44 target, on the app's own
+  // convention — not on a WCAG requirement, and the difference matters for how
+  // this gets described and prioritised:
+  //
+  //   - 2.5.8 Target Size (Minimum) is **AA** and asks for 24x24. "▶ Start
+  //     Focus" measured exactly 24px, so it PASSED, with zero margin.
+  //   - 2.5.5 Target Size (Enhanced) is **AAA** and asks for 44x44. That is the
+  //     one it failed, and the project's stated bar is AA.
+  //
+  // So nothing here was non-conformant, and any comment or report saying "a
+  // 2.5.8 failure" is wrong. It is fixed anyway for two reasons specific to
+  // this app. Sitting exactly on the threshold means any change to font size,
+  // line height or a Tailwind padding default silently drops it below and
+  // nothing catches it — this spec is that "nothing". And the primary call to
+  // action on every row was the smallest thing in the row while the
+  // end-cluster icons beside it were all 44px, in a tool for people with ADHD
+  // used mostly on a phone, where a mis-tap costs the thread you were holding.
+  //
+  // Asserted over the WHOLE group rather than one control, because that is the
+  // shape the gap hid in: !270 measured only the note trigger and the buttons
+  // either side of it were 24px. jsdom computes no layout, so this checks the
+  // classes that produce the box; the pixel measurement at 390px lives in
+  // e2e/smoke/row-menu-viewport-fit.spec.ts, which measures the same group.
+  const expectFullTargets = (scope: HTMLElement) => {
+    const groups = scope.querySelectorAll<HTMLElement>("[data-row-actions]");
+    expect(groups.length).toBeGreaterThan(0);
+    for (const group of Array.from(groups)) {
+      const controls = group.querySelectorAll<HTMLElement>("button, a");
+      expect(controls.length).toBeGreaterThan(0);
+      for (const control of Array.from(controls)) {
+        const name = control.getAttribute("aria-label") ?? control.textContent;
+        expect(control.className, `"${name}" is under 44px tall`).toContain(
+          "min-h-11",
+        );
+        expect(control.className, `"${name}" is under 44px wide`).toContain(
+          "min-w-11",
+        );
+      }
+    }
+  };
+
+  it("sizes every control in every bucket's action group", () => {
+    const { container } = render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[
+          // One row per frame that renders its own `inline` array.
+          makeItem({ id: "t184a", text: "review row" }),
+          makeMultiStep(),
+          makeItem({
+            id: "t184b",
+            text: "awaiting breakdown",
+            status: "triaged",
+            taskId: "t184bt",
+            breakdownRequestedAt: new Date(),
+          }),
+          makeItem({ id: "t184c", text: "single todo", status: "triaged" }),
+          // The Done bucket, which hand-rolls its action line rather than
+          // rendering <RowActions>. Without a completed item here the bucket
+          // never mounts, so neither its `data-row-actions` marker nor its
+          // Reopen button was ever measured — the marker was added by this MR
+          // precisely because the line was invisible to this guard, and adding
+          // it while leaving it unexercised proves nothing. Raised by an
+          // independent review of !278.
+          makeItem({
+            id: "t184d",
+            text: "finished thing",
+            status: "triaged",
+            completedAt: new Date(),
+          }),
+        ]}
+        settings={settings}
+        google={{ configured: true, connected: true, needsReconnect: false }}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    expectFullTargets(container);
+  });
+
+  it("sizes the saved-for-later options too, which only render once opened", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[
+          makeItem({
+            id: "t184d",
+            text: "stored thing",
+            snoozedUntil: new Date(Date.now() + 60 * 60_000),
+          }),
+        ]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "stored thing" }));
+    expect(
+      screen.getByRole("button", { name: /Break into steps/ }),
+    ).toBeInTheDocument();
+    expectFullTargets(container);
+  });
+});
+// ── #186 — the "add note" affordance on both brain-dump fields ──────────────
+//
+// #179 shipped the inline note syntax with nothing on screen announcing it, and
+// `{`/`}` are two or three taps deep in a phone's symbol keyboard. The button's
+// own behaviour (where the caret lands, both branches) is covered in
+// `add-note-button.test.tsx`; what is asserted here is that it is MOUNTED on
+// both fields and named after the right one — the capture bar and an open row
+// editor are on screen together, so two buttons called "Add note" would be two
+// controls a screen-reader or voice-control user cannot tell apart.
+describe("InboxView — the inline-note affordance (#186)", () => {
+  const renderInbox = (items: Item[] = []) =>
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={items}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+
+  it("puts a button on the capture bar, named after that field", () => {
+    renderInbox();
+    expect(
+      screen.getByRole("button", { name: "Add note for Brain dump" }),
+    ).toBeTruthy();
+  });
+
+  it("inserts the braces into the capture field", async () => {
+    const user = userEvent.setup();
+    renderInbox();
+    const input = screen.getByRole("textbox", { name: "Brain dump" });
+    await user.type(input, "buy milk");
+    await user.click(
+      screen.getByRole("button", { name: "Add note for Brain dump" }),
+    );
+    await waitFor(() => expect(input).toHaveValue("buy milk {}"));
+  });
+
+  it("teaches the syntax in the capture field's DESCRIPTION", () => {
+    // The hint is the only thing that says the rule is "at the END" — someone
+    // who learns only the braces meets a refusal (`fix the {foo} handler`) and
+    // reads it as a bug. Associated with the field rather than left as orphaned
+    // text, which is the #183 obligation this paragraph already carried.
+    renderInbox();
+    const input = screen.getByRole("textbox", { name: "Brain dump" });
+    const describedBy = input.getAttribute("aria-describedby") as string;
+    expect(document.getElementById(describedBy)?.textContent).toContain(
+      "Put a note in {curly braces} at the end.",
+    );
+  });
+
+  it("puts a button on the ✎ row editor, named after that row", async () => {
+    const user = userEvent.setup();
+    renderInbox([makeItem({ id: "r1", text: "water the plants" })]);
+    const row = screen.getByText("water the plants").closest("li")!;
+    await user.click(
+      within(row).getByRole("button", { name: "Edit water the plants" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Add note for water the plants" }),
+    ).toBeTruthy();
+    // And the capture bar's is still there, under its own name — the two are
+    // distinguishable, which is the whole reason `subject` exists.
+    expect(
+      screen.getByRole("button", { name: "Add note for Brain dump" }),
+    ).toBeTruthy();
+  });
+
+  it("carries the composed string through to renameItem", async () => {
+    const { renameItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    renderInbox([makeItem({ id: "r1", text: "water the plants" })]);
+    const row = screen.getByText("water the plants").closest("li")!;
+    await user.click(
+      within(row).getByRole("button", { name: "Edit water the plants" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Add note for water the plants" }),
+    );
+    const editor = screen.getByRole("textbox", { name: "Edit title" });
+    await waitFor(() => expect(editor).toHaveFocus());
+    await user.keyboard("can under sink{Enter}");
+    expect(renameItem).toHaveBeenCalledWith(
+      "r1",
+      "water the plants {can under sink}",
+    );
+  });
+
+  it("describes the row editor with the same rule, for a screen reader", () => {
+    // The row editor has no room for a visible hint line, and repeating one per
+    // row would be noise on a dense list. A referenced `hidden` node contributes
+    // its text to the description without rendering, which is the dialect
+    // `MOVE_INSTRUCTIONS` already uses on this surface.
+    renderInbox([makeItem({ id: "r1", text: "water the plants" })]);
+    const row = screen.getByText("water the plants").closest("li")!;
+    fireEvent.click(
+      within(row).getByRole("button", { name: "Edit water the plants" }),
+    );
+    const editor = screen.getByRole("textbox", { name: "Edit title" });
+    const describedBy = editor.getAttribute("aria-describedby") as string;
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy)?.textContent).toContain(
+      "Put a note in {curly braces} at the end.",
+    );
+  });
+});
+
+// ── #179 / #186 — the captured note, on the row and in the ✎ editor ─────────
+//
+// A note split off at capture has to be readable, or an inline capture is
+// indistinguishable from text that went missing. And the ✎ field is pre-filled
+// with the RECONSTRUCTION (`text {note}`) rather than the bare text, which is
+// what makes an unchanged save a no-op instead of eroding the text one brace
+// group at a time.
+describe("InboxView — the captured inline note (#179/#186)", () => {
+  const renderInbox = (items: Item[]) =>
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={items}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+
+  it("shows an untriaged row's note without anyone expanding anything", () => {
+    renderInbox([
+      makeItem({
+        id: "r1",
+        text: "water the plants",
+        itemNotes: "can under sink",
+      }),
+    ]);
+    expect(
+      screen.getAllByTestId("note-text").map((n) => n.textContent),
+    ).toContain("can under sink");
+  });
+
+  it("offers the note control on a Needs-review row, named after it", () => {
+    // The absence !270 documented was correct then and is wrong now: #186 gave
+    // `BrainDumpItem` its own `notes` column, so the save can succeed.
+    renderInbox([makeItem({ id: "r1", text: "water the plants" })]);
+    expect(
+      screen.getByRole("button", { name: "Note for water the plants" }),
+    ).toBeTruthy();
+  });
+
+  it("shows a Saved-for-later row's note without opening the row", async () => {
+    // Parked rows are untriaged as well, so a note that vanished because somebody
+    // moved a row to the pantry would be the same defect in a quieter place.
+    //
+    // READING it costs nothing; EDITING it follows the row's own design, where the
+    // action group stays hidden until you engage with the row (a sleeping pantry
+    // row shows only "Review now"). Deliberately not special-cased: a note
+    // trigger permanently visible on a dimmed row would be the only control that
+    // ignored that rule.
+    const user = userEvent.setup();
+    renderInbox([
+      makeItem({
+        id: "v1",
+        text: "book the dentist",
+        itemNotes: "before the 20th",
+        snoozedUntil: new Date(Date.now() + 3_600_000),
+      }),
+    ]);
+    expect(
+      screen.getAllByTestId("note-text").map((n) => n.textContent),
+    ).toContain("before the 20th");
+    // Collapsed: no trigger yet.
+    expect(
+      screen.queryByRole("button", { name: "Note for book the dentist" }),
+    ).toBeNull();
+    await user.click(screen.getByRole("button", { name: "book the dentist" }));
+    expect(
+      screen.getByRole("button", { name: "Note for book the dentist" }),
+    ).toBeTruthy();
+  });
+
+  it("pre-fills the ✎ editor with the RECONSTRUCTION, not the bare text", async () => {
+    const user = userEvent.setup();
+    renderInbox([
+      makeItem({
+        id: "r1",
+        text: "water the plants",
+        itemNotes: "can under sink",
+      }),
+    ]);
+    const row = screen.getByText("water the plants").closest("li")!;
+    await user.click(
+      within(row).getByRole("button", { name: "Edit water the plants" }),
+    );
+    expect(screen.getByRole("textbox", { name: "Edit title" })).toHaveValue(
+      "water the plants {can under sink}",
+    );
+  });
+
+  it("an unchanged save never reaches the server at all", async () => {
+    // Belt as well as braces: `resolveInlineNoteEdit` makes the SAVE a no-op, and
+    // this makes the round trip not happen. Before the reconstruction the field
+    // held `water the plants`, which differed from nothing and so always did.
+    const { renameItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    renderInbox([
+      makeItem({
+        id: "r1",
+        text: "water the plants",
+        itemNotes: "can under sink",
+      }),
+    ]);
+    const row = screen.getByText("water the plants").closest("li")!;
+    await user.click(
+      within(row).getByRole("button", { name: "Edit water the plants" }),
+    );
+    await user.keyboard("{Enter}");
+    expect(renameItem).not.toHaveBeenCalled();
+  });
+
+  it("carries the note back with an edit to the text half", async () => {
+    const { renameItem } = await import("@/app/actions/braindump");
+    const user = userEvent.setup();
+    renderInbox([
+      makeItem({
+        id: "r1",
+        text: "water the plants",
+        itemNotes: "can under sink",
+      }),
+    ]);
+    const row = screen.getByText("water the plants").closest("li")!;
+    await user.click(
+      within(row).getByRole("button", { name: "Edit water the plants" }),
+    );
+    const editor = screen.getByRole("textbox", { name: "Edit title" });
+    await user.clear(editor);
+    // `{{` is user-event's escape for a literal brace — the syntax under test is
+    // made of the one character its keyboard API reserves.
+    await user.type(editor, "water the office plants {{can under sink}{Enter}");
+    expect(renameItem).toHaveBeenCalledWith(
+      "r1",
+      "water the office plants {can under sink}",
+    );
+  });
+
+  it("the Add-note button lands in the note the row already has", async () => {
+    // Where the two halves meet. The reconstruction puts the existing note in the
+    // field, so `inlineNoteInsertion` finds a trailing group and the caret goes
+    // INSIDE it — appending would promote a new group to note and demote this one
+    // to text.
+    const user = userEvent.setup();
+    renderInbox([
+      makeItem({
+        id: "r1",
+        text: "water the plants",
+        itemNotes: "can under sink",
+      }),
+    ]);
+    const row = screen.getByText("water the plants").closest("li")!;
+    await user.click(
+      within(row).getByRole("button", { name: "Edit water the plants" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Add note for water the plants" }),
+    );
+    const editor = screen.getByRole("textbox", {
+      name: "Edit title",
+    }) as HTMLInputElement;
+    await waitFor(() => expect(editor).toHaveFocus());
+    expect(editor.selectionStart).toBe(
+      "water the plants {can under sink".length,
+    );
+    await user.keyboard(" — rinse it");
+    expect(editor).toHaveValue("water the plants {can under sink — rinse it}");
+  });
+
+  it("leaves a task-backed row reading its TASK note, not the leftover copy", () => {
+    // The grain rule, at the surface. Triage copies the item note onto the task;
+    // showing the item's copy afterwards would resurrect whatever it held when
+    // triage ran, including a note since deleted.
+    renderInbox([
+      makeItem({
+        id: "s1",
+        text: "single item",
+        status: "triaged",
+        taskId: "t1",
+        notes: "live task note",
+        itemNotes: "stale item copy",
+      }),
+    ]);
+    const shown = screen.getAllByTestId("note-text").map((n) => n.textContent);
+    expect(shown).toContain("live task note");
+    expect(shown).not.toContain("stale item copy");
   });
 });

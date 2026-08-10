@@ -60,6 +60,9 @@ const OWNER_WS = "test-idor-owner";
 const OTHER_WS = "test-idor-other";
 
 describe("cross-workspace IDOR — the breakdown context read path", () => {
+  /** OWNER_WS's task — its id is what OTHER_WS tries to name (#179). */
+  let ownerTaskId = "";
+
   beforeAll(async () => {
     await prisma.workspace.createMany({
       data: [
@@ -74,8 +77,16 @@ describe("cross-workspace IDOR — the breakdown context read path", () => {
       data: { text: "owner-private-item", workspaceId: OWNER_WS },
     });
     const task = await prisma.task.create({
-      data: { title: "owner-private-task", workspaceId: OWNER_WS },
+      data: {
+        title: "owner-private-task",
+        workspaceId: OWNER_WS,
+        // #179 — the breakdown coach now quotes this column, so it is part of
+        // the IDOR surface: the task id it is keyed on arrives in the request
+        // body, where anyone can put anybody's.
+        notes: "owner-private-note",
+      },
     });
+    ownerTaskId = task.id;
     await prisma.step.create({
       data: {
         taskId: task.id,
@@ -165,5 +176,22 @@ describe("cross-workspace IDOR — the breakdown context read path", () => {
     expect(serialised).not.toContain("owner-private-item");
     expect(serialised).not.toContain("owner-private-task");
     expect(serialised).not.toContain("owner-private-step");
+    expect(serialised).not.toContain("owner-private-note");
+  });
+
+  // ── #179 — the note read is keyed on a task id from the REQUEST BODY ───────
+  it("the owner's own request does get the note (so the test below can fail)", async () => {
+    const ctx = await gatherBreakdownContext(OWNER_WS, ownerTaskId);
+    expect(ownerTaskId).not.toBe("");
+    expect(ctx.note).toBe("owner-private-note");
+  });
+
+  it("naming another workspace's task id yields no note, not that task's note", async () => {
+    // Delete the `workspaceId` term from the note read in breakdown-context.ts
+    // and this goes red: `findFirst({ where: { id } })` on its own would hand
+    // OTHER_WS the owner's note purely because it guessed the id.
+    const ctx = await gatherBreakdownContext(OTHER_WS, ownerTaskId);
+    expect(ctx.note).toBeNull();
+    expect(JSON.stringify(ctx)).not.toContain("owner-private-note");
   });
 });

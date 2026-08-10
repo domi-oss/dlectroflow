@@ -241,6 +241,33 @@ export function toZonedDateInput(
 }
 
 /**
+ * `"Fri 31 Jul"` — the human twin of {@link toZonedDateInput}, in the scheduling
+ * zone rather than the reader's.
+ *
+ * Weekday-first and month-by-name on purpose: a deadline has to survive being
+ * read aloud, and `31/07` is a number pair that a screen reader announces as
+ * one (#187). `en-GB` fixes day-before-month so the string cannot flip meaning
+ * with the server's locale.
+ *
+ * Lives here rather than beside its first caller because it is now read by two
+ * surfaces — the Schedule menu's feasibility line (`scheduling/summary.ts`) and
+ * the /focus launcher's due-by (`lib/due-by.ts`) — and those two disagreeing
+ * about which day a deadline falls on is exactly the confusion the due-by is
+ * meant to remove.
+ */
+export function formatShortDay(
+  d: Date,
+  timeZone: string = schedulingTimeZone(),
+): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  }).format(d);
+}
+
+/**
  * The instant at which the scheduling zone's wall clock reads `dateInput`'s
  * calendar date at `keepTimeFrom`'s time of day.
  *

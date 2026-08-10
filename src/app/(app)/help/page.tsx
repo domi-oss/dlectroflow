@@ -193,19 +193,22 @@ export default async function HelpPage({
           fetches the audio itself and serves it from its own address, so
           listening never puts you in touch with anywhere else. If that store is
           missing or having a bad day you get the bundled ten and the music
-          still plays. Choose a track under{" "}
+          still plays. Music is <strong>on to start with</strong> — if you would
+          rather work in silence, one switch turns it off:{" "}
           <strong>Focus timer → Focus sounds</strong> on the{" "}
           <Link href="/settings?from=help" className="underline">
             Settings
           </Link>{" "}
-          page — each has a preview toggle so you can audition it without
-          starting a session. During a session a small player gives you
-          play/pause, previous/next, volume and progress, plus{" "}
-          <strong>Shuffle</strong>. The playlist moves itself along when a track
-          ends and only starts over once every track has played, so you should
-          not hear the same thing twice in a row. It follows the timer: pausing
-          pauses the music, resuming resumes it, and ending the session stops
-          it. Turn on <strong>Pause music and timer together</strong> in
+          page. That switch is the only music setting there, on purpose;{" "}
+          <strong>which playlists and which track</strong> you pick from the
+          player while a session is running, because that is a decision you make
+          while listening rather than one to make in advance. During a session
+          that player gives you play/pause, previous/next, volume and progress,
+          plus <strong>Shuffle</strong>. The playlist moves itself along when a
+          track ends and only starts over once every track has played, so you
+          should not hear the same thing twice in a row. It follows the timer:
+          pausing pauses the music, resuming resumes it, and ending the session
+          stops it. Turn on <strong>Pause music and timer together</strong> in
           settings and it works both ways round — the player&rsquo;s own pause
           button then stops your session too, and playing again resumes both.
         </p>

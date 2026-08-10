@@ -3,8 +3,10 @@ import {
   isPublicPath,
   isOwnerOnlyPath,
   isAuthenticatedOnlyPath,
+  isCanonicalOriginPath,
   AUTHENTICATED_PREFIXES,
   OWNER_ONLY_PREFIXES,
+  CANONICAL_ORIGIN_PREFIXES,
 } from "./gate";
 
 describe("gate paths", () => {
@@ -121,6 +123,62 @@ describe("authenticated-only paths", () => {
     // "/api/accountant", quietly gating an unrelated future route.
     for (const prefix of AUTHENTICATED_PREFIXES) {
       expect(prefix.endsWith("/")).toBe(true);
+    }
+  });
+});
+
+// #174 — the fourth category: WHERE a path may be served, not who may reach it.
+describe("canonical-origin paths (#174)", () => {
+  it("covers the whole sign-in journey", () => {
+    for (const p of [
+      "/login",
+      "/login?error=expired",
+      "/api/auth/gitlab/start",
+      "/api/auth/gitlab/callback",
+      "/api/auth/logout",
+      "/api/google/oauth/start",
+      "/api/google/oauth/callback",
+    ]) {
+      // Query strings never reach the classifier, but assert on the bare path.
+      expect(isCanonicalOriginPath(p.split("?")[0])).toBe(true);
+    }
+  });
+
+  // A blanket canonical-host redirect would break the cold fetch Google's OAuth
+  // reviewers make against the homepage, the privacy notice and the terms —
+  // they want a 200, not a hop (.gitlab-ci.yml, deploy_production). Those pages
+  // set no host-only auth cookie, so they have no reason to move.
+  it("leaves the pages that must answer 200 on every hostname alone", () => {
+    for (const p of ["/", "/privacy", "/terms"]) {
+      expect(isCanonicalOriginPath(p)).toBe(false);
+    }
+  });
+
+  // The kubelet counts a 3xx as a pass, so redirecting a probe would make
+  // readiness green without /api/health ever running its SELECT 1.
+  it("leaves the Kubernetes probe paths alone", () => {
+    expect(isCanonicalOriginPath("/api/health")).toBe(false);
+    expect(isCanonicalOriginPath("/api/livez")).toBe(false);
+  });
+
+  it("does not treat lookalike paths as canonical-origin paths", () => {
+    expect(isCanonicalOriginPath("/loginhack")).toBe(false);
+    expect(isCanonicalOriginPath("/api/authx/start")).toBe(false);
+    expect(isCanonicalOriginPath("/api/ics/feed/tok")).toBe(false);
+  });
+
+  it("matches subpaths of every declared prefix", () => {
+    for (const prefix of CANONICAL_ORIGIN_PREFIXES) {
+      const base = prefix.endsWith("/") ? prefix : prefix + "/";
+      expect(isCanonicalOriginPath(`${base}anything/deeper`)).toBe(true);
+    }
+  });
+
+  // Every auth route in the tree has to be in the list, or a sign-in step can
+  // still be served on a hostname whose cookies the next step will not see.
+  it("covers every route under the auth prefixes it names", () => {
+    for (const prefix of ["/api/auth/", "/api/google/oauth/"]) {
+      expect(CANONICAL_ORIGIN_PREFIXES).toContain(prefix);
     }
   });
 });

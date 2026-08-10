@@ -62,12 +62,26 @@ export function makeSettings(overrides: Partial<Settings> = {}): Settings {
     focusKeepAwake: true,
     focusAlarmEnabled: true,
     focusSound: "off",
-    // #70 — null is "play the whole list", the state every row was in before the
-    // column existed, so it is the right value for a baseline fixture.
-    focusSoundCategory: null,
+    // #180 — the empty array is "play the whole catalogue", which is what #70's
+    // NULL meant, so it stays the right value for a baseline fixture. Held at
+    // off/[]/false rather than the new-account defaults on purpose: this fixture
+    // is a row an EXISTING account could have, and the export's job is to
+    // reproduce what was stored, not what a fresh install would store.
+    focusSoundCategories: [],
+    // #185 — held at `[]` for the same reason as its sibling above: this
+    // fixture is a row an EXISTING account could have, and an account that
+    // predates custom playlists has selected none. The export's job is to
+    // reproduce what was stored, not what a fresh install would store.
+    focusPlaylistIds: [],
     focusShuffle: false,
     focusPauseTogether: false,
     focusTimerTipDismissedAt: null,
+    // #199 — held at the schema default. Shopping-list mode is off unless asked
+    // for, so "an existing account that never turned it on" is the baseline row,
+    // and `makeSnapshot` below still carries shopping items: the export reproduces
+    // what was STORED, and turning the switch off hides the list rather than
+    // deleting it.
+    shoppingList: false,
     completeStrikethrough: true,
     completeTickColor: "green",
     typeface: "figtree",
@@ -92,6 +106,11 @@ function makeTaskWithSteps(): ExportTask {
     scheduleDueAt: new Date(Date.UTC(2026, 6, 5, 17, 0, 0)),
     schedulePriority: "high",
     scheduleHours: "work",
+    // #44 — deliberately MULTI-LINE and multi-paragraph: the note is free text
+    // typed by the data subject, and the tiers disagree about how to carry it
+    // (quoted in `tasks.md`, verbatim in `export.json`, absent from the CSVs).
+    // A single-line fixture would let all three look correct.
+    notes: "Bring the Figma link\n\ncall before 5",
     workspaceId: WORKSPACE_ID,
     steps: [
       {
@@ -106,6 +125,10 @@ function makeTaskWithSteps(): ExportTask {
         googleTaskListId: null,
         scheduledAt: new Date(Date.UTC(2026, 6, 2, 9, 0, 0)),
         done: true,
+        // #44 — a step-level note, so the export tiers are exercised at BOTH
+        // grains. `tasks.md` quotes it under its step, `export.json` reproduces
+        // it verbatim, and the CSVs drop it like every other free-text column.
+        notes: "the login page, not the marketing one",
         // The column holds a JSON *string*, which is the whole reason
         // export.json has to expand it.
         estimateHistory: "[10,15]",
@@ -123,6 +146,7 @@ function makeTaskWithSteps(): ExportTask {
         googleTaskListId: null,
         scheduledAt: null,
         done: false,
+        notes: null,
         estimateHistory: null,
         createdAt: new Date(Date.UTC(2026, 6, 1, 9, 2, 0)),
       },
@@ -165,6 +189,9 @@ function makeSteplessTask(): ExportTask {
     scheduleDueAt: new Date(Date.UTC(2026, 6, 10, 12, 0, 0)),
     schedulePriority: null,
     scheduleHours: null,
+    // No note — the common case, and what keeps the "omits what it has no
+    // value for" assertions honest (#44).
+    notes: null,
     workspaceId: WORKSPACE_ID,
     steps: [],
     turns: [],
@@ -188,6 +215,7 @@ function makeUnscheduledTask(): ExportTask {
     scheduleDueAt: null,
     schedulePriority: null,
     scheduleHours: null,
+    notes: null,
     workspaceId: WORKSPACE_ID,
     steps: [],
     turns: [],
@@ -232,6 +260,15 @@ export function makeSnapshot(
         estMinutes: 5,
         breakdownRequestedAt: null,
         taskId: null,
+        // #186 added notes + the three schedule columns to BrainDumpItem. This
+        // fixture is the export golden master, so it has to carry every column
+        // the model has — an absent one here means the exporter is never asked
+        // to emit it and a regression ships silently. item-1 leaves them empty
+        // on purpose; item-2 below populates them, so both paths are covered.
+        notes: null,
+        scheduleDueAt: null,
+        schedulePriority: null,
+        scheduleHours: null,
         workspaceId: WORKSPACE_ID,
       },
       {
@@ -248,6 +285,12 @@ export function makeSnapshot(
         estMinutes: null,
         breakdownRequestedAt: null,
         taskId: "task-1",
+        // Populated, so the exporter's handling of a scheduled + noted item is
+        // exercised rather than only its null path.
+        notes: "ring them before 10, they close for lunch",
+        scheduleDueAt: new Date(Date.UTC(2026, 6, 9, 9, 0, 0)),
+        schedulePriority: "high",
+        scheduleHours: "work",
         workspaceId: WORKSPACE_ID,
       },
     ],
@@ -265,6 +308,52 @@ export function makeSnapshot(
         workspaceId: WORKSPACE_ID,
         pausedAt: null,
         accumulatedPausedMs: 0,
+      },
+    ],
+    focusPlaylists: [
+      {
+        id: "playlist-1",
+        workspaceId: WORKSPACE_ID,
+        // #185 — a name with a comma and an emoji, for the same reason the task
+        // title has them: this is free text the data subject typed.
+        name: "Deep work, mornings 🎧",
+        trackIds: ["catalog:rain-01.mp3", "bundled-piano"],
+        createdAt: new Date(Date.UTC(2026, 6, 1, 10, 0, 0)),
+      },
+    ],
+    shoppingItems: [
+      {
+        id: "shop-1",
+        workspaceId: WORKSPACE_ID,
+        // #199 — a comma and a quote, because item text is free text typed into a
+        // single-line field and `export.json` is the only tier that must carry it
+        // back verbatim.
+        text: 'oat milk, the "barista" one',
+        done: false,
+        savedForLater: false,
+        order: 1,
+        createdAt: new Date(Date.UTC(2026, 6, 3, 7, 0, 0)),
+      },
+      {
+        id: "shop-2",
+        workspaceId: WORKSPACE_ID,
+        text: "batteries",
+        done: true,
+        savedForLater: false,
+        order: 2,
+        createdAt: new Date(Date.UTC(2026, 6, 3, 7, 1, 0)),
+      },
+      {
+        // The saved-for-later pile IS exported: "I deferred this" is something
+        // the data subject wrote down, so an export that dropped it would be
+        // handing over less than they have.
+        id: "shop-3",
+        workspaceId: WORKSPACE_ID,
+        text: "a bigger frying pan",
+        done: false,
+        savedForLater: true,
+        order: 3,
+        createdAt: new Date(Date.UTC(2026, 6, 3, 7, 2, 0)),
       },
     ],
     gamification: {
@@ -342,6 +431,8 @@ export function makeEmptySnapshot(): ExportSnapshot {
     tasks: [],
     inbox: [],
     focusSessions: [],
+    focusPlaylists: [],
+    shoppingItems: [],
     gamification: {
       streak: null,
       streakRecords: [],

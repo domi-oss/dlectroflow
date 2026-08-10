@@ -28,6 +28,31 @@ export type Item = {
   scheduledAt: Date | null;
   /** Single-task time estimate in minutes; null → display default of 5. */
   estMinutes: number | null;
+  /** #44 — the freeform note on the `Task` behind this item; null when the task
+   *  has none, and meaningless when `taskId` is null because there is then no
+   *  row to hold one.
+   *
+   *  OPTIONAL for the same reason the per-step `notes` below is: not every read
+   *  site fetches it. The Inbox and Library pages do, because both render task
+   *  rows the owner manages from; the focus launcher builds the same `Item`
+   *  shape to pick what to work on next and renders no note. */
+  notes?: string | null;
+  /**
+   * #186 — the note on the `BrainDumpItem` ITSELF, which is a different column
+   * from `notes` above and live at a different time. `notes` is the note on the
+   * `Task` behind this row; this is the one an untriaged item carries, written at
+   * capture by #179's inline syntax and copied onto the task at triage.
+   *
+   * The name moves rather than `notes` because `Task.notes` (#44) got there
+   * first and is read by more surfaces. `liveNote` (src/lib/braindump-to-task.ts)
+   * is the single answer to which of the two a row actually shows — never read
+   * one of them directly to decide what to display or write.
+   *
+   * OPTIONAL for the same reason `notes` is: not every read site fetches it. The
+   * Inbox does, because its untriaged buckets are the only place this grain is
+   * live; the focus launcher builds the same `Item` shape and renders no note.
+   */
+  itemNotes?: string | null;
   steps: {
     id: string;
     order: number;
@@ -35,6 +60,16 @@ export type Item = {
     done: boolean;
     estMinutes: number;
     subtaskEmoji: string | null;
+    /** #44 — this step's own freeform note; null when it has none.
+     *
+     *  OPTIONAL for the same reason `openRemainingSec` is: not every read site
+     *  fetches it. The Inbox and Library pages do, because expanding a row
+     *  there mounts the same `<TaskSteps>` the task page does and a step's note
+     *  must not depend on which surface you opened it from. The focus launcher
+     *  pages build the same `Item` shape but only ever read titles and
+     *  estimates off it, so making them select a column they will not render
+     *  would be a wider row for nothing. */
+    notes?: string | null;
     resumable: boolean;
     /** #27 follow-up — remaining seconds of this step's open FocusSession
      * (paused or actively running) as of when the page was rendered; null/

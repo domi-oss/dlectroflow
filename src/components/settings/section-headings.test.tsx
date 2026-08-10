@@ -15,6 +15,7 @@ vi.mock("@/app/actions/settings", () => ({
   updateAppearanceSettings: vi.fn().mockResolvedValue(undefined),
   updateNotificationSettings: vi.fn().mockResolvedValue(undefined),
   updateFocusTimerSettings: vi.fn().mockResolvedValue(undefined),
+  updateShoppingList: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/app/actions/google-schedule", () => ({
   disconnectGoogleTasks: vi.fn().mockResolvedValue(undefined),
@@ -48,6 +49,7 @@ import { AgingSection } from "@/components/settings/aging-section";
 import { VoiceSection } from "@/components/settings/voice-section";
 import { BreakdownModelSection } from "@/components/settings/breakdown-model-section";
 import { DemoSection } from "@/components/settings/demo-section";
+import { ShoppingSection } from "@/components/settings/shopping-section";
 import { AppearanceSection } from "@/components/settings/appearance-section";
 import { NotificationsSection } from "@/components/settings/notifications-section";
 import { FocusTimerSection } from "@/components/settings/focus-timer-section";
@@ -93,6 +95,7 @@ function AllSections({ voice = "plain" as Voice }) {
         modelChoices={[{ id: "sonnet", label: "Sonnet" }]}
         voice={voice}
       />
+      <ShoppingSection shoppingList={false} voice={voice} />
       <DemoSection firstRunPreview={false} voice={voice} />
       <AppearanceSection
         completeStrikethrough
@@ -112,8 +115,7 @@ function AllSections({ voice = "plain" as Voice }) {
         minimalMode={false}
         keepAwake={false}
         alarmEnabled={false}
-        sound="chime"
-        category={null}
+        sound="off"
         pauseTogether={false}
         voice={voice}
       />

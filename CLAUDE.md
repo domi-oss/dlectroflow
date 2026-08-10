@@ -29,7 +29,7 @@ npm run db:migrate     prisma migrate dev
 npm run check:env      env-drift check
 ```
 
-`DATABASE_URL` is read from `.env` (Prisma's convention). `vitest.config.ts` forwards only that one variable into tests — deliberately, so no test can reach a secret it wasn't given.
+`DATABASE_URL` is read from `.env` (Prisma's convention). `config/vitest.config.ts` forwards only that one variable into tests — deliberately, so no test can reach a secret it wasn't given.
 
 ## Architecture
 
@@ -37,7 +37,12 @@ npm run check:env      env-drift check
 - `src/app/actions/` — server actions, one file per action, colocated tests.
 - `src/lib/` — all domain logic, flat, colocated `*.test.ts`. Subfolders only where a cluster earns one: `auth/`, `llm/`, `crypto/`, `scheduling/`, `nav/`.
 - `src/components/` — grouped by feature (`inbox/`, `focus/`, `library/`, `settings/`…); `ui/` is shadcn primitives.
-- `prisma/schema.prisma` — 19 models. `Workspace` is the tenancy root.
+- `prisma/schema.prisma` — `Workspace` is the tenancy root. A model that declares
+  `workspaceId` is enrolled automatically in the scoping harness
+  (`src/lib/__tests__/scoping.harness.test.ts`) and the export coverage guard
+  (`src/lib/export/__tests__/model-coverage.test.ts`), both of which read
+  `Prisma.dmmf` at runtime. (The count used to be written here and was wrong by
+  the time anybody read it — `grep -c '^model ' prisma/schema.prisma`.)
 - `docker/` — both Dockerfiles, the Caddyfile and both Compose files. Paths inside the compose files resolve against `docker/`, so `.env.prod` and `backups/` are referenced as `../`; the image build context stays the repo root.
 - Community files (`CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`) live in `docs/`, not the root and not `.gitlab/` — `.gitlab/**` is in the CI `.code_changes` list, so putting them there would cost every typo fix a full pipeline. Renovate's config is `.gitlab/renovate.json`.
 
@@ -50,7 +55,7 @@ Auth path classification lives in `src/lib/auth/gate.ts` and is enforced by `src
 ## Conventions
 
 - Prettier: `semi`, double quotes, 2 spaces, `trailingComma: "all"`, `printWidth: 80`. These were measured off the existing tree, not copied from defaults.
-- **Comments explain _why_, and cite the issue number.** Config files carry real prose (see `prettier.config.mjs`, `vitest.config.ts`, `src/lib/auth/gate.ts`). Match that density — a non-obvious constant or exclusion without its reasoning will get flagged in review.
+- **Comments explain _why_, and cite the issue number.** Config files carry real prose (see `config/prettier.config.mjs`, `config/vitest.config.ts`, `src/lib/auth/gate.ts`). Match that density — a non-obvious constant or exclusion without its reasoning will get flagged in review.
 - Tests colocate next to the code: `foo.ts` + `foo.test.ts`. `*.integration.test.ts` means it needs real Postgres.
 - Path alias `@/` → `src/`.
 - Conventional commits.
@@ -96,6 +101,8 @@ Prod deploys, cluster changes and deletes are owner-authorised only.
 ## Local development gotchas
 
 - Local `npm` is allow-scripts-wrapped: regenerate lockfiles inside the CI image (`node:22-alpine`), not on the host.
-- **Worktrees live in `.claude/worktrees/<name>`**, which `.gitignore`, `.dockerignore`, `.prettierignore` and `eslint.config.mjs` all exclude. Putting one anywhere else means every one of those tools walks into it.
+- **A worktree must sit somewhere the repo's tools won't walk into.** Two places qualify and both are in use: `../wt-<issue>`, a sibling of the checkout and therefore outside the repo root entirely (42 of the 45 live worktrees), or `.claude/worktrees/<name>`, which is inside but excluded by `.gitignore`, `.dockerignore`, `.prettierignore` and `eslint.config.mjs`. Anywhere else and every one of those tools walks into it. This bullet used to name only the second and read as a rule; it was describing the rarer of the two.
 - Worktrees share a symlinked `node_modules` including the generated Prisma client, and branches carry different schema columns. Seed a new worktree with `cp -Rc` from the main checkout, then `npx prisma generate` for that branch.
+- **A new worktree has no `.env`** — it is gitignored, so it does not come across with the checkout, and without it `DATABASE_URL` is unset and every `*.integration.test.ts` dies in a wall of Prisma errors. Copy the main checkout's and give the copy **its own `?schema=`** (`?schema=wt190` for `wt-190`), because concurrent streams sharing one schema corrupt each other's fixtures. Then `npx prisma migrate deploy` to build it.
+- **Running one test file needs the config passed explicitly**: `npx vitest run --config config/vitest.config.ts <file>`. There is no `vitest.config.*` at the root — `npm test` supplies the flag, a bare `npx vitest run <file>` does not, and it fails on an unresolvable `@/lib/…` alias rather than on anything to do with the test.
 - Never `git stash` while other agents are working the repo — the stash is repo-wide and gets clobbered.

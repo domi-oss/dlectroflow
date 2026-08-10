@@ -75,7 +75,8 @@ the open-lofi catalog now reaches the app through that same origin — see below
 The other 156 open-lofi tracks are **not vendored here**; the full set is ~544 MB
 and a container image is the wrong place for it. An operator who sets
 `FOCUS_CATALOG_ORIGIN` points the app at a directory holding the extracted
-`openlofi.zip` — the mp3s plus `catalog.json` — and the app reads them at run
+`openlofi.zip` — the mp3s plus `catalog.json`, which is published separately from
+the archive and has to be fetched on its own — and the app reads them at run
 time. Unset, everything above is all there is, which is the default.
 
 **The licence is the same, and so is the chain of title.** The streamed set is the

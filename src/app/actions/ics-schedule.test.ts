@@ -165,6 +165,246 @@ describe("scheduleViaIcs", () => {
     delete process.env.PUBLIC_ORIGIN;
   });
 
+  // ── #44: the task's own note rides into the DESCRIPTION ──────────────────
+  it("threads the task's note into every step's DESCRIPTION, above the deep-link", async () => {
+    workspaceMock.mockResolvedValue("owner");
+    process.env.PUBLIC_ORIGIN = "https://app.example";
+    taskFindFirstMock.mockResolvedValue(
+      stepTask({
+        notes: "Bring the Figma link",
+        steps: [
+          { id: "step-A", text: "Plan", estMinutes: 15 },
+          { id: "step-B", text: "Build", estMinutes: 20 },
+        ],
+      }),
+    );
+    const res = await scheduleViaIcs("task-1");
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      const unfolded = res.ics.replace(/\r\n[ \t]/g, "");
+      // Every event, not just the first: the note is context for the whole
+      // task, and a calendar entry you open at step 3 needs it as much as one
+      // you open at step 1.
+      expect((unfolded.match(/Bring the Figma link/g) ?? []).length).toBe(2);
+      const description = unfolded
+        .split("\r\n")
+        .find((l) => l.startsWith("DESCRIPTION:")) as string;
+      expect(description.indexOf("Bring the Figma link")).toBeLessThan(
+        description.indexOf("https://app.example/focus/step-A"),
+      );
+    }
+    delete process.env.PUBLIC_ORIGIN;
+  });
+
+  it("threads the note onto the stepless fallback event too", async () => {
+    workspaceMock.mockResolvedValue("owner");
+    taskFindFirstMock.mockResolvedValue(
+      stepTask({ steps: [], notes: "call before 5" }),
+    );
+    const res = await scheduleViaIcs("task-1", { durationMin: 30 });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.ics.replace(/\r\n[ \t]/g, "")).toContain("call before 5");
+    }
+  });
+
+  it("produces the pre-#44 bytes for a task with no note", async () => {
+    workspaceMock.mockResolvedValue("owner");
+    process.env.PUBLIC_ORIGIN = "https://app.example";
+    const stamp = new Date("2026-08-05T09:00:00Z");
+    vi.setSystemTime(stamp);
+    taskFindFirstMock.mockResolvedValue(stepTask({ notes: null }));
+    const withNullNote = await scheduleViaIcs("task-1");
+    vi.setSystemTime(stamp);
+    taskFindFirstMock.mockResolvedValue(stepTask());
+    const withNoColumn = await scheduleViaIcs("task-1");
+    vi.useRealTimers();
+    expect(withNullNote.ok && withNullNote.ics).toBe(
+      withNoColumn.ok && withNoColumn.ics,
+    );
+    delete process.env.PUBLIC_ORIGIN;
+  });
+
+  // ── #44 / #154: the note is free text, so it is an injection surface ──────
+  //
+  // This is the exact hole `esc()` was hardened for. A DESCRIPTION value that
+  // reaches the file unescaped can END ITS CONTENT LINE and start a new one, and
+  // a lenient parser then reads whatever follows as a fresh calendar property —
+  // a forged ATTENDEE, a second VEVENT, an ORGANIZER that is not you. Before
+  // #44 the only user text in a DESCRIPTION was a title that `oneLine`
+  // collapsed; a multi-line note is the first value with a real line terminator
+  // in it, and CR is the one that matters most because no editor shows it.
+  it("cannot forge a calendar property from a note containing newlines, semicolons and a bare CR", async () => {
+    workspaceMock.mockResolvedValue("owner");
+    taskFindFirstMock.mockResolvedValue(
+      stepTask({
+        notes:
+          "harmless\r\nATTENDEE;CN=Mallory:mailto:m@evil.test\rORGANIZER:mailto:m@evil.test\nEND:VEVENT\nBEGIN:VEVENT\nSUMMARY:forged",
+        steps: [{ id: "step-A", text: "Plan", estMinutes: 15 }],
+      }),
+    );
+    const res = await scheduleViaIcs("task-1");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+
+    // Unfold first (§3.1), because that is what a client does before parsing:
+    // a check against the folded text would pass on a payload that reassembles
+    // into a property once the continuations are joined.
+    const unfolded = res.ics.replace(/\r\n[ \t]/g, "");
+    const lines = unfolded.split("\r\n");
+
+    // The structure is exactly what one step produces — the note added no
+    // events and closed none. Counted as WHOLE LINES rather than substrings,
+    // because the escaped payload legitimately still contains the characters
+    // `END:VEVENT` inside a DESCRIPTION value; being present as data is the
+    // outcome we want, and only being present as a LINE is the attack.
+    expect(lines.filter((l) => l === "BEGIN:VEVENT")).toHaveLength(1);
+    expect(lines.filter((l) => l === "END:VEVENT")).toHaveLength(1);
+
+    // No physical line begins one of the properties the note tried to
+    // introduce.
+    for (const forbidden of ["ATTENDEE", "ORGANIZER", "SUMMARY:forged"]) {
+      expect(
+        lines.some((l) => l.startsWith(forbidden)),
+        `a note forged a ${forbidden} line`,
+      ).toBe(false);
+    }
+
+    // The payload is still THERE — escaped, not stripped. The user typed it and
+    // gets to read it back; the point is that it is data, not syntax.
+    expect(unfolded).toContain("ATTENDEE\\;CN=Mallory");
+    // CRLF and a bare CR both collapse to ONE escaped `\n`, never two, so the
+    // note does not gain blank lines on the way into somebody's calendar.
+    expect(unfolded).toContain("harmless\\nATTENDEE");
+
+    // And no raw terminator survives inside a value: after unfolding, the only
+    // CR and LF in the file are the CRLFs that separate content lines.
+    for (const line of lines) {
+      expect(/[\r\n]/.test(line)).toBe(false);
+    }
+  });
+
+  // ── #44: the step's OWN note, on its own event only ──────────────────────
+  it("gives each event its own step's note, and never another step's", async () => {
+    workspaceMock.mockResolvedValue("owner");
+    process.env.PUBLIC_ORIGIN = "https://app.example";
+    taskFindFirstMock.mockResolvedValue(
+      stepTask({
+        notes: null,
+        steps: [
+          { id: "step-A", text: "Plan", estMinutes: 15, notes: "note for A" },
+          { id: "step-B", text: "Build", estMinutes: 20, notes: "note for B" },
+        ],
+      }),
+    );
+    const res = await scheduleViaIcs("task-1");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+
+    // Split per VEVENT so "the string is somewhere in the file" cannot pass for
+    // "the string is on the right event" — the exact confusion #104 was filed
+    // for, one grain down.
+    const unfolded = res.ics.replace(/\r\n[ \t]/g, "");
+    const events = unfolded.split("BEGIN:VEVENT").slice(1);
+    expect(events).toHaveLength(2);
+    const eventFor = (stepId: string) =>
+      events.find((e) => e.includes(`/focus/${stepId}`)) as string;
+
+    expect(eventFor("step-A")).toContain("note for A");
+    expect(eventFor("step-A")).not.toContain("note for B");
+    expect(eventFor("step-B")).toContain("note for B");
+    expect(eventFor("step-B")).not.toContain("note for A");
+    delete process.env.PUBLIC_ORIGIN;
+  });
+
+  it("carries the task note AND the step note, task first", async () => {
+    workspaceMock.mockResolvedValue("owner");
+    process.env.PUBLIC_ORIGIN = "https://app.example";
+    taskFindFirstMock.mockResolvedValue(
+      stepTask({
+        notes: "Bring the Figma link",
+        steps: [
+          { id: "step-A", text: "Plan", estMinutes: 15, notes: "call Sam" },
+        ],
+      }),
+    );
+    const res = await scheduleViaIcs("task-1");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+
+    const unfolded = res.ics.replace(/\r\n[ \t]/g, "");
+    // The decision recorded in `buildScheduleNote`: annotating a step must not
+    // strip the task's context from that step's entry.
+    expect(unfolded).toContain("Bring the Figma link");
+    expect(unfolded).toContain("call Sam");
+    expect(unfolded.indexOf("Bring the Figma link")).toBeLessThan(
+      unfolded.indexOf("call Sam"),
+    );
+    delete process.env.PUBLIC_ORIGIN;
+  });
+
+  it("cannot forge a calendar property from a STEP note either", async () => {
+    // The same gate at the second grain. It is asserted rather than assumed to
+    // follow from the task-level case, because the two values reach `esc()`
+    // through different arguments — one from `task.notes` on every event, one
+    // from `s.notes` per step — and a wiring change could route one of them
+    // around the serialiser without touching the other.
+    workspaceMock.mockResolvedValue("owner");
+    taskFindFirstMock.mockResolvedValue(
+      stepTask({
+        notes: null,
+        steps: [
+          {
+            id: "step-A",
+            text: "Plan",
+            estMinutes: 15,
+            notes:
+              "ok\r\nATTENDEE;CN=Mallory:mailto:m@evil.test\rEND:VEVENT\nBEGIN:VEVENT\nSUMMARY:forged",
+          },
+        ],
+      }),
+    );
+    const res = await scheduleViaIcs("task-1");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+
+    const lines = res.ics.replace(/\r\n[ \t]/g, "").split("\r\n");
+    expect(lines.filter((l) => l === "BEGIN:VEVENT")).toHaveLength(1);
+    expect(lines.filter((l) => l === "END:VEVENT")).toHaveLength(1);
+    for (const forbidden of ["ATTENDEE", "SUMMARY:forged"]) {
+      expect(
+        lines.some((l) => l.startsWith(forbidden)),
+        `a step note forged a ${forbidden} line`,
+      ).toBe(false);
+    }
+    // Escaped, not stripped: the user typed it and gets to read it back.
+    expect(lines.join("\r\n")).toContain("ATTENDEE\\;CN=Mallory");
+  });
+
+  it("keeps every physical line inside 75 octets with a long note (RFC 5545 §3.1)", async () => {
+    workspaceMock.mockResolvedValue("owner");
+    taskFindFirstMock.mockResolvedValue(
+      stepTask({
+        // Emoji on purpose: folding is bounded in OCTETS, and a naive character
+        // fold both overshoots and can split a UTF-8 sequence.
+        notes: "🧠 remember the thing ".repeat(40),
+        steps: [{ id: "step-A", text: "Plan", estMinutes: 15 }],
+      }),
+    );
+    const res = await scheduleViaIcs("task-1");
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+
+    for (const line of res.ics.split("\r\n")) {
+      expect(Buffer.byteLength(line, "utf8")).toBeLessThanOrEqual(75);
+    }
+    // Unfolding is lossless — the note is intact once the client puts it back
+    // together, replacement characters and all absent.
+    const unfolded = res.ics.replace(/\r\n[ \t]/g, "");
+    expect(unfolded).toContain("🧠 remember the thing");
+    expect(unfolded).not.toContain("�");
+  });
+
   it("a reward failure does not fail scheduling (returns the .ics anyway)", async () => {
     workspaceMock.mockResolvedValue("owner");
     taskFindFirstMock.mockResolvedValue(stepTask());

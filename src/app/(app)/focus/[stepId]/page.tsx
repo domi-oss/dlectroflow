@@ -227,6 +227,9 @@ export default async function FocusPage({
       }))}
       taskId={step.taskId}
       taskTitle={step.task.title}
+      // #44 — the jotted context, read-only, while the work is happening.
+      taskNote={step.task.notes}
+      stepNote={step.notes}
       parentEmoji={step.task.parentEmoji}
       streak={dashboard.currentStreak}
       focusMinToday={dashboard.focusMinToday}
@@ -248,7 +251,7 @@ export default async function FocusPage({
         keepAwake: settings.focusKeepAwake,
         alarmEnabled: settings.focusAlarmEnabled,
         sound: settings.focusSound,
-        category: settings.focusSoundCategory,
+        categories: settings.focusSoundCategories,
         shuffle: settings.focusShuffle,
         pauseTogether: settings.focusPauseTogether,
       }}

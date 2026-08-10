@@ -1,0 +1,20 @@
+-- #190 — the OAuth singleton, re-created after the migration that empties it.
+--
+-- This seed exists because the MEASURED coverage gate caught something the
+-- static one cannot: `20260713170000_clear_oauth_tokens_for_encryption` ends with
+-- an unqualified `DELETE FROM "GoogleAuth"`, so the row seeded at init is gone
+-- from here on. Every later GoogleAuth migration — the unique index and foreign
+-- key in `accounts_identity`, both orphan purges, and the `SET NOT NULL` — was
+-- therefore still running against an empty table, while a check that only reads
+-- the seed FILES would have called that table seeded and passed.
+--
+-- The general rule this instance illustrates: a seed's rows are only in place
+-- until something deletes them, so a table cleared mid-timeline needs a seed on
+-- the far side of the clearing. That is why the harness counts rows immediately
+-- before each migration instead of trusting the corpus.
+--
+-- `id` still defaults to 'singleton' at this version — `20260727230000_accounts_identity`
+-- drops that default — and `updatedAt` has never had one. The token columns are
+-- left NULL: this row's job is to exist, and a fake token string in a public repo
+-- is a secret-scanner finding waiting to happen.
+INSERT INTO "GoogleAuth" ("updatedAt") VALUES (now());

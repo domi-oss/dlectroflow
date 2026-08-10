@@ -14,11 +14,34 @@
 //      (The route resolves the owner's model tier separately, still gated on
 //      `owner`; that call must not be confused with these. Pre-#35 the danger
 //      was the OWNER_WORKSPACE_ID constant; now it is any other account's id.)
-//   2. Every read pins an explicit `select` of numeric / enum / boolean / date
-//      columns. Notably `Step.text` and `BrainDumpItem.text` are never selected:
-//      not fetching them is a far stronger guarantee than remembering not to
-//      render them, and it also means breakdown history can never become a
-//      prompt-injection channel into future breakdowns.
+//   2. Every read pins an explicit `select`, and only ONE selected column is
+//      free text: `Task.notes`, for the single task the caller says is being
+//      broken down. Everything else is numeric / enum / boolean / date, and
+//      `Step.text` and `BrainDumpItem.text` are never selected at all.
+//
+//      WHERE THE LINE IS, AND WHY IT IS THERE. This invariant used to admit no
+//      free text whatever. The owner changed it deliberately on 2026-08-08
+//      (#179, !281): the note is the context that makes a breakdown good — "for
+//      the accountant, needs receipts" — and a coach that cannot see it plans
+//      around a constraint the person had already written down. What did NOT
+//      change is the reason the rule existed. The line now runs between:
+//        • the CURRENT task's own note — one row, named by the request, supplied
+//          on purpose as context for the very breakdown being asked for. It is
+//          the same category as the task title the prompt has always carried;
+//        • the text of OTHER and PAST items — `Step.text`, `BrainDumpItem.text`,
+//          and the notes of every task in the history summary. Those are still
+//          never selected, because feeding them back in is what would make
+//          breakdown history a SELF-FEEDING injection channel: a note written
+//          once would ride into every later breakdown, unread by anyone.
+//      One task's note is context. Every task's note is a channel. Not fetching
+//      the rest is still a far stronger guarantee than remembering not to render
+//      it, so the history reads keep their text-free selects.
+//
+//      The note is untrusted text on its way into a prompt, so the rendering
+//      half fences and labels it (`buildNoteBlock` in src/lib/breakdown.ts) and
+//      neutralises the markers it would need to escape that fence. What remains
+//      — a model persuaded by prose inside the fence — is the residual risk the
+//      owner accepted, alongside the BYO-LLM egress of the note itself.
 //   3. Read-only. No upsert (which is why this uses prisma.settings/streak
 //      .findUnique directly rather than getSettings/getStreak from @/lib/db —
 //      both of those CREATE a row, and the breakdown route is a hot path).
@@ -26,6 +49,7 @@
 import { prisma } from "@/lib/db";
 import { BrainDumpStatus } from "@/lib/constants";
 import { bucketItems, type Item } from "@/components/inbox/bucket";
+import { normalizeTaskNote } from "@/lib/task-notes";
 import type { BreakdownContext, RecentBreakdownShape } from "@/lib/breakdown";
 
 /** How many past breakdowns the coach is shown the SHAPE of. */
@@ -192,55 +216,88 @@ function countBuckets(rows: BoardRow[]): BreakdownContext["buckets"] {
  * canned local fallback. Any failure resolves to `{}`, which renders as an
  * empty context and therefore a prompt byte-identical to the pre-#14 one.
  *
- * `currentTaskId` excludes the in-flight task's own steps from the history
- * summary. The breakdown request body carries no task id today (see the note
- * in the route), so it is unused there — it exists so a future caller that
- * does know the task cannot accidentally feed the coach its own draft.
+ * `currentTaskId` names the task being broken down, and does two jobs:
+ *   • it excludes that task's own steps from the history summary, so the coach
+ *     is never shown its own draft as evidence of how this person likes their
+ *     breakdowns shaped;
+ *   • since #179 it is also the key for the ONE free-text read — that task's
+ *     `Task.notes`. Read invariant 2 at the top of this file first.
+ *
+ * `Task.notes` and NOT `BrainDumpItem.notes`, which is the column #179 added.
+ * They hold the same value at triage — `brainDumpItemToTaskData` COPIES the
+ * item's note across — but only the task column stays live afterwards, which is
+ * exactly what `liveNote()` (src/lib/braindump-to-task.ts) exists to say: from
+ * triage onwards every note surface reads `Task.notes` and the item's copy is a
+ * historical leftover. A breakdown always has a Task (the page is
+ * /tasks/[taskId], and `startBreakdown` creates one before navigating), so
+ * reading the item column here would show the coach a note the person had since
+ * edited — or one they had DELETED, since deleting through `NoteField` clears
+ * the task column and leaves the item's triage-time copy behind.
+ *
+ * The id arrives in the request body, so it is untrusted: the `workspaceId`
+ * term in that read is invariant 1 doing its job, and without it naming
+ * somebody else's task id would quote their note into this prompt. A miss
+ * resolves to `null`, which reads as "no note" — never as an error.
  */
 export async function gatherBreakdownContext(
   workspaceId: string,
   currentTaskId?: string | null,
 ): Promise<BreakdownContext> {
   try {
-    const [settings, streak, boardRows, stepRows] = await Promise.all([
-      prisma.settings.findUnique({
-        where: { workspaceId },
-        select: { voice: true },
-      }),
-      prisma.streak.findUnique({
-        where: { workspaceId },
-        select: { current: true, lastActiveWorkday: true },
-      }),
-      prisma.brainDumpItem.findMany({
-        // Archived and completed items belong to none of the four buckets
-        // bucketItems() puts them in, so filtering them here shrinks the scan
-        // without changing a single count. The integration test proves it.
-        where: {
-          workspaceId,
-          status: { not: BrainDumpStatus.Archived },
-          completedAt: null,
-        },
-        select: {
-          status: true,
-          createdAt: true,
-          freshenedAt: true,
-          snoozedUntil: true,
-          completedAt: true,
-          breakdownRequestedAt: true,
-          task: { select: { status: true, steps: { select: { done: true } } } },
-        },
-        take: BOARD_SCAN_LIMIT,
-      }),
-      prisma.step.findMany({
-        where: {
-          task: { workspaceId },
-          ...(currentTaskId ? { taskId: { not: currentTaskId } } : {}),
-        },
-        select: { taskId: true, estMinutes: true, createdAt: true },
-        orderBy: { createdAt: "desc" },
-        take: RECENT_STEP_ROW_LIMIT,
-      }),
-    ]);
+    const [settings, streak, boardRows, stepRows, currentTask] =
+      await Promise.all([
+        prisma.settings.findUnique({
+          where: { workspaceId },
+          select: { voice: true },
+        }),
+        prisma.streak.findUnique({
+          where: { workspaceId },
+          select: { current: true, lastActiveWorkday: true },
+        }),
+        prisma.brainDumpItem.findMany({
+          // Archived and completed items belong to none of the four buckets
+          // bucketItems() puts them in, so filtering them here shrinks the scan
+          // without changing a single count. The integration test proves it.
+          where: {
+            workspaceId,
+            status: { not: BrainDumpStatus.Archived },
+            completedAt: null,
+          },
+          select: {
+            status: true,
+            createdAt: true,
+            freshenedAt: true,
+            snoozedUntil: true,
+            completedAt: true,
+            breakdownRequestedAt: true,
+            task: {
+              select: { status: true, steps: { select: { done: true } } },
+            },
+          },
+          take: BOARD_SCAN_LIMIT,
+        }),
+        prisma.step.findMany({
+          where: {
+            task: { workspaceId },
+            ...(currentTaskId ? { taskId: { not: currentTaskId } } : {}),
+          },
+          select: { taskId: true, estMinutes: true, createdAt: true },
+          orderBy: { createdAt: "desc" },
+          take: RECENT_STEP_ROW_LIMIT,
+        }),
+        // #179 — the ONE free-text read (invariant 2). `findFirst` and not
+        // `findUnique`, because the where clause has to carry `workspaceId`
+        // alongside the id: the id came from the request body, and a unique
+        // lookup on it alone would be a straight IDOR into anybody's note. No
+        // task named ⇒ no query at all, which keeps the pre-#179 request shape
+        // exactly as cheap as it was.
+        currentTaskId
+          ? prisma.task.findFirst({
+              where: { id: currentTaskId, workspaceId },
+              select: { notes: true },
+            })
+          : Promise.resolve(null),
+      ]);
 
     // Settings.voice is a plain String column with no CHECK constraint, so an
     // unknown value is treated as "no preference recorded" rather than passed
@@ -260,9 +317,21 @@ export async function gatherBreakdownContext(
           }
         : null;
 
+    // The SHARED normaliser (src/lib/task-notes.ts), not a second rule: "" and
+    // whitespace-only fold to "no note" here by exactly the same definition the
+    // write path uses, and the control-character sweep and the 2000-character
+    // clamp are re-applied on the way out. Both are already true of every row
+    // the app writes — the CHECK constraint sees to the length — so this costs
+    // nothing on the real path and is the read-side backstop for a row that
+    // predates the constraint, which would otherwise be the one value on this
+    // whole boundary that nothing bounds. The prompt-side cap is separate and
+    // much tighter (`MAX_NOTE_CONTEXT_CHARS`).
+    const note = normalizeTaskNote(currentTask?.notes);
+
     return {
       voice,
       streak: streakCtx,
+      note,
       buckets: countBuckets(boardRows as BoardRow[]),
       recentBreakdowns: summarizeRecentBreakdowns(stepRows as StepShapeRow[]),
     };

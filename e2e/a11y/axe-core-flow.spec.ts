@@ -179,5 +179,33 @@ test.describe("accessibility: core-flow routes (axe)", () => {
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await expect(pacer).toBeVisible();
     await scanA11y(page, "/focus/[stepId] running (breathing)");
+
+    // #181 — the playlist/jump panel, EXPANDED. It is the surface with the most
+    // mechanical a11y to get wrong on this page (a disclosure, a named checkbox
+    // group, a set of headed lists and an aria-current item), and every one of
+    // those is an attribute only a real accessibility tree can confirm.
+    //
+    // Each precondition is asserted before the scan rather than assumed. A
+    // collapsed panel renders nothing at all, so a scan taken without them would
+    // be a clean result that looked at none of this — and would keep on being
+    // clean after the panel was broken.
+    const panelToggle = page.getByRole("button", {
+      name: "Playlists and tracks",
+    });
+    await expect(panelToggle).toBeVisible();
+    await panelToggle.click();
+    await expect(panelToggle).toHaveAttribute("aria-expanded", "true");
+    // The e2e instance has no streamed catalog, so this is the BUNDLED extreme:
+    // the ten shipped tracks and the column's default ["ambient-lofi"]. Both
+    // sections must still be on screen — the tick-list because a selected
+    // below-floor playlist is shown, the jump-list because the pool is never
+    // empty.
+    await expect(
+      page.getByRole("group", { name: "Playlists", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Tracks", exact: true }),
+    ).toBeVisible();
+    await scanA11y(page, "/focus/[stepId] playlist panel open");
   });
 });

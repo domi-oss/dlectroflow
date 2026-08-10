@@ -102,6 +102,9 @@ vi.mock("@/components/settings/breakdown-model-section", () => ({
 vi.mock("@/components/settings/demo-section", () => ({
   DemoSection: stub("settings-demo"),
 }));
+vi.mock("@/components/settings/shopping-section", () => ({
+  ShoppingSection: stub("settings-shopping"),
+}));
 vi.mock("@/components/settings/notifications-section", () => ({
   NotificationsSection: stub("settings-notifications"),
 }));

@@ -5,6 +5,7 @@ import { currentWorkspaceId, currentUser } from "@/lib/workspace";
 import { BreakdownChat } from "@/components/breakdown/breakdown-chat";
 import { TaskSteps } from "@/components/breakdown/task-steps";
 import { TaskSchedule } from "@/components/breakdown/task-schedule";
+import { TaskNote } from "@/components/breakdown/task-note";
 import { getGoogleStatus } from "@/lib/google";
 import { loadScheduleIntent } from "@/app/actions/schedule-intent";
 import { t, type Voice } from "@/lib/strings";
@@ -178,6 +179,17 @@ export default async function TaskPage({
             voice={voice}
           />
         </div>
+
+        {/* #44 — the task's freeform note, inside the header card because it is
+            context for the whole task rather than for any one step. Collapsed
+            until asked for when empty, and rendered as text once it exists, so
+            coming back to the task shows the note without a tap. */}
+        <TaskNote
+          taskId={task.id}
+          taskTitle={task.title}
+          notes={task.notes}
+          voice={voice}
+        />
       </div>
 
       <TaskSteps
@@ -190,6 +202,7 @@ export default async function TaskPage({
           subtaskEmoji: s.subtaskEmoji,
           estMinutes: s.estMinutes,
           done: s.done,
+          notes: s.notes,
           resumable: s.focusSessions.length > 0,
         }))}
       />

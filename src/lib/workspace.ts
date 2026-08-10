@@ -17,12 +17,76 @@ export class MissingWorkspaceError extends Error {
   }
 }
 
-/** A workspace's kind is a fact about the session that produced it, so it is
- *  returned alongside the id rather than re-derived from the id's shape. */
-export type ResolvedWorkspace = {
-  id: string;
-  kind: typeof WorkspaceKind.User | typeof WorkspaceKind.Guest;
-};
+/**
+ * #220 — the session is cryptographically valid, but the account behind it has
+ * been frozen (`User.status = revoked`, see `freezeAccount`).
+ *
+ * A SUBCLASS of MissingWorkspaceError rather than a sibling, and that is the
+ * load-bearing decision in this fix. Every handler that already narrows on
+ * MissingWorkspaceError treats it as "no usable session and no workspace to
+ * scope to", which is exactly the right answer here — `/api/export` answers 401
+ * instead of 500, and every action file inherits the refusal without a line
+ * changed. More to the point it fails closed for code that does not exist yet:
+ * a future handler written knowing only about MissingWorkspaceError cannot
+ * accidentally let a frozen account through, because there is no narrower
+ * branch for it to miss.
+ *
+ * **The inheritance only reaches code this error can actually reach, and
+ * {@link hasSession} is not that code (!305 review).** It resolves through
+ * {@link resolveWorkspace}, which issues no query and so never learns the
+ * status; the sole `throw` below is inside {@link currentWorkspaceId}, which
+ * `hasSession` does not call. A frozen account's still-valid token therefore
+ * keeps it `true`, and that is the intended answer — see that function, where
+ * the trade is argued and what it opens is enumerated. It is written down HERE
+ * too because "subclass of MissingWorkspaceError" reads like it covers every
+ * refusal path in the app, and this one path it does not.
+ *
+ * The message stays deliberately uninformative for the same reason
+ * `/api/export`'s 401 says "Not signed in": whoever holds the cookie already
+ * knows whose it is, and nothing downstream should start rendering copy off an
+ * exception type.
+ */
+export class RevokedAccountError extends MissingWorkspaceError {
+  constructor() {
+    super();
+    this.name = "RevokedAccountError";
+  }
+}
+
+/**
+ * A workspace's kind is a fact about the session that produced it, so it is
+ * returned alongside the id rather than re-derived from the id's shape.
+ *
+ * #220 makes it a DISCRIMINATED UNION so `userId` can be non-optional on the
+ * arm that has one. Written as one object with `userId?: string`, narrowing on
+ * `kind === "user"` would leave the id possibly-undefined, and
+ * `findUnique({ where: { id: undefined } })` type-checks happily against
+ * Prisma's `UserWhereUniqueInput` — a status check that quietly throws
+ * "needs at least one argument" instead of reading a status. It would fail
+ * closed, but it would fail closed for the wrong reason and only at runtime.
+ * The union makes the compiler the thing that guarantees it.
+ */
+export type ResolvedWorkspace =
+  | {
+      id: string;
+      kind: typeof WorkspaceKind.User;
+      /**
+       * Whose account this is. Carried out of the token for the same reason
+       * `kind` is: it is a fact about the session that produced this workspace,
+       * and the alternative is re-deriving it with a query against the very row
+       * we are about to write to. `userId` and `wsId` are signed together, so a
+       * caller cannot mismatch them — which is what makes it safe to look an
+       * account up by it.
+       */
+      userId: string;
+    }
+  | {
+      id: string;
+      kind: typeof WorkspaceKind.Guest;
+      /** A guest sandbox belongs to nobody; `never` so the two arms stay
+       *  distinguishable by more than their `kind` string. */
+      userId?: never;
+    };
 
 /** The signed-in account behind the current request, or null. */
 export type CurrentUser = {
@@ -39,6 +103,23 @@ export type CurrentUser = {
   handle: string | null;
 };
 
+/**
+ * Which workspace does this request's tokens point at?
+ *
+ * **Token-level only, by design (#220).** This answers "what is signed here",
+ * not "may this account act" — it performs no database read at all, and the
+ * account's `status` is therefore invisible to it. Keeping it that way is the
+ * point: `hasSession()` (#61) is built on this function precisely because it
+ * touches no database, and a status check here would put a query on every
+ * byte-range request of every audio seek. The check lives one level up, in
+ * {@link currentWorkspaceId}, which is already making a round trip and is only
+ * reached by callers that go on to read or write account data.
+ *
+ * That split is why `scoping.harness.test.ts` fails if any module outside this
+ * file CALLS this function. It is exported — the module's own tests need it —
+ * but it is not a public entry point, and reaching past `currentWorkspaceId()`
+ * for a workspace id is exactly how a status-blind write path would come back.
+ */
 export async function resolveWorkspace(input: {
   owner?: string;
   guest?: string;
@@ -50,7 +131,9 @@ export async function resolveWorkspace(input: {
     // #35 Phase A: the signed-in account's OWN workspace, carried in the signed
     // token. Pre-accounts this returned the constant OWNER_WORKSPACE_ID, which
     // is exactly the binary this phase removes.
-    if (p?.kind === "user") return { id: p.wsId, kind: WorkspaceKind.User };
+    if (p?.kind === "user") {
+      return { id: p.wsId, kind: WorkspaceKind.User, userId: p.userId };
+    }
   }
   if (input.guest) {
     const p = await verifySession(input.guest, sessionSecret);
@@ -74,10 +157,29 @@ export async function resolveWorkspaceId(input: {
 /**
  * Record activity on a workspace, creating it if this is the first sighting.
  *
- * `kind` is now passed in rather than inferred from the id: a workspace's kind
- * is a database fact, and with per-user workspaces there is no longer any id
- * shape to infer it from. Getting it wrong on a user workspace would stamp an
+ * `kind` is passed in rather than inferred from the id: a workspace's kind is a
+ * database fact, and with per-user workspaces there is no longer any id shape to
+ * infer it from. Getting it wrong on a user workspace would stamp an
  * `expiresAt` and let the guest-retention purge sweep a real account's data.
+ *
+ * ## Do not add a `select` or an `include` to this upsert (#220)
+ *
+ * It has to stay a shape Prisma can compile to a single
+ * `INSERT ... ON CONFLICT DO UPDATE`, because it races itself constantly: a
+ * fresh guest sandbox's first navigation fires the shell, the page and its data
+ * reads concurrently, all touching a workspace id that does not exist yet.
+ * Atomicity is the only thing making that safe.
+ *
+ * #220's first attempt read the owner's `status` here through a nested relation
+ * select, on the reasoning that a column on a query already being issued is
+ * free. It is not. A relation select disqualifies the native upsert, Prisma
+ * falls back to read-then-write, and the race returns — every loser raising
+ * P2002. It passed every sequential test in the suite and took down every guest
+ * page the moment requests overlapped, which is why
+ * `touch-workspace-race.integration.test.ts` now overlaps them on purpose.
+ *
+ * So the status check lives in {@link currentWorkspaceId} as its own query. It
+ * genuinely costs a round trip; the alternative cost an atomic write.
  */
 export async function touchWorkspace(
   id: string,
@@ -94,6 +196,358 @@ export async function touchWorkspace(
   });
 }
 
+/**
+ * Sign the frozen account out, as far as the framework permits.
+ *
+ * #220 asked for a revoked session to be CLEARED rather than merely refused, so
+ * the person is signed out instead of meeting silent failures until a 30-day
+ * cookie expires. How much of that is achievable depends entirely on where the
+ * refusal happens, and Next 16 draws that line, not us:
+ *
+ *  - In a **Server Function or Route Handler** the delete lands. The next
+ *    request carries no owner cookie, `src/proxy.ts` mints a guest sandbox, and
+ *    the app works normally for a signed-out visitor. This is the path that
+ *    matters most, because it is the one a still-open tab and a scripted client
+ *    keep hitting.
+ *  - In a **Server Component render** it cannot: "Setting cookies is not
+ *    supported during Server Component rendering"
+ *    (`node_modules/next/dist/docs/01-app/03-api-reference/04-functions/cookies.md`),
+ *    and Next enforces it by sealing the jar so `.delete` throws. Every page
+ *    under `src/app/(app)/` and the shell layout resolve their workspace this
+ *    way, so this is not a corner.
+ *
+ * Hence best-effort — which cannot weaken anything, because the refusal it
+ * accompanies is thrown by the CALLER, outside this try, and does not consult
+ * the result. Failing to sign somebody out is a worse experience; it is not a
+ * weaker gate.
+ *
+ * The catch is NOT bare, though it was until !305's review. Only the sealed jar
+ * is expected here; anything else is a fault, and a fault absorbed by a catch
+ * written for a different reason is one nobody ever hears about. See
+ * {@link reportUnexpectedClearFailure}.
+ *
+ * Bouncing a frozen person to /login with an explanation is the missing other
+ * half, and it belongs at the gate rather than here — `src/proxy.ts` is the only
+ * layer that sees the request before a page renders, and it has no Prisma client
+ * to read a status with (Edge runtime). That is a separate change with a real
+ * design question in it, not something to smuggle into a security fix.
+ */
+function clearOwnerSession(jar: Awaited<ReturnType<typeof cookies>>): void {
+  try {
+    jar.delete(OWNER_COOKIE);
+  } catch (err) {
+    reportUnexpectedClearFailure(err);
+  }
+}
+
+/**
+ * The opening clause of the message Next raises from a sealed cookie jar
+ * (`ReadonlyRequestCookiesError`, in
+ * `node_modules/next/dist/server/web/spec-extension/adapters/request-cookies.js`),
+ * which is what both of Next 16's read-only throw sites construct.
+ *
+ * **Matching on English text is the least bad discriminator here, and the
+ * alternatives were measured rather than assumed (!305 review).** Next exports
+ * that class from no public entry point, so recognising it by type would take a
+ * deep import of `next/dist/…` — and that would then be wrong rather than
+ * merely ugly, because `app-page.runtime.prod.js` carries its own bundled copy
+ * of the class: the identity a deep import binds is not the identity a page
+ * render throws, so the check would read false on the one path it exists for.
+ * Nothing else on the error survives either. Its constructor never assigns
+ * `name`, so `err.name` is the generic `"Error"`, and the production bundle
+ * minifies the class declaration itself down to a single letter, which takes
+ * `err.constructor.name` with it. The message is the only part that reaches the
+ * shipped runtime intact.
+ *
+ * Anchored on the opening clause and not the whole sentence because the
+ * documentation URL after it moves between releases; a literal substring rather
+ * than a pattern because there is no variation left to express, and this repo
+ * builds no regex it does not need (see `log-retention.ts`).
+ *
+ * If a future Next rewords it, this stops matching and a frozen account's page
+ * render logs one line per render saying so. That is the right direction to
+ * fail — loud and traceable to this constant, rather than back to silently
+ * discarding real faults.
+ */
+const SEALED_JAR_MESSAGE = "Cookies can only be modified";
+
+/**
+ * One structured, greppable line when the sign-out fails for a reason that is
+ * NOT the sealed jar — the shape `google_disconnect_failed` and `llm_failure`
+ * use, including the try/catch around the emission itself.
+ *
+ * `error` rather than `warn`: #158 is about handled outcomes printing as
+ * faults, and every handled outcome here returns silently one line above. What
+ * reaches `console.error` is by construction the residue — a throw from
+ * `.delete` that nothing in this codebase anticipated — which is the same
+ * category as `tokens_not_cleared`, the sibling best-effort clean-up in
+ * `google.ts` that logs at error for exactly this reason.
+ *
+ * No account id, unlike that sibling. There it names a credential row an
+ * operator has to go and delete by hand; here nothing persisted and there is no
+ * per-account clean-up to point at, so the id would be identifying data logged
+ * for no operational use.
+ *
+ * The classification sits INSIDE the try with the emission, not above it:
+ * reading `err.message` is itself a property access on an object this code did
+ * not construct, and an observability step must not become the response —
+ * least of all on the path that is refusing a frozen account.
+ *
+ * Which leaves the outer catch holding a second silence, and !305's review
+ * found it: with the classification inside, a throw from `err.message` itself
+ * skips the emission and lands there, so the one input most likely to be a
+ * genuine fault produced no line at all — the exact swallow this function
+ * exists to end, one layer down. Hence {@link emitUnreadableClearFailure},
+ * which says only that something failed and could not be read. That is the
+ * floor: the tag is always emitted, and every attempt to say more than the tag
+ * is made somewhere a throw can be caught above it.
+ */
+function reportUnexpectedClearFailure(err: unknown): void {
+  try {
+    if (err instanceof Error && err.message.includes(SEALED_JAR_MESSAGE)) {
+      // Server Component render: the jar is read-only and this is expected.
+      return;
+    }
+    console.error(
+      JSON.stringify({
+        tag: "session_clear_failed",
+        message: describeThrown(err),
+        ts: new Date().toISOString(),
+      }),
+    );
+  } catch {
+    emitUnreadableClearFailure();
+  }
+}
+
+/**
+ * The floor of {@link reportUnexpectedClearFailure}: a line built entirely from
+ * literals, so nothing in it can throw a second time.
+ *
+ * It is deliberately almost empty. Reaching here means the thrown value refused
+ * to be read at all — a `message` getter that throws, or an `Object.keys` that
+ * throws from a proxy — so there is nothing true left to say beyond the tag.
+ * `session_clear_failed` is the same tag as the informative line rather than a
+ * variant of it, because the grep that matters is "did signing anybody out ever
+ * fail", and a second tag would let one of the two answer it alone. `message`
+ * distinguishes them.
+ *
+ * Still wrapped, because `console.error` is itself replaceable and a test double
+ * or a log shipper can throw from it. An empty catch is the honest end of the
+ * chain here, and only here: at this point there is no surface left to report a
+ * reporting failure to, and the request must still be refused.
+ */
+function emitUnreadableClearFailure(): void {
+  try {
+    console.error(
+      JSON.stringify({
+        tag: "session_clear_failed",
+        message: "unreadable",
+        ts: new Date().toISOString(),
+      }),
+    );
+  } catch {
+    // Observability must never take the request down with it.
+  }
+}
+
+/**
+ * The only keys whose VALUE this module will print off a thrown object.
+ *
+ * Closed by construction: a key absent from this list has its value replaced,
+ * so the list decides what CAN be logged rather than what happens to be caught.
+ * That is the difference from a denylist of suspicious names, which was the
+ * other way to answer !305's review and is only ever as good as the last name
+ * somebody thought of — `cookie` and `session` are easy, `jar`, `principal`,
+ * `set-cookie` and `raw` are the ones that ship.
+ *
+ * These four are system-error vocabulary with no second meaning: Node stamps
+ * them on `ErrnoException`, and no user, session or request record is spelled
+ * this way. `path` is deliberately absent (a filesystem path is an operator's
+ * layout, and the syscall alone says as much as the line needs).
+ *
+ * **`name` and `status` are deliberately absent too**, though both read as
+ * error vocabulary and both were suggested. `name` is equally a person's name,
+ * and `status` is the exact field #220 is about — an allowlist that admits
+ * either would print a `User` row's contents the first time one is thrown,
+ * which is the failure this constant exists to make impossible. What `name` was
+ * wanted for is covered without the ambiguity by the constructor name, which is
+ * source-defined and cannot be user data.
+ */
+const LOGGABLE_ERROR_FIELDS: readonly string[] = [
+  "code",
+  "errno",
+  "syscall",
+  "statusCode",
+];
+
+/** Stands in for a value that was not printed, whatever the reason. */
+const REDACTED = "[redacted]";
+
+/**
+ * Render a thrown `unknown` as one line of log text: its shape in full, its
+ * values only where a value cannot be anybody's data (!305 review).
+ *
+ * Two rounds shaped this. `String(err)` was the whole of it first, and rendered
+ * every plain object as `[object Object]` — a `{ code, syscall, path }` reduced
+ * to the word "object", in the line whose only job is to describe an
+ * unanticipated failure. Replacing it with a whole-object `JSON.stringify`
+ * fixed that and bought a data-exposure path in the same stroke: this runs
+ * while refusing a frozen account, so the value in hand is one thrown from
+ * inside the cookie machinery, and the fields such an object reaches — a
+ * request, a jar, a session payload, a user row — went to a log retained for
+ * 30 days. A diagnostic must not be the thing that spills the session it is
+ * describing.
+ *
+ * So the two questions are separated. **Key names are always printed; values
+ * almost never are.** The shape is what makes an unanticipated failure
+ * actionable — an operator reading `{ code, syscall, socket }` knows what threw
+ * and where to look — and it is chosen by whoever wrote the throw, not by a
+ * request. The values are where anything sensitive actually lives, and only
+ * {@link LOGGABLE_ERROR_FIELDS} survives. That keeps what a bare allowlist
+ * would have thrown away: an object of entirely unknown shape, the case this
+ * line exists for, still describes itself instead of arriving as `{}`.
+ *
+ * The other two inputs keep their own branches, unchanged:
+ *
+ *  - **`Error`** → `message`, unquoted, which is what the sibling lines in
+ *    `google.ts` and `observability.ts` print. Not narrowed, because it is the
+ *    repo-wide convention and because a message is a sentence somebody wrote,
+ *    not a field something populated. An `Error`'s own extra properties are not
+ *    read at all, so nothing rides along with it.
+ *  - **primitives** (`throw "boom"`, a number, `null`, `undefined`, a symbol) →
+ *    `String`, because `JSON.stringify` would wrap a thrown string in a second
+ *    pair of quotes inside a field that is already JSON-encoded.
+ *
+ * Not size-capped, deliberately. The value is whatever `jar.delete()` threw
+ * inside Next's cookie adapter — framework internals, not anything a request
+ * body reaches — so a cap would be an unexplainable constant guarding a case
+ * that cannot arrive. Revisit if this helper is ever reused somewhere the
+ * thrown value IS attacker-shaped.
+ */
+function describeThrown(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err !== "object" || err === null) return String(err);
+  return describeObjectSafely(err);
+}
+
+/**
+ * One flat line naming every own key of a thrown object, carrying only the
+ * values {@link LOGGABLE_ERROR_FIELDS} permits.
+ *
+ * **Nothing here recurses, and that is the security property as well as the
+ * simplification.** A nested object is a key name and `[redacted]`, never a
+ * subtree, so there is no depth at which an unlisted field can smuggle a value
+ * up — a `req.headers.cookie` cannot be reached because `req` is never opened.
+ *
+ * It also retires the cycle guard the previous round added, without giving up
+ * what that guard was protecting. A back-reference to a request or a socket
+ * used to make `JSON.stringify` throw and cost the whole line; here it is one
+ * unlisted key like any other, so a cycle cannot arise rather than being caught
+ * — which is why `emitUnreadableClearFailure` is still not reachable from a
+ * circular input, only now by construction.
+ *
+ * `Object.keys` reads descriptors and does not invoke getters, so building the
+ * key list cannot run foreign code; only an allowlisted read can, and
+ * {@link loggableValue} contains that per key rather than letting one hostile
+ * getter cost the line. What `Object.keys` CAN throw on is a proxy, which is
+ * left to the caller's catch: that is a value refusing to be read at all, which
+ * is precisely the floor {@link emitUnreadableClearFailure} was written for.
+ *
+ * The result is a flat record of primitives, so the final `JSON.stringify`
+ * has nothing left to throw on.
+ */
+function describeObjectSafely(value: object): string {
+  const shape: Record<string, string | number | boolean> = {};
+  for (const key of Object.keys(value)) {
+    shape[key] = loggableValue(value, key);
+  }
+  return `${constructorNameOf(value)} ${JSON.stringify(shape)}`;
+}
+
+/** The value of one key, if it is allowlisted AND a primitive worth printing. */
+function loggableValue(value: object, key: string): string | number | boolean {
+  if (!LOGGABLE_ERROR_FIELDS.includes(key)) return REDACTED;
+  let read: unknown;
+  try {
+    read = (value as Record<string, unknown>)[key];
+  } catch {
+    // An allowlisted getter that throws. Distinct from `[redacted]`, which
+    // means "not printed", and from the `"unreadable"` line, which means the
+    // whole value defeated us — here one field did.
+    return "[threw]";
+  }
+  // Deliberately not `!== "object"`: that would admit a `bigint` or a `symbol`
+  // and hand `JSON.stringify` back the throw this function exists to avoid.
+  return typeof read === "string" ||
+    typeof read === "number" ||
+    typeof read === "boolean"
+    ? read
+    : REDACTED;
+}
+
+/**
+ * The class a thrown object was made from, which is source-defined and so the
+ * one piece of identifying text here that cannot be user data.
+ *
+ * Weaker in production than it looks, for the reason {@link SEALED_JAR_MESSAGE}
+ * documents: the bundler minifies class declarations, so Next's own errors
+ * arrive as a single letter. It still separates a plain `Object` — the shape a
+ * hand-rolled `throw { code }` takes — from something a library constructed,
+ * and it costs one guarded property read.
+ */
+function constructorNameOf(value: object): string {
+  try {
+    const name: unknown = value.constructor?.name;
+    return typeof name === "string" && name.length > 0 ? name : "object";
+  } catch {
+    return "object";
+  }
+}
+
+/**
+ * The workspace every write in this app scopes itself to — and the one place
+ * that decides a frozen account may not have one (#220).
+ *
+ * `currentUser()` has always re-read `status`, but only a minority of the action
+ * files go through it; the rest resolve a workspace id and write, and
+ * `braindump.ts` alone does so from nearly every function it exports. So a
+ * revoked account holding a valid cookie kept writing while `people-panel.tsx`
+ * rendered it as "Revoked". Enforcing it HERE, on the single helper the write
+ * path already shares, is what makes the badge true without asking every action
+ * file to remember — and what stops the next one from forgetting.
+ *
+ * (No count, deliberately: #220 was filed quoting "6 of 15 action files" and the
+ * tree was already at 5 of 16 by the time the fix was written. Measure it with
+ * `grep -l 'currentUser(' src/app/actions/*.ts` if the ratio ever matters again.)
+ *
+ * **Guests pay nothing.** The check is skipped on the kind of the resolved
+ * workspace, before any query is issued — a guest sandbox has no account to have
+ * a status, so it makes exactly the one round trip it always did. Branching on
+ * the KIND rather than on a null status is also what keeps that true by
+ * construction rather than by coincidence.
+ *
+ * **A signed-in request pays one extra round trip, and that is the honest
+ * price.** It was meant to be free: the first attempt at #220 read the status
+ * through a relation select on `touchWorkspace`'s existing upsert. That
+ * disqualifies Prisma's single-statement upsert, and the read-then-write it
+ * falls back to reintroduced a P2002 race that took down every guest page —
+ * see the comment on `touchWorkspace`. A query that costs an atomic write is not
+ * a free query. What the placement DOES still buy is `hasSession()` (#61) and
+ * `resolveWorkspace()` staying free, which is the reason the check is not one
+ * level down where the issue first proposed it.
+ *
+ * **The order matters.** The status is read BEFORE the touch, so a frozen
+ * account does not stamp `lastSeenAt` on the way to being refused, and a deleted
+ * account's live cookie does not cause `touchWorkspace` to re-create the
+ * ownerless workspace the cascade just removed.
+ *
+ * **It fails closed.** If the status read itself fails, the query rejects and
+ * that rejection propagates — there is no catch here and none is wanted. A
+ * database outage must not read as "carry on"; `/api/export` already
+ * distinguishes the two and answers 500 rather than 401 for exactly this case.
+ * A missing row is refused for the same reason: `undefined` is not `active`.
+ */
 export async function currentWorkspaceId(): Promise<string> {
   const jar = await cookies();
   const hdrs = await headers();
@@ -102,6 +556,20 @@ export async function currentWorkspaceId(): Promise<string> {
     guest: jar.get(GUEST_COOKIE)?.value,
     header: hdrs.get(GUEST_WS_HEADER) ?? undefined,
   });
+  if (ws.kind === WorkspaceKind.User) {
+    const owner = await prisma.user.findUnique({
+      // `ws.userId` is a non-optional `string` on this arm of the union, and it
+      // comes out of the same signed token as `ws.id`, so a caller can neither
+      // omit it nor point it at somebody else. `select` is one column: nothing
+      // here needs the account, only permission to continue.
+      where: { id: ws.userId },
+      select: { status: true },
+    });
+    if (owner?.status !== UserStatus.Active) {
+      clearOwnerSession(jar);
+      throw new RevokedAccountError();
+    }
+  }
   await touchWorkspace(ws.id, ws.kind);
   return ws.id;
 }
@@ -121,6 +589,18 @@ export async function currentWorkspaceId(): Promise<string> {
  * Use it ONLY where the answer needed is "is this a real caller" and no user data
  * is read. Anything that touches workspace-scoped rows must resolve the workspace
  * properly — an unscoped query behind this gate is still an IDOR.
+ *
+ * **It does not check `User.status`, and that is a decision, not an oversight
+ * (#220).** Checking it would mean a database read, which is the one thing this
+ * function exists not to do. What a revoked account gets by passing it is the
+ * lo-fi catalogue and the audio proxy (`src/app/api/focus-catalog/**`, its only
+ * two callers) — public third-party media, no account data, nothing written.
+ * Trading a read on every byte-range request of every seek for that is the wrong
+ * side of the deal. Anything that reads or writes account data must go through
+ * {@link currentWorkspaceId}, which does check, and `scoping.harness.test.ts`
+ * names this function in `STATUS_BLIND_RESOLVERS` with that reason — so the
+ * exemption is one somebody had to write down, and a fourth resolver appearing
+ * without a status check fails the build rather than joining it quietly.
  *
  * A missing or tampered token is `false`. Anything else rethrows, deliberately:
  * reporting an outage as "not signed in" sends somebody with a perfectly good
@@ -156,6 +636,16 @@ export async function hasSession(): Promise<boolean> {
  * account in the header therefore costs no extra round trip, and — more to the
  * point — the handle shown can never belong to a different session than the role
  * being enforced, which a second lookup could allow.
+ *
+ * **This is a session→workspace resolver in its own right, and rule 1 of
+ * `scoping.harness.test.ts` now says so (!305 review).** It calls
+ * {@link verifySession} itself and returns `workspaceId: p.wsId`, reaching
+ * neither {@link resolveWorkspace} nor {@link resolveWorkspaceId} — which is
+ * how it stayed invisible to a rule that looked for those two names. The status
+ * check above was therefore correct by the care of whoever wrote it rather than
+ * by anything enforced, and deleting it would have failed nothing. Rule 1 asks
+ * about the property now, so this function is in its pinned set and the check is
+ * load-bearing.
  */
 export async function currentUser(): Promise<CurrentUser | null> {
   const jar = await cookies();

@@ -80,6 +80,10 @@ describe("export.json — the round-trippable tier", () => {
     expect(task.googleTaskId).toBe("g-task-1");
     expect(task.googleTaskListId).toBe("g-list-1");
     expect(task.scheduledVia).toBe("ics");
+    // #44 — the user's note, VERBATIM. `tasks.md` quotes it and the CSVs drop
+    // it, so this tier is the only one that reproduces the exact bytes the
+    // person typed, blank line included.
+    expect(task.notes).toBe("Bring the Figma link\n\ncall before 5");
   });
 
   it("keeps the unflattened title, newline and all", () => {
@@ -107,6 +111,51 @@ describe("export.json — the round-trippable tier", () => {
     );
     expect(parsed.gamification.dailySparks).toHaveLength(1);
     expect(parsed.gamification.streakRecords).toHaveLength(1);
+  });
+
+  // #185, wired in review of #199 — the table reached `main` absent from the
+  // export and every test stayed green. `__tests__/model-coverage.test.ts` is the
+  // structural half; this is the value half.
+  it("carries the workspace's own focus playlists", () => {
+    expect(parsed.focusPlaylists).toHaveLength(1);
+    expect(parsed.focusPlaylists[0].name).toBe("Deep work, mornings 🎧");
+    expect(parsed.focusPlaylists[0].trackIds).toEqual([
+      "catalog:rain-01.mp3",
+      "bundled-piano",
+    ]);
+  });
+
+  // #199 — the WHOLE shopping list, including the ticked and saved-for-later
+  // rows: both are things the data subject wrote down, and this is the tier whose
+  // job is to lose nothing.
+  it("carries the shopping list, ticked and saved-for-later rows included", () => {
+    expect(parsed.shoppingItems).toHaveLength(3);
+    expect(parsed.shoppingItems[0].text).toBe('oat milk, the "barista" one');
+    expect(parsed.shoppingItems.map((i: { done: boolean }) => i.done)).toEqual([
+      false,
+      true,
+      false,
+    ]);
+    expect(
+      parsed.shoppingItems.map(
+        (i: { savedForLater: boolean }) => i.savedForLater,
+      ),
+    ).toEqual([false, false, true]);
+  });
+
+  // #199 — the summary row is app-generated bookkeeping, and it is DELIBERATELY
+  // absent. This assertion exists so the exclusion can never be mistaken for
+  // hiding real user data: the shopping list itself is exported in full (above),
+  // and what is withheld is one nullable timestamp saying whether an inbox line is
+  // currently dismissed — a fact an importer can recreate from the exported rows.
+  // Registered with that reasoning in __tests__/model-coverage.test.ts's
+  // DELIBERATELY_EXCLUDED, which requires every exclusion to carry a reason.
+  it("does NOT carry the inbox summary row — and does carry the list it summarises", () => {
+    expect(everyKey(parsed)).not.toContain("shoppingSummary");
+    expect(everyKey(parsed)).not.toContain("clearedAt");
+    // The control that makes the two absences above mean something: a serialiser
+    // that dropped the whole feature would satisfy them too.
+    expect(parsed.shoppingItems).toHaveLength(3);
   });
 
   it("writes every timestamp as ISO-8601 with an explicit offset", () => {
@@ -165,6 +214,8 @@ describe("export.json — the round-trippable tier", () => {
     expect(empty.tasks).toEqual([]);
     expect(empty.inbox).toEqual([]);
     expect(empty.settings).toBeNull();
+    expect(empty.focusPlaylists).toEqual([]);
+    expect(empty.shoppingItems).toEqual([]);
     expect(empty.gamification.streak).toBeNull();
     expect(empty.gamification.badges).toEqual([]);
   });

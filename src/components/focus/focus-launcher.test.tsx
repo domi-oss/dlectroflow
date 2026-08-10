@@ -51,6 +51,9 @@ const hero = (
   estMinutes: 12,
   taskId: "task-" + o.stepId,
   taskTitle: "Task " + o.stepId,
+  // #187 — defaulted so existing cases stay untouched; a spec that cares about
+  // a deadline overrides it.
+  dueAt: null,
   resumable: true,
   resumeAt: 1,
   // #27 follow-up — defaults to match estMinutes (the common "not paused
@@ -83,7 +86,15 @@ describe("FocusLauncher shell", () => {
         currentStreak={4}
         clearedToday={false}
         data={data({
-          singleTasks: [{ itemId: "i1", text: "Buy milk", estMinutes: 8 }],
+          singleTasks: [
+            {
+              itemId: "i1",
+              text: "Buy milk",
+              estMinutes: 8,
+              taskId: null,
+              dueAt: null,
+            },
+          ],
           meta: { minutesToClear: 42 },
         })}
       />,
@@ -114,7 +125,15 @@ describe("FocusLauncher shell", () => {
         currentStreak={0}
         clearedToday={false}
         data={data({
-          singleTasks: [{ itemId: "i1", text: "Buy milk", estMinutes: 8 }],
+          singleTasks: [
+            {
+              itemId: "i1",
+              text: "Buy milk",
+              estMinutes: 8,
+              taskId: null,
+              dueAt: null,
+            },
+          ],
           multiStep: [
             hero({ stepId: "m1", stepText: "Draft intro", resumable: false }),
           ],
@@ -146,7 +165,15 @@ describe("FocusLauncher shell", () => {
         currentStreak={0}
         clearedToday={false}
         data={data({
-          singleTasks: [{ itemId: "i1", text: "Buy milk", estMinutes: 8 }],
+          singleTasks: [
+            {
+              itemId: "i1",
+              text: "Buy milk",
+              estMinutes: 8,
+              taskId: null,
+              dueAt: null,
+            },
+          ],
         })}
       />,
     );

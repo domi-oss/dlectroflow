@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { getAuthProvider } from "./providers";
+import { getAuthProvider, PROVIDER_FETCH_TIMEOUT_MS } from "./providers";
 import { assertAuthConfig } from "./config";
 
 afterEach(() => {
@@ -124,5 +124,88 @@ describe("assertAuthConfig", () => {
     vi.stubEnv("GITLAB_OAUTH_CLIENT_SECRET", "");
     vi.stubEnv("OWNER_ALLOWLIST", "");
     expect(() => assertAuthConfig()).not.toThrow();
+  });
+});
+
+// #174 — a hang is the worst failure mode this flow has: no error, no retry
+// affordance, no explanation. Neither of these two calls carried a deadline, so
+// a stalled provider left the callback sitting on undici's default 300 s header
+// timeout with a blank screen. Every failure path in the callback redirects to
+// /login?error=…; the point of the deadline is to make sure one is reached.
+describe("gitlab provider request deadlines (#174)", () => {
+  // Typed with `fetch`'s real parameters even though the body ignores them.
+  // `vi.fn(async () => …)` infers a zero-argument signature, which makes
+  // `mock.calls` an empty tuple — so reading `calls[0][1]` to get at the
+  // RequestInit is a type error, and the `as RequestInit` cast that hid it was
+  // casting `undefined`. The assertions below are about the second argument, so
+  // the mock has to admit it has one.
+  function okFetch(body: unknown) {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify(body)),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("bounds the deadline — long enough for a slow mobile network, short enough to be an error", () => {
+    expect(PROVIDER_FETCH_TIMEOUT_MS).toBeGreaterThanOrEqual(5_000);
+    expect(PROVIDER_FETCH_TIMEOUT_MS).toBeLessThanOrEqual(15_000);
+  });
+
+  it("gives the token exchange an abort signal that is live, not already spent", async () => {
+    const fetchMock = okFetch({ access_token: "at" });
+    vi.stubEnv("AUTH_PROVIDER", "gitlab");
+    vi.stubEnv("GITLAB_OAUTH_CLIENT_ID", "cid");
+    vi.stubEnv("GITLAB_OAUTH_CLIENT_SECRET", "secret");
+
+    await getAuthProvider().exchangeCode({
+      code: "c",
+      codeVerifier: "v",
+      redirectUri: "https://x/api/auth/gitlab/callback",
+    });
+
+    const init = fetchMock.mock.calls[0][1];
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+    expect(init?.signal?.aborted).toBe(false);
+  });
+
+  it("gives the profile fetch one too", async () => {
+    const fetchMock = okFetch({ id: 1, username: "x" });
+
+    await getAuthProvider().fetchProfile("tok");
+
+    const init = fetchMock.mock.calls[0][1];
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+    expect(init?.signal?.aborted).toBe(false);
+  });
+
+  // The user-facing half. An expired deadline surfaces from fetch as a
+  // TimeoutError DOMException; the callback's catch turns any rejection into a
+  // /login?error=… redirect, so what matters here is that it rejects at all
+  // rather than resolving to something the caller then treats as a profile.
+  it.each([
+    [
+      "exchangeCode",
+      () =>
+        getAuthProvider().exchangeCode({
+          code: "c",
+          codeVerifier: "v",
+          redirectUri: "https://x/api/auth/gitlab/callback",
+        }),
+    ],
+    ["fetchProfile", () => getAuthProvider().fetchProfile("tok")],
+  ])("propagates a timed-out %s as a rejection", async (_name, call) => {
+    vi.stubEnv("AUTH_PROVIDER", "gitlab");
+    vi.stubEnv("GITLAB_OAUTH_CLIENT_ID", "cid");
+    vi.stubEnv("GITLAB_OAUTH_CLIENT_SECRET", "secret");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new DOMException("The operation was aborted", "TimeoutError");
+      }),
+    );
+
+    await expect(call()).rejects.toThrow(/aborted/i);
   });
 });

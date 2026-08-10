@@ -88,6 +88,15 @@ export const STRINGS = {
     playful: "🍴 Resume focus timer",
   },
   "step.complete": { plain: "Complete step", playful: "✅ Complete step" },
+  // #198 — the inverse of step.complete, on a done row. Same wording in both
+  // voices: the playful register belongs on an achievement, not on correcting
+  // one. Phrased as the state being restored ("not done") rather than as the
+  // operation ("un-complete"), which is jargon for a database write the user
+  // never thinks about.
+  "step.uncomplete": {
+    plain: "Mark not done",
+    playful: "Mark not done",
+  },
   "step.editEstimate": {
     plain: "Edit time estimate",
     playful: "⏱️ Edit time estimate",
@@ -124,6 +133,10 @@ export const STRINGS = {
   "nav.focusTimer": { plain: "Focus Timer", playful: "⏱️ Focus Timer" },
   "nav.settings": { plain: "Settings", playful: "⚙️ Settings" },
   "nav.help": { plain: "Help", playful: "🆘 Help" },
+  // #199 — a menu entry rather than a Library tab, because every Library tab is
+  // a bucket of BrainDumpItems (inbox/bucket.ts) and a tab there would say "this is
+  // a kind of task". Only rendered when Settings.shoppingList is on.
+  "nav.shopping": { plain: "Shopping list", playful: "🛒 Shopping list" },
 
   // ── Freshness tiers ────────────────────────────────────────────────────────
   "freshness.recent": { plain: "Recent", playful: "Fresh" },
@@ -313,6 +326,20 @@ export const STRINGS = {
     plain: "Back to focus",
     playful: "Back to focus",
   },
+  // #198 — the undo, offered on the done screen because that is where the
+  // accidental completion #197 produced actually happens. Worded as what the
+  // user knows ("I hadn't finished") rather than as the mechanism
+  // ("un-complete"): they are not undoing a database write, they are correcting
+  // a claim the app made about their work. No exclamation in either voice — this
+  // is a mistake being fixed, and the playful register would be badly timed.
+  "focus.done.undo": {
+    plain: "Actually, I hadn't finished",
+    playful: "Actually, I hadn't finished",
+  },
+  "focus.done.undone": {
+    plain: "Put back. The step is open again.",
+    playful: "Put back. The step is open again.",
+  },
   "focus.done.queueEmpty": {
     plain: "No multi-step tasks left. Work through the single-task to-dos?",
     playful: "No big plates left. Work through the snacks?",
@@ -366,6 +393,14 @@ export const STRINGS = {
   "focus.error.complete": {
     plain: "Couldn't finish the step just now — nothing is lost.",
     playful: "Couldn't finish the step just now — nothing is lost.",
+  },
+  // #198 — a failed UNDO needs its own line, because the reassurance that fits
+  // every other failure here ("nothing is lost") is the one thing that is not
+  // true: the step really is still marked done, and saying otherwise would leave
+  // someone believing they had recovered work they had not.
+  "focus.error.undo": {
+    plain: "Couldn't put the step back just now — it is still marked done.",
+    playful: "Couldn't put the step back just now — it is still marked done.",
   },
   "focus.error.session": {
     plain: "Couldn't reach the server just now.",
@@ -535,6 +570,8 @@ export const STRINGS = {
     playful:
       "Play a short chime (and vibrate on mobile) when the timer reaches zero.",
   },
+  // #180 — the label of the one music control left on this page. It is a switch
+  // now, so the label has to name the THING rather than an option within it.
   "focusSettings.sound": { plain: "Focus sounds", playful: "🎧 Focus sounds" },
   // #68 — the timer plays a real playlist now (it advances itself and only
   // wraps once every track has played), so this copy must not promise a loop.
@@ -542,48 +579,15 @@ export const STRINGS = {
     plain: "Play a calm lo-fi playlist while you focus.",
     playful: "Play a calm lo-fi playlist while you focus.",
   },
-  "focusSettings.soundOff": { plain: "Off", playful: "Off" },
-  "focusSettings.soundLofiCalm": {
-    plain: "Lo-fi (calm)",
-    playful: "Lo-fi (calm)",
-  },
-  // #43 — lo-fi library picker + preview. Labels stay identical across voices
-  // (functional controls); the composed aria-labels append the track title.
-  "focusSettings.soundPickerHint": {
+  // #180 — where the ten tracks, their previews and the category playlists went.
+  // This line is the whole mitigation for the removal reading as a lost feature,
+  // so it names both of the things that moved and where they moved TO; "in the
+  // player" alone would leave someone hunting on this page.
+  "focusSettings.soundPlayerHint": {
     plain:
-      "Pick the track your focus playlist starts on, or preview each one first.",
+      "Choose which playlists and which track from the player, while a session is running.",
     playful:
-      "Pick the track your focus playlist starts on, or preview each one first. 🎧",
-  },
-  // #70 — category playlists. These four only ever render when the catalog has
-  // actually given some category more than one track, so the hint can talk about
-  // categories in the present tense without lying on a default install (where the
-  // whole group is absent, not disabled).
-  //
-  // "whole category" and the count are part of each radio's LABEL rather than
-  // decoration around it: read aloud, a radio called "Chillhop" sitting next to
-  // one called "Porchlight Golden Hour · Chillhop" says nothing about which is the
-  // playlist.
-  "focusSettings.soundCategoryHint": {
-    plain:
-      "Or play a whole category: every track in it, in one pass, with no repeats until it's done.",
-    playful:
-      "Or play a whole category: every track in it, in one pass, with no repeats until it's done. 🎶",
-  },
-  "focusSettings.soundWholeCategory": {
-    plain: "whole category",
-    playful: "whole category",
-  },
-  // Composed as "· 14 tracks". Singular is reachable only for a stored selection
-  // whose category has shrunk below the offer floor (the store stopped
-  // answering) — that radio stays on screen so the preference can still be
-  // cleared, so its label still has to read correctly.
-  "focusSettings.soundTrackCount": { plain: "tracks", playful: "tracks" },
-  "focusSettings.soundTrackCountOne": { plain: "track", playful: "track" },
-  "focusSettings.preview": { plain: "Preview", playful: "Preview" },
-  "focusSettings.stopPreview": {
-    plain: "Stop preview",
-    playful: "Stop preview",
+      "Choose which playlists and which track from the player, while a session is running. 🎧",
   },
   // #65 — the opt-in music↔timer pause coupling. The label gets a playful glyph
   // anchor (same convention as the alarm toggle) and the hint spells out the
@@ -638,9 +642,176 @@ export const STRINGS = {
     plain: "Resume music and timer",
     playful: "Resume music and timer",
   },
+  // #181 — the in-player playlist + jump panel. Every one of these is a
+  // functional control on a screen someone is using to concentrate, so they read
+  // identically in both voices: a playful flourish here would be the panel
+  // drawing attention to itself, which is the one thing it must not do.
+  //
+  // The disclosure keeps ONE label in both states, like the shuffle toggle above:
+  // aria-expanded carries open/closed, and a label that changed under the user
+  // would be a second thing to re-read on every press.
+  "focus.sound.panel": {
+    plain: "Playlists and tracks",
+    playful: "Playlists and tracks",
+  },
+  "focus.sound.playlists": { plain: "Playlists", playful: "Playlists" },
+  // Says how to leave the all-tracks state, because "All tracks" is the only row
+  // that cannot be unticked directly — you leave it by ticking a playlist. A
+  // control whose off-switch is elsewhere has to say where.
+  "focus.sound.playlistsHint": {
+    plain: "Tick a playlist to narrow what plays.",
+    playful: "Tick a playlist to narrow what plays.",
+  },
+  "focus.sound.allTracks": { plain: "All tracks", playful: "All tracks" },
+  "focus.sound.tracks": { plain: "Tracks", playful: "Tracks" },
+  // The playing track's mark, in text. aria-current announces it to a screen
+  // reader; this is the half that keeps it off colour alone (WCAG 1.4.1).
+  "focus.sound.playing": { plain: "Playing", playful: "Playing" },
+  // Counts belong INSIDE each checkbox's accessible name — a bare "(21)" beside
+  // a label is invisible to a screen reader reading the label alone — so the
+  // visible parenthesised figure is aria-hidden and these spell it out instead.
+  "focus.sound.trackOne": { plain: "track", playful: "track" },
+  "focus.sound.trackMany": { plain: "tracks", playful: "tracks" },
 
   // ── Breakdown confirm ──────────────────────────────────────────────────────
   "breakdown.looksRight": { plain: "Looks right", playful: "👍 Looks right" },
+  // #212 (!304 review) — the counted noun in the held line below, split rather
+  // than templated because this table carries no interpolation (#86). Same shape
+  // as `shopping.itemOne`/`itemMany` and `focus.sound.trackOne`/`trackMany`, and
+  // composed at the call site as `<count> <this> <breakdown.ejectHeld>`.
+  //
+  // The first cut hardcoded "One step", and the twins specs on this same branch
+  // are what make that wrong rather than merely imprecise: the gate is
+  // `ejecting.size > 0`, two rows can legitimately be mid-eject at once, and a
+  // line saying "one" while the user is looking at two controls reading
+  // "Sending…" is the app contradicting itself about the thing it is asking them
+  // to wait for.
+  "breakdown.stepOne": { plain: "step", playful: "step" },
+  "breakdown.stepMany": { plain: "steps", playful: "steps" },
+  // #212 (!304 review) — why neither "Looks right" nor the re-plan controls are
+  // taking the press while a row is still on its way to the inbox.
+  //
+  // One string for both, because it is one fact and both refusals lift on the
+  // same event. Saving the plan persists every row that has text, and an
+  // ejecting row is deliberately still one of them until its write lands, so
+  // confirming across the gap puts one step in two places. Asking for a new plan
+  // is that same gap wearing a longer coat: the request shows the model the plan
+  // as it stands — the ejecting row included — and then replaces the plan with
+  // the answer, which hands that row straight back.
+  //
+  // A TAIL, not a whole sentence: the count and its noun are composed in front
+  // of it. Worded so neither a verb nor a pronoun has to agree with the count —
+  // "1 step still being sent…" and "2 steps still being sent…" are both
+  // grammatical, which is what a table with no interpolation can actually
+  // deliver.
+  //
+  // Identical across voices for the reason the `breakdown.eject.*` family gives:
+  // this is the app declining an action to protect the user's data, and a joke
+  // about it would read as the app being cute about something it will not do.
+  // Says what is happening and that it is brief, never "disabled" — the controls
+  // are not broken and the wait is one round trip.
+  "breakdown.ejectHeld": {
+    plain:
+      "still being sent to your inbox — saving the plan and asking for a new one both wait, so the same step cannot end up in both places.",
+    playful:
+      "still being sent to your inbox — saving the plan and asking for a new one both wait, so the same step cannot end up in both places.",
+  },
+  // #212 (!304 review) — the same fact from the other side: why "Back to inbox"
+  // and the notice's Retry are not taking the press while the plan itself is in
+  // flight.
+  //
+  // Its own key rather than a re-use of the tail above, because the two are not
+  // the same sentence and only look alike: that one is a TAIL with a count
+  // composed in front of it, this one is whole. There is no count to compose —
+  // there is one plan, and only ever one operation on it at a time.
+  //
+  // One string for the confirm and the re-plan together, for the reason its
+  // sibling gives: it is one fact, both refusals lift on the same event, and the
+  // harm is identical. Saving the plan writes every row that has text, so a step
+  // whose words are on their way to the inbox lands in both; asking for a new
+  // plan shows the model the row and then replaces the plan with an answer that
+  // hands it straight back, moments after the eject took it away.
+  //
+  // Identical across voices, and never the word "disabled", for the reasons the
+  // `breakdown.eject.*` family and `breakdown.ejectHeld` give: the app is
+  // declining an action to protect the user's data, the control is not broken,
+  // and the wait is one round trip.
+  "breakdown.planHeld": {
+    plain:
+      "Saving the plan, or asking for a new one — sending a step back to your inbox waits for that to finish, so the same step cannot end up in both places.",
+    playful:
+      "Saving the plan, or asking for a new one — sending a step back to your inbox waits for that to finish, so the same step cannot end up in both places.",
+  },
+
+  // ── #212: a step that could not be sent back to the inbox ──────────────────
+  // Identical across voices, for the same reason `capture.error.*` and
+  // `shopping.errorSave*` are: the playful skin is a delight layer, and "did I
+  // just lose that step?" is not where delight belongs.
+  //
+  // Named under `breakdown.eject.` rather than reusing `capture.error.*`, whose
+  // values are close but not the same sentence. That family's own comment makes
+  // the argument for this one: the prefix has to name the surface, or re-tuning
+  // one surface's copy silently re-words another's. Two of the three differ here
+  // anyway — a capture that fails is about words in a field, an eject that fails
+  // is about a row in a list that is still on screen.
+  //
+  // All three END on a colon: the words are rendered, quoted, immediately after,
+  // so the notice is itself a copy of them and survives the user then deleting
+  // the row. And all three say "nothing was lost" rather than naming where the
+  // words are, because that stays true whether or not the row is still there.
+  "breakdown.eject.failed": {
+    plain: "Couldn't send that to your inbox just now — nothing was lost:",
+    playful: "Couldn't send that to your inbox just now — nothing was lost:",
+  },
+  "breakdown.eject.stale": {
+    plain:
+      "The app updated while this was open, so that didn't send. Reload to carry on — nothing was lost:",
+    playful:
+      "The app updated while this was open, so that didn't send. Reload to carry on — nothing was lost:",
+  },
+  // The one failure whose verdict is genuinely unknown. A server action cannot
+  // be aborted from the client, so the timeout bounds how long the UI waits, not
+  // the write — the insert may still land, and a retry after it does leaves two
+  // identical inbox items. "Couldn't send that" would be a claim the client
+  // cannot support, so this says what it knows and names the one thing that
+  // resolves the ambiguity.
+  "breakdown.eject.timeout": {
+    plain:
+      "No answer from the server, so this may already be in your inbox. Check there before trying again — nothing was lost:",
+    playful:
+      "No answer from the server, so this may already be in your inbox. Check there before trying again — nothing was lost:",
+  },
+  // The one outcome that is not a failure (!304 review, finding 1). The write
+  // landed; the user then edited the row while it was in the air, so their inbox
+  // holds the words as they read at the press and the row in front of them says
+  // something else. Neither copy may be thrown away — dropping the row would
+  // destroy the edit, which is the same data loss as #212 with the hands
+  // swapped — so the only thing left to do is SAY it, or the user gets an item
+  // they never saw arrive and a row they think is still only in the plan.
+  //
+  // Ends on a colon like its siblings, and the words quoted after it are the
+  // ones that were SENT, not the ones now in the row: the row is on screen and
+  // the inbox copy is not, so the invisible one is the one worth repeating.
+  "breakdown.eject.edited": {
+    plain:
+      "This was already sending when you edited it, so your inbox has the earlier wording and the row keeps yours:",
+    playful:
+      "This was already sending when you edited it, so your inbox has the earlier wording and the row keeps yours:",
+  },
+  "breakdown.eject.retry": { plain: "Try again", playful: "Try again" },
+  "breakdown.eject.reload": {
+    plain: "Reload the page",
+    playful: "Reload the page",
+  },
+  // Only the `edited` notice carries this. The three failures each end in an
+  // action that resolves them (a retry that lands, a reload); that one reports
+  // something already finished, so acknowledging it is the only thing left and
+  // without it the notice would sit there for the rest of the session.
+  "breakdown.eject.dismiss": { plain: "Got it", playful: "Got it" },
+  // Two jobs, one word, deliberately: the row control's busy label and the
+  // notice's in-flight line. They describe the same outstanding write from two
+  // places, so splitting them could only let the two drift apart.
+  "breakdown.eject.sending": { plain: "Sending…", playful: "Sending…" },
 
   // ── Schedule status banner (ground truth, Phase 4) ─────────────────────────
   // Reflects the PERSISTED task.scheduledAt marker — never optimistic UI. ⚠️/✅
@@ -661,6 +832,82 @@ export const STRINGS = {
 
   // ── Capture confirm ────────────────────────────────────────────────────────
   "capture.confirm": { plain: "captured ✓", playful: "captured ✓" },
+
+  // ── The inline note affordance on a brain-dump field (#186) ────────────────
+  //
+  // `capture.*` rather than `note.*` on purpose: `note.trigger` below is #44's
+  // task/step note disclosure, which is a different control on a different
+  // column. These two belong to the brain-dump text field — the capture bar and
+  // the ✎ row editor, which are the same field at two moments.
+  //
+  // ONE fixed word, never "Add" swapped for "Edit". Same argument
+  // `note.trigger` makes: the label must not change width (and shift the row)
+  // the instant a note exists, and "add" is what the person is doing either way
+  // — the button's job is to open a place to write, whether or not braces are
+  // already there. 🗒️ is flavour, so playful only.
+  "capture.addNote": { plain: "Add note", playful: "🗒️ Add note" },
+  // The only thing on screen that says the syntax exists (#179 shipped the
+  // parser with nothing announcing it). It states the POSITION as well as the
+  // punctuation, because "at the end" is the entire rule — a group anywhere else
+  // stays literal, and someone who learns only the braces will meet that
+  // refusal as a bug.
+  //
+  // Safe to write braces here and NOT in JSX text, where `{` opens an
+  // expression: this is a plain string the renderer interpolates.
+  "capture.noteHint": {
+    plain: "Put a note in {curly braces} at the end.",
+    playful: "Tuck a note in {curly braces} at the end.",
+  },
+  // ── #210: a capture that did not land ──────────────────────────────────────
+  // Identical across voices, for the same reason the focus.error.* family is:
+  // the playful skin is a delight layer, and "did I just lose that thought?" is
+  // not where delight belongs. Each message says what did not happen AND what is
+  // still true, because that question is the only one the user has.
+  //
+  // Named under `capture.` rather than reusing focus.error.retry / .reload,
+  // whose values are identical today: the `focus.` prefix is a lie in the inbox,
+  // and re-tuning the focus timer's copy must not silently re-word the capture
+  // bar. The duplication is two short button labels; the coupling would be
+  // permanent.
+  //
+  // Both messages END on a colon — the words the write could not save are
+  // rendered, quoted, immediately after, so the notice itself is a copy of them
+  // and they survive even when the input has moved on.
+  "capture.error.failed": {
+    plain: "Couldn't save that just now — your words are still here:",
+    playful: "Couldn't save that just now — your words are still here:",
+  },
+  "capture.error.stale": {
+    plain:
+      "The app updated while this was open, so that didn't save. Reload to carry on — your words are still here:",
+    playful:
+      "The app updated while this was open, so that didn't save. Reload to carry on — your words are still here:",
+  },
+  // Duo review round 2 — the one failure whose verdict is genuinely unknown. A
+  // server action cannot be aborted from the client, so a timeout bounds how
+  // long the UI waits, not the write: the insert may still land, and a retry
+  // after it does leaves two identical items. Saying "couldn't save that" here
+  // would be a claim the client cannot support — the same unverifiable
+  // confirmation as the `captured ✓` this issue is about, pointing the other
+  // way. So it says what it knows, names the one thing that resolves the
+  // ambiguity, and lets the user choose: a duplicate is one tap to delete, an
+  // unwritten thought is not recoverable at all.
+  "capture.error.timeout": {
+    plain:
+      "No answer from the server, so this may already have saved. Check your inbox before trying again — your words are still here:",
+    playful:
+      "No answer from the server, so this may already have saved. Check your inbox before trying again — your words are still here:",
+  },
+  "capture.error.retry": { plain: "Try again", playful: "Try again" },
+  "capture.error.reload": {
+    plain: "Reload the page",
+    playful: "Reload the page",
+  },
+  // Announced from inside the notice while a write is in flight, so the wait is
+  // not silent and Retry can keep focus instead of being `disabled`. "Saving…"
+  // rather than "Trying again…" because the same flag is raised by a FRESH
+  // capture typed while an older failure's notice is still on screen.
+  "capture.error.saving": { plain: "Saving…", playful: "Saving…" },
 
   // ── Prompts ────────────────────────────────────────────────────────────────
   "prompt.stillNeeded": {
@@ -741,6 +988,20 @@ export const STRINGS = {
   "settings.saveError": {
     plain: "Couldn't save — still editable, try again.",
     playful: "Couldn't save — still editable, try again.",
+  },
+  // #227 — the write never answered, so whether it landed is UNKNOWN. Says
+  // exactly that and nothing stronger: "couldn't save" would be a claim the
+  // client has no evidence for (a server action cannot be aborted, so the write
+  // may still complete), and the control is deliberately left showing the value
+  // the user chose rather than rolled back, because undoing a write that may
+  // have succeeded is the same lie pointing the other way.
+  //
+  // Identical across voices for the reason "settings.saveError" is: the playful
+  // skin is a delight layer, and "did I just lose that?" is not where delight
+  // belongs.
+  "settings.saveStalled": {
+    plain: "No answer yet — this may not have saved.",
+    playful: "No answer yet — this may not have saved.",
   },
 
   // ── Phase 6 — Notifications settings ───────────────────────────────────────
@@ -868,6 +1129,49 @@ export const STRINGS = {
   // identical across voices (same call as task.scheduled/notScheduled above).
   "task.eyebrow": { plain: "Task", playful: "Task" },
 
+  // ── #44 — the note disclosure, on a task and on a step row ────────────────
+  // ONE noun, never "Add"/"Edit". Both of those describe a one-off action and
+  // this is a persistent autosaving field, not an action. The switch also told
+  // a lie in a case that is about to be common — #179 carries a note in from a
+  // brain dump via `{curly brace}` syntax, so a note can exist before anyone
+  // has "added" anything. A fixed word additionally means the control does not
+  // change width the instant somebody types their first character, so the row
+  // does not shift under them.
+  //
+  // This is the VISIBLE label only — the component appends the task or step it
+  // belongs to for assistive tech, so a list of steps does not present a dozen
+  // buttons with identical names. Keeping it a PREFIX of the accessible name is
+  // what keeps WCAG 2.5.3 (Label in Name) satisfied for voice control.
+  // 🗒️ is flavour, so playful only: plain voice is emoji-free app-wide.
+  "note.trigger": { plain: "Note", playful: "🗒️ Note" },
+  // The field's accessible name (`aria-label` on the textarea). Same word in
+  // both voices and deliberately emoji-free: it is read out every time the
+  // field takes focus. There is no longer a VISIBLE label element — the trigger
+  // directly above the field already reads "Note", and two identical words
+  // stacked for one field is noise. See note-field.tsx for what that removal
+  // had to preserve.
+  "note.label": { plain: "Note", playful: "Note" },
+  // Inside the box, matching the brain-dump capture input's pattern (owner).
+  // An EXAMPLE of the kind of thing a note is for, not a restatement of the
+  // word "Note" — the owner's own illustration when specifying #44 was "water
+  // can under sink needs a wash" against a task called "water the office
+  // plants": a detail that changes how you do the thing.
+  //
+  // Short on purpose: a step row's textarea is two rows tall and a long
+  // placeholder truncates. It is NOT the accessible name — a placeholder is
+  // unreliable across assistive tech and vanishes on the first keystroke, so
+  // the textarea keeps an explicit `aria-label`.
+  "note.placeholder": {
+    plain: "Anything worth knowing when you start…",
+    playful: "Anything worth knowing when you sit down…",
+  },
+  "note.hint": {
+    plain:
+      "Rides along into your calendar event or Google Task when you schedule this. Saves automatically.",
+    playful:
+      "Tags along into your calendar event or Google Task when you plate this up. Saves itself.",
+  },
+
   // ── MR ③ — Appearance (theme + app-wide completion style) ──────────────────
   // ✓ is a functional glyph (allowed in plain).
   "appearance.heading": { plain: "Appearance", playful: "🎨 Appearance" },
@@ -976,6 +1280,212 @@ export const STRINGS = {
   "settings.helpDocs": { plain: "Help & Docs", playful: "🆘 Help & Docs" },
   // Guest sandbox onboarding link → in-app /help docs (#29). → is a functional
   // glyph (allowed in plain); 🆘 is playful-only flavour.
+
+  // ── #199 Shopping list mode ────────────────────────────────────────────────
+  // A list-shaped thing that is NOT a task. The copy leans on that deliberately:
+  // nothing here mentions estimates, steps, scheduling or streaks, because the
+  // feature is outside all four and copy that borrowed their vocabulary would
+  // promise behaviour the page does not have.
+  "shopping.intro": {
+    plain:
+      "A plain list. No estimates, no steps, nothing lands in your calendar, and ticking one off does not touch your streak.",
+    playful:
+      "🛒 Just a list. No estimates, no steps, nothing hits your calendar — and ticking one off won't touch your streak.",
+  },
+  "shopping.addLabel": { plain: "Add to the list", playful: "Add to the list" },
+  "shopping.addPlaceholder": {
+    plain: "e.g. oat milk",
+    playful: "e.g. oat milk 🥛",
+  },
+  "shopping.add": { plain: "Add", playful: "➕ Add" },
+  // The three refusals are separate keys, not one "that didn't work": a capture
+  // field that fails without saying which rule was broken is the failure mode
+  // that makes people stop trusting it.
+  "shopping.errorEmpty": {
+    plain: "Type something first.",
+    playful: "Type something first.",
+  },
+  "shopping.errorTooLong": {
+    plain: "That is too long for one line — 200 characters is the limit.",
+    playful: "Whoa, that's a paragraph — 200 characters is the limit.",
+  },
+  "shopping.errorFull": {
+    plain:
+      "This list is full at 500 items. Tick a few off and delete them to make room.",
+    playful: "This list is full at 500 items. Clear a few to make room. 🧹",
+  },
+  // ── A write that did not land ──────────────────────────────────────────────
+  // Distinct from the three refusals above, which are decided on the client
+  // before anything is sent. These three are the server's silence, split the same
+  // three ways `capture.error.*` splits it (#210) because each one changes what
+  // the user should DO: a stale bundle makes a retry impossible, a timeout makes
+  // the outcome unknown, and only the generic case can honestly say nothing
+  // happened.
+  //
+  // Named under `shopping.` rather than reusing `capture.error.*`, whose values
+  // are close but not identical. That module's own comment makes the argument for
+  // both of us: the prefix has to name the surface, or re-tuning one surface's
+  // copy silently re-words another's. The duplication is a few short strings; the
+  // coupling would be permanent.
+  //
+  // All three END on a colon — the words the write could not save are rendered,
+  // quoted, immediately after, so the notice is itself a copy of them.
+  "shopping.errorSaveFailed": {
+    plain: "Couldn't save that just now:",
+    playful: "Couldn't save that just now:",
+  },
+  "shopping.errorSaveStale": {
+    plain:
+      "The app updated while this was open, so that didn't save. Reload to carry on:",
+    playful:
+      "The app updated while this was open, so that didn't save. Reload to carry on:",
+  },
+  // The one failure whose verdict is genuinely unknown. A server action cannot be
+  // aborted from the client, so the timeout bounds how long the UI waits, not the
+  // write — it may still land, and "couldn't save that" would be a claim the
+  // client cannot support. Says what it knows, names the thing that resolves the
+  // ambiguity, and leaves the choice with the user: a duplicate line is one tap to
+  // delete, an item that never landed is discovered at the checkout.
+  "shopping.errorSaveTimeout": {
+    plain:
+      "No answer from the server, so this may already have saved. Check the list before trying again:",
+    playful:
+      "No answer from the server, so this may already have saved. Check the list before trying again:",
+  },
+  // ── A write the server DECLINED ────────────────────────────────────────────
+  // Duo review round 5, !294. A third category again, and the reason it needs
+  // its own words rather than "couldn't save that just now" is that nothing
+  // failed: the server answered, promptly and correctly, and said no. Copy that
+  // blames the connection would send the user to look in the wrong place, and
+  // the Retry it implies would re-post a call that is refused by definition.
+  //
+  // Only the two the page has no words for are here. "This list is full" and the
+  // two text rules are already `shopping.errorFull` / `errorEmpty` / `errorTooLong`
+  // above, said by the capture field about itself — a server-side full is the
+  // same sentence arriving a round trip later, not a new one.
+  "shopping.errorSaveGone": {
+    plain: "That item is not on the list any more, so nothing changed:",
+    playful: "That item is not on the list any more, so nothing changed:",
+  },
+  // The feature switched off in another tab or window. A retry posts into an
+  // action that refuses it for the same reason; only a reload shows the user
+  // where they actually are, which is why this reads like the stale-bundle copy.
+  "shopping.errorSaveOff": {
+    plain:
+      "Shopping list mode is switched off, so that didn't save. Reload to carry on:",
+    playful:
+      "Shopping list mode is switched off, so that didn't save. Reload to carry on:",
+  },
+  // Appended to a capture-field refusal, before the words it could not keep.
+  // Needed only when the field has moved on: the restore never overwrites text
+  // the user has typed since, so on the rare occasion it declines, this is where
+  // the words survive instead of nowhere.
+  "shopping.errorUnsaved": { plain: "Not saved:", playful: "Not saved:" },
+  "shopping.errorRetry": { plain: "Try again", playful: "Try again" },
+  "shopping.errorReload": {
+    plain: "Reload the page",
+    playful: "Reload the page",
+  },
+  // Announced from inside the notice while a retry is in flight, so the wait is
+  // not silent and Retry can keep focus instead of being `disabled`.
+  "shopping.errorSaving": { plain: "Saving…", playful: "Saving…" },
+  "shopping.sectionActive": { plain: "To buy", playful: "🛒 To buy" },
+  "shopping.sectionSaved": {
+    plain: "Saved for later",
+    playful: "🥫 Saved for later",
+  },
+  "shopping.savedHint": {
+    plain:
+      "Nothing here comes back on its own — pull an item up when you want it again.",
+    playful:
+      "Nothing here comes back on its own — pull it up when you want it again.",
+  },
+  "shopping.empty": {
+    plain: "Nothing on the list yet.",
+    playful: "Nothing on the list yet.",
+  },
+  // Counted noun, split so a count reads "1 item" / "3 items". Same shape as
+  // focus.sound.trackOne/trackMany, and #199 part 2's inbox summary reuses these
+  // keys rather than spelling the word again.
+  "shopping.itemOne": { plain: "item", playful: "item" },
+  "shopping.itemMany": { plain: "items", playful: "items" },
+  "shopping.stillToBuy": { plain: "still to buy", playful: "still to buy" },
+  // #199 — the inbox summary line, composed as
+  // `<count> <shopping.itemOne|itemMany> <shopping.summaryOn>`. Composed rather
+  // than one templated string because this table carries no interpolation, and
+  // reusing the counted noun is what stops the inbox and the /shopping header
+  // disagreeing about what one item is called.
+  "shopping.summaryOn": {
+    plain: "on your shopping list",
+    // The emoji sits before the NOUN, not at the head of the fragment: the label is
+    // composed as `<count> <item|items> <this>`, so a leading glyph would read
+    // "3 items 🛒 on your shopping list" — an emoji dropped into the middle of a
+    // sentence rather than decorating the thing it depicts.
+    playful: "on your 🛒 shopping list",
+  },
+  "shopping.summaryDismiss": {
+    plain: "Not now",
+    playful: "Not now",
+  },
+  // "the list grows", not "you add something" (Duo review, !295). Adding is one
+  // of the THREE writes `syncShoppingSummary` resurfaces a dismissed summary on —
+  // the others are un-ticking an item and pulling one back up from saved-for-later
+  // — and this hint is the only place the app explains what "Not now" does. Naming
+  // one trigger made the other two look like a bug: un-tick something, watch the
+  // line return, and the app has contradicted the last thing it told you about
+  // that control. "Grows" is the rule itself, in fewer words than listing them,
+  // and it is already how `shopping-summary-sync.ts` and `dismissShoppingSummary`
+  // both state it — the string was the one place that disagreed.
+  //
+  // Identical across voices, like `summaryDismiss` above: this is the sentence
+  // that keeps a temporary control from reading as a delete, and the one place
+  // where flavour would be paid for in comprehension.
+  "shopping.summaryDismissHint": {
+    plain: "Back when the list grows.",
+    playful: "Back when the list grows.",
+  },
+  // Duo review, !295 — a rejected `dismissShoppingSummary()` used to clear the
+  // pending flag and say nothing, so the user believed "Not now" had worked until
+  // the line turned up again. The sentence has to contradict that belief with the
+  // fact they can check for themselves — the line is still here — rather than the
+  // generic "something went wrong", which leaves them guessing which half failed.
+  //
+  // No emoji in the playful variant, and no joke: this is the copy that lands on
+  // somebody whose press just did not work, and flavour there is paid for by the
+  // one person least able to spare it. Only the contraction differs, which is the
+  // same plain/playful split `shopping.errorTooLong` uses.
+  "shopping.summaryDismissError": {
+    plain: "That did not go through — the line is still here. Try again.",
+    playful: "That didn't go through — the line's still here. Try again.",
+  },
+  // Accessible names. Each one names the ITEM, because "Delete" repeated down a
+  // list of twelve rows is unusable in a screen reader's element list.
+  "shopping.tickOff": { plain: "Tick off", playful: "Tick off" },
+  "shopping.saveForLater": {
+    plain: "Save for later",
+    playful: "Save for later",
+  },
+  "shopping.moveBackUp": {
+    plain: "Move back to the list",
+    playful: "Move back to the list",
+  },
+  "shopping.delete": { plain: "Delete", playful: "Delete" },
+  "shopping.rename": { plain: "Rename", playful: "Rename" },
+  // Settings section.
+  "shopping.settingsHeading": {
+    plain: "Shopping list",
+    playful: "🛒 Shopping list",
+  },
+  "shopping.settingsToggle": {
+    plain: "Show the shopping list",
+    playful: "Show the shopping list",
+  },
+  "shopping.settingsHint": {
+    plain:
+      "Adds a Shopping list to the menu: a plain list for things that are not tasks. Off by default. Turning it off hides the list without deleting it.",
+    playful:
+      "Adds a 🛒 Shopping list to the menu — a plain list for things that aren't tasks. Off by default, and turning it off hides the list rather than binning it.",
+  },
   "guest.newHere": { plain: "New here?", playful: "New here?" },
   "guest.helpCta": {
     plain: "See the help & docs →",

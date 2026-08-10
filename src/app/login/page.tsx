@@ -30,6 +30,16 @@ export default async function LoginPage({
           <p className="text-sm text-red-700 dark:text-red-400">
             That account isn&apos;t the owner of this instance.
           </p>
+        ) : error === "expired" ? (
+          // #174 — an expired attempt is RECOVERABLE, and the generic sentence
+          // below reads as a rejection. It names both causes because the server
+          // genuinely cannot tell them apart: the state and PKCE cookies are
+          // just absent by the time the callback runs, whether the attempt
+          // timed out or began somewhere else.
+          <p className="text-sm text-red-700 dark:text-red-400">
+            That sign-in attempt expired, or was started in a different browser.
+            Start again below.
+          </p>
         ) : error ? (
           <p className="text-sm text-red-700 dark:text-red-400">
             Sign-in failed. Please try again.

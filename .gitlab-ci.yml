@@ -150,6 +150,18 @@ include:
   # `Caddyfile` root entries, so a new file added under docker/ is covered
   # automatically instead of needing its own line here.
   - "docker/**/*"
+  # The test and formatting configuration (#133): vitest, its setup file,
+  # playwright and prettier. Code, not documentation — vitest.config.ts decides
+  # which files the suite collects and prettier.config.mjs decides whether the
+  # format gate passes, so a change here can turn the gate green on a tree it
+  # should reject. Same recursive-glob shape as docker/ for the same reason: a
+  # fifth config added later is covered without another line.
+  - "config/**/*"
+  # Editor workspace settings (#133). Cannot affect the app, but it is not
+  # documentation either — the docs-only fast path only admits prose file types,
+  # so this is classified as code and takes the full gate. It changes about once
+  # a year, so the cost is theoretical.
+  - ".vscode/**/*"
   # Root-level code + config. `*` does not cross `/`, so these match the repo
   # root only; leading-dot files are listed explicitly because a `*` glob does
   # not match them.
@@ -488,7 +500,7 @@ test_app:
     # set-state-in-effect and refs are all at ERROR now and block CI. New
     # violations are bugs, not backlog. See eslint.config.mjs.
     - npm run lint
-    # #32: fail the gate on unformatted code. Config in prettier.config.mjs
+    # #32: fail the gate on unformatted code. Config in config/prettier.config.mjs
     # (double quotes, semicolons, 2-space, trailing-comma:all, 80 cols — the
     # style the tree already follows); scope carved by .prettierignore (app code
     # + JSON/CSS, not docs/infra YAML). Cheap static check, reuses this npm ci.
@@ -529,7 +541,7 @@ test_app:
 # image's `CMD` — with `public/` and `.next/static` grafted on the way
 # docker/Dockerfile.ci grafts them (the bundle omits both; skip the copy and every HTML
 # route still answers 200 while every stylesheet and client chunk 404s).
-# playwright.config.ts owns that assembly, so this job is unchanged: the
+# config/playwright.config.ts owns that assembly, so this job is unchanged: the
 # `npm run build` below already produced `.next/standalone`, and the copy costs
 # ~0.2s for 31 MB. src/lib/dockerfile-hygiene.test.ts keeps the two sides in
 # lock-step.
@@ -537,7 +549,7 @@ test_app:
 # ships Node, so no apk/openssl before_script is needed here (unlike test_app's
 # alpine image) — npm ci's postinstall (`prisma generate`) downloads the
 # Debian-matched engine directly. Auth/session boot-guard env vars are supplied
-# by playwright.config.ts's webServer.env, so this job only needs the
+# by config/playwright.config.ts's webServer.env, so this job only needs the
 # Postgres/DB vars, same as test_app.
 #
 # #31: this job also runs the mechanical accessibility (axe) gate — the axe spec
@@ -563,7 +575,9 @@ e2e_test:
     - npm ci --cache .npm --prefer-offline --no-audit --no-fund
     - npx prisma migrate deploy   # schema for the smoke suite's service DB
     - npm run build
-    - npx playwright test
+    # --config because the file moved out of the root in #133 and Playwright's
+    # auto-discovery only looks there. `npm run test:e2e` carries the same flag.
+    - npx playwright test --config config/playwright.config.ts
   artifacts:
     when: on_failure
     paths:
@@ -878,14 +892,39 @@ deploy_production:
     # host to the ingress and the multi-SAN cert; the 301 is a SEPARATE hardcoded
     # rule in next.config.ts matching dlectroflow.dlectronique.dev alone, so a host
     # listed here but absent from that rule is simply served. That is deliberate:
-    # Google is verifying the OAuth consent screen against https://dlectroflow.dev
-    # right now, and its homepage / privacy / terms checks want a 200, not a hop.
-    # Do NOT add the apex to the next.config.ts redirect until verification has
-    # cleared AND the apex has moved to the instance that keeps it.
+    # Google's OAuth consent-screen review fetches the homepage / privacy / terms
+    # cold and wants a 200, not a hop.
+    # Do NOT add the apex to the next.config.ts redirect until the apex has moved
+    # to the instance that keeps it.
+    #
+    # #174 carved out the ONE exception, and it is not optional: the sign-in
+    # journey (/login and the OAuth routes — CANONICAL_ORIGIN_PREFIXES in
+    # src/lib/auth/gate.ts) is redirected to PUBLIC_ORIGIN from every hostname,
+    # including the apex. "Two hostnames can be SERVED, but only one can complete
+    # a sign-in" above is exactly why: the OAuth state and PKCE cookies are
+    # host-only, so a sign-in begun on a served-but-not-canonical host looped
+    # forever on missing_oauth_params. Everything OUTSIDE those prefixes — the
+    # homepage, the privacy notice, the terms — still answers 200 on every
+    # hostname, so the reviewer's cold fetch is unaffected.
     #
     # Both hostnames must also be in cert-manager's hostAliases or the HTTP-01
     # self-check never completes on GKE and the cert silently never issues —
     # docs/deploy-runbook.md §4.
+    #
+    # ── The streamed lo-fi catalog (#61) ─────────────────────────────────────
+    # Ten CC0 tracks ship inside the image, one per category. The full set is
+    # 166 tracks / ~544 MB, which is more than a runtime image should carry, so
+    # the rest is read at run time from a location the operator configures.
+    # The value is a plain operator knob like the others here, not a credential:
+    # the pod fetches the bytes and streams them back through
+    # /api/focus-catalog/audio, because next.config.ts keeps `default-src 'self'`
+    # with `media-src` unset and a browser therefore refuses third-party audio.
+    #
+    # Unset, the player falls back to the bundled ten and nothing else changes —
+    # which is a good default and a bad failure mode, because a MISSING flag and
+    # a deliberately empty one are indistinguishable from inside the cluster.
+    # `src/lib/deploy-values.ts` exists to make that difference loud; deleting
+    # the flag below fails that test rather than quietly halving the feature.
     - helm upgrade --install dlectroflow charts/dlectroflow
         --namespace dlectroflow-prod --create-namespace
         --set env=production --set postgres.persistent=true
@@ -903,6 +942,7 @@ deploy_production:
         --set-string secrets.gitlabOauthClientSecret="$GITLAB_OAUTH_CLIENT_SECRET"
         --set-string secrets.guestIpHashSalt="$GUEST_IP_HASH_SALT"
         --set-string secrets.tokenEncKey="$TOKEN_ENC_KEY"
+        --set-string focus.catalogOrigin="$FOCUS_CATALOG_ORIGIN"
         --set-string registry.username="$GITLAB_DEPLOY_TOKEN_USER"
         --set-string registry.password="$GITLAB_DEPLOY_TOKEN"
         --set backup.enabled=true

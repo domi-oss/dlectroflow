@@ -8,7 +8,11 @@
  *   - every read is scoped to the REQUEST's workspace (never "owner" for a guest)
  *   - the path is read-only (no create/update/upsert — the route is a hot path
  *     and an upsert here would be a write on a read)
- *   - no free text, identifier, email, token or date is ever selected
+ *   - the four SHAPE reads select no free text, identifier, email, token or date
+ *   - the ONE free-text read added by #179 — the note of the task being broken
+ *     down — is scoped to the request's workspace like every other read, is
+ *     taken only when the caller names a task, and selects `notes` and nothing
+ *     else. `Step.text` and `BrainDumpItem.text` stay unselected everywhere.
  *   - any failure degrades to an empty context instead of failing the request
  */
 
@@ -31,12 +35,20 @@ const { prismaMock } = vi.hoisted(() => ({
     },
     brainDumpItem: { findMany: vi.fn(), update: vi.fn(), upsert: vi.fn() },
     step: { findMany: vi.fn(), update: vi.fn(), upsert: vi.fn() },
+    task: {
+      findFirst: vi.fn(),
+      findUnique: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      upsert: vi.fn(),
+    },
   },
 }));
 
 vi.mock("@/lib/db", () => ({ prisma: prismaMock }));
 
 const GUEST = "guest-abc";
+const TASK = "task-current";
 
 function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
@@ -50,6 +62,7 @@ beforeEach(() => {
   prismaMock.streak.findUnique.mockResolvedValue(null);
   prismaMock.brainDumpItem.findMany.mockResolvedValue([]);
   prismaMock.step.findMany.mockResolvedValue([]);
+  prismaMock.task.findFirst.mockResolvedValue(null);
 });
 
 /** All the write-shaped mocks that must never be touched on this path. */
@@ -64,6 +77,9 @@ const WRITE_MOCKS = () => [
   prismaMock.brainDumpItem.upsert,
   prismaMock.step.update,
   prismaMock.step.upsert,
+  prismaMock.task.create,
+  prismaMock.task.update,
+  prismaMock.task.upsert,
 ];
 
 describe("gatherBreakdownContext — workspace scoping (IDOR)", () => {
@@ -91,17 +107,34 @@ describe("gatherBreakdownContext — workspace scoping (IDOR)", () => {
     );
   });
 
+  it("scopes the #179 note read to the workspace, not to the task id alone", async () => {
+    // The task id arrives in the REQUEST BODY, so `where: { id }` on its own
+    // would be a straight IDOR: anyone could name another workspace's task and
+    // have its note quoted into their prompt. The workspaceId term is what
+    // makes a foreign id resolve to null instead.
+    const { gatherBreakdownContext } = await import("./breakdown-context");
+    await gatherBreakdownContext(GUEST, TASK);
+
+    expect(prismaMock.task.findFirst).toHaveBeenCalledWith({
+      where: { id: TASK, workspaceId: GUEST },
+      select: { notes: true },
+    });
+  });
+
   it("never reads the owner's workspace on behalf of a guest", async () => {
     const { gatherBreakdownContext } = await import("./breakdown-context");
-    await gatherBreakdownContext(GUEST);
+    await gatherBreakdownContext(GUEST, TASK);
 
     const everyCall = [
       ...prismaMock.settings.findUnique.mock.calls,
       ...prismaMock.streak.findUnique.mock.calls,
       ...prismaMock.brainDumpItem.findMany.mock.calls,
       ...prismaMock.step.findMany.mock.calls,
+      ...prismaMock.task.findFirst.mock.calls,
     ];
-    expect(everyCall.length).toBe(4);
+    // Five reads with a task id, four without — asserted so a new read cannot
+    // be added without this test being looked at.
+    expect(everyCall.length).toBe(5);
     for (const [args] of everyCall) {
       expect(JSON.stringify(args)).not.toContain('"owner"');
       expect(JSON.stringify(args)).toContain(GUEST);
@@ -116,24 +149,47 @@ describe("gatherBreakdownContext — workspace scoping (IDOR)", () => {
 });
 
 describe("gatherBreakdownContext — what it selects (privacy)", () => {
+  /** The four SHAPE reads — the ones that must stay free of any text column. */
+  const shapeSelects = () => [
+    prismaMock.settings.findUnique.mock.calls[0][0].select,
+    prismaMock.streak.findUnique.mock.calls[0][0].select,
+    prismaMock.brainDumpItem.findMany.mock.calls[0][0].select,
+    prismaMock.step.findMany.mock.calls[0][0].select,
+  ];
+
   it("selects only numeric/enum/boolean columns — never any text column", async () => {
     const { gatherBreakdownContext } = await import("./breakdown-context");
-    await gatherBreakdownContext(GUEST);
+    // With a task id, so the #179 note read is in flight too: widening one of
+    // these four on the back of that read is exactly what this must catch.
+    await gatherBreakdownContext(GUEST, TASK);
 
-    const selects = [
-      prismaMock.settings.findUnique.mock.calls[0][0].select,
-      prismaMock.streak.findUnique.mock.calls[0][0].select,
-      prismaMock.brainDumpItem.findMany.mock.calls[0][0].select,
-      prismaMock.step.findMany.mock.calls[0][0].select,
-    ];
-    for (const sel of selects) {
+    for (const sel of shapeSelects()) {
       expect(sel, "every read must pin an explicit select").toBeTruthy();
       // `text` is the free-text column on BOTH BrainDumpItem and Step; not
       // selecting it is the structural guarantee that it can never leak.
       expect(JSON.stringify(sel)).not.toContain('"text"');
       expect(JSON.stringify(sel)).not.toContain("roundupEmail");
       expect(JSON.stringify(sel)).not.toContain("title");
+      expect(JSON.stringify(sel)).not.toContain("notes");
     }
+  });
+
+  it("keeps `notes` to the one read that is meant to have it, and nothing else with it", async () => {
+    // Invariant 2's surviving half, asserted on the SELECT LIST rather than on
+    // the rendered output: this fails the moment somebody widens the note read
+    // to carry `title`, `text` or a second row's worth of anything.
+    const { gatherBreakdownContext } = await import("./breakdown-context");
+    await gatherBreakdownContext(GUEST, TASK);
+
+    const noteSelect = prismaMock.task.findFirst.mock.calls[0][0].select;
+    expect(Object.keys(noteSelect)).toEqual(["notes"]);
+    expect(noteSelect.notes).toBe(true);
+  });
+
+  it("takes no note read at all when the caller names no task", async () => {
+    const { gatherBreakdownContext } = await import("./breakdown-context");
+    await gatherBreakdownContext(GUEST);
+    expect(prismaMock.task.findFirst).not.toHaveBeenCalled();
   });
 
   it("bounds the recent-step scan so prompt size cannot grow with history", async () => {
@@ -182,6 +238,7 @@ describe("gatherBreakdownContext — defaults and coercion", () => {
     expect(ctx.streak).toBeNull();
     expect(ctx.buckets).toBeNull();
     expect(ctx.recentBreakdowns).toEqual([]);
+    expect(ctx.note).toBeNull();
     // The back-compat anchor: nothing known ⇒ the prompt is exactly today's.
     expect(buildContextBlock(ctx)).toBe("");
   });
@@ -225,6 +282,62 @@ describe("gatherBreakdownContext — defaults and coercion", () => {
       lastActiveWorkday: null,
     });
     expect((await gatherBreakdownContext(GUEST)).streak).toBeNull();
+  });
+});
+
+// ── #179 — the note of the task being broken down ───────────────────────────
+describe("gatherBreakdownContext — the current task's note", () => {
+  it("reads the note of the task the caller named", async () => {
+    const { gatherBreakdownContext } = await import("./breakdown-context");
+    prismaMock.task.findFirst.mockResolvedValue({
+      notes: "for the accountant — needs receipts",
+    });
+    expect((await gatherBreakdownContext(GUEST, TASK)).note).toBe(
+      "for the accountant — needs receipts",
+    );
+  });
+
+  it("normalises through the SHARED normalizeTaskNote, not a second rule", async () => {
+    const { gatherBreakdownContext } = await import("./breakdown-context");
+    const { TASK_NOTE_MAX_LENGTH } = await import("./task-notes");
+
+    // Whitespace-only and empty are the column's own "no note" vocabulary.
+    for (const notes of ["", "   ", "\n\t \r\n", null]) {
+      prismaMock.task.findFirst.mockResolvedValue({ notes });
+      expect(
+        (await gatherBreakdownContext(GUEST, TASK)).note,
+        JSON.stringify(notes),
+      ).toBeNull();
+    }
+
+    // Control characters are stripped and the column bound is re-applied, even
+    // though the CHECK constraint already holds — a row that predates the
+    // constraint must not become the one value nothing bounds.
+    prismaMock.task.findFirst.mockResolvedValue({
+      notes: `  call  the vet  ${"x".repeat(TASK_NOTE_MAX_LENGTH)}`,
+    });
+    const note = (await gatherBreakdownContext(GUEST, TASK)).note!;
+    expect(note.startsWith("call the vet")).toBe(true);
+    expect([...note]).toHaveLength(TASK_NOTE_MAX_LENGTH);
+  });
+
+  it("is null when the named task belongs to somebody else (findFirst misses)", async () => {
+    // The workspace term in the where clause is what turns a foreign task id
+    // into a miss; a miss must read as "no note", never as an error.
+    const { gatherBreakdownContext } = await import("./breakdown-context");
+    prismaMock.task.findFirst.mockResolvedValue(null);
+    expect((await gatherBreakdownContext(GUEST, TASK)).note).toBeNull();
+  });
+
+  it("is null when no task was named at all", async () => {
+    const { gatherBreakdownContext } = await import("./breakdown-context");
+    expect((await gatherBreakdownContext(GUEST)).note).toBeNull();
+  });
+
+  it("degrades the WHOLE context to empty if the note read throws", async () => {
+    const { gatherBreakdownContext } = await import("./breakdown-context");
+    prismaMock.task.findFirst.mockRejectedValue(new Error("db down"));
+    await expect(gatherBreakdownContext(GUEST, TASK)).resolves.toEqual({});
   });
 });
 

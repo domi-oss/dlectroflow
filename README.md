@@ -153,7 +153,7 @@ trap in local setup:
 
 | File | Who reads it | What to put there |
 |---|---|---|
-| **`.env`** | The **Prisma CLI** (`npm run setup`, `npm run db:migrate`, `npm run db:studio` — via `prisma.config.ts`), `next dev`, **`npm test`** (`vitest.config.ts` forwards `DATABASE_URL` from it) and **`npm run test:e2e`** (`playwright.config.ts` does the same, because the standalone server it boots reads a *build-time copy* of this file — see #97). | **`DATABASE_URL`**, plus anything else you want persisted. A single `.env` is enough to run everything locally — that's what `cp .env.example .env` gives you. |
+| **`.env`** | The **Prisma CLI** (`npm run setup`, `npm run db:migrate`, `npm run db:studio` — via `prisma.config.ts`), `next dev`, **`npm test`** (`config/vitest.config.ts` forwards `DATABASE_URL` from it) and **`npm run test:e2e`** (`config/playwright.config.ts` does the same, because the standalone server it boots reads a *build-time copy* of this file — see #97). | **`DATABASE_URL`**, plus anything else you want persisted. A single `.env` is enough to run everything locally — that's what `cp .env.example .env` gives you. |
 | **`.env.local`** | **Next.js**, and `npm test` / `npm run test:e2e` for `DATABASE_URL`; it *overrides* `.env`. The **Prisma CLI** never reads it. | Optional. Runtime-only values you'd rather keep out of `.env`. Don't put `DATABASE_URL` *only* here — migrations will fail with *"Environment variable not found: DATABASE_URL"*. |
 
 Both are gitignored. If you only ever create `.env`, nothing is missing.
@@ -347,15 +347,21 @@ one would be a link that quietly dies.
 
 ## 🎧 Focus music
 
-Optional lo-fi to focus to. Ten tracks ship inside the app — no streaming account,
-works offline — and an operator can serve the rest of the catalogue without the
-browser ever talking to anything but the app itself.
+Lo-fi to focus to, **on by default**. Ten tracks ship inside the app — no
+streaming account, works offline — and an operator can serve the rest of the
+catalogue without the browser ever talking to anything but the app itself.
 
 - **10 tracks**, one per genre category, in `public/audio/lofi/`. Every file is
   **CC0 1.0 (public domain)**; per-file provenance is in
   [`public/audio/LICENSE.md`](public/audio/LICENSE.md).
-- **Pick one** in **Settings → Focus timer** — each track has a preview toggle, so
-  you can audition without starting a session.
+- **One switch**, in **Settings → Focus timer**. That is the whole of the music
+  configuration: a new account starts with sound on and the ambient lo-fi
+  playlist, and the switch is how you turn it off. Existing accounts keep
+  whatever they already chose — the default applies to new ones only.
+- **Playlists and tracks are chosen from the player**, during a session. You can
+  draw from **any combination of the genre categories** (none selected = the
+  whole catalogue), because "what do I want to hear" is a decision you make
+  while listening rather than one to configure in advance.
 - **In-session mini-player**: now-playing, prev/next, play/pause, volume, progress,
   and a **shuffle** toggle.
 - **It follows the timer** — the music pauses when you pause and resumes when you
@@ -370,8 +376,9 @@ tracks / ~544 MB**, which is too much to put in a container image, so the rest i
 read at run time from wherever the operator keeps it:
 
 ```bash
-# Point the app at a directory holding the extracted openlofi.zip
-# (the mp3s plus catalog.json). Unset — the default — nothing changes.
+# Point the app at a directory holding the extracted openlofi.zip plus
+# catalog.json, flat. The manifest is NOT inside the zip — download it
+# separately. Unset — the default — nothing changes.
 FOCUS_CATALOG_ORIGIN=https://your-store.example.com/openlofi
 ```
 

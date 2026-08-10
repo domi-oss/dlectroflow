@@ -4,9 +4,11 @@ import type {
   BreakdownTurn,
   DailySpark,
   DayRollup,
+  FocusPlaylist,
   FocusSession,
   RewardEvent,
   Settings,
+  ShoppingItem,
   Step,
   Streak,
   StreakRecord,
@@ -97,6 +99,24 @@ export type ExportSnapshot = {
   tasks: ExportTask[];
   inbox: BrainDumpItem[];
   focusSessions: FocusSession[];
+  /**
+   * #185 — the workspace's own named focus playlists.
+   *
+   * ADDED IN REVIEW OF #199, and the omission is why
+   * `__tests__/model-coverage.test.ts` exists: `FocusPlaylist` reached `main` on
+   * 2026-08-07 absent from all three export files and every test stayed green,
+   * because nothing derived the export's obligations from the schema. A user
+   * exercising Art. 15/20 would have received an archive quietly missing a table.
+   */
+  focusPlaylists: FocusPlaylist[];
+  /**
+   * #199 — the shopping list, `savedForLater` pile included.
+   *
+   * The whole list, not the un-ticked part of it: an export is the artefact that
+   * outlives the app, and "I had already bought this" and "I deferred this" are
+   * both things the user wrote down.
+   */
+  shoppingItems: ShoppingItem[];
   gamification: ExportGamification;
   /**
    * Metadata about connected integrations — never a token, encrypted or
