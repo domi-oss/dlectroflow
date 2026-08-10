@@ -30,6 +30,7 @@ import {
   beforeAll,
   afterAll,
   beforeEach,
+  afterEach,
 } from "vitest";
 import { PrismaClient } from "@prisma/client";
 
@@ -107,6 +108,61 @@ async function createFixture() {
   });
 }
 
+/**
+ * Leave the fixture in the worst state any case here can leave it — on purpose,
+ * unconditionally, after every case and before the first (!305 review round 2).
+ *
+ * Without this, `beforeEach` restoring the fixture is not observable by anything
+ * in the file. Every case is handed a rebuild, so "the fixture is intact" is
+ * true no matter how the restore is written, and the canary at the foot of the
+ * file asserted it anyway — a check whose subject was constructed one line
+ * earlier. Proven rather than argued: degrading `beforeEach` to a repair that
+ * restores `status` but never `handle`, which is precisely the defect the first
+ * review round found, left all seven cases green.
+ *
+ * Damaging the fixture deliberately is what turns that assertion back into a
+ * question. Each of the three things the canary reads is broken here in a
+ * different way, so a restore that misses any one of them is caught by name:
+ *
+ *  - `status` revoked — what the guest case leaves behind.
+ *  - `handle` null — what the deleted-outright case's hand-written rebuild left
+ *    behind, and the half no other case in this file reads, which is why a
+ *    restore that forgot it stayed silent.
+ *  - a stray item in the workspace — what the active-write case leaves behind.
+ *
+ * Upserted rather than updated, so the row EXISTS and is wrong. A case that
+ * deletes the account outright would otherwise hand the next restore an absent
+ * row, and "rebuild when there is nothing there" is the one branch a partial
+ * restore gets right by accident. This is also why it runs in `beforeAll`: with
+ * the damage in place before the first case, no assertion here depends on run
+ * order, so `--sequence.shuffle` and a single `-t` filter both mean the same
+ * thing as the whole file.
+ */
+async function damageFixture() {
+  await prisma.user.upsert({
+    where: { id: USER_ID },
+    create: {
+      id: USER_ID,
+      provider: "gitlab",
+      providerSub: PROVIDER_SUB,
+      handle: null,
+      status: UserStatus.Revoked,
+    },
+    update: { handle: null, status: UserStatus.Revoked },
+  });
+  await prisma.workspace.upsert({
+    where: { id: WS_ID },
+    create: { id: WS_ID, kind: WorkspaceKind.User, userId: USER_ID },
+    update: { kind: WorkspaceKind.User, userId: USER_ID },
+  });
+  await prisma.brainDumpItem.create({
+    data: {
+      workspaceId: WS_ID,
+      text: "residue the next case must not inherit",
+    },
+  });
+}
+
 describe("#220 a revoked account with a valid cookie (real Postgres)", () => {
   /** The cookie the browser is still holding, signed while the account was live. */
   let ownerToken: string;
@@ -124,6 +180,10 @@ describe("#220 a revoked account with a valid cookie (real Postgres)", () => {
       SECRET,
     );
     headersMock.mockResolvedValue(new Headers());
+    // The first case is entitled to the same proof as every later one, so it
+    // starts from damage too rather than from whatever the database happened to
+    // hold. See {@link damageFixture}.
+    await damageFixture();
   });
 
   afterAll(async () => {
@@ -141,20 +201,25 @@ describe("#220 a revoked account with a valid cookie (real Postgres)", () => {
    * on the way IN, which reads as isolation but is not: a case's precondition
    * was still whatever its predecessor happened to leave, and two of them left
    * something. The guest case revoked the account and never restored it, and
-   * the deleted-outright case rebuilt a row without its `handle`. Both were
-   * reproduced by asserting the fixture immediately after them, which is what
-   * the last case in this file now does permanently.
+   * the deleted-outright case rebuilt a row without its `handle`.
    *
    * Rebuilding costs four statements against a local database and buys an
    * ordering the suite does not depend on — so `--sequence.shuffle`, a split
    * into concurrent blocks, or a case inserted in the middle next year are all
    * non-events instead of silent corruption.
+   *
+   * A full rebuild rather than a repair is also what {@link damageFixture} makes
+   * checkable: it is handed a row that exists and is wrong on all three counts,
+   * which no repair short of a rebuild puts right.
    */
   beforeEach(async () => {
     cookiesMock.mockResolvedValue(jarWith(OWNER_COOKIE, ownerToken));
     await wipe();
     await createFixture();
   });
+
+  /** @see damageFixture — the restore above is only observable if this runs. */
+  afterEach(damageFixture);
 
   // The control. Without it, every refusal below could just as easily mean the
   // fixture never worked — the "a zero nobody proved" failure the harnesses in
@@ -241,24 +306,38 @@ describe("#220 a revoked account with a valid cookie (real Postgres)", () => {
   });
 
   /**
-   * The canary for `beforeEach` (!305 review).
+   * The canary for `beforeEach` — and the second review round on !305 is the
+   * reason it is worth reading twice.
    *
-   * Declared last so that in declaration order it runs after both cases that
-   * mutate the shared account, and under `--sequence.shuffle` it lands after
-   * one of them about half the time. Against the version of this file that
-   * repaired the fixture per case instead of rebuilding it, exactly these two
-   * assertions failed: `'revoked'` where `'active'` was expected after the
-   * guest case, and `null` where `'frozen-person'` was expected after the
-   * deleted-outright case rebuilt a row without its handle.
+   * The first round wrote it as "declared last, so it inherits whatever the
+   * mutating cases left". That stopped being true in the same commit that
+   * introduced it: the fix for the ordering leak was to make `beforeEach` wipe
+   * and rebuild unconditionally, so from then on this case read a fixture
+   * constructed microseconds earlier, could not fail for the reason its own
+   * comment gave, and said so in prose anyway. The same shape as #220 itself —
+   * a comment promising a check the code does not make — which is a poor thing
+   * to leave in the file that closes it.
    *
-   * So it is a check with a demonstrated failing mode rather than a restatement
-   * of `beforeEach` — deleting the rebuild brings both failures straight back.
+   * What makes the assertions real is {@link damageFixture}, not their
+   * position: the row this reads is deliberately broken before every case, so
+   * each line below now names a distinct way the restore can be incomplete, and
+   * the `handle` line names the one no other case in this file would notice.
+   * Position is now irrelevant, which is the point — it holds under
+   * `--sequence.shuffle` and under a single `-t` filter alike.
+   *
+   * Demonstrated, not asserted: degrade `beforeEach` to a repair that restores
+   * `status` and not `handle` and this case fails with `null` where
+   * `'frozen-person'` was expected, while the other six stay green. Against the
+   * version of this comment that claimed declaration order was the mechanism,
+   * the very same degradation left all seven green.
    */
-  it("is handed the same fixture as every other case, whatever ran before it", async () => {
+  it("is handed a rebuilt fixture, not the damaged one every case leaves", async () => {
     const owner = await prisma.user.findUnique({
       where: { id: USER_ID },
       select: { status: true, handle: true },
     });
+    // Each line is a different failure of the restore: a row that was never
+    // rebuilt, a rebuild that dropped a column, and a wipe that did not run.
     expect(owner?.status).toBe(UserStatus.Active);
     expect(owner?.handle).toBe("frozen-person");
     expect(await itemCount(WS_ID)).toBe(0);
