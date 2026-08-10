@@ -74,6 +74,15 @@ export async function proxy(req: NextRequest) {
   // gate is named, not assumed: #119 found this promise unkept on the Google
   // OAuth routes, so the handlers now call isOwnerRequest() themselves — see
   // src/app/api/google/oauth/{start,callback}/route.ts.
+  //
+  // #220 — the same boundary, for the same reason, applies to `User.status`.
+  // This is "the signature is ours and unexpired", NOT "this account may act": a
+  // frozen account's cookie stays cryptographically valid for its full 30 days,
+  // and nothing here can read a status to know otherwise. So this must never
+  // become the only gate in front of anything that reads or writes account data.
+  // The status check is currentWorkspaceId()'s, at the action/route layer, where
+  // the round trip it needs is already being made; src/lib/workspace.ts says why
+  // it is there rather than here.
   const isSignedIn = sessionPayload?.kind === "user";
 
   // Owner-only paths: block guests.

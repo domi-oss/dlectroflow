@@ -83,9 +83,29 @@ export const PURGE_GRACE_DAYS = 30;
  *     original `revokedAt`: re-revoking must not push the purge date out.
  *
  * The freeze takes effect on the NEXT REQUEST rather than at the next sign-in,
- * because `currentUser()` re-reads `status` on every request
- * (src/lib/workspace.ts). No data is touched: this schedules, it does not
- * destroy. `deleteAccount` above is the only thing in `src/` that destroys.
+ * and #220 is the issue that made that true rather than merely written down.
+ * This comment used to name `currentUser()` as the whole mechanism. It was
+ * accurate about pages and roles and wrong about every write: only a minority of
+ * the action files go through `currentUser()`, and the rest resolve a workspace
+ * id and write — `currentWorkspaceId()`, which read the signed token and never
+ * looked at `status`. So a frozen account kept writing for the 30 days its
+ * cookie had left, while `people-panel.tsx` rendered it as "Revoked".
+ *
+ * Both halves re-read it now, and each pays for its own read:
+ *
+ *  - `currentUser()` selects `status` alongside `role` — pages, role checks and
+ *    the identity in the header.
+ *  - `currentWorkspaceId()` refuses a workspace whose owner is not active,
+ *    reading the status by the id the session token signed, before it stamps
+ *    `lastSeenAt` — so a frozen account leaves no activity behind on its way to
+ *    being refused. It also clears the session cookie where the framework allows
+ *    it, so the person is signed out rather than meeting silent failures. Guests
+ *    are skipped on the workspace's kind and pay nothing. Both helpers are in
+ *    src/lib/workspace.ts, and `scoping.harness.test.ts` is what stops a third
+ *    resolver appearing without the check.
+ *
+ * No data is touched: this schedules, it does not destroy. `deleteAccount` above
+ * is the only thing in `src/` that destroys.
  *
  * Returns whether an ACTIVE account was frozen — false for an unknown id and
  * for one that was already revoked. The two are deliberately indistinguishable
