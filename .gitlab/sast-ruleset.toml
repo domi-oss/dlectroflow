@@ -94,3 +94,63 @@
     [semgrep.ruleset.override]
       severity = "Info"
       description = "Generic SSRF taint sink. Demoted to Info in #83 for the same reason as the gitlab-advanced-sast rule above — body taint, not target taint. Target constancy is enforced by src/lib/fetch-host-hygiene.test.ts."
+
+  # ── #234: dynamic-RegExp detection is demoted to Info ───────────────────────
+  #
+  # `eslint.detect-non-literal-regexp` is the single largest source of SAST
+  # findings in this repo. Measured on main's pipeline for `57a272a`
+  # (2026-08-10): **15 of 38 findings — 40%** — across nine files. On `!318`,
+  # a merge request that touched only a footer component and its tests, it
+  # produced three.
+  #
+  # Not one has ever been a true positive, and that is structural rather than
+  # luck. CWE-185 needs an attacker to influence the pattern. Every construction
+  # here interpolates a SCREAMING_CASE module constant, a value already through
+  # `escapeForRegExp`, a Postgres identifier read from this repo's own migration
+  # SQL, or a test fixture. There is no path from a request to a `new RegExp`.
+  #
+  # The recurrence is the real cost. Semgrep re-fingerprints on file and line, so
+  # a dismissal attaches to a POSITION rather than to the code: adding a comment
+  # above one of these resurfaces an already-triaged finding as new, and the
+  # scan-result policy then blocks a merge request that changed nothing relevant.
+  # The same three constructs in the scoping harness have been dismissed with
+  # written evidence at least eleven times since 2026-07-28.
+  #
+  # ── Why Info and not `disable = true` ───────────────────────────────────────
+  #
+  # Same reasoning as #83 above: disabling marks every past finding "No longer
+  # detected", which retires the dismissal history and loses the audit trail. An
+  # override keeps them visible and keeps the history, while taking the rule out
+  # of a gate that fires on new Critical/High. It is reversible without loss.
+  #
+  # ── The compensating control ────────────────────────────────────────────────
+  #
+  # `src/lib/regexp-source-hygiene.ts` + `.test.ts` assert the property this rule
+  # cannot: that every `new RegExp` in `src/` and `e2e/` builds its pattern from
+  # a module constant, an `escapeForRegExp` call, or a test fixture — and that
+  # anything else is listed in `REVIEWED_DYNAMIC_PATTERNS` with a written
+  # argument for why it cannot carry attacker input. It fails the unit-test job,
+  # which is a hard gate rather than an approval prompt, and its keys carry no
+  # line number, so it cannot re-fingerprint the way this rule does.
+  #
+  # That guard also asserts it can SEE all nine files this rule reports on. Its
+  # first version silently missed four of them — a regex literal containing a
+  # quote desynchronised its tokeniser — and reported them clean while Semgrep
+  # kept firing. A compensating control that looks at nothing is worse than no
+  # control, because the demotion stays either way.
+  #
+  # ── What is deliberately NOT demoted ────────────────────────────────────────
+  #
+  # `nodejs_scan.javascript-dos-rule-regex_dos` (7 findings on the same pipeline)
+  # stays where it is. It is about catastrophic backtracking and it fires on
+  # regex LITERALS — three of its four files contain no `new RegExp` at all. The
+  # guard above says nothing about backtracking, so demoting that rule on the
+  # strength of it would be claiming a control that does not exist. If it becomes
+  # a nuisance too, it needs its own guard and its own argument.
+  [[semgrep.ruleset]]
+    [semgrep.ruleset.identifier]
+      type = "semgrep_id"
+      value = "eslint.detect-non-literal-regexp"
+    [semgrep.ruleset.override]
+      severity = "Info"
+      description = "Dynamically-constructed RegExp. Demoted to Info in #234: 15 of 38 findings on main and zero true positives, because every pattern here is built from a module constant, an escapeForRegExp call, a Postgres identifier out of this repo's own migrations, or a test fixture. Pattern provenance is enforced instead by src/lib/regexp-source-hygiene.test.ts, which fails the build rather than asking for an approval, and which is keyed without line numbers so it cannot re-fingerprint. Re-raise this to Medium if that guard is removed or its REVIEWED_DYNAMIC_PATTERNS map grows a request-derived value."
