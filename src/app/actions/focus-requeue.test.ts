@@ -21,6 +21,8 @@ vi.mock("@/lib/db", () => ({ prisma: prismaMock }));
 vi.mock("@/lib/workspace", () => ({
   currentWorkspaceId: currentWorkspaceIdMock,
   isOwnerRequest: vi.fn().mockResolvedValue(true),
+  // #118 Phase C — the Google patch resolves the ACTING account's credential.
+  currentUser: vi.fn().mockResolvedValue({ id: "user-owner" }),
   MissingWorkspaceError: class extends Error {},
 }));
 vi.mock("@/lib/rewards", () => ({
@@ -103,6 +105,62 @@ describe("requeueFocus — estimateHistory JSON guard", () => {
       newEstMinutes: 30,
     });
     expect(lastUpdateHistory()).toEqual([20]);
+  });
+});
+
+/**
+ * !288 — the Google patch here is commented "Best-effort", and it was not: a
+ * network error or a failed token refresh threw straight out of the action.
+ * The new estimate is already written by then, so the user got an error for a
+ * save that succeeded — and, worse, the `revalidatePath` trio below the patch
+ * never ran, so the list kept rendering the old estimate. That is #139's
+ * failure mode arriving by a different route, which is why these assert on the
+ * revalidated paths and not only on the resolved value.
+ */
+describe("requeueFocus — the Google patch really is best-effort", () => {
+  beforeEach(() => {
+    prismaMock.focusSession.update.mockResolvedValue({
+      step: {
+        ...stepWith("[10]"),
+        googleTaskId: "g1",
+        googleTaskListId: "l1",
+      },
+    });
+    prismaMock.task.findFirst.mockResolvedValue({
+      id: "t1",
+      title: "Task",
+      parentEmoji: null,
+    });
+  });
+
+  it("a thrown PATCH still saves the estimate and still invalidates the list", async () => {
+    const google = await import("@/lib/google");
+    (
+      google.getValidAccessToken as ReturnType<typeof vi.fn>
+    ).mockResolvedValueOnce("tok");
+    (google.patchGoogleTask as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("network down"),
+    );
+    const { requeueFocus } = await import("./focus");
+    await expect(
+      requeueFocus("sess", { durationMin: 25, addedMin: 0, newEstMinutes: 30 }),
+    ).resolves.toEqual({ ok: true });
+    expect(prismaMock.step.update.mock.calls.at(-1)![0].data.estMinutes).toBe(
+      30,
+    );
+    expect(revalidatePath).toHaveBeenCalledWith("/");
+  });
+
+  it("a thrown token refresh does the same", async () => {
+    const google = await import("@/lib/google");
+    (
+      google.getValidAccessToken as ReturnType<typeof vi.fn>
+    ).mockRejectedValueOnce(new Error("refresh failed"));
+    const { requeueFocus } = await import("./focus");
+    await expect(
+      requeueFocus("sess", { durationMin: 25, addedMin: 0, newEstMinutes: 30 }),
+    ).resolves.toEqual({ ok: true });
+    expect(revalidatePath).toHaveBeenCalledWith("/");
   });
 });
 

@@ -23,6 +23,7 @@ import {
 } from "@/lib/braindump-note-syntax";
 import { brainDumpItemToTaskData, liveNote } from "@/lib/braindump-to-task";
 import { normalizeTaskNote } from "@/lib/task-notes";
+import { completeGoogleTaskForTask } from "@/lib/google-task-sync";
 
 const INBOX_PATH = "/";
 const LIBRARY_PATH = "/library";
@@ -389,6 +390,14 @@ export async function completeItem(id: string) {
   await touchStreakOnCompletion(workspaceId);
   await awardBadge(workspaceId, BadgeKey.TaskComplete);
   await maybeAwardInboxZero(workspaceId);
+
+  // #195 — a stepless to-do is scheduled as ONE Google Task stored on the task
+  // row, so this is the only place that can close it. Deliberately keyed on the
+  // id rather than on `steps.length === 0`: a task scheduled while stepless
+  // keeps that Google task even after a breakdown gives it steps of its own.
+  // Runs after the local writes and swallows its own failures, so an unreachable
+  // Google can never cost the user the completion they asked for.
+  if (item.task) await completeGoogleTaskForTask(item.task);
 
   revalidatePath(INBOX_PATH);
   revalidatePath("/dashboard");

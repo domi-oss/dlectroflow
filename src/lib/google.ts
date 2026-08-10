@@ -432,9 +432,44 @@ export async function createGoogleTask(
 }
 
 /**
+ * How long one Google Tasks PATCH may take before it is abandoned.
+ *
+ * !288 (#195) put this call inside `completeItem`, which `bulkBrainDumpAction`
+ * runs in a sequential loop over every selected row — so one stalled connection
+ * stops being a slow request and becomes a bulk operation that never returns.
+ * Node's fetch defaults to a **300 s** header timeout, which on twenty selected
+ * to-dos is an hour and forty minutes, and no caller's try/catch can help
+ * because a stall never throws. The callers' best-effort contract is a promise
+ * about errors; this is the half of it that has to be a promise about time.
+ *
+ * 10 s: well above a slow round trip to Google, far below anything a person
+ * would sit through. `AbortSignal.timeout` rather than a hand-owned timer, for
+ * the reason `src/lib/auth/providers.ts` gives — the response is a few hundred
+ * bytes of JSON, so a server that answers promptly and then trickles the body
+ * should hit this too, and there is no long stream to truncate.
+ *
+ * `PROVIDER_FETCH_TIMEOUT_MS` in that file is also 10 s, and this deliberately
+ * does NOT import it (Duo review, !288). The two budgets are equal by
+ * coincidence, not by requirement, and each moves for its own reason: that one
+ * bounds how long a person stares at an OAuth callback, this one bounds how
+ * long ONE item of a bulk-complete can stall the nineteen behind it. Sharing
+ * the constant would mean tuning for a slow identity provider silently retuning
+ * a Google Tasks batch, and would point `google.ts` at the auth module for no
+ * other reason. The consolidation that IS right — one constant for this
+ * module's seven fetches instead of seven literals — is #211.
+ *
+ * Deliberately only on the PATCH: it is the one call this change put in a loop.
+ * The other six fetches here have the same gap and the same fix, but they sit
+ * on interactive paths where a stall costs one request, so they are #211 rather
+ * than a widening of this one.
+ */
+const TASKS_PATCH_TIMEOUT_MS = 10_000;
+
+/**
  * PATCH a Google Task (title/status/notes). Best-effort — returns ok.
  * Throws only if an identifier is unusable (see {@link pathSegment}); callers
- * already skip steps with a missing list/task id.
+ * already skip steps with a missing list/task id. A timed-out request rejects
+ * with the abort error, which every caller already treats as "not synced".
  */
 export async function patchGoogleTask(
   token: string,
@@ -455,6 +490,7 @@ export async function patchGoogleTask(
       "Content-Type": "application/json",
     },
     body: JSON.stringify(patch),
+    signal: AbortSignal.timeout(TASKS_PATCH_TIMEOUT_MS),
   });
   return res.ok;
 }
