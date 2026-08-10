@@ -341,6 +341,33 @@ type WriteFailure = {
 };
 
 /**
+ * #225 — is the write that just landed the one the notice on screen is waiting
+ * on?
+ *
+ * Both halves were learned the expensive way. The TARGET test is !294's round-6
+ * finding: identity is the row and the field, never the closure, because every
+ * ordinary control builds a fresh closure on every render. The SEQUENCE test
+ * stops a late success clearing a FRESHER failure at the same target, which
+ * would be a silent no-op of exactly the kind this issue removes.
+ *
+ * One predicate rather than two copies of it, because the notice's removal and
+ * the focus hand-off that goes with it have to agree about what is happening:
+ * arming a hand-off for a notice that is NOT going away is how focus lands on a
+ * control the user was never sent away from (!306, Duo review).
+ */
+function answersFailure(
+  failure: WriteFailure | null,
+  target: WriteTarget,
+  seq: number,
+): failure is WriteFailure {
+  return (
+    failure !== null &&
+    sameWriteTarget(failure.target, target) &&
+    failure.seq < seq
+  );
+}
+
+/**
  * #225 — which of the four messages a row failure gets, ordered by how much the
  * user can be told, most-certain first. Mirrors `captureMessageKey` above,
  * `writeFailureKey` in `shopping-list.tsx` and `failureMessageKey` in
@@ -927,13 +954,44 @@ export function InboxView({
   const writesOutstanding = useRef(0);
   const writeLandedAt = useRef(new Map<string, number>());
   /**
+   * What the notice on screen is currently about, readable from the async write
+   * paths. Their closure holds the `writeFailure` from the press that started
+   * them, which is by definition not the record a LATER failure put on screen.
+   *
+   * Not a one-shot instruction like the two refs below it — a mirror, kept in an
+   * effect rather than assigned during render so a render React discards leaves
+   * no fact behind. It can therefore LAG the state by a commit, which is safe in
+   * the one place that reads it: that reader also requires the notice's control
+   * to be holding focus, and a notice that has not been committed has no control
+   * to hold it.
+   */
+  const displayedFailure = useRef<WriteFailure | null>(null);
+  useEffect(() => {
+    displayedFailure.current = writeFailure;
+  }, [writeFailure]);
+  /**
    * One-shot instructions to the two effects below. Refs rather than state for
    * the reason `returnFocusToInput` gives: they are messages to an effect, not
    * something anything renders, and putting them in state would schedule a render
    * just to say "no focus move needed".
    */
   const takeFocusForWrite = useRef(false);
-  const returnFocusAfterWrite = useRef<HTMLElement | null>(null);
+  /**
+   * Where focus goes when the notice unmounts; `null` when no hand-off is
+   * pending.
+   *
+   * A BOX rather than a bare element, because "armed, with nowhere in particular
+   * to go" is a real state and has to be distinguishable from "not armed". A
+   * press whose control the browser never focused leaves no origin — and that is
+   * every mouse press in WebKit, which blurs whatever held focus and puts it on
+   * `<body>` rather than on the button (measured; Chromium reports the button for
+   * the same gesture). Collapsing the two states left that user on `<body>` when
+   * the notice they had been sent to unmounted, which is the WCAG 2.4.3 fault
+   * this hand-off exists to avoid rather than to create.
+   */
+  const returnFocusAfterWrite = useRef<{ origin: HTMLElement | null } | null>(
+    null,
+  );
   useEffect(() => {
     if (!writeFailure) return;
     // Two reasons to move focus here, and the second is not a duplicate of the
@@ -955,13 +1013,22 @@ export function InboxView({
     (writeCtaRef.current ?? writeNoticeRef.current)?.focus();
   }, [writeFailure, writeRemedy]);
   useEffect(() => {
-    if (writeFailure || !returnFocusAfterWrite.current) return;
-    const origin = returnFocusAfterWrite.current;
+    const handOff = returnFocusAfterWrite.current;
+    // A notice REPLACED rather than removed voids the hand-off armed for the one
+    // it displaced: React re-uses the control the user is standing on instead of
+    // unmounting it, so nothing was stranded, and moving focus now would be a
+    // steal rather than a repair (!306, Duo review).
+    if (writeFailure) {
+      returnFocusAfterWrite.current = null;
+      return;
+    }
+    if (!handOff) return;
     returnFocusAfterWrite.current = null;
-    // A row removed by the refresh cannot be focused, and dropping the user to
-    // <body> is the WCAG 2.4.3 fault this whole hand-off exists to avoid. The
-    // capture field is the nearest surviving neighbour of the notice.
-    if (origin.isConnected) origin.focus();
+    // Two ways to have nowhere to go back to, and dropping the user on <body> is
+    // the WCAG 2.4.3 fault in both: a row removed by the refresh cannot be
+    // focused, and a press the browser never focused left no origin at all. The
+    // capture field is the notice's nearest surviving neighbour.
+    if (handOff.origin?.isConnected) handOff.origin.focus();
     else inputRef.current?.focus();
   }, [writeFailure]);
 
@@ -988,15 +1055,12 @@ export function InboxView({
         : prev,
     );
 
-  /** Drop the notice, if it is about this target and this attempt is newer than
-   *  the one that raised it. The sequence test is the guard rail: a late success
-   *  must not clear a fresher failure at the same target, which would be a silent
-   *  no-op of exactly the kind this issue removes. */
+  /** Drop the notice, if this write is the one it was waiting on.
+   *  @see answersFailure — the same predicate the focus hand-off is gated on, so
+   *  the removal and the hand-off cannot disagree about what is happening. */
   const clearWriteFailureFor = (target: WriteTarget, seq: number) =>
     setWriteFailure((prev) =>
-      prev && sameWriteTarget(prev.target, target) && prev.seq < seq
-        ? null
-        : prev,
+      answersFailure(prev, target, seq) ? null : prev,
     );
 
   const attemptWrite = (
@@ -1059,13 +1123,23 @@ export function InboxView({
         );
         // Read while the notice still exists: its unmount is about to drop focus
         // to <body> if the user is standing on it, which they are if they pressed
-        // Retry. Gated on the CTA actually holding focus, so a success arriving
-        // while the user is somewhere else moves nothing.
+        // Retry. Two conditions, and the second is !306's review finding — the
+        // control has to be holding focus AND this write has to be the one the
+        // notice is waiting on. Twenty independent row controls means writes to
+        // different rows overlap routinely, and a success at ANOTHER target
+        // leaves the notice up: arming on it pointed the hand-off at a control
+        // the user was never sent away from, and spent it on whatever cleared the
+        // notice later.
+        const displayed = displayedFailure.current;
         if (
+          answersFailure(displayed, target, seq) &&
           writeCtaRef.current !== null &&
           writeCtaRef.current === document.activeElement
         ) {
-          returnFocusAfterWrite.current = origin;
+          // The notice's OWN record rather than this call's `origin`: the same
+          // object on the retry path, and where the user was standing before the
+          // notice pulled them in is the thing the hand-off is for.
+          returnFocusAfterWrite.current = { origin: displayed.origin };
         }
         // Any notice about THIS target, not just the one this closure raised: a
         // fresh press of the row's own control is how a user actually retries,

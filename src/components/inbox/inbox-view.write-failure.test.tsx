@@ -669,6 +669,224 @@ describe("InboxView — the write notice's accessibility (#225)", () => {
   });
 
   /**
+   * !306, Duo review — the hand-off used to be armed by ANY write that landed
+   * while the notice's control held focus, including one about a different row.
+   * Twenty independent row controls means two writes overlap routinely, and the
+   * one that lands second is not necessarily the one the notice is about: the ref
+   * ended up holding the other row's button, and spent it on whatever finally did
+   * clear the notice.
+   */
+  it("a write that lands at another row does not become this notice's hand-off target", async () => {
+    let settleBravo!: () => void;
+    let alphaAttempts = 0;
+    vi.mocked(completeItem).mockImplementation((id: string) => {
+      if (id === "b")
+        return new Promise<void>((resolve) => {
+          settleBravo = resolve;
+        });
+      alphaAttempts += 1;
+      return alphaAttempts === 1
+        ? Promise.reject(new Error("offline"))
+        : Promise.resolve();
+    });
+    renderInbox([
+      makeItem({ id: "a", text: "alpha" }),
+      makeItem({ id: "b", text: "bravo" }),
+    ]);
+    // Re-queried every time rather than held: the notice mounting and unmounting
+    // above the board re-renders the rows, and a stale node would make
+    // `toHaveFocus` fail for a reason that is not the one under test.
+    const completeOn = (row: 0 | 1) =>
+      screen.getAllByRole("button", { name: COMPLETE })[row];
+
+    // Bravo's write is still in flight when alpha's fails, so the notice on
+    // screen is alpha's while bravo's success is still to come.
+    completeOn(1).focus();
+    await act(async () => {
+      completeOn(1).click();
+      await flushTicks();
+    });
+    completeOn(0).focus();
+    await act(async () => {
+      completeOn(0).click();
+      await flushTicks();
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: RETRY })).toHaveFocus(),
+    );
+
+    await act(async () => {
+      settleBravo();
+      await flushTicks();
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(/alpha/);
+
+    // Bravo landing stranded nobody — the notice is still up and the user is
+    // still standing on its Retry — so no hand-off may be pending. They give up
+    // on it, go back to the capture field, and clear the notice from alpha's own
+    // control. Nothing in that sequence sends focus anywhere, so nothing may move
+    // it. (jsdom's `click()` leaves focus where it is, which is also what the
+    // WebKit press two specs down does.)
+    const capture = screen.getByPlaceholderText(/Brain dump/i);
+    capture.focus();
+    await act(async () => {
+      completeOn(0).click();
+      await flushTicks();
+    });
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(capture).toHaveFocus();
+    expect(completeOn(1)).not.toHaveFocus();
+  });
+
+  /**
+   * A control can be activated without being focused — assistive technology does
+   * it through the accessibility API, and `HTMLElement.click()` is that same
+   * gesture. So the write that clears the notice is not always the one the notice
+   * was raised from, and the hand-off belongs to the notice: it exists to undo the
+   * pull the notice performed, which was away from the row's own control and not
+   * away from whatever happened to clear it.
+   */
+  it("returns focus to the control the notice was raised from, not to whatever cleared it", async () => {
+    vi.mocked(completeItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue(undefined);
+    renderInbox([makeItem()]);
+
+    const trigger = screen.getByRole("button", { name: COMPLETE });
+    trigger.focus();
+    await act(async () => {
+      trigger.click();
+      await flushTicks();
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: RETRY })).toHaveFocus(),
+    );
+
+    // Focus stays on the Retry across this press, so the write that clears the
+    // notice was started from a control that is itself about to be unmounted.
+    await act(async () => {
+      screen.getByRole("button", { name: COMPLETE }).click();
+      await flushTicks();
+    });
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(screen.getByRole("button", { name: COMPLETE })).toHaveFocus();
+  });
+
+  /**
+   * The same defect from the other side. Here the hand-off is armed for the right
+   * notice, and then a second failure takes that notice's PLACE before it can
+   * unmount: React re-uses the control the user is standing on rather than
+   * removing it, so nothing is stranded and there is nothing to hand back — but
+   * the ref was still armed, and the next notice to clear spent it.
+   */
+  it("a notice that replaces another voids the hand-off armed for the first", async () => {
+    let rejectBravo!: (reason: unknown) => void;
+    let settleAlphaRetry!: () => void;
+    let alphaAttempts = 0;
+    let bravoAttempts = 0;
+    vi.mocked(completeItem).mockImplementation((id: string) => {
+      if (id === "b") {
+        bravoAttempts += 1;
+        return bravoAttempts === 1
+          ? new Promise<void>((_, reject) => {
+              rejectBravo = reject;
+            })
+          : Promise.resolve();
+      }
+      alphaAttempts += 1;
+      return alphaAttempts === 1
+        ? Promise.reject(new Error("offline"))
+        : new Promise<void>((resolve) => {
+            settleAlphaRetry = resolve;
+          });
+    });
+    renderInbox([
+      makeItem({ id: "a", text: "alpha" }),
+      makeItem({ id: "b", text: "bravo" }),
+    ]);
+    const completeOn = (row: 0 | 1) =>
+      screen.getAllByRole("button", { name: COMPLETE })[row];
+
+    completeOn(1).focus();
+    await act(async () => {
+      completeOn(1).click();
+      await flushTicks();
+    });
+    completeOn(0).focus();
+    await act(async () => {
+      completeOn(0).click();
+      await flushTicks();
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: RETRY })).toHaveFocus(),
+    );
+    await act(async () => {
+      screen.getByRole("button", { name: RETRY }).click();
+      await flushTicks();
+    });
+
+    // Alpha's retry lands and bravo's write fails in the same flush, so the
+    // notice is replaced rather than removed and the Retry keeps focus.
+    await act(async () => {
+      settleAlphaRetry();
+      rejectBravo(new Error("offline"));
+      await flushTicks();
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(/bravo/);
+
+    // The user gives up on the notice and goes back to the capture field, then
+    // clears bravo's notice from bravo's own control. Nothing here sends focus
+    // anywhere, so nothing may move it.
+    const capture = screen.getByPlaceholderText(/Brain dump/i);
+    capture.focus();
+    await act(async () => {
+      completeOn(1).click();
+      await flushTicks();
+    });
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(capture).toHaveFocus();
+  });
+
+  /**
+   * Not every browser focuses a `<button>` when it is clicked, so not every press
+   * leaves an origin behind. Measured in Playwright's WebKit (Safari's engine):
+   * click a `<button>` while a text field holds focus and `document.activeElement`
+   * ends up on `<body>` — the mousedown blurs the field, and nothing takes its
+   * place. Chromium reports the button for the same gesture. So on WebKit the
+   * ordinary mouse press through this whole file has `origin === null`.
+   *
+   * The notice still takes focus there, through the arm that exists for a user
+   * already stranded on `<body>` — so its unmount still takes focus away from
+   * someone, and there is no pressed control to give it back to. The capture field
+   * is the fallback, the same one a removed row gets, rather than `<body>`
+   * (WCAG 2.4.3).
+   */
+  it("hands focus to the capture field when the press left no control to return to", async () => {
+    vi.mocked(completeItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue(undefined);
+    renderInbox([makeItem()]);
+
+    // The page loads with the capture field focused (`autoFocus`). jsdom's
+    // `click()` models half of WebKit's press — it never focuses the button — so
+    // the other half, the blur every engine performs on mousedown, is spelled out.
+    screen.getByPlaceholderText(/Brain dump/i).blur();
+    expect(document.activeElement).toBe(document.body);
+    await press(COMPLETE);
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: RETRY })).toHaveFocus(),
+    );
+    await press(RETRY);
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(screen.getByPlaceholderText(/Brain dump/i)).toHaveFocus();
+  });
+
+  /**
    * The capture field is where the user is typing, and #210 argues at length that
    * the capture notice must not steal focus from it. A row write is the opposite
    * case — the press came from a button — but the guard has to hold when the two
