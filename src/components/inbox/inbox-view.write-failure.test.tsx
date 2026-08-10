@@ -1272,4 +1272,69 @@ describe("InboxView — a failed rename (#225)", () => {
       await flushTicks();
     });
   });
+
+  /**
+   * !306's Duo review. The retry flag was raised and dropped on a TARGET match
+   * alone, and the comment beside it argued no sequence test was needed because
+   * "a record for this target can only be showing `retrying` because THIS retry
+   * raised it". `writeGuardKey` is what falsifies that: a rename is guarded on
+   * its words too, so two retries of one row to DIFFERENT text are two writes in
+   * flight at the same `{ id, field: "text" }` target, and the older one's
+   * cleanup was putting the newer one's notice back to idle while its own write
+   * was still running.
+   *
+   * The damage is this issue's own bug one step further on. A Retry that reads
+   * idle invites a press, and that press is then absorbed by the double-press
+   * guard — correctly, because the words really are still in flight — so the
+   * user gets a silent no-op from a control that just told them it was free.
+   */
+  it("an older retry settling does not put a DIFFERENT retry's notice back to idle", async () => {
+    let failFirstRetry!: () => void;
+    let settleSecondRetry!: () => void;
+    vi.mocked(renameItem)
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockReturnValueOnce(
+        new Promise<undefined>((_resolve, reject) => {
+          failFirstRetry = () => reject(new Error("offline"));
+        }),
+      )
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockReturnValueOnce(
+        new Promise<undefined>((resolve) => {
+          settleSecondRetry = () => resolve(undefined);
+        }),
+      );
+    renderInbox([makeItem({ text: "old title" })]);
+
+    // A failed rename, retried — that retry is still in flight for the rest of
+    // the spec and is the one whose cleanup runs last.
+    await editTitle("old title", "first edit");
+    await press(RETRY);
+
+    // A second edit of the same row fails and takes the notice over, and it too
+    // is retried. Two retries, one target, different words.
+    await editTitle("old title", "second edit");
+    expect(screen.getByRole("alert")).toHaveTextContent(/second edit/);
+    await press(RETRY);
+    expect(screen.getByRole("button", { name: RETRY })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+
+    await act(async () => {
+      failFirstRetry();
+      await flushTicks();
+    });
+
+    // The notice on screen is still the second edit's, and its retry has not
+    // finished, so the control has to keep saying so.
+    const retry = screen.getByRole("button", { name: RETRY });
+    expect(screen.getByRole("alert")).toHaveTextContent(/second edit/);
+    expect(retry).toHaveAttribute("aria-disabled", "true");
+
+    await act(async () => {
+      settleSecondRetry();
+      await flushTicks();
+    });
+  });
 });

@@ -1153,14 +1153,34 @@ export function InboxView({
     return el instanceof HTMLElement && el !== document.body ? el : null;
   };
 
-  /** Raise or drop `retrying`, and only on a record about this attempt's own
-   *  target — an older attempt settling must not rewrite a record about
-   *  something else. No sequence test: a record for this target can only be
-   *  showing `retrying` because THIS retry raised it, since a fresh record
-   *  always starts with the flag down. */
-  const markWriteRetrying = (target: WriteTarget, retrying: boolean) =>
+  /**
+   * Raise or drop `retrying`, and only on a record about this attempt's own
+   * write — an older attempt settling must not rewrite a record about something
+   * else.
+   *
+   * Keyed on {@link writeGuardKey} rather than the target, which is !306's Duo
+   * review and a correction to what stood here. The old comment argued that no
+   * sequence test was needed because "a record for this target can only be
+   * showing `retrying` because THIS retry raised it" — true only while one write
+   * per target can be in flight, and `writeGuardKey` is the line that stopped
+   * that being so. Two retries of one row to DIFFERENT words are two writes at
+   * the same `{ id, field: "text" }` target, and on a target match the older
+   * one's cleanup put the newer one's notice back to idle underneath it. A Retry
+   * that reads idle invites a press, and the guard then absorbs that press
+   * because the words really are still in flight — a silent no-op handed out by
+   * a control that had just said it was free, which is the class #225 exists to
+   * remove. The guard key is the identity of an in-flight write, so matching on
+   * it keeps this in step with whatever that function decides.
+   *
+   * Still no sequence test, and now that is sound: an entry is held in
+   * `inFlight` for exactly the life of its attempt, so one guard key cannot have
+   * two attempts running at once to be confused about.
+   */
+  const markWriteRetrying = (guardKey: string, retrying: boolean) =>
     setWriteFailure((prev) =>
-      prev && sameWriteTarget(prev.target, target) && prev.retrying !== retrying
+      prev &&
+      writeGuardKey(prev.target, prev.subject) === guardKey &&
+      prev.retrying !== retrying
         ? { ...prev, retrying }
         : prev,
     );
@@ -1190,7 +1210,7 @@ export function InboxView({
     // the guard is one; the retry flag is state and so must be raised here.
     if (inFlight.current.has(guardKey)) return;
     inFlight.current.add(guardKey);
-    if (fromRetry) markWriteRetrying(target, true);
+    if (fromRetry) markWriteRetrying(guardKey, true);
     return startTransition(async () => {
       const seq = (writeAttempts.current += 1);
       writesOutstanding.current += 1;
@@ -1294,7 +1314,7 @@ export function InboxView({
         // is a control that silently does nothing for the rest of the session,
         // and a retry flag left up is a Retry button that reads permanently busy.
         inFlight.current.delete(guardKey);
-        if (fromRetry) markWriteRetrying(target, false);
+        if (fromRetry) markWriteRetrying(guardKey, false);
         writesOutstanding.current -= 1;
         if (writesOutstanding.current === 0) writeSettledAt.current.clear();
       }
