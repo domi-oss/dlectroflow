@@ -714,6 +714,58 @@ describe("findSessionResolvers — the controls, which must stay silent", () => 
     ).toEqual([]);
   });
 
+  it("says nothing about a workspaceId READ OFF one of its own parameters", () => {
+    // The parameter exclusion the return-position check already makes, applied
+    // to the walk that watches every property access (!305 review). Without it
+    // the walk answered "surfaces a workspace id" for `row.workspaceId` before
+    // the return-position check — which would have excluded it — ever ran, so
+    // the careful half was unreachable for exactly the shape it was written for.
+    expect(
+      resolvers(`
+        export function scopeOf(row: { workspaceId: string }): string {
+          return row.workspaceId;
+        }
+        export function scopesOf(rows: { wsId: string }[]): string[] {
+          return rows.map((row) => row.wsId);
+        }
+      `),
+    ).toEqual([]);
+  });
+
+  it("says nothing about an object literal that repackages a parameter's id", () => {
+    // `return row.id` is already excluded; `return { id: row.id }` is the same
+    // id in a wrapper and was not. A serialiser or a mapper is most of what
+    // this shape is, and none of it resolved a session to get there.
+    expect(
+      resolvers(`
+        export function pack(row: { id: string }): { id: string } {
+          return { id: row.id };
+        }
+        export function pack2(id: string): { id: string } {
+          return { id };
+        }
+      `),
+    ).toEqual([]);
+  });
+
+  it("still flags an object literal built from an id it resolved itself", () => {
+    // The other side of the exclusion, so it cannot be widened into silence:
+    // once nothing came in through the front door, `{ id }` is a resolver
+    // handing a workspace out and must stay a finding.
+    expect(
+      resolvers(`
+        export async function currentScope() {
+          const ws = await resolveWorkspace({ owner: token });
+          return { id: ws.id, kind: ws.kind };
+        }
+        export async function currentScopeShort() {
+          const { id } = await resolveWorkspace({ owner: token });
+          return { id };
+        }
+      `),
+    ).toEqual(["currentScope", "currentScopeShort"]);
+  });
+
   it("says nothing about a NON-exported helper", () => {
     // A module-private helper cannot be a resolver anybody outside reaches, and
     // this is the shape a test helper or a fixture builder takes.

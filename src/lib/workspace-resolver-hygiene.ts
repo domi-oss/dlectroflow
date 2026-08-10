@@ -716,18 +716,70 @@ function returnsWorkspaceId(
     return node.properties.some((property) => {
       if (!property.name) return false;
       const key = bindingPropertyName(property.name);
-      return key !== null && RETURNED_ID_FIELDS.includes(key);
+      if (key === null || !RETURNED_ID_FIELDS.includes(key)) return false;
+      // The same front-door exclusion the member-access branch below makes.
+      // `return row.id` was already not a resolution; `return { id: row.id }`
+      // is the same id in a wrapper and was still a finding (!305 review),
+      // which is a serialiser or a mapper misread as a session resolver.
+      return !propertyComesFromParameter(property, parameters);
     });
   }
   const read = accessedName(node);
   if (read !== null && RETURNED_ID_FIELDS.includes(read)) {
-    const base = unwrapExpression(
-      (node as ts.PropertyAccessExpression | ts.ElementAccessExpression)
-        .expression,
-    );
-    return !(ts.isIdentifier(base) && parameters.has(base.text));
+    return !readsOffParameter(node, parameters);
   }
   return false;
+}
+
+/**
+ * Is this expression a field read off one of the function's own parameters?
+ *
+ * The single spelling of the front-door exclusion, shared by all three places
+ * that need it, because they disagreed while it was written out inline: the
+ * return-position check made it, the property-access walk did not, and the
+ * object-literal branch did not (!305 review). A guard that fires on `listTasks
+ * (workspaceId)`-shaped code — most of `src/lib` — is a guard that gets relaxed
+ * rather than fixed, which is how the hole this module closes was made.
+ *
+ * Only the IMMEDIATE base counts, so `ctx.session.wsId` is still a finding even
+ * when `ctx` is a parameter. That is the fail-closed direction the rest of this
+ * module takes, and it is the pre-existing behaviour of the return-position
+ * check rather than a new position: a parameter carrying a whole session object
+ * is worth a look, whereas `row.wsId` is a row.
+ */
+function readsOffParameter(
+  node: ts.Node,
+  parameters: ReadonlySet<string>,
+): boolean {
+  if (
+    !ts.isPropertyAccessExpression(node) &&
+    !ts.isElementAccessExpression(node)
+  ) {
+    return false;
+  }
+  const base = unwrapExpression(node.expression);
+  return ts.isIdentifier(base) && parameters.has(base.text);
+}
+
+/**
+ * Does this object-literal property take its value from a parameter — directly
+ * as shorthand, or by reading a field off one?
+ *
+ * Anything else (a method, a getter, an accessor, a call) is left alone and so
+ * keeps counting, which is the fail-closed default: the question is only ever
+ * "did this demonstrably come in through the front door", never "is it safe".
+ */
+function propertyComesFromParameter(
+  property: ts.ObjectLiteralElementLike,
+  parameters: ReadonlySet<string>,
+): boolean {
+  if (ts.isShorthandPropertyAssignment(property)) {
+    return parameters.has(property.name.text);
+  }
+  if (!ts.isPropertyAssignment(property)) return false;
+  const value = unwrapExpression(property.initializer);
+  if (ts.isIdentifier(value)) return parameters.has(value.text);
+  return readsOffParameter(value, parameters);
 }
 
 /** One exported function, with the node the analysis reads. */
@@ -918,8 +970,18 @@ export function findSessionResolvers(
         }
       }
 
+      // `row.workspaceId` is an id handed IN, exactly as `return row.id` is —
+      // and without the exclusion this fired FIRST, before the return-position
+      // check that would have made it, leaving the careful half unreachable for
+      // the shape it was written for (!305 review).
       const read = accessedName(node);
-      if (read !== null && isWorkspaceIdField(read)) surfacesWorkspaceId = true;
+      if (
+        read !== null &&
+        isWorkspaceIdField(read) &&
+        !readsOffParameter(node, inner)
+      ) {
+        surfacesWorkspaceId = true;
+      }
 
       if (ts.isIdentifier(node) && !isMemberName(node)) {
         if (isWorkspaceIdField(node.text) && !inner.has(node.text)) {
