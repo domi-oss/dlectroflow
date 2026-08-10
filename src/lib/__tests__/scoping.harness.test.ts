@@ -2,6 +2,11 @@ import { describe, it, expect } from "vitest";
 import { Prisma } from "@prisma/client";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import {
+  TOKEN_LEVEL_RESOLVERS,
+  WORKSPACE_MODULE,
+  findTokenResolverEscapes,
+} from "@/lib/workspace-resolver-hygiene";
 
 /**
  * #35 Phase A — the workspace-scoping harness.
@@ -806,14 +811,17 @@ describe("workspace-scoping harness", () => {
   //     workspace id checks `UserStatus`, or is named below with a reason.
   //     A `currentWorkspaceIdFast()` added next year fails this on the day it
   //     is written.
-  //  2. No module OUTSIDE `workspace.ts` calls the token-level resolvers at
+  //  2. No module OUTSIDE `workspace.ts` gets hold of a token-level resolver at
   //     all. Rule 1 is worth nothing if an action file can reach past the
   //     helper that does the checking and call `resolveWorkspaceId()` itself.
-
-  const WORKSPACE_MODULE = "src/lib/workspace.ts";
-
-  /** The token-level resolvers, which by design know nothing about `status`. */
-  const TOKEN_LEVEL_RESOLVERS = ["resolveWorkspace", "resolveWorkspaceId"];
+  //
+  // Rule 2 used to be a substring search for the call, and review on `!305`
+  // showed that a rename on import defeats it in one line — the call site is
+  // then spelled something no fixed string predicts, and the rule reports a
+  // clean zero for the regression it exists to catch. It now asks the parser in
+  // `@/lib/workspace-resolver-hygiene` about the REFERENCE instead, which is
+  // named at the import whatever the local alias becomes; the fixture below
+  // proves that scan still bites.
 
   /**
    * Session→workspace resolvers allowed to skip the status check, each with its
@@ -989,38 +997,77 @@ describe("workspace-scoping harness", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("rule 2's comment-stripping is load-bearing, and is exercised for real", () => {
+  it("rule 2's parser tells prose from code, on a file that really holds both", () => {
     // The control for the rule below. `src/app/actions/account.ts` names
     // `resolveWorkspace()` in prose, to explain why it does NOT call it — so a
     // rule that could not tell code from prose would flag it, and the rule below
-    // passing is only meaningful because this string is really there.
-    expect(readFileSync("src/app/actions/account.ts", "utf8")).toContain(
-      "resolveWorkspace()",
-    );
+    // passing is only meaningful because that string is really there.
+    //
+    // Asserted against the real file rather than a fixture: if the comment is
+    // ever reworded away this fails and says so, instead of the control quietly
+    // becoming a test of nothing. This repo has twice shipped a tool that read a
+    // comment as code, which is most of why rule 2 parses now.
+    const account = readFileSync("src/app/actions/account.ts", "utf8");
+    expect(account).toContain("resolveWorkspace()");
+    expect(
+      findTokenResolverEscapes(account, "src/app/actions/account.ts"),
+    ).toEqual([]);
   });
 
-  it("no module outside workspace.ts calls the token-level resolvers", () => {
-    // Rule 1 is worth nothing on its own: an action file that calls
-    // `resolveWorkspaceId()` directly reaches past the helper doing the checking
-    // and is back to #220 with none of the resolvers in workspace.ts changed.
+  it("rule 2 bites: the rename-on-import that defeated its first version", () => {
+    // The anti-vacuous half of the rule below, and the `!305` review finding as
+    // a fixture. `getWsId(` matches neither resolver's name, so the substring
+    // rule this replaced reported a clean zero for a call reaching straight past
+    // `currentWorkspaceId()`. A zero from the real tree only means something
+    // alongside this.
+    const escapes = findTokenResolverEscapes(
+      `import { resolveWorkspaceId as getWsId } from "@/lib/workspace";
+
+       export async function ownerWorkspace(owner: string) {
+         return getWsId({ owner });
+       }`,
+      "src/app/actions/synthetic.ts",
+    );
+    expect(escapes.map((e) => [e.resolver, e.local])).toEqual([
+      ["resolveWorkspaceId", "getWsId"],
+    ]);
+  });
+
+  it("no module outside workspace.ts holds a token-level resolver", () => {
+    // Rule 1 is worth nothing on its own: an action file that reaches the
+    // token-level resolvers directly gets past the helper doing the checking and
+    // is back to #220 with none of the resolvers in workspace.ts changed.
+    //
+    // The question is asked of the REFERENCE rather than of the call. The
+    // exported name is written at the import whatever the local alias becomes,
+    // and outside that module there is no legitimate use for the reference at
+    // all — so `withWorkspace(resolveWorkspaceId)`, which never writes a call,
+    // counts too. Every case the parser accepts and refuses is pinned in
+    // `src/lib/workspace-resolver-hygiene.test.ts`.
     const offenders: string[] = [];
     for (const file of sourceFiles()) {
       if (file === WORKSPACE_MODULE) continue;
-      const src = readFileSync(file, "utf8");
-      for (const resolver of TOKEN_LEVEL_RESOLVERS) {
-        // Line-level, comments stripped: `src/app/actions/account.ts` names
-        // `resolveWorkspace()` in prose to explain why it does not call it.
-        const hit = src
-          .split("\n")
-          .some(
-            (line) =>
-              !line.trimStart().startsWith("//") &&
-              !line.trimStart().startsWith("*") &&
-              line.includes(`${resolver}(`),
-          );
-        if (hit) offenders.push(`${file}: ${resolver}()`);
+      for (const escape of findTokenResolverEscapes(
+        readFileSync(file, "utf8"),
+        file,
+      )) {
+        offenders.push(`${file}:${escape.line} — ${escape.reason}`);
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  it("everything rule 2 confines, rule 1 exempted with a reason", () => {
+    // The two rules share TOKEN_LEVEL_RESOLVERS, so they cannot drift apart on
+    // the NAME — but they can on the reason. Each of those resolvers skips the
+    // status check, and is only safe doing so because rule 2 keeps it out of
+    // reach; one of them arriving without an entry above would be a confinement
+    // nobody argued for, which is the shape #220 shipped in.
+    for (const resolver of TOKEN_LEVEL_RESOLVERS) {
+      expect(
+        STATUS_BLIND_RESOLVERS[resolver],
+        `${resolver} is confined by rule 2 but states no reason for skipping the status check`,
+      ).toBeTruthy();
+    }
   });
 });
