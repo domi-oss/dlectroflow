@@ -2723,7 +2723,139 @@ describe("FocusTimer — server-action failures (#137, #139)", () => {
       expect(
         screen.getByRole("button", { name: /try again/i }),
       ).toHaveAttribute("aria-disabled", "true");
-      expect(screen.getByRole("status")).toHaveTextContent(/trying again/i);
+      // #218 — the wait is asserted by its text, not by `getByRole("status")`.
+      // That query was pinning the MECHANISM (a nested live region), and the
+      // mechanism was the bug; the behaviour it stood for — the wait is on
+      // screen while the retry runs — is what survives, and the spec below
+      // pins how it now reaches a screen reader.
+      expect(screen.getByRole("alert")).toHaveTextContent(/trying again/i);
+    });
+
+    // #218 — a polite `role="status"` nested inside this assertive `role="alert"`
+    // has no defined announcement behaviour: the outer region's politeness
+    // applies to its whole subtree, so whether the inner text is read politely,
+    // assertively, twice or not at all is down to the screen reader. Nothing
+    // live may live inside the notice, and the sighted line stays where it was.
+    it("keeps every live region out of the notice, and the wait visibly inside it", async () => {
+      vi.mocked(proposeNewEstimate)
+        .mockRejectedValueOnce(new Error("nope"))
+        .mockReturnValueOnce(new Promise<number>(() => {}));
+      await askForNewEstimate();
+      await click(/try again/i);
+
+      const notice = screen.getByRole("alert");
+      // Nothing polite anywhere in the assertive region's subtree — neither the
+      // role nor a bare `aria-live`, which would nest just as unreliably.
+      expect(within(notice).queryByRole("status")).toBeNull();
+      expect(notice.querySelector("[role='status']")).toBeNull();
+      expect(notice.querySelector("[aria-live]")).toBeNull();
+
+      // No visual change: the same text, in the same place, for sighted users.
+      expect(notice).toContainElement(
+        screen.getByTestId("focus-retrying-visible"),
+      );
+
+      // …and it is also reachable from the control that is deliberately still
+      // holding focus, alongside the reason it is being retried — the channel
+      // that carries the mirror-image case, where focus LANDS on the CTA with a
+      // retry already running. Duo round 16: this is the second channel, not
+      // the only one; the live region above is what covers the press itself.
+      const retry = screen.getByRole("button", { name: /try again/i });
+      const ids = (retry.getAttribute("aria-describedby") ?? "").split(/\s+/);
+      const announcer = screen.getByTestId("focus-retrying-announcer");
+      expect(announcer.id).toBeTruthy();
+      expect(ids).toContain(announcer.id);
+      const described = ids
+        .map((id) => document.getElementById(id)?.textContent ?? "")
+        .join(" ");
+      expect(described).toMatch(/couldn't get a new estimate/i);
+      expect(described).toMatch(/trying again/i);
+    });
+
+    // #218, Duo round 16 — `aria-describedby` was doing this on its own, and it
+    // cannot. A description is computed when focus LANDS on a control; the
+    // retry is pressed on a control that already has focus and deliberately
+    // keeps it, so the value gaining `retryingMessageId` mid-flight changes
+    // nothing a screen reader re-reads. That is the same "not reliably
+    // announced" hole the nested `role="status"` had, moved onto the button.
+    //
+    // The one spec-defined channel for content that changes while the user is
+    // stationary is a live region, so the wait gets a real one — polite,
+    // visually hidden, and a SIBLING of the notice rather than a descendant, so
+    // it is not the nested-region bug again. It is mounted empty with the
+    // notice, because assistive technology announces a *change* to a region
+    // already in the accessibility tree and one that arrives with its first
+    // message is silent (the same reasoning `inbox-view.tsx`'s move announcer
+    // carries).
+    it("announces the wait through a polite live region that is a sibling of the notice", async () => {
+      vi.mocked(proposeNewEstimate)
+        .mockRejectedValueOnce(new Error("nope"))
+        .mockReturnValueOnce(new Promise<number>(() => {}));
+      await askForNewEstimate();
+
+      // Present and empty BEFORE the wait exists — otherwise the change that is
+      // supposed to be announced is the region's own arrival, which is not one.
+      const announcer = screen.getByTestId("focus-retrying-announcer");
+      expect(announcer).toBeEmptyDOMElement();
+      expect(screen.getByRole("alert")).not.toContainElement(announcer);
+
+      await click(/try again/i);
+
+      expect(announcer).toHaveTextContent(/trying again/i);
+      expect(announcer).toHaveAttribute("role", "status");
+      expect(announcer).toHaveAttribute("aria-live", "polite");
+      // Visually hidden, not `hidden`: a live region has to be rendered to be
+      // observed, and the sighted copy inside the notice has not moved.
+      expect(announcer).toHaveClass("sr-only");
+      // Still not nested, which was the whole of #218.
+      expect(screen.getByRole("alert")).not.toContainElement(announcer);
+    });
+
+    // The other half of the live region: the sentence must exist exactly once in
+    // the accessibility tree. The visible copy stays for sighted users but is
+    // hidden from assistive technology — otherwise inserting it into the
+    // assertive `role="alert"` re-reads the entire notice over the polite
+    // announcement, which is the double-announcement #218 set out to remove.
+    it("keeps the visible wait out of the accessibility tree, so the notice is not re-read", async () => {
+      vi.mocked(proposeNewEstimate)
+        .mockRejectedValueOnce(new Error("nope"))
+        .mockReturnValueOnce(new Promise<number>(() => {}));
+      await askForNewEstimate();
+      await click(/try again/i);
+
+      const visible = screen.getByTestId("focus-retrying-visible");
+      expect(screen.getByRole("alert")).toContainElement(visible);
+      expect(visible).toHaveAttribute("aria-hidden", "true");
+      expect(visible).not.toHaveClass("sr-only");
+
+      // Exactly one node carries it to a screen reader, and it is the announcer.
+      expect(
+        screen.getAllByText(/trying again/i, {
+          ignore: "[aria-hidden='true']",
+        }),
+      ).toEqual([screen.getByTestId("focus-retrying-announcer")]);
+    });
+
+    // The other half of the same contract: a description that never retracts
+    // would have the button claiming a retry is running long after it stopped.
+    it("drops the wait from the button's description once nothing is in flight", async () => {
+      vi.mocked(proposeNewEstimate).mockRejectedValueOnce(new Error("nope"));
+      await askForNewEstimate();
+
+      const retry = screen.getByRole("button", { name: /try again/i });
+      const ids = (retry.getAttribute("aria-describedby") ?? "").split(/\s+/);
+      expect(screen.queryByText(/trying again/i)).toBeNull();
+      const described = ids
+        .map((id) => document.getElementById(id)?.textContent ?? "")
+        .join(" ");
+      expect(described).toMatch(/couldn't get a new estimate/i);
+      expect(described).not.toMatch(/trying again/i);
+      // The live region empties with it, so nothing is left claiming a retry is
+      // running — and it stays MOUNTED, which is what makes the next press
+      // announceable at all.
+      expect(
+        screen.getByTestId("focus-retrying-announcer"),
+      ).toBeEmptyDOMElement();
     });
 
     it("does not fire a second request when Retry is pressed mid-flight", async () => {

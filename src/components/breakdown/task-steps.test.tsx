@@ -703,6 +703,122 @@ describe("TaskSteps — a failed un-complete says so, and is retryable (#198, ro
   });
 });
 
+describe("TaskSteps — focus survives a FAILED un-complete and its retry (#215)", () => {
+  // #215, the residual half of the defect `!286` fixed the other half of. Round 15
+  // swapped both undo controls to `aria-disabled`, which fixes the case where the
+  // pressed element is merely held. The Retry has a second, independent route to
+  // the same outcome: pressing it clears this row from `undoFailedIds`, which
+  // unmounts the `role="alert"` it lives inside, so the button is destroyed and no
+  // attribute choice can keep focus on it. WCAG 2.4.3.
+  //
+  // The decision recorded here and in the component: focus MOVES to the row's own
+  // undo control rather than the notice being kept mounted. See the note beside
+  // the round-14 clear-on-the-way-in in `task-steps.tsx`.
+  it("hands focus to the row's own undo when Retry withdraws the notice", async () => {
+    const user = userEvent.setup();
+    vi.mocked(uncompleteStep)
+      .mockRejectedValueOnce(new Error("db down"))
+      // The retry hangs, so the in-flight state is observable rather than racing
+      // a resolution. `…Once`, so nothing leaks into the next spec.
+      .mockImplementationOnce(() => new Promise<void>(() => {}));
+    render(
+      <TaskSteps
+        taskId="t1"
+        steps={[{ ...baseStep(), id: "s1", text: "First", done: true }]}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /mark not done: first/i }),
+    );
+    const retry = await screen.findByRole("button", { name: /try again/i });
+    // A keyboard user reaches Retry by tabbing to it; the bug is in what happens
+    // to that focus, so the press has to be a keyboard press from that element.
+    retry.focus();
+    expect(retry).toHaveFocus();
+    await user.keyboard("{Enter}");
+
+    // The negative control. Without this, "the undo has focus" could be true
+    // vacuously — it proves the pressed element really was destroyed, so focus
+    // can only be where it is because something moved it.
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: /try again/i }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(retry).not.toBeInTheDocument();
+    expect(document.body).not.toHaveFocus();
+
+    // Not <body>, and not just "something": the row's own undo, which stays
+    // mounted throughout, is the same action, and — being `aria-disabled` with
+    // `aria-busy` and a spoken reason — announces the wait to whoever is on it.
+    const undo = screen.getByRole("button", { name: /mark not done: first/i });
+    expect(undo).toHaveFocus();
+    expect(undo).toHaveAttribute("aria-disabled", "true");
+    expect(undo).toHaveAccessibleName(/already in progress for this row/i);
+  });
+
+  it("hands off to the retried row's undo, not to the first row's", async () => {
+    // The hand-off is keyed, like every other per-row record in this file. A
+    // single unkeyed target would pass the spec above and still land a two-row
+    // list's correction on the wrong row.
+    const user = userEvent.setup();
+    vi.mocked(uncompleteStep)
+      .mockRejectedValueOnce(new Error("db down"))
+      .mockImplementationOnce(() => new Promise<void>(() => {}));
+    render(
+      <TaskSteps
+        taskId="t1"
+        steps={[
+          { ...baseStep(), id: "s1", text: "First", done: true },
+          { ...baseStep(), id: "s2", order: 2, text: "Second", done: true },
+        ]}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /mark not done: second/i }),
+    );
+    const retry = await screen.findByRole("button", { name: /try again/i });
+    retry.focus();
+    await user.keyboard("{Enter}");
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /mark not done: second/i }),
+      ).toHaveFocus(),
+    );
+    expect(
+      screen.getByRole("button", { name: /mark not done: first/i }),
+    ).not.toHaveFocus();
+  });
+
+  it("leaves focus on the row's undo when the first attempt fails", async () => {
+    // The other failure path #215 asks to be checked against the same reasoning.
+    // This one needs no hand-off and must not get one: the control that was
+    // pressed is `aria-disabled`, never unmounted, so focus stays put on its own
+    // and the `role="alert"` announces without moving anybody. Pinned so a future
+    // hand-off cannot start yanking focus off it.
+    const user = userEvent.setup();
+    vi.mocked(uncompleteStep).mockRejectedValueOnce(new Error("db down"));
+    render(
+      <TaskSteps
+        taskId="t1"
+        steps={[{ ...baseStep(), id: "s1", text: "First", done: true }]}
+      />,
+    );
+
+    const undo = screen.getByRole("button", { name: /mark not done: first/i });
+    undo.focus();
+    await user.keyboard("{Enter}");
+
+    await screen.findByRole("alert");
+    expect(undo).toBeInTheDocument();
+    expect(undo).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
+  });
+});
+
 describe("TaskSteps — focus survives a successful un-complete (#206, round 12)", () => {
   // Duo round 12, and it confirms #206's suspicion independently. `steps.map()`
   // renders two structurally different subtrees for the SAME `key={s.id}`
