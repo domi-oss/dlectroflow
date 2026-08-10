@@ -675,21 +675,46 @@ export const STRINGS = {
 
   // ── Breakdown confirm ──────────────────────────────────────────────────────
   "breakdown.looksRight": { plain: "Looks right", playful: "👍 Looks right" },
-  // #212 (!304 review) — why the confirm above is not taking the press while a
-  // row is still on its way to the inbox. Saving the plan persists every row
-  // that has text, and an ejecting row is deliberately still one of them until
-  // its write lands, so confirming across the gap puts one step in two places.
+  // #212 (!304 review) — the counted noun in the held line below, split rather
+  // than templated because this table carries no interpolation (#86). Same shape
+  // as `shopping.itemOne`/`itemMany` and `focus.sound.trackOne`/`trackMany`, and
+  // composed at the call site as `<count> <this> <breakdown.ejectHeld>`.
+  //
+  // The first cut hardcoded "One step", and the twins specs on this same branch
+  // are what make that wrong rather than merely imprecise: the gate is
+  // `ejecting.size > 0`, two rows can legitimately be mid-eject at once, and a
+  // line saying "one" while the user is looking at two controls reading
+  // "Sending…" is the app contradicting itself about the thing it is asking them
+  // to wait for.
+  "breakdown.stepOne": { plain: "step", playful: "step" },
+  "breakdown.stepMany": { plain: "steps", playful: "steps" },
+  // #212 (!304 review) — why neither "Looks right" nor the re-plan controls are
+  // taking the press while a row is still on its way to the inbox.
+  //
+  // One string for both, because it is one fact and both refusals lift on the
+  // same event. Saving the plan persists every row that has text, and an
+  // ejecting row is deliberately still one of them until its write lands, so
+  // confirming across the gap puts one step in two places. Asking for a new plan
+  // is that same gap wearing a longer coat: the request shows the model the plan
+  // as it stands — the ejecting row included — and then replaces the plan with
+  // the answer, which hands that row straight back.
+  //
+  // A TAIL, not a whole sentence: the count and its noun are composed in front
+  // of it. Worded so neither a verb nor a pronoun has to agree with the count —
+  // "1 step still being sent…" and "2 steps still being sent…" are both
+  // grammatical, which is what a table with no interpolation can actually
+  // deliver.
   //
   // Identical across voices for the reason the `breakdown.eject.*` family gives:
   // this is the app declining an action to protect the user's data, and a joke
   // about it would read as the app being cute about something it will not do.
-  // Says what is happening and that it is brief, never "disabled" — the control
-  // is not broken and the wait is one round trip.
-  "breakdown.confirmHeld": {
+  // Says what is happening and that it is brief, never "disabled" — the controls
+  // are not broken and the wait is one round trip.
+  "breakdown.ejectHeld": {
     plain:
-      "One step is still being sent to your inbox — saving the plan waits for it, so the same step cannot end up in both places.",
+      "still being sent to your inbox — saving the plan and asking for a new one both wait, so the same step cannot end up in both places.",
     playful:
-      "One step is still being sent to your inbox — saving the plan waits for it, so the same step cannot end up in both places.",
+      "still being sent to your inbox — saving the plan and asking for a new one both wait, so the same step cannot end up in both places.",
   },
 
   // ── #212: a step that could not be sent back to the inbox ──────────────────

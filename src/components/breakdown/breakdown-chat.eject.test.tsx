@@ -56,7 +56,7 @@ import {
 // The module is mocked below; this binding is the mock, which is what the specs
 // asserting on what crosses the wire need.
 import { confirmBreakdown } from "@/app/actions/breakdown";
-import type { Proposal } from "@/lib/breakdown";
+import type { Proposal, StreamEvent } from "@/lib/breakdown";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
@@ -152,6 +152,77 @@ const ejectButton = (n = 0) =>
 
 /** The confirm control — the one press that persists the whole plan. */
 const confirmButton = () => screen.getByRole("button", { name: "Looks right" });
+
+/** The three controls that ask the model for a different plan. */
+const moreSteps = () => screen.getByRole("button", { name: "More steps" });
+const fewerSteps = () => screen.getByRole("button", { name: "Fewer steps" });
+const sendFeedback = () => screen.getByRole("button", { name: "Send" });
+const feedbackBox = () =>
+  screen.getByPlaceholderText("Tell Claude how to adjust…");
+
+/**
+ * The reason a control gives for not taking the press, read through the very
+ * association that makes it reachable — an `aria-describedby` pointing at
+ * nothing is the failure this is guarding, so resolving the id is the assertion.
+ */
+const heldReason = (control: HTMLElement) => {
+  const id = control.getAttribute("aria-describedby");
+  return id === null
+    ? null
+    : (document.getElementById(id)?.textContent ?? null);
+};
+
+/** A `/api/breakdown` response body, as the component reads it: one JSON
+ *  stream event per line, off a `ReadableStream`-shaped reader. */
+function streamOf(...events: StreamEvent[]) {
+  const encoder = new TextEncoder();
+  const chunks = events.map((e) => encoder.encode(`${JSON.stringify(e)}\n`));
+  let i = 0;
+  return {
+    body: {
+      getReader: () => ({
+        read: async () =>
+          i < chunks.length
+            ? { done: false, value: chunks[i++] }
+            : { done: true, value: undefined },
+      }),
+    },
+  };
+}
+
+/**
+ * A re-plan that answers with the plan it was SHOWN, plus one new row.
+ *
+ * Not a convenience: it is the mechanism the specs below are about. The model
+ * only ever sees `currentProposal`, so a row that is mid-eject — and therefore
+ * deliberately still in the list — is in that snapshot, and comes back in the
+ * answer under a fresh key. A fixture with a hardcoded answer could not tell a
+ * snapshot that carried the ejected row from one that did not.
+ */
+function replanEchoingSnapshot() {
+  return vi.fn(async (_url: string, init: { body: string }) => {
+    const sent = JSON.parse(init.body) as { currentProposal: Proposal | null };
+    return streamOf({
+      type: "steps",
+      data: {
+        parentEmoji: sent.currentProposal?.parentEmoji ?? "🗂️",
+        steps: [
+          ...(sent.currentProposal?.steps ?? []),
+          { text: "Third step", estMinutes: 5, subtaskEmoji: "🧊" },
+        ],
+      },
+    });
+  });
+}
+
+/** What the last re-plan told the model the plan currently is. */
+const snapshotSent = (fetchMock: ReturnType<typeof replanEchoingSnapshot>) => {
+  const calls = fetchMock.mock.calls;
+  const { currentProposal } = JSON.parse(calls[calls.length - 1][1].body) as {
+    currentProposal: Proposal | null;
+  };
+  return currentProposal?.steps.map((s) => s.text) ?? null;
+};
 
 /**
  * The texts that reached BOTH destinations: the saved plan (`confirmBreakdown`)
@@ -994,6 +1065,29 @@ describe("BreakdownChat — confirming mid-eject (!304 review)", () => {
     expect(confirmButton()).not.toHaveAttribute("aria-disabled", "true");
     expect(confirmButton().getAttribute("aria-describedby")).toBeNull();
   });
+
+  it("counts the rows it is holding for rather than saying one", async () => {
+    // The gate is `ejecting.size > 0`, and the twins block above proves two rows
+    // can be mid-eject at once — so a line hardcoding "One step" is telling the
+    // user something the app already knows to be false. Composed from the
+    // counted-noun keys, the shape `shopping.itemOne`/`itemMany` and
+    // `focus.sound.trackOne`/`trackMany` already use, because `strings.ts` is a
+    // flat table with no interpolation (#86).
+    const first = deferWrite();
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.click(ejectButton(0));
+    expect(heldReason(confirmButton())).toMatch(/^1 step still being sent/i);
+
+    const second = deferWrite();
+    await user.click(ejectButton(1));
+    expect(heldReason(confirmButton())).toMatch(/^2 steps still being sent/i);
+
+    await first.settle();
+    await second.settle();
+    await waitFor(() => expect(stepTexts()).toEqual([]));
+  });
 });
 
 /**
@@ -1172,5 +1266,155 @@ describe("BreakdownChat — a notice control that unmounts itself (!304 review)"
     await screen.findByRole("status");
     expect(document.activeElement).not.toBe(document.body);
     expect(screen.getByRole("button", { name: /got it/i })).toHaveFocus();
+  });
+});
+
+/**
+ * Duo review of !304, the round after — the re-plan controls across an
+ * outstanding eject. The sibling of the confirm gate above, and the same harm
+ * arriving by a longer road.
+ *
+ * "Looks right" was the obvious half, because it WRITES. `request` writes
+ * nothing, which is exactly why it was left alone — and it is still the same
+ * bug, because of what it does instead: it sends the model a snapshot of the
+ * plan and then **replaces the plan with the answer**. A row mid-eject is
+ * deliberately still in that snapshot (#212's whole fix), so the model plans
+ * around it and hands it back, under a fresh key, seconds after the eject
+ * removed it. The step is then in the inbox AND in the plan, and the next
+ * confirm persists both.
+ *
+ * Nothing announces it. The success path is silent by design — the row simply
+ * goes — so from the user's side a row they ejected vanishes and then reappears,
+ * and the only place the two copies ever meet is in front of them, later.
+ *
+ * Duo's own account of this stopped at the failure branch ("a notice for a step
+ * no longer visible anywhere"), which is the mild version and already answered:
+ * the notice QUOTES the words and says "nothing was lost" precisely so it stays
+ * true once the row has gone. The duplicate is the reachable harm.
+ *
+ * Remedy: the same in-flight set, the same wait, the same `aria-disabled` +
+ * `aria-describedby` — one gate at the door of `request`, so every route in is
+ * covered by the guard rather than each caller remembering.
+ */
+describe("BreakdownChat — re-planning mid-eject (!304 review)", () => {
+  it("holds the re-plan until the row has actually left", async () => {
+    const fetchMock = replanEchoingSnapshot();
+    vi.stubGlobal("fetch", fetchMock);
+    const write = deferWrite();
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.click(ejectButton(0));
+    await user.click(moreSteps());
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await write.settle();
+    await waitFor(() => expect(stepTexts()).toEqual(["Second step"]));
+    await user.click(moreSteps());
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    // The point of the wait, stated: the model is shown the plan as it now is,
+    // with the ejected row gone rather than about to be.
+    expect(snapshotSent(fetchMock)).toEqual(["Second step"]);
+  });
+
+  it("never lets a re-plan put an ejected step back into the plan", async () => {
+    const fetchMock = replanEchoingSnapshot();
+    vi.stubGlobal("fetch", fetchMock);
+    const write = deferWrite();
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.click(ejectButton(0));
+    await user.click(moreSteps());
+    await write.settle();
+    await waitFor(() =>
+      expect(moreSteps()).not.toHaveAttribute("aria-disabled", "true"),
+    );
+    await user.click(moreSteps());
+
+    await waitFor(() => expect(stepTexts()).toContain("Third step"));
+    await waitFor(() => expect(confirmButton()).toBeEnabled());
+    await user.click(confirmButton());
+
+    await waitFor(() => expect(confirmBreakdown).toHaveBeenCalledTimes(1));
+    expect(inBothPlaces()).toEqual([]);
+  });
+
+  it("keeps the feedback the user typed when the send is held", async () => {
+    // The gate must not eat the words on its way to refusing: the submit handler
+    // cleared the box BEFORE calling `request`, so a refusal there would destroy
+    // typed text with nothing offering it back — #212's own harm, one control
+    // along.
+    const fetchMock = replanEchoingSnapshot();
+    vi.stubGlobal("fetch", fetchMock);
+    const write = deferWrite();
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.click(ejectButton(0));
+    await user.type(feedbackBox(), "shorter please");
+    await user.click(sendFeedback());
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(feedbackBox()).toHaveValue("shorter please");
+
+    await write.settle();
+    await waitFor(() => expect(stepTexts()).toEqual(["Second step"]));
+    await user.click(sendFeedback());
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(feedbackBox()).toHaveValue("");
+  });
+
+  it("says why the re-plan controls are held, and keeps them focusable", async () => {
+    // Same call as the confirm above (WCAG 2.4.3): `aria-disabled`, never
+    // `disabled`, so a keyboard user can still land on the control and be told
+    // why — they are exactly the users who did not watch a row's own control
+    // change to "Sending…".
+    const write = deferWrite();
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.type(feedbackBox(), "shorter please");
+    await user.click(ejectButton(0));
+
+    for (const control of [moreSteps(), fewerSteps(), sendFeedback()]) {
+      expect(control).toHaveAttribute("aria-disabled", "true");
+      expect(control).not.toBeDisabled();
+      expect(heldReason(control)).toMatch(/still being sent to your inbox/i);
+    }
+
+    await write.settle();
+    await waitFor(() => expect(stepTexts()).toEqual(["Second step"]));
+    for (const control of [moreSteps(), fewerSteps(), sendFeedback()]) {
+      expect(control).not.toHaveAttribute("aria-disabled", "true");
+      expect(control.getAttribute("aria-describedby")).toBeNull();
+    }
+  });
+
+  it("holds the error banner's Try again too", async () => {
+    // The third way into `request`, and the one a caller-side guard would have
+    // missed: it is a `propose` from inside an error banner, so it replaces the
+    // whole list — the most destructive of the three if a row is mid-departure.
+    const fetchMock = vi.fn().mockRejectedValue(new Error("offline"));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.click(moreSteps());
+    const tryAgain = await screen.findByRole("button", { name: /try again/i });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const write = deferWrite();
+    await user.click(ejectButton(0));
+    expect(tryAgain).toHaveAttribute("aria-disabled", "true");
+    expect(heldReason(tryAgain)).toMatch(/still being sent to your inbox/i);
+
+    await user.click(tryAgain);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await write.settle();
+    await waitFor(() => expect(stepTexts()).toEqual(["Second step"]));
   });
 });

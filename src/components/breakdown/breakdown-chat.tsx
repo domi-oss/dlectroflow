@@ -318,7 +318,7 @@ export function BreakdownChat({
   const [ejectNotice, setEjectNotice] = useState<EjectNotice | null>(null);
   const ejectErrorId = useId();
   const ejectSendingId = useId();
-  const confirmHeldId = useId();
+  const ejectHeldId = useId();
   /**
    * The notice's Retry control, **and the row that notice was about**.
    *
@@ -422,6 +422,34 @@ export function BreakdownChat({
 
   async function request(feedback: Feedback, userLabel?: string) {
     if (streaming) return;
+    /**
+     * #212 (!304 review) — never across an outstanding eject either, and this is
+     * the sibling of `confirm`'s gate rather than a second idea.
+     *
+     * `request` writes nothing, which is exactly why the first cut left it alone
+     * (see `ejectPending`, whose note used to say so). It is still the same bug,
+     * because of what it does instead: it shows the model **a snapshot of the
+     * plan** and then **replaces the plan with the answer**. A row mid-eject is
+     * deliberately still in that snapshot — that IS #212's fix — so the model
+     * plans around it and hands it back, under a fresh key, moments after the
+     * eject took it away. The step is then in the inbox and in the plan, and the
+     * next confirm persists both. `confirm`'s own gate cannot see it: by then
+     * the eject has long settled and the row is, as far as the editor knows, an
+     * ordinary one.
+     *
+     * Nothing announces it. A successful eject is silent by design — the row
+     * simply goes — so from the user's side a row they ejected vanishes and then
+     * reappears, and the two copies only ever meet in front of them, later.
+     *
+     * At the door rather than on each control, so every route in is covered by
+     * one guard: the two quick replies, the free-text form, the error banner's
+     * "Try again", and the mount-time propose (where the set is always empty).
+     * On the REF, not the state, for the reason `ejectStep` and `confirm` give.
+     * A wait, not a refusal — `ejectStep`'s `finally` drains the set on every
+     * exit including a throw, so a failed eject leaves the row in the plan where
+     * re-planning around it is the truth, and the gate lifts either way.
+     */
+    if (ejectsInFlight.current.size > 0) return;
     setError(null);
     setFallbackNote(null);
     if (userLabel)
@@ -802,13 +830,36 @@ export function BreakdownChat({
     proposal?.steps.reduce((n, s) => n + (s.estMinutes || 0), 0) ?? 0;
   const busy = streaming || confirmPending;
   /**
-   * Is any row's eject still outstanding? The paint half of the confirm gate —
-   * `ejectsInFlight` decides, this is the same fact as state so the control can
-   * say it. Deliberately not folded into `busy`: that flag also drives the three
-   * re-plan controls and the free-text box, and none of those write anything a
-   * pending eject could duplicate.
+   * Is any row's eject still outstanding? The paint half of the gate —
+   * `ejectsInFlight` decides, this is the same fact as state so the controls can
+   * say it.
+   *
+   * It used to read "deliberately not folded into `busy`, because the re-plan
+   * controls write nothing a pending eject could duplicate". The second half of
+   * that was wrong and the review found it (!304): a re-plan does not write, it
+   * SHOWS the model the plan and then replaces it, which brings an ejecting row
+   * back under a fresh key. See `request`'s gate.
+   *
+   * Still deliberately not folded into `busy`: that is a `disabled` flag where
+   * this one has to stay focusable, and the two controls it drives that this
+   * does not — "Add a step" and "Remove step" — genuinely do not need holding.
+   * Removing a row mid-eject is the same act as pressing ✕ on it, which is a
+   * thing the user is allowed to mean; `settledEject`'s `gone` already answers
+   * it, in silence and on purpose.
    */
   const ejectPending = ejecting.size > 0;
+  /**
+   * The held line, composed rather than templated: `strings.ts` is a flat table
+   * with no interpolation (#86), so a count reaches the user the way
+   * `shoppingSummaryLabel` does it — `<count> <counted noun> <invariant tail>`.
+   *
+   * `ejecting.size`, the same fact the gate is read from, so the sentence cannot
+   * come to disagree with the controls it explains.
+   */
+  const ejectHeldLine = `${ejecting.size} ${t(
+    ejecting.size === 1 ? "breakdown.stepOne" : "breakdown.stepMany",
+    voice,
+  )} ${t("breakdown.ejectHeld", voice)}`;
 
   // Route the Google-vs-ICS control choice through the seam (S1, #34): the
   // "Schedule onto your calendar" (Google Tasks) section is offered to any
@@ -993,11 +1044,21 @@ export function BreakdownChat({
           e.preventDefault();
           const v = freeText.trim();
           if (!v) return;
+          // Ask BEFORE emptying the box (!304 review). `request` holds the
+          // authoritative gate, so no caller can route round it — but a handler
+          // that had already cleared the field would answer that refusal by
+          // destroying words the user typed, with nothing on screen offering
+          // them back. That is #212's own harm, one control along. The duplicate
+          // guard exists only to keep the text, and reads the same ref for the
+          // same reason: the state is what paints, the ref is what decides.
+          if (ejectsInFlight.current.size > 0) return;
           setFreeText("");
           request({ kind: "free", text: v }, `✍️ ${v}`);
         }}
         className="flex gap-2"
       >
+        {/* Not held: typing is not the thing a pending eject collides with, and
+            taking the field away mid-sentence would be the worse trade. */}
         <input
           value={freeText}
           onChange={(e) => setFreeText(e.target.value)}
@@ -1008,7 +1069,14 @@ export function BreakdownChat({
         <button
           type="submit"
           disabled={busy || !freeText.trim()}
-          className="hover:bg-accent rounded-md border px-3 py-2 text-sm disabled:opacity-50"
+          // Held, and `aria-disabled` rather than `disabled`, for the reason
+          // spelled out on "Looks right" below. The description it points at is
+          // the shared held line at the foot of the panel: one sentence covering
+          // every control the same event holds, rather than the same words
+          // repeated beside each of them.
+          aria-disabled={ejectPending}
+          aria-describedby={ejectPending ? ejectHeldId : undefined}
+          className="hover:bg-accent rounded-md border px-3 py-2 text-sm aria-disabled:opacity-50 disabled:opacity-50"
         >
           Send
         </button>
@@ -1033,8 +1101,13 @@ export function BreakdownChat({
           )}
         >
           {error}{" "}
+          {/* Held too, and the most destructive of the three if it were not: a
+              bare `propose` replaces the whole list, so a row on its way to the
+              inbox comes back with everything else. */}
           <button
-            className="underline"
+            className="underline aria-disabled:opacity-50"
+            aria-disabled={ejectPending}
+            aria-describedby={ejectPending ? ejectHeldId : undefined}
             onClick={() => request({ kind: "propose" })}
           >
             Try again
@@ -1352,24 +1425,32 @@ export function BreakdownChat({
           // `aria-describedby` off this button, the mechanism the notice's Retry
           // already uses for its in-flight line, rather than a second live
           // region (#218).
-          aria-describedby={ejectPending ? confirmHeldId : undefined}
+          aria-describedby={ejectPending ? ejectHeldId : undefined}
           className="bg-primary text-primary-foreground rounded-md px-3 py-1.5 text-sm font-medium aria-disabled:opacity-50 disabled:opacity-50"
         >
           {confirmPending ? "Saving…" : t("breakdown.looksRight", voice)}
         </button>
+        {/* The two re-plan controls, held on the same fact and saying the same
+            reason (!304 review). They do not write, but they replace the plan
+            with an answer computed from a snapshot that still carries the
+            ejecting row — see `request`'s gate. */}
         <button
           onClick={() =>
             request({ kind: "too_small" }, "Fewer, bigger steps ⬇️")
           }
           disabled={busy || !proposal}
-          className="hover:bg-accent rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
+          aria-disabled={ejectPending}
+          aria-describedby={ejectPending ? ejectHeldId : undefined}
+          className="hover:bg-accent rounded-md border px-3 py-1.5 text-sm aria-disabled:opacity-50 disabled:opacity-50"
         >
           {t("action.fewerSteps", voice)}
         </button>
         <button
           onClick={() => request({ kind: "too_big" }, "More, smaller steps ⬆️")}
           disabled={busy || !proposal}
-          className="hover:bg-accent rounded-md border px-3 py-1.5 text-sm disabled:opacity-50"
+          aria-disabled={ejectPending}
+          aria-describedby={ejectPending ? ejectHeldId : undefined}
+          className="hover:bg-accent rounded-md border px-3 py-1.5 text-sm aria-disabled:opacity-50 disabled:opacity-50"
         >
           {t("action.moreSteps", voice)}
         </button>
@@ -1393,20 +1474,29 @@ export function BreakdownChat({
         </button>
       </div>
 
-      {/* #212 (!304 review) — why "Looks right" is not taking the press.
-          Rendered as a sibling of the button row rather than inside it, so the
-          wrapping flex row does not try to lay a sentence out as a control.
+      {/* #212 (!304 review) — why "Looks right", the two re-plan controls, the
+          free-text Send and the error banner's "Try again" are not taking the
+          press. Rendered as a sibling of the button row rather than inside it,
+          so the wrapping flex row does not try to lay a sentence out as a
+          control.
+
+          ONE paragraph for all five. They are held by the same event and lift on
+          it together, so five copies of one sentence would be five things to
+          re-read rather than five explanations. The two furthest from it — the
+          Send above the conversation and the "Try again" inside the error banner
+          — reach it by `aria-describedby` like the rest, and carry their own
+          local signal in the meantime by greying out the moment the hold starts.
 
           Deliberately NOT a live region. It appears as a consequence of a press
           the user just made on a row's own control, which already announces
           itself through that control's `aria-disabled`/`aria-busy` and its
           changed label — a third announcement for one press is noise, and a
           second live region beside the eject notice is #218's shape. It is
-          `aria-describedby`'d off the confirm button instead, which is where a
+          `aria-describedby`'d off the held controls instead, which is where a
           user who tries the press will meet it. */}
       {ejectPending && (
-        <p id={confirmHeldId} className="text-muted-foreground text-sm">
-          {t("breakdown.confirmHeld", voice)}
+        <p id={ejectHeldId} className="text-muted-foreground text-sm">
+          {ejectHeldLine}
         </p>
       )}
     </div>
