@@ -468,6 +468,14 @@ operators upgrading a self-hosted instance don't get surprised.
   busy, no longer swallows a press on it, and no longer clears a message about
   the first one.
 
+  **Keyboard focus never lands nowhere.** Every control in this flow that
+  vanishes when you press it now hands you on to a specific, still-present one:
+  ejecting a step moves you to the row that takes its place, dismissing the
+  "your inbox has the earlier wording" note puts you on that row's own control,
+  and trying again after you have deleted the row leaves you on "Add a step".
+  Each of those used to drop you at the top of the page, which for anyone
+  navigating by keyboard or screen reader means starting the tab sequence over.
+
   Finally, **"Looks right" now waits for a step that is still being sent.** A
   plan is saved with every row it still shows, and a row on its way to the inbox
   is deliberately one of them until the inbox has it — so pressing Save in that

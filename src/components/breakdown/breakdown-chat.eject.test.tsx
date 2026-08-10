@@ -995,3 +995,182 @@ describe("BreakdownChat — confirming mid-eject (!304 review)", () => {
     expect(confirmButton().getAttribute("aria-describedby")).toBeNull();
   });
 });
+
+/**
+ * Duo review of !304, round four — a control inside the notice that destroys the
+ * notice, and with it itself.
+ *
+ * The same WCAG 2.4.3 shape !303 settled for `task-steps.tsx` and
+ * `focus-timer.tsx`: `aria-disabled` covers a control that is merely HELD, and
+ * can do nothing for one that ceases to exist. Round three swapped both eject
+ * controls and the Retry to `aria-disabled` and stopped there, because the two
+ * ways the notice can vanish under the user were not on the list.
+ *
+ * "Got it" is the plain one — its only job is `setEjectNotice(null)`, so the
+ * press unmounts the button being pressed. The other arrives through finding 2's
+ * path: a retry whose row the user deleted meanwhile settles `gone`, which
+ * clears the notice, which takes the Retry with it.
+ *
+ * The case that LOOKS like a third and is not is pinned here too: a retry
+ * settling `edited` swaps Retry for "Got it" in the same slot, and React updates
+ * that `<button>` in place rather than remounting it, so focus never leaves. A
+ * hand-off there would be a focus move with nothing to justify it (WCAG 3.2.2).
+ */
+describe("BreakdownChat — a notice control that unmounts itself (!304 review)", () => {
+  /** Get to the `edited` notice: eject row 0, type into it mid-flight, land. */
+  async function divergedRow0(user: ReturnType<typeof userEvent.setup>) {
+    const write = deferWrite();
+    await user.click(ejectButton(0));
+    await user.type(screen.getAllByLabelText("Step text")[0], " (revised)");
+    await write.settle();
+    return screen.findByRole("status");
+  }
+
+  it("hands focus to the row's own control when Got it withdraws the notice", async () => {
+    const user = userEvent.setup();
+    renderChat();
+    await divergedRow0(user);
+
+    // The notice does not take focus when it appears — the user is mid-sentence
+    // in the row it is about (WCAG 3.2.2, and the notice's own comment).
+    expect(screen.getAllByLabelText("Step text")[0]).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: /got it/i }));
+
+    // Asserted first, so the focus claim below cannot pass vacuously on a
+    // notice that never went away.
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(document.activeElement).not.toBe(document.body);
+    // The row the notice named — kept, precisely so the words typed while
+    // waiting survive — and its own eject control, which is the same action.
+    expect(stepTexts()).toEqual(["First step (revised)", "Second step"]);
+    expect(ejectButton(0)).toHaveFocus();
+  });
+
+  it("hands focus to the row it named, not to whichever row is first", async () => {
+    // Keyed, like every other per-row record in this file. A hand-off that
+    // always went to row 0 would pass the spec above and still land the user on
+    // a row the notice was never about.
+    const user = userEvent.setup();
+    renderChat();
+
+    const write = deferWrite();
+    await user.click(ejectButton(1));
+    await user.type(screen.getAllByLabelText("Step text")[1], " (revised)");
+    await write.settle();
+    await screen.findByRole("status");
+
+    await user.click(screen.getByRole("button", { name: /got it/i }));
+
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(stepTexts()).toEqual(["First step", "Second step (revised)"]);
+    expect(ejectButton(1)).toHaveFocus();
+    expect(ejectButton(0)).not.toHaveFocus();
+  });
+
+  it("falls through to Add a step when the row it named has gone too", async () => {
+    // The row is kept by the `edited` branch, not pinned there: the user can
+    // still delete it while the notice is up, and then there is no row control
+    // to receive the hand-off.
+    const user = userEvent.setup();
+    renderChat();
+    await divergedRow0(user);
+
+    await user.click(screen.getAllByTitle("Remove this step")[0]);
+    expect(stepTexts()).toEqual(["Second step"]);
+
+    await user.click(screen.getByRole("button", { name: /got it/i }));
+
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(document.activeElement).not.toBe(document.body);
+    expect(screen.getByRole("button", { name: "Add a step" })).toHaveFocus();
+  });
+
+  it("leaves focus where it was when the press did not come from it", async () => {
+    // 2.4.3 asks where focus goes when the focused control is destroyed — it
+    // does not license taking focus off something else. Safari does not focus a
+    // button on click, so this is the ordinary mouse case there, and yanking
+    // the user out of the field they were typing in would be 3.2.2's harm.
+    const user = userEvent.setup();
+    renderChat();
+    await divergedRow0(user);
+
+    const field = screen.getAllByLabelText("Step text")[1];
+    field.focus();
+    fireEvent.click(screen.getByRole("button", { name: /got it/i }));
+
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(field).toHaveFocus();
+  });
+
+  it("still resends the words after the row itself has been deleted", async () => {
+    // Duo's finding 2, answered by pinning rather than by guarding. Once the row
+    // is gone the notice holds the ONLY copy of those words, so a Retry that
+    // refused because "the row no longer exists" would destroy them — #212's
+    // harm exactly, and the notice's failure branch offers no other way out.
+    const failed = deferWrite();
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.click(ejectButton(0));
+    await failed.fail(new Error("offline"));
+    await screen.findByRole("alert");
+
+    await user.click(screen.getAllByTitle("Remove this step")[0]);
+    expect(stepTexts()).toEqual(["Second step"]);
+
+    const retried = deferWrite();
+    await user.click(screen.getByRole("button", { name: /try again/i }));
+    await retried.settle();
+
+    expect(createBrainDumpItem).toHaveBeenLastCalledWith("First step");
+    // And it passes in silence: `gone` is the outcome the user asked for, so
+    // there is nothing left to announce and nothing left to retry.
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(stepTexts()).toEqual(["Second step"]);
+  });
+
+  it("hands focus on when that retry's own notice clears beneath it", async () => {
+    // The focus half of the path above: clearing the notice unmounts the Retry
+    // the user is standing on. Nothing took the deleted row's place, so the
+    // landing spot is the one control that is always mounted.
+    const failed = deferWrite();
+    const user = userEvent.setup();
+    renderChat();
+
+    await user.click(ejectButton(0));
+    await failed.fail(new Error("offline"));
+    await screen.findByRole("alert");
+    await user.click(screen.getAllByTitle("Remove this step")[0]);
+
+    const retried = deferWrite();
+    const retry = screen.getByRole("button", { name: /try again/i });
+    await user.click(retry);
+    expect(retry).toHaveFocus();
+    await retried.settle();
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(document.activeElement).not.toBe(document.body);
+    expect(screen.getByRole("button", { name: "Add a step" })).toHaveFocus();
+  });
+
+  it("does not move focus when Retry becomes Got it in the same slot", async () => {
+    // Not a third case, and pinned so it does not acquire a hand-off it does not
+    // need: React updates the one `<button>` in place across the branch swap, so
+    // the user is already standing on the control that replaced theirs.
+    createBrainDumpItem.mockRejectedValueOnce(new Error("offline"));
+    const user = userEvent.setup();
+    renderChat();
+    await user.click(ejectButton(0));
+    await screen.findByRole("alert");
+    await user.type(screen.getAllByLabelText("Step text")[0], " (revised)");
+
+    const retried = deferWrite();
+    const retry = screen.getByRole("button", { name: /try again/i });
+    await user.click(retry);
+    await retried.settle();
+
+    await screen.findByRole("status");
+    expect(document.activeElement).not.toBe(document.body);
+    expect(screen.getByRole("button", { name: /got it/i })).toHaveFocus();
+  });
+});

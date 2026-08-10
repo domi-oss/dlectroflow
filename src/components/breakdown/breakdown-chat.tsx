@@ -357,24 +357,48 @@ export function BreakdownChat({
    */
   const ejectButtonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   /**
-   * Where focus goes once a successful eject has re-rendered.
+   * Where focus goes once the control the user was standing on has unmounted.
    *
    * `null` means leave focus alone — the overwhelmingly common case, including
-   * every eject the user did not have focus on. A `successorKey` of `null` is
-   * the other thing: focus SHOULD move, but the list ran out, so it falls
+   * every eject the user did not have focus on. A `rowKey` of `null` is the
+   * other thing: focus SHOULD move, but no row is left to take it, so it falls
    * through to "Add a step".
+   *
+   * Three arms, all WCAG 2.4.3 and all the same shape — a control is DESTROYED
+   * rather than merely held, which is the half no `aria-disabled` choice can
+   * reach (that is why the row controls, the Retry and "Looks right" all carry
+   * one, and why it was not enough on its own). `task-steps.tsx` took the same
+   * route for the same reason in #215:
+   *
+   *   - a successful eject removes the row, taking the pressed control with it
+   *     → the row that takes its place, or the list ran out;
+   *   - "Got it" withdraws the `edited` notice it lives inside (!304 review)
+   *     → the row that notice named. That row is kept precisely so the words
+   *       typed while waiting survive, and its own eject control is the SAME
+   *       action, so focus has not wandered somewhere unrelated;
+   *   - a retry landing on a row the user deleted meanwhile settles `gone`,
+   *     which clears the notice and takes the Retry with it (!304 review)
+   *     → nothing replaced the row, so "Add a step".
+   *
+   * The case that looks like a fourth and is not: a retry settling `edited`
+   * swaps Retry for "Got it" in the same slot, and React updates that one
+   * `<button>` in place rather than remounting it. Focus never leaves, and
+   * arming a hand-off there would move it for no reason (WCAG 3.2.2).
+   *
+   * One slot rather than the keyed Set `task-steps.tsx` uses, because these
+   * cannot overlap: every arm is paired with a state change that this effect
+   * depends on, so each is drained on the very next commit.
    */
-  const focusAfterEject = useRef<{ successorKey: string | null } | null>(null);
+  const focusAfterUnmount = useRef<{ rowKey: string | null } | null>(null);
   useEffect(() => {
-    const target = focusAfterEject.current;
+    const target = focusAfterUnmount.current;
     if (target === null) return;
-    focusAfterEject.current = null;
+    focusAfterUnmount.current = null;
     // In an effect rather than beside the state update: the old button is still
     // mounted then, so focusing anything would be undone by the unmount.
     const refs = ejectButtonRefs.current;
-    const successor =
-      target.successorKey === null ? null : refs.get(target.successorKey);
-    (successor ?? addStepRef.current)?.focus();
+    const landing = target.rowKey === null ? null : refs.get(target.rowKey);
+    (landing ?? addStepRef.current)?.focus();
   }, [proposal, ejecting, ejectNotice]);
   /**
    * The current steps, readable from a callback that started renders ago.
@@ -556,13 +580,19 @@ export function BreakdownChat({
       // it stays correct even if the list moved under this in the meantime.
       const steps = latestSteps.current;
       const settled = settledEject(steps, key, text);
+      // Both branches ask the same question first — is the control about to be
+      // destroyed the one the user is standing on? — because that, and not the
+      // press, is what WCAG 2.4.3 is about. A press whose control never held
+      // focus (Safari does not focus a button on click) has nothing to hand on,
+      // and moving focus anyway would be 3.2.2's harm instead.
+      const handOff = pressed !== null && pressed === document.activeElement;
       if (settled.kind === "remove") {
-        if (pressed !== null && pressed === document.activeElement) {
+        if (handOff) {
           // The row that will occupy this one's place: the next one down, or
           // the one above when this was the last. A key, not an index — by the
           // time the effect runs the indices have all moved.
           const successor = steps[settled.at + 1] ?? steps[settled.at - 1];
-          focusAfterEject.current = { successorKey: successor?.key ?? null };
+          focusAfterUnmount.current = { rowKey: successor?.key ?? null };
         }
         // Pure updater, and removing by key: a row the user reordered while
         // this was in flight is still the same row, and one that merely says
@@ -570,6 +600,16 @@ export function BreakdownChat({
         setProposal((p) =>
           p ? { ...p, steps: p.steps.filter((s) => s.key !== key) } : p,
         );
+      } else if (settled.kind === "gone" && handOff) {
+        // The retry-after-delete path (!304 review, and the focus half of the
+        // answer to "should a retry check its row still exists?" — it should
+        // not; see `retryEject`). `pressed` can only be the notice's own Retry
+        // here: an ordinary eject's row control was unregistered when the user
+        // deleted the row, and the identity guard above has already ruled out
+        // somebody else's Retry. The updater below then clears this notice, so
+        // that button is on its way out — and nothing took the deleted row's
+        // place, so the last-resort landing spot is the only one left.
+        focusAfterUnmount.current = { rowKey: null };
       }
       setEjectNotice((prev) => {
         // The write landed on words the row no longer says. Neither copy can be
@@ -650,6 +690,16 @@ export function BreakdownChat({
     // The notice carries the row it was about, so a retry re-targets that row
     // however the list has been rearranged since — or, if the user deleted it,
     // lands in the inbox and quietly changes nothing here.
+    //
+    // Deliberately NOT gated on the row still existing (!304 review asked). Once
+    // the row is deleted the notice holds the ONLY copy of those words — the
+    // failure branch keeps the row, so a user who removes it anyway has the
+    // notice and nothing else — and a Retry that refused for lack of a row would
+    // destroy them, with no other control on offer to save them. That is #212's
+    // harm exactly, wearing the other hat. What the ungated version can produce
+    // is an inbox item for a step no longer in the plan, from two deliberate
+    // presses asking for precisely that; `settledEject`'s `gone` then leaves the
+    // list alone and clears the notice in silence.
     void ejectStep(ejectNotice.key, ejectNotice.text, { fromRetry: true });
   };
 
@@ -1006,10 +1056,12 @@ export function BreakdownChat({
           through would overstate it. The in-flight line rides
           `aria-describedby` off the pressed button in both.
 
-          Focus is NOT moved here. The user is still in the editor with every
-          row where they left it, so taking focus would interrupt them
-          mid-sentence (WCAG 3.2.2). The notice announces without stealing.
-          Focus IS moved when a row unmounts under it — see `focusAfterEject`.
+          Focus is NOT moved when this appears. The user is still in the editor
+          with every row where they left it, so taking focus would interrupt
+          them mid-sentence (WCAG 3.2.2). The notice announces without
+          stealing. It IS moved when something the user is standing on unmounts
+          — a row leaving the list, or one of this notice's own controls taking
+          the notice with it (WCAG 2.4.3). See `focusAfterUnmount`.
 
           Colour: the outcome is carried by the icon and the words, never by the
           hue alone (WCAG 1.4.1). `text-destructive` / `border-destructive/40` /
@@ -1058,10 +1110,21 @@ export function BreakdownChat({
               // this notice has no way to end, because the thing it reports is
               // already over; the three failures all resolve themselves through
               // the action they offer.
+              //
+              // …which makes it the one control here whose whole job is to
+              // destroy itself, so `aria-disabled` has nothing to say and the
+              // hand-off does it all (!304 review). See `focusAfterUnmount`.
               <button
                 type="button"
                 aria-describedby={ejectErrorId}
-                onClick={() => setEjectNotice(null)}
+                onClick={(e) => {
+                  // `currentTarget`, read synchronously: this is the button, and
+                  // the question is only whether the user is standing on it.
+                  if (e.currentTarget === document.activeElement) {
+                    focusAfterUnmount.current = { rowKey: ejectNotice.key };
+                  }
+                  setEjectNotice(null);
+                }}
                 className="bg-primary text-primary-foreground inline-flex min-h-[44px] items-center gap-1.5 rounded-md px-4 text-sm font-medium"
               >
                 {t("breakdown.eject.dismiss", voice)}
