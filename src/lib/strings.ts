@@ -1273,6 +1273,54 @@ export const STRINGS = {
   "shopping.itemOne": { plain: "item", playful: "item" },
   "shopping.itemMany": { plain: "items", playful: "items" },
   "shopping.stillToBuy": { plain: "still to buy", playful: "still to buy" },
+  // #199 — the inbox summary line, composed as
+  // `<count> <shopping.itemOne|itemMany> <shopping.summaryOn>`. Composed rather
+  // than one templated string because this table carries no interpolation, and
+  // reusing the counted noun is what stops the inbox and the /shopping header
+  // disagreeing about what one item is called.
+  "shopping.summaryOn": {
+    plain: "on your shopping list",
+    // The emoji sits before the NOUN, not at the head of the fragment: the label is
+    // composed as `<count> <item|items> <this>`, so a leading glyph would read
+    // "3 items 🛒 on your shopping list" — an emoji dropped into the middle of a
+    // sentence rather than decorating the thing it depicts.
+    playful: "on your 🛒 shopping list",
+  },
+  "shopping.summaryDismiss": {
+    plain: "Not now",
+    playful: "Not now",
+  },
+  // "the list grows", not "you add something" (Duo review, !295). Adding is one
+  // of the THREE writes `syncShoppingSummary` resurfaces a dismissed summary on —
+  // the others are un-ticking an item and pulling one back up from saved-for-later
+  // — and this hint is the only place the app explains what "Not now" does. Naming
+  // one trigger made the other two look like a bug: un-tick something, watch the
+  // line return, and the app has contradicted the last thing it told you about
+  // that control. "Grows" is the rule itself, in fewer words than listing them,
+  // and it is already how `shopping-summary-sync.ts` and `dismissShoppingSummary`
+  // both state it — the string was the one place that disagreed.
+  //
+  // Identical across voices, like `summaryDismiss` above: this is the sentence
+  // that keeps a temporary control from reading as a delete, and the one place
+  // where flavour would be paid for in comprehension.
+  "shopping.summaryDismissHint": {
+    plain: "Back when the list grows.",
+    playful: "Back when the list grows.",
+  },
+  // Duo review, !295 — a rejected `dismissShoppingSummary()` used to clear the
+  // pending flag and say nothing, so the user believed "Not now" had worked until
+  // the line turned up again. The sentence has to contradict that belief with the
+  // fact they can check for themselves — the line is still here — rather than the
+  // generic "something went wrong", which leaves them guessing which half failed.
+  //
+  // No emoji in the playful variant, and no joke: this is the copy that lands on
+  // somebody whose press just did not work, and flavour there is paid for by the
+  // one person least able to spare it. Only the contraction differs, which is the
+  // same plain/playful split `shopping.errorTooLong` uses.
+  "shopping.summaryDismissError": {
+    plain: "That did not go through — the line is still here. Try again.",
+    playful: "That didn't go through — the line's still here. Try again.",
+  },
   // Accessible names. Each one names the ITEM, because "Delete" repeated down a
   // list of twelve rows is unusable in a screen reader's element list.
   "shopping.tickOff": { plain: "Tick off", playful: "Tick off" },

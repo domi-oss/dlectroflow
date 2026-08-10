@@ -24,6 +24,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SparkSource } from "@/lib/constants";
 
+/** The columns `getTodaySpark` writes, shared by the two write mocks below. */
+type SparkRow = {
+  quote: string;
+  source: string;
+  date: string;
+  workspaceId: string;
+};
+
 // ── vi.hoisted: create shared mock objects before vi.mock hoisting ──────────
 const { generateSpy, prismaMock, currentWorkspaceIdMock } = vi.hoisted(() => {
   const generateSpy = vi.fn(() => {
@@ -34,6 +42,11 @@ const { generateSpy, prismaMock, currentWorkspaceIdMock } = vi.hoisted(() => {
   const prismaMock = {
     dailySpark: {
       findUnique: vi.fn(),
+      // #223 — `getTodaySpark` writes through `createManyAndReturn` +
+      // `skipDuplicates` now. `refreshTodaySpark` still upserts, legitimately:
+      // its update payload is non-empty, so Prisma compiles it to a real
+      // `INSERT … ON CONFLICT DO UPDATE`.
+      createManyAndReturn: vi.fn(),
       upsert: vi.fn(),
     },
     dayRollup: {
@@ -107,17 +120,13 @@ describe("spark.ts › getTodaySpark", () => {
     vi.clearAllMocks();
     // No cached spark in DB → quoteFor() is exercised on every call.
     prismaMock.dailySpark.findUnique.mockResolvedValue(null);
+    // The winning caller: `ON CONFLICT DO NOTHING` inserted, so the row it wrote
+    // comes back (#223).
+    prismaMock.dailySpark.createManyAndReturn.mockImplementation(
+      ({ data }: { data: SparkRow }) => Promise.resolve([data]),
+    );
     prismaMock.dailySpark.upsert.mockImplementation(
-      ({
-        create,
-      }: {
-        create: {
-          quote: string;
-          source: string;
-          date: string;
-          workspaceId: string;
-        };
-      }) => Promise.resolve(create),
+      ({ create }: { create: SparkRow }) => Promise.resolve(create),
     );
     // Reset spy to throwing behaviour (guards against false-positive owner tests)
     generateSpy.mockImplementation(() => {
