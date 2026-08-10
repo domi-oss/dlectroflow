@@ -41,6 +41,19 @@ import {
 const REVIEWED_UNSCOPED: Record<string, string> = {};
 
 // Operations whose own arguments must carry workspaceId.
+//
+// The two `…AndReturn` variants are here for parity with the write list in
+// `src/lib/revalidation-hygiene.ts`, which has always named them: they are bulk
+// writes that additionally hand their rows back, so an unscoped one both writes
+// and READS across workspaces, which is strictly worse than the plain twin
+// beside it. `src/app/actions/braindump.ts` (#196 round 12) is the first caller
+// of either in this codebase, and it should not have been possible for it to be
+// the first to find that out. Two guards reading the same source and disagreeing
+// about what counts as a write is its own defect — the note on `WRITE_METHODS`
+// in that file makes the same argument in the other direction.
+//
+// Anchored on the `(` in the scan's regex, so `updateMany` cannot shadow
+// `updateManyAndReturn` in the alternation.
 const STRICT_OPS = [
   "findMany",
   "findFirst",
@@ -51,7 +64,9 @@ const STRICT_OPS = [
   "groupBy",
   "create",
   "createMany",
+  "createManyAndReturn",
   "updateMany",
+  "updateManyAndReturn",
   "deleteMany",
 ] as const;
 
