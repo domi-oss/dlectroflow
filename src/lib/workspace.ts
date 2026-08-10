@@ -325,8 +325,8 @@ function reportUnexpectedClearFailure(err: unknown): void {
  * literals, so nothing in it can throw a second time.
  *
  * It is deliberately almost empty. Reaching here means the thrown value refused
- * to be read at all — a `message` getter that throws, or a null-prototype object
- * that has no `toString` — so there is nothing true left to say beyond the tag.
+ * to be read at all — a `message` getter that throws, or an `Object.keys` that
+ * throws from a proxy — so there is nothing true left to say beyond the tag.
  * `session_clear_failed` is the same tag as the informative line rather than a
  * variant of it, because the grep that matters is "did signing anybody out ever
  * fail", and a second tag would let one of the two answer it alone. `message`
@@ -352,75 +352,156 @@ function emitUnreadableClearFailure(): void {
 }
 
 /**
- * Render a thrown `unknown` as one line of log text, keeping whatever it
- * carried (!305 review).
+ * The only keys whose VALUE this module will print off a thrown object.
  *
- * `String(err)` was the whole of this and rendered every plain object as
- * `[object Object]` — a `{ code, syscall, path }` reduced to the word "object",
- * in the line whose only job is to describe an unanticipated failure. The two
- * inputs it did serve are kept on their own branches:
+ * Closed by construction: a key absent from this list has its value replaced,
+ * so the list decides what CAN be logged rather than what happens to be caught.
+ * That is the difference from a denylist of suspicious names, which was the
+ * other way to answer !305's review and is only ever as good as the last name
+ * somebody thought of — `cookie` and `session` are easy, `jar`, `principal`,
+ * `set-cookie` and `raw` are the ones that ship.
  *
- *  - **`Error`** → `message`, unchanged and unquoted, which is what the sibling
- *    lines in `google.ts` and `observability.ts` print.
+ * These four are system-error vocabulary with no second meaning: Node stamps
+ * them on `ErrnoException`, and no user, session or request record is spelled
+ * this way. `path` is deliberately absent (a filesystem path is an operator's
+ * layout, and the syscall alone says as much as the line needs).
+ *
+ * **`name` and `status` are deliberately absent too**, though both read as
+ * error vocabulary and both were suggested. `name` is equally a person's name,
+ * and `status` is the exact field #220 is about — an allowlist that admits
+ * either would print a `User` row's contents the first time one is thrown,
+ * which is the failure this constant exists to make impossible. What `name` was
+ * wanted for is covered without the ambiguity by the constructor name, which is
+ * source-defined and cannot be user data.
+ */
+const LOGGABLE_ERROR_FIELDS: readonly string[] = [
+  "code",
+  "errno",
+  "syscall",
+  "statusCode",
+];
+
+/** Stands in for a value that was not printed, whatever the reason. */
+const REDACTED = "[redacted]";
+
+/**
+ * Render a thrown `unknown` as one line of log text: its shape in full, its
+ * values only where a value cannot be anybody's data (!305 review).
+ *
+ * Two rounds shaped this. `String(err)` was the whole of it first, and rendered
+ * every plain object as `[object Object]` — a `{ code, syscall, path }` reduced
+ * to the word "object", in the line whose only job is to describe an
+ * unanticipated failure. Replacing it with a whole-object `JSON.stringify`
+ * fixed that and bought a data-exposure path in the same stroke: this runs
+ * while refusing a frozen account, so the value in hand is one thrown from
+ * inside the cookie machinery, and the fields such an object reaches — a
+ * request, a jar, a session payload, a user row — went to a log retained for
+ * 30 days. A diagnostic must not be the thing that spills the session it is
+ * describing.
+ *
+ * So the two questions are separated. **Key names are always printed; values
+ * almost never are.** The shape is what makes an unanticipated failure
+ * actionable — an operator reading `{ code, syscall, socket }` knows what threw
+ * and where to look — and it is chosen by whoever wrote the throw, not by a
+ * request. The values are where anything sensitive actually lives, and only
+ * {@link LOGGABLE_ERROR_FIELDS} survives. That keeps what a bare allowlist
+ * would have thrown away: an object of entirely unknown shape, the case this
+ * line exists for, still describes itself instead of arriving as `{}`.
+ *
+ * The other two inputs keep their own branches, unchanged:
+ *
+ *  - **`Error`** → `message`, unquoted, which is what the sibling lines in
+ *    `google.ts` and `observability.ts` print. Not narrowed, because it is the
+ *    repo-wide convention and because a message is a sentence somebody wrote,
+ *    not a field something populated. An `Error`'s own extra properties are not
+ *    read at all, so nothing rides along with it.
  *  - **primitives** (`throw "boom"`, a number, `null`, `undefined`, a symbol) →
  *    `String`, because `JSON.stringify` would wrap a thrown string in a second
  *    pair of quotes inside a field that is already JSON-encoded.
- *
- * Only objects reach the serialiser, and only they ever produced the complaint.
  *
  * Not size-capped, deliberately. The value is whatever `jar.delete()` threw
  * inside Next's cookie adapter — framework internals, not anything a request
  * body reaches — so a cap would be an unexplainable constant guarding a case
  * that cannot arrive. Revisit if this helper is ever reused somewhere the
  * thrown value IS attacker-shaped.
- *
- * The last expression can still throw (`String()` on a null-prototype object),
- * and that is intentional rather than overlooked: catching it here would have to
- * invent a value, whereas letting it reach the caller's catch spends
- * {@link emitUnreadableClearFailure}, which is exactly what that line is for. So
- * the tag survives every input; the detail degrades in one step.
  */
 function describeThrown(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err !== "object" || err === null) return String(err);
-  return serialiseWithoutCycles(err) ?? String(err);
+  return describeObjectSafely(err);
 }
 
 /**
- * `JSON.stringify`, minus the two ways it takes a diagnostic line down.
+ * One flat line naming every own key of a thrown object, carrying only the
+ * values {@link LOGGABLE_ERROR_FIELDS} permits.
  *
- * A cycle is the common one and is not a corner: an error escaping a framework's
- * internals routinely holds a reference to a request, a socket or a parent
- * frame, any of which points back. Plain `JSON.stringify` throws on it, so the
- * naive fix for `[object Object]` would have replaced a useless line with no
- * line — and, once {@link emitUnreadableClearFailure} exists, with a line
- * reading "unreadable" about a value that was perfectly readable. Replacing the
- * back-reference keeps every sibling key that made the object worth logging.
+ * **Nothing here recurses, and that is the security property as well as the
+ * simplification.** A nested object is a key name and `[redacted]`, never a
+ * subtree, so there is no depth at which an unlisted field can smuggle a value
+ * up — a `req.headers.cookie` cannot be reached because `req` is never opened.
  *
- * The `catch` covers the rest, which no replacer can help with: a `BigInt`
- * value, a getter or a `toJSON` that throws. `undefined` is returned rather than
- * a placeholder so the caller falls through to `String(err)` and the old
- * behaviour remains the floor rather than the ceiling.
+ * It also retires the cycle guard the previous round added, without giving up
+ * what that guard was protecting. A back-reference to a request or a socket
+ * used to make `JSON.stringify` throw and cost the whole line; here it is one
+ * unlisted key like any other, so a cycle cannot arise rather than being caught
+ * — which is why `emitUnreadableClearFailure` is still not reachable from a
+ * circular input, only now by construction.
  *
- * Known and accepted imprecision: `seen` is never unwound, so the SAME object
- * appearing twice in sibling positions is labelled `[circular]` on its second
- * appearance even though it is a repeat rather than a cycle. Tracking the
- * ancestor path instead would fix it and costs an allocation per node; for a
- * line that only ever prints when something already went wrong, a repeat
- * rendered as `[circular]` loses nothing an operator was going to use.
+ * `Object.keys` reads descriptors and does not invoke getters, so building the
+ * key list cannot run foreign code; only an allowlisted read can, and
+ * {@link loggableValue} contains that per key rather than letting one hostile
+ * getter cost the line. What `Object.keys` CAN throw on is a proxy, which is
+ * left to the caller's catch: that is a value refusing to be read at all, which
+ * is precisely the floor {@link emitUnreadableClearFailure} was written for.
+ *
+ * The result is a flat record of primitives, so the final `JSON.stringify`
+ * has nothing left to throw on.
  */
-function serialiseWithoutCycles(value: object): string | undefined {
-  const seen = new WeakSet<object>();
+function describeObjectSafely(value: object): string {
+  const shape: Record<string, string | number | boolean> = {};
+  for (const key of Object.keys(value)) {
+    shape[key] = loggableValue(value, key);
+  }
+  return `${constructorNameOf(value)} ${JSON.stringify(shape)}`;
+}
+
+/** The value of one key, if it is allowlisted AND a primitive worth printing. */
+function loggableValue(value: object, key: string): string | number | boolean {
+  if (!LOGGABLE_ERROR_FIELDS.includes(key)) return REDACTED;
+  let read: unknown;
   try {
-    return JSON.stringify(value, (_key, nested: unknown) => {
-      if (typeof nested === "object" && nested !== null) {
-        if (seen.has(nested)) return "[circular]";
-        seen.add(nested);
-      }
-      return nested;
-    });
+    read = (value as Record<string, unknown>)[key];
   } catch {
-    return undefined;
+    // An allowlisted getter that throws. Distinct from `[redacted]`, which
+    // means "not printed", and from the `"unreadable"` line, which means the
+    // whole value defeated us — here one field did.
+    return "[threw]";
+  }
+  // Deliberately not `!== "object"`: that would admit a `bigint` or a `symbol`
+  // and hand `JSON.stringify` back the throw this function exists to avoid.
+  return typeof read === "string" ||
+    typeof read === "number" ||
+    typeof read === "boolean"
+    ? read
+    : REDACTED;
+}
+
+/**
+ * The class a thrown object was made from, which is source-defined and so the
+ * one piece of identifying text here that cannot be user data.
+ *
+ * Weaker in production than it looks, for the reason {@link SEALED_JAR_MESSAGE}
+ * documents: the bundler minifies class declarations, so Next's own errors
+ * arrive as a single letter. It still separates a plain `Object` — the shape a
+ * hand-rolled `throw { code }` takes — from something a library constructed,
+ * and it costs one guarded property read.
+ */
+function constructorNameOf(value: object): string {
+  try {
+    const name: unknown = value.constructor?.name;
+    return typeof name === "string" && name.length > 0 ? name : "object";
+  } catch {
+    return "object";
   }
 }
 

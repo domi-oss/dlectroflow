@@ -396,6 +396,43 @@ describe("currentWorkspaceId", () => {
       expect(refusal).toBeInstanceOf(RevokedAccountError);
     });
 
+    it("prints the diagnostic fields of a thrown object and no other VALUES", async () => {
+      // The cost of the line above, found by !305's review: keeping "whatever
+      // it carried" kept ALL of it, into a log this repo retains for 30 days,
+      // on the one path that is holding a frozen account's session. A thrown
+      // value from a cookie adapter is exactly the kind of object that reaches
+      // a request, a jar or a user row through one of its fields.
+      //
+      // So the shape is still reported — the key names are the diagnostic, and
+      // dropping them would leave the line unable to describe the unanticipated
+      // failure it exists for — but only an allowlisted field's value is
+      // printed. `name` and `status` are deliberately NOT allowlisted despite
+      // being error vocabulary: they are equally a person's name and #220's own
+      // `User.status`, and an allowlist that admits either is not a boundary.
+      const thrown = {
+        code: "ERR_UNKNOWN",
+        name: "SENTINEL-person-name",
+        status: "SENTINEL-account-status",
+        cookie: "owner=SENTINEL-signed-token",
+        session: { userId: "SENTINEL-user-id" },
+      };
+      const { refusal, lines } = await frozenWithFailingDelete(thrown);
+      expect(lines).toHaveLength(1);
+      const parsed = JSON.parse(lines[0]);
+      expect(parsed.tag).toBe("session_clear_failed");
+      // The diagnostic survives — this is still the line that has to explain an
+      // unanticipated failure, and a redaction that says nothing is a deletion.
+      expect(parsed.message).toContain("ERR_UNKNOWN");
+      for (const key of ["name", "status", "cookie", "session"]) {
+        expect(parsed.message).toContain(key);
+      }
+      // And not one value behind those keys reaches the log. Asserted on the
+      // whole emitted line, not on `message`, because the leak this prevents
+      // does not care which field it arrives in.
+      expect(lines[0]).not.toContain("SENTINEL");
+      expect(refusal).toBeInstanceOf(RevokedAccountError);
+    });
+
     it("never lets the logging itself take the request down", async () => {
       // The invariant every other structured line in this repo states: an
       // observability failure must not become the response. Here it would be
