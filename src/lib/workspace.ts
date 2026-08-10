@@ -442,6 +442,16 @@ export async function hasSession(): Promise<boolean> {
  * account in the header therefore costs no extra round trip, and — more to the
  * point — the handle shown can never belong to a different session than the role
  * being enforced, which a second lookup could allow.
+ *
+ * **This is a session→workspace resolver in its own right, and rule 1 of
+ * `scoping.harness.test.ts` now says so (!305 review).** It calls
+ * {@link verifySession} itself and returns `workspaceId: p.wsId`, reaching
+ * neither {@link resolveWorkspace} nor {@link resolveWorkspaceId} — which is
+ * how it stayed invisible to a rule that looked for those two names. The status
+ * check above was therefore correct by the care of whoever wrote it rather than
+ * by anything enforced, and deleting it would have failed nothing. Rule 1 asks
+ * about the property now, so this function is in its pinned set and the check is
+ * load-bearing.
  */
 export async function currentUser(): Promise<CurrentUser | null> {
   const jar = await cookies();
