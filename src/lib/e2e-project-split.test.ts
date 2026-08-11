@@ -288,6 +288,29 @@ describe("filesReaching — synthetic", () => {
     ).toEqual([]);
   });
 
+  it("reads and parses each file exactly once, across every traversal", () => {
+    // Raised by review on !323. The outer filter starts a fresh DFS per file, so
+    // a shared module used to be re-read and re-regexed once per importing spec.
+    // Asserting the READ COUNT rather than a duration keeps this a real
+    // assertion instead of a benchmark that passes on a fast machine.
+    const sources = new Map([
+      ["/repo/e2e/helpers.ts", "export const x = 1;"],
+      ...(Array.from({ length: 5 }, (_, i) => [
+        `/repo/e2e/smoke/s${i}.spec.ts`,
+        `import { x } from "../helpers";`,
+      ]) as [string, string][]),
+    ]);
+    const reads: string[] = [];
+    filesReaching(runsAxe, [...sources.keys()], (f) => {
+      reads.push(f);
+      return sources.get(f)!;
+    });
+    expect(reads).toHaveLength(sources.size);
+    expect(new Set(reads).size).toBe(sources.size);
+    // Without the cache this was 11: five specs each re-reading helpers.ts.
+    expect(reads.filter((f) => f.endsWith("helpers.ts"))).toHaveLength(1);
+  });
+
   it("ignores a specifier that resolves to no file in the tree", () => {
     const sources = new Map([
       ["/repo/e2e/a.spec.ts", `import "./deleted-yesterday";`],

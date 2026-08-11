@@ -261,6 +261,34 @@ export function filesReaching(
       known.has(candidate),
     );
 
+  /**
+   * Each file read and parsed ONCE, however many traversals cross it.
+   *
+   * Raised by review on !323: the outer filter starts a fresh DFS per file, so
+   * without this a module every spec imports — `e2e/helpers.ts` — was read off
+   * disk and regex-scanned once per importing spec.
+   *
+   * Deliberately caching the EDGES and the predicate's answer, not per-file
+   * REACHABILITY. Reachability is the tempting thing to memoise and the unsafe
+   * one: a traversal cut short by the cycle guard has not proven the file cannot
+   * reach the target, only that this walk stopped, so caching that `false` would
+   * make the result depend on which entry point happened to run first. Parsing
+   * is a pure function of the file's bytes and has no such hazard.
+   */
+  const parsed = new Map<string, { hit: boolean; imports: string[] }>();
+  const parse = (file: string) => {
+    let entry = parsed.get(file);
+    if (entry === undefined) {
+      const source = readSource(file);
+      entry = {
+        hit: isTarget(file, source),
+        imports: relativeImportTargets(file, source),
+      };
+      parsed.set(file, entry);
+    }
+    return entry;
+  };
+
   const reaches = (entry: string): boolean => {
     const seen = new Set<string>();
     const pending = [entry];
@@ -268,9 +296,9 @@ export function filesReaching(
       const file = pending.pop()!;
       if (seen.has(file)) continue;
       seen.add(file);
-      const source = readSource(file);
-      if (isTarget(file, source)) return true;
-      for (const base of relativeImportTargets(file, source)) {
+      const { hit, imports } = parse(file);
+      if (hit) return true;
+      for (const base of imports) {
         const dependency = resolve(base);
         if (dependency !== undefined) pending.push(dependency);
       }
