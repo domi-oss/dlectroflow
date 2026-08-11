@@ -186,6 +186,35 @@ fi
 # production is stuck, and including the replica count would re-fire on every
 # flap. Both are noise, and noise is what gets a channel muted.
 FINGERPRINT="drift=${drift_code} replicas=${replicas_code}"
+
+# ── The same verdict, in words, for the JOB LOG ──────────────────────────────
+# The pipeline notification says only that `alert_prod_state` failed, so the line
+# this script leaves in its log is the first sentence a human reads. On 2026-08-11
+# 11:08 that line was, in full:
+#
+#     alert-prod-state: posted a alert note to issue #45 (`drift=0 replicas=1`)
+#
+# `severity` is a four-value word that says a check fired without saying WHICH, and
+# the fingerprint is two raw exit codes the reader has to decode against two script
+# headers. The note has a headline that says it in words; the log line did not. So
+# each check contributes its own fragment, chosen from its OWN exit code and tested
+# for one value at a time — the same rule as the note's fragments below, because a
+# default arm catching "everything but 1" is what renders an unknown as a pass.
+case "$drift_code" in
+  1) drift_word="production is not on \`${DRIFT_REF}\`" ;;
+  2) drift_word="undetermined" ;;
+  3) drift_word="behind, but inside the grace" ;;
+  0) drift_word="in sync" ;;
+  *) drift_word="undefined exit ${drift_code}" ;;
+esac
+case "$replicas_code" in
+  1) replicas_word="short of desired" ;;
+  2) replicas_word="undetermined" ;;
+  3) replicas_word="short, but self-limiting so far" ;;
+  0) replicas_word="every desired replica available" ;;
+  *) replicas_word="undefined exit ${replicas_code}" ;;
+esac
+CONDITION="drift: ${drift_word}; replicas: ${replicas_word}"
 # The trailing sentence is per-severity because the note IS the product: on the
 # healthy path "the exit code keeps failing until this clears" is simply false,
 # and a line that is wrong on the good days is a line nobody reads on the bad
@@ -226,7 +255,16 @@ case "$severity" in
     HEADLINE="### ✅ production has recovered — on \`${DRIFT_REF}\`, fully replicated"
     ;;
   in_flight)
-    HEADLINE="### 🔄 a deploy is in flight — not an alert, and **not** a clean bill of health"
+    # `in_flight` used to mean one thing — a deploy still running — and now means
+    # two: that, or a replica shortfall too young to conclude from. Branching on
+    # WHICH child returned 3 rather than widening the sentence to cover both, because
+    # a headline vague enough to be true of either says nothing about this one, and
+    # the headline is the line that actually gets read.
+    if [ "$drift_code" = "3" ]; then
+      HEADLINE="### 🔄 a deploy is in flight — not an alert, and **not** a clean bill of health"
+    else
+      HEADLINE="### 🔄 production is short of replicas, but only just — not an alert yet, and **not** a clean bill of health"
+    fi
     ;;
   *)
     HEADLINE="### ⚠️ production's state is **undetermined** — an unknown, not an all-clear"
@@ -254,8 +292,10 @@ if [ -n "${ALERT_MENTION:-}" ]; then
     elif [ "$severity" = "in_flight" ]; then
       # "cleared" is the word this severity must never reach — it is the line
       # addressed to the on-call BY NAME, so it is the one sentence most likely
-      # to be read on its own and acted on (!293 review).
-      MENTION_LINE="${ALERT_MENTION} — a deploy is in flight; nothing to do yet, and not an all-clear."
+      # to be read on its own and acted on (!293 review). Neutral as to WHICH
+      # self-limiting state it is: the headline above already says, and a mention
+      # line that named the wrong one would be worse than one that names neither.
+      MENTION_LINE="${ALERT_MENTION} — nothing to do yet, and not an all-clear."
     else
       MENTION_LINE="${ALERT_MENTION} — production needs a look."
     fi
@@ -301,7 +341,7 @@ esac
 case "$replicas_code" in
   1) REPLICAS_STEP="**Production is short of replicas.** A wedged migration is the likeliest cause, and it is the one that compounds: it blocks every LATER migration, so each merge from now makes it worse — § 19 for that path." ;;
   2) REPLICAS_STEP="**The replica count could not be determined** — an unknown, and neither a fault nor an all-clear. The \`kubectl\` error is in this job's log; stdout withholds it deliberately." ;;
-  3) REPLICAS_STEP="**Fewer replicas than desired, but a rollout is progressing inside its own deadline**, so this is not concluded from either way. Kubernetes flips \`Progressing\` to False if it stops making progress, and the next run alerts on that." ;;
+  3) REPLICAS_STEP="**Fewer replicas than desired, but self-limiting so far**, so this is not concluded from either way — either a rollout progressing inside its own deadline, or a shortfall younger than one run of this schedule. The bullet in the evidence above says which. Kubernetes flips \`Progressing\` to False if a rollout stops making progress, and a shortfall that is still there next run has outlived the wait and alerts." ;;
   0) REPLICAS_STEP="Every replica **is** available, so nothing here is a shortfall in capacity." ;;
   *) REPLICAS_STEP="**The replica check exited \`${replicas_code}\`**, which is not one of its four defined outcomes. Treat it as an unknown and read this job's log; nothing about capacity was established." ;;
 esac
@@ -312,7 +352,7 @@ elif [ "$severity" = "in_flight" ]; then
   # Deliberately NOT "nothing to do": nothing was verified healthy, and the
   # difference between "no action needed" and "no action needed yet" is the
   # difference this severity exists to preserve.
-  NEXT_STEPS="**Nothing to do yet, and nothing here is an all-clear.** A deploy appears to be running, so the state below is expected to be temporary — it has not been confirmed good, only confirmed self-limiting. The next run alerts if it is still true.
+  NEXT_STEPS="**Nothing to do yet, and nothing here is an all-clear.** The state below is expected to be temporary — it has not been confirmed good, only confirmed self-limiting. The next run alerts if it is still true.
 
 ${DRIFT_STEP}
 
@@ -423,9 +463,9 @@ fi
 
 if [ "$last_fp" = "$FINGERPRINT" ]; then
   if [ "$severity" = "healthy" ] || [ "$severity" = "in_flight" ]; then
-    echo "alert-prod-state: state unchanged since the last check (\`${FINGERPRINT}\`, ${severity}) — nothing to post."
+    echo "alert-prod-state: state unchanged since the last check (${severity} — ${CONDITION}) — nothing to post."
   else
-    echo "alert-prod-state: state unchanged since the last note (\`${FINGERPRINT}\`) — not repeating it. This job still exits ${exit_code}, so the pipeline notification keeps firing."
+    echo "alert-prod-state: state unchanged since the last note (${severity} — ${CONDITION}) — not repeating it. This job still exits ${exit_code}, so the pipeline notification keeps firing."
   fi
   exit "$exit_code"
 fi
@@ -446,7 +486,12 @@ if { [ "$severity" = "healthy" ] || [ "$severity" = "in_flight" ]; } &&
   # how an alert channel trains its reader to ignore it. `in_flight` joins it for
   # the same reason — announcing an ordinary deploy to a channel that has said
   # nothing before is noise, and noise is what gets a channel muted.
-  echo "alert-prod-state: ${severity}, and this job has said nothing before — staying quiet."
+  # The condition is named here too, and this is now the load-bearing case rather
+  # than a nicety: with a replica shortfall graced for a cycle, a run that posts
+  # nothing and exits 0 is the ONLY record that a shortfall was seen at all. A log
+  # line reading just "in_flight" would make a held shortfall indistinguishable
+  # from a run where nothing happened.
+  echo "alert-prod-state: ${severity} — ${CONDITION} — and this job has said nothing before, so it is staying quiet."
   exit 0
 fi
 
@@ -474,5 +519,9 @@ case "$post_code" in
     ;;
 esac
 
-echo "alert-prod-state: posted a ${severity} note to issue #${ISSUE_IID} (\`${FINGERPRINT}\`)"
+# The severity leads, the condition names itself, and the article is gone rather
+# than computed: "a alert" was the bug, and "an alert"/"a healthy" would need a
+# vowel test to stay correct across all four severities. Restructuring costs
+# nothing and cannot regress.
+echo "alert-prod-state: ${severity} — ${CONDITION} — posted a note to issue #${ISSUE_IID} (\`${FINGERPRINT}\`)"
 exit "$exit_code"
