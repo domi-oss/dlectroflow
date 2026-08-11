@@ -94,3 +94,83 @@
     [semgrep.ruleset.override]
       severity = "Info"
       description = "Generic SSRF taint sink. Demoted to Info in #83 for the same reason as the gitlab-advanced-sast rule above — body taint, not target taint. Target constancy is enforced by src/lib/fetch-host-hygiene.test.ts."
+
+  # ── #234: dynamic-RegExp detection is demoted to Info ───────────────────────
+  #
+  # `eslint.detect-non-literal-regexp` is the largest single source of SAST
+  # findings in this repo: **58 records across the project's vulnerability
+  # history, 57 of them already dismissed** (2026-08-11). On main's pipeline 2700
+  # (`da32bf9` -- the newest FINISHED baseline, which is what the scan-result
+  # policy diffs against; `d768832` was still running) it is 18 findings across ten
+  # files, and with its sibling
+  # `nodejs_scan.javascript-dos-rule-regex_dos` (8) the regex family is 26 of 42
+  # — 62% of everything the scanners say about this codebase.
+  #
+  # The cumulative figure leads because the per-pipeline one rots: it read 15 of
+  # 37 across nine files on `57a272a` a day earlier.
+  #
+  # Not one has been a true positive, structurally rather than by luck. CWE-185
+  # needs an attacker to influence the pattern. Every construction here
+  # interpolates a file-level literal constant, a value already through
+  # `escapeForRegExp`, a Postgres identifier read from this repo's own migration
+  # SQL, or a test fixture.
+  #
+  # ── What this demotion does and does not buy ────────────────────────────────
+  #
+  # It does NOT unblock merge requests, and an earlier draft of this comment
+  # said it did. The scan-result policy gates on
+  # `severity_levels: [critical, high]` with
+  # `vulnerability_states: [new_needs_triage]`; this rule is Medium and there
+  # are zero Critical or High findings anywhere on main. The MR cited at the
+  # time as blocked read `approvals_required: 0, approved: true` throughout.
+  #
+  # What it buys is the end of a recurring TRIAGE cost, which is real and large.
+  # Semgrep fingerprints a finding by file and line, so a dismissal attaches to
+  # a position rather than to code: any edit above one resurfaces an
+  # already-triaged finding as untriaged, and a human has to read it and dismiss
+  # it with written evidence again. 58 historical records for this rule, 57
+  # dismissed, on the project vulnerability report as of 2026-08-11; the three
+  # constructs in the scoping harness account for 11 alone. The cumulative count
+  # is quoted rather than a per-pipeline one because the snapshot rots — it read
+  # 15 of 37 on `57a272a` and 18 of 40 three merges later. Paginate if you
+  # re-measure: the SAST history is 141 records and one page of 100 undercounts
+  # this rule by three.
+  #
+  # ── Why Info and not `disable = true` ───────────────────────────────────────
+  #
+  # Same reasoning as #83 above: disabling marks every past finding "No longer
+  # detected", retiring the dismissal history and the audit trail with it. An
+  # override keeps them visible and keeps the history. It is reversible.
+  #
+  # ── The compensating control ────────────────────────────────────────────────
+  #
+  # `src/lib/regexp-source-hygiene.ts` + `.test.ts` assert the property this
+  # rule cannot: that every `new RegExp` in `src/` and `e2e/` builds its pattern
+  # from a file-level literal constant, an `escapeForRegExp` call, or a test
+  # fixture — and that anything else is listed in `REVIEWED_DYNAMIC_PATTERNS`
+  # with a written argument and an expected occurrence count. It **fails the
+  # unit-test job**, which is a hard gate and strictly stronger than what this
+  # rule was doing, and its keys carry no line number so it cannot
+  # re-fingerprint.
+  #
+  # That guard also asserts it can SEE all ten files this rule reports on, and
+  # at least as many sites per file. Its first version silently missed four of
+  # them — a regex literal containing a quote desynchronised its tokeniser —
+  # and reported them clean while Semgrep kept firing. A compensating control
+  # that looks at nothing is worse than no control, because the demotion stays
+  # either way.
+  #
+  # ── What is deliberately NOT demoted ────────────────────────────────────────
+  #
+  # `nodejs_scan.javascript-dos-rule-regex_dos` (7 findings) stays. It is about
+  # catastrophic backtracking and fires on regex LITERALS — three of its four
+  # files contain no `new RegExp` at all. The guard says nothing about
+  # backtracking, so demoting that rule on its strength would be claiming a
+  # control that does not exist.
+  [[semgrep.ruleset]]
+    [semgrep.ruleset.identifier]
+      type = "semgrep_id"
+      value = "eslint.detect-non-literal-regexp"
+    [semgrep.ruleset.override]
+      severity = "Info"
+      description = "Dynamically-constructed RegExp. Demoted to Info in #234: the largest single source of SAST findings in this repo -- 58 records in the project's history, 57 of them already dismissed -- and zero true positives, because every pattern here is built from a module constant, an escapeForRegExp call, a Postgres identifier out of this repo's own migrations, or a test fixture. This does not change any merge gate -- the scan-result policy gates on Critical/High only and this rule is Medium; what it ends is a recurring triage cost, because Semgrep re-fingerprints on line position and a dismissal has to be re-argued every time code moves. Pattern provenance is enforced instead by src/lib/regexp-source-hygiene.test.ts, which FAILS THE BUILD -- strictly stronger than this rule was -- and which is keyed without line numbers so it cannot re-fingerprint. Re-raise this to Medium if that guard is removed or its REVIEWED_DYNAMIC_PATTERNS map grows a request-derived value."

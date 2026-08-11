@@ -71,6 +71,38 @@ operators upgrading a self-hosted instance don't get surprised.
   is still caught an hour in; a routine pod replacement, which is a minute of `1/2`
   with the rollout long finished, never alerts at all. **Drift is never waited on** —
   production running the wrong commit is not transient and alerts on first sight.
+- **A build-time guard on where regular expressions get their patterns
+  (#234).** Nothing changes for anyone using dlectroflow; this is about the
+  project's own security scanning, and self-hosters inherit the same guard.
+
+  One scanner rule — "this regular expression was built at run time rather than
+  written out" — accounts for **more than a third of everything the scanners
+  report** about this codebase, 58 records across the project's history with 57
+  of them already reviewed and dismissed, and none was ever a real problem:
+  every pattern here is assembled from fixed constants, from text already
+  escaped, from identifiers in the project's own database migrations, or from a
+  test's own fixtures. There is no route from anything a user types to one of
+  them.
+
+  The cost was never that these blocked anything — they did not. It was that the
+  scanner remembers a finding by its **position in the file**, so adding a
+  comment above one brought an already-reviewed finding back as brand new, and
+  somebody had to read it and write down why it was fine all over again. Three
+  came back on a change to the page footer. The same three in the tenancy test
+  harness had been reviewed and dismissed eleven times since July.
+
+  So the rule is turned down to informational, and a check that lives in this
+  repository takes over the part that matters: every `new RegExp` must build its
+  pattern from something no request can influence, and anything else has to be
+  listed with a written argument and a count of how many places it covers.
+  Unlike the scanner, it **fails the build** — which is stricter than what the
+  rule was doing — and it identifies a site by what the code says rather than by
+  which line it is on, so moving code around no longer resurrects settled
+  questions.
+
+  The neighbouring rule about patterns that can be made to run slowly is
+  **deliberately left alone**: it measures something the new check does not, so
+  turning it down would be claiming a safeguard that does not exist.
 
 - **The inbox tells you the shopping list is there (#199).** When something is on
   the list, one line at the top of the inbox reads *"3 items on your shopping
