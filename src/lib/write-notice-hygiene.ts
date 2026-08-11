@@ -89,7 +89,14 @@
  *     inside an alert in this file is invisible to both. All three notice
  *     surfaces are plain markup, which is why that is affordable here — an
  *     extracted `<WriteNotice />` would need this scope widened along with it.
- *  4. **Focus behaviour.** Which control receives the hand-off when the notice
+ *  4. **A role or `aria-live` arriving through a JSX spread.** `{...props}` is
+ *     read as an attribute nobody can evaluate statically, so `<p {...live}>` is
+ *     neither reported by rule D nor counted by rule E. Stated because a guard
+ *     that advertises a closed set and quietly has a bypass is the failure mode
+ *     this whole module exists to remove — and pinned by a spec, so the day it
+ *     stops being true somebody is told. Nothing in the tree does it today: every
+ *     live region on all three surfaces spells its attributes out literally.
+ *  5. **Focus behaviour.** Which control receives the hand-off when the notice
  *     withdraws its button is per-surface and covered by each surface's specs.
  */
 

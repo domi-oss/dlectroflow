@@ -343,6 +343,22 @@ describe("nestedLiveRegions (rule D's parser)", () => {
       ),
     ).toHaveLength(1);
   });
+
+  /**
+   * The documented blind spot, pinned rather than left to be discovered — a guard
+   * that advertises a closed set and quietly has a bypass is the failure mode this
+   * module exists to remove. `{...live}` cannot be evaluated statically, so the
+   * nesting below is real and invisible. Nothing in the tree does this today; the
+   * day one of the three surfaces starts to, this spec fails and says why.
+   */
+  it("cannot see a role that arrives through a JSX spread — stated, not silent", () => {
+    expect(
+      nestedLiveRegions(
+        `const v = <div role="alert"><p {...live}>Saving…</p></div>;`,
+        "a.tsx",
+      ),
+    ).toEqual([]);
+  });
 });
 
 describe("politeAnnouncersOf (rule E)", () => {
