@@ -295,7 +295,10 @@ describe("ensureFocusStep — losing the race for the row (#225)", () => {
     // order — the step a single-step task has and the first of a breakdown.
     expect(prismaMock.step.findFirst).toHaveBeenCalledWith({
       where: { taskId: "t1", task: { workspaceId: "owner" } },
-      orderBy: { order: "asc" },
+      // The SAME rule the non-empty branch applies in JS — first open step, else
+      // the lowest-ordered one. Asserted as the whole `orderBy` so the two
+      // branches cannot drift into answering the question differently.
+      orderBy: [{ done: "asc" }, { order: "asc" }],
     });
     // NOT revalidated: this call wrote nothing, and the winner revalidated for
     // its own write. Firing here would be a cache invalidation with no cause.

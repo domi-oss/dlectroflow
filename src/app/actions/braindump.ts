@@ -584,9 +584,15 @@ export async function ensureFocusStep(id: string): Promise<string | null> {
       // `wrote` stays false: the revalidation below fires only when this call
       // actually wrote, which is what it did before #225 moved the body into a
       // transaction, and the winner did its own.
+      // `done` first, then `order`, which is exactly what
+      // `steps.find((s) => !s.done) ?? steps[0]` below computes — the first open
+      // step, or the lowest-ordered one when they are all closed. Written as the
+      // same rule rather than "the lowest order" because the two branches answer
+      // the same question and a reader should not have to check whether they
+      // agree.
       const landed = await tx.step.findFirst({
         where: { taskId, task: { workspaceId } },
-        orderBy: { order: "asc" },
+        orderBy: [{ done: "asc" }, { order: "asc" }],
       });
       // Null only if the winner's step has since been deleted — an eject or a
       // re-plan between its commit and this read. There is nothing to focus, and

@@ -517,9 +517,13 @@ describe("the (taskId, order) unique index against the other step writers (#245)
     const errors = await prismaErrorsDuring(async () => {
       await confirmBreakdown(task.id, {
         parentEmoji: "🎨",
+        // `subtaskEmoji` is REQUIRED on `ProposedStep`, not optional. Omitting it
+        // still ran green under vitest and eslint and failed only `tsc` — which is
+        // what `next build` runs, so this would have been a red pipeline rather
+        // than a test failure.
         steps: [
-          { text: "new one", estMinutes: 10 },
-          { text: "new two", estMinutes: 20 },
+          { text: "new one", estMinutes: 10, subtaskEmoji: "🖌️" },
+          { text: "new two", estMinutes: 20, subtaskEmoji: "🧹" },
         ],
       });
     });
