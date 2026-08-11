@@ -146,6 +146,17 @@
 # Nothing here touches drift. Production running the wrong commit is never
 # transient and alerts on the first observation, in the other script.
 #
+# **Bounded under-alerting, deliberately accepted** — the same trade, and the same
+# wording, as the sibling's grace. A shortfall that FLAPS resets the transition each
+# time it recovers, so a Deployment oscillating short/recovered inside the hour
+# stays quiet while spending most of it at `1/2`. Two things bound it: a pod that
+# never becomes ready does not flap (a crashlooping pod holds `Available` False
+# continuously, which is #180's shape and alerts), and the only shape that does —
+# a readiness probe flapping — needs a recovery window every cycle, which is a
+# different fault with its own signals. Closing it needs cross-run state, which is
+# the thing this arm exists to avoid; the cost of that state is a second clock and
+# a `date` implementation this repo has been bitten by twice.
+#
 # ── Read-only, and careful with what the cluster says ───────────────────────
 # Every kubectl verb here is `get`. Nothing this script can do changes the
 # cluster. Its stdout is spliced into a note on an issue in a **PUBLIC** project,
