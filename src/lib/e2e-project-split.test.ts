@@ -136,7 +136,7 @@ describe("claimingProjects — synthetic", () => {
   });
 });
 
-// ── #247: reaching the a11y helpers from a retrying project ──────────────────
+// ── #247: reaching @axe-core/playwright from a retrying project ──────────────
 
 describe("relativeImportTargets — synthetic", () => {
   it("resolves a `..` hop the way the importing file's directory implies", () => {
@@ -865,12 +865,15 @@ describe("no a11y assertion runs with a retry to spend (#247)", () => {
     expect(found).toContain(abs("e2e", "a11y", "axe-core-flow.spec.ts"));
   });
 
-  it("runs every a11y-helper caller in a project that declares retries: 0", async () => {
+  it("runs every axe caller in a project that declares retries: 0", async () => {
     // #247. #127 gave the `a11y` PROJECT zero retries; it could not see an
     // assertion called from a spec in another project. `schedule-menu.spec.ts`
-    // and `people-admin.spec.ts` had four such calls between them, and the
-    // retry masked #222's document-title race at one of them until it failed on
-    // `main` instead and skipped a production deploy.
+    // and `people-admin.spec.ts` had FIVE such calls between them — two and
+    // three, the issue having named only one of schedule-menu's — and
+    // `member-delete-account.spec.ts` a sixth, in the `member` project, through
+    // an `AxeBuilder` it built itself. The retry masked #222's document-title
+    // race at one of them until it failed on `main` instead and skipped a
+    // production deploy.
     const { projects, raw } = await realProjects();
     const routing = routeFiles(e2eFiles(), projects, isSuiteSpec);
     const retriesByProject = new Map(raw.map((p) => [p.name, p.retries]));

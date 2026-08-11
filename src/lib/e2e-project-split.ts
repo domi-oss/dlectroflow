@@ -126,11 +126,20 @@ export function filesFor(routing: Routing, project: string): string[] {
 // Everything above answers "which project runs this FILE". #247 is that question
 // one level in, and the level where it was actually wrong: an accessibility
 // assertion is not a file, it is a CALL, and a call can be made from a spec the
-// strict project does not run. `e2e/smoke/schedule-menu.spec.ts` called
-// `scanA11y` — the helper the whole gate is built on — from `chromium`, where the
-// suite-wide `retries` applies. `e2e/smoke/people-admin.spec.ts` did the same
-// with `scanColorContrast`, three times. So #127 bought zero tolerance for the
-// files in `e2e/a11y/` and left four AA assertions running with a retry to spend.
+// strict project does not run. Measured on the tree #247 was filed against:
+//
+//   * `e2e/smoke/schedule-menu.spec.ts` — `scanA11y` AND `scanColorContrast`, so
+//     two, not the one the issue named. `chromium`.
+//   * `e2e/smoke/people-admin.spec.ts` — `scanColorContrast`, three times.
+//     `chromium`.
+//   * `e2e/smoke/member-delete-account.spec.ts` — a hand-rolled `AxeBuilder`
+//     that imports `@axe-core/playwright` directly and touches the helpers not at
+//     all. `member`, so the exposure was never limited to one project either.
+//
+// **Six call sites, three files, both retrying projects.** So #127 bought zero
+// tolerance for the files in `e2e/a11y/` and left all six running with a retry to
+// spend. (Six CALL SITES; the test count is higher, because the contrast blocks
+// are parameterised over both themes.)
 //
 // Not a theoretical hole. It masked #222's `document-title` race at the
 // schedule-menu call site, so the race never surfaced from `chromium`; it then
@@ -139,8 +148,14 @@ export function filesFor(routing: Routing, project: string): string[] {
 // green. A retried a11y assertion is not a noisier signal, it is a failure class
 // that stays invisible until it lands somewhere that gates.
 //
-// **The rule enforced here: a file that can reach the a11y helpers is run only by
-// projects that declare `retries: 0`.** Chosen over the alternative #247 also
+// **The rule enforced here: a file that can reach `@axe-core/playwright` — through
+// the a11y helpers or through a scan it builds itself — is run only by projects
+// that declare `retries: 0`.** Keyed on the PACKAGE deliberately, and saying so
+// here deliberately: the third file above escaped a helper-keyed rule, and "go
+// through the helpers" is a convention, not a mechanism. A reader who takes the
+// trigger to be `e2e/a11y/axe-helpers.ts` will write that sixth call site again.
+//
+// Chosen over the alternative #247 also
 // lists — leave the call where it is and give its spec `retries: 0` via
 // `test.describe.configure` — on two counts, both mechanical rather than
 // aesthetic:
@@ -426,7 +441,7 @@ export interface RetryingClaim {
   retries: number | undefined;
 }
 
-/** One file that can reach the a11y helpers from a project that retries. */
+/** One file that can reach `@axe-core/playwright` from a project that retries. */
 export interface RetryMaskedSpec {
   file: string;
   claims: RetryingClaim[];

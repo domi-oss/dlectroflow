@@ -223,9 +223,16 @@ const MEMBER_SPECS = /member-[\w-]+\.spec\.ts/;
  *
  * Over-tolerant is still wrong for an a11y assertion, though, and that was the
  * gap (#247): "keeps the retry" is fine for a smoke spec and is exactly what a
- * WCAG scan must not do. So a spec that calls the a11y helpers from outside this
- * pattern is no longer merely over-tolerant, it is a test failure —
+ * WCAG scan must not do. So a spec that reaches `@axe-core/playwright` — through
+ * the a11y helpers OR through an `AxeBuilder` it constructs itself — from outside
+ * this pattern is no longer merely over-tolerant, it is a test failure, and
  * `src/lib/e2e-project-split.test.ts` reports it.
+ *
+ * The trigger is the PACKAGE, not the helper module, and the distinction is the
+ * whole reason the guard works: `e2e/smoke/member-delete-account.spec.ts` ran a
+ * zero-tolerance scan without importing the helpers at all, so a helper-keyed rule
+ * called it clean. Read this as "importing the helpers is what trips the guard"
+ * and the next hand-rolled scan escapes exactly as that one did.
  */
 const A11Y_SPECS = /[\\/]e2e[\\/]a11y[-\\/].*\.spec\.ts$/;
 
