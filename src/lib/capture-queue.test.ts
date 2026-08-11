@@ -74,7 +74,7 @@ describe("capture queue — reading (#175)", () => {
   });
 
   it("recovers from valid JSON of the wrong shape", () => {
-    for (const junk of ['{"a":1}', '"a string"', "42", "null", '[1,2,3]']) {
+    for (const junk of ['{"a":1}', '"a string"', "42", "null", "[1,2,3]"]) {
       const store = memoryStore({ [CAPTURE_QUEUE_STORAGE_KEY]: junk });
       expect(readQueue(store)).toEqual([]);
     }
@@ -172,7 +172,9 @@ describe("capture queue — enqueue and the caps (#175)", () => {
   it("refuses a capture that would push the total over the byte bound, below the item cap", () => {
     const big = "y".repeat(Math.floor(CAPTURE_QUEUE_MAX_BYTES / 2));
     const store = memoryStore();
-    expect(enqueue(store, capture({ clientKey: "a", text: big })).ok).toBe(true);
+    expect(enqueue(store, capture({ clientKey: "a", text: big })).ok).toBe(
+      true,
+    );
     const result = enqueue(store, capture({ clientKey: "b", text: big }));
 
     expect(result.ok).toBe(false);
@@ -194,7 +196,10 @@ describe("capture queue — enqueue and the caps (#175)", () => {
   it("is idempotent on clientKey — re-enqueueing the same key does not duplicate", () => {
     const store = memoryStore();
     enqueue(store, capture({ clientKey: "same" }));
-    const result = enqueue(store, capture({ clientKey: "same", text: "again" }));
+    const result = enqueue(
+      store,
+      capture({ clientKey: "same", text: "again" }),
+    );
     expect(result.ok).toBe(true);
     expect(readQueue(store)).toHaveLength(1);
     // The FIRST wins: the words already promised to the user are the ones kept.

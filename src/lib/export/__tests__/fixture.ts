@@ -249,6 +249,12 @@ export function makeSnapshot(
       {
         id: "item-1",
         text: AWKWARD_INBOX_TEXT,
+        // #175 — null is the ordinary case: only a capture replayed from the
+        // offline queue carries a clientKey, and the export fixture is an online
+        // one. Spelled out rather than omitted because this literal is typed
+        // against the whole model, which is what makes a new column a compile
+        // error here instead of a silently-missing export field.
+        clientKey: null,
         createdAt: new Date(Date.UTC(2026, 6, 1, 7, 0, 0)),
         status: "inbox",
         triagedAt: null,
@@ -274,6 +280,7 @@ export function makeSnapshot(
       {
         id: "item-2",
         text: "book the car in",
+        clientKey: null,
         createdAt: new Date(Date.UTC(2026, 6, 2, 7, 0, 0)),
         status: "triaged",
         triagedAt: new Date(Date.UTC(2026, 6, 2, 7, 30, 0)),

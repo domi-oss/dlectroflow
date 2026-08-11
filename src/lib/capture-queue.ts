@@ -100,14 +100,10 @@ export type QueuedCapture = {
 
 /** Why an enqueue was refused. Each maps to something the user is told. */
 export type EnqueueRefusal =
-  | "empty"
-  | "max-items"
-  | "max-bytes"
-  | "storage-unavailable";
+  "empty" | "max-items" | "max-bytes" | "storage-unavailable";
 
 export type EnqueueResult =
-  | { ok: true; queue: QueuedCapture[] }
-  | { ok: false; reason: EnqueueRefusal };
+  { ok: true; queue: QueuedCapture[] } | { ok: false; reason: EnqueueRefusal };
 
 /**
  * What the server said about one queued capture.
@@ -119,11 +115,7 @@ export type EnqueueResult =
  * collapsing them at this boundary is what produced the bug the spec review found.
  */
 export type FlushOutcome =
-  | "saved"
-  | "duplicate"
-  | "session-expired"
-  | "account-revoked"
-  | "retry";
+  "saved" | "duplicate" | "session-expired" | "account-revoked" | "retry";
 
 /** Bytes of a UTF-8 string, not characters — the quota is measured in bytes. */
 function byteLength(value: string): number {
