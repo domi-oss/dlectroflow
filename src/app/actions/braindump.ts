@@ -276,14 +276,20 @@ export async function deleteBrainDumpItem(id: string) {
   });
   if (!existing) return;
 
+  // Hoisted out of the transaction because `maybeAwardInboxZero` runs after it
+  // commits and needs the answer. It is the claimed count, not `existing`'s
+  // pre-read — a delete that lost the race to a concurrent one took no
+  // completion and must not be credited with the queue the winner emptied.
+  let tookCompletion = 0;
+
   await prisma.$transaction(async (tx) => {
     // First write in the transaction on purpose — see the note above. Two
     // concurrent deletes of one row contend HERE, and the loser re-reads
     // `completedAt` as null the moment the winner commits.
-    const { count: tookCompletion } = await tx.brainDumpItem.updateMany({
+    ({ count: tookCompletion } = await tx.brainDumpItem.updateMany({
       where: { id, workspaceId, completedAt: { not: null } },
       data: { completedAt: null },
-    });
+    }));
 
     const { count } = await tx.brainDumpItem.deleteMany({
       where: { id, workspaceId },
@@ -340,7 +346,16 @@ export async function deleteBrainDumpItem(id: string) {
       await revokeUnqualifiedBadges(workspaceId, reversed, tx);
   });
 
-  await maybeAwardInboxZero(workspaceId);
+  // #251 — not for a completed item. `maybeAwardInboxZero` counts rows matching
+  // `status: Inbox` AND `completedAt: null`; a completed one fails the second
+  // half, so it was never in that count and deleting it cannot lower it. The
+  // queue is provably the same size on both sides of this call, so the only
+  // thing an award here can do is re-pay an inbox zero the workspace was already
+  // sitting on — measured at +15 points and an `inbox_zero` badge on the very
+  // path this issue is about, a delete whose whole job was to take points back.
+  // An untriaged row is the opposite case: deleting it genuinely can empty the
+  // queue, so that call has to survive, and the control test pins it.
+  if (tookCompletion === 0) await maybeAwardInboxZero(workspaceId);
   revalidatePath(INBOX_PATH);
   // #251 — the Done tab renders the same rows and the dashboard renders the
   // points this call may have just taken back, so both are now stale for the

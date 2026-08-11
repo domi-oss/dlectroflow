@@ -441,3 +441,57 @@ describe("deleteBrainDumpItem — badge revocation (#251)", () => {
     expect(await hasBadge(WS, BadgeKey.TenStepsDay)).toBe(true);
   });
 });
+
+describe("deleteBrainDumpItem — the inbox-zero award it must not re-pay (#251)", () => {
+  // `maybeAwardInboxZero` counts `status: Inbox, completedAt: null`. A completed
+  // item is excluded from that count by BOTH halves of the predicate, so deleting
+  // one cannot lower it — the queue it measures is the same size before and
+  // after. Calling the award anyway can only re-pay an inbox zero the workspace
+  // was already sitting on, which is the "delete a demo item, gain 15 points"
+  // shape #251 exists to remove. For an item that is still untriaged the call is
+  // correct and has to stay, hence the control below.
+  it("does not run the award when the deleted item was completed", async () => {
+    const rewards = await import("@/lib/rewards");
+    const item = await prisma.brainDumpItem.create({
+      data: {
+        text: "a demo item, already done",
+        workspaceId: WS,
+        status: "inbox",
+        completedAt: new Date(),
+      },
+    });
+    vi.mocked(rewards.maybeAwardInboxZero).mockClear();
+
+    const { deleteBrainDumpItem } = await import("./braindump");
+    await deleteBrainDumpItem(item.id);
+
+    expect(await prisma.brainDumpItem.count({ where: { id: item.id } })).toBe(
+      0,
+    );
+    expect(rewards.maybeAwardInboxZero).not.toHaveBeenCalled();
+  });
+
+  it("still runs the award when the deleted item was untriaged", async () => {
+    // The negative control. Deleting an untriaged row genuinely can empty the
+    // queue, so gating the award must not reach this path — without this case a
+    // gate that removed the call outright would pass the test above.
+    const rewards = await import("@/lib/rewards");
+    const item = await prisma.brainDumpItem.create({
+      data: {
+        text: "still needs triage",
+        workspaceId: WS,
+        status: "inbox",
+        completedAt: null,
+      },
+    });
+    vi.mocked(rewards.maybeAwardInboxZero).mockClear();
+
+    const { deleteBrainDumpItem } = await import("./braindump");
+    await deleteBrainDumpItem(item.id);
+
+    expect(await prisma.brainDumpItem.count({ where: { id: item.id } })).toBe(
+      0,
+    );
+    expect(rewards.maybeAwardInboxZero).toHaveBeenCalledWith(WS);
+  });
+});

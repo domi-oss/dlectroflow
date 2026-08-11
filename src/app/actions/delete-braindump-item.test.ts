@@ -194,6 +194,11 @@ describe("deleteBrainDumpItem", () => {
       id: "i1",
       taskId: null,
     });
+    // Explicit, not inherited from the file default: this case is an UNTRIAGED
+    // row, whose removal genuinely can empty the queue `maybeAwardInboxZero`
+    // measures. The default is `count: 1` (a completion was claimed), which is
+    // the other case entirely — see the test below.
+    prismaMock.brainDumpItem.updateMany.mockResolvedValueOnce({ count: 0 });
     const { deleteBrainDumpItem } = await import("./braindump");
     const rewards = await import("@/lib/rewards");
 
@@ -203,6 +208,32 @@ describe("deleteBrainDumpItem", () => {
     expect(revalidatePathMock).toHaveBeenCalledWith("/");
     // #251 — the Done tab renders these rows and the dashboard renders the score
     // this call may have just reduced.
+    expect(revalidatePathMock).toHaveBeenCalledWith("/library");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/dashboard");
+  });
+
+  it("does not award inbox-zero when the delete took a completion, but still revalidates", async () => {
+    // #251 — the mirror of the case above, and the reason it had to become
+    // explicit. `maybeAwardInboxZero` counts `status: Inbox, completedAt: null`,
+    // so a completed row was never in that count and deleting it cannot lower
+    // it. Awarding here re-pays an inbox zero the workspace already held — +15
+    // points and a badge, on the call whose job was to take points back.
+    //
+    // The revalidations are asserted in the same test on purpose: the gate must
+    // narrow the award only, and a regression that moved the whole tail behind
+    // it would leave the Done tab and the dashboard showing a stale score.
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i1",
+      taskId: null,
+    });
+    prismaMock.brainDumpItem.updateMany.mockResolvedValueOnce({ count: 1 });
+    const { deleteBrainDumpItem } = await import("./braindump");
+    const rewards = await import("@/lib/rewards");
+
+    await deleteBrainDumpItem("i1");
+
+    expect(rewards.maybeAwardInboxZero).not.toHaveBeenCalled();
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
     expect(revalidatePathMock).toHaveBeenCalledWith("/library");
     expect(revalidatePathMock).toHaveBeenCalledWith("/dashboard");
   });
