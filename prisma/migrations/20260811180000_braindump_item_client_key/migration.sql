@@ -1,0 +1,73 @@
+-- #175 — `clientKey` on "BrainDumpItem", UNIQUE per workspace, so a capture
+-- replayed from the offline queue cannot become two rows.
+--
+-- ── Why an idempotency key is required rather than defensive ────────────────
+--
+-- `withActionTimeout` bounds how long the UI waits, NOT how long the request
+-- runs — its own docblock in src/lib/server-action-failure.ts says so, and #245's
+-- migration cites the same fact for the same reason. So a capture that times out
+-- at `CAPTURE_TIMEOUT_MS` (10s) and lands at 14s is ordinary on a mobile
+-- connection, which is the primary target for this feature. Without a key, every
+-- automatic flush of the queue would insert a second row for a capture that
+-- already saved.
+--
+-- One column serves two purposes: replay-on-reconnect for #175, and the
+-- late-write duplicate #210 recorded as its own unresolved residual.
+--
+-- ── Per-workspace, NOT global, and this is a tenancy decision ───────────────
+--
+-- The value is generated in the browser (`newClientKey`, src/lib/capture-queue.ts).
+-- Two different workspaces can therefore legitimately mint the same string. A
+-- global `UNIQUE ("clientKey")` would:
+--
+--   1. refuse a valid write for the second workspace to use that key, and
+--   2. leak across the tenancy boundary — the refusal itself tells workspace B
+--      that workspace A holds a row with that key.
+--
+-- (2) is the one that matters. CLAUDE.md's scoping invariant is that every query
+-- touching user data is scoped to the resolved workspace; a constraint is a query
+-- the database runs on your behalf, and this one is scoped for the same reason.
+--
+-- ── No repair pass, and unlike #245 that is provable without reading prod ───
+--
+-- #180 is the standing precedent: on 2026-08-07 a data migration that had only
+-- ever run against empty tables failed in production with SQLSTATE 23514 and
+-- wedged every later migration behind P3009. A unique index over existing data is
+-- exactly that shape, so the question has to be answered rather than assumed.
+--
+-- Here it is answered by construction, not by measurement: **the column is
+-- created in this same file, so every pre-existing row has `clientKey` NULL, and
+-- Postgres treats NULLs as DISTINCT in a unique index.** Any number of them
+-- coexist. There is no value any existing row could hold that collides, in
+-- production or in any self-hoster's database, so there is nothing to repair.
+--
+-- That is why this migration reads no production data, and the reason is stated
+-- rather than the step silently skipped — #245 needed a `GROUP BY … HAVING
+-- count(*) > 1` against production precisely because its column already held
+-- values. This one cannot.
+--
+-- The NULL allowance is also permanent behaviour, not just a migration
+-- convenience: every ordinary online capture goes through
+-- `createBrainDumpItem`, which does not set this column. A NOT NULL here would
+-- break the app's most-used write on its next insert.
+--
+-- ── Lock level ─────────────────────────────────────────────────────────────
+--
+-- Plain `CREATE UNIQUE INDEX`, not `CONCURRENTLY`. Both halves of that were
+-- MEASURED on Postgres 16 by #245's migration, which found a `ShareLock` rather
+-- than ACCESS EXCLUSIVE, and found `CONCURRENTLY` unavailable at all because
+-- Prisma wraps every migration file in a transaction (SQLSTATE 25001). Cited
+-- here as that migration's measurement, not re-measured for this one.
+--
+-- The cost is smaller here regardless: the index is being built over a column
+-- that is NULL in every row, on a table whose writers are the old pods still
+-- serving while migrations run at container start.
+
+-- 1. The column. Nullable — see above; the NULL is load-bearing twice over.
+ALTER TABLE "BrainDumpItem" ADD COLUMN     "clientKey" TEXT;
+
+-- 2. The constraint. `BrainDumpItem_workspaceId_idx` is left in place: it is now
+--    redundant as a prefix of this index, but dropping an index is a performance
+--    change with its own justification and does not belong in a correctness fix.
+--    Same call, for the same reason, as #245 made about `Step_taskId_idx`.
+CREATE UNIQUE INDEX "BrainDumpItem_workspaceId_clientKey_key" ON "BrainDumpItem"("workspaceId", "clientKey");

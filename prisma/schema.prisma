@@ -395,11 +395,39 @@ model BrainDumpItem {
   // (LENGTH_REGISTRY); behavioural half in
   // src/lib/notes-length-check.integration.test.ts.
   notes                String?
+  // #175 — idempotency key for a capture replayed from the offline queue.
+  //
+  // Client-generated (`newClientKey`, src/lib/capture-queue.ts) and unique PER
+  // WORKSPACE, not globally: the value comes from the browser, so two tenants can
+  // legitimately mint the same one, and a global unique index would both refuse a
+  // valid write and tell one workspace that another holds that key.
+  //
+  // NULLABLE, and the null is load-bearing twice over. Every row that predates
+  // this migration has none, and every ordinary online capture leaves it unset —
+  // Postgres treats nulls as distinct in a unique index, so any number of them
+  // coexist. A NOT NULL column here would break `createBrainDumpItem` on its next
+  // insert.
+  //
+  // Why it exists at all: `withActionTimeout` bounds how long the UI waits, NOT
+  // the request (see its docblock in src/lib/server-action-failure.ts), so a write
+  // that times out at CAPTURE_TIMEOUT_MS and lands four seconds later is ordinary
+  // on a mobile connection. Without this key every automatic flush would duplicate
+  // it. One column serves two purposes: replay-on-reconnect, and the late-write
+  // duplicate #210 recorded as its own residual.
+  //
+  // Prisma CAN express this one, so unlike the CHECK constraints above it needs no
+  // registry entry — and it is deliberately NOT in
+  // src/lib/enum-constraint-sync.integration.test.ts, which polices CHECKs and the
+  // enum/range/length registries. The behavioural half, proving the index bites
+  // and that nulls and cross-workspace duplicates are both allowed, is
+  // src/lib/braindump-client-key-unique.integration.test.ts.
+  clientKey            String?
   taskId               String?
   task                 Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
   workspaceId          String
   workspace            Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
+  @@unique([workspaceId, clientKey])
   @@index([status])
   @@index([workspaceId])
 }
