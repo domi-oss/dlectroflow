@@ -214,9 +214,19 @@ function normalise(path: string): string {
   return (rooted ? "/" : "") + out.join("/");
 }
 
+/** True when `source` imports the bare package `pkg` (not a relative path). */
+export function importsPackage(source: string, pkg: string): boolean {
+  for (const match of source.matchAll(IMPORT_SPECIFIER)) {
+    // Exact, or a subpath import of the same package (`@axe-core/playwright`
+    // has none today, but `pkg/thing` must not be read as a different package).
+    if (match[1] === pkg || match[1].startsWith(`${pkg}/`)) return true;
+  }
+  return false;
+}
+
 /**
- * Every file in `files` whose import graph reaches `target`, directly or through
- * any number of intermediate modules.
+ * Every file in `files` whose import graph reaches a file `isTarget` accepts —
+ * itself included — directly or through any number of intermediate modules.
  *
  * **Transitive on purpose.** A one-hop check is what a `grep` for `scanA11y`
  * already gives, and it is defeated by the most natural refactor available: a
@@ -225,12 +235,21 @@ function normalise(path: string): string {
  * "nothing found because nothing was looked at" shape this file already exists
  * to prevent one level up.
  *
+ * **A predicate rather than a path**, because keying on
+ * `e2e/a11y/axe-helpers.ts` was not enough. `e2e/smoke/member-delete-account.spec.ts`
+ * ran a zero-tolerance WCAG scan by importing `@axe-core/playwright` and building
+ * an `AxeBuilder` itself, touching the helper module not at all — so a guard
+ * pointed at the helpers reported that file clean while it retried an a11y
+ * assertion in the `member` project. Pointing the predicate at the PACKAGE
+ * subsumes the helpers (`axe-helpers.ts` imports it too) and catches the
+ * hand-rolled scan as well.
+ *
  * `readSource` is injected so the traversal can be exercised on synthetic input
  * (the house shape: no `fs` in this module). Cycle-safe — `e2e/helpers.ts` and a
  * spec importing each other must not hang the test suite.
  */
 export function filesReaching(
-  target: string,
+  isTarget: (file: string, source: string) => boolean,
   files: readonly string[],
   readSource: (file: string) => string,
 ): string[] {
@@ -247,10 +266,11 @@ export function filesReaching(
     const pending = [entry];
     while (pending.length > 0) {
       const file = pending.pop()!;
-      if (file === target) return true;
       if (seen.has(file)) continue;
       seen.add(file);
-      for (const base of relativeImportTargets(file, readSource(file))) {
+      const source = readSource(file);
+      if (isTarget(file, source)) return true;
+      for (const base of relativeImportTargets(file, source)) {
         const dependency = resolve(base);
         if (dependency !== undefined) pending.push(dependency);
       }
@@ -258,7 +278,7 @@ export function filesReaching(
     return false;
   };
 
-  return files.filter((file) => file !== target && reaches(file)).sort();
+  return files.filter((file) => reaches(file)).sort();
 }
 
 /** A project that would run an a11y assertion, and the retry it would give it. */

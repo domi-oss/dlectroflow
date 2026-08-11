@@ -11,6 +11,7 @@ import {
   filesFor,
   relativeImportTargets,
   filesReaching,
+  importsPackage,
   retryMaskedSpecs,
   type ProjectRouting,
   type Routing,
@@ -185,12 +186,44 @@ describe("relativeImportTargets — synthetic", () => {
   });
 });
 
+describe("importsPackage — synthetic", () => {
+  it("matches a bare package import and a subpath of it", () => {
+    expect(importsPackage(`import A from "@axe-core/playwright";`, AXE)).toBe(
+      true,
+    );
+    expect(importsPackage(`import A from "@axe-core/playwright/x";`, AXE)).toBe(
+      true,
+    );
+  });
+
+  it("does not match a different package that merely shares a prefix", () => {
+    expect(importsPackage(`import A from "@axe-core/playwright-x";`, AXE)).toBe(
+      false,
+    );
+    expect(
+      importsPackage(`import { test } from "@playwright/test";`, AXE),
+    ).toBe(false);
+  });
+
+  it("does not match a relative path that happens to end in the name", () => {
+    expect(importsPackage(`import A from "./@axe-core/playwright";`, AXE)).toBe(
+      false,
+    );
+  });
+});
+
+/** The package every axe scan in the suite has to go through. */
+const AXE = "@axe-core/playwright";
+
 describe("filesReaching — synthetic", () => {
   const HELPERS = "/repo/e2e/a11y/axe-helpers.ts";
+  /** The real predicate: anything that can run an axe scan. */
+  const runsAxe = (_file: string, source: string) =>
+    importsPackage(source, AXE);
 
-  it("finds a direct importer", () => {
+  it("finds a direct importer, and the helper module itself", () => {
     const sources = new Map([
-      [HELPERS, "export function scanA11y() {}"],
+      [HELPERS, `import AxeBuilder from "${AXE}";`],
       [
         "/repo/e2e/smoke/menu.spec.ts",
         `import { scanA11y } from "../a11y/axe-helpers";`,
@@ -199,15 +232,32 @@ describe("filesReaching — synthetic", () => {
       ["/repo/e2e/helpers.ts", "export const x = 1;"],
     ]);
     expect(
-      filesReaching(HELPERS, [...sources.keys()], (f) => sources.get(f)!),
-    ).toEqual(["/repo/e2e/smoke/menu.spec.ts"]);
+      filesReaching(runsAxe, [...sources.keys()], (f) => sources.get(f)!),
+    ).toEqual([HELPERS, "/repo/e2e/smoke/menu.spec.ts"]);
+  });
+
+  it("finds a spec that hand-rolls its own scan, touching no helper", () => {
+    // `e2e/smoke/member-delete-account.spec.ts` was exactly this, and a guard
+    // keyed on the helper MODULE reported it clean while it retried a
+    // zero-tolerance WCAG assertion in the `member` project.
+    const sources = new Map([
+      [HELPERS, `import AxeBuilder from "${AXE}";`],
+      [
+        "/repo/e2e/smoke/delete-account.spec.ts",
+        `import AxeBuilder from "${AXE}";
+         const r = await new AxeBuilder({ page }).analyze();`,
+      ],
+    ]);
+    expect(
+      filesReaching(runsAxe, [...sources.keys()], (f) => sources.get(f)!),
+    ).toEqual([HELPERS, "/repo/e2e/smoke/delete-account.spec.ts"]);
   });
 
   it("finds a TRANSITIVE importer through a re-exporting module", () => {
     // The refactor that defeats a one-hop grep, and therefore the whole reason
     // this traversal is not a one-hop check.
     const sources = new Map([
-      [HELPERS, "export function scanA11y() {}"],
+      [HELPERS, `import AxeBuilder from "${AXE}";`],
       [
         "/repo/e2e/a11y-wrappers.ts",
         `export { scanA11y } from "./a11y/axe-helpers";`,
@@ -218,28 +268,32 @@ describe("filesReaching — synthetic", () => {
       ],
     ]);
     expect(
-      filesReaching(HELPERS, [...sources.keys()], (f) => sources.get(f)!),
-    ).toEqual(["/repo/e2e/a11y-wrappers.ts", "/repo/e2e/smoke/menu.spec.ts"]);
+      filesReaching(runsAxe, [...sources.keys()], (f) => sources.get(f)!),
+      // Sorted, and `a11y-wrappers.ts` precedes `a11y/axe-helpers.ts` because
+      // "-" (0x2D) sorts below "/" (0x2F).
+    ).toEqual([
+      "/repo/e2e/a11y-wrappers.ts",
+      HELPERS,
+      "/repo/e2e/smoke/menu.spec.ts",
+    ]);
   });
 
   it("terminates on an import cycle rather than hanging the suite", () => {
     const sources = new Map([
-      [HELPERS, "export function scanA11y() {}"],
       ["/repo/e2e/a.ts", `import "./b";`],
       ["/repo/e2e/b.ts", `import "./a";`],
     ]);
     expect(
-      filesReaching(HELPERS, [...sources.keys()], (f) => sources.get(f)!),
+      filesReaching(runsAxe, [...sources.keys()], (f) => sources.get(f)!),
     ).toEqual([]);
   });
 
   it("ignores a specifier that resolves to no file in the tree", () => {
     const sources = new Map([
-      [HELPERS, "export function scanA11y() {}"],
       ["/repo/e2e/a.spec.ts", `import "./deleted-yesterday";`],
     ]);
     expect(
-      filesReaching(HELPERS, [...sources.keys()], (f) => sources.get(f)!),
+      filesReaching(runsAxe, [...sources.keys()], (f) => sources.get(f)!),
     ).toEqual([]);
   });
 });
@@ -520,37 +574,55 @@ describe("the committed e2e tree routes cleanly (#127)", () => {
 });
 
 describe("no a11y assertion runs with a retry to spend (#247)", () => {
-  /** The module every a11y assertion in the suite goes through. */
-  const A11Y_HELPERS = join(REPO_ROOT, "e2e", "a11y", "axe-helpers.ts")
-    .split(sep)
-    .join("/");
-
   const readSource = (file: string) => readFileSync(file, "utf8");
 
-  const reachers = () => filesReaching(A11Y_HELPERS, e2eFiles(), readSource);
-
-  it("is looking at a module that exists", () => {
-    // Without this the whole describe degrades to a pass: rename or move
-    // `axe-helpers.ts` and `filesReaching` finds nobody reaching a file that is
-    // not there, which reads exactly like compliance. Same failure shape as an
-    // empty a11y project, one level in.
-    expect(
+  /**
+   * Every file that can run an axe scan.
+   *
+   * Keyed on the PACKAGE, not on `e2e/a11y/axe-helpers.ts`. The helper module is
+   * how the gate is meant to be reached, and
+   * `e2e/smoke/member-delete-account.spec.ts` bypassed it entirely — it imported
+   * `@axe-core/playwright` and built its own `AxeBuilder`, so a guard aimed at
+   * the helpers called it clean while it retried a WCAG assertion in `member`.
+   * Everything that scans has to import this package, helpers included.
+   */
+  const reachers = () =>
+    filesReaching(
+      (_file, source) => importsPackage(source, AXE),
       e2eFiles(),
-      `${A11Y_HELPERS} is gone — this guard is now measuring nothing. Point it at the module the a11y helpers actually live in.`,
-    ).toContain(A11Y_HELPERS);
+      readSource,
+    );
+
+  it("is looking at a package the suite actually depends on", () => {
+    // Without this the whole describe degrades to a pass: rename the package (or
+    // typo it here) and the traversal finds nobody importing something nothing
+    // imports, which reads exactly like compliance. Same failure shape as an
+    // empty a11y project, one level in.
+    const manifest = JSON.parse(
+      readFileSync(join(REPO_ROOT, "package.json"), "utf8"),
+    ) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    expect(
+      { ...manifest.dependencies, ...manifest.devDependencies },
+      `${AXE} is not a dependency — this guard is now measuring nothing.`,
+    ).toHaveProperty(AXE);
   });
 
   it("can see the call sites it is supposed to police", () => {
     // The other half of the same defence: prove the traversal returns non-zero
-    // on the real tree, and that it finds the gate's own specs. A zero here
-    // would mean the import scanner stopped working, not that the repo is clean.
+    // on the real tree, and that it finds both shapes — the helper module and a
+    // spec that only reaches axe THROUGH it. A zero here would mean the import
+    // scanner stopped working, not that the repo is clean.
+    const abs = (...p: string[]) =>
+      join(REPO_ROOT, ...p)
+        .split(sep)
+        .join("/");
     const found = reachers();
     expect(found.length).toBeGreaterThan(0);
-    expect(found).toContain(
-      join(REPO_ROOT, "e2e", "a11y", "axe-core-flow.spec.ts")
-        .split(sep)
-        .join("/"),
-    );
+    expect(found).toContain(abs("e2e", "a11y", "axe-helpers.ts"));
+    expect(found).toContain(abs("e2e", "a11y", "axe-core-flow.spec.ts"));
   });
 
   it("runs every a11y-helper caller in a project that declares retries: 0", async () => {
