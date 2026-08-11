@@ -86,11 +86,23 @@ export function AccountMenu({ identity }: { identity: AccountIdentity }) {
             touchTarget,
           )}
         >
-          {/* Capped, not wrapped: a long provider handle must not be able to
-              widen the bar past the viewport. Tighter on a phone than on a
-              desktop, because 390px is where the collisions are (#72, #103).
-              The popup below and the `title` above both carry it in full. */}
-          <span className="max-w-20 truncate sm:max-w-40">
+          {/* Capped, not wrapped: a long label must not be able to widen the bar
+              past the viewport. Tighter on a phone than on a desktop, because
+              that is where the collisions are (#72, #103).
+
+              #252 tightened the phone cap from `max-w-20` (80px) to `max-w-16`
+              (64px), and the 16px is not cosmetic — it is the margin. Measured at
+              360px, where the row has 328px of content width: three 44px icon
+              controls, this trigger at its cap, the 44px menu trigger and four
+              4px gaps come to 330px with an 80px cap and 314px with a 64px one.
+              The first overflows; the second leaves 14px. The uncapped case is
+              not the worst case, because `truncate` means the cap IS the width a
+              long label renders at.
+
+              Nothing is lost that was not already truncated: the popup below and
+              the `title` above both carry the label in full, and above `sm` the
+              cap is unchanged at 160px. */}
+          <span className="max-w-16 truncate sm:max-w-40">
             {identity.label}
           </span>
           <ChevronDown aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />

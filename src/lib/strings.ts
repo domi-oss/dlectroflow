@@ -137,6 +137,22 @@ export const STRINGS = {
   // a bucket of BrainDumpItems (inbox/bucket.ts) and a tab there would say "this is
   // a kind of task". Only rendered when Settings.shoppingList is on.
   "nav.shopping": { plain: "Shopping list", playful: "🛒 Shopping list" },
+  // #252 — the header's quick-access icons. Their own keys rather than reusing
+  // `nav.focusTimer` / `nav.shopping`, for a reason that only applies to an
+  // icon-only control: those two are VISIBLE menu text, so the playful voice
+  // decorates them with an emoji, and these strings are an `aria-label` and a
+  // `title`. A screen reader spells an emoji out, so the flavour would be read
+  // aloud as part of the control's name ("stopwatch Focus Timer") — and unlike
+  // the menu rows there is no visible text for WCAG 2.5.3 to require it to
+  // match. Identical across both voices for the same reason `action.complete`
+  // is: the name of a destination is not where a skin belongs. The WORDS still
+  // match the menu rows exactly, so the icon and the row it duplicates cannot
+  // start describing two different places.
+  "nav.focusQuickAccess": { plain: "Focus Timer", playful: "Focus Timer" },
+  "nav.shoppingQuickAccess": {
+    plain: "Shopping list",
+    playful: "Shopping list",
+  },
 
   // ── Freshness tiers ────────────────────────────────────────────────────────
   "freshness.recent": { plain: "Recent", playful: "Fresh" },
