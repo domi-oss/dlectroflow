@@ -238,14 +238,24 @@ export async function reverseStepCompletionRewards(
  *
  * ── Why one primitive serves both ───────────────────────────────────────────
  *
- * Deleting a completed to-do owes **exactly what reopening that same row would
- * owe**: one `step_done` per step it turns from done, plus a `task_complete` if
- * it was carrying a completion. Stating it as an equality rather than as a
- * second rule is what keeps the two paths from drifting — a user who reopens a
- * to-do and then deletes it must end on the same balance as one who deletes it
- * outright, and they only do if both routes ask this function the same question.
- * The delete's caller therefore counts its arguments off what its own writes
- * destroyed, exactly as `reopenItem` counts them off what its writes changed.
+ * Deleting a completed to-do owes **what reopening that whole row would owe**:
+ * one `step_done` per step that was done, plus a `task_complete` if it was
+ * carrying a completion. Stating it as an equality rather than as a second rule
+ * is what keeps the two paths from drifting — a user who reopens a to-do and then
+ * deletes it must end on the same balance as one who deletes it outright, and
+ * they only do if both routes ask this function the same question. The delete's
+ * caller therefore counts its arguments off what its own writes destroyed,
+ * exactly as `reopenItem` counts them off what its writes changed.
+ *
+ * The equality is against a **whole-row** reopen, which is the only reopen a
+ * delete has an analogue for — there is no partial delete to compare with
+ * `reopenItem(id, stepIds)`. It also stops short in the one case the two writes
+ * genuinely differ: when another `BrainDumpItem` still references the Task, the
+ * delete destroys no steps and so owes no `step_done`, while a reopen would still
+ * reverse them because it turns those surviving steps back to not-done. No code
+ * path creates a second item on one Task today (see the note at the delete's
+ * call site), so this is a boundary being stated rather than a case being
+ * handled.
  *
  * ── Why the step count is a parameter ───────────────────────────────────────
  *
