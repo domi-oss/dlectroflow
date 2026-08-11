@@ -8,7 +8,6 @@ import {
   logReward,
   awardBadge,
   touchStreakOnCompletion,
-  touchStreakOnEngagement,
   reverseItemCompletionRewards,
 } from "@/lib/rewards";
 import {
@@ -19,10 +18,8 @@ import {
   TASK_WRITER_TX_BUDGET,
 } from "@/lib/constants";
 import { currentWorkspaceId } from "@/lib/workspace";
-import {
-  splitInlineNote,
-  resolveInlineNoteEdit,
-} from "@/lib/braindump-note-syntax";
+import { resolveInlineNoteEdit } from "@/lib/braindump-note-syntax";
+import { writeCapture } from "@/lib/capture-write";
 import { brainDumpItemToTaskData, liveNote } from "@/lib/braindump-to-task";
 import { normalizeTaskNote } from "@/lib/task-notes";
 import {
@@ -41,26 +38,31 @@ const LIBRARY_PATH = "/library";
  * rule is end-anchored and deliberately strict — see
  * `src/lib/braindump-note-syntax.ts` for why that is the whole design.
  *
- * The note goes through `normalizeTaskNote` rather than being left to
- * `BrainDumpItem_notes_check`: the constraint is the backstop for a writer that
- * forgot, and reaching it from the writer that did not would surface to the
- * person as a capture that silently failed.
+ * ## The write itself moved to `writeCapture` (#175), and this is now a wrapper
  *
- * The empty guard reads the PARSED text, not the raw string. `{just a note}` is
- * refused by the parser and stored literally, so this cannot create a row whose
- * only content is hidden behind a note.
+ * The offline capture queue flushes through `POST /api/braindump`, and the spec
+ * puts the FOREGROUND capture on that same route — so there is one write path and
+ * one set of semantics to test. Rather than let the route grow a second copy of
+ * the note split, the empty guard and the streak touch, all three live in
+ * `src/lib/capture-write.ts` and both callers share them. What is left here is
+ * the two things a server action owns and a route handler does not: resolving the
+ * session's workspace, and invalidating the list.
+ *
+ * This action keeps its non-queued callers — the breakdown ejector
+ * (`src/components/breakdown/breakdown-chat.tsx`) — and takes no `clientKey`,
+ * deliberately. Idempotency belongs to a capture that can be REPLAYED, and only
+ * the queue replays; an unkeyed capture leaves the column null, which the unique
+ * index treats as distinct from every other null.
+ *
+ * `created` is therefore the only non-`empty` outcome reachable from here, so
+ * gating the revalidation on it is exactly the behaviour this action had before
+ * the extraction — not a narrowing of it. A revalidation is a consequence of a
+ * write, the same reading `ensureFocusStep` takes of its own.
  */
 export async function createBrainDumpItem(text: string) {
   const workspaceId = await currentWorkspaceId();
-  const { text: itemText, note } = splitInlineNote(text);
-  if (!itemText) return;
-  await prisma.brainDumpItem.create({
-    data: { text: itemText, notes: normalizeTaskNote(note), workspaceId },
-  });
-  // A capture is a qualifying engagement (Decision 1) — advances the streak at
-  // most once per working day.
-  await touchStreakOnEngagement(workspaceId);
-  revalidatePath(INBOX_PATH);
+  const outcome = await writeCapture({ workspaceId, text });
+  if (outcome === "created") revalidatePath(INBOX_PATH);
 }
 
 export async function triageBrainDumpItem(id: string) {

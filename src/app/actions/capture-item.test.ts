@@ -8,6 +8,18 @@
  * is wired to it at all, that the note goes through `normalizeTaskNote` on the
  * way to a CHECK-constrained column, and that Decision 1 survives the trip.
  *
+ * ## #175 moved the write, and these tests deliberately still reach Postgres
+ *
+ * The action delegates to `writeCapture` (`src/lib/capture-write.ts`), which is
+ * also what `POST /api/braindump` calls — one write path, one set of semantics.
+ * `@/lib/capture-write` is therefore NOT mocked here: mocking it would leave
+ * these cases asserting that one function calls another, and the #179 guarantee
+ * they exist for (what actually lands in the two columns) would stop being
+ * checked from the action at all. The delegate mocked is Prisma's, and the write
+ * is `createManyAndReturn` + `skipDuplicates` rather than `create` — the
+ * `INSERT … ON CONFLICT DO NOTHING` shape `src/lib/db.ts` argues for, so a
+ * replayed capture cannot print `prisma:error` (#156, #158).
+ *
  * Mirrors the vi.mock shape used in rename-item.test.ts.
  */
 
@@ -21,7 +33,10 @@ const {
 } = vi.hoisted(() => {
   const prismaMock = {
     brainDumpItem: {
-      create: vi.fn().mockResolvedValue({}),
+      // The row the WINNER of an `ON CONFLICT DO NOTHING` gets back. A
+      // non-queued capture carries no `clientKey`, and Postgres treats nulls as
+      // distinct in a unique index, so this path always wins.
+      createManyAndReturn: vi.fn().mockResolvedValue([{ id: "item-1" }]),
     },
   };
   return {
@@ -52,9 +67,9 @@ beforeEach(() => {
   currentWorkspaceIdMock.mockResolvedValue("owner");
 });
 
-/** The `data` the one `create` call was made with. */
+/** The `data` the one write was made with. */
 const capturedData = () =>
-  prismaMock.brainDumpItem.create.mock.calls[0][0].data as Record<
+  prismaMock.brainDumpItem.createManyAndReturn.mock.calls[0][0].data as Record<
     string,
     unknown
   >;
@@ -69,6 +84,7 @@ describe("createBrainDumpItem — the inline note syntax (#179)", () => {
       text: "water the office plants",
       notes: "can under sink needs a wash",
       workspaceId: "owner",
+      clientKey: null,
     });
   });
 
@@ -79,6 +95,11 @@ describe("createBrainDumpItem — the inline note syntax (#179)", () => {
       text: "buy milk",
       notes: null,
       workspaceId: "owner",
+      // #175 — a non-queued capture has no idempotency key, and must not invent
+      // one: a value here would put every ordinary capture under
+      // `BrainDumpItem_workspaceId_clientKey_key`, where the null keeps them all
+      // distinct.
+      clientKey: null,
     });
   });
 
@@ -133,7 +154,7 @@ describe("createBrainDumpItem — the inline note syntax (#179)", () => {
   it("still no-ops on empty / whitespace-only input", async () => {
     const { createBrainDumpItem } = await import("./braindump");
     await createBrainDumpItem("   \n\t ");
-    expect(prismaMock.brainDumpItem.create).not.toHaveBeenCalled();
+    expect(prismaMock.brainDumpItem.createManyAndReturn).not.toHaveBeenCalled();
     // Not an engagement either — nothing was captured, so nothing may advance
     // the streak.
     expect(touchStreakOnEngagementMock).not.toHaveBeenCalled();
