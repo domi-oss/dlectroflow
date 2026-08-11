@@ -118,8 +118,21 @@ async function holdTitleAway(
     // `<div>` still reporting `"dlectroflow"`. A head-only sweep would leave a
     // readable title behind the moment one lands anywhere else. The NodeList is
     // static, so removing as we go cannot skip an entry.
+    //
+    // Narrowed to HTML `<title>` by the `instanceof`, on !327 review: a CSS type
+    // selector matches on local name irrespective of namespace, so plain
+    // `querySelectorAll("title")` also matches the SVG `<title>` that gives an
+    // inline `<svg>` its accessible name. `document.title` does not read those,
+    // so removing them would put the fixture's reach beyond the predicate it
+    // exists to falsify — and the FIRST test's scan really does run to
+    // completion, so a stripped SVG name there would surface as a spurious
+    // `svg-img-alt` failure in a gate with no retry. Nothing on `/` ships one
+    // today (`grep -rn "<title" src/` is empty); this keeps that from becoming a
+    // trap for whoever adds the first.
     const strip = () => {
-      for (const el of document.querySelectorAll("title")) el.remove();
+      for (const el of document.querySelectorAll("title")) {
+        if (el instanceof HTMLTitleElement) el.remove();
+      }
     };
     strip();
     // Terminates rather than looping: the removals it performs re-enter it once
