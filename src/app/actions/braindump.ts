@@ -330,8 +330,14 @@ export async function deleteBrainDumpItem(id: string) {
     // unqualified `task_complete` (reopening the only completed to-do leaves
     // exactly that), and revoking it here would be punishing an unrelated delete
     // for a state it did not create.
+    //
+    // `reversed` is handed on rather than just gating the call, because "did this
+    // delete reverse something" is too coarse a gate on its own: a step-only
+    // reversal must not reach `task_complete` and a completion-only one must not
+    // reach `ten_steps_day`. The per-badge gates live in that function; this one
+    // is the early-out.
     if (reversed.stepDone > 0 || reversed.taskComplete)
-      await revokeUnqualifiedBadges(workspaceId, tx);
+      await revokeUnqualifiedBadges(workspaceId, reversed, tx);
   });
 
   await maybeAwardInboxZero(workspaceId);

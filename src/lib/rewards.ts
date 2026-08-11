@@ -301,6 +301,22 @@ export async function reverseItemCompletionRewards(
  * unlike an undo it can leave a badge with nothing behind it (see the amended
  * rule on {@link reverseStepCompletionRewards}).
  *
+ * ── `reversed`: each badge is gated on the reversal that could un-qualify it ─
+ *
+ * Not on "the delete reversed *something*". Recomputing a condition and revoking
+ * on the answer is only a reversal if this call is what moved that condition;
+ * otherwise it is taking away a badge the deleted row had no part in earning, and
+ * a workspace can already be sitting on an unqualified badge with no delete
+ * involved (reopening the only completed to-do leaves `task_complete` in exactly
+ * that state). Both directions were live and both are now covered:
+ *
+ *  * a **step-only** reversal — the `isFullyDone` route, every step ticked and
+ *    `completedAt` never stamped — recomputed "is any item completed" as false and
+ *    revoked `task_complete`, which it had not touched;
+ *  * a **completion-only** reversal — a stepless to-do — recomputed today's step
+ *    count, found it under ten, and revoked `ten_steps_day` without having changed
+ *    a single `step_done`.
+ *
  * ── Only badges whose condition is RECOMPUTABLE are in scope ────────────────
  *
  * `Badge` records a key, a workspace and `earnedAt`. It records nothing about
@@ -349,6 +365,7 @@ export async function reverseItemCompletionRewards(
  */
 export async function revokeUnqualifiedBadges(
   workspaceId: string,
+  reversed: { stepDone: number; taskComplete: boolean },
   db: Prisma.TransactionClient = prisma,
 ): Promise<BadgeKeyT[]> {
   const revoked: BadgeKeyT[] = [];
@@ -364,18 +381,22 @@ export async function revokeUnqualifiedBadges(
     if (count > 0) revoked.push(key);
   };
 
-  // Read AFTER the delete and the points reversal, never off a snapshot taken
-  // before them: the whole question is what the workspace looks like now that
-  // this call's writes have landed.
-  const completedLeft = await db.brainDumpItem.count({
-    where: { workspaceId, completedAt: { not: null } },
-  });
-  if (completedLeft === 0) await revoke(BadgeKey.TaskComplete);
+  // Every read below happens AFTER the delete and the points reversal, never off
+  // a snapshot taken before them: the question is what the workspace looks like
+  // now that this call's writes have landed.
+  if (reversed.taskComplete) {
+    const completedLeft = await db.brainDumpItem.count({
+      where: { workspaceId, completedAt: { not: null } },
+    });
+    if (completedLeft === 0) await revoke(BadgeKey.TaskComplete);
+  }
 
-  const tenStepsDay = await db.badge.findUnique({
-    where: { workspaceId_key: { workspaceId, key: BadgeKey.TenStepsDay } },
-    select: { earnedAt: true },
-  });
+  const tenStepsDay = reversed.stepDone
+    ? await db.badge.findUnique({
+        where: { workspaceId_key: { workspaceId, key: BadgeKey.TenStepsDay } },
+        select: { earnedAt: true },
+      })
+    : null;
   if (tenStepsDay && tenStepsDay.earnedAt >= startOfToday()) {
     const stepsToday = await db.rewardEvent.count({
       where: {

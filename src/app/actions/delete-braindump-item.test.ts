@@ -331,8 +331,12 @@ describe("deleteBrainDumpItem — reward reversal wiring (#251)", () => {
     found(null);
     reverse.mockResolvedValueOnce({ stepDone: 0, taskComplete: true });
     await deleteBrainDumpItem("i1");
+    // `reversed` is handed on, not just used as a gate: the per-badge gates in
+    // that function need it, because a step-only reversal must not reach
+    // `task_complete` and a completion-only one must not reach `ten_steps_day`.
     expect(rewards.revokeUnqualifiedBadges).toHaveBeenCalledWith(
       "owner",
+      { stepDone: 0, taskComplete: true },
       prismaMock,
     );
   });
@@ -350,9 +354,11 @@ describe("deleteBrainDumpItem — reward reversal wiring (#251)", () => {
     await deleteBrainDumpItem("i1");
 
     // ten_steps_day is the badge this case exists for: three step_done rows
-    // fewer today can drop the day back under its threshold.
+    // fewer today can drop the day back under its threshold. `task_complete` is
+    // not, and the reversal it is handed is what says so.
     expect(rewards.revokeUnqualifiedBadges).toHaveBeenCalledWith(
       "owner",
+      { stepDone: 3, taskComplete: false },
       prismaMock,
     );
   });

@@ -399,4 +399,45 @@ describe("deleteBrainDumpItem — badge revocation (#251)", () => {
 
     expect(await hasBadge(WS, BadgeKey.TaskComplete)).toBe(true);
   });
+
+  it("a step-only reversal does not take task_complete with it", async () => {
+    // The `isFullyDone` route: every step ticked, `completedAt` never stamped, so
+    // the delete owes `step_done` and no `task_complete`. The badge here was
+    // earned by a DIFFERENT to-do that has since been reopened or deleted, which
+    // is why the workspace already looks unqualified. Recomputing the condition
+    // and revoking on it would be taking away something this delete had no part
+    // in — so each badge is gated on the reversal that could actually have
+    // un-qualified it, not merely on the delete having reversed something.
+    const { item } = await completedTodo({ steps: 2, completed: false });
+    await prisma.badge.create({
+      data: { workspaceId: WS, key: BadgeKey.TaskComplete },
+    });
+
+    const { deleteBrainDumpItem } = await import("./braindump");
+    await deleteBrainDumpItem(item.id);
+
+    expect(await countRewards(WS, RewardType.StepDone)).toBe(0); // it did reverse
+    expect(await hasBadge(WS, BadgeKey.TaskComplete)).toBe(true);
+  });
+
+  it("a completion-only reversal does not take ten_steps_day with it", async () => {
+    // The mirror case. A stepless completed to-do owes a `task_complete` and no
+    // `step_done`, so today's step count is untouched and the day's badge is not
+    // this delete's business — even though the workspace holds fewer than ten.
+    const { item } = await completedTodo({ steps: 0 });
+    await bank(WS, RewardType.StepDone, 4);
+    await prisma.badge.create({
+      data: {
+        workspaceId: WS,
+        key: BadgeKey.TenStepsDay,
+        earnedAt: new Date(),
+      },
+    });
+
+    const { deleteBrainDumpItem } = await import("./braindump");
+    await deleteBrainDumpItem(item.id);
+
+    expect(await countRewards(WS, RewardType.TaskComplete)).toBe(0); // it did reverse
+    expect(await hasBadge(WS, BadgeKey.TenStepsDay)).toBe(true);
+  });
 });
