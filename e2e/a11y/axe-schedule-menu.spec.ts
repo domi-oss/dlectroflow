@@ -7,6 +7,7 @@ import {
   expectNoContrastViolations,
 } from "./axe-helpers";
 import {
+  MARKER,
   seedScheduleMenuFixture,
   removeScheduleMenuFixture,
   openScheduleDialog,
@@ -69,7 +70,7 @@ test("the open Schedule menu has no WCAG violations", async ({ page }) => {
   // The precondition the scan depends on: a Popover.Popup is a `dialog`, so an
   // accessible name is required, and asserting it here means a scan that passes
   // because the dialog never opened cannot be mistaken for a clean gate.
-  await expect(dialog).toHaveAccessibleName(/^Schedule /);
+  await expect(dialog).toHaveAccessibleName(`Schedule ${MARKER}`);
   await expect(dialog.getByLabel("Done by")).toBeVisible();
 
   // The mechanical WCAG gate, on a real accessibility tree rather than jsdom's
