@@ -84,6 +84,7 @@
     }
   ],
   "vulnerabilityAlerts": {
+    "description": "Labels only, deliberately - a concurrency limit or schedule set here would be a no-op (#243). Renovate ALWAYS raises a security PR: every limit gate in its branch/PR workers is guarded by `&& !config.isVulnerabilityAlert` and vulnerability upgrades sort ahead of everything else, so `prConcurrentLimit`, `branchConcurrentLimit`, `prHourlyLimit`, `commitHourlyLimit` and `schedule` are all ignored on this path - the docs put it as 'vulnerability alerts skip the line'. src/lib/renovate-hygiene.test.ts fails if one is added back, because renovate-config-validator accepts the key and so cannot tell you it does nothing. Separately, this block is inert on GitLab today: Renovate implements `platform.getVulnerabilityAlerts` on its GitHub platform only, so no advisory source reaches it, and `osvVulnerabilityAlerts` is deliberately left off - see #243 for that reasoning and what enabling it would cost.",
     "labels": ["dependencies", "security"]
   }
 }
