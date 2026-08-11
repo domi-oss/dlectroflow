@@ -20,7 +20,9 @@ import {
   fireEvent,
   cleanup,
   waitFor,
+  within,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { InboxView } from "@/components/inbox/inbox-view";
 import type { Item } from "@/components/inbox/bucket";
 import type { AgingSettings } from "@/lib/aging";
@@ -99,9 +101,11 @@ vi.mock("@/lib/notifications", () => ({
 import {
   completeItem,
   deleteBrainDumpItem,
+  ensureFocusStep,
   keepAsTask,
   renameItem,
 } from "@/app/actions/braindump";
+import { startBreakdown } from "@/app/actions/breakdown";
 import { INBOX_ACTION_TIMEOUT_MS } from "@/components/inbox/inbox-view";
 
 const settings: AgingSettings = {
@@ -215,6 +219,11 @@ beforeEach(() => {
   vi.mocked(keepAsTask).mockResolvedValue(undefined);
   vi.mocked(renameItem).mockReset();
   vi.mocked(renameItem).mockResolvedValue(undefined);
+  vi.mocked(ensureFocusStep).mockReset();
+  vi.mocked(ensureFocusStep).mockResolvedValue(null);
+  vi.mocked(startBreakdown).mockReset();
+  vi.mocked(startBreakdown).mockResolvedValue(null);
+  push.mockReset();
   refresh.mockReset();
 });
 
@@ -1334,6 +1343,125 @@ describe("InboxView — a failed rename (#225)", () => {
 
     await act(async () => {
       settleSecondRetry();
+      await flushTicks();
+    });
+  });
+});
+
+/**
+ * #225 — the title's own claim, tested as a claim.
+ *
+ * "Every inbox row write says so when it does not land" is the promise, and two
+ * separate things can break it: a write path that never reaches `run()` at all,
+ * and a write that reaches it but leaves an EARLIER, contradicting sentence
+ * standing in another live region. Both are the silent-failure class this issue
+ * removes, so both belong beside the specs above rather than in a follow-up.
+ */
+describe("InboxView — every row write reaches the notice (#225)", () => {
+  it("does not leave the move announcer claiming the item moved when the move failed", async () => {
+    const user = userEvent.setup();
+    vi.mocked(completeItem).mockRejectedValueOnce(new Error("offline"));
+    renderInbox([makeItem({ id: "m1", text: "buy oat milk" })]);
+
+    const row = screen.getByText("buy oat milk").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Move to" }));
+    await user.click(
+      await within(row).findByRole("menuitem", { name: /^Completed$/ }),
+    );
+
+    // The write is the thing that decides, so the assertion waits for its
+    // verdict rather than for a paint.
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/couldn't save that/i);
+
+    // `movedAnnouncement` is documented as "a move that actually happened"
+    // (drag-announce.ts) and the dispatcher's own comment says announcing the
+    // INTENT "would tell a screen reader an item had moved when it had not".
+    // Announced before the write, that is exactly what it does — and now that a
+    // failure is assertive, a screen reader gets both sentences about one
+    // gesture. The polite one must never have been the lie.
+    expect(screen.getByTestId("move-announcer")).not.toHaveTextContent(
+      /moved/i,
+    );
+  });
+
+  it("still announces a move that did land", async () => {
+    const user = userEvent.setup();
+    renderInbox([makeItem({ id: "m2", text: "buy rye bread" })]);
+
+    const row = screen.getByText("buy rye bread").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Move to" }));
+    await user.click(
+      await within(row).findByRole("menuitem", { name: /^Completed$/ }),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("move-announcer")).toHaveTextContent(
+        /moved .*buy rye bread.* to Completed/i,
+      ),
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("says so when ▶ Start Focus cannot create the step it needs", async () => {
+    vi.mocked(ensureFocusStep).mockRejectedValueOnce(new Error("offline"));
+    renderInbox([
+      makeItem({
+        id: "f1",
+        text: "book the dentist",
+        status: "triaged",
+        triagedAt: new Date(),
+      }),
+    ]);
+
+    await press(/start focus/i);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/couldn't save that/i);
+    expect(alert).toHaveTextContent(/book the dentist/);
+    // It creates a Task and a Step, so it must not navigate off a write that
+    // never happened.
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("says so when Break into steps cannot create the task it needs", async () => {
+    vi.mocked(startBreakdown).mockRejectedValueOnce(new Error("offline"));
+    renderInbox([makeItem({ id: "b1", text: "plan the loft" })]);
+
+    await press(/break into steps/i);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/couldn't save that/i);
+    expect(alert).toHaveTextContent(/plan the loft/);
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("absorbs a second press of ▶ Start Focus rather than creating a second task", async () => {
+    let settle = () => {};
+    vi.mocked(ensureFocusStep).mockImplementation(
+      () =>
+        new Promise<string | null>(
+          (resolve) => (settle = () => resolve("step-1")),
+        ),
+    );
+    renderInbox([
+      makeItem({
+        id: "f2",
+        text: "book the optician",
+        status: "triaged",
+        triagedAt: new Date(),
+      }),
+    ]);
+
+    await press(/start focus/i);
+    await press(/start focus/i);
+
+    // `ensureFocusStep` creates a Task when the item has none, which is the
+    // duplicate-row class `keepAsTask` was guarded against in this same MR.
+    expect(vi.mocked(ensureFocusStep)).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      settle();
       await flushTicks();
     });
   });

@@ -317,7 +317,23 @@ type WriteField =
   /** `dismissPrompt`. */
   | "prompt"
   /** `moveItemToBucket`'s composite: an optional reopen plus one bucket write. */
-  | "move";
+  | "move"
+  /**
+   * `startBreakdown`. Like `"triage"` it CREATES a Task, and like `"triage"` it
+   * navigates away on success rather than refreshing — see `onLanded`.
+   *
+   * Its own field rather than a share of `"triage"`, even though the two write
+   * the same three columns. Sharing would absorb "Break into steps" pressed
+   * after "Add to-do", and that second press asks for something the first one
+   * does not do: it asks to be TAKEN somewhere. Absorbing it would leave the
+   * user on the inbox with no navigation and no explanation, which is the silent
+   * no-op this issue removes rather than one to add. Two presses of the SAME
+   * control are still absorbed, which is the case that fires twice in practice.
+   */
+  | "breakdown"
+  /** `ensureFocusStep`. Creates a Task AND a Step, and navigates. Its own field
+   *  for the reason `"breakdown"` has one. */
+  | "focus";
 
 type WriteTarget = { id: string; field: WriteField };
 
@@ -409,6 +425,21 @@ type WriteFailure = {
   /** The exact call that failed, so Retry re-runs *that* rather than a rebuilt
    *  guess at it. Deliberately not an identity — see {@link WriteTarget}. */
   fn: () => Promise<unknown>;
+  /**
+   * #225 — what success does, when `router.refresh()` is not it.
+   *
+   * Two of the writes NAVIGATE: a breakdown and ▶ Focus create the row they are
+   * about and then go to its page, so the default refresh would be a second
+   * fetch of a route the push has already left. Held beside `fn` for exactly the
+   * reason `fn` is held — Retry has to reproduce the whole write, and the outcome
+   * is part of the write rather than a decoration on it. A retry that saved the
+   * row and then stayed on the inbox would be the press vanishing again.
+   *
+   * Takes the resolved value because that is where the id to navigate to is, and
+   * because a falsy one means the action declined: the callback is the only place
+   * that knows which of those two happened.
+   */
+  onLanded?: (result: unknown) => void;
   /**
    * The control the press came from, so focus can be handed back when the notice
    * goes away (WCAG 2.4.3).
@@ -1197,7 +1228,15 @@ export function InboxView({
     fn: () => Promise<unknown>,
     target: WriteTarget,
     subject: string,
-    { fromRetry, origin }: { fromRetry: boolean; origin: HTMLElement | null },
+    {
+      fromRetry,
+      origin,
+      onLanded,
+    }: {
+      fromRetry: boolean;
+      origin: HTMLElement | null;
+      onLanded?: (result: unknown) => void;
+    },
   ) => {
     const key = writeTargetKey(target);
     // @see writeGuardKey — the same target for everything except a rename, which
@@ -1232,8 +1271,9 @@ export function InboxView({
         );
       try {
         let landed = false;
+        let result: unknown;
         try {
-          await withActionTimeout(fn(), INBOX_ACTION_TIMEOUT_MS);
+          result = await withActionTimeout(fn(), INBOX_ACTION_TIMEOUT_MS);
           landed = true;
         } catch (error) {
           if (overtaken()) return;
@@ -1270,6 +1310,7 @@ export function InboxView({
             subject,
             seq,
             origin,
+            onLanded,
             stale: isStaleActionError(error),
             timedOut: error instanceof ActionTimeoutError,
             // A fresh record, so the retry flag starts down: this attempt is
@@ -1307,8 +1348,12 @@ export function InboxView({
         // there is nothing new to fetch, and a refresh that itself failed would be
         // a second unreported error. Outside the inner `try` for the reason !290
         // round 8 found — the row is written, so a refresh that throws is a stale
-        // list, not a lost write, and must never be reported as one.
-        router.refresh();
+        // list, not a lost write, and must never be reported as one. The same
+        // reasoning covers `onLanded`, which stands in for the refresh on the two
+        // writes that navigate instead (see {@link WriteFailure.onLanded}): it
+        // runs on success only, and a throw inside it cannot un-write the row.
+        if (onLanded) onLanded(result);
+        else router.refresh();
       } finally {
         // Must run on every exit including a throw: a target left in `inFlight`
         // is a control that silently does nothing for the rest of the session,
@@ -1330,10 +1375,12 @@ export function InboxView({
     fn: () => Promise<unknown>,
     target: WriteTarget,
     subject: string,
+    onLanded?: (result: unknown) => void,
   ) =>
     attemptWrite(fn, target, subject, {
       fromRetry: false,
       origin: focusOrigin(),
+      onLanded,
     });
 
   const retryWrite = () => {
@@ -1345,7 +1392,14 @@ export function InboxView({
       // The origin is the control the ORIGINAL press came from, not the Retry
       // button: the Retry is about to unmount, and handing focus back to it would
       // be handing it to nothing.
-      { fromRetry: true, origin: writeFailure.origin },
+      {
+        fromRetry: true,
+        origin: writeFailure.origin,
+        // Carried through, so a retry that lands navigates exactly as the first
+        // press would have. Dropping it here would save the row and leave the
+        // user on the inbox with no sign anything had happened.
+        onLanded: writeFailure.onLanded,
+      },
     );
   };
 
@@ -1489,19 +1543,49 @@ export function InboxView({
     pending: schedulingIds.has(item.id),
   });
 
-  const breakdown = (id: string) =>
-    startTransition(async () => {
-      const taskId = await startBreakdown(id);
-      if (taskId) router.push(`/tasks/${taskId}`);
-    });
+  /**
+   * #225 — the two row writes that were still outside the notice.
+   *
+   * Both were `startTransition(async () => { await action(); router.push(…) })`
+   * with no `try`, which is the exact four-line shape this issue was filed
+   * about — and between them they are seven more call sites (five here, two for
+   * ▶ Focus) across two more actions, so "every inbox row write says so when it
+   * does not land" was not true of the component while they stayed out. The
+   * issue's table counts the `run()` sites only, which is why these were missed
+   * rather than excluded.
+   *
+   * They are also the two the guard matters most for: each CREATES a Task, so a
+   * second press is the duplicate-row class `keepAsTask` is guarded against
+   * server-side in this same change.
+   *
+   * `onLanded` is what lets them through the shared machinery without the
+   * navigation becoming a refresh — see {@link WriteFailure.onLanded}. A falsy
+   * id means the action declined because the row has gone, so the fall-back is a
+   * refresh: the list is what is now wrong, and refreshing it is what says so.
+   */
+  const breakdown = (id: string, subject: string) =>
+    run(
+      () => startBreakdown(id),
+      { id, field: "breakdown" },
+      subject,
+      (taskId) => {
+        if (typeof taskId === "string") router.push(`/tasks/${taskId}`);
+        else router.refresh();
+      },
+    );
 
   // ▶ Focus on a single to-do — ensures its one-step task exists, then opens
   // the step-based focus timer.
-  const focusOnItem = (id: string) =>
-    startTransition(async () => {
-      const stepId = await ensureFocusStep(id);
-      if (stepId) router.push(`/focus/${stepId}`);
-    });
+  const focusOnItem = (id: string, subject: string) =>
+    run(
+      () => ensureFocusStep(id),
+      { id, field: "focus" },
+      subject,
+      (stepId) => {
+        if (typeof stepId === "string") router.push(`/focus/${stepId}`);
+        else router.refresh();
+      },
+    );
 
   // ▶ Focus a multi-step row: jump straight into the next unfinished step's
   // timer (mirrors the single-task ▶ Focus). Steps already exist, so there's
@@ -1612,8 +1696,6 @@ export function InboxView({
       setAnnouncement(notMovedAnnouncement(item.text, source, voice));
       return;
     }
-    setAnnouncement(movedAnnouncement(item.text, source, plan.target, voice));
-
     run(
       async () => {
         if (plan.reopenFirst) await reopenItem(itemId, undefined);
@@ -1634,6 +1716,25 @@ export function InboxView({
             await completeItem(itemId);
             break;
         }
+        // #225 — announced HERE, after the writes, and that placement is the
+        // fix rather than a tidy-up. `movedAnnouncement` is documented as "a
+        // move that actually happened", and the rule three lines above is that
+        // announcing the INTENT "would tell a screen reader an item had moved
+        // when it had not" — which is precisely what announcing it ahead of the
+        // write did. While every failure here was silent that was one wrong
+        // sentence; now that a failure is an assertive `role="alert"`, it is two
+        // live regions contradicting each other about one gesture, which is the
+        // pair #210 clears `justCaptured` to avoid on the capture path.
+        //
+        // Inside `fn` rather than in a success callback, because the failure
+        // record carries `fn` and nothing else about the write: a successful
+        // RETRY has to announce too, and this is what makes that free. A write
+        // that lands after the client stopped waiting announces late, which is
+        // the honest outcome — the move did happen, and the timeout's message
+        // says only that it could not tell.
+        setAnnouncement(
+          movedAnnouncement(item.text, source, plan.target, voice),
+        );
       },
       // #225 — its own field rather than the field of whichever action `plan`
       // picked. A move is ONE user intent and the notice reports on it as one, so
@@ -2493,7 +2594,7 @@ export function InboxView({
                           settings={settings}
                           voice={voice}
                           now={now}
-                          onBreakdown={() => breakdown(item.id)}
+                          onBreakdown={() => breakdown(item.id, item.text)}
                           onKeep={() =>
                             run(
                               () => keepAsTask(item.id),
@@ -2761,7 +2862,9 @@ export function InboxView({
                                         <button
                                           key="break-now"
                                           type="button"
-                                          onClick={() => breakdown(item.id)}
+                                          onClick={() =>
+                                            breakdown(item.id, item.text)
+                                          }
                                           className={cn(
                                             touchTarget,
                                             "bg-destructive text-destructive-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
@@ -2859,7 +2962,9 @@ export function InboxView({
                                       key="break-now-m"
                                       type="button"
                                       className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                      onClick={() => breakdown(item.id)}
+                                      onClick={() =>
+                                        breakdown(item.id, item.text)
+                                      }
                                     >
                                       {t("prompt.breakNow", voice)}
                                     </button>
@@ -3025,7 +3130,9 @@ export function InboxView({
                                   <button
                                     key="focus"
                                     type="button"
-                                    onClick={() => focusOnItem(item.id)}
+                                    onClick={() =>
+                                      focusOnItem(item.id, item.text)
+                                    }
                                     className={cn(
                                       touchTarget,
                                       "bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
@@ -3075,7 +3182,9 @@ export function InboxView({
                                     key="focus-m"
                                     type="button"
                                     className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
-                                    onClick={() => focusOnItem(item.id)}
+                                    onClick={() =>
+                                      focusOnItem(item.id, item.text)
+                                    }
                                   >
                                     Start visual focus timer
                                   </button>,
@@ -3221,7 +3330,9 @@ export function InboxView({
                                 inline={[
                                   <button
                                     key="breakdown"
-                                    onClick={() => breakdown(item.id)}
+                                    onClick={() =>
+                                      breakdown(item.id, item.text)
+                                    }
                                     className={cn(
                                       touchTarget,
                                       "bg-primary text-primary-foreground rounded-md px-2.5 py-1 font-medium hover:opacity-90",
@@ -3303,7 +3414,9 @@ export function InboxView({
                                   />,
                                   <button
                                     key="breakdown-m"
-                                    onClick={() => breakdown(item.id)}
+                                    onClick={() =>
+                                      breakdown(item.id, item.text)
+                                    }
                                     className="hover:bg-accent w-full rounded-md px-2.5 py-1 text-left"
                                   >
                                     {t("action.breakdownFull", voice)}
