@@ -93,6 +93,65 @@ function report(violations: Violation[], allowed: Set<string>): string {
   return lines.join("\n");
 }
 
+// ── #222: never read `document.title` mid-commit ────────────────────────────
+//
+// `src/app/layout.tsx` sets a static `metadata.title`, so every route ships a
+// `<title>` in the server-streamed HTML. Next puts that metadata in the BODY and
+// React 19 hoists it into `<head>` — and on the RSC payload a `router.refresh()`
+// brings back, the whole hoisted block (`<title>`, the description `<meta>` and
+// both icon `<link>`s) is detached and re-inserted.
+//
+// axe's `doc-has-title` check is exactly `!!sanitize(document.title)`, and
+// `document.title` is empty only while the element belongs to no parent at all —
+// a `<title>` parked inside a body `<div>` still reads `"dlectroflow"`. So the
+// bug is that one instant of re-parenting, a few milliseconds wide, and the
+// specs it exposes are the ones whose last wait before scanning is on *body*
+// content, which says nothing about `<head>`. It failed whichever
+// mutate-then-scan spec landed in the window — `/ (with a row)` on one attempt
+// and `/shopping` on the next, same SHA.
+//
+// #222 carries the CI evidence: the trace snapshots bracketing `axe.runPartial`
+// with `<head>` four children short, and the red/red/green runs on one sha. It
+// is deliberately not restated here — job logs are purged and trace ids mean
+// nothing once the artefact expires, so the durable reference is the issue.
+//
+// So every scan waits for the title first. Deliberately here rather than in
+// `waitForShell`:
+//
+//   * `waitForShell` runs BEFORE the mutation in every affected spec (`goto` →
+//     `waitForShell` → `captureItem` → scan), so a guard there cannot see a
+//     window the later mutation opens. It would read as a fix and change nothing.
+//   * `e2e/a11y/axe-shopping.spec.ts` — the site the second sighting fired on —
+//     does not call `waitForShell` before its scan at all; it arrives by link
+//     click and waits on the page heading.
+//   * `waitForShell` is shared with the smoke specs, where its contract is "the
+//     app shell is rendered". Only the scanners care about `<head>`.
+//
+// This is a WAIT, not a suppression. `document-title` stays out of
+// `axe-baseline.json`: a genuinely title-less route is a real WCAG 2.4.2 failure
+// and baselining the rule would blind the gate to it permanently. A route that
+// really has no title still fails here — with a better message than axe's, and
+// `e2e/a11y/axe-title-guard.spec.ts` holds the title away for good to prove it.
+//
+// `/\S/` rather than `/dlectroflow/`: this asserts the same predicate axe does,
+// which is what makes the wait exactly as strong as the rule it protects.
+// Matching the brand would also couple the gate to one string — `/terms` and
+// `/privacy` set their own titles today, and the next route to do so should not
+// have to know about this file.
+
+/** How long to wait for the title. The window it covers is milliseconds wide. */
+const TITLE_TIMEOUT_MS = 5_000;
+
+async function waitForDocumentTitle(page: Page): Promise<void> {
+  await expect(
+    page,
+    "the page never got a non-empty <title>, so scanning now would report a " +
+      "`document-title` violation that is really a scan taken too early (#222). " +
+      "If this route genuinely ships without a title that is a real WCAG 2.4.2 " +
+      "failure — fix the route's metadata, do not baseline the rule.",
+  ).toHaveTitle(/\S/, { timeout: TITLE_TIMEOUT_MS });
+}
+
 /**
  * Scan the current page with axe and assert there are no NEW serious/critical
  * violations relative to the checked-in baseline for `routeKey`.
@@ -103,6 +162,13 @@ function report(violations: Violation[], allowed: Set<string>): string {
  * that env var set.
  */
 export async function scanA11y(page: Page, routeKey: string): Promise<void> {
+  // Ahead of the UPDATE_BASELINE branch, not inside the asserting path: a
+  // refresh run that caught the #222 window would otherwise WRITE
+  // `document-title::html` into the baseline and permanently blind the gate to
+  // the real thing. The escape hatch this helper advertises must not be able to
+  // record the flake.
+  await waitForDocumentTitle(page);
+
   const results = await new AxeBuilder({ page }).withTags(WCAG_TAGS).analyze();
   const current = blockingFingerprints(results.violations);
 
