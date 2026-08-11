@@ -480,25 +480,41 @@ export async function keepAsTask(id: string) {
  * so nothing outside it ever sees the speculative row, and the winner's Task is
  * adopted instead.
  *
- * ## What is NOT guarded, said plainly rather than left to be assumed
+ * ## The STEP create, closed at the table grain (#245)
  *
- * **The STEP create.** Two concurrent calls against an item that ALREADY has a
- * Task with no steps take no lock at all — neither enters the block above — so
- * both read `steps: []` from their own snapshot and both create one, leaving two
- * steps at `order: 1, total: 1`. Pre-existing rather than introduced here (the
- * unguarded shape is on `main` too), and less harmful than the duplicate Task it
- * sits next to: a stray step is visible in the breakdown and deletable, where an
- * orphaned Task was reachable from nothing. But !306 does make it easier to reach,
- * by putting this write behind the notice's Retry, so it is written down instead
- * of being covered by the heading above.
+ * This heading used to read "what is NOT guarded". Two concurrent calls against an
+ * item that ALREADY has a Task with no steps take **no lock at all** — neither
+ * enters the block above, because `taskId` is already set — so both read
+ * `steps: []` from their own snapshot and both create one, leaving two steps at
+ * `order: 1, total: 1`. `!306` made that easier to reach rather than merely latent,
+ * by putting the write behind the notice's Retry.
  *
- * It is not fixed here because there is no cheap instrument. `Step` has no unique
- * constraint, so `createMany({ skipDuplicates: true })` — the `ON CONFLICT DO
- * NOTHING` shape `src/lib/db.ts` recommends — has nothing to conflict on, and
- * neither `Step` nor `Task` carries an `updatedAt` to write by value and take a
- * lock with. The real options are a unique index on `(taskId, order)` or an
- * explicit lock on the Task row, and both are their own change with their own
- * migration and review rather than a fourth guard bolted onto this one.
+ * No precondition in application code can close it, which is why it was filed
+ * separately (#245) instead of bolted on as a fourth guard. An `UPDATE`'s `where`
+ * can carry a precondition; an `INSERT`'s cannot, and there is no row to lock
+ * because the whole question is whether a row should exist. Both transactions
+ * genuinely find nothing.
+ *
+ * The paragraph that stood here named the two real options — "a unique index on
+ * `(taskId, order)` or an explicit lock on the Task row" — and #245 took the
+ * index (`20260811120000_step_task_order_unique`, which carries the full argument
+ * and the repair pass). It also named the exact reason the cheap instrument was
+ * unavailable: "`Step` has no unique constraint, so `createMany({ skipDuplicates:
+ * true })` — the `ON CONFLICT DO NOTHING` shape `src/lib/db.ts` recommends — has
+ * nothing to conflict on". **It has something to conflict on now**, so this is
+ * that shape and not a `P2002` catch.
+ *
+ * The distinction matters and is the whole reason the index was preferred to the
+ * lock: `src/lib/db.ts` keeps `log: ["error"]` deliberately truthful, so a caught
+ * `P2002` still prints before any `catch` runs — the defect #156 and #158 exist
+ * for, once escalated as an incident. `ON CONFLICT DO NOTHING` raises nothing,
+ * which is what makes a duplicate press a real no-op rather than a handled error.
+ *
+ * `createManyAndReturn` rather than `createMany`, because the count is not enough
+ * here: this action owes its caller a step id to open the timer on. The winner
+ * gets its row back; the loser gets `[]`, which is how it learns to go and read
+ * what actually landed. An empty array is a **result**, not an error — the same
+ * reading `linked.count === 0` gets above.
  */
 export async function ensureFocusStep(id: string): Promise<string | null> {
   const workspaceId = await currentWorkspaceId();
@@ -550,11 +566,33 @@ export async function ensureFocusStep(id: string): Promise<string | null> {
     }
 
     if (steps.length === 0) {
-      const step = await tx.step.create({
-        data: { taskId, text: item.text, order: 1, total: 1, estMinutes: 10 },
+      // #245 — `INSERT … ON CONFLICT DO NOTHING`, against
+      // `Step_taskId_order_key`. `steps: []` came from a read that took no lock,
+      // so it is a hint that this branch is worth entering rather than a fact
+      // this write may rely on; the index is what decides between two callers
+      // who both saw nothing.
+      const [created] = await tx.step.createManyAndReturn({
+        data: [{ taskId, text: item.text, order: 1, total: 1, estMinutes: 10 }],
+        skipDuplicates: true,
       });
-      wrote = true;
-      return step.id;
+      if (created) {
+        wrote = true;
+        return created.id;
+      }
+      // Lost the race. Nothing was inserted and nothing was raised, so go and
+      // read the step the winner committed — a new statement, which sees it.
+      // `wrote` stays false: the revalidation below fires only when this call
+      // actually wrote, which is what it did before #225 moved the body into a
+      // transaction, and the winner did its own.
+      const landed = await tx.step.findFirst({
+        where: { taskId, task: { workspaceId } },
+        orderBy: { order: "asc" },
+      });
+      // Null only if the winner's step has since been deleted — an eject or a
+      // re-plan between its commit and this read. There is nothing to focus, and
+      // that is the same answer this action already gives for an item it cannot
+      // resolve, rather than an error raised at somebody who pressed ▶ twice.
+      return landed?.id ?? null;
     }
 
     const next = steps.find((s) => !s.done) ?? steps[0];

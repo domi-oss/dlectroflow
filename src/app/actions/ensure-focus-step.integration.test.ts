@@ -396,3 +396,138 @@ describe("ensureFocusStep (real Postgres) — one ▶ Focus, one step (#245)", (
     expect(stepId).toBe(steps.find((s) => s.order === 2)!.id);
   });
 });
+
+/**
+ * #245 — the OTHER writers of `Step.order`, against the real unique index.
+ *
+ * A constraint is only as good as the writes it does not break, and the migration's
+ * argument for `(taskId, order)` being safe rests on two claims about code that is
+ * not `ensureFocusStep`. Reasoning is how #180 shipped; these are the claims,
+ * executed.
+ *
+ * `ejectStepToInbox` is the one that could plausibly collide. `confirmBreakdown`
+ * writes `1..N` inside a transaction whose leading `task.update` takes the parent
+ * row lock, so a second confirm serialises behind it — nothing transient to
+ * observe, and its orders are distinct by construction.
+ */
+describe("the (taskId, order) unique index against the other step writers (#245)", () => {
+  /**
+   * The renumber-after-delete that a naive unique index would break.
+   *
+   * `ejectStepToInbox` removes one step and rewrites the survivors to `1..N` as a
+   * sequence of individual `UPDATE`s in one transaction. Postgres checks a unique
+   * index per ROW, not at commit, so a renumbering that ever moved a row ONTO an
+   * order another row still held would abort mid-transaction. It never does: the
+   * survivors are processed ascending and each one's current order is at least its
+   * target, so every move is downward into a slot the loop has already vacated.
+   *
+   * That argument is exactly the kind #180 was shipped on. Here it runs.
+   */
+  it("renumbers the survivors without ever colliding, ejecting from the MIDDLE", async () => {
+    const { item, task } = await seedTriagedItemWithNoSteps();
+    await prisma.step.createMany({
+      data: [1, 2, 3, 4].map((order) => ({
+        taskId: task.id,
+        text: `step ${order}`,
+        order,
+        total: 4,
+        estMinutes: 5,
+      })),
+    });
+    const second = (await stepsIn()).find((s) => s.order === 2)!;
+    const { ejectStepToInbox } = await import("./breakdown");
+
+    const errors = await prismaErrorsDuring(async () => {
+      const result = await ejectStepToInbox(second.id);
+      expect(result).toEqual({ taskId: task.id, remaining: 3 });
+    });
+
+    // No `prisma:error`: a unique-violation abort inside that transaction would
+    // print one whether or not anything caught it (`src/lib/db.ts`).
+    expect(errors).toEqual([]);
+    const steps = await stepsIn();
+    expect(steps.map((s) => [s.text, s.order, s.total])).toEqual([
+      ["step 1", 1, 3],
+      ["step 3", 2, 3],
+      ["step 4", 3, 3],
+    ]);
+    // The ejected step came back as an inbox row, which is the action's point.
+    expect(
+      await prisma.brainDumpItem.count({
+        where: { workspaceId: WS, text: "step 2" },
+      }),
+    ).toBe(1);
+    // And the item this file seeds is untouched by the eject.
+    expect(
+      (await prisma.brainDumpItem.findUnique({ where: { id: item.id } }))
+        ?.taskId,
+    ).toBe(task.id);
+  });
+
+  /**
+   * The same path where the survivors start with GAPS — the state an eject that
+   * died between its `delete` and its renumbering transaction leaves behind. The
+   * ascending-move argument has to hold for a non-contiguous sequence too, and
+   * this is the shape where a "renumber into the first free slot" implementation
+   * would collide.
+   */
+  it("renumbers a gapped sequence without colliding", async () => {
+    const { task } = await seedTriagedItemWithNoSteps();
+    await prisma.step.createMany({
+      data: [3, 7, 9].map((order) => ({
+        taskId: task.id,
+        text: `step ${order}`,
+        order,
+        total: 3,
+        estMinutes: 5,
+      })),
+    });
+    const last = (await stepsIn()).find((s) => s.order === 9)!;
+    const { ejectStepToInbox } = await import("./breakdown");
+
+    const errors = await prismaErrorsDuring(async () => {
+      await ejectStepToInbox(last.id);
+    });
+
+    expect(errors).toEqual([]);
+    expect((await stepsIn()).map((s) => [s.text, s.order, s.total])).toEqual([
+      ["step 3", 1, 2],
+      ["step 7", 2, 2],
+    ]);
+  });
+
+  /**
+   * `confirmBreakdown` replaces a task's steps wholesale — `deleteMany` then
+   * `createMany` in one transaction. Under the new index the delete and the insert
+   * must not be seen as overlapping, and the replacement must land at `1..N`.
+   */
+  it("replaces a breakdown's steps in place, reusing the same orders", async () => {
+    const { task } = await seedTriagedItemWithNoSteps();
+    await prisma.step.createMany({
+      data: [1, 2, 3].map((order) => ({
+        taskId: task.id,
+        text: `old ${order}`,
+        order,
+        total: 3,
+        estMinutes: 5,
+      })),
+    });
+    const { confirmBreakdown } = await import("./breakdown");
+
+    const errors = await prismaErrorsDuring(async () => {
+      await confirmBreakdown(task.id, {
+        parentEmoji: "🎨",
+        steps: [
+          { text: "new one", estMinutes: 10 },
+          { text: "new two", estMinutes: 20 },
+        ],
+      });
+    });
+
+    expect(errors).toEqual([]);
+    expect((await stepsIn()).map((s) => [s.text, s.order, s.total])).toEqual([
+      ["new one", 1, 2],
+      ["new two", 2, 2],
+    ]);
+  });
+});

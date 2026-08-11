@@ -490,6 +490,19 @@ model Step {
   createdAt        DateTime       @default(now())
   focusSessions    FocusSession[]
 
+  // #245 — the constraint `ensureFocusStep` needs and could not have. Two ▶ Focus
+  // presses against a task with no steps take no row lock (the item's `taskId` is
+  // already set, so #225's Task guard is skipped), both read `steps: []` and both
+  // insert; an INSERT's precondition cannot live in a `where`. With this index the
+  // second insert is an `ON CONFLICT DO NOTHING` no-op — the shape `src/lib/db.ts`
+  // prescribes and that action's docblock could not use until now — so the loser
+  // adopts instead of duplicating, and nothing is printed at error level.
+  //
+  // Safe against both existing step writers, and the migration
+  // (20260811120000_step_task_order_unique) carries the argument plus the repair
+  // pass for data that already holds duplicates. A future reorder-by-SWAP would
+  // collide here, loudly, which is the right way round.
+  @@unique([taskId, order])
   @@index([taskId])
 }
 
