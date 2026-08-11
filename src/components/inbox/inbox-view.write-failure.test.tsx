@@ -193,9 +193,14 @@ async function press(name: RegExp) {
  */
 async function editTitle(rowText: string, next: string) {
   await act(async () => {
-    screen
-      .getByRole("button", { name: new RegExp(`^edit ${rowText}$`, "i") })
-      .click();
+    // An exact STRING match rather than a built regex. Testing Library treats a
+    // string `name` as the whole accessible name, which is exactly what the
+    // pencil's `aria-label={`Edit ${item.text}`}` gives — so the regex bought
+    // nothing, and building one from an interpolated value is what SAST flags as
+    // a non-literal `RegExp` (CWE-1333). It was the one live scanner finding on
+    // this branch; removing the construct is better than triaging it, since a
+    // dismissal has to be re-argued every time the fingerprint moves.
+    screen.getByRole("button", { name: `Edit ${rowText}` }).click();
     await flushTicks();
   });
   const editor = screen.getByRole("textbox", { name: /^edit title$/i });
