@@ -218,9 +218,17 @@ async function whileRowIsLockedWithATask<T>(
 
   await locked;
   const running = act();
-  await waitUntilBlockedBy(holderPid);
-  release();
-  await holder;
+  try {
+    await waitUntilBlockedBy(holderPid);
+  } finally {
+    // Always, even when the barrier never fired. Skipping it on the throw path
+    // would leave this transaction holding the row lock until its own 30s
+    // timeout — on a database up to forty worktrees share — and the diagnostic
+    // would arrive as somebody else's mysterious hang rather than as the
+    // assertion below.
+    release();
+    await holder;
+  }
   return { winner, result: await running };
 }
 
