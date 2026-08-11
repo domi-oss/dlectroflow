@@ -121,6 +121,11 @@ export default async function SettingsPage({
           alarmEnabled={settings.focusAlarmEnabled}
           sound={settings.focusSound}
           pauseTogether={settings.focusPauseTogether}
+          // #252 — whether the header carries the one-tap timer shortcut. Filed
+          // with the other focus options because it governs one icon, not a
+          // route: `shoppingList` earned its own section (#199) by gating
+          // /shopping, and this gates nothing.
+          quickAccess={settings.focusQuickAccess}
           voice={voice}
           defaultExpanded
         />
@@ -199,6 +204,11 @@ export default async function SettingsPage({
         <div className="border-t pt-4">
           <AccountPanel
             handle={me.handle}
+            // #252 — the name the header calls them by. Read from the same
+            // `currentUser()` resolution this page already made, and person-
+            // scoped, so it sits under Account rather than with the
+            // workspace-scoped sections above.
+            displayName={me.displayName}
             provider={me.provider}
             keyPresent={keyPresent}
             // #118 — the model a member's OWN-KEY breakdown actually resolves

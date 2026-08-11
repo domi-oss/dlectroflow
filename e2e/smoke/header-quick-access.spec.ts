@@ -1,6 +1,12 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
-import { DESKTOP, MOBILE, NARROW, waitForShell } from "../helpers";
+import {
+  DESKTOP,
+  MOBILE,
+  NARROW,
+  expandSection,
+  waitForShell,
+} from "../helpers";
 import { OWNER_HANDLE, OWNER_USER_ID, OWNER_WS_ID } from "../constants";
 
 /**
@@ -343,5 +349,94 @@ test.describe("#252 header quick access — behaviour", () => {
     await page.goto("/help");
     await waitForShell(page);
     await expect(identityTrigger(page)).toContainText(OWNER_HANDLE);
+  });
+});
+
+// ── Driven from Settings, the way a person does it ──────────────────────────
+//
+// The two describes above set state with Prisma, which proves the header READS
+// it. This one proves the whole path: the Settings control renders, its write
+// lands, and the app shell — a different component tree on a different route —
+// changes as a result. That is the half a unit test structurally cannot reach,
+// and the half that broke in #199 (a client component reaching a module that
+// constructs `new PrismaClient()`: `next build` green, unit suite green, the
+// chunk threw in a browser).
+
+test.describe("#252 driven from Settings", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize(DESKTOP);
+  });
+
+  test("turning the shortcut off in Settings removes it from the header", async ({
+    page,
+  }) => {
+    await setGates({ shoppingList: false, focusQuickAccess: true });
+    await page.goto("/settings");
+    await waitForShell(page);
+    await expandSection(page, "settings-focus-timer");
+
+    const toggle = page.getByRole("checkbox", {
+      name: /shortcut in the header/i,
+    });
+    await expect(toggle).toBeChecked();
+    // The header on THIS page already carries it, so the removal is observable
+    // without navigating anywhere.
+    await expect(focusLink(page)).toBeVisible();
+
+    await toggle.setChecked(false);
+    // The shortcut is server-rendered by the layout, so it can only disappear
+    // once the write has landed and the revalidation has taken effect — which is
+    // what makes this the proof rather than the checkbox's own state.
+    await expect(focusLink(page)).toHaveCount(0);
+
+    // …and back, so nothing after this file inherits the change.
+    await toggle.setChecked(true);
+    await expect(focusLink(page)).toBeVisible();
+  });
+
+  test("typing a name in Settings changes what the header calls you", async ({
+    page,
+  }) => {
+    await setDisplayName(null);
+    try {
+      await page.goto("/settings");
+      await waitForShell(page);
+      await expandSection(page, "settings-account");
+
+      await expect(identityTrigger(page)).toContainText(OWNER_HANDLE);
+
+      const nameField = page.getByLabel(/your name/i);
+      await nameField.fill("Domi");
+      // Auto-saved behind a debounce, so this waits on the HEADER rather than on
+      // a Save button there is none of.
+      await expect(identityTrigger(page)).toContainText("Domi");
+      await expect(identityTrigger(page)).toHaveAccessibleName("Account: Domi");
+
+      // Emptying it is the documented way back, and the hint promises it.
+      await nameField.fill("");
+      await expect(identityTrigger(page)).toContainText(OWNER_HANDLE);
+    } finally {
+      await setDisplayName(null);
+    }
+  });
+
+  // The length bound is enforced by the field, not only by the action, so a
+  // refusal is not something a user can reach by typing.
+  test("the name field stops at the cap rather than letting the write fail", async ({
+    page,
+  }) => {
+    await setDisplayName(null);
+    try {
+      await page.goto("/settings");
+      await waitForShell(page);
+      await expandSection(page, "settings-account");
+
+      const nameField = page.getByLabel(/your name/i);
+      await nameField.fill("");
+      await nameField.pressSequentially("a".repeat(70), { delay: 0 });
+      expect(await nameField.inputValue()).toHaveLength(60);
+    } finally {
+      await setDisplayName(null);
+    }
   });
 });
