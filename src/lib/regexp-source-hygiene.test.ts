@@ -100,9 +100,13 @@ describe("scanRegExpSites — the verdicts", () => {
   });
 
   /**
-   * Adversarial review of !293's sibling MR. Seven of ten constructions written
-   * to defeat this guard passed it green, and these are the four that mattered.
-   * Each is the ordinary way somebody would actually write the unsafe thing.
+   * First adversarial round on !319. Seven of ten constructions written to defeat
+   * this guard passed it green, and these are the four that mattered. Each is the
+   * ordinary way somebody would actually write the unsafe thing.
+   *
+   * (This block cited `!293` until the second round; that is an unrelated MR
+   * about production alerting, and a cross-reference nobody can follow is worse
+   * than none.)
    */
   describe("the ways a dynamic pattern used to slip through", () => {
     it("does not call string concatenation a literal", () => {

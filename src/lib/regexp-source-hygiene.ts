@@ -4,11 +4,11 @@
  * ── Why this module exists ───────────────────────────────────────────────────
  *
  * `eslint.detect-non-literal-regexp` is the largest single source of SAST
- * findings here: **15 of the 37 SAST findings on `main`** (measured on the
- * pipeline for `57a272a`, 2026-08-10), spread across nine files. Its sibling
- * `nodejs_scan.javascript-dos-rule-regex_dos` adds 7 more, so between them the
- * regex family is 22 of 37 — a shade under 60% of everything the scanners say
- * about this codebase.
+ * findings here: **58 records across the project's vulnerability history, 57 of
+ * them already dismissed** (2026-08-11), spread across nine files that the rule
+ * still reports on. Its sibling `nodejs_scan.javascript-dos-rule-regex_dos` sits
+ * behind it, and between them the regex family is most of what the scanners have
+ * ever said about this codebase.
  *
  * None has been a true positive, and that is structural rather than lucky: the
  * CWE needs an attacker to influence the pattern. Every construction here
@@ -33,17 +33,16 @@
  * finding by file and line, so a dismissal attaches to a POSITION rather than
  * to code: any edit above one — a comment, an import, a reordered block —
  * resurfaces an already-triaged finding as untriaged, and somebody has to read
- * it and dismiss it with written evidence again. There are **58 historical
- * records for this rule, 57 of them dismissed** (project vulnerability report,
- * 2026-08-11); the three constructs in the scoping harness account for 11 by
- * themselves, and `!318`, which touched only a page footer and its tests,
- * produced three more.
+ * it and dismiss it with written evidence again. That is what 57 dismissals
+ * across 58 records buys you. The three constructs in the scoping harness
+ * account for 11 of them by themselves, and `!318`, which touched only a page
+ * footer and its tests, produced three more.
  *
- * That total is the argument, and it is deliberately the *cumulative* one rather
- * than a per-pipeline snapshot, because a snapshot rots: it read 15 of 37 on
- * `57a272a` and 18 of 40 three merges later. If you re-measure, **paginate** —
- * the project's SAST history runs to 141 records and a single page of 100
- * undercounts this rule by three.
+ * The count above is deliberately the **cumulative** one rather than a
+ * per-pipeline snapshot, because a snapshot rots: this rule read 15 of 37
+ * findings on `57a272a` and 18 of 40 three merges later. If you re-measure,
+ * **paginate** — the project's SAST history runs to 141 records and a single page
+ * of 100 undercounts this rule by three.
  *
  * ── Why a guard and not just a rewrite ───────────────────────────────────────
  *
