@@ -118,10 +118,29 @@ synchronous-localStorage pattern with a `useSyncExternalStore` subscription (`sr
 and an async store would make the write-before-network guarantee harder to hold. Chrome Android
 applies no 7-day script-writable-storage eviction, so durability is measured in weeks.
 
-**Cap: 200 items or 256 KB, whichever binds first.** At the cap a new capture is **refused with a
-visible message** and the words stay in the field. It does not silently evict the oldest — losing the
-newest *with the user watching* is honest; losing the oldest quietly is the bug this issue exists to
-fix, in a new costume.
+**Cap: 20 items, or 64 KB total, whichever binds first** (owner decision 2026-08-11 — an earlier draft
+said 200). At the cap a new capture is **refused with a visible message** and the words stay in the
+field. It does not silently evict the oldest — losing the newest *with the user watching* is honest;
+losing the oldest quietly is the bug this issue exists to fix, in a new costume.
+
+**20 makes the cap a limit the user can actually meet, and that changes what it is.** At 200 it is a
+runaway guard nobody reaches; at 20 a genuine capture burst on a long journey can hit it, so the
+refusal is user-facing UX rather than a defensive branch. It therefore has to say what to do, not just
+that it failed:
+
+> *"20 captures are already waiting to save — that's the limit until some of them go through. Your
+> words are still in the box; copy them somewhere safe if you need to."*
+
+The bound is not about storage size. 20 short captures is a few kilobytes and `localStorage` has
+megabytes; the item cap exists to keep the strip legible and the wait comprehensible.
+
+**The byte bound is doing a different job, and it is load-bearing.** Verified 2026-08-11: there is **no
+length limit on capture text anywhere** — no `maxLength` on the input, no check in
+`createBrainDumpItem`, and `BrainDumpItem.text` is an unbounded Postgres `text`. So one pasted essay
+can be arbitrarily large, and without a byte bound a single capture could exhaust the quota and throw
+`QuotaExceededError` on the write this whole design depends on being reliable. 64 KB total, checked
+before enqueue, with an over-large single capture refused on the same message. Whether capture text
+should have a limit *at all* is a separate question and not this issue's to answer.
 
 ### Idempotency — a separate column, not a client-chosen primary key
 
@@ -271,9 +290,12 @@ date moves. That gate is the reason this cannot be forgotten.
 
 TDD, failing test first, in this order:
 
-1. **Queue module** (`src/lib/capture-queue.ts`, pure) — enqueue, ordering, cap refusal at both bounds,
-   removal on `200`/`201`, retention on `409`/`403`/`5xx`, corrupt-JSON recovery, quota-exceeded
-   recovery. No React, no DOM.
+1. **Queue module** (`src/lib/capture-queue.ts`, pure) — enqueue, ordering, refusal at the 20-item
+   bound, refusal at the 64 KB bound, refusal of a single over-large capture, removal on `200`/`201`,
+   retention on `409`/`403`/`5xx`, corrupt-JSON recovery, `QuotaExceededError` recovery. The
+   20th-and-21st capture is its own test: the 20th must save and the 21st must be refused **with the
+   words still in the field**, which is the assertion that stops the cap becoming silent eviction in a
+   later refactor. No React, no DOM.
 2. **Route** (`src/app/api/braindump/route.ts`) — same `clientKey` twice yields **one** row;
    workspace mismatch yields `409` **and no row**; frozen account yields `403` and no row; the guest
    arm still works for a genuine guest.
