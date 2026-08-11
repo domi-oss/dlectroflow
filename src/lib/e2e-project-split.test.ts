@@ -12,10 +12,12 @@ import {
   relativeImportTargets,
   filesReaching,
   importsPackage,
+  commentOnlySpecifiers,
   retryMaskedSpecs,
   type ProjectRouting,
   type Routing,
 } from "./e2e-project-split";
+import { stripComments } from "./source-text";
 
 /**
  * #127 — the routing guard's own tests.
@@ -214,6 +216,107 @@ describe("importsPackage — synthetic", () => {
 
 /** The package every axe scan in the suite has to go through. */
 const AXE = "@axe-core/playwright";
+
+describe("comments are not code, and stripping them must not lose code (#150)", () => {
+  // Raised by review on !323, and both halves were measured before choosing a
+  // fix. The scanner reads raw text, so a comment quoting a specifier becomes a
+  // phantom edge — real, and Duo was right about it. But `stripComments` is
+  // documented in source-text.ts as erring "towards seeing LESS", and for THIS
+  // caller seeing less means declaring a file that genuinely reaches axe to be
+  // clean while it retries a WCAG assertion. That is the defect this MR removes,
+  // reintroduced in the parser.
+  //
+  // So: `stripComments` CLASSIFIES, it never DECIDES. The reachability answer
+  // stays fail-closed on the raw text, which can only ever over-report.
+
+  const AXE_IMPORT = `import AxeBuilder from "${AXE}";`;
+
+  describe("classification — which specifiers exist only inside comments", () => {
+    it("reports a specifier that only a line comment mentions", () => {
+      expect(
+        commentOnlySpecifiers(
+          '// import x from "./axe-helpers";\nconst a = 1;',
+        ),
+      ).toEqual(["./axe-helpers"]);
+    });
+
+    it("reports one that only a multi-line block comment mentions", () => {
+      expect(
+        commentOnlySpecifiers(
+          `/**\n * Tags are derived from "${AXE}" defaults.\n */\nconst a = 1;`,
+        ),
+      ).toEqual([AXE]);
+    });
+
+    it("reports nothing when the specifier is real code", () => {
+      expect(commentOnlySpecifiers(AXE_IMPORT)).toEqual([]);
+    });
+
+    it("reports nothing when a comment quotes a specifier the code also imports", () => {
+      // The specifier is in both, so it is code. Only the comment-EXCLUSIVE ones
+      // are worth telling anyone about.
+      expect(commentOnlySpecifiers(`// see "${AXE}"\n${AXE_IMPORT}`)).toEqual(
+        [],
+      );
+    });
+  });
+
+  describe("fail closed — every shape that can defeat a text-level strip", () => {
+    // Each of these is a REAL import that `stripComments` alone would lose. The
+    // assertion is that reachability still says yes, so the guard cannot go
+    // quiet on a file it failed to understand.
+    const hazards: [string, string][] = [
+      [
+        "a string containing a block-comment opener, import on a later line",
+        `const s = "a /* b";\n${AXE_IMPORT}\nconst t = "c */ d";`,
+      ],
+      [
+        "a regex literal containing slashes, import on the same line",
+        `const re = /\\/\\//; ${AXE_IMPORT}`,
+      ],
+      [
+        "a regex literal containing a quote ahead of the import",
+        `const q = /["']/;\n${AXE_IMPORT}`,
+      ],
+      [
+        "a string containing the word from followed by a quote",
+        `const msg = "copied from \\"elsewhere\\"";\n${AXE_IMPORT}`,
+      ],
+      [
+        "an import specifier inside a template literal, plus a real import",
+        `const doc = \`import x from "./ghost";\`;\n${AXE_IMPORT}`,
+      ],
+    ];
+
+    for (const [name, source] of hazards) {
+      it(`still sees the real axe import despite ${name}`, () => {
+        const sources = new Map([["/repo/e2e/a.spec.ts", source]]);
+        expect(
+          filesReaching(
+            (_f, s) => importsPackage(s, AXE),
+            [...sources.keys()],
+            (f) => sources.get(f)!,
+          ),
+          "reachability must never rest on stripComments, which is documented to see LESS",
+        ).toEqual(["/repo/e2e/a.spec.ts"]);
+      });
+    }
+
+    it("proves stripComments alone WOULD have lost two of them", () => {
+      // The evidence for the paragraph above, run rather than asserted. If
+      // source-text.ts ever becomes string-aware this fails, and the comment
+      // that justifies the fail-closed design has to be revisited.
+      const lost = [
+        `const s = "a /* b";\n${AXE_IMPORT}\nconst t = "c */ d";`,
+        `const re = /\\/\\//; ${AXE_IMPORT}`,
+      ];
+      for (const source of lost) {
+        expect(importsPackage(source, AXE)).toBe(true);
+        expect(importsPackage(stripComments(source), AXE)).toBe(false);
+      }
+    });
+  });
+});
 
 describe("filesReaching — synthetic", () => {
   const HELPERS = "/repo/e2e/a11y/axe-helpers.ts";
@@ -631,6 +734,51 @@ describe("no a11y assertion runs with a retry to spend (#247)", () => {
       { ...manifest.dependencies, ...manifest.devDependencies },
       `${AXE} is not a dependency — this guard is now measuring nothing.`,
     ).toHaveProperty(AXE);
+  });
+
+  it("has no file whose axe reachability rests only on a comment (#150)", () => {
+    // The cure for what review on !323 actually objected to. Reachability is
+    // fail-closed on raw text, so a comment quoting a specifier DOES inflate the
+    // graph — the complaint was that whoever hit it would have to
+    // reverse-engineer why prose tripped a routing guard. This makes that state
+    // illegal in the tree and says so in one sentence, so the confusing version
+    // of the failure can never happen.
+    //
+    // Only specifiers that would really create an edge count: a comment naming a
+    // path that resolves to nothing cannot change any answer.
+    const files = e2eFiles();
+    const known = new Set(files);
+    const offenders: string[] = [];
+    for (const file of files) {
+      for (const specifier of commentOnlySpecifiers(readSource(file))) {
+        if (specifier === AXE || specifier.startsWith(`${AXE}/`)) {
+          offenders.push(
+            `${file.slice(REPO_ROOT.length)} — comment quotes ${AXE}`,
+          );
+          continue;
+        }
+        if (!specifier.startsWith(".")) continue;
+        const resolvedFrom = relativeImportTargets(
+          file,
+          // The specifier alone, re-wrapped so the resolver sees one edge.
+          `import ${JSON.stringify(specifier)};`,
+        );
+        const hit = resolvedFrom.find((base) =>
+          [base, `${base}.ts`, `${base}.tsx`, `${base}/index.ts`].some((c) =>
+            known.has(c),
+          ),
+        );
+        if (hit !== undefined) {
+          offenders.push(
+            `${file.slice(REPO_ROOT.length)} — comment quotes ${specifier}`,
+          );
+        }
+      }
+    }
+    expect(
+      offenders,
+      "a comment quotes an import specifier that resolves to a real module, so it becomes a phantom edge in the reachability graph. Put the path in backticks instead of straight quotes, or drop the `from` before it.",
+    ).toEqual([]);
   });
 
   it("can see the call sites it is supposed to police", () => {

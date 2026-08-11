@@ -30,6 +30,11 @@
  * shown to pass.
  */
 
+// The neutral text helper #150 extracted for exactly this, rather than a second
+// copy of it — see `commentOnlySpecifiers` for the one thing this module uses it
+// for, and the one thing it deliberately does not.
+import { stripComments } from "./source-text";
+
 /**
  * One Playwright project reduced to the only thing that decides file routing.
  *
@@ -177,13 +182,17 @@ export function relativeImportTargets(file: string, source: string): string[] {
   // directory too deep.
   const dir = lastSlash === -1 ? "." : file.slice(0, lastSlash);
   const targets = new Set<string>();
-  for (const match of source.matchAll(IMPORT_SPECIFIER)) {
-    const specifier = match[1];
+  for (const specifier of specifiersIn(source)) {
     // A relative specifier is the only kind that can name a repo file.
     if (!specifier.startsWith(".")) continue;
     targets.add(normalise(`${dir}/${specifier}`));
   }
   return [...targets];
+}
+
+/** Every quoted specifier in `text`, in source order, duplicates included. */
+function specifiersIn(text: string): string[] {
+  return [...text.matchAll(IMPORT_SPECIFIER)].map((match) => match[1]);
 }
 
 /**
@@ -216,12 +225,49 @@ function normalise(path: string): string {
 
 /** True when `source` imports the bare package `pkg` (not a relative path). */
 export function importsPackage(source: string, pkg: string): boolean {
-  for (const match of source.matchAll(IMPORT_SPECIFIER)) {
-    // Exact, or a subpath import of the same package (`@axe-core/playwright`
-    // has none today, but `pkg/thing` must not be read as a different package).
-    if (match[1] === pkg || match[1].startsWith(`${pkg}/`)) return true;
-  }
-  return false;
+  // Exact, or a subpath import of the same package (`@axe-core/playwright` has
+  // none today, but `pkg/thing` must not be read as a different package).
+  return specifiersIn(source).some(
+    (specifier) => specifier === pkg || specifier.startsWith(`${pkg}/`),
+  );
+}
+
+/**
+ * Specifiers that appear ONLY in text `stripComments` removes — a comment
+ * quoting an import rather than an import.
+ *
+ * ── Why this classifies and never decides (#150, raised on !323) ─────────────
+ * Every regex scanner in this repo strips comments before it looks, because
+ * prose describing a construct is indistinguishable from code using it once the
+ * reader is a regex. This scanner did not, so a doc comment writing
+ * `derived from "@axe-core/playwright"` with straight quotes became a phantom
+ * edge. That much was real and is what this function is for.
+ *
+ * What it deliberately does NOT do is gate reachability on the stripped text.
+ * `source-text.ts` states its own trade plainly: it is text-level, a `//` or
+ * `/*` inside a string literal can still read as a comment opener, and it
+ * therefore errs "towards seeing LESS". For `manifest-hygiene` and `env-drift`
+ * that is the safe direction — a missed package name or env var costs nothing
+ * until the construct reappears in plain code. **For this guard it is the
+ * catastrophic direction**: seeing less means declaring a file that genuinely
+ * reaches axe to be clean, while it retries a zero-tolerance WCAG assertion.
+ * That is the exact defect #247 exists to remove, one layer up in the parser.
+ *
+ * Measured rather than argued, in the colocated test: `stripComments` turns a
+ * REAL `import AxeBuilder from "@axe-core/playwright"` into no match at all when
+ * a string containing `/*` precedes it, or when a regex literal containing
+ * slashes sits on the same line. So reachability stays on the raw text, which
+ * can only ever over-report, and this function exists to make the over-report
+ * legible: the colocated test fails with "only a comment mentions it" instead of
+ * leaving someone to reverse-engineer why prose tripped a routing guard.
+ *
+ * Comment-exclusive only. A specifier both imported and discussed is code.
+ */
+export function commentOnlySpecifiers(source: string): string[] {
+  const inCode = new Set(specifiersIn(stripComments(source)));
+  return [...new Set(specifiersIn(source))].filter(
+    (specifier) => !inCode.has(specifier),
+  );
 }
 
 /**
