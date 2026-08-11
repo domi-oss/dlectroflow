@@ -99,8 +99,8 @@
   #
   # `eslint.detect-non-literal-regexp` is the largest single source of SAST
   # findings in this repo: **58 records across the project's vulnerability
-  # history, 57 of them already dismissed** (2026-08-11). On main's pipeline 2674
-  # (`9d59f6a`) it is 18 findings across ten files, and with its sibling
+  # history, 57 of them already dismissed** (2026-08-11). On main's pipeline 2678
+  # (`973919f`) it is 18 findings across ten files, and with its sibling
   # `nodejs_scan.javascript-dos-rule-regex_dos` (8) the regex family is 26 of 42
   # — 62% of everything the scanners say about this codebase.
   #

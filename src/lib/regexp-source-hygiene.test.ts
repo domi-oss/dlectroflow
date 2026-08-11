@@ -497,7 +497,8 @@ describe("the real tree", () => {
    * content. It reported those files clean while Semgrep kept firing on them.
    *
    * The list is the real per-file breakdown of `eslint.detect-non-literal-regexp`
-   * on `main`'s pipeline `2674` (`9d59f6a`), measured 2026-08-11 — **18 findings
+   * on `main`'s pipeline `2678` (`973919f`, this branch's merge base), measured
+   * 2026-08-11 — **18 findings
    * across ten files**.
    *
    * **This snapshot rots, and it rotted inside a day.** Measured first on
