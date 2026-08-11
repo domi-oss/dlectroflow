@@ -104,9 +104,30 @@ const renderList = (items: Parameters<typeof ShoppingList>[0]["items"] = []) =>
  * There is exactly one `<form>` in the component: the capture field and its Add
  * button. Every other spec here renders a handful of rows, where the same two
  * unscoped queries cost 1 ms and 4 ms, so they are left alone.
+ *
+ * That "exactly one" is **asserted, not assumed**. The `screen`/`within`
+ * queries this replaces throw when a selector matches more than one node, and
+ * dropping to `querySelector` would have quietly given up that property: a
+ * second `<form>` in the tree — a rename editor growing one, say — would scope
+ * the two specs to the wrong subtree while their queries still resolved and
+ * their assertions still passed. Silent lost coverage is worse than the slow
+ * version this replaced, which at least announced itself
+ * (Duo review round 2, !320). `getByRole("form")` is not the alternative: a
+ * `<form>` only takes that role once it has an accessible name, and this one
+ * has none.
  */
-const captureForm = (container: HTMLElement): HTMLElement =>
-  container.querySelector("form")!;
+const captureForm = (container: HTMLElement): HTMLElement => {
+  const forms = container.querySelectorAll("form");
+  if (forms.length !== 1) {
+    throw new Error(
+      `captureForm: expected exactly one <form> in the rendered tree, found ` +
+        `${forms.length}. The at-the-cap specs scope their queries to that ` +
+        `form, so any other count would point them at the wrong subtree ` +
+        `without failing.`,
+    );
+  }
+  return forms[0];
+};
 
 /**
  * `fireEvent` rather than `userEvent`: some specs below drive fake timers, and
@@ -140,6 +161,35 @@ const addViaField = async (value: string, scope?: HTMLElement) => {
   await flush();
   return field;
 };
+
+describe("the at-the-cap query scope", () => {
+  /**
+   * {@link captureForm} exists so the two at-the-cap specs can skip a
+   * whole-document query, and it is only correct while the tree holds exactly
+   * one `<form>`. Taking the first match silently would be the worst available
+   * outcome: those specs would scope to the wrong subtree, their queries would
+   * still resolve, their assertions would still pass, and the coverage they
+   * claim would be gone with nothing saying so. A slow test at least tells you
+   * it is slow. So the invariant the docblock relies on is asserted here rather
+   * than trusted (Duo review round 2, !320).
+   */
+  it("refuses to guess when the tree holds more than one form", () => {
+    const { container } = renderList([item({})]);
+    container.appendChild(document.createElement("form"));
+    expect(() => captureForm(container)).toThrow(
+      /exactly one <form>.*\bfound 2\b/i,
+    );
+  });
+
+  // The same guard catches the opposite drift: a component that stopped
+  // rendering the capture form would otherwise hand back null and fail later,
+  // somewhere that says nothing about the cause.
+  it("refuses to guess when the tree holds no form at all", () => {
+    expect(() => captureForm(document.createElement("div"))).toThrow(
+      /exactly one <form>.*\bfound 0\b/i,
+    );
+  });
+});
 
 const clickRetry = () =>
   act(async () => {
