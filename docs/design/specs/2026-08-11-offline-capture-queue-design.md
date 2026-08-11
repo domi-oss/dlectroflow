@@ -30,7 +30,8 @@ save themselves when the network comes back, whether or not you reopen the app.*
   would *help* this design (installation is one of Chrome's signals for granting
   `navigator.storage.persist()`, which makes the queue harder to evict — better odds, not a
   guarantee). It is excluded because it is its own feature with its own auth-testing surface, not
-  because it is unwelcome. See *The manifest question* below.
+  because it is unwelcome. **Filed as #254 and scheduled into v0.6.0 on 2026-08-11.** See *The
+  manifest question* below.
 - **Changing `proxy.ts` or the auth middleware.** The expired-session hole is closed here by a guard
   in the queue and in the new route, both of which can only *refuse* a write. Fixing the middleware's
   guest-sandbox minting is real but belongs to its own issue; this repo has recorded auth-flow
@@ -343,8 +344,10 @@ server half first.
 
 Raised by the owner on 2026-08-11 while this spec was being written — first as "how hard is a Play
 Store release", then as the sharper version: *is there better mobile usability available without going
-down the store route?* There is. Recorded here because it turns one of this document's non-goals from a
-settled boundary into a scheduled decision. **None of it is in scope for #175.**
+down the store route?* There is. **Filed as #254 — No way to capture from the home screen or another
+app's Share, scheduled into v0.6.0 the same day.** Recorded here because it turns one of this
+document's non-goals from a settled boundary into scheduled work. **None of it is in scope for #175**;
+this section is the handover to #254, whose own brainstorm has not yet been held.
 
 ### A manifest alone, no store involved
 
