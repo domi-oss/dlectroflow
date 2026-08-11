@@ -235,20 +235,40 @@ describe("capture queue — flush outcomes (#175)", () => {
     expect(readQueue(store).map((c) => c.clientKey)).toEqual(["b"]);
   });
 
-  it("KEEPS a capture whose session expired (409), and marks it", () => {
+  // ⚠️ 409 and 403 are asserted SEPARATELY and their marks compared. A test that
+  // only checked "the capture was kept" would pass the collapsed-state bug the
+  // spec review caught — both statuses keep the capture, and that is exactly why
+  // "it was kept" is not enough to prove they are distinguished.
+  it("KEEPS a capture whose session expired (409) and marks it session-expired", () => {
     const store = seeded(two);
-    applyFlushOutcome(store, "a", "needs-sign-in");
+    applyFlushOutcome(store, "a", "session-expired");
     const q = readQueue(store);
     expect(q.map((c) => c.clientKey)).toEqual(["a", "b"]);
-    expect(q[0].needsSignIn).toBe(true);
+    expect(q[0].blockedBy).toBe("session-expired");
     // Only the one it was told about.
-    expect(q[1].needsSignIn).toBeUndefined();
+    expect(q[1].blockedBy).toBeUndefined();
   });
 
-  it("KEEPS a capture whose account was frozen (403), and marks it", () => {
+  it("KEEPS a capture whose account was revoked (403) and marks it account-revoked", () => {
     const store = seeded(two);
-    applyFlushOutcome(store, "a", "needs-sign-in");
-    expect(readQueue(store)).toHaveLength(2);
+    applyFlushOutcome(store, "a", "account-revoked");
+    const q = readQueue(store);
+    expect(q.map((c) => c.clientKey)).toEqual(["a", "b"]);
+    expect(q[0].blockedBy).toBe("account-revoked");
+  });
+
+  // The distinction has a user consequence: for a revoked account, signing in
+  // CANNOT help — #220 has already cleared the session and bounced to /login — so
+  // the strip must not offer a sign-in. That decision is only possible if these
+  // two never share a value.
+  it("does not confuse the two refusals with each other", () => {
+    const expired = seeded([capture({ clientKey: "a" })]);
+    const revoked = seeded([capture({ clientKey: "a" })]);
+    applyFlushOutcome(expired, "a", "session-expired");
+    applyFlushOutcome(revoked, "a", "account-revoked");
+    expect(readQueue(expired)[0].blockedBy).not.toBe(
+      readQueue(revoked)[0].blockedBy,
+    );
   });
 
   it("KEEPS a capture on a retryable failure, unmarked", () => {
@@ -256,19 +276,25 @@ describe("capture queue — flush outcomes (#175)", () => {
     applyFlushOutcome(store, "a", "retry");
     const q = readQueue(store);
     expect(q).toHaveLength(2);
-    expect(q[0].needsSignIn).toBeUndefined();
+    expect(q[0].blockedBy).toBeUndefined();
   });
 
   it("clears the mark when a previously-refused capture later saves", () => {
-    const store = seeded([capture({ clientKey: "a", needsSignIn: true })]);
+    const store = seeded([
+      capture({ clientKey: "a", blockedBy: "session-expired" }),
+    ]);
     applyFlushOutcome(store, "a", "saved");
     expect(readQueue(store)).toEqual([]);
   });
 
-  it("clears the mark when a retry gets past the guard without saving yet", () => {
-    const store = seeded([capture({ clientKey: "a", needsSignIn: true })]);
-    applyFlushOutcome(store, "a", "retry");
-    expect(readQueue(store)[0].needsSignIn).toBeUndefined();
+  // Reaching a retryable failure proves the guard is no longer the obstacle, so a
+  // stale mark would keep asking for a sign-in that already happened.
+  it("clears either mark when a retry gets past the guard without saving yet", () => {
+    for (const was of ["session-expired", "account-revoked"] as const) {
+      const store = seeded([capture({ clientKey: "a", blockedBy: was })]);
+      applyFlushOutcome(store, "a", "retry");
+      expect(readQueue(store)[0].blockedBy).toBeUndefined();
+    }
   });
 
   it("removes the storage key entirely once the queue empties", () => {

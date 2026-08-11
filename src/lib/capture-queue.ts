@@ -72,12 +72,30 @@ export type QueuedCapture = {
   /** ms epoch. Ordering, and the age shown in the strip. */
   capturedAt: number;
   /**
-   * Set when the server refused this capture because the session no longer
-   * matches (409) or the account is frozen (403). The capture is kept, not
-   * dropped — the words are still the user's, and they need a sign-in, not a
-   * retry. Cleared as soon as a later attempt gets past the guard.
+   * Why the server last refused this capture, if it did. The capture is kept
+   * either way — the words are still the user's.
+   *
+   * **Persisted with the capture rather than held in component state**, because
+   * the refusal has to survive the reload a discarded tab forces. A capture that
+   * came back after a restart with no memory of why it was stuck would offer a
+   * Retry that cannot work.
+   *
+   * ⚠️ **Two values, not one boolean.** These look alike — both keep the capture,
+   * neither is retryable — but the remedy differs and so does the truth:
+   *
+   *  * `session-expired` (409): the session moved on. Signing in again FIXES it.
+   *  * `account-revoked` (403): the account was revoked. Signing in again CANNOT
+   *    fix it, and `currentWorkspaceId` (#220) has already cleared the session and
+   *    bounced the user to /login. Telling this person to "sign in to save these"
+   *    sends them into a loop and misstates what happened to them.
+   *
+   * A first draft of this module collapsed both into `needsSignIn: boolean` under
+   * the 409 wording. Caught in review of the spec (!332); the distinction is the
+   * whole reason this is a union.
+   *
+   * `undefined` means not refused, or refused for a reason that has since cleared.
    */
-  needsSignIn?: boolean;
+  blockedBy?: "session-expired" | "account-revoked";
 };
 
 /** Why an enqueue was refused. Each maps to something the user is told. */
@@ -94,10 +112,18 @@ export type EnqueueResult =
 /**
  * What the server said about one queued capture.
  *
- * Mirrors `POST /api/braindump` exactly: `201` → `saved`, `200` → `duplicate`,
- * `409` → `needs-sign-in`, `403` → `needs-sign-in`, anything else → `retry`.
+ * Mirrors `POST /api/braindump` one-to-one: `201` → `saved`, `200` → `duplicate`,
+ * `409` → `session-expired`, `403` → `account-revoked`, anything else → `retry`.
+ * Deliberately one outcome per status rather than one per *behaviour*: 409 and 403
+ * behave identically here (keep the capture) and still need telling apart, so
+ * collapsing them at this boundary is what produced the bug the spec review found.
  */
-export type FlushOutcome = "saved" | "duplicate" | "needs-sign-in" | "retry";
+export type FlushOutcome =
+  | "saved"
+  | "duplicate"
+  | "session-expired"
+  | "account-revoked"
+  | "retry";
 
 /** Bytes of a UTF-8 string, not characters — the quota is measured in bytes. */
 function byteLength(value: string): number {
@@ -218,8 +244,8 @@ export function enqueue(
  * 14s comes back as a duplicate. Treating it as a failure would either duplicate
  * the row on retry or strand a capture that is already saved.
  *
- * `needs-sign-in` and `retry` both KEEP the capture. Nothing in this module ever
- * drops words the server has not accounted for.
+ * `session-expired`, `account-revoked` and `retry` all KEEP the capture. Nothing in
+ * this module ever drops words the server has not accounted for.
  */
 export function applyFlushOutcome(
   store: QueueStore | null | undefined,
@@ -235,10 +261,13 @@ export function applyFlushOutcome(
   } else {
     next = existing.map((c) => {
       if (c.clientKey !== clientKey) return c;
-      if (outcome === "needs-sign-in") return { ...c, needsSignIn: true };
-      // `retry` — the guard is no longer the reason, so the mark must go, or the
-      // strip keeps asking for a sign-in that already happened.
-      const { needsSignIn: _cleared, ...rest } = c;
+      if (outcome === "session-expired" || outcome === "account-revoked") {
+        return { ...c, blockedBy: outcome };
+      }
+      // `retry` — reaching a retryable failure proves the guard is no longer what
+      // is stopping this capture, so the mark must go. Left in place, the strip
+      // would keep asking for a sign-in that has already happened.
+      const { blockedBy: _cleared, ...rest } = c;
       return rest;
     });
   }
