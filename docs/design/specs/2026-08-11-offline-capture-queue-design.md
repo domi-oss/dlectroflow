@@ -264,8 +264,29 @@ completes synchronously inside `submit()`, and the IndexedDB write is *initiated
 but settles later. So the durability guarantee is carried entirely by `localStorage`, which is also
 the source of truth for the UI. If the tab is discarded between the two writes, the foreground flush
 recovers the item on next open and the background flush simply has nothing to find — the failure mode
-is a delayed save, never a lost one. Reconciliation runs on mount: `localStorage` wins, and any
-IndexedDB entry with no `localStorage` counterpart is deleted. On Safari and Firefox the `sync`
+is a delayed save, never a lost one.
+
+**Reconciliation on mount runs in both directions, and the second one is the point.** `localStorage`
+wins in every disagreement, but "wins" resolves to two different actions:
+
+- an IndexedDB entry with **no** `localStorage` counterpart is **deleted** — it was already saved, or
+  the user cleared it, and a mirror is not allowed to resurrect it;
+- a `localStorage` entry **missing** from IndexedDB is **re-mirrored**, and `sync` is re-registered
+  for it.
+
+Only the first direction is obvious, and stopping there would have left a real hole. The paragraph
+above concedes that the IndexedDB write settles *after* the synchronous `localStorage` write, so a tab
+discarded between the two — the exact thing Chrome Android does, and the whole reason this design is
+not in-memory — leaves a capture that is durable but **invisible to the worker forever**, because
+nothing else ever writes the mirror. That capture is not lost: the foreground flush still finds it on
+next open. But it would silently fall out of Background Sync, so the *only* path that works while the
+app is closed would cover an arbitrary subset of the queue, and no test asserting "the item survived"
+could see it. Re-mirroring is what makes the mirror eventually complete rather than best-effort.
+
+Both directions are asserted, and separately — the delete direction passes on its own against a
+one-way implementation, which is how this gap survived the first draft of this spec.
+
+On Safari and Firefox the `sync`
 registration no-ops and the foreground triggers are the whole mechanism; the feature degrades to the
 foreground-only design with no code branch of its own beyond a capability check.
 
@@ -306,11 +327,31 @@ it. It says what is true, and each state gets its own sentence because each has 
 | item cap reached | *"20 captures are already waiting to save — that's the limit until some of them go through. Your words are still in the box; copy them somewhere safe if you need to."* |
 | byte cap reached | *"That capture is too long to hold safely while offline. Your words are still in the box — shorten it, or copy it somewhere safe."* |
 
-**a11y.** The count strip is `role="status"` (polite — a background count is not an interruption); both
-`blockedBy` states and both cap-reached states are `role="alert"`. Retry carries `aria-disabled` while a flush
-is in flight, mirroring #210's contract, and is ≥44×44 px (WCAG 2.5.5). When the strip unmounts on the
-last item saving, focus returns to the input only if it was inside the strip — the one-shot ref pattern
-at `inbox-view.tsx:866-880` (WCAG 2.4.3).
+**a11y.** The strip carries **two live regions, not one whose `role` changes.** A polite
+`role="status"` announces the waiting count (a background count is not an interruption); an assertive
+`role="alert"` announces both `blockedBy` states and both cap-reached states. Each element's `role` is
+**fixed for the lifetime of the strip**, and each is **mounted empty from the strip's first paint** and
+then filled.
+
+Both halves of that are load-bearing:
+
+- **Swapping one element's `role` between `status` and `alert` is not a reliable announcement.** A live
+  region's politeness is registered when the element is recognised as a region; mutating the attribute
+  on an element that is already one leaves whether the change takes effect — and whether the new text
+  re-announces at all — down to the screen reader. The observable failure is the worst kind: silence,
+  on the states that most need to be heard (a revoked account, a refused capture).
+- **The two regions are siblings, never nested.** `write-notice-hygiene` rule D exists for this: a
+  polite `role="status"` inside an assertive `role="alert"` inherits the container's politeness across
+  the whole subtree, so "will it announce politely" has no answer. That was #218's defect and the gate
+  now blocks it, so a single role-swapping element would not have survived CI anyway — the sibling
+  pair is the repo's existing contract, not a new pattern.
+- **Mounted empty, for the reason `inbox-view.tsx`'s notice already documents:** a region that arrives
+  together with its first message is silent. Kept identical in shape to that notice and
+  `focus-timer.tsx`'s on purpose — those two drifted apart once already, which is what produced #236.
+
+Retry carries `aria-disabled` while a flush is in flight, mirroring #210's contract, and is ≥44×44 px
+(WCAG 2.5.5). When the strip unmounts on the last item saving, focus returns to the input only if it
+was inside the strip — the one-shot ref pattern at `inbox-view.tsx:866-880` (WCAG 2.4.3).
 
 ### Multi-device dissolves by construction
 
@@ -353,14 +394,28 @@ TDD, failing test first, in this order:
 2. **Route** (`src/app/api/braindump/route.ts`) — same `clientKey` twice yields **one** row;
    workspace mismatch yields `409` **and no row**; frozen account yields `403` and no row; the guest
    arm still works for a genuine guest.
-3. **Migration** — the `@@unique([workspaceId, clientKey])` index exists and multiple null
-   `clientKey`s coexist. Registered alongside the other constraint checks in
-   `src/lib/enum-constraint-sync.integration.test.ts`.
-4. **`inbox-view.tsx`** — the strip renders only when the queue is non-empty, its a11y contract, and
-   the flush triggers. **`capture-failure-pile-up` in `inbox-view.test.tsx` will change**, which is
-   intended and was predicted on #175 on 8 Aug: a second failure no longer displaces the first.
-5. **Worker** — the `sync` handler drains the store, in a worker context, with the capability check
-   exercised both ways.
+3. **Migration** — the `@@unique([workspaceId, clientKey])` index exists, the same `clientKey` in two
+   different workspaces yields two rows, and multiple null `clientKey`s coexist. This gets **its own
+   integration test** (`src/lib/braindump-client-key-unique.integration.test.ts`) and is **not**
+   registered in `enum-constraint-sync.integration.test.ts` — an earlier draft of this section said it
+   was, and that was wrong. That test queries `pg_constraint WHERE contype = 'c'`: it polices CHECK
+   constraints and the enum, array-containment, numeric-range and text-length registries. A unique
+   *index* is not a CHECK and is invisible to it, so adding a line to its registry would have asserted
+   nothing while reading as covered.
+4. **`inbox-view.tsx`** — the strip renders only when the queue is non-empty, and the flush triggers
+   fire. Its a11y contract is asserted as **two sibling live regions with fixed roles**, both present
+   and empty before the first message: that the polite region carries the count and the assertive one
+   carries the refusals, that neither is nested in the other (`write-notice-hygiene` rule D also blocks
+   that mechanically), and that **no element's `role` changes between renders** — the assertion that
+   catches a later refactor collapsing them back into one. **`capture-failure-pile-up` in
+   `inbox-view.test.tsx` will change**, which is intended and was predicted on #175 on 8 Aug: a second
+   failure no longer displaces the first.
+5. **Worker and the mirror** — the `sync` handler drains the store, in a worker context, with the
+   capability check exercised both ways. Mount reconciliation is asserted in **both directions
+   separately**: an IndexedDB entry with no `localStorage` counterpart is deleted, **and** a
+   `localStorage` entry missing from IndexedDB is re-mirrored and re-registered for `sync`. One test
+   covering "the queue still matches after mount" passes a one-way implementation, which is exactly
+   how the missing direction survived this spec's first draft.
 6. **e2e** — extend `e2e/smoke/brain-dump.spec.ts` using Playwright's `context.setOffline(true)`:
    capture offline, reload the page, assert the words are still queued, go online, assert exactly one
    row lands.
