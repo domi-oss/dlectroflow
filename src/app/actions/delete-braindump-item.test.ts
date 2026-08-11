@@ -18,11 +18,19 @@ const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
     const prismaMock = {
       brainDumpItem: {
         findFirst: vi.fn(),
+        // #251 — the guarded claim that decides whether THIS call takes the
+        // completion back. `count: 1` = it did.
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
         count: vi.fn().mockResolvedValue(0),
       },
       task: {
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      // #251 — the done steps this delete destroys, and therefore the number of
+      // `step_done` rows it owes back.
+      step: {
+        count: vi.fn().mockResolvedValue(0),
       },
       $transaction: vi.fn(),
     };
@@ -52,13 +60,33 @@ vi.mock("@/lib/rewards", () => ({
   logReward: vi.fn().mockResolvedValue(undefined),
   awardBadge: vi.fn().mockResolvedValue(undefined),
   touchStreakOnCompletion: vi.fn().mockResolvedValue(null),
+  // #251 — the reversal reports what it actually took, which is what gates the
+  // badge revocation below. Defaults to "took nothing", so a spec that does not
+  // set it up asserts the no-reversal path rather than accidentally the other.
+  reverseItemCompletionRewards: vi
+    .fn()
+    .mockResolvedValue({ stepDone: 0, taskComplete: false }),
+  revokeUnqualifiedBadges: vi.fn().mockResolvedValue([]),
 }));
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
   currentWorkspaceIdMock.mockResolvedValue("owner");
+  prismaMock.brainDumpItem.updateMany.mockResolvedValue({ count: 1 });
   prismaMock.brainDumpItem.deleteMany.mockResolvedValue({ count: 1 });
   prismaMock.brainDumpItem.count.mockResolvedValue(0);
+  prismaMock.step.count.mockResolvedValue(0);
+  // `vi.clearAllMocks()` clears recorded calls but NOT implementations, and it
+  // DOES clear a `mockResolvedValue` set at declaration — so the two reward
+  // mocks have to be re-armed here or the second spec onward reads `undefined`
+  // and destructures it.
+  const rewards = await import("@/lib/rewards");
+  (
+    rewards.reverseItemCompletionRewards as ReturnType<typeof vi.fn>
+  ).mockResolvedValue({ stepDone: 0, taskComplete: false });
+  (
+    rewards.revokeUnqualifiedBadges as ReturnType<typeof vi.fn>
+  ).mockResolvedValue([]);
 });
 
 describe("deleteBrainDumpItem", () => {
@@ -166,5 +194,166 @@ describe("deleteBrainDumpItem", () => {
 
     expect(rewards.maybeAwardInboxZero).toHaveBeenCalledWith("owner");
     expect(revalidatePathMock).toHaveBeenCalledWith("/");
+    // #251 — the Done tab renders these rows and the dashboard renders the score
+    // this call may have just reduced.
+    expect(revalidatePathMock).toHaveBeenCalledWith("/library");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/dashboard");
+  });
+});
+
+// ── #251 — the reward reversal's wiring ────────────────────────────────────
+//
+// The arithmetic itself is proved against real Postgres in
+// delete-completed-item.integration.test.ts, because every guarantee it makes is
+// a property of the row locks. What is asserted here is the part a mock CAN see
+// and the integration test cannot isolate: which numbers the action derives, that
+// they come from the writes rather than from the pre-transaction read, and that
+// both reward calls are handed the transaction client rather than the singleton.
+describe("deleteBrainDumpItem — reward reversal wiring (#251)", () => {
+  const found = (taskId: string | null) =>
+    prismaMock.brainDumpItem.findFirst.mockResolvedValueOnce({
+      id: "i1",
+      taskId,
+    });
+
+  it("claims the completion with a guarded updateMany before deleting the row", async () => {
+    found(null);
+    const { deleteBrainDumpItem } = await import("./braindump");
+
+    await deleteBrainDumpItem("i1");
+
+    // The `completedAt: { not: null }` precondition is the whole gate: it is what
+    // makes a second concurrent delete report 0 and reverse nothing.
+    expect(prismaMock.brainDumpItem.updateMany).toHaveBeenCalledWith({
+      where: { id: "i1", workspaceId: "owner", completedAt: { not: null } },
+      data: { completedAt: null },
+    });
+    const claimOrder =
+      prismaMock.brainDumpItem.updateMany.mock.invocationCallOrder[0];
+    const deleteOrder =
+      prismaMock.brainDumpItem.deleteMany.mock.invocationCallOrder[0];
+    expect(claimOrder).toBeLessThan(deleteOrder);
+  });
+
+  it("owes one step_done per done step it destroys, plus the task_complete it claimed", async () => {
+    found("t1");
+    prismaMock.brainDumpItem.count.mockResolvedValueOnce(0); // last item on t1
+    prismaMock.step.count.mockResolvedValueOnce(4);
+    const { deleteBrainDumpItem } = await import("./braindump");
+    const rewards = await import("@/lib/rewards");
+
+    await deleteBrainDumpItem("i1");
+
+    expect(prismaMock.step.count).toHaveBeenCalledWith({
+      where: { taskId: "t1", done: true, task: { workspaceId: "owner" } },
+    });
+    expect(rewards.reverseItemCompletionRewards).toHaveBeenCalledWith(
+      "owner",
+      { stepDone: 4, includeTaskComplete: true },
+      // The transaction client, not the module singleton — a reversal that
+      // committed independently would survive the rollback.
+      prismaMock,
+    );
+  });
+
+  it("counts the steps before the Task goes, or the cascade would have taken them", async () => {
+    found("t1");
+    prismaMock.brainDumpItem.count.mockResolvedValueOnce(0);
+    prismaMock.step.count.mockResolvedValueOnce(2);
+    const { deleteBrainDumpItem } = await import("./braindump");
+
+    await deleteBrainDumpItem("i1");
+
+    expect(prismaMock.step.count.mock.invocationCallOrder[0]).toBeLessThan(
+      prismaMock.task.deleteMany.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("owes no step_done when the Task survives — its steps are still paid for", async () => {
+    found("t1");
+    prismaMock.brainDumpItem.count.mockResolvedValueOnce(1); // another item holds t1
+    const { deleteBrainDumpItem } = await import("./braindump");
+    const rewards = await import("@/lib/rewards");
+
+    await deleteBrainDumpItem("i1");
+
+    expect(prismaMock.step.count).not.toHaveBeenCalled();
+    expect(rewards.reverseItemCompletionRewards).toHaveBeenCalledWith(
+      "owner",
+      { stepDone: 0, includeTaskComplete: true },
+      prismaMock,
+    );
+  });
+
+  it("does not claim a task_complete when the row was not carrying a completion", async () => {
+    found(null);
+    prismaMock.brainDumpItem.updateMany.mockResolvedValueOnce({ count: 0 });
+    const { deleteBrainDumpItem } = await import("./braindump");
+    const rewards = await import("@/lib/rewards");
+
+    await deleteBrainDumpItem("i1");
+
+    expect(rewards.reverseItemCompletionRewards).toHaveBeenCalledWith(
+      "owner",
+      { stepDone: 0, includeTaskComplete: false },
+      prismaMock,
+    );
+  });
+
+  it("reverses nothing at all when the row was already deleted concurrently", async () => {
+    found("t1");
+    prismaMock.brainDumpItem.deleteMany.mockResolvedValueOnce({ count: 0 });
+    const { deleteBrainDumpItem } = await import("./braindump");
+    const rewards = await import("@/lib/rewards");
+
+    await deleteBrainDumpItem("i1");
+
+    expect(rewards.reverseItemCompletionRewards).not.toHaveBeenCalled();
+    expect(rewards.revokeUnqualifiedBadges).not.toHaveBeenCalled();
+  });
+
+  it("revokes badges only when the reversal actually took something back", async () => {
+    found(null);
+    const { deleteBrainDumpItem } = await import("./braindump");
+    const rewards = await import("@/lib/rewards");
+    const reverse = rewards.reverseItemCompletionRewards as ReturnType<
+      typeof vi.fn
+    >;
+
+    // Took nothing: the workspace may already be sitting on an unqualified
+    // badge (a reopen leaves exactly that), and this delete has no claim on it.
+    reverse.mockResolvedValueOnce({ stepDone: 0, taskComplete: false });
+    await deleteBrainDumpItem("i1");
+    expect(rewards.revokeUnqualifiedBadges).not.toHaveBeenCalled();
+
+    // Took a task_complete: the badges it could have supported are re-checked,
+    // in the same transaction.
+    found(null);
+    reverse.mockResolvedValueOnce({ stepDone: 0, taskComplete: true });
+    await deleteBrainDumpItem("i1");
+    expect(rewards.revokeUnqualifiedBadges).toHaveBeenCalledWith(
+      "owner",
+      prismaMock,
+    );
+  });
+
+  it("re-checks badges when only step points came back", async () => {
+    found("t1");
+    prismaMock.brainDumpItem.count.mockResolvedValueOnce(0);
+    prismaMock.step.count.mockResolvedValueOnce(3);
+    const { deleteBrainDumpItem } = await import("./braindump");
+    const rewards = await import("@/lib/rewards");
+    (
+      rewards.reverseItemCompletionRewards as ReturnType<typeof vi.fn>
+    ).mockResolvedValueOnce({ stepDone: 3, taskComplete: false });
+
+    await deleteBrainDumpItem("i1");
+
+    // ten_steps_day is the badge this case exists for: three step_done rows
+    // fewer today can drop the day back under its threshold.
+    expect(rewards.revokeUnqualifiedBadges).toHaveBeenCalledWith(
+      "owner",
+      prismaMock,
+    );
   });
 });

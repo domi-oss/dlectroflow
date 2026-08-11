@@ -25,6 +25,15 @@ vi.mock("@/lib/workspace", () => ({
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/rewards", () => ({
   maybeAwardInboxZero: vi.fn().mockResolvedValue(undefined),
+  // #251 — stubbed, not exercised. This file's question is the #64 cascade, and
+  // the reversal's own arithmetic, floor guard and concurrency are proved against
+  // the same real Postgres in delete-completed-item.integration.test.ts. Leaving
+  // it live here would mean every fixture had to account for its reward rows to
+  // assert something about Task orphaning.
+  reverseItemCompletionRewards: vi
+    .fn()
+    .mockResolvedValue({ stepDone: 0, taskComplete: false }),
+  revokeUnqualifiedBadges: vi.fn().mockResolvedValue([]),
 }));
 
 // Dedicated client (not the shared @/lib/db singleton used by the action

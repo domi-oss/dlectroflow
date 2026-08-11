@@ -21,10 +21,19 @@ const { prismaMock, revalidatePathMock, currentWorkspaceIdMock } = vi.hoisted(
         findMany: vi.fn(),
         findFirst: vi.fn(),
         update: vi.fn().mockResolvedValue({}),
+        // #251 — deleteBrainDumpItem claims the row's completion with a guarded
+        // updateMany before deleting it. `count: 0` here: these fixtures are
+        // uncompleted items, so nothing is claimed and nothing is reversed.
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
         count: vi.fn().mockResolvedValue(0),
       },
-      step: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      step: {
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        // #251 — the done steps a delete destroys, and so the step_done rows it
+        // owes back. None here, for the same reason.
+        count: vi.fn().mockResolvedValue(0),
+      },
       task: {
         update: vi.fn().mockResolvedValue({}),
         deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
@@ -59,11 +68,30 @@ vi.mock("@/lib/rewards", () => ({
   logReward: vi.fn().mockResolvedValue(undefined),
   awardBadge: vi.fn().mockResolvedValue(undefined),
   touchStreakOnCompletion: vi.fn().mockResolvedValue(null),
+  // #251 — a bulk delete routes through deleteBrainDumpItem, which now reverses
+  // what each row banked. Stubbed as "took nothing": the reversal's own arithmetic
+  // is proved in delete-completed-item.integration.test.ts, and what this file
+  // asks about is the workspace filtering and the per-action routing.
+  reverseItemCompletionRewards: vi
+    .fn()
+    .mockResolvedValue({ stepDone: 0, taskComplete: false }),
+  revokeUnqualifiedBadges: vi.fn().mockResolvedValue([]),
 }));
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
   currentWorkspaceIdMock.mockResolvedValue("ws1");
+  prismaMock.brainDumpItem.updateMany.mockResolvedValue({ count: 0 });
+  prismaMock.step.count.mockResolvedValue(0);
+  // `vi.clearAllMocks()` drops a resolved value armed at declaration, so the
+  // reversal stub has to be re-armed or the action destructures `undefined`.
+  const rewards = await import("@/lib/rewards");
+  (
+    rewards.reverseItemCompletionRewards as ReturnType<typeof vi.fn>
+  ).mockResolvedValue({ stepDone: 0, taskComplete: false });
+  (
+    rewards.revokeUnqualifiedBadges as ReturnType<typeof vi.fn>
+  ).mockResolvedValue([]);
   // Each per-item action re-fetches the item by id (defense in depth beyond
   // bulkBrainDumpAction's own workspace filter) — keep it "found" by default.
   prismaMock.brainDumpItem.findFirst.mockImplementation(

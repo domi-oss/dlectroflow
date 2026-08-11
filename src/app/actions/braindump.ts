@@ -10,6 +10,7 @@ import {
   touchStreakOnCompletion,
   touchStreakOnEngagement,
   reverseItemCompletionRewards,
+  revokeUnqualifiedBadges,
 } from "@/lib/rewards";
 import {
   BrainDumpStatus,
@@ -226,6 +227,47 @@ export async function renameItem(id: string, text: string) {
  * Prisma P2025 "record not found" throw that would roll back the transaction;
  * when that happens we skip the Task cleanup too, since there is nothing left
  * that this call actually removed.
+ *
+ * ── #251 — the delete also gives back what the row had banked ────────────────
+ *
+ * A completed to-do can now be deleted (previously the Done bucket and the
+ * Library's Done tab offered no way to), and completing one banks points. Left
+ * alone, deleting a to-do you completed while demonstrating the app kept its
+ * payout and the score stayed inflated with nothing behind it. The owner's
+ * decision is a **full reversal**: the points go, and so does a badge that only
+ * still qualified because of that row.
+ *
+ * **What it owes is defined as an equality, not as a second rule:** deleting a
+ * row owes exactly what `reopenItem` would owe for the same row — one
+ * `step_done` per step it destroys that was done, plus a `task_complete` if it
+ * was carrying a completion. So reopen-then-delete and delete-outright land on
+ * the same balance, and both routes ask `reverseItemCompletionRewards` the same
+ * question. That is also why a row that was never `completedAt`-stamped still
+ * gives its steps back: the Library's Done tab shows `isFullyDone` rows too, and
+ * each of their ticked steps banked a `step_done` of its own.
+ *
+ * **Both halves are inside the transaction**, for the reason `uncompleteStep`
+ * records at length: a reversal that failed after the row was gone would leave
+ * the points banked with nothing left to ever take them, and production runs two
+ * replicas so that is a scheduling accident away, not a hypothesis.
+ *
+ * **Every input is counted off what THIS call's writes changed**, never off the
+ * pre-transaction read — the hole #196 rounds 10-12 closed one level down. The
+ * completion is claimed by a guarded `updateMany` that clears `completedAt`
+ * before the delete: Postgres re-evaluates an UPDATE's WHERE after the row lock
+ * it was waiting on is released, so a second delete of the same id (a double-tap
+ * outrunning the button's own confirm, or the same Done row open in two tabs)
+ * matches nothing, reports `count: 0`, and reverses nothing. Without that gate
+ * both callers would see `completedAt` set and both would take a
+ * `task_complete` — and since `RewardEvent` holds no link back to the to-do that
+ * earned it, the second one would come out of unrelated, already-settled work.
+ * The floor is `reverseLatestReward`'s: it reports `false` when the workspace has
+ * run out of that type rather than continuing, so an over-large reversal stops at
+ * zero instead of going negative or borrowing from another type.
+ *
+ * Clearing `completedAt` on a row that is about to be deleted looks redundant and
+ * is not: it is the only write here whose `count` can answer "did I take the
+ * completion", and it is the same claim-under-the-lock shape `reopenItem` uses.
  */
 export async function deleteBrainDumpItem(id: string) {
   const workspaceId = await currentWorkspaceId();
@@ -235,10 +277,23 @@ export async function deleteBrainDumpItem(id: string) {
   if (!existing) return;
 
   await prisma.$transaction(async (tx) => {
+    // First write in the transaction on purpose — see the note above. Two
+    // concurrent deletes of one row contend HERE, and the loser re-reads
+    // `completedAt` as null the moment the winner commits.
+    const { count: tookCompletion } = await tx.brainDumpItem.updateMany({
+      where: { id, workspaceId, completedAt: { not: null } },
+      data: { completedAt: null },
+    });
+
     const { count } = await tx.brainDumpItem.deleteMany({
       where: { id, workspaceId },
     });
     if (count === 0) return; // already deleted concurrently — nothing to clean up
+
+    // Steps this delete destroys that were done, and therefore the `step_done`
+    // rows it owes back. Counted BEFORE the Task goes, because Step cascades
+    // with it (schema.prisma onDelete: Cascade) and would be unaskable after.
+    let stepDone = 0;
     if (existing.taskId) {
       // Defensive: the schema allows multiple BrainDumpItems to reference the
       // same Task, though no code path today creates more than one. Only
@@ -247,15 +302,47 @@ export async function deleteBrainDumpItem(id: string) {
         where: { taskId: existing.taskId },
       });
       if (stillLinked === 0) {
+        // Scoped by `task.workspaceId` as well as by `taskId`, the same way
+        // `reopenItem`'s step write is: the id came from a workspace-scoped read
+        // and is re-proved against it here, because `Step` declares no
+        // `workspaceId` of its own and so is not enrolled in the scoping harness.
+        stepDone = await tx.step.count({
+          where: { taskId: existing.taskId, done: true, task: { workspaceId } },
+        });
         await tx.task.deleteMany({
           where: { id: existing.taskId, workspaceId },
         });
       }
+      // When the Task survives, its steps survive with it and their points are
+      // still paid for by work that still exists — so `stepDone` stays 0.
     }
+
+    // On `tx`, not `prisma`: a reversal that committed independently would
+    // survive the rollback, which is the bug wearing the fix's clothes.
+    const reversed = await reverseItemCompletionRewards(
+      workspaceId,
+      { stepDone, includeTaskComplete: tookCompletion > 0 },
+      tx,
+    );
+
+    // Only when this delete actually took something back. A delete that reversed
+    // nothing has no claim on a badge: a workspace can already be sitting on an
+    // unqualified `task_complete` (reopening the only completed to-do leaves
+    // exactly that), and revoking it here would be punishing an unrelated delete
+    // for a state it did not create.
+    if (reversed.stepDone > 0 || reversed.taskComplete)
+      await revokeUnqualifiedBadges(workspaceId, tx);
   });
 
   await maybeAwardInboxZero(workspaceId);
   revalidatePath(INBOX_PATH);
+  // #251 — the Done tab renders the same rows and the dashboard renders the
+  // points this call may have just taken back, so both are now stale for the
+  // same reason the Inbox is. `updateBrainDumpItem` revalidates the Library for
+  // #139's class of bug; a delete that changes the score owes the dashboard the
+  // same courtesy.
+  revalidatePath(LIBRARY_PATH);
+  revalidatePath("/dashboard");
 }
 
 /** Mark an aging item as reminded so we don't re-notify (step 4). */
