@@ -221,7 +221,17 @@ export function inlineNoteInsertion(raw: string): InlineNoteInsertion {
   return { value: composed, caret: composed.length - 1 };
 }
 
-/** What a keystroke should do to the field, or `null` for "leave it alone". */
+/**
+ * What a keystroke should do to the field, or `null` for "leave it alone".
+ *
+ * Structurally identical to {@link InlineNoteInsertion}, but its own name because
+ * `caret` does not mean the same thing (!306, substitute review). There it is
+ * always the index of the group's closing `}`, so the next character lands inside
+ * the braces. Here that holds for `{` only: on a `}` type-over the caret is just
+ * PAST the brace, and on a Backspace the result contains no braces at all and the
+ * caret is the deletion point. Reading the insertion type's promise here would be
+ * wrong for two of the three branches.
+ */
 export type InlineNoteTyping = InlineNoteInsertion;
 
 /** Every key {@link inlineNoteTyping} has an opinion about. */
@@ -286,11 +296,19 @@ type BraceKey = "{" | "}" | "Backspace";
  * ## Why the caller may bind this to `keydown`
  *
  * The usual objection to `keydown` for text entry is that predictive text, swipe
- * input and autocorrect rewrite the field without producing one — which is true,
- * and does not reach this function: **no IME, swipe path or autocorrect emits a
- * bare `{`**. It arrives only from an explicit key press or a symbol-keyboard
- * tap, and both report `key: "{"`. The caller still has to skip a composition in
- * progress, because a `{` typed while an IME is composing belongs to the IME.
+ * input and autocorrect rewrite the field without producing one. That is true and
+ * it does reach `{` sometimes — this used to claim otherwise in as many words,
+ * and the claim does not survive Android, where GBoard routes soft-keyboard input
+ * through the IME and can report `key: "Unidentified"` (!306, substitute review).
+ *
+ * `keydown` is still the right binding, because of what a MISS costs: the
+ * keystroke types a literal `{`, which is precisely what the field held before
+ * #201 and which this parser accepts. So the failure mode is the convenience not
+ * firing, never a wrong value and never a lost character — and that is a much
+ * better trade than `beforeinput`, whose `preventDefault` behaviour on a
+ * controlled React input is far harder to get right. The caller still has to skip
+ * a composition in progress, because a `{` typed while an IME is composing
+ * belongs to the IME.
  */
 export function inlineNoteTyping({
   value,
@@ -308,33 +326,65 @@ export function inlineNoteTyping({
   if (key !== "{" && key !== "}" && key !== "Backspace") return null;
   const braceKey: BraceKey = key;
 
+  // The selection, normalised before any branch reads it (!306, substitute
+  // review). A DOM input always reports `0 <= selectionStart <= selectionEnd <=
+  // value.length`, so `handleNoteBraceKey` cannot produce anything else — but this
+  // function is exported and pure, and it used to trust the numbers: a caret past
+  // the end returned a caret past the end of its own result, and a REVERSED
+  // selection duplicated the text it spanned. Clamping here is one line and makes
+  // the contract "any two integers" rather than "whatever the DOM happens to give
+  // you", which is the difference between a second caller being safe and being
+  // lucky.
+  const lo = Math.max(0, Math.min(start, end, value.length));
+  const hi = Math.max(0, Math.min(Math.max(start, end), value.length));
+
   if (braceKey === "{") {
+    // Nothing for the note to be ABOUT, so there is nothing to auto-close
+    // (!306, substitute review). This is the case `add-note-button.tsx` spells
+    // out when it disables itself on `value.trim() === ""` — "the syntax needs
+    // text in front of the group or the parser refuses it outright" — and
+    // `splitInlineNote("{urgent}")` does refuse it, keeping the whole string as
+    // text. Auto-closing here helped the user build the one shape the parser will
+    // not read, in the exact case the button declines to build, and the two
+    // affordances living in this module together is supposed to mean they agree.
+    if (value.trim() === "") return null;
     // The refusal, checked before anything is composed. `trimEnd` because the
     // parser reads the trimmed string, so a trailing space must not smuggle a
     // second group past a rule that would otherwise have refused it.
-    if (trailingGroupRange(value.trimEnd()) !== null) return null;
-    const selected = value.slice(start, end);
-    const composed = `${value.slice(0, start)}{${selected}}${value.slice(end)}`;
+    //
+    // Scoped to keystrokes that actually reach the group (!306, substitute
+    // review). It used to refuse EVERY `{` once a trailing group existed, and a
+    // refusal is not a no-op: the caller does not call `preventDefault`, so the
+    // browser inserts the `{` and REPLACES whatever was selected — the outcome
+    // the header calls the one an auto-close must never produce. The refusal's
+    // reason does not reach a selection lying wholly before the group either,
+    // because under #179 Decision 1 only the LAST group is the note, so a wrap
+    // in front of it reassigns nothing. `range.open` indexes `value` as well as
+    // the trimmed copy, since `trimEnd` only removes characters after it.
+    const range = trailingGroupRange(value.trimEnd());
+    if (range !== null && hi > range.open) return null;
+    const selected = value.slice(lo, hi);
+    const composed = `${value.slice(0, lo)}{${selected}}${value.slice(hi)}`;
     // Just inside the closing brace, so the next keystroke extends the note
-    // rather than escaping it. For a collapsed caret that is `start + 1`; for a
-    // wrap it is the far end of what was selected.
-    return { value: composed, caret: start + 1 + selected.length };
+    // rather than escaping it. For a collapsed caret that is `lo + 1`; for a wrap
+    // it is the far end of what was selected.
+    return { value: composed, caret: lo + 1 + selected.length };
   }
 
   if (braceKey === "}") {
     // A selection means the `}` is a replacement, which is an ordinary edit.
-    if (start !== end) return null;
-    if (value[start] !== "}") return null;
-    return { value, caret: start + 1 };
+    if (lo !== hi) return null;
+    if (value[lo] !== "}") return null;
+    return { value, caret: lo + 1 };
   }
 
   // Backspace. Only the exact `{|}` shape the auto-close creates; anything else
   // is an ordinary deletion and must behave like one.
-  if (start !== end) return null;
-  if (value[start - 1] !== "{" || value[start] !== "}") return null;
+  if (lo !== hi) return null;
+  if (value[lo - 1] !== "{" || value[lo] !== "}") return null;
   return {
-    value: `${value.slice(0, start - 1)}${value.slice(start + 1)}`,
-    caret: start - 1,
+    value: `${value.slice(0, lo - 1)}${value.slice(lo + 1)}`,
+    caret: lo - 1,
   };
 }
 

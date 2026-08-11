@@ -552,23 +552,41 @@ function writeFailureRemedy(
  * editor, the estimate input) is plain text to the parser, and auto-closing a
  * brace there would be a surprise with no payoff.
  *
- * ## `keydown`, and why the usual objection does not apply
+ * ## `keydown`, and what it costs
  *
  * Predictive text, swipe input and autocorrect rewrite a field without emitting
- * a `keydown`, which is the standard argument for `beforeinput`. It does not
- * reach this handler: **no IME, swipe path or autocorrect produces a bare `{`**.
- * It arrives from an explicit key press or a symbol-keyboard tap, and both report
- * `key: "{"`. A composition in progress is still skipped, because a `{` typed
- * mid-composition belongs to the IME.
+ * a `keydown`, which is the standard argument for `beforeinput`. `keydown` is
+ * chosen anyway, and the reason is the FAILURE MODE rather than a claim that the
+ * gap cannot be reached (!306, substitute review — this used to assert that "no
+ * IME, swipe path or autocorrect produces a bare `{`", which is not defensible as
+ * an absolute and is least defensible on Android, where GBoard routes
+ * soft-keyboard input through the IME and can report `key: "Unidentified"`).
+ *
+ * A keystroke this handler never sees types a literal `{`. The parser accepts
+ * that — it is exactly what the field held before #201 — so the worst case is the
+ * convenience not firing, never a wrong value or a lost character. `beforeinput`
+ * would trade that for a mechanism whose `preventDefault` semantics on a
+ * controlled React input are considerably harder to get right, to buy a case that
+ * degrades gracefully. Dictation and paste produce no `keydown` at all and are
+ * out of reach for the same reason and with the same consequence.
+ *
+ * A composition in progress is skipped, because a `{` typed mid-composition
+ * belongs to the IME.
  */
 function handleNoteBraceKey(
   e: ReactKeyboardEvent<HTMLInputElement>,
   setValue: (next: string) => void,
 ): void {
   if (e.nativeEvent.isComposing) return;
-  // Cmd/Ctrl chords are shortcuts rather than text entry — the browser's own
-  // undo among them. AltGr is NOT excluded: on several European layouts it is
-  // how `{` is produced at all, and it reports as ctrl and alt together.
+  // Cmd/Ctrl chords are shortcuts rather than text entry: Cmd+Backspace deletes
+  // to the line start and Ctrl+`{` is a binding, and neither should auto-close
+  // anything. This used to cite "the browser's own undo among them", which it
+  // cannot be protecting — Cmd+Z reports `key: "z"`, which the rule declines on
+  // its first line anyway, and `inlineNoteTyping`'s own header records that a
+  // controlled React input sits outside the native undo stack regardless
+  // (!306, substitute review). AltGr is NOT excluded: on several European
+  // layouts it is how `{` is produced at all, and it reports as ctrl and alt
+  // together.
   if (e.metaKey || (e.ctrlKey && !e.altKey)) return;
   // A modified Backspace is a word or line delete, which must stay one.
   if (e.key === "Backspace" && (e.altKey || e.ctrlKey)) return;
@@ -3723,9 +3741,13 @@ function EditTitleInput({
             return;
           }
           // #201 — the same auto-close as the capture bar. This field holds the
-          // reconstruction (`text {note}`), which already ends in a group, so
-          // the rule's refusal is what it meets most of the time — and that is
-          // the correct outcome, not a gap.
+          // reconstruction (`text {note}`), so a row WITH a note pre-fills as a
+          // value already ending in a group and a `{` typed at the end is
+          // declined — the correct outcome, not a gap. No claim about how often
+          // that happens: notes are opt-in, so most rows pre-fill as bare text
+          // and the rule fires normally (!306, substitute review, which found the
+          // frequency claim that used to be here unmeasurable and probably
+          // backwards).
           handleNoteBraceKey(e, setValue);
         }}
         className="border-input bg-background focus-visible:ring-ring min-w-0 flex-1 rounded-md border px-2 py-1 text-sm outline-none focus-visible:ring-2"

@@ -4380,11 +4380,27 @@ describe("InboxView — the captured inline note (#179/#186)", () => {
  * the handler calls `preventDefault`.
  */
 describe("InboxView — auto-closing the note brace (#201)", () => {
-  async function typeBrace(el: HTMLInputElement, key: string) {
+  /**
+   * Press `key` and report whether the handler CLAIMED the keystroke.
+   *
+   * `fireEvent.keyDown` returns `!defaultPrevented`, and that return value is the
+   * only thing separating "the rule declined" from "the rule is not wired up at
+   * all" (!306, substitute review). jsdom performs no default text insertion for
+   * a key event, so on the negative branches an unchanged value is exactly what a
+   * MISSING handler produces too — three specs below passed with
+   * `handleNoteBraceKey` deleted. Asserting `claimed` is what makes them discriminate.
+   */
+  async function typeBrace(
+    el: HTMLInputElement,
+    key: string,
+    init: Record<string, unknown> = {},
+  ): Promise<{ claimed: boolean }> {
+    let notPrevented = true;
     await act(async () => {
-      fireEvent.keyDown(el, { key });
+      notPrevented = fireEvent.keyDown(el, { key, ...init });
       await Promise.resolve();
     });
+    return { claimed: !notPrevented };
   }
 
   function captureField() {
@@ -4487,10 +4503,12 @@ describe("InboxView — auto-closing the note brace (#201)", () => {
     fireEvent.change(input, { target: { value: "fix {foo}" } });
     input.setSelectionRange(9, 9);
 
-    await typeBrace(input, "{");
+    const { claimed } = await typeBrace(input, "{");
 
     // Unchanged: the browser is left to type the `{` literally, which is what
-    // the parser expects of a group that is not the last one.
+    // the parser expects of a group that is not the last one. `claimed` is what
+    // distinguishes that from the handler being absent — see `typeBrace`.
+    expect(claimed).toBe(false);
     expect(input).toHaveValue("fix {foo}");
   });
 
@@ -4526,11 +4544,11 @@ describe("InboxView — auto-closing the note brace (#201)", () => {
     fireEvent.change(input, { target: { value: "note " } });
     input.setSelectionRange(5, 5);
 
-    await act(async () => {
-      fireEvent.keyDown(input, { key: "{", isComposing: true });
-      await Promise.resolve();
-    });
+    const { claimed } = await typeBrace(input, "{", { isComposing: true });
 
+    // Not merely "the value did not change" — that is also what no handler at
+    // all looks like in jsdom. The handler must have let the keystroke through.
+    expect(claimed).toBe(false);
     expect(input).toHaveValue("note ");
   });
 
@@ -4548,11 +4566,35 @@ describe("InboxView — auto-closing the note brace (#201)", () => {
     fireEvent.change(input, { target: { value: "buy milk {}" } });
     input.setSelectionRange(10, 10);
 
-    await act(async () => {
-      fireEvent.keyDown(input, { key: "Backspace", metaKey: true });
-      await Promise.resolve();
-    });
+    const { claimed } = await typeBrace(input, "Backspace", { metaKey: true });
 
+    expect(claimed).toBe(false);
+    expect(input).toHaveValue("buy milk {}");
+  });
+
+  /**
+   * The positive counterpart to the three `claimed: false` assertions above, and
+   * the reason they mean anything: the same channel reads `true` when the rule
+   * fires (!306, substitute review). Without this, "claimed is false" could be a
+   * `fireEvent` return value that is always false and nobody would know.
+   */
+  it("claims the keystroke when the rule does fire", async () => {
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+    const input = captureField();
+    fireEvent.change(input, { target: { value: "buy milk " } });
+    input.setSelectionRange(9, 9);
+
+    const { claimed } = await typeBrace(input, "{");
+
+    expect(claimed).toBe(true);
     expect(input).toHaveValue("buy milk {}");
   });
 

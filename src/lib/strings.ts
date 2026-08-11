@@ -775,8 +775,10 @@ export const STRINGS = {
   // ── A ROW write that did not land (#225) ───────────────────────────────────
   // The other half of the same defect. `capture.error.*` above covers the one
   // write whose failure destroys words that exist nowhere else; these cover the
-  // twenty that operate on a row the server already has — rename, complete,
-  // delete, snooze, keep-as-task, freshen, dismiss, reopen and the bucket move.
+  // ones that operate on a row the server already has — rename, complete, delete,
+  // snooze, keep-as-task, freshen, dismiss, reopen, the bucket move, a breakdown
+  // and ▶ Focus. No count: it was written as "the twenty" and the number moved in
+  // the same MR that wrote it.
   //
   // A separate family rather than a reuse of `capture.error.*`, for the reason
   // `shopping.errorSave*` gives for the same choice: the prefix has to name the
@@ -785,9 +787,11 @@ export const STRINGS = {
   // still here" because it is holding them, and nothing here can, because the
   // words were never at risk. What is at risk is the change.
   //
-  // All four END on a colon: the item the write was about is rendered, quoted,
-  // immediately after, so the notice names the row without the row having to be
-  // on screen. That is the whole reason one notice can serve a list that scrolls.
+  // Every one of these ENDS on a colon: the item the write was about is rendered,
+  // quoted, immediately after, so the notice names the row without the row having
+  // to be on screen. That is the whole reason one notice can serve a list that
+  // scrolls. Phrased without a count on purpose — this said "all four" while five
+  // sat below it, the fifth added by the same MR (!306, substitute review).
   "inbox.errorSaveFailed": {
     plain: "Couldn't save that just now:",
     playful: "Couldn't save that just now:",
