@@ -1839,6 +1839,49 @@ describe("scripts/alert-prod-state.sh — the healthy path is silent", () => {
   });
 
   /**
+   * Duo review on !328, and it is the collapse this file keeps catching in a new
+   * place: the `in_flight` headline was branched on `drift_code` alone, so when BOTH
+   * children return 3 — a merge minutes old inside the drift grace, landing while an
+   * unrelated pod is being replaced — the headline said only "a deploy is in flight"
+   * and never mentioned that the replica count was also being held. Every other
+   * composed string in this script is built from each check's OWN exit code, tested
+   * one value at a time, and the `alert` headline above already spells out all four
+   * combinations; the in-flight one had two arms for three states.
+   *
+   * The reachable version of the miss is that the existing "never words an in-flight
+   * deploy as a recovery" test hits exactly this pair and asserts only the drift
+   * half, so the replica omission passed underneath it.
+   */
+  it("names BOTH halves in the headline when drift and replicas are each held", () => {
+    const run = alert({
+      prodSha: OLD_SHORT,
+      // Inside DRIFT_GRACE_SECONDS (1500), so the drift check returns 3.
+      refMovedAt: new Date(Date.now() - 4 * 60_000)
+        .toISOString()
+        .replace("Z", "+00:00"),
+      deploy: deployment({
+        available: 1,
+        ready: 1,
+        updated: 2,
+        progressing: {
+          status: "True",
+          reason: "NewReplicaSetAvailable",
+          lastTransitionTime: secondsAgo(4 * 24 * 3600),
+        },
+        availableCondition: unavailableFor(29),
+      }),
+      notes: noteWithFingerprint("drift=1 replicas=1"),
+    });
+    expect(run.status).toBe(0);
+    const headline = (run.note?.body ?? "").split("\n")[0];
+    expect(headline).toMatch(/deploy/i);
+    expect(headline).toMatch(/replica/i);
+    expect(headline).toMatch(/not.*clean bill of health/i);
+    // And still never a recovery, which is what the severity exists to prevent.
+    expect(run.note?.body ?? "").not.toMatch(/recovered/i);
+  });
+
+  /**
    * ── The whole point of the change, at the level the schedule actually runs ───
    *
    * A monitor made quieter and a monitor broken outright look identical from

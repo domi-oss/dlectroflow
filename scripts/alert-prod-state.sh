@@ -256,11 +256,21 @@ case "$severity" in
     ;;
   in_flight)
     # `in_flight` used to mean one thing — a deploy still running — and now means
-    # two: that, or a replica shortfall too young to conclude from. Branching on
-    # WHICH child returned 3 rather than widening the sentence to cover both, because
-    # a headline vague enough to be true of either says nothing about this one, and
-    # the headline is the line that actually gets read.
-    if [ "$drift_code" = "3" ]; then
+    # two: that, or a replica shortfall too young to conclude from. Branched on WHICH
+    # child returned 3 rather than widened to a sentence true of either, because a
+    # headline vague enough to cover both says nothing about this one, and the
+    # headline is the line that actually gets read.
+    #
+    # THREE arms for three states, and the two-arm version was a Duo finding on !328.
+    # Branching on `drift_code` alone put the both-graced case — a merge minutes old
+    # landing while an unrelated pod is replaced — into the deploy arm, so the note
+    # never said the replica count was also being held. Every other composed string
+    # here is built from each check's own exit code, and the `alert` headline below
+    # already enumerates its combinations; this one was one arm short of doing the
+    # same.
+    if [ "$drift_code" = "3" ] && [ "$replicas_code" = "3" ]; then
+      HEADLINE="### 🔄 a deploy is in flight **and** production is briefly short of replicas — neither is an alert yet, and **not** a clean bill of health"
+    elif [ "$drift_code" = "3" ]; then
       HEADLINE="### 🔄 a deploy is in flight — not an alert, and **not** a clean bill of health"
     else
       HEADLINE="### 🔄 production is short of replicas, but only just — not an alert yet, and **not** a clean bill of health"
