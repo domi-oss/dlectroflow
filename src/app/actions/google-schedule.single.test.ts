@@ -15,6 +15,7 @@ const {
   itemUpdateManyMock,
   taskCreateMock,
   taskDeleteMock,
+  taskDeleteManyMock,
   taskFindFirstMock,
   taskUpdateMock,
   getSettingsMock,
@@ -33,6 +34,7 @@ const {
   itemUpdateManyMock: vi.fn(),
   taskCreateMock: vi.fn(),
   taskDeleteMock: vi.fn(),
+  taskDeleteManyMock: vi.fn(),
   taskFindFirstMock: vi.fn(),
   taskUpdateMock: vi.fn(),
   getSettingsMock: vi.fn(),
@@ -52,7 +54,13 @@ vi.mock("@/lib/db", () => {
     },
     task: {
       create: taskCreateMock,
+      // #244 (Duo review) — the loser's discard is a workspace-scoped
+      // `deleteMany` now. `delete` stays on the mock rather than being swapped
+      // out: leaving it means a regression to the unscoped form fails on THIS
+      // FILE's assertion, with a sentence about scope, instead of on
+      // `delete is not a function`, which says nothing about why it is wrong.
       delete: taskDeleteMock,
+      deleteMany: taskDeleteManyMock,
       findFirst: taskFindFirstMock,
       update: taskUpdateMock,
     },
@@ -134,6 +142,7 @@ beforeEach(() => {
   // return values as well as calls, and an `updateMany` answering `undefined`
   // would read as "lost" on every single spec in this file.
   itemUpdateManyMock.mockResolvedValue({ count: 1 });
+  taskDeleteManyMock.mockResolvedValue({ count: 1 });
 });
 
 describe("scheduleSingleTask", () => {
@@ -375,7 +384,7 @@ describe("scheduleSingleTask", () => {
         data: expect.objectContaining({ taskId: "task-2" }),
       }),
     );
-    expect(taskDeleteMock).not.toHaveBeenCalled();
+    expect(taskDeleteManyMock).not.toHaveBeenCalled();
     expect(taskUpdateMock).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "task-2" },
@@ -419,9 +428,14 @@ describe("scheduleSingleTask", () => {
     expect(res).toEqual({ ok: true });
     // The Task nobody outside the transaction saw is gone, so the orphan this
     // whole guard is about never reaches the database.
-    expect(taskDeleteMock).toHaveBeenCalledWith({
-      where: { id: "task-loser" },
+    //
+    // Asserted as the WHOLE call including `workspaceId` (Duo review), so
+    // dropping that term fails HERE rather than only in a cross-tenant scenario
+    // nobody has written a test for.
+    expect(taskDeleteManyMock).toHaveBeenCalledWith({
+      where: { id: "task-loser", workspaceId: OWNER_WS },
     });
+    expect(taskDeleteMock).not.toHaveBeenCalled();
     // And the schedule lands on the ADOPTED row, not on the discarded one.
     expect(taskUpdateMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -506,8 +520,8 @@ describe("scheduleSingleTask", () => {
       message: "Item not found",
     });
 
-    expect(taskDeleteMock).toHaveBeenCalledWith({
-      where: { id: "task-loser" },
+    expect(taskDeleteManyMock).toHaveBeenCalledWith({
+      where: { id: "task-loser", workspaceId: OWNER_WS },
     });
     expect(findReclaimListMock).not.toHaveBeenCalled();
     expect(upsertGoogleTaskMock).not.toHaveBeenCalled();

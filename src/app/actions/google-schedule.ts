@@ -377,7 +377,23 @@ export async function scheduleSingleTask(
         // transaction has seen and go and read what actually won — the re-read is
         // a new statement, so it sees the commit whose lock this transaction just
         // waited on.
-        await tx.task.delete({ where: { id: task.id } });
+        //
+        // `deleteMany` with `workspaceId`, not `delete` by id (Duo review). Safe
+        // either way today — `task.id` is a row this same transaction created two
+        // statements up, through `brainDumpItemToTaskData(item, workspaceId)`, so
+        // there is no other row to reach. It is fixed anyway because it was the
+        // ONE write in this block whose scope was inherited from the read above
+        // rather than carried on the operation, which is the exact sentence the
+        // `updateMany` two lines up is commented with. "Not reachable today" is
+        // not a property the next person to copy this shape can rely on, and
+        // `deleteBrainDumpItem` in `braindump.ts` already writes it the scoped
+        // way — so this was the outlier, not the convention.
+        //
+        // It also moves the check from `scoping.harness.test.ts`'s GUARDED_OPS,
+        // which accepts a by-id write when some EARLIER statement in the function
+        // established scope, into its STRICT_OPS, which requires `workspaceId` in
+        // the call's own arguments. The stronger of the two rules for free.
+        await tx.task.deleteMany({ where: { id: task.id, workspaceId } });
         const winner = await tx.brainDumpItem.findFirst({
           where: { id: item.id, workspaceId },
           select: {
