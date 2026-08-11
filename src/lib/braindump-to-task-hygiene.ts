@@ -35,6 +35,40 @@
  * same trap. A regex reports the module that exists to prevent the thing, and a
  * guard that cries wolf is a guard that gets relaxed. This repo has twice
  * shipped a tool that read a comment as code.
+ *
+ * ## The second rule: the create must be inside a transaction with a budget
+ * (#244)
+ *
+ * #225 gave three of the four writers a precondition inside a transaction, and
+ * left `scheduleSingleTask` — which #244 closed. All four now share one shape,
+ * and one thing about that shape is invisible in review and silently wrong when
+ * it is missing: **the transaction's timeout.**
+ *
+ * Prisma's default is 5 s, and these transactions exist precisely to make a
+ * second caller WAIT for the winner's row lock. Measured on real Postgres during
+ * `!306`'s review, a lock held 6.5 s killed the waiter with `P2028 Transaction
+ * already closed` — which converts the no-op every one of these guards is
+ * documented as giving into an error raised at somebody who pressed a button
+ * twice. `TASK_WRITER_TX_BUDGET` (`src/lib/constants.ts`) exists for that, and
+ * dropping it is a one-token edit with no visible symptom until a slow server.
+ *
+ * So `findUnbudgetedBrainDumpTaskWrites` requires every `task.create` routed
+ * through the helper to sit inside a `$transaction(…)` call that was given an
+ * explicit options argument. It is the natural companion to the rule above rather
+ * than a separate module, because the two describe one construction: this is the
+ * only place in the repo that knows which `task.create` calls are brain-dump
+ * writers, and the answer is what both rules need.
+ *
+ * `inbox-write-hygiene`, which #225 added, is NOT the right home for it — that
+ * module answers "which functions in `inbox-view.tsx` start a bare
+ * `startTransition`", and a server action starts none. Recorded here because the
+ * two guards came out of the same review and the confusion is easy to make.
+ *
+ * The budget is accepted as either the shared constant or any options literal
+ * that names `timeout`. Requiring the constant by name would be stronger, and it
+ * would also flag a writer that deliberately chose a different budget and said
+ * so — the invariant worth enforcing is that somebody *decided*, not which value
+ * they picked.
  */
 
 import ts from "typescript";
@@ -237,6 +271,210 @@ export function findHandBuiltBrainDumpTasks(
           reason:
             "builds a brain-dump Task by hand — pass `data: brainDumpItemToTaskData(item, workspaceId)` instead, or the item's note and schedule intent are dropped on this path only",
         });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return findings;
+}
+
+/** The name every brain-dump→Task writer routes its `data` through (#179). */
+const CONVERSION_HELPER = "brainDumpItemToTaskData";
+
+/**
+ * The initialiser a `data` identifier resolves to in the call site's own scope.
+ *
+ * Deliberately a sibling of `resolveShorthandData` rather than a widening of it:
+ * that one returns an object literal because the rule above is about hand-built
+ * literals, and this one needs the expression whatever kind it is, because the
+ * rule below is about a helper CALL. The scope walk is identical and stops at the
+ * nearest declaration for the same reason — continuing outward past a local
+ * `data` would let an unrelated outer one answer for this call site.
+ */
+function resolveDataExpression(
+  call: ts.Node,
+  name: string,
+): ts.Expression | null {
+  for (let scope: ts.Node | undefined = call; scope; scope = scope.parent) {
+    if (!isScopeLike(scope)) continue;
+    const decl = declaredDirectlyIn(scope, name);
+    if (!decl) continue;
+    return decl.initializer ?? null;
+  }
+  return null;
+}
+
+/** Is this expression a call to the conversion helper? */
+function isConversionCall(expr: ts.Expression | null): boolean {
+  return (
+    expr !== null &&
+    ts.isCallExpression(expr) &&
+    ts.isIdentifier(expr.expression) &&
+    expr.expression.text === CONVERSION_HELPER
+  );
+}
+
+/** Does this `task.create` build its row through `brainDumpItemToTaskData`? */
+function isConversionRouted(node: ts.CallExpression): boolean {
+  const [arg] = node.arguments;
+  if (!arg || !ts.isObjectLiteralExpression(arg)) return false;
+  for (const prop of arg.properties) {
+    // `create({ data })`, resolved to its declaration in this file.
+    if (
+      ts.isShorthandPropertyAssignment(prop) &&
+      prop.name.getText() === "data"
+    ) {
+      return isConversionCall(resolveDataExpression(prop, prop.name.text));
+    }
+    if (!ts.isPropertyAssignment(prop)) continue;
+    if (prop.name.getText() !== "data") continue;
+    // `data: brainDumpItemToTaskData(item, workspaceId)` — the shape all four
+    // writers actually use.
+    if (isConversionCall(prop.initializer)) return true;
+    // `data: payload`, the hoisted spelling the rule above also resolves.
+    if (ts.isIdentifier(prop.initializer)) {
+      return isConversionCall(
+        resolveDataExpression(prop, prop.initializer.text),
+      );
+    }
+    return false;
+  }
+  return false;
+}
+
+/** `x.$transaction(…)` — any receiver, so a re-exported client still counts. */
+function isTransactionCall(node: ts.Node): node is ts.CallExpression {
+  if (!ts.isCallExpression(node)) return false;
+  const callee = node.expression;
+  return (
+    ts.isPropertyAccessExpression(callee) && callee.name.text === "$transaction"
+  );
+}
+
+/**
+ * The shared budget `src/lib/constants.ts` declares for these writers.
+ *
+ * Accepted BY NAME, because it is imported and therefore unresolvable in a module
+ * that takes source text rather than a `Program` — the same boundary
+ * `resolveShorthandData` documents. Naming it is what lets the identifier branch
+ * below resolve everything else instead of waving it through.
+ */
+const BUDGET_CONSTANT = "TASK_WRITER_TX_BUDGET";
+
+/** Does this options literal name a `timeout`? */
+function namesTimeout(literal: ts.ObjectLiteralExpression): boolean {
+  return literal.properties.some(
+    (p) =>
+      (ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) &&
+      p.name.getText() === "timeout",
+  );
+}
+
+/**
+ * Was this `$transaction` given a budget?
+ *
+ * A bare `$transaction(cb)` is the finding: it inherits Prisma's 5 s default,
+ * which is shorter than these transactions are designed to WAIT.
+ *
+ * ## An identifier is RESOLVED, not trusted (Duo review on `!324`)
+ *
+ * The first version returned `true` for any bare identifier in the options
+ * position, which made the guard defeatable by passing an unrelated or empty
+ * options object — `$transaction(cb, opts)` with `const opts = {}` reported a
+ * budget that does not exist. That is worse than not checking, because it reads as
+ * a guard.
+ *
+ * It was also inconsistent with this module's own two sibling helpers, which
+ * already resolve an identifier to its declaration in the call site's scope rather
+ * than guessing from its presence. Same scope walk, same stop-at-the-nearest rule,
+ * and the same conservative answer when it cannot resolve.
+ *
+ * So, in order: the shared constant by name; an inline literal naming `timeout`;
+ * an identifier resolving in this file to such a literal, or to the constant
+ * itself one hop away. Anything else is a finding — and here that is the
+ * conservative side, unlike the rule above where a false POSITIVE is the danger.
+ * This one is a build gate on four known writers, so an unresolvable options
+ * argument should make somebody look.
+ */
+function hasExplicitBudget(call: ts.CallExpression): boolean {
+  const options = call.arguments[1];
+  if (!options) return false;
+  if (ts.isObjectLiteralExpression(options)) return namesTimeout(options);
+  if (ts.isIdentifier(options)) {
+    if (options.text === BUDGET_CONSTANT) return true;
+    const resolved = resolveDataExpression(options, options.text);
+    if (!resolved) return false;
+    // `const budget = TASK_WRITER_TX_BUDGET;` — one hop, the obvious spelling and
+    // the one whose absence would be a false positive rather than a hole.
+    if (ts.isIdentifier(resolved)) return resolved.text === BUDGET_CONSTANT;
+    return ts.isObjectLiteralExpression(resolved) && namesTimeout(resolved);
+  }
+  return false;
+}
+
+/** One brain-dump `task.create` whose transaction has no explicit budget (#244). */
+export interface UnbudgetedTaskWriteFinding {
+  /** 1-based line of the `task.create` call. */
+  line: number;
+  reason: string;
+}
+
+/**
+ * Every helper-routed `task.create` in `source` that is not inside a
+ * `$transaction` carrying an explicit timeout budget (#244).
+ *
+ * `fileName` is only used to give the parse a name; nothing is read from disk.
+ *
+ * The two failure modes are reported separately because they are different
+ * mistakes with different fixes — "no transaction at all" reopens the orphan a
+ * failed link leaves behind, while "no budget" reopens the `P2028` that turns a
+ * losing caller's no-op into an error.
+ */
+export function findUnbudgetedBrainDumpTaskWrites(
+  source: string,
+  fileName: string,
+): UnbudgetedTaskWriteFinding[] {
+  const sourceFile = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.Latest,
+    // Required for the same reason as above: `getText()` and the ancestor walk
+    // below both need `parent` links.
+    true,
+    fileName.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+
+  const findings: UnbudgetedTaskWriteFinding[] = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node) && isTaskCreate(node)) {
+      if (isConversionRouted(node)) {
+        // Nearest enclosing `$transaction`, walking out through the arrow
+        // function the callback is written as. Nearest rather than any, because a
+        // nested transaction would be the one that owns this write.
+        let enclosing: ts.CallExpression | null = null;
+        for (let n: ts.Node | undefined = node.parent; n; n = n.parent) {
+          if (isTransactionCall(n)) {
+            enclosing = n;
+            break;
+          }
+        }
+        const line =
+          sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile))
+            .line + 1;
+        if (!enclosing) {
+          findings.push({
+            line,
+            reason:
+              "a brain-dump `task.create` outside any `$transaction` — the insert and the item link must commit together, or a failed link orphans the Task and the retry makes a second one",
+          });
+        } else if (!hasExplicitBudget(enclosing)) {
+          findings.push({
+            line,
+            reason:
+              "`$transaction` with no explicit timeout budget — pass `TASK_WRITER_TX_BUDGET`, because Prisma's 5 s default kills a caller that waits longer than that for the winner's row lock with `P2028` and turns a documented no-op into an error",
+          });
+        }
       }
     }
     ts.forEachChild(node, visit);

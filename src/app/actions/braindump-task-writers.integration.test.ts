@@ -51,6 +51,7 @@ import {
 } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { prismaErrorsDuring } from "@/lib/__tests__/prisma-error-log";
+import { whileItemRowIsLockedWithATask } from "@/lib/__tests__/braindump-row-lock";
 import { BrainDumpStatus } from "@/lib/constants";
 
 const WS = vi.hoisted(() => "itest-225-task-writers");
@@ -125,112 +126,22 @@ const stepsIn = (workspaceId = WS) =>
   });
 
 /**
- * Is some other session blocked specifically by `holderPid`?
+ * The contention barrier both this suite and #244's use — see
+ * `src/lib/__tests__/braindump-row-lock.ts`, which carries the argument for why
+ * the interleaving is arranged rather than hoped for and why it is observed
+ * through `pg_blocking_pids` on the holder's own backend pid.
  *
- * The barrier the contention spec below waits on, and the reason it is a proof
- * rather than a hope. Firing two calls at once and trusting them to overlap does
- * not work: measured on this file, the `Promise.all` companions pass against the
- * UNFIXED `ensureFocusStep` and fail against the unfixed `startBreakdown` — same
- * file, same pool, same run — so whether the interleaving happens is not
- * something a spec can assume either way. `reopen-item.integration.test.ts`
- * reached the same conclusion and arranged its interleaving too.
- *
- * `pg_blocking_pids` rather than a count of sessions in `wait_event_type =
- * 'Lock'`, because this database is shared: up to forty worktrees run their
- * integration suites against it on separate schemas, so a database-wide count of
- * blocked sessions can be satisfied by somebody else's test entirely — which
- * would release the lock before the action under test ever reached it and quietly
- * turn this spec back into the sequential one. Naming the holder's own pid is
- * what makes the observation about this test.
+ * It lived here until #244 gave `scheduleSingleTask` — the fourth of the four
+ * writers `braindump-to-task.ts` names — the same spec. Duplicating a subtle
+ * concurrency harness is how the two copies drift into asserting different
+ * things, so it moved to `__tests__/` beside `prisma-error-log.ts`, which is
+ * there for the same cross-cutting reason.
  */
-async function isBlockedBy(holderPid: number): Promise<boolean> {
-  const [row] = await prisma.$queryRaw<{ blocked: bigint }[]>`
-    SELECT count(*)::bigint AS blocked
-    FROM pg_stat_activity
-    WHERE pid <> ${holderPid}
-      AND ${holderPid} = ANY(pg_blocking_pids(pid))`;
-  return Number(row.blocked) > 0;
-}
-
-/** Poll until the action has demonstrably blocked on the holder, or fail saying
- *  so. A block that never appears means the action took no lock, and the spec
- *  has to say that rather than quietly assert something weaker. */
-async function waitUntilBlockedBy(holderPid: number): Promise<void> {
-  for (let i = 0; i < 200; i += 1) {
-    if (await isBlockedBy(holderPid)) return;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error(
-    `nothing ever blocked on pid ${holderPid}'s row lock — the action under ` +
-      "test did not take one, so this spec cannot prove the loser adopts",
-  );
-}
-
-/**
- * Run `act` while the item's row is held locked by a transaction that has
- * already given it a Task, and release the lock only once `act` has demonstrably
- * blocked on it.
- *
- * This is the interleaving the fix exists for, arranged rather than hoped for:
- * the action reaches its guarded write, blocks, and when it unblocks Postgres
- * re-evaluates the `UPDATE` against the COMMITTED row — so the `taskId` it reads
- * back is the winner's. Against a `findFirst` outside any transaction the same
- * arrangement is a deterministic failure instead: that read is served from a
- * snapshot taken before the commit, so it sees `taskId` as NULL and creates a
- * second Task.
- *
- * Returns the winner's task id so the caller can assert the loser adopted it.
- */
-async function whileRowIsLockedWithATask<T>(
+const whileRowIsLockedWithATask = <T>(
   itemId: string,
   act: () => Promise<T>,
-): Promise<{ winner: string; result: T }> {
-  let release = () => {};
-  const held = new Promise<void>((resolve) => (release = resolve));
-  let announceLocked = () => {};
-  const locked = new Promise<void>((resolve) => (announceLocked = resolve));
-  let winner = "";
-
-  let holderPid = 0;
-  const holder = prisma.$transaction(
-    async (tx) => {
-      const [{ pid }] = await tx.$queryRaw<{ pid: number }[]>`
-        SELECT pg_backend_pid() AS pid`;
-      holderPid = pid;
-      const task = await tx.task.create({
-        data: { title: "Water the plants", workspaceId: WS },
-      });
-      winner = task.id;
-      // Takes the row lock this spec is about, and gives the row the `taskId`
-      // the loser has to come back and read.
-      await tx.brainDumpItem.update({
-        where: { id: itemId },
-        data: { taskId: task.id },
-      });
-      announceLocked();
-      await held;
-    },
-    // Generous: the timeout has to outlast the poll below, and a transaction
-    // that times out here would look like the defect rather than like a slow
-    // machine.
-    { timeout: 30_000, maxWait: 30_000 },
-  );
-
-  await locked;
-  const running = act();
-  try {
-    await waitUntilBlockedBy(holderPid);
-  } finally {
-    // Always, even when the barrier never fired. Skipping it on the throw path
-    // would leave this transaction holding the row lock until its own 30s
-    // timeout — on a database up to forty worktrees share — and the diagnostic
-    // would arrive as somebody else's mysterious hang rather than as the
-    // assertion below.
-    release();
-    await holder;
-  }
-  return { winner, result: await running };
-}
+): Promise<{ winner: string; result: T }> =>
+  whileItemRowIsLockedWithATask(prisma, { itemId, workspaceId: WS }, act);
 
 beforeAll(async () => {
   await wipe();

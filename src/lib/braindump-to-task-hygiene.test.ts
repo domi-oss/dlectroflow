@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { findHandBuiltBrainDumpTasks } from "@/lib/braindump-to-task-hygiene";
+import {
+  findHandBuiltBrainDumpTasks,
+  findUnbudgetedBrainDumpTaskWrites,
+} from "@/lib/braindump-to-task-hygiene";
 
 /**
  * #179 — the guard `braindump-to-task.ts` promises in its own doc comment.
@@ -65,6 +68,26 @@ const CONVERSION_SITES = [
   "src/app/actions/breakdown.ts",
   "src/app/actions/google-schedule.ts",
 ];
+
+/**
+ * The synthetic writer both #244 rules are exercised against.
+ *
+ * One string, so a spec that mutates it is provably changing only the thing it
+ * says it is changing — a hand-written "bad" variant can differ in a second way
+ * nobody noticed and then pass for the wrong reason.
+ */
+const GUARDED_WRITER = `async function ensureTask(id, workspaceId) {
+  return prisma.$transaction(async (tx) => {
+    const task = await tx.task.create({
+      data: brainDumpItemToTaskData(item, workspaceId),
+    });
+    await tx.brainDumpItem.updateMany({
+      where: { id, workspaceId, taskId: null },
+      data: { taskId: task.id },
+    });
+    return task.id;
+  }, TASK_WRITER_TX_BUDGET);
+}`;
 
 describe("findHandBuiltBrainDumpTasks — the parser, on synthetic input", () => {
   it("flags a hand-built brain-dump task", () => {
@@ -302,6 +325,200 @@ describe("findHandBuiltBrainDumpTasks — the parser, on synthetic input", () =>
   });
 });
 
+describe("findUnbudgetedBrainDumpTaskWrites — the parser, on synthetic input", () => {
+  it("does NOT flag the guarded shape all four writers now use", () => {
+    // The control that keeps this from becoming a guard somebody relaxes: the
+    // shape #225 and #244 landed must stay silent, or every writer is a finding
+    // and the rule gets deleted rather than fixed.
+    expect(
+      findUnbudgetedBrainDumpTaskWrites(GUARDED_WRITER, "synthetic.ts"),
+    ).toEqual([]);
+  });
+
+  it("flags a create whose transaction was given no options at all", () => {
+    // The regression this exists for, and a one-token edit: dropping the budget
+    // leaves Prisma's 5 s default on a transaction whose whole purpose is to WAIT
+    // for another caller's row lock. Measured during `!306`'s review, a lock held
+    // 6.5 s killed the waiter with `P2028`.
+    const findings = findUnbudgetedBrainDumpTaskWrites(
+      GUARDED_WRITER.replace(", TASK_WRITER_TX_BUDGET", ""),
+      "synthetic.ts",
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].line).toBe(3);
+    expect(findings[0].reason).toContain("TASK_WRITER_TX_BUDGET");
+  });
+
+  it("flags a create with no transaction around it at all", () => {
+    const findings = findUnbudgetedBrainDumpTaskWrites(
+      `const task = await prisma.task.create({
+         data: brainDumpItemToTaskData(item, workspaceId),
+       });`,
+      "synthetic.ts",
+    );
+    expect(findings).toHaveLength(1);
+    // A DIFFERENT reason from the one above, because they are different mistakes:
+    // this one reopens the orphan a failed link leaves, not the P2028.
+    expect(findings[0].reason).toContain("outside any `$transaction`");
+  });
+
+  it("accepts an inline options object that names a timeout", () => {
+    // The invariant is that somebody DECIDED, not which number they picked. A
+    // writer that deliberately chose a different budget and said so is not drift,
+    // and flagging it is how a guard acquires the false positives that get it
+    // relaxed.
+    expect(
+      findUnbudgetedBrainDumpTaskWrites(
+        GUARDED_WRITER.replace("TASK_WRITER_TX_BUDGET", "{ timeout: 20_000 }"),
+        "synthetic.ts",
+      ),
+    ).toEqual([]);
+  });
+
+  /**
+   * Duo review on `!324`. The first version of `hasExplicitBudget` returned true
+   * for ANY bare identifier in the options position, so the guard was defeatable
+   * by passing an unrelated or empty options object — worse than not checking,
+   * because it reads as a guard. These five specs are that hole, closed and pinned
+   * from both directions.
+   */
+  it("flags an identifier that resolves to an options object with NO timeout", () => {
+    expect(
+      findUnbudgetedBrainDumpTaskWrites(
+        `const opts = { maxWait: 5_000 };
+         ${GUARDED_WRITER.replace("TASK_WRITER_TX_BUDGET", "opts")}`,
+        "synthetic.ts",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("flags an identifier that resolves to an EMPTY options object", () => {
+    // The cheapest possible defeat, and the one the old code waved through.
+    expect(
+      findUnbudgetedBrainDumpTaskWrites(
+        `const opts = {};
+         ${GUARDED_WRITER.replace("TASK_WRITER_TX_BUDGET", "opts")}`,
+        "synthetic.ts",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("flags an identifier it cannot resolve at all", () => {
+    // Imported, or a parameter. Unlike the hand-built rule above, the conservative
+    // answer HERE is to flag: this is a build gate on four known writers, so an
+    // options argument nobody can read should make somebody look. The shared
+    // constant is exempt by name, which is the next spec.
+    expect(
+      findUnbudgetedBrainDumpTaskWrites(
+        GUARDED_WRITER.replace("TASK_WRITER_TX_BUDGET", "someImportedOptions"),
+        "synthetic.ts",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("does NOT flag an identifier resolving to an options object WITH a timeout", () => {
+    // A writer that deliberately chose its own budget and said so, via a local
+    // constant. Still a decision, so still silent.
+    expect(
+      findUnbudgetedBrainDumpTaskWrites(
+        `const opts = { timeout: 20_000, maxWait: 5_000 };
+         ${GUARDED_WRITER.replace("TASK_WRITER_TX_BUDGET", "opts")}`,
+        "synthetic.ts",
+      ),
+    ).toEqual([]);
+  });
+
+  it("does NOT flag a one-hop local alias of the shared constant", () => {
+    // The spelling whose absence would be a FALSE POSITIVE rather than a hole,
+    // which is the only reason the identifier branch follows an alias at all.
+    expect(
+      findUnbudgetedBrainDumpTaskWrites(
+        `const budget = TASK_WRITER_TX_BUDGET;
+         ${GUARDED_WRITER.replace("TASK_WRITER_TX_BUDGET", "budget")}`,
+        "synthetic.ts",
+      ),
+    ).toEqual([]);
+  });
+
+  it("flags an options object that sets maxWait but no timeout", () => {
+    // `maxWait` is time to acquire a CONNECTION, a different failure (the app is
+    // saturated). Passing it looks like a budget and is not one, so an options
+    // argument is not by itself evidence of a decision about the timeout.
+    expect(
+      findUnbudgetedBrainDumpTaskWrites(
+        GUARDED_WRITER.replace("TASK_WRITER_TX_BUDGET", "{ maxWait: 5_000 }"),
+        "synthetic.ts",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("resolves the hoisted `data: payload` spelling", () => {
+    // Same evasion the rule above closes twice, and it has to be closed here too
+    // or the budget check is defeatable by hoisting one line.
+    expect(
+      findUnbudgetedBrainDumpTaskWrites(
+        `async function bad(item, workspaceId) {
+           const payload = brainDumpItemToTaskData(item, workspaceId);
+           return prisma.task.create({ data: payload });
+         }`,
+        "synthetic.ts",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("resolves the `{ data }` shorthand spelling", () => {
+    expect(
+      findUnbudgetedBrainDumpTaskWrites(
+        `async function bad(item, workspaceId) {
+           const data = brainDumpItemToTaskData(item, workspaceId);
+           return prisma.task.create({ data });
+         }`,
+        "synthetic.ts",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("does NOT flag a MANUAL task create outside a transaction", () => {
+    // `createTask` in breakdown.ts writes one row from a typed title. It has no
+    // item link to commit atomically with and no lock to wait on, so requiring a
+    // transaction of it would be a false positive — and this rule keys on the
+    // conversion helper precisely so that stays decidable rather than guessed.
+    expect(
+      findUnbudgetedBrainDumpTaskWrites(
+        `await prisma.task.create({
+           data: { title: trimmed, source: TaskSource.Manual, workspaceId },
+         });`,
+        "synthetic.ts",
+      ),
+    ).toEqual([]);
+  });
+
+  it("does NOT flag another model's create inside an unbudgeted transaction", () => {
+    expect(
+      findUnbudgetedBrainDumpTaskWrites(
+        `await prisma.$transaction(async (tx) => {
+           await tx.step.create({ data: brainDumpItemToTaskData(item, ws) });
+         });`,
+        "synthetic.ts",
+      ),
+    ).toEqual([]);
+  });
+
+  it("does NOT flag a mention in a COMMENT — the reason this is an AST too", () => {
+    // `braindump-to-task.ts` and the module under test both name
+    // `prisma.task.create` and `brainDumpItemToTaskData` in prose describing these
+    // rules. A regex reports the files that exist to prevent the thing.
+    expect(
+      findUnbudgetedBrainDumpTaskWrites(
+        `// Every prisma.task.create({ data: brainDumpItemToTaskData(item, ws) })
+         // belongs inside a budgeted $transaction.
+         const x = 1;`,
+        "synthetic.ts",
+      ),
+    ).toEqual([]);
+  });
+});
+
 describe("the real tree", () => {
   it("scans a plausible number of files", () => {
     // A zero from a scanner that visited nothing looks exactly like a clean
@@ -334,6 +551,45 @@ describe("the real tree", () => {
    * its routing undone — the precise edit a future writer would make by copying
    * an older sibling — and the detector has to notice.
    */
+  it("has no unbudgeted brain-dump task write, anywhere (#244)", () => {
+    const offenders: string[] = [];
+    for (const file of scannedFiles()) {
+      for (const finding of findUnbudgetedBrainDumpTaskWrites(
+        readFileSync(file, "utf8"),
+        file,
+      )) {
+        offenders.push(`${file}:${finding.line} — ${finding.reason}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  /**
+   * That zero, proved rather than asserted — the same argument the mutation below
+   * makes for the first rule.
+   *
+   * Dropping `TASK_WRITER_TX_BUDGET` is the precise edit a future writer makes by
+   * copying a sibling written before #225, and it has no visible symptom until a
+   * slow server. Each real conversion site has it removed and the detector has to
+   * notice.
+   */
+  it.each(CONVERSION_SITES)(
+    "%s would be flagged without its budget",
+    (file) => {
+      const mutated = readFileSync(file, "utf8").replaceAll(
+        ", TASK_WRITER_TX_BUDGET)",
+        ")",
+      );
+      // Only meaningful where the mutation changed something — `breakdown.ts` is in
+      // this list for the first rule too, and a site that never named the constant
+      // would otherwise pass this spec by doing nothing at all.
+      expect(mutated).not.toBe(readFileSync(file, "utf8"));
+      expect(
+        findUnbudgetedBrainDumpTaskWrites(mutated, file).length,
+      ).toBeGreaterThan(0);
+    },
+  );
+
   it.each(CONVERSION_SITES)("%s would be flagged if it stopped", (file) => {
     const mutated = readFileSync(file, "utf8").replace(
       /brainDumpItemToTaskData\([^)]*\)/g,

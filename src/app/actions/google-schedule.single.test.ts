@@ -12,7 +12,10 @@ const {
   upsertGoogleTaskMock,
   itemFindFirstMock,
   itemUpdateMock,
+  itemUpdateManyMock,
   taskCreateMock,
+  taskDeleteMock,
+  taskDeleteManyMock,
   taskFindFirstMock,
   taskUpdateMock,
   getSettingsMock,
@@ -28,7 +31,10 @@ const {
   upsertGoogleTaskMock: vi.fn(),
   itemFindFirstMock: vi.fn(),
   itemUpdateMock: vi.fn(),
+  itemUpdateManyMock: vi.fn(),
   taskCreateMock: vi.fn(),
+  taskDeleteMock: vi.fn(),
+  taskDeleteManyMock: vi.fn(),
   taskFindFirstMock: vi.fn(),
   taskUpdateMock: vi.fn(),
   getSettingsMock: vi.fn(),
@@ -41,15 +47,38 @@ vi.mock("@/lib/db", () => {
     brainDumpItem: {
       findFirst: itemFindFirstMock,
       update: itemUpdateMock,
+      // #244 — the lazy link is an `updateMany` now, because the precondition
+      // (`taskId: null`) lives in its `where`. `update` stays on the mock: other
+      // actions in this module still write the item by primary key.
+      updateMany: itemUpdateManyMock,
     },
     task: {
       create: taskCreateMock,
+      // #244 (Duo review) — the loser's discard is a workspace-scoped
+      // `deleteMany` now. `delete` stays on the mock rather than being swapped
+      // out: leaving it means a regression to the unscoped form fails on THIS
+      // FILE's assertion, with a sentence about scope, instead of on
+      // `delete is not a function`, which says nothing about why it is wrong.
+      delete: taskDeleteMock,
+      deleteMany: taskDeleteManyMock,
       findFirst: taskFindFirstMock,
       update: taskUpdateMock,
     },
     // Interactive transaction: run the callback with the same mock client, so
     // the lazy Task-create + item-link (now wrapped in $transaction) still hit
-    // taskCreateMock / itemUpdateMock.
+    // taskCreateMock / itemUpdateManyMock.
+    //
+    // Note what this CANNOT show, and why the sibling integration file exists
+    // (#244): the callback runs with no row lock to block on and nothing to roll
+    // back, so the loser's `updateMany` reports whatever this file tells it to
+    // rather than the `count: 0` Postgres produces when it re-qualifies a blocked
+    // `UPDATE`. The specs below pin the SHAPE — the precondition is in the write,
+    // the speculative Task is dropped, the winner is adopted. The behaviour is
+    // proved in `schedule-single-task.integration.test.ts`.
+    //
+    // The options argument is accepted and ignored: the budget it carries
+    // (`TASK_WRITER_TX_BUDGET`) is a real-Postgres property, and
+    // `braindump-to-task-hygiene` is what fails the build if a writer drops it.
     $transaction: (fn: (tx: unknown) => unknown) => fn(prisma),
   };
   return { prisma, getSettings: getSettingsMock };
@@ -109,6 +138,11 @@ beforeEach(() => {
   getSettingsMock.mockResolvedValue({ voice: "plain" });
   taskFindFirstMock.mockResolvedValue(null);
   upsertGoogleTaskMock.mockResolvedValue({ id: "gtask-9", created: true });
+  // #244 — won the race unless a spec says otherwise. `clearAllMocks` wipes
+  // return values as well as calls, and an `updateMany` answering `undefined`
+  // would read as "lost" on every single spec in this file.
+  itemUpdateManyMock.mockResolvedValue({ count: 1 });
+  taskDeleteManyMock.mockResolvedValue({ count: 1 });
 });
 
 describe("scheduleSingleTask", () => {
@@ -339,18 +373,158 @@ describe("scheduleSingleTask", () => {
         data: expect.objectContaining({ title: "Water the plants" }),
       }),
     );
-    expect(itemUpdateMock).toHaveBeenCalledWith(
+    // #244 — the precondition is IN the write. `taskId: null` is what makes a
+    // second caller's link match zero rows instead of overwriting the first's,
+    // and `workspaceId` puts the scope on the write rather than inheriting it
+    // from the read above. Asserted here as a shape; the behaviour it buys needs
+    // a real row lock and is proved in `schedule-single-task.integration.test.ts`.
+    expect(itemUpdateManyMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "item-2" },
+        where: { id: "item-2", workspaceId: OWNER_WS, taskId: null },
         data: expect.objectContaining({ taskId: "task-2" }),
       }),
     );
+    expect(taskDeleteManyMock).not.toHaveBeenCalled();
     expect(taskUpdateMock).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "task-2" },
         data: expect.objectContaining({ googleTaskId: "gtask-3" }),
       }),
     );
+  });
+
+  /**
+   * #244 — the adopt branch, in shape. Two callers can both read `taskId: null`
+   * from a snapshot taken before either wrote, because that read takes no lock;
+   * the guard is the `taskId: null` term in the link's `where`, and a `count: 0`
+   * is how the loser learns it lost.
+   */
+  it("adopts the winner's Task and drops its own when the link matches nothing", async () => {
+    workspaceMock.mockResolvedValue(OWNER_WS);
+    configuredMock.mockReturnValue(true);
+    tokenMock.mockResolvedValue("tok");
+    itemFindFirstMock
+      // The pre-lock snapshot: no Task yet, so the branch is entered.
+      .mockResolvedValueOnce({
+        id: "item-2",
+        text: "Water the plants",
+        taskId: null,
+        task: null,
+      })
+      // The re-read inside the transaction, after the losing link.
+      .mockResolvedValueOnce({
+        taskId: "task-winner",
+        task: { notes: "can under the sink", scheduledAt: null },
+      });
+    taskCreateMock.mockResolvedValue({ id: "task-loser" });
+    itemUpdateManyMock.mockResolvedValue({ count: 0 });
+    findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
+    upsertGoogleTaskMock.mockResolvedValue({ id: "gtask-4", created: true });
+
+    const res = await scheduleSingleTask("item-2", 15);
+
+    // A lost race is not an error to raise at somebody who pressed a button
+    // twice — the schedule still happens, against the Task that already exists.
+    expect(res).toEqual({ ok: true });
+    // The Task nobody outside the transaction saw is gone, so the orphan this
+    // whole guard is about never reaches the database.
+    //
+    // Asserted as the WHOLE call including `workspaceId` (Duo review), so
+    // dropping that term fails HERE rather than only in a cross-tenant scenario
+    // nobody has written a test for.
+    expect(taskDeleteManyMock).toHaveBeenCalledWith({
+      where: { id: "task-loser", workspaceId: OWNER_WS },
+    });
+    expect(taskDeleteMock).not.toHaveBeenCalled();
+    // And the schedule lands on the ADOPTED row, not on the discarded one.
+    expect(taskUpdateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "task-winner" },
+        data: expect.objectContaining({ googleTaskId: "gtask-4" }),
+      }),
+    );
+    // The note comes from the adopted row too. Derived from the pre-lock
+    // snapshot it would have been null, because `item.task` is null BY
+    // CONSTRUCTION on the path that enters this branch (#179 review, `!281`,
+    // one case wider).
+    // Stringified rather than reached into, the same way the #179 spec below
+    // does: the encoder owns which field of its payload the note lands in, and
+    // this spec is about the note travelling at all.
+    expect(JSON.stringify(upsertGoogleTaskMock.mock.calls[0][3])).toContain(
+      "can under the sink",
+    );
+  });
+
+  /**
+   * #244 — the reward marker is re-read from the winner for the same reason the
+   * note is. A winner that has already stamped `scheduledAt` must not be paid
+   * for again, and the pre-lock snapshot says "never scheduled" about a `Task`
+   * that did not exist when it was taken.
+   */
+  it("does not re-award when the Task it adopts was already scheduled", async () => {
+    workspaceMock.mockResolvedValue(OWNER_WS);
+    configuredMock.mockReturnValue(true);
+    tokenMock.mockResolvedValue("tok");
+    itemFindFirstMock
+      .mockResolvedValueOnce({
+        id: "item-2",
+        text: "Water the plants",
+        taskId: null,
+        task: null,
+      })
+      .mockResolvedValueOnce({
+        taskId: "task-winner",
+        task: { notes: null, scheduledAt: new Date("2026-08-01T10:00:00Z") },
+      });
+    taskCreateMock.mockResolvedValue({ id: "task-loser" });
+    itemUpdateManyMock.mockResolvedValue({ count: 0 });
+    findReclaimListMock.mockResolvedValue({ id: "list-9", title: "🗓 Reclaim" });
+
+    expect(await scheduleSingleTask("item-2", 15)).toEqual({ ok: true });
+
+    expect(logReward).not.toHaveBeenCalled();
+    expect(awardBadge).not.toHaveBeenCalled();
+    // And the marker is not restamped either — it is a FIRST-schedule fact.
+    expect(taskUpdateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "task-winner" },
+        data: expect.not.objectContaining({ scheduledAt: expect.anything() }),
+      }),
+    );
+  });
+
+  /**
+   * #244 — the other reason a link can match nothing: the row is gone, or is not
+   * this workspace's. Reported as the same RESULT the read above gives for a
+   * missing item rather than thrown, because it is reachable by scheduling a row
+   * a second tab has just deleted.
+   */
+  it("reports the item as not found when the row has gone, and calls Google not at all", async () => {
+    workspaceMock.mockResolvedValue(OWNER_WS);
+    configuredMock.mockReturnValue(true);
+    tokenMock.mockResolvedValue("tok");
+    itemFindFirstMock
+      .mockResolvedValueOnce({
+        id: "item-2",
+        text: "Water the plants",
+        taskId: null,
+        task: null,
+      })
+      .mockResolvedValueOnce(null);
+    taskCreateMock.mockResolvedValue({ id: "task-loser" });
+    itemUpdateManyMock.mockResolvedValue({ count: 0 });
+
+    expect(await scheduleSingleTask("item-2", 15)).toEqual({
+      ok: false,
+      reason: "error",
+      message: "Item not found",
+    });
+
+    expect(taskDeleteManyMock).toHaveBeenCalledWith({
+      where: { id: "task-loser", workspaceId: OWNER_WS },
+    });
+    expect(findReclaimListMock).not.toHaveBeenCalled();
+    expect(upsertGoogleTaskMock).not.toHaveBeenCalled();
   });
 
   it("sets the provider-agnostic scheduled marker (scheduledVia='google') on success", async () => {
