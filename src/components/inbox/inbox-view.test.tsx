@@ -1708,6 +1708,121 @@ describe("InboxView — complete + completed bucket", () => {
   });
 });
 
+// ── #251 — a completed item could not be removed ───────────────────────────
+//
+// Completing an item moved it into the Done bucket and took away every way of
+// getting rid of it: that bucket hand-rolls its action line (see the comment
+// beside it in inbox-view.tsx) and offered only Reopen and Move to…, so a demo
+// item completed while showing the app off stayed in the list for good.
+//
+// The server action was never the blocker — `deleteBrainDumpItem` carries no
+// `completedAt` guard and is workspace-scoped already (its own tests cover
+// that). What is new here is the affordance, that it keeps the same two-step
+// confirm as every other bucket, and where focus goes once the control it was
+// pressed in has been unmounted.
+describe("InboxView — deleting a completed item (#251)", () => {
+  const completed = () =>
+    makeItem({
+      id: "d251",
+      text: "demo item",
+      status: "triaged",
+      completedAt: new Date(),
+    });
+
+  const renderCompleted = () =>
+    render(
+      <InboxView
+        now={Date.now()}
+        initialItems={[completed()]}
+        settings={settings}
+        welcomeVisible={false}
+        resumeStep={null}
+      />,
+    );
+
+  it("offers Delete in the Completed bucket's action line, beside Reopen", () => {
+    renderCompleted();
+    const row = screen.getByText("demo item").closest("li")!;
+    const group = row.querySelector<HTMLElement>("[data-row-actions]")!;
+    expect(group).toBeTruthy();
+    // In the action group, not loose in the row — the group is what the
+    // target-size guards measure and what a reader treats as the row's controls.
+    expect(
+      within(group).getByRole("button", { name: "Delete" }),
+    ).toBeInTheDocument();
+    expect(
+      within(group).getByRole("button", { name: "Reopen" }),
+    ).toBeInTheDocument();
+  });
+
+  it("requires the two-step confirm before deleting a completed item", async () => {
+    const user = userEvent.setup();
+    renderCompleted();
+    const row = screen.getByText("demo item").closest("li")!;
+
+    // First press arms the confirm and deletes nothing.
+    await user.click(within(row).getByRole("button", { name: "Delete" }));
+    expect(deleteBrainDumpItem).not.toHaveBeenCalled();
+    expect(
+      within(row).getByRole("button", { name: "Cancel" }),
+    ).toBeInTheDocument();
+
+    // The confirming press is the one that writes.
+    await user.click(within(row).getByRole("button", { name: "Delete" }));
+    await waitFor(() =>
+      expect(deleteBrainDumpItem).toHaveBeenCalledWith("d251"),
+    );
+  });
+
+  it("Cancel disarms without deleting", async () => {
+    const user = userEvent.setup();
+    renderCompleted();
+    const row = screen.getByText("demo item").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Delete" }));
+    await user.click(within(row).getByRole("button", { name: "Cancel" }));
+    expect(deleteBrainDumpItem).not.toHaveBeenCalled();
+    // Back to the resting 🗑 control, so a second attempt is still possible.
+    expect(
+      within(row).getByRole("button", { name: "Delete" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the armed confirm pair at the house 44px minimum", async () => {
+    // The pair replaces the 🗑 that opened it, and that button is already 44px.
+    // At 24px the action line shrank under the pointer at exactly the moment a
+    // mis-tap deletes something. `expectFullTargets` below cannot see this: it
+    // measures the resting state and never opens a confirm.
+    const user = userEvent.setup();
+    renderCompleted();
+    const row = screen.getByText("demo item").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Delete" }));
+    for (const name of ["Delete", "Cancel"]) {
+      const control = within(row).getByRole("button", { name });
+      expect(control.className, `"${name}" is under 44px tall`).toContain(
+        "min-h-11",
+      );
+      expect(control.className, `"${name}" is under 44px wide`).toContain(
+        "min-w-11",
+      );
+    }
+  });
+
+  it("hands focus to the capture field instead of dropping it on <body>", async () => {
+    const user = userEvent.setup();
+    renderCompleted();
+    const row = screen.getByText("demo item").closest("li")!;
+    await user.click(within(row).getByRole("button", { name: "Delete" }));
+    await user.click(within(row).getByRole("button", { name: "Delete" }));
+    // The confirming button unmounts with the press and the row goes with the
+    // refresh, so the browser has already put focus on <body> (WCAG 2.4.3).
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("textbox", { name: "Brain dump" }),
+      ),
+    );
+  });
+});
+
 describe("InboxView — per-step Undo picker (completed multi-step)", () => {
   const doneMulti = () =>
     makeItem({

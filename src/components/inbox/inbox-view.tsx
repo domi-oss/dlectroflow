@@ -2117,6 +2117,35 @@ export function InboxView({
       () => deleteBrainDumpItem(id),
       { id, field: "delete" },
       itemsById.get(id)?.text ?? "",
+      // #251 — where focus goes once the control it was pressed in is gone.
+      //
+      // A confirmed delete withdraws TWO things: the confirming button unmounts
+      // with the state change above (React re-uses the slot for the resting 🗑),
+      // and the row itself goes with the refresh. Either is enough for the
+      // browser to drop focus on `<body>`, which is the WCAG 2.4.3 fault the
+      // write notice's own hand-off exists to avoid — it was simply never wired
+      // for the success path, because until this issue every delete was of a row
+      // the user could re-create by typing it again. A completed to-do is the
+      // one they cannot.
+      //
+      // In `onLanded` rather than beside the press, for two reasons. It replaces
+      // the default `router.refresh()` (see `attemptWrite`) and so has to make
+      // that call itself — done first, because the refresh is what the user
+      // asked for and the focus move is bookkeeping. And it runs only when the
+      // write LANDED: on a failure, focus must stay where it is so the notice's
+      // own hand-off can pull the user to the error, which is a decision it
+      // makes by observing that focus is on `<body>`. Repairing here would take
+      // that signal away and leave the failure unannounced.
+      //
+      // Repair, never steal: if the user moved focus somewhere real while the
+      // write was in flight — the capture field during a slow round trip — they
+      // stay there. The capture field is the fallback the notice's hand-off
+      // already uses for "nowhere to go back to", and it is the deleted row's
+      // nearest surviving neighbour.
+      () => {
+        router.refresh();
+        if (document.activeElement === document.body) inputRef.current?.focus();
+      },
     );
   };
 
@@ -2136,15 +2165,30 @@ export function InboxView({
   ) =>
     confirmDeleteId === itemId ? (
       <span key={key} className="flex items-center gap-2">
+        {/* #251 — both confirm controls carry `touchTarget`, which they did not.
+            The armed pair REPLACES the 🗑 that opened it, and that button is
+            already 44px, so a 24px pair shrank the action line under the
+            pointer at exactly the moment a mis-tap deletes something. Sizing
+            them keeps the row from moving as well as clearing the house
+            minimum. `expectFullTargets` (inbox-view.test.tsx) measures every
+            control in `[data-row-actions]`, but only in the resting state — it
+            never opens a confirm, which is how these two stayed small while
+            every sibling was checked. */}
         <button
-          className="text-destructive rounded-md px-2.5 py-1 font-medium"
+          className={cn(
+            touchTarget,
+            "text-destructive rounded-md px-2.5 py-1 font-medium",
+          )}
           onClick={() => confirmDelete(itemId)}
         >
           {t("action.delete", voice)}
         </button>
         <span className="text-muted-foreground">·</span>
         <button
-          className="text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1"
+          className={cn(
+            touchTarget,
+            "text-muted-foreground hover:text-foreground rounded-md px-2.5 py-1",
+          )}
           onClick={cancelDelete}
         >
           {t("action.cancel", voice)}
@@ -3654,7 +3698,16 @@ export function InboxView({
                             24px while every other bucket's CTA was checked.
                             The layout classes are duplicated from RowActions
                             deliberately-for-now — folding this into that
-                            component is worth doing and is not this issue. */}
+                            component is worth doing and is not this issue.
+
+                            #251 — "and none of the rest" no longer includes
+                            delete. Completing an item used to be a one-way door:
+                            this line offered Reopen and Move to… only, so a
+                            to-do completed while demoing the app stayed in the
+                            list for good. It is the same 🗑 the other buckets
+                            render, from the same `deleteControl` and sharing the
+                            one `confirmDeleteId`, so the two-step confirm and
+                            its wording cannot drift from theirs. */}
                         <div
                           data-row-actions=""
                           className="mt-2 flex flex-wrap items-center gap-2 pl-9 text-xs"
@@ -3689,6 +3742,13 @@ export function InboxView({
                               moveItemToBucket(item.id, target)
                             }
                           />
+                          {/* Visible gap so 📥 Move to and 🗑 Delete don't sit
+                              flush — the same spacer RowActions puts between
+                              its end-cluster icons, for the same misclick. */}
+                          <span aria-hidden="true" className="w-3" />
+                          {deleteControl(item.id, "delete-done", {
+                            icon: true,
+                          })}
                         </div>
                         {pickingSteps && (
                           <ReopenStepPicker
