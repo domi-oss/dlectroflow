@@ -96,10 +96,15 @@ function report(violations: Violation[], allowed: Set<string>): string {
 // ── #222: never read `document.title` mid-commit ────────────────────────────
 //
 // `src/app/layout.tsx` sets a static `metadata.title`, so every route ships a
-// `<title>` in the server-streamed HTML. Next puts that metadata in the BODY and
-// React 19 hoists it into `<head>` — and on the RSC payload a `router.refresh()`
-// brings back, the whole hoisted block (`<title>`, the description `<meta>` and
-// both icon `<link>`s) is detached and re-inserted.
+// `<title>` in the server-streamed HTML — and, corrected while measuring #249,
+// it ships INSIDE `<head>` rather than in the body for React to hoist out of it
+// (on `/`: `<title>` at byte 1624 of the response, `</head>` at 2159). React 19
+// still owns the element, which is what the rest of this paragraph rests on: on
+// the RSC payload a `router.refresh()` brings back, the whole hoisted block
+// (`<title>`, the description `<meta>` and both icon `<link>`s) is detached and
+// re-inserted — and `e2e/a11y/axe-title-guard.spec.ts` records the same
+// ownership showing up a second way, React's first hydration commit re-creating
+// a `<title>` that a test had removed.
 //
 // axe's `doc-has-title` check is exactly `!!sanitize(document.title)`, and
 // `document.title` is empty only while the element belongs to no parent at all —

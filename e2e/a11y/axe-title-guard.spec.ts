@@ -36,6 +36,51 @@ import { scanA11y } from "./axe-helpers";
  * `isSectionHighlightSettled`): the second test holds the title away for good
  * and requires the scan to fail with the GUARD's message, so the guard cannot
  * be quietly turned into a no-op that lets a real WCAG 2.4.2 regression past.
+ *
+ * ── #249: "removed once" is not "held away" ─────────────────────────────────
+ *
+ * Both tests used to `remove()` the element once, which turned out to mean "gone
+ * until React notices" rather than gone. That made the negative control a race
+ * it lost on loaded CI runners — ~2 in 7 `e2e_test` jobs, hard-failing MRs
+ * because the `a11y` project has no retry to absorb it (#127, correctly).
+ *
+ * Measured under a 20× CPU throttle, which is how #110 stood in for a loaded
+ * runner: on `/`, the `<title>` ships INSIDE the server-streamed `<head>` (byte
+ * 1624 of the response, `</head>` at 2159) — which corrects the paragraph above,
+ * and `axe-helpers.ts` with it: the element the browser parses is already in
+ * `<head>`, so nothing has to be hoisted out of the body for it to be readable.
+ * The consequence is what matters here: the `toHaveTitle(/\S/)` precondition
+ * below is satisfied by the PARSED document, while hydration is still pending.
+ * React 19 owns that hoisted element, and its FIRST COMMIT puts one back — a new
+ * element, `insertBefore`d into `<head>` ~700 ms after the detach, not the node
+ * the fixture took out, so holding a reference to the removed one would not have
+ * been enough either. The negative control before this change: 30/30 pass at 1×,
+ * **0/30 at 20×**, failing with exactly the signature #249 records. Both tests
+ * after it: 60/60 at 1× and 30/30 at 20× (fifteen runs each).
+ *
+ * That corrects the mechanism for this fixture, and the correction is the reason
+ * a narrower fix would not hold: the `router.refresh()` re-insertion described
+ * above is how the window opens in PRODUCTION, but what this file was losing to
+ * is initial hydration. A title detached AFTER hydration finishes is never
+ * re-inserted at all (0/3 at 20×, over a full 5 s guard budget) — so "detach a
+ * bit later" or "shorten the window" would only have re-tuned the race.
+ *
+ * `holdTitleAway` therefore makes "away" true instead of likely, with a
+ * `MutationObserver` that removes every `<title>` that appears. The removal lands
+ * in the same task as the insertion — observer callbacks are delivered at that
+ * task's microtask checkpoint — while both readers of `document.title` here run
+ * in later tasks: Playwright's `toHaveTitle` poll, and axe's `doc-has-title`,
+ * which is literally `!!sanitize(document.title)`. Robust to the re-render rather
+ * than faster than it.
+ *
+ * The first test needed it as much as the second, for a quieter reason: at 20× it
+ * passed 10/10, but seven of those ten ended with TWO `<title>`s in `<head>` —
+ * React's and the fixture's — meaning the recovery the guard was observed to make
+ * was usually React's rather than the one this test opened a window for. Never
+ * red, and still a vacuous pass, which is the shape the paragraph above is about.
+ * Holding the window open instead, and dropping anything React put back before
+ * restoring the original, ends all fifteen 20× runs with exactly one `<title>`:
+ * the fixture's.
  */
 
 test.use({ contextOptions: { reducedMotion: "reduce" } });
@@ -50,24 +95,60 @@ test.use({ contextOptions: { reducedMotion: "reduce" } });
 const DETACH_MS = 750;
 
 /**
- * Reproduce #222's window: take the `<title>` out of the document entirely, and
- * optionally put it back after `restoreAfterMs`.
+ * Reproduce #222's window: take the `<title>` out of the document and KEEP it
+ * out for `restoreAfterMs` — or for the rest of the test, when that is `null`.
  *
  * Returns the `document.title` reading taken immediately afterwards so the
  * caller can assert the window actually opened. A fixture that silently failed
  * to open it would make every assertion below pass for the wrong reason — the
  * scan would simply see a titled page.
  */
-async function detachTitle(
+async function holdTitleAway(
   page: Page,
   restoreAfterMs: number | null,
 ): Promise<string> {
   return page.evaluate((ms) => {
-    const el = document.querySelector("head > title");
-    if (!el) throw new Error("no <head> <title> to detach — fixture is broken");
-    el.remove();
+    const original = document.querySelector("head > title");
+    if (!original) {
+      throw new Error("no <head> <title> to detach — fixture is broken");
+    }
+    // Swept over the whole document rather than `head > title`, because
+    // `document.title` reads the FIRST `<title>` in tree order wherever it sits
+    // — the reading `axe-helpers.ts` records, a `<title>` parked in a body
+    // `<div>` still reporting `"dlectroflow"`. A head-only sweep would leave a
+    // readable title behind the moment one lands anywhere else. The NodeList is
+    // static, so removing as we go cannot skip an entry.
+    //
+    // Narrowed to HTML `<title>` by the `instanceof`, on !327 review: a CSS type
+    // selector matches on local name irrespective of namespace, so plain
+    // `querySelectorAll("title")` also matches the SVG `<title>` that gives an
+    // inline `<svg>` its accessible name. `document.title` does not read those,
+    // so removing them would put the fixture's reach beyond the predicate it
+    // exists to falsify — and the FIRST test's scan really does run to
+    // completion, so a stripped SVG name there would surface as a spurious
+    // `svg-img-alt` failure in a gate with no retry. Nothing on `/` ships one
+    // today (`grep -rn "<title" src/` is empty); this keeps that from becoming a
+    // trap for whoever adds the first.
+    const strip = () => {
+      for (const el of document.querySelectorAll("title")) {
+        if (el instanceof HTMLTitleElement) el.remove();
+      }
+    };
+    strip();
+    // Terminates rather than looping: the removals it performs re-enter it once
+    // more, and that pass finds nothing left to remove.
+    const observer = new MutationObserver(strip);
+    observer.observe(document, { childList: true, subtree: true });
     if (ms !== null) {
-      window.setTimeout(() => document.head.appendChild(el), ms);
+      window.setTimeout(() => {
+        // Disconnect FIRST, or the observer eats the restore it is watching for.
+        observer.disconnect();
+        // Then drop whatever React put back, so the element that returns is the
+        // one this fixture took away — the whole point of holding the window
+        // open for a known duration.
+        strip();
+        document.head.appendChild(original);
+      }, ms);
     }
     return document.title;
   }, restoreAfterMs);
@@ -84,7 +165,7 @@ test.describe("#222 — the axe gate waits for the document title", () => {
     await expect(page).toHaveTitle(/\S/);
 
     expect(
-      await detachTitle(page, DETACH_MS),
+      await holdTitleAway(page, DETACH_MS),
       "detaching the <title> did not empty document.title, so the window this " +
         "test needs never opened",
     ).toBe("");
@@ -101,7 +182,11 @@ test.describe("#222 — the axe gate waits for the document title", () => {
     await waitForShell(page);
     await expect(page).toHaveTitle(/\S/);
 
-    expect(await detachTitle(page, null)).toBe("");
+    expect(
+      await holdTitleAway(page, null),
+      "holding the <title> away did not empty document.title, so the window " +
+        "this test needs never opened",
+    ).toBe("");
 
     // Matched on the GUARD's wording, not on anything axe says. axe's own
     // failure text contains the word "title" too, so a looser matcher would
