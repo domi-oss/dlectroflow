@@ -117,8 +117,26 @@ type QueuedCapture = {
   workspaceId: string;
   /** ms epoch, for ordering and for the age shown in the strip. */
   capturedAt: number;
+  /**
+   * Why the server last refused this capture, if it did. Persisted with the
+   * capture rather than held in component state, because the refusal has to
+   * survive the reload that a discarded tab forces — a capture that comes back
+   * after a restart with no memory of why it is stuck would offer a Retry that
+   * cannot work.
+   *
+   * `undefined` means "not yet refused, or refused for a reason that has since
+   * cleared". Cleared as soon as an attempt gets past the guard.
+   */
+  blockedBy?: "session-expired" | "account-revoked";
 };
 ```
+
+**`blockedBy` is a persisted field, and both of its values are needed.** An
+earlier draft of this document had neither — it declared the type without it while
+the flush table below said a refusal "marks `needsSignIn`", and it collapsed two
+different refusals into that one mark. Both were caught in review of this spec and
+are corrected here; the second is the more serious, because the two refusals need
+**different words and a different remedy**.
 
 `localStorage` over IndexedDB deliberately: the payload is short text, the repo already has a
 synchronous-localStorage pattern with a `useSyncExternalStore` subscription (`src/lib/use-hyper-focus.ts`),
@@ -148,6 +166,12 @@ can be arbitrarily large, and without a byte bound a single capture could exhaus
 `QuotaExceededError` on the write this whole design depends on being reliable. 64 KB total, checked
 before enqueue, with an over-large single capture refused on the same message. Whether capture text
 should have a limit *at all* is a separate question and not this issue's to answer.
+
+**The two caps do not share a message.** An earlier draft said an over-large single
+capture was "refused on the same message", which would tell someone who pasted one
+long essay that *"20 captures are already waiting"* — a number that may well be zero.
+The item cap is about how many are queued; the byte cap is about how big one of them
+is. Separate sentences, in the wording table above.
 
 ### Idempotency — a separate column, not a client-chosen primary key
 
@@ -190,9 +214,23 @@ body: { clientKey, text, workspaceId }
 |---|---|---|
 | Written | `201` | remove |
 | `clientKey` already present for this workspace | `200` | remove — already saved |
-| Resolved workspace ≠ declared `workspaceId` | `409` | **keep**, mark `needsSignIn` |
-| Account frozen (`RevokedAccountError`) | `403` | **keep**, mark `needsSignIn` |
-| Anything else | `5xx` / network failure | keep, retry later |
+| Resolved workspace ≠ declared `workspaceId` | `409` | **keep**, `blockedBy: "session-expired"` |
+| Account frozen (`RevokedAccountError`) | `403` | **keep**, `blockedBy: "account-revoked"` |
+| Anything else | `5xx` / network failure | keep, clear `blockedBy`, retry later |
+
+**`409` and `403` must not share a state.** They look alike — both keep the capture
+and neither is retryable — but the remedy differs and so does the truth:
+
+- **`409`** means the session moved on. Signing in again **fixes it**, and the queued
+  words then save.
+- **`403`** means the account was revoked. Signing in again **cannot fix it**, and
+  #220 has already cleared the session and bounced the user to `/login` with an
+  explanation. Telling this person to "sign in to save these" sends them into a loop
+  and misstates what happened.
+
+`5xx` clears `blockedBy` rather than leaving it: reaching a retryable failure proves
+the guard is no longer what is stopping the capture, and a stale mark would keep
+asking for a sign-in that already happened.
 
 The foreground path uses this same route rather than the server action, so there is one write path and
 one set of semantics to test. `createBrainDumpItem` stays for non-queued callers and is refactored to
@@ -258,11 +296,18 @@ strip is off-screen. That is the trade for spending no fixed-position height on 
 decluttered, and it is recorded here so it is not rediscovered as a defect.
 
 **Wording.** The strip never says "offline" — `navigator.onLine` is not trustworthy enough to assert
-it. It says what is true: *"3 waiting to save"*, and on the `needsSignIn` state *"Your session
-expired. Sign in to save these."*
+it. It says what is true, and each state gets its own sentence because each has a different remedy:
 
-**a11y.** The count strip is `role="status"` (polite — a background count is not an interruption); the
-`needsSignIn` and cap-reached states are `role="alert"`. Retry carries `aria-disabled` while a flush
+| State | What it says |
+|---|---|
+| waiting | *"3 waiting to save"* |
+| `blockedBy: "session-expired"` (409) | *"Your session expired. Sign in and these will save."* |
+| `blockedBy: "account-revoked"` (403) | *"This account can no longer save. Your words are still here — copy them somewhere safe."* — no sign-in offered, because signing in will not help |
+| item cap reached | *"20 captures are already waiting to save — that's the limit until some of them go through. Your words are still in the box; copy them somewhere safe if you need to."* |
+| byte cap reached | *"That capture is too long to hold safely while offline. Your words are still in the box — shorten it, or copy it somewhere safe."* |
+
+**a11y.** The count strip is `role="status"` (polite — a background count is not an interruption); both
+`blockedBy` states and both cap-reached states are `role="alert"`. Retry carries `aria-disabled` while a flush
 is in flight, mirroring #210's contract, and is ≥44×44 px (WCAG 2.5.5). When the strip unmounts on the
 last item saving, focus returns to the input only if it was inside the strip — the one-shot ref pattern
 at `inbox-view.tsx:866-880` (WCAG 2.4.3).
@@ -299,7 +344,9 @@ TDD, failing test first, in this order:
 
 1. **Queue module** (`src/lib/capture-queue.ts`, pure) — enqueue, ordering, refusal at the 20-item
    bound, refusal at the 64 KB bound, refusal of a single over-large capture, removal on `200`/`201`,
-   retention on `409`/`403`/`5xx`, corrupt-JSON recovery, `QuotaExceededError` recovery. The
+   retention on `409`/`403`/`5xx` **with the two `blockedBy` values asserted separately** (a test that
+   only checks "it was kept" would pass the collapsed-state bug this spec was reviewed for), clearing
+   `blockedBy` on `5xx`, corrupt-JSON recovery, `QuotaExceededError` recovery. The
    20th-and-21st capture is its own test: the 20th must save and the 21st must be refused **with the
    words still in the field**, which is the assertion that stops the cap becoming silent eviction in a
    later refactor. No React, no DOM.
