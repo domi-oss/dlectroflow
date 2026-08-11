@@ -440,7 +440,7 @@ export async function keepAsTask(id: string) {
  * ▶ Focus on a single to-do: make sure the item has a Task with at least one
  * Step, and answer with the step to open the timer on.
  *
- * ## At most one Task and one Step, however many times this is called (#225)
+ * ## At most one Task, however many times this is called (#225)
  *
  * This used to be `findFirst` → `if (!taskId)` → `task.create` → link, with no
  * transaction and no precondition on either write. `keepAsTask`'s docblock above
@@ -479,6 +479,26 @@ export async function keepAsTask(id: string) {
  * The Task it had already built is then discarded inside the same transaction,
  * so nothing outside it ever sees the speculative row, and the winner's Task is
  * adopted instead.
+ *
+ * ## What is NOT guarded, said plainly rather than left to be assumed
+ *
+ * **The STEP create.** Two concurrent calls against an item that ALREADY has a
+ * Task with no steps take no lock at all — neither enters the block above — so
+ * both read `steps: []` from their own snapshot and both create one, leaving two
+ * steps at `order: 1, total: 1`. Pre-existing rather than introduced here (the
+ * unguarded shape is on `main` too), and less harmful than the duplicate Task it
+ * sits next to: a stray step is visible in the breakdown and deletable, where an
+ * orphaned Task was reachable from nothing. But !306 does make it easier to reach,
+ * by putting this write behind the notice's Retry, so it is written down instead
+ * of being covered by the heading above.
+ *
+ * It is not fixed here because there is no cheap instrument. `Step` has no unique
+ * constraint, so `createMany({ skipDuplicates: true })` — the `ON CONFLICT DO
+ * NOTHING` shape `src/lib/db.ts` recommends — has nothing to conflict on, and
+ * neither `Step` nor `Task` carries an `updatedAt` to write by value and take a
+ * lock with. The real options are a unique index on `(taskId, order)` or an
+ * explicit lock on the Task row, and both are their own change with their own
+ * migration and review rather than a fourth guard bolted onto this one.
  */
 export async function ensureFocusStep(id: string): Promise<string | null> {
   const workspaceId = await currentWorkspaceId();

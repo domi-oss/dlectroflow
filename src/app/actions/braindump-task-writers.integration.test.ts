@@ -360,6 +360,33 @@ describe("ensureFocusStep (real Postgres) — one ▶ Focus, one Task (#225)", (
     expect((await itemById(item.id))?.status).toBe(BrainDumpStatus.Inbox);
   });
 
+  /**
+   * The boundary of what this file proves, asserted so it cannot be mistaken for
+   * more. Two concurrent calls against an item that already has a Task with NO
+   * steps take no lock — neither enters the create-and-link block — so both can
+   * create a step. That is recorded in `ensureFocusStep`'s doc comment as
+   * outstanding, with the two instruments that would close it; this spec pins the
+   * SEQUENTIAL case, which is the one the action does guarantee, so a future fix
+   * has a passing test to keep passing.
+   */
+  it("adds no second step when called twice on a task that had none", async () => {
+    const item = await seedItem();
+    const task = await prisma.task.create({
+      data: { title: "Water the plants", workspaceId: WS },
+    });
+    await prisma.brainDumpItem.update({
+      where: { id: item.id },
+      data: { taskId: task.id },
+    });
+    const { ensureFocusStep } = await import("./braindump");
+
+    const first = await ensureFocusStep(item.id);
+    const second = await ensureFocusStep(item.id);
+
+    expect(second).toBe(first);
+    expect(await stepsIn()).toHaveLength(1);
+  });
+
   it("reuses the task's existing steps rather than adding another", async () => {
     const item = await seedItem();
     const task = await prisma.task.create({
