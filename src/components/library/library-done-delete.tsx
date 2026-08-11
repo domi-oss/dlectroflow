@@ -63,6 +63,11 @@ export const LIB_PANEL_HEADING_ID = "lib-panel-heading";
  * the row was just removed from rather than on nothing — and it is a `<p>` with
  * `tabIndex={-1}`, so it takes the hand-off without entering the tab order.
  *
+ * That is the house pattern rather than a choice made here: `SectionHeading`
+ * (components/nav/section-heading.tsx) lists "a landing place for focus" as one of
+ * its four jobs, for the same stated reason — a jump that moves no real focus
+ * leaves keyboard and screen-reader users at the top of the document.
+ *
  * **Repair, never steal.** The move is gated on focus having actually been lost:
  * a user who moved to the tab strip or another row while the write was in flight
  * stays where they are. Collapsing that condition is what made the Inbox's own
