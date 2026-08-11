@@ -195,4 +195,75 @@ test.describe("#222 — the axe gate waits for the document title", () => {
       /never got a non-empty <title>/,
     );
   });
+
+  // !327 Duo review — the fixture must not reach past the predicate it exists to
+  // falsify. `document.title` reads the first HTML `<title>`; an SVG `<title>` is
+  // a different element in a different namespace that supplies an inline
+  // `<svg>`'s ACCESSIBLE NAME, and a bare `querySelectorAll("title")` matches
+  // both because a CSS type selector matches on local name only.
+  //
+  // Removing one would be a fix for a flake that manufactures a different one:
+  // the recoverable case above scans to completion, so a stripped SVG name lands
+  // as an `svg-img-alt` violation in a project with `retries: 0` (#127) — and it
+  // would arrive intermittently, depending on which icons were on screen.
+  //
+  // The fixture is checked in both directions because `strip()` runs twice: once
+  // up front, and once per mutation for as long as the window is held open. An
+  // SVG title that arrives DURING the window goes through the observer, which is
+  // the path React's re-insertion takes.
+  test("holding the title away leaves an inline SVG's accessible name alone", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await waitForShell(page);
+    await expect(page).toHaveTitle(/\S/);
+
+    const addNamedIcon = (id: string) =>
+      page.evaluate((elementId) => {
+        const NS = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(NS, "svg");
+        svg.id = elementId;
+        svg.setAttribute("role", "img");
+        svg.setAttribute("width", "16");
+        svg.setAttribute("height", "16");
+        svg.setAttribute("viewBox", "0 0 16 16");
+        const title = document.createElementNS(NS, "title");
+        title.textContent = `named icon ${elementId}`;
+        svg.append(title, document.createElementNS(NS, "circle"));
+        document.body.append(svg);
+        return document.querySelectorAll("svg > title").length;
+      }, id);
+
+    // Reported rather than assumed: `grep -rn "<title" src/` is empty, so this
+    // was a latent trap rather than a live failure, and the count says so on
+    // every run instead of on the day somebody re-greps.
+    const preExisting = await page.evaluate(
+      () => document.querySelectorAll("svg > title").length,
+    );
+    expect(
+      preExisting,
+      "the app grew inline SVG titles — see the note above",
+    ).toBe(0);
+
+    expect(await addNamedIcon("before-window")).toBe(1);
+    expect(
+      await holdTitleAway(page, DETACH_MS),
+      "holding the <title> away did not empty document.title, so the window " +
+        "this test needs never opened",
+    ).toBe("");
+    // Through the observer this time, not the up-front sweep.
+    expect(await addNamedIcon("during-window")).toBe(2);
+
+    expect(
+      await page.evaluate(() =>
+        [...document.querySelectorAll("svg > title")].map((t) => t.textContent),
+      ),
+      "the sweep took an SVG accessible name with it",
+    ).toEqual(["named icon before-window", "named icon during-window"]);
+
+    // And the guard still recovers, so narrowing the sweep has not quietly
+    // stopped it holding the document title away.
+    await scanA11y(page, "/");
+    await expect(page).toHaveTitle(/\S/);
+  });
 });
