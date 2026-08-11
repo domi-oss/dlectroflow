@@ -220,6 +220,12 @@ const MEMBER_SPECS = /member-[\w-]+\.spec\.ts/;
  * Put a new gate spec in `e2e/a11y/` and it lands here. Anything else keeps
  * the retry, which is the safe direction to fail: a spec in the wrong project
  * is over-tolerant, not silently unrun.
+ *
+ * Over-tolerant is still wrong for an a11y assertion, though, and that was the
+ * gap (#247): "keeps the retry" is fine for a smoke spec and is exactly what a
+ * WCAG scan must not do. So a spec that calls the a11y helpers from outside this
+ * pattern is no longer merely over-tolerant, it is a test failure —
+ * `src/lib/e2e-project-split.test.ts` reports it.
  */
 const A11Y_SPECS = /[\\/]e2e[\\/]a11y[-\\/].*\.spec\.ts$/;
 
@@ -266,10 +272,22 @@ export default defineConfig({
     //     equivalent (checked against @playwright/test 1.61's types), so it is
     //     all-or-nothing across projects and cannot express "strict here,
     //     tolerant there" at all.
-    // Measured before committing to it, 2026-08-06: these 59 tests were run
-    // 30x each locally (1,770 runs) at retries 0, zero failures. The gate is
-    // not absorbing anything today, so zero tolerance costs nothing now and
-    // starts failing loudly the day that stops being true.
+    // Measured before committing to it, 2026-08-06: the 59 tests the gate held
+    // AT THAT DATE were run 30x each locally (1,770 runs) at retries 0, zero
+    // failures. The gate was not absorbing anything then, so zero tolerance
+    // cost nothing and starts failing loudly the day that stops being true.
+    // The count is deliberately pinned to its date rather than kept current —
+    // it is the evidence for a decision, not an inventory, and this line read
+    // as a live figure once the gate had grown past it (#247).
+    //
+    // #247 — the retry this removes is now enforced on the ASSERTION, not just
+    // on the project. The gate is built on `e2e/a11y/axe-helpers.ts`, and a spec
+    // in any other project could import it and get the retry back:
+    // `e2e/smoke/schedule-menu.spec.ts` and `e2e/smoke/people-admin.spec.ts`
+    // both did, for five call sites, and it masked #222's document-title race
+    // until that race failed here instead and skipped a production deploy.
+    // `src/lib/e2e-project-split.test.ts` now fails if any file reaching those
+    // helpers is claimed by a project that does not declare `retries: 0`.
     //
     // Runs FIRST, and that is now ENFORCED rather than assumed. Several of
     // these specs seed and delete rows in the shared owner workspace, so
