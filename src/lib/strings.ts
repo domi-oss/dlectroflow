@@ -1408,8 +1408,8 @@ export const STRINGS = {
   //
   // EVERY message below ends on a colon — the words the write could not save are
   // rendered, quoted, immediately after, so the notice is itself a copy of them.
-  // (Said of "all three" until #246 made it six; `write-notice-hygiene` enforces
-  // it now, so the count cannot go stale in a comment again.)
+  // (This counted them until #246 added one; `write-notice-hygiene` asserts the
+  // rule now, so a count cannot go stale in a comment here again.)
   "shopping.errorSaveFailed": {
     plain: "Couldn't save that just now:",
     playful: "Couldn't save that just now:",
@@ -1447,12 +1447,23 @@ export const STRINGS = {
     plain: "That item is not on the list any more, so nothing changed:",
     playful: "That item is not on the list any more, so nothing changed:",
   },
-  // #246 — the two facts above arriving together, which neither of them says
-  // honestly on its own. The timeout copy sends the user to check the list
-  // "before trying again", and by the time the row has left the rendered list the
-  // page has already made that check AND withdrawn the Retry, because every one
-  // of these writes is a `findFirst`-then-write against a row id that now matches
-  // nothing, for good.
+  // The feature switched off in another tab or window. A retry posts into an
+  // action that refuses it for the same reason; only a reload shows the user
+  // where they actually are, which is why this reads like the stale-bundle copy.
+  "shopping.errorSaveOff": {
+    plain:
+      "Shopping list mode is switched off, so that didn't save. Reload to carry on:",
+    playful:
+      "Shopping list mode is switched off, so that didn't save. Reload to carry on:",
+  },
+  // ── Silence AND a row that has gone ────────────────────────────────────────
+  // #246. Its own group rather than a member of either above, because it is
+  // neither: the timeout is silence, `errorSaveGone` is a row the page can see is
+  // absent, and this is both at once — which neither of them says honestly on its
+  // own. The timeout copy sends the user to check the list "before trying again",
+  // and by the time the row has left the rendered list the page has already made
+  // that check AND withdrawn the Retry, because every one of these writes is a
+  // `findFirst`-then-write against a row id that now matches nothing, for good.
   //
   // So it reports the check rather than asking for it, and stops offering a
   // "trying again" that is not on the screen. What it must NOT do is collapse
@@ -1464,15 +1475,6 @@ export const STRINGS = {
       "No answer from the server, and that item is not on the list any more — so this may already have saved:",
     playful:
       "No answer from the server, and that item is not on the list any more — so this may already have saved:",
-  },
-  // The feature switched off in another tab or window. A retry posts into an
-  // action that refuses it for the same reason; only a reload shows the user
-  // where they actually are, which is why this reads like the stale-bundle copy.
-  "shopping.errorSaveOff": {
-    plain:
-      "Shopping list mode is switched off, so that didn't save. Reload to carry on:",
-    playful:
-      "Shopping list mode is switched off, so that didn't save. Reload to carry on:",
   },
   // Appended to a capture-field refusal, before the words it could not keep.
   // Needed only when the field has moved on: the restore never overwrites text

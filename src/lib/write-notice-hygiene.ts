@@ -3,10 +3,10 @@
  * write-failure notice: **does it carry the whole set of things that notice
  * needs, or only the ones somebody remembered?**
  *
- * The recurrence this exists for is specific and has now happened four times.
- * `#210` gave the capture bar a notice; `#218` gave it to the focus timer and
- * the step list; `#225` gave it to the twenty inbox row writes; `#199` gave it
- * to the shopping list. Each grew independently, and each drifted:
+ * Four surfaces carry a notice of this shape and it has drifted three times.
+ * `#210` gave the capture bar the first one; `#199` gave the shopping list its
+ * own; `#218` found the focus timer and the step list had a third; `#225` gave
+ * the twenty inbox row writes a fourth. The drifts:
  *
  *  * `!306` found that `inbox`'s copy and its controls disagreed about the pair
  *    `timedOut && rowGone` — "check your inbox before trying again" printed above

@@ -8,9 +8,9 @@
  * See `write-notice-hygiene.ts` for why this guard exists. The short version:
  * `shopping.errorSaveTimeoutGone` did not exist, `writeFailureKey` fell through
  * to the timeout copy, and the surface read as fixed to anyone auditing by grep
- * for the helper rather than for the strings. Nothing failed. Four surfaces have
- * grown this notice independently and every one of them has drifted at least
- * once, so the assertion is written across surfaces, once.
+ * for the helper rather than for the strings. Nothing failed. Four surfaces carry
+ * a notice of this shape and it has drifted three times (#218, #236, and a round
+ * inside `!306`), so the assertion is written across surfaces, once.
  */
 
 import { describe, it, expect } from "vitest";
